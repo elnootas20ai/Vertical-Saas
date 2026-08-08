@@ -4,10 +4,20 @@
  * Modo editar: capacidad / comensales +/- , añadir/quitar mesas y zonas.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Clock, LayoutGrid, Minus, Pencil, Plus, Trash2, Users, X } from 'lucide-react';
+import {
+  Clock,
+  LayoutGrid,
+  Minus,
+  Pencil,
+  Plus,
+  Receipt,
+  Trash2,
+  Users,
+  X,
+} from 'lucide-react';
 import { RestaurantSeatGuestsModal } from '../../components/saas/restaurant/RestaurantSeatGuestsModal';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
@@ -29,6 +39,7 @@ import { DELIVERY_CEO_TPV_PATH, RESTAURANT_CEO_TPV_PATH } from '../../lib/retail
 import { writeSalaTpvOpenTable } from '../../lib/salaTpvLaunch';
 import type { SalaRoom, SalaRoomType } from '../../lib/salaStudioTypes';
 import { SALA_ROOM_TYPE_LABELS } from '../../lib/salaStudioTypes';
+import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
 import { RestaurantAddTablesModal } from './RestaurantAddTablesModal';
 import { RestaurantAddZoneModal } from './RestaurantAddZoneModal';
 import { resolveTableCapacity } from './tableCapacity';
@@ -65,51 +76,156 @@ type Props = {
   onOpenTableAccount?: (table: DiningTable, orderId?: string) => void;
 };
 
-const STATUS_UI: Record<
-  DiningTableStatus,
-  { label: string; card: string; badge: string }
-> = {
+type TableStatusUi = {
+  label: string;
+  /** Card contenedora de la mesa en el plano. */
+  card: string;
+  /** Chip de estado (ficha de mesa). */
+  badge: string;
+  /** Tablero de la mesa (la figura). */
+  tableSurface: string;
+  /** Silla con comensal sentado. */
+  chairFill: string;
+  /** Texto de estado bajo la figura. */
+  statusText: string;
+  /** Barra de acento superior en la ficha de mesa. */
+  accent: string;
+};
+
+const OCCUPIED_UI: TableStatusUi = {
+  label: 'Ocupada',
+  card: 'hover:bg-white/50',
+  badge: 'bg-rose-600 text-white',
+  tableSurface:
+    'border-rose-600/70 bg-gradient-to-br from-rose-500 to-rose-600 text-white shadow-lg shadow-rose-600/30',
+  chairFill: 'bg-rose-500 shadow-sm shadow-rose-500/40',
+  statusText: 'text-rose-700',
+  accent: 'from-rose-500 to-rose-600',
+};
+
+/** Cuenta pedida → cobrar = azul avance Vertial. */
+const PENDING_PAYMENT_UI: TableStatusUi = {
+  label: 'Por cobrar',
+  card: 'hover:bg-white/50',
+  badge: 'bg-blue-600 text-white',
+  tableSurface:
+    'border-blue-600/70 bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-lg shadow-blue-600/30',
+  chairFill: 'bg-blue-500 shadow-sm shadow-blue-500/40',
+  statusText: 'text-blue-700',
+  accent: 'from-blue-500 to-blue-600',
+};
+
+const STATUS_UI: Record<DiningTableStatus, TableStatusUi> = {
   available: {
     label: 'Libre',
-    card: 'border-emerald-200 bg-emerald-50 text-emerald-950',
-    badge: 'bg-emerald-600 text-white',
+    card: 'hover:bg-white/60',
+    badge: 'border border-emerald-200 bg-emerald-50 text-emerald-700',
+    tableSurface:
+      'border-emerald-300 bg-gradient-to-br from-white to-emerald-50 text-stone-900 shadow-md shadow-stone-900/10 group-hover:from-emerald-50 group-hover:to-emerald-100/80',
+    chairFill: 'bg-emerald-500',
+    statusText: 'text-emerald-700',
+    accent: 'from-emerald-400 to-emerald-500',
   },
-  occupied: {
-    label: 'Ocupada',
-    card: 'border-red-200 bg-red-50 text-red-950',
-    badge: 'bg-red-600 text-white',
-  },
-  pending_order: {
-    label: 'Ocupada',
-    card: 'border-red-200 bg-red-50 text-red-950',
-    badge: 'bg-red-600 text-white',
-  },
-  served: {
-    label: 'Ocupada',
-    card: 'border-red-200 bg-red-50 text-red-950',
-    badge: 'bg-red-600 text-white',
-  },
-  pending_payment: {
-    label: 'Ocupada',
-    card: 'border-red-200 bg-red-50 text-red-950',
-    badge: 'bg-red-600 text-white',
-  },
+  occupied: OCCUPIED_UI,
+  pending_order: OCCUPIED_UI,
+  served: OCCUPIED_UI,
+  pending_payment: PENDING_PAYMENT_UI,
   unavailable: {
     label: 'Por limpiar',
-    card: 'border-neutral-200 bg-neutral-100 text-neutral-800',
-    badge: 'bg-neutral-500 text-white',
+    card: 'hover:bg-white/50',
+    badge: 'bg-stone-200 text-stone-600',
+    tableSurface:
+      'border-dashed border-stone-300 bg-stone-100/90 text-stone-500 shadow-sm',
+    chairFill: 'bg-stone-400',
+    statusText: 'text-stone-500',
+    accent: 'from-stone-300 to-stone-400',
   },
   reserved: {
     label: 'Reservada',
-    card: 'border-amber-200 bg-amber-50 text-amber-950',
-    badge: 'bg-amber-500 text-white',
+    card: 'hover:bg-white/50',
+    badge: 'border border-amber-200 bg-amber-100 text-amber-800',
+    tableSurface:
+      'border-amber-400 bg-gradient-to-br from-amber-50 to-amber-200/80 text-amber-900 shadow-md shadow-amber-500/20',
+    chairFill: 'bg-amber-500',
+    statusText: 'text-amber-700',
+    accent: 'from-amber-400 to-amber-500',
   },
   hidden: {
     label: 'Oculta',
-    card: 'border-neutral-200 bg-neutral-50 text-neutral-700',
-    badge: 'bg-neutral-400 text-white',
+    card: '',
+    badge: 'bg-stone-100 text-stone-500',
+    tableSurface: 'border-dashed border-stone-300 bg-stone-50 text-stone-400',
+    chairFill: 'bg-stone-300',
+    statusText: 'text-stone-400',
+    accent: 'from-stone-200 to-stone-300',
   },
 };
+
+/** Suelo del plano de sala: tono cálido, trama de baldosas y luz ambiental. */
+const SALA_FLOOR_STYLE: CSSProperties = {
+  backgroundColor: '#faf7f2',
+  backgroundImage:
+    'radial-gradient(ellipse 90% 70% at 50% 0%, rgba(255,255,255,0.9), transparent 70%), radial-gradient(circle, rgba(120, 100, 80, 0.14) 1px, transparent 1px)',
+  backgroundSize: 'auto, 18px 18px',
+};
+
+/**
+ * Figura de mesa: forma y sillas según capacidad.
+ * ≤2 pax → redonda · 3-4 → cuadrada con laterales · 5+ → rectangular con laterales.
+ */
+function tableFigureLayout(capacity: number): {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+  surface: string;
+} {
+  const cap = Math.max(1, capacity);
+  if (cap <= 2) {
+    return {
+      top: 1,
+      bottom: cap > 1 ? 1 : 0,
+      left: 0,
+      right: 0,
+      surface: 'h-16 w-16 rounded-full',
+    };
+  }
+  const left = 1;
+  const right = cap >= 4 ? 1 : 0;
+  const rest = cap - left - right;
+  const top = Math.min(4, Math.ceil(rest / 2));
+  const bottom = Math.min(4, rest - top);
+  const width = top <= 1 ? 'w-16' : top === 2 ? 'w-20' : top === 3 ? 'w-24' : 'w-28';
+  return { top, bottom, left, right, surface: `h-14 ${width} rounded-xl` };
+}
+
+const EMPTY_CHAIR = 'bg-stone-300/90 shadow-sm shadow-stone-400/20';
+
+/** Fila de sillas (vista cenital): rellenas = comensales sentados. */
+function ChairRow({ count, filled, fill }: { count: number; filled: number; fill: string }) {
+  if (count <= 0) return <span className="h-2" aria-hidden />;
+  return (
+    <div className="flex justify-center gap-1.5" aria-hidden>
+      {Array.from({ length: count }).map((_, i) => (
+        <span
+          key={i}
+          className={`h-2 w-5 rounded-md transition-colors ${i < filled ? fill : EMPTY_CHAIR}`}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** Silla lateral (izquierda/derecha de la mesa). */
+function SideChair({ present, filled, fill }: { present: boolean; filled: boolean; fill: string }) {
+  if (!present) return <span className="w-2" aria-hidden />;
+  return (
+    <span
+      className={`h-5 w-2 rounded-md transition-colors ${filled ? fill : EMPTY_CHAIR}`}
+      aria-hidden
+    />
+  );
+}
 
 function tablesForRoom(tables: DiningTable[], room: SalaRoom): DiningTable[] {
   return tables
@@ -143,10 +259,15 @@ function minutesSinceIso(iso: string): number | null {
 
 function formatDurationMinutes(mins: number): string {
   if (mins < 60) return `${mins} min`;
-  const h = Math.floor(mins / 60);
+  const days = Math.floor(mins / 1440);
+  const h = Math.floor((mins % 1440) / 60);
   const m = mins % 60;
+  if (days > 0) return h ? `${days} d ${h} h` : `${days} d`;
   return m ? `${h} h ${m} min` : `${h} h`;
 }
+
+/** Mesa con estancia larga → chip en ámbar (aviso). */
+const LONG_STAY_MINUTES = 120;
 
 function isOpenDiningOrder(order: DiningOrder): boolean {
   return order.status === 'open' || order.status === 'served' || order.status === 'pending_payment';
@@ -378,7 +499,13 @@ export function RestaurantSalaLiveView({
   const activeRoom =
     sortedRooms.find((r) => r.id === activeRoomId) || sortedRooms[0] || null;
   const roomTables = activeRoom ? tablesForRoom(tables, activeRoom) : [];
-  const freeCount = tables.filter((t) => t.status === 'available').length;
+  const visibleTables = tables.filter((t) => t.active !== false && t.status !== 'hidden');
+  const freeCount = visibleTables.filter((t) => t.status === 'available').length;
+  const toChargeCount = visibleTables.filter((t) => t.status === 'pending_payment').length;
+  const occupiedCount =
+    visibleTables.filter((t) => isOccupiedStatus(t.status)).length - toChargeCount;
+  const reservedCount = visibleTables.filter((t) => t.status === 'reserved').length;
+  const cleaningCount = visibleTables.filter((t) => t.status === 'unavailable').length;
 
   const openEditTable = (table: DiningTable) => {
     setEditTable(table);
@@ -549,64 +676,98 @@ export function RestaurantSalaLiveView({
 
   return (
     <div className="mx-auto min-h-[calc(100vh-4rem)] w-full max-w-5xl px-4 py-6">
-      <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-[0.16em] text-neutral-400">
-            Sala · En servicio
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-neutral-900">
-            {storeLabel || 'Tu local'}
-          </h1>
-          <p className="mt-1 text-sm text-neutral-500">
-            {sortedRooms.length} zonas · {tables.length} mesas · {freeCount} libres
-          </p>
+      <header className="mb-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-stone-400">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+              </span>
+              Sala · En servicio
+            </p>
+            <h1 className="mt-1 truncate text-2xl font-bold tracking-tight text-stone-900">
+              {storeLabel || 'Tu local'}
+            </h1>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {canEditMap && (
+              <button
+                type="button"
+                disabled={mapBusy}
+                onClick={toggleEditMode}
+                className={
+                  editMode
+                    ? 'inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-amber-400 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-900 transition-colors hover:bg-amber-100 disabled:opacity-50'
+                    : VERTIAL_BTN_SECONDARY
+                }
+              >
+                <Pencil className="h-4 w-4" strokeWidth={2} />
+                {editMode ? 'Listo' : 'Editar sala'}
+              </button>
+            )}
+            {editMode && onAddZone && (
+              <button
+                type="button"
+                disabled={mapBusy}
+                onClick={() => setShowAddZone(true)}
+                className={VERTIAL_BTN_PRIMARY}
+              >
+                <Plus className="h-4 w-4" strokeWidth={2} />
+                Nueva zona
+              </button>
+            )}
+            {editMode && onRemount && (
+              <button type="button" onClick={onRemount} className={VERTIAL_BTN_SECONDARY}>
+                Rehacer mapa
+              </button>
+            )}
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {canEditMap && (
-            <button
-              type="button"
-              disabled={mapBusy}
-              onClick={toggleEditMode}
-              className={`inline-flex items-center gap-1.5 rounded-[12px] border px-3 py-2 text-xs font-semibold disabled:opacity-50 ${
-                editMode
-                  ? 'border-amber-500 bg-amber-50 text-amber-900'
-                  : 'border-neutral-200 bg-white text-neutral-800 hover:border-neutral-300'
-              }`}
-            >
-              <Pencil className="h-3.5 w-3.5" strokeWidth={2} />
-              {editMode ? 'Listo' : 'Editar'}
-            </button>
+
+        {/* Pulso de la sala: contadores por estado */}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
+            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+            {freeCount} libre{freeCount === 1 ? '' : 's'}
+          </span>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-800">
+            <span className="h-2 w-2 rounded-full bg-rose-500" />
+            {occupiedCount} ocupada{occupiedCount === 1 ? '' : 's'}
+          </span>
+          {toChargeCount > 0 && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-800">
+              <span className="h-2 w-2 rounded-full bg-blue-500" />
+              {toChargeCount} por cobrar
+            </span>
           )}
-          {editMode && onAddZone && (
-            <button
-              type="button"
-              disabled={mapBusy}
-              onClick={() => setShowAddZone(true)}
-              className="inline-flex items-center gap-1.5 rounded-[12px] bg-neutral-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
-            >
-              <Plus className="h-3.5 w-3.5" strokeWidth={2} />
-              Nueva zona
-            </button>
+          {reservedCount > 0 && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">
+              <span className="h-2 w-2 rounded-full bg-amber-500" />
+              {reservedCount} reservada{reservedCount === 1 ? '' : 's'}
+            </span>
           )}
-          {editMode && onRemount && (
-            <button
-              type="button"
-              onClick={onRemount}
-              className="rounded-[12px] border border-neutral-200 px-3 py-2 text-xs font-semibold text-neutral-600"
-            >
-              Rehacer mapa
-            </button>
+          {cleaningCount > 0 && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-stone-200 bg-stone-100 px-3 py-1 text-xs font-semibold text-stone-600">
+              <span className="h-2 w-2 rounded-full bg-stone-400" />
+              {cleaningCount} por limpiar
+            </span>
           )}
+          <span className="text-xs text-stone-400">
+            {sortedRooms.length} zona{sortedRooms.length === 1 ? '' : 's'} · {visibleTables.length} mesas
+          </span>
         </div>
       </header>
 
       {sortedRooms.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-[12px] border border-neutral-200 bg-white px-6 py-16 text-center">
-          <LayoutGrid className="h-8 w-8 text-neutral-300" strokeWidth={1.5} />
-          <p className="mt-3 text-sm font-medium text-neutral-800">
+        <div className="flex flex-col items-center justify-center rounded-2xl border border-stone-200 bg-white px-6 py-16 text-center shadow-sm">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50">
+            <LayoutGrid className="h-7 w-7 text-blue-600" strokeWidth={1.5} />
+          </div>
+          <p className="mt-4 text-base font-semibold text-stone-900">
             Aún no hay zonas configuradas
           </p>
-          <p className="mt-1 text-sm text-neutral-500">
+          <p className="mt-1 text-sm text-stone-500">
             Crea la primera zona (salón, terraza, barra…) para empezar a servir.
           </p>
           {onAddZone ? (
@@ -614,18 +775,18 @@ export function RestaurantSalaLiveView({
               type="button"
               disabled={mapBusy}
               onClick={() => setShowAddZone(true)}
-              className="mt-5 inline-flex items-center gap-2 rounded-[12px] bg-neutral-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+              className={`mt-5 ${VERTIAL_BTN_PRIMARY}`}
             >
-              <Plus className="h-4 w-4" strokeWidth={1.5} />
+              <Plus className="h-4 w-4" strokeWidth={2} />
               Nueva zona
             </button>
           ) : onRemount ? (
             <button
               type="button"
               onClick={onRemount}
-              className="mt-5 inline-flex items-center gap-2 rounded-[12px] bg-neutral-900 px-4 py-2.5 text-sm font-semibold text-white"
+              className={`mt-5 ${VERTIAL_BTN_PRIMARY}`}
             >
-              <Plus className="h-4 w-4" strokeWidth={1.5} />
+              <Plus className="h-4 w-4" strokeWidth={2} />
               Configurar sala
             </button>
           ) : null}
@@ -634,23 +795,30 @@ export function RestaurantSalaLiveView({
         <>
           <div className="mb-4 flex gap-2 overflow-x-auto pb-1">
             {sortedRooms.map((room) => {
-              const count = tablesForRoom(tables, room).length;
+              const zoneTables = tablesForRoom(tables, room);
+              const count = zoneTables.length;
+              const zoneFree = zoneTables.filter((t) => t.status === 'available').length;
               const selected = (activeRoom?.id || '') === room.id;
               return (
                 <button
                   key={room.id}
                   type="button"
                   onClick={() => setActiveRoomId(room.id)}
-                  className={`shrink-0 rounded-[12px] border px-4 py-2.5 text-left transition-colors ${
+                  className={`shrink-0 rounded-xl border px-4 py-2.5 text-left transition-all ${
                     selected
-                      ? 'border-neutral-900 bg-neutral-900 text-white'
-                      : 'border-neutral-200 bg-white text-neutral-800 hover:border-neutral-300'
+                      ? 'border-blue-600 bg-blue-600 text-white shadow-sm shadow-blue-600/25'
+                      : 'border-stone-200 bg-white text-stone-800 hover:border-blue-200 hover:bg-blue-50/50'
                   }`}
                 >
                   <p className="text-sm font-semibold">{room.name}</p>
-                  <p className={`text-xs ${selected ? 'text-neutral-300' : 'text-neutral-500'}`}>
+                  <p className={`mt-0.5 text-xs ${selected ? 'text-blue-100' : 'text-stone-500'}`}>
                     {SALA_ROOM_TYPE_LABELS[room.roomType] || room.roomType} · {count}{' '}
                     {room.roomType === 'barra' ? 'puestos' : 'mesas'}
+                    {count > 0 && (
+                      <span className={selected ? 'text-blue-100' : 'text-emerald-600'}>
+                        {' '}· {zoneFree} libre{zoneFree === 1 ? '' : 's'}
+                      </span>
+                    )}
                   </p>
                 </button>
               );
@@ -660,35 +828,48 @@ export function RestaurantSalaLiveView({
                 type="button"
                 disabled={mapBusy}
                 onClick={() => setShowAddZone(true)}
-                className="shrink-0 rounded-[12px] border border-dashed border-neutral-300 bg-white px-4 py-2.5 text-left text-neutral-600 hover:border-neutral-400 disabled:opacity-50"
+                className="shrink-0 rounded-xl border border-dashed border-stone-300 bg-white px-4 py-2.5 text-left text-stone-600 transition-colors hover:border-blue-300 hover:text-blue-700 disabled:opacity-50"
               >
                 <p className="inline-flex items-center gap-1 text-sm font-semibold">
                   <Plus className="h-3.5 w-3.5" strokeWidth={2} />
                   Zona
                 </p>
-                <p className="text-xs text-neutral-400">Terraza, barra…</p>
+                <p className="text-xs text-stone-400">Terraza, barra…</p>
               </button>
             )}
           </div>
 
           {activeRoom && (
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm text-neutral-500">
-                {SALA_ROOM_TYPE_LABELS[activeRoom.roomType]} · {roomTables.length}{' '}
-                {activeRoom.roomType === 'barra' ? 'puestos' : 'mesas'}
-                {editMode ? (
-                  <span className="ml-2 font-medium text-amber-700">· Modo edición</span>
-                ) : (
-                  <span className="ml-2 text-neutral-400">· Libre: montar mesa · Ocupada: pedir / cobrar</span>
-                )}
-              </p>
+              {editMode ? (
+                <p className="text-sm text-stone-500">
+                  {SALA_ROOM_TYPE_LABELS[activeRoom.roomType]} · {roomTables.length}{' '}
+                  {activeRoom.roomType === 'barra' ? 'puestos' : 'mesas'}
+                  <span className="ml-2 font-semibold text-amber-700">· Modo edición</span>
+                </p>
+              ) : (
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-stone-500">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                    Libre — toca para montar mesa
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-rose-500" />
+                    Ocupada — toca para pedir / cobrar
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-blue-500" />
+                    Por cobrar — cuenta pedida
+                  </span>
+                </div>
+              )}
               <div className="flex flex-wrap gap-2">
                 {editMode && onAddTables && (
                   <button
                     type="button"
                     disabled={mapBusy}
                     onClick={() => setShowAddTables(true)}
-                    className="inline-flex items-center gap-1.5 rounded-[12px] border border-neutral-200 bg-white px-3 py-2 text-xs font-semibold text-neutral-800 hover:border-neutral-300 disabled:opacity-50"
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-100 disabled:opacity-50"
                   >
                     <Plus className="h-3.5 w-3.5" strokeWidth={2} />
                     Añadir {activeRoom.roomType === 'barra' ? 'puestos' : 'mesas'}
@@ -708,7 +889,7 @@ export function RestaurantSalaLiveView({
                       }
                       void Promise.resolve(onRemoveZone(activeRoom.id)).catch(() => undefined);
                     }}
-                    className="inline-flex items-center gap-1.5 rounded-[12px] border border-neutral-200 px-3 py-2 text-xs font-semibold text-neutral-500 hover:border-red-200 hover:text-red-600 disabled:opacity-50"
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-500 transition-colors hover:border-rose-200 hover:text-rose-600 disabled:opacity-50"
                   >
                     <Trash2 className="h-3.5 w-3.5" strokeWidth={1.5} />
                     Quitar zona
@@ -719,37 +900,43 @@ export function RestaurantSalaLiveView({
           )}
 
           {editMode && (
-            <div className="mb-3 rounded-[12px] border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-900">
               Toca una mesa para cambiar personas o eliminarla. Usa «Añadir» para mesas o zonas.
               Pulsa «Listo» para volver al servicio.
             </div>
           )}
 
           {roomTables.length === 0 ? (
-            <div className="flex flex-col items-center justify-center rounded-[12px] border border-neutral-200 bg-white px-6 py-16 text-center">
-              <LayoutGrid className="h-8 w-8 text-neutral-300" strokeWidth={1.5} />
-              <p className="mt-3 text-sm font-medium text-neutral-800">
+            <div className="flex flex-col items-center justify-center rounded-2xl border border-stone-200 bg-white px-6 py-16 text-center shadow-sm">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-stone-100">
+                <LayoutGrid className="h-7 w-7 text-stone-400" strokeWidth={1.5} />
+              </div>
+              <p className="mt-4 text-base font-semibold text-stone-900">
                 Aún no hay {activeRoom?.roomType === 'barra' ? 'puestos' : 'mesas'} en esta zona
               </p>
-              <p className="mt-1 max-w-sm text-sm text-neutral-500">
+              <p className="mt-1 max-w-sm text-sm text-stone-500">
                 {editMode
                   ? `«${activeRoom?.name}» está lista. Añade mesas o puestos de barra.`
-                  : 'Pulsa «Editar» arriba para añadir mesas o puestos.'}
+                  : 'Pulsa «Editar sala» arriba para añadir mesas o puestos.'}
               </p>
               {editMode && onAddTables && activeRoom && (
                 <button
                   type="button"
                   disabled={mapBusy}
                   onClick={() => setShowAddTables(true)}
-                  className="mt-5 inline-flex items-center gap-2 rounded-[12px] bg-neutral-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+                  className={`mt-5 ${VERTIAL_BTN_PRIMARY}`}
                 >
-                  <Plus className="h-4 w-4" strokeWidth={1.5} />
+                  <Plus className="h-4 w-4" strokeWidth={2} />
                   Añadir {activeRoom.roomType === 'barra' ? 'puestos' : 'mesas'}
                 </button>
               )}
             </div>
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+            <div
+              className="rounded-3xl border border-stone-200/80 p-3 shadow-inner sm:p-5"
+              style={SALA_FLOOR_STYLE}
+            >
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
               {roomTables.map((table) => {
                 const ui = STATUS_UI[table.status] || STATUS_UI.available;
                 const capacity = resolveTableCapacity(table);
@@ -758,38 +945,92 @@ export function RestaurantSalaLiveView({
                 const selectedEdit =
                   editMode && editTable && String(editTable._id || editTable.id) === tableId;
                 const seatedMins = minutesSinceIso(table.occupiedAt);
+                const occupied = isOccupiedStatus(table.status);
+                const longStay =
+                  occupied && seatedMins != null && seatedMins >= LONG_STAY_MINUTES;
+                const guests = occupied ? Math.max(0, Number(table.currentGuests) || 0) : 0;
+                const isBarSeat = activeRoom?.roomType === 'barra';
+                const layout = tableFigureLayout(capacity);
+                const filledTop = Math.min(guests, layout.top);
+                const filledBottom = Math.min(Math.max(0, guests - filledTop), layout.bottom);
+                const filledLeft = Math.min(
+                  Math.max(0, guests - filledTop - filledBottom),
+                  layout.left,
+                );
+                const filledRight = Math.min(
+                  Math.max(0, guests - filledTop - filledBottom - filledLeft),
+                  layout.right,
+                );
+                const customName =
+                  table.name && table.name !== `Mesa ${table.number}` ? table.name : '';
                 return (
                   <button
                     key={tableId}
                     type="button"
                     disabled={busy || mapBusy}
                     onClick={() => handleTableClick(table)}
-                    className={`relative rounded-[12px] border p-4 text-left transition-opacity hover:opacity-90 disabled:opacity-60 ${ui.card} ${
-                      selectedEdit ? 'ring-2 ring-amber-500 ring-offset-1' : ''
+                    className={`group relative flex flex-col items-center rounded-2xl px-2 py-3 text-center transition-all active:scale-[0.97] disabled:opacity-60 ${ui.card} ${
+                      selectedEdit ? 'ring-2 ring-amber-500 ring-offset-2' : ''
                     }`}
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="text-base font-semibold">
-                          {table.name || `Mesa ${table.number}`}
-                        </p>
-                        <p className="mt-1 flex items-center gap-1 text-xs opacity-80">
-                          <Users className="h-3.5 w-3.5" strokeWidth={1.5} />
-                          {capacity} pax
-                          {table.currentGuests > 0 ? ` · ${table.currentGuests} sentados` : ''}
-                        </p>
-                        {!editMode && seatedMins != null && isOccupiedStatus(table.status) && (
-                          <p className="mt-1 flex items-center gap-1 text-[11px] opacity-70">
-                            <Clock className="h-3 w-3" strokeWidth={1.5} />
+                    {editMode && (
+                      <span className="absolute right-2 top-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+                        Editar
+                      </span>
+                    )}
+
+                    {/* Figura de mesa (o taburete en barra) */}
+                    {isBarSeat ? (
+                      <div
+                        className={`mt-1 flex h-14 w-14 flex-col items-center justify-center rounded-full border-2 transition-colors ${ui.tableSurface}`}
+                      >
+                        <span className="text-lg font-bold leading-none">{table.number}</span>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center gap-1">
+                        <ChairRow count={layout.top} filled={filledTop} fill={ui.chairFill} />
+                        <div className="flex items-center gap-1">
+                          <SideChair
+                            present={layout.left > 0}
+                            filled={filledLeft > 0}
+                            fill={ui.chairFill}
+                          />
+                          <div
+                            className={`flex flex-col items-center justify-center border-2 transition-colors ${layout.surface} ${ui.tableSurface}`}
+                          >
+                            <span className="text-lg font-bold leading-none">{table.number}</span>
+                            <span className="mt-0.5 text-[10px] font-semibold opacity-80">
+                              {guests > 0 ? `${guests}/${capacity}` : `${capacity} pax`}
+                            </span>
+                          </div>
+                          <SideChair
+                            present={layout.right > 0}
+                            filled={filledRight > 0}
+                            fill={ui.chairFill}
+                          />
+                        </div>
+                        <ChairRow count={layout.bottom} filled={filledBottom} fill={ui.chairFill} />
+                      </div>
+                    )}
+
+                    {/* Pie: nombre propio (si lo hay) + estado / tiempo */}
+                    <div className="mt-2 w-full">
+                      {customName && (
+                        <p className="truncate text-xs font-bold text-stone-800">{customName}</p>
+                      )}
+                      <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-[11px] font-semibold">
+                        <span className={ui.statusText}>{ui.label}</span>
+                        {!editMode && occupied && seatedMins != null && (
+                          <span
+                            className={`inline-flex items-center gap-0.5 ${
+                              longStay ? 'text-amber-700' : 'text-stone-400'
+                            }`}
+                          >
+                            <Clock className="h-3 w-3" strokeWidth={2} />
                             {formatDurationMinutes(seatedMins)}
-                          </p>
+                          </span>
                         )}
                       </div>
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${ui.badge}`}
-                      >
-                        {editMode ? 'Editar' : ui.label}
-                      </span>
                     </div>
                   </button>
                 );
@@ -799,7 +1040,7 @@ export function RestaurantSalaLiveView({
                   type="button"
                   disabled={mapBusy}
                   onClick={() => setShowAddTables(true)}
-                  className="flex min-h-[88px] flex-col items-center justify-center gap-1 rounded-[12px] border border-dashed border-neutral-300 bg-white/60 px-4 py-4 text-neutral-500 hover:border-neutral-400 hover:text-neutral-700 disabled:opacity-50"
+                  className="flex min-h-[140px] flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed border-stone-300 bg-white/60 px-4 py-4 text-stone-500 transition-colors hover:border-blue-300 hover:text-blue-700 disabled:opacity-50"
                 >
                   <Plus className="h-5 w-5" strokeWidth={1.5} />
                   <span className="text-xs font-semibold">
@@ -808,13 +1049,14 @@ export function RestaurantSalaLiveView({
                 </button>
               )}
             </div>
+            </div>
           )}
         </>
       )}
 
       {infoTable && !editMode && (
         <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/50 p-4 sm:items-center">
-          <div className="flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-xl sm:max-w-xl">
+          <div className="flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-xl sm:max-w-xl">
             {(() => {
               const ui = STATUS_UI[infoTable.status] || STATUS_UI.available;
               const capacity = resolveTableCapacity(infoTable);
@@ -828,15 +1070,21 @@ export function RestaurantSalaLiveView({
               const comandaCount = (infoOpenOrder?.comandas || []).filter(
                 (c) => c.status !== 'cancelled',
               ).length;
+              const seated = seatedMins != null && isOccupiedStatus(infoTable.status);
+              const infoLongStay = seated && seatedMins >= LONG_STAY_MINUTES;
               return (
                 <>
-                  <div className="shrink-0 border-b border-neutral-100 px-5 py-4 sm:px-6">
+                  <div
+                    className={`h-1.5 shrink-0 bg-gradient-to-r ${ui.accent}`}
+                    aria-hidden
+                  />
+                  <div className="shrink-0 border-b border-stone-100 px-5 py-4 sm:px-6">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <h2 className="text-xl font-semibold text-neutral-900 sm:text-2xl">
+                        <h2 className="text-xl font-semibold text-stone-900 sm:text-2xl">
                           {infoTable.name || `Mesa ${infoTable.number}`}
                         </h2>
-                        <p className="mt-1.5 flex flex-wrap items-center gap-2 text-sm text-neutral-500">
+                        <p className="mt-1.5 flex flex-wrap items-center gap-2 text-sm text-stone-500">
                           <span
                             className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${ui.badge}`}
                           >
@@ -848,7 +1096,7 @@ export function RestaurantSalaLiveView({
                       <button
                         type="button"
                         onClick={() => setInfoTable(null)}
-                        className="rounded-lg p-1.5 text-neutral-500 hover:bg-neutral-100"
+                        className="rounded-lg p-1.5 text-stone-500 hover:bg-stone-100"
                       >
                         <X className="h-5 w-5" />
                       </button>
@@ -857,51 +1105,75 @@ export function RestaurantSalaLiveView({
 
                   <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6">
                     <div className="mb-4 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-                      <div className="rounded-xl border border-neutral-100 bg-neutral-50 px-3 py-3">
-                        <p className="text-[11px] font-medium uppercase tracking-wide text-neutral-400">
-                          Personas
-                        </p>
-                        <p className="mt-1 text-base font-semibold text-neutral-900">
+                      <div className="rounded-xl border border-stone-100 bg-stone-50 px-3 py-3">
+                        <div className="flex items-center gap-1.5">
+                          <Users className="h-3.5 w-3.5 text-stone-400" strokeWidth={2} />
+                          <p className="text-[11px] font-medium uppercase tracking-wide text-stone-400">
+                            Personas
+                          </p>
+                        </div>
+                        <p className="mt-1 text-base font-semibold tabular-nums text-stone-900">
                           {infoTable.currentGuests > 0
                             ? `${infoTable.currentGuests} / ${capacity}`
                             : `${capacity} pax`}
                         </p>
                       </div>
-                      <div className="rounded-xl border border-neutral-100 bg-neutral-50 px-3 py-3">
-                        <p className="text-[11px] font-medium uppercase tracking-wide text-neutral-400">
-                          Tiempo en mesa
-                        </p>
-                        <p className="mt-1 text-base font-semibold text-neutral-900">
-                          {seatedMins != null && isOccupiedStatus(infoTable.status)
-                            ? formatDurationMinutes(seatedMins)
-                            : '—'}
+                      <div
+                        className={`rounded-xl border px-3 py-3 ${
+                          infoLongStay
+                            ? 'border-amber-200 bg-amber-50'
+                            : 'border-stone-100 bg-stone-50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <Clock
+                            className={`h-3.5 w-3.5 ${infoLongStay ? 'text-amber-500' : 'text-stone-400'}`}
+                            strokeWidth={2}
+                          />
+                          <p
+                            className={`text-[11px] font-medium uppercase tracking-wide ${
+                              infoLongStay ? 'text-amber-600' : 'text-stone-400'
+                            }`}
+                          >
+                            Tiempo en mesa
+                          </p>
+                        </div>
+                        <p
+                          className={`mt-1 text-base font-semibold tabular-nums ${
+                            infoLongStay ? 'text-amber-800' : 'text-stone-900'
+                          }`}
+                        >
+                          {seated ? formatDurationMinutes(seatedMins) : '—'}
                         </p>
                       </div>
-                      <div className="rounded-xl border border-neutral-100 bg-neutral-50 px-3 py-3">
-                        <p className="text-[11px] font-medium uppercase tracking-wide text-neutral-400">
+                      <div className="rounded-xl border border-stone-100 bg-stone-50 px-3 py-3">
+                        <p className="text-[11px] font-medium uppercase tracking-wide text-stone-400">
                           Facturado hoy
                         </p>
-                        <p className="mt-1 text-base font-semibold text-neutral-900">
+                        <p className="mt-1 text-base font-semibold tabular-nums text-stone-900">
                           {infoLoading ? '…' : formatEuro(infoTodayAmount)}
                         </p>
                       </div>
-                      <div className="rounded-xl border border-neutral-100 bg-neutral-50 px-3 py-3">
-                        <p className="text-[11px] font-medium uppercase tracking-wide text-neutral-400">
+                      <div className="rounded-xl border border-stone-100 bg-stone-50 px-3 py-3">
+                        <p className="text-[11px] font-medium uppercase tracking-wide text-stone-400">
                           Tickets hoy
                         </p>
-                        <p className="mt-1 text-base font-semibold text-neutral-900">
+                        <p className="mt-1 text-base font-semibold tabular-nums text-stone-900">
                           {infoLoading ? '…' : infoTodayTickets}
                         </p>
                       </div>
                     </div>
 
-                    <div className="mb-2 rounded-2xl border border-neutral-200 bg-white">
-                      <div className="flex items-center justify-between gap-2 border-b border-neutral-100 px-4 py-3">
-                        <p className="text-[11px] font-medium uppercase tracking-wide text-neutral-400">
-                          Pedido TPV abierto
-                        </p>
+                    <div className="mb-2 overflow-hidden rounded-2xl border border-stone-200 bg-white">
+                      <div className="flex items-center justify-between gap-2 border-b border-stone-100 bg-stone-50/70 px-4 py-3">
+                        <div className="flex items-center gap-1.5">
+                          <Receipt className="h-3.5 w-3.5 text-stone-400" strokeWidth={2} />
+                          <p className="text-[11px] font-medium uppercase tracking-wide text-stone-400">
+                            Pedido TPV abierto
+                          </p>
+                        </div>
                         {infoOpenOrder ? (
-                          <p className="text-xs font-medium text-neutral-500">
+                          <p className="text-xs font-medium text-stone-500">
                             {orderStatusLabel(infoOpenOrder.status)}
                             {comandaCount > 0 ? ` · ${comandaCount} comanda${comandaCount === 1 ? '' : 's'}` : ''}
                           </p>
@@ -909,29 +1181,32 @@ export function RestaurantSalaLiveView({
                       </div>
 
                       {infoLoading ? (
-                        <p className="px-4 py-4 text-sm text-neutral-500">Cargando pedido…</p>
+                        <p className="px-4 py-4 text-sm text-stone-500">Cargando pedido…</p>
                       ) : infoOpenOrder ? (
                         <div className="px-4 py-3">
                           <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
                             <div>
-                              <p className="text-2xl font-bold tabular-nums tracking-tight text-neutral-900">
+                              <p className="text-3xl font-bold tabular-nums tracking-tight text-stone-900">
                                 {formatEuro(due)}
                               </p>
-                              <p className="mt-0.5 text-sm text-neutral-500">
+                              <p className="mt-0.5 text-sm text-stone-500">
                                 {itemCount} artículo{itemCount === 1 ? '' : 's'}
                                 {' · '}
                                 {infoOpenOrder.guests || infoTable.currentGuests || 0} pax
                               </p>
                             </div>
                             {infoOpenOrder.createdByName ? (
-                              <p className="text-xs text-neutral-400">
+                              <span className="inline-flex items-center gap-1.5 rounded-full bg-stone-100 px-2.5 py-1 text-[11px] font-medium text-stone-600">
+                                <span className="flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 text-[9px] font-bold uppercase text-white">
+                                  {infoOpenOrder.createdByName.trim().charAt(0)}
+                                </span>
                                 Abierto por {infoOpenOrder.createdByName}
-                              </p>
+                              </span>
                             ) : null}
                           </div>
 
                           {ticketLines.length > 0 ? (
-                            <ul className="max-h-56 space-y-2 overflow-y-auto border-t border-neutral-100 pt-3 sm:max-h-72">
+                            <ul className="max-h-56 space-y-2 overflow-y-auto border-t border-stone-100 pt-3 sm:max-h-72">
                               {ticketLines.map((line) => {
                                 const st = itemStatusShort(line.status);
                                 return (
@@ -940,17 +1215,17 @@ export function RestaurantSalaLiveView({
                                     className="flex items-start justify-between gap-3 text-sm"
                                   >
                                     <div className="min-w-0">
-                                      <p className="font-medium text-neutral-900">
-                                        <span className="tabular-nums text-neutral-500">
+                                      <p className="font-medium text-stone-900">
+                                        <span className="tabular-nums text-stone-500">
                                           {line.qty}×
                                         </span>{' '}
                                         {line.label}
                                       </p>
                                       {st ? (
-                                        <p className="mt-0.5 text-xs text-neutral-400">{st}</p>
+                                        <p className="mt-0.5 text-xs text-stone-400">{st}</p>
                                       ) : null}
                                     </div>
-                                    <p className="shrink-0 tabular-nums font-semibold text-neutral-800">
+                                    <p className="shrink-0 tabular-nums font-semibold text-stone-800">
                                       {formatEuro(line.lineTotal)}
                                     </p>
                                   </li>
@@ -958,7 +1233,7 @@ export function RestaurantSalaLiveView({
                               })}
                             </ul>
                           ) : (
-                            <p className="border-t border-neutral-100 pt-3 text-sm text-neutral-500">
+                            <p className="border-t border-stone-100 pt-3 text-sm text-stone-500">
                               Sin líneas todavía — abre la carta para pedir.
                             </p>
                           )}
@@ -970,7 +1245,7 @@ export function RestaurantSalaLiveView({
                           ) : null}
 
                           {Number(infoOpenOrder.discount) > 0 ? (
-                            <p className="mt-2 text-xs text-neutral-500">
+                            <p className="mt-2 text-xs text-stone-500">
                               Descuento: −{formatEuro(Number(infoOpenOrder.discount) || 0)}
                               {infoOpenOrder.discountReason
                                 ? ` (${infoOpenOrder.discountReason})`
@@ -979,14 +1254,14 @@ export function RestaurantSalaLiveView({
                           ) : null}
                         </div>
                       ) : (
-                        <p className="px-4 py-4 text-sm text-neutral-500">
+                        <p className="px-4 py-4 text-sm text-stone-500">
                           Ningún pedido TPV abierto en esta mesa.
                         </p>
                       )}
                     </div>
                   </div>
 
-                  <div className="shrink-0 space-y-2 border-t border-neutral-100 px-5 py-4 sm:px-6">
+                  <div className="shrink-0 space-y-2 border-t border-stone-100 px-5 py-4 sm:px-6">
                     {infoTable.status === 'available' && (
                       <button
                         type="button"
@@ -994,7 +1269,7 @@ export function RestaurantSalaLiveView({
                           setSeatTable(infoTable);
                           setInfoTable(null);
                         }}
-                        className="w-full rounded-2xl bg-neutral-900 px-4 py-3 text-base font-semibold text-white"
+                        className={`w-full !min-h-12 !text-base ${VERTIAL_BTN_PRIMARY}`}
                       >
                         Montar mesa / sentar
                       </button>
@@ -1007,7 +1282,7 @@ export function RestaurantSalaLiveView({
                             setSeatTable(infoTable);
                             setInfoTable(null);
                           }}
-                          className="w-full rounded-2xl bg-neutral-900 px-4 py-3 text-base font-semibold text-white"
+                          className={`w-full !min-h-12 !text-base ${VERTIAL_BTN_PRIMARY}`}
                         >
                           Sentar ahora
                         </button>
@@ -1016,7 +1291,7 @@ export function RestaurantSalaLiveView({
                           onClick={() => {
                             void cancelTableReservation(infoTable).then(() => setInfoTable(null));
                           }}
-                          className="w-full rounded-2xl border border-neutral-200 px-4 py-3 text-base font-semibold text-neutral-700"
+                          className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-base font-semibold text-rose-600 transition-colors hover:bg-rose-50"
                         >
                           Cancelar reserva
                         </button>
@@ -1028,7 +1303,7 @@ export function RestaurantSalaLiveView({
                         onClick={() => {
                           void markAvailable(infoTable).then(() => setInfoTable(null));
                         }}
-                        className="w-full rounded-2xl bg-neutral-900 px-4 py-3 text-base font-semibold text-white"
+                        className={`w-full !min-h-12 !text-base ${VERTIAL_BTN_PRIMARY}`}
                       >
                         Marcar libre
                       </button>
@@ -1040,7 +1315,7 @@ export function RestaurantSalaLiveView({
                           openTpvForTable(infoTable, openOrderId || undefined);
                           setInfoTable(null);
                         }}
-                        className="w-full rounded-2xl bg-neutral-900 px-4 py-3 text-base font-semibold text-white"
+                        className={`w-full !min-h-12 !text-base ${VERTIAL_BTN_PRIMARY}`}
                       >
                         {infoOpenOrder ? 'Pedir / ver cuenta' : 'Abrir carta'}
                       </button>
@@ -1048,7 +1323,7 @@ export function RestaurantSalaLiveView({
                     <button
                       type="button"
                       onClick={() => setInfoTable(null)}
-                      className="w-full rounded-2xl border border-neutral-200 px-4 py-3 text-base font-semibold text-neutral-600"
+                      className={`w-full !min-h-12 !text-base ${VERTIAL_BTN_SECONDARY}`}
                     >
                       Cerrar
                     </button>
@@ -1073,18 +1348,18 @@ export function RestaurantSalaLiveView({
 
       {reservedTable && !editMode && (
         <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/50 p-4 sm:items-center">
-          <div className="w-full max-w-sm rounded-[12px] border border-neutral-200 bg-white p-5">
+          <div className="w-full max-w-sm rounded-2xl border border-stone-200 bg-white p-5 shadow-xl">
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
-                <h2 className="text-base font-semibold text-neutral-900">
+                <h2 className="text-base font-bold text-stone-900">
                   {reservedTable.name || `Mesa ${reservedTable.number}`}
                 </h2>
-                <p className="text-sm text-neutral-500">Mesa reservada</p>
+                <p className="text-sm text-stone-500">Mesa reservada</p>
               </div>
               <button
                 type="button"
                 onClick={() => setReservedTable(null)}
-                className="rounded-lg p-1 text-neutral-500 hover:bg-neutral-100"
+                className="rounded-lg p-1 text-stone-500 hover:bg-stone-100"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -1096,7 +1371,7 @@ export function RestaurantSalaLiveView({
                   setSeatTable(reservedTable);
                   setReservedTable(null);
                 }}
-                className="w-full rounded-[12px] bg-neutral-900 px-4 py-2.5 text-sm font-semibold text-white"
+                className={`w-full ${VERTIAL_BTN_PRIMARY}`}
               >
                 Sentar ahora
               </button>
@@ -1105,7 +1380,7 @@ export function RestaurantSalaLiveView({
                 onClick={() => {
                   void cancelTableReservation(reservedTable).then(() => setReservedTable(null));
                 }}
-                className="w-full rounded-[12px] border border-neutral-200 px-4 py-2.5 text-sm font-semibold text-neutral-700"
+                className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-semibold text-rose-600 transition-colors hover:bg-rose-50"
               >
                 Cancelar reserva
               </button>
@@ -1116,18 +1391,18 @@ export function RestaurantSalaLiveView({
 
       {editTable && editMode && (
         <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/50 p-4 sm:items-center">
-          <div className="w-full max-w-sm rounded-[12px] border border-neutral-200 bg-white p-5">
+          <div className="w-full max-w-sm rounded-2xl border border-stone-200 bg-white p-5 shadow-xl">
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
-                <h2 className="text-base font-semibold text-neutral-900">
+                <h2 className="text-base font-semibold text-stone-900">
                   {editTable.name || `Mesa ${editTable.number}`}
                 </h2>
-                <p className="text-sm text-neutral-500">Editar mesa</p>
+                <p className="text-sm text-stone-500">Editar mesa</p>
               </div>
               <button
                 type="button"
                 onClick={() => setEditTable(null)}
-                className="rounded-lg p-1 text-neutral-500 hover:bg-neutral-100"
+                className="rounded-lg p-1 text-stone-500 hover:bg-stone-100"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -1135,12 +1410,12 @@ export function RestaurantSalaLiveView({
 
             <div className="space-y-4">
               <div>
-                <p className="mb-2 text-xs font-medium text-neutral-500">Capacidad (máx. personas)</p>
+                <p className="mb-2 text-xs font-medium text-stone-500">Capacidad (máx. personas)</p>
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
                     onClick={() => setEditCapacity((n) => Math.max(1, n - 1))}
-                    className="flex h-11 w-11 items-center justify-center rounded-xl border border-neutral-200 text-neutral-700 hover:bg-neutral-50"
+                    className="flex h-11 w-11 items-center justify-center rounded-xl border border-stone-200 text-stone-700 hover:bg-stone-50"
                   >
                     <Minus className="h-4 w-4" />
                   </button>
@@ -1150,7 +1425,7 @@ export function RestaurantSalaLiveView({
                   <button
                     type="button"
                     onClick={() => setEditCapacity((n) => Math.min(40, n + 1))}
-                    className="flex h-11 w-11 items-center justify-center rounded-xl border border-neutral-200 text-neutral-700 hover:bg-neutral-50"
+                    className="flex h-11 w-11 items-center justify-center rounded-xl border border-stone-200 text-stone-700 hover:bg-stone-50"
                   >
                     <Plus className="h-4 w-4" />
                   </button>
@@ -1159,12 +1434,12 @@ export function RestaurantSalaLiveView({
 
               {isOccupiedStatus(editTable.status) && (
                 <div>
-                  <p className="mb-2 text-xs font-medium text-neutral-500">Comensales ahora</p>
+                  <p className="mb-2 text-xs font-medium text-stone-500">Comensales ahora</p>
                   <div className="flex items-center gap-3">
                     <button
                       type="button"
                       onClick={() => setEditGuests((n) => Math.max(0, n - 1))}
-                      className="flex h-11 w-11 items-center justify-center rounded-xl border border-neutral-200 text-neutral-700 hover:bg-neutral-50"
+                      className="flex h-11 w-11 items-center justify-center rounded-xl border border-stone-200 text-stone-700 hover:bg-stone-50"
                     >
                       <Minus className="h-4 w-4" />
                     </button>
@@ -1176,7 +1451,7 @@ export function RestaurantSalaLiveView({
                       onClick={() =>
                         setEditGuests((n) => Math.min(Math.max(editCapacity, 1), n + 1))
                       }
-                      className="flex h-11 w-11 items-center justify-center rounded-xl border border-neutral-200 text-neutral-700 hover:bg-neutral-50"
+                      className="flex h-11 w-11 items-center justify-center rounded-xl border border-stone-200 text-stone-700 hover:bg-stone-50"
                     >
                       <Plus className="h-4 w-4" />
                     </button>
@@ -1188,7 +1463,7 @@ export function RestaurantSalaLiveView({
                 type="button"
                 disabled={mapBusy || !onUpdateTablePeople}
                 onClick={() => void saveEditTable()}
-                className="w-full rounded-[12px] bg-neutral-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+                className={`w-full ${VERTIAL_BTN_PRIMARY}`}
               >
                 Guardar
               </button>
@@ -1209,7 +1484,7 @@ export function RestaurantSalaLiveView({
                     setEditTable(null);
                     void Promise.resolve(onRemoveTable(id)).catch(() => undefined);
                   }}
-                  className="inline-flex w-full items-center justify-center gap-1.5 rounded-[12px] border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                  className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-semibold text-rose-600 transition-colors hover:bg-rose-50 disabled:opacity-50"
                 >
                   <Trash2 className="h-4 w-4" strokeWidth={1.5} />
                   Eliminar mesa

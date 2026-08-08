@@ -63,6 +63,10 @@ export function CeoGroupApartados({
     () => Object.values(laborByBiz).reduce((s, n) => s + (Number(n) || 0), 0),
     [laborByBiz],
   );
+  const staffTotal = useMemo(
+    () => visions.reduce((s, v) => s + (Number(v.staffing) || 0), 0),
+    [visions],
+  );
   const clients = useMemo(() => {
     let total = 0;
     let neu = 0;
@@ -132,8 +136,8 @@ export function CeoGroupApartados({
           }
           sub={
             laborTotal > 0
-              ? 'pago trabajadores'
-              : `${formatNumberEs(people.clockedInNow, { maxFraction: 0 })} fichados`
+              ? `pago trab. · ${formatNumberEs(people.clockedInNow, { maxFraction: 0 })}${staffTotal > 0 ? `/${formatNumberEs(staffTotal, { maxFraction: 0 })}` : ''} fichados`
+              : `${formatNumberEs(people.clockedInNow, { maxFraction: 0 })}${staffTotal > 0 ? `/${formatNumberEs(staffTotal, { maxFraction: 0 })}` : ''} fichados`
           }
         />
         <ApartadoChip
@@ -164,7 +168,9 @@ export function CeoGroupApartados({
       <section className="overflow-hidden rounded-2xl border border-stone-200/80 bg-white dark:border-stone-800 dark:bg-stone-950">
         <header className="border-b border-stone-100 px-3 py-2.5 sm:px-4 dark:border-stone-800">
           <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-stone-500">1 · Dinero</p>
-          <h2 className="text-sm font-bold text-stone-900 dark:text-white">P&amp;L del grupo</h2>
+          <h2 className="text-sm font-bold text-stone-900 dark:text-white">
+            Cuenta de resultados del grupo
+          </h2>
           <p className="text-[11px] text-stone-500">Todas las empresas · mes en curso</p>
         </header>
         <div className="grid gap-3 p-3 sm:grid-cols-2 sm:p-4 lg:grid-cols-[1fr_1.2fr]">
@@ -211,22 +217,37 @@ export function CeoGroupApartados({
 
       {/* 2 + 3 Personas / Clientes */}
       <div className="grid gap-3 sm:grid-cols-2">
-        <section className="overflow-hidden rounded-2xl border border-stone-200/80 bg-white dark:border-stone-800 dark:bg-stone-950">
+        <section className="flex flex-col overflow-hidden rounded-2xl border border-stone-200/80 bg-white dark:border-stone-800 dark:bg-stone-950">
           <header className="border-b border-stone-100 px-3 py-2.5 sm:px-4 dark:border-stone-800">
             <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-stone-500">2 · Personas</p>
             <h2 className="text-sm font-bold text-stone-900 dark:text-white">RRHH del grupo</h2>
+            <p className="text-[11px] text-stone-500">Fichajes en vivo y coste de plantilla · mes</p>
           </header>
           <div className="grid grid-cols-2 gap-2 p-3 sm:p-4">
             <MoneyTile
               label="Pago trabajadores"
               value={laborLoading && laborTotal === 0 ? '…' : laborTotal > 0 ? formatMoneyEs(laborTotal) : '—'}
             />
-            <MoneyTile label="Fichados ahora" value={formatNumberEs(people.clockedInNow, { maxFraction: 0 })} />
-            <MoneyTile label="Vacaciones pend." value={formatNumberEs(people.pendingVacations, { maxFraction: 0 })} />
-            <MoneyTile label="Alertas horario" value={formatNumberEs(people.scheduleAlerts, { maxFraction: 0 })} />
+            <MoneyTile
+              label="Fichados ahora"
+              value={
+                staffTotal > 0
+                  ? `${formatNumberEs(people.clockedInNow, { maxFraction: 0 })}/${formatNumberEs(staffTotal, { maxFraction: 0 })}`
+                  : formatNumberEs(people.clockedInNow, { maxFraction: 0 })
+              }
+            />
+            <MoneyTile
+              label="Vacaciones pend."
+              value={formatNumberEs(people.pendingVacations, { maxFraction: 0 })}
+            />
+            <MoneyTile
+              label="Alertas horario"
+              value={formatNumberEs(people.scheduleAlerts, { maxFraction: 0 })}
+              tone={people.scheduleAlerts > 0 ? 'bad' : undefined}
+            />
           </div>
           {visions.length > 0 ? (
-            <ul className="max-h-[140px] space-y-1 overflow-y-auto border-t border-stone-100 px-3 py-2 dark:border-stone-800">
+            <ul className="flex-1 space-y-1 overflow-y-auto border-t border-stone-100 px-3 py-2 dark:border-stone-800">
               {visions.slice(0, 6).map((v) => {
                 const pay = laborByBiz[v.businessId] || 0;
                 return (
@@ -240,8 +261,11 @@ export function CeoGroupApartados({
                       <span className="min-w-0 flex-1 truncate font-semibold text-stone-800 dark:text-stone-100">
                         {v.name}
                       </span>
-                      <span className="tabular-nums text-stone-500">
-                        {pay > 0 ? formatMoneyEs(pay) : `${v.clockedIn}/${v.staffing}`}
+                      <span className="shrink-0 tabular-nums text-stone-500">
+                        {v.staffing > 0 ? `${v.clockedIn}/${v.staffing} fichados` : '—'}
+                      </span>
+                      <span className="w-16 shrink-0 text-right font-semibold tabular-nums text-stone-700 dark:text-stone-200">
+                        {pay > 0 ? formatMoneyEs(pay) : '—'}
                       </span>
                     </button>
                   </li>
@@ -251,10 +275,11 @@ export function CeoGroupApartados({
           ) : null}
         </section>
 
-        <section className="overflow-hidden rounded-2xl border border-stone-200/80 bg-white dark:border-stone-800 dark:bg-stone-950">
+        <section className="flex flex-col overflow-hidden rounded-2xl border border-stone-200/80 bg-white dark:border-stone-800 dark:bg-stone-950">
           <header className="border-b border-stone-100 px-3 py-2.5 sm:px-4 dark:border-stone-800">
             <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-stone-500">3 · Clientes</p>
             <h2 className="text-sm font-bold text-stone-900 dark:text-white">CRM del grupo</h2>
+            <p className="text-[11px] text-stone-500">Altas del mes por empresa</p>
           </header>
           <div className="grid grid-cols-2 gap-2 p-3 sm:p-4">
             <MoneyTile
@@ -268,7 +293,7 @@ export function CeoGroupApartados({
             />
           </div>
           {clientChart.length > 0 ? (
-            <div className="h-[140px] px-2 pb-3">
+            <div className="min-h-[140px] flex-1 px-2 pb-3">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={clientChart} layout="vertical" margin={{ top: 4, right: 8, left: 4, bottom: 0 }}>
                   <XAxis type="number" hide />
@@ -293,9 +318,11 @@ export function CeoGroupApartados({
               </ResponsiveContainer>
             </div>
           ) : (
-            <p className="px-3 pb-3 text-[11px] text-stone-400">
-              {rows.length === 0 ? 'Cargando clientes…' : 'Sin altas este mes'}
-            </p>
+            <div className="flex flex-1 items-center justify-center px-3 pb-4 pt-2">
+              <p className="text-[11px] text-stone-400">
+                {rows.length === 0 ? 'Cargando clientes…' : 'Sin altas de clientes este mes'}
+              </p>
+            </div>
           )}
         </section>
       </div>

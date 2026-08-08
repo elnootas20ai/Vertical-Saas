@@ -14,6 +14,8 @@ import {
   getAllDocuments,
   getDocument,
   putDocument,
+  putDocumentAttachment,
+  getDocumentAttachment,
   softDeleteDocument,
   findAccountByUserId,
 } from './couchdb.js';
@@ -36,6 +38,33 @@ function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
 }
 
+function normalizeScopeId(raw) {
+  return String(raw || '').replace(/^business:/, '').trim();
+}
+
+function docBusinessId(doc) {
+  return normalizeScopeId(doc?.businessId || doc?.business_id);
+}
+
+function docSalesPointId(doc) {
+  return String(doc?.salesPointId || doc?.pointOfSaleId || '').trim();
+}
+
+/** Filtra por empresa/PDV. Docs legacy sin businessId siguen visibles (hasta que se guarden). */
+function matchesScope(doc, businessId, salesPointId) {
+  const bid = normalizeScopeId(businessId);
+  if (bid) {
+    const docBid = docBusinessId(doc);
+    if (docBid && docBid !== bid) return false;
+  }
+  const pdv = String(salesPointId || '').trim();
+  if (pdv) {
+    const docPdv = docSalesPointId(doc);
+    if (docPdv && docPdv !== pdv) return false;
+  }
+  return true;
+}
+
 function buildDocument(entityCfg, userId, data, existing) {
   const now = new Date().toISOString();
   const id = existing?._id || `${entityCfg.idPrefix}-${uuidv4()}`;
@@ -51,12 +80,38 @@ function buildDocument(entityCfg, userId, data, existing) {
 
   for (const field of entityCfg.fields) {
     if (data[field] !== undefined) {
-      doc[field] = data[field];
+      if (field === 'fotos') {
+        const raw = data[field];
+        doc[field] = Array.isArray(raw)
+          ? raw.filter((u) => typeof u === 'string' && u.trim().length > 0)
+          : [];
+      } else {
+        doc[field] = data[field];
+      }
     } else if (existing && existing[field] !== undefined) {
       doc[field] = existing[field];
     } else {
-      doc[field] = '';
+      doc[field] = field === 'fotos' ? [] : '';
     }
+  }
+
+  // Siempre normalizar scope si el entity lo declara.
+  if (entityCfg.fields.includes('businessId')) {
+    const bid = normalizeScopeId(
+      data.businessId ?? data.business_id ?? existing?.businessId ?? existing?.business_id,
+    );
+    doc.businessId = bid;
+    doc.business_id = bid;
+  }
+  if (entityCfg.fields.includes('salesPointId')) {
+    doc.salesPointId = String(
+      data.salesPointId ?? data.pointOfSaleId ?? existing?.salesPointId ?? existing?.pointOfSaleId ?? '',
+    ).trim();
+  }
+
+  // Sin esto CouchDB borra los adjuntos al PUT del documento.
+  if (existing?._attachments && typeof existing._attachments === 'object') {
+    doc._attachments = existing._attachments;
   }
 
   return doc;
@@ -73,16 +128,199 @@ function sanitize(entityCfg, doc) {
     updatedAt: doc.updatedAt,
   };
   for (const field of entityCfg.fields) {
-    out[field] = doc[field] !== undefined ? doc[field] : '';
+    out[field] = doc[field] !== undefined ? doc[field] : (field === 'fotos' ? [] : '');
+  }
+  if (entityCfg.fields.includes('businessId')) {
+    out.businessId = docBusinessId(doc);
+    out.business_id = out.businessId;
   }
   return out;
 }
 
-async function listByUser(req, dbName, entityCfg, userId) {
+function parseDataUrl(dataUrl) {
+  const raw = String(dataUrl || '').replace(/\s/g, '');
+  const m = /^data:([^;]+);base64,([\s\S]+)$/i.exec(raw);
+  if (!m) return null;
+  try {
+    const buffer = Buffer.from(m[2], 'base64');
+    if (!buffer.length) return null;
+    return { contentType: m[1] || 'image/jpeg', buffer };
+  } catch {
+    return null;
+  }
+}
+
+function isDataUrlFoto(value) {
+  return /^data:image\//i.test(String(value || '').trim());
+}
+
+function attachmentNameFromFotoRef(value) {
+  const s = String(value || '').trim();
+  if (!s || isDataUrlFoto(s)) return '';
+  // att:foto-0.jpg  |  /api/.../foto-0.jpg  |  foto-0.jpg
+  if (s.startsWith('att:')) return s.slice(4);
+  const marker = '/foto/';
+  const idx = s.lastIndexOf(marker);
+  if (idx >= 0) return decodeURIComponent(s.slice(idx + marker.length).split('?')[0]);
+  if (s.includes('/')) {
+    const last = s.split('/').pop() || '';
+    return decodeURIComponent(last.split('?')[0]);
+  }
+  return s;
+}
+
+/**
+ * Adjunta UNA foto (data URL) al documento y la añade a `fotos` como `att:nombre`.
+ * Nunca guarda base64 inline en el JSON (límite Couch ~8MB / fallos silenciosos).
+ */
+async function appendOneFotoAttachment(req, dbName, doc, dataUrl, index = 0) {
+  const parsed = parseDataUrl(dataUrl);
+  if (!parsed || !parsed.buffer?.length) {
+    throw new Error('Una foto llegó corrupta (data URL inválida). Vuelve a seleccionarla.');
+  }
+  let rev = doc._rev;
+  const ext = /png/i.test(parsed.contentType) ? 'png' : 'jpg';
+  const name = `foto-${Date.now().toString(36)}-${index}.${ext}`;
+  const contentType = parsed.contentType.startsWith('image/')
+    ? parsed.contentType
+    : 'image/jpeg';
+
+  let savedAtt;
+  try {
+    savedAtt = await putDocumentAttachment(
+      req,
+      dbName,
+      doc._id,
+      name,
+      parsed.buffer,
+      contentType,
+      rev,
+    );
+  } catch (err) {
+    // Conflicto de rev: reintentar una vez con el doc fresco.
+    const fresh = await getDocument(req, dbName, doc._id);
+    if (!fresh?._rev) throw err;
+    rev = fresh._rev;
+    savedAtt = await putDocumentAttachment(
+      req,
+      dbName,
+      doc._id,
+      name,
+      parsed.buffer,
+      contentType,
+      rev,
+    );
+  }
+
+  rev = savedAtt.rev || rev;
+  const fresh = await getDocument(req, dbName, doc._id);
+  if (!fresh) {
+    throw new Error('La propiedad desapareció al guardar la foto');
+  }
+  const prevFotos = Array.isArray(fresh.fotos) ? fresh.fotos : [];
+  const attRef = `att:${name}`;
+  const fotos = prevFotos.includes(attRef) ? prevFotos : [...prevFotos, attRef];
+  const next = {
+    ...fresh,
+    _rev: rev,
+    fotos,
+    updatedAt: new Date().toISOString(),
+  };
+  const saved = await putDocument(req, dbName, doc._id, next);
+  return { ...next, _rev: saved.rev || next._rev, _attachedName: name };
+}
+
+/**
+ * Las data URLs no caben bien en el JSON del doc (límite Couch ~8MB).
+ * Se guardan como adjuntos y en `fotos` queda la ref `att:nombre`.
+ */
+async function persistFotosField(req, dbName, entityKey, userId, doc, rawFotos) {
+  const list = Array.isArray(rawFotos) ? rawFotos : [];
+  if (!list.length) {
+    return { ...doc, fotos: [] };
+  }
+
+  const kept = [];
+  let current = { ...doc };
+  let i = 0;
+
+  for (const item of list) {
+    const s = String(item || '').trim();
+    if (!s) continue;
+    if (!isDataUrlFoto(s)) {
+      const name = attachmentNameFromFotoRef(s);
+      kept.push(name ? `att:${name}` : s);
+      continue;
+    }
+    try {
+      current = await appendOneFotoAttachment(req, dbName, current, s, i);
+      i += 1;
+      const attName = current._attachedName;
+      delete current._attachedName;
+      if (attName) kept.push(`att:${attName}`);
+    } catch (err) {
+      console.error('[verticalCrud] persistFotosField attach failed', err);
+      throw new Error(
+        err instanceof Error
+          ? `No se pudo guardar la foto: ${err.message}`
+          : 'No se pudo guardar la foto en el servidor',
+      );
+    }
+  }
+
+  // Releer y fijar la lista final (orden del cliente; quita adjuntos huérfanos de la lista).
+  const fresh = await getDocument(req, dbName, doc._id);
+  if (!fresh) {
+    return { ...current, fotos: kept };
+  }
+  const next = {
+    ...fresh,
+    fotos: kept,
+    updatedAt: new Date().toISOString(),
+  };
+  const saved = await putDocument(req, dbName, doc._id, next);
+  return { ...next, _rev: saved.rev || next._rev };
+}
+
+function toClientFotoRefs(verticalName, entityKey, userId, docId, fotos) {
+  return (Array.isArray(fotos) ? fotos : []).map((f) => {
+    const s = String(f || '').trim();
+    if (!s) return '';
+    // Data URLs enormes en el listado tumban el navegador (pantalla en blanco).
+    if (isDataUrlFoto(s)) {
+      if (s.length > 1_200_000) return '';
+      return s;
+    }
+    if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('blob:')) {
+      return s;
+    }
+    const name = attachmentNameFromFotoRef(s);
+    if (!name) return s;
+    return `/api/${verticalName}/${entityKey}/${encodeURIComponent(userId)}/${encodeURIComponent(docId)}/foto/${encodeURIComponent(name)}`;
+  }).filter(Boolean);
+}
+
+function sanitizeForClient(verticalName, entityKey, entityCfg, doc) {
+  const out = sanitize(entityCfg, doc);
+  if (!out) return null;
+  if (entityCfg.fields.includes('fotos')) {
+    out.fotos = toClientFotoRefs(verticalName, entityKey, doc.user_id, doc._id, doc.fotos);
+  }
+  return out;
+}
+
+async function listByUser(req, dbName, entityCfg, userId, scope = {}) {
   await ensureDatabase(req, dbName);
   const docs = await getAllDocuments(req, dbName);
+  const businessId = normalizeScopeId(scope.businessId);
+  const salesPointId = String(scope.salesPointId || '').trim();
   return docs
-    .filter(d => d?.type === entityCfg.type && !d?.deletedAt && (!userId || d?.user_id === userId))
+    .filter(d =>
+      d?.type === entityCfg.type
+      && !d?.deletedAt
+      && (!userId || d?.user_id === userId)
+      && matchesScope(d, businessId, salesPointId),
+    )
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 }
 
@@ -110,9 +348,14 @@ export function createVerticalRouter(config) {
       const account = await findAccountByUserId(req, userId);
       if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
+      const businessId = normalizeScopeId(req.query.businessId || req.query.business_id);
+      const salesPointId = String(req.query.salesPointId || req.query.pointOfSaleId || '').trim();
+
       await ensureDatabase(req, dbName);
       const docs = await getAllDocuments(req, dbName);
-      const userDocs = docs.filter(d => d?.user_id === userId && !d?.deletedAt);
+      const userDocs = docs.filter(
+        (d) => d?.user_id === userId && !d?.deletedAt && matchesScope(d, businessId, salesPointId),
+      );
 
       const counts = {};
       for (const [key, entityCfg] of Object.entries(config.entities)) {
@@ -145,8 +388,13 @@ export function createVerticalRouter(config) {
         if (!userId) return badRequest(res, 'Falta userId');
         const account = await findAccountByUserId(req, userId);
         if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
-        const items = await listByUser(req, dbName, entityCfg, userId);
-        return res.json({ ok: true, items: items.map(d => sanitize(entityCfg, d)) });
+        const businessId = normalizeScopeId(req.query.businessId || req.query.business_id);
+        const salesPointId = String(req.query.salesPointId || req.query.pointOfSaleId || '').trim();
+        const items = await listByUser(req, dbName, entityCfg, userId, { businessId, salesPointId });
+        return res.json({
+          ok: true,
+          items: items.map((d) => sanitizeForClient(config.name, entityKey, entityCfg, d)),
+        });
       } catch (error) {
         return res.status(500).json({ ok: false, error: error.message || `Error al listar ${entityKey}` });
       }
@@ -172,12 +420,25 @@ export function createVerticalRouter(config) {
         if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
         await ensureDatabase(req, dbName);
-        const doc = buildDocument(entityCfg, userId, data);
+        const rawFotos = entityCfg.fields.includes('fotos') && Array.isArray(data.fotos)
+          ? [...data.fotos]
+          : null;
+        const slimData = rawFotos
+          ? { ...data, fotos: rawFotos.filter((f) => !isDataUrlFoto(f)).map((f) => {
+            const name = attachmentNameFromFotoRef(f);
+            return name ? `att:${name}` : f;
+          }) }
+          : data;
+        const doc = buildDocument(entityCfg, userId, slimData);
         const saved = await putDocument(req, dbName, doc._id, doc);
-        const item = sanitize(entityCfg, { ...doc, _rev: saved.rev });
+        let finalDoc = { ...doc, _rev: saved.rev };
+        if (rawFotos && rawFotos.some(isDataUrlFoto)) {
+          finalDoc = await persistFotosField(req, dbName, entityKey, userId, finalDoc, rawFotos);
+        }
+        const item = sanitizeForClient(config.name, entityKey, entityCfg, finalDoc);
         if (config.name === 'butcher-ops' && entityKey === 'catalog') {
           import('./butcherCatalogBridge.js')
-            .then((m) => m.syncButcherCatalogToCore(req, userId, { ...doc, _rev: saved.rev }))
+            .then((m) => m.syncButcherCatalogToCore(req, userId, finalDoc))
             .catch(() => {});
         }
         return res.status(201).json({ ok: true, item });
@@ -185,6 +446,61 @@ export function createVerticalRouter(config) {
         return res.status(500).json({ ok: false, error: error.message || `Error al crear ${entityKey}` });
       }
     });
+
+    // Foto adjunta (auth vía API vertical; usable con fetch + blob en el cliente)
+    if (entityCfg.fields.includes('fotos')) {
+      router.get(`/${entityKey}/:userId/:id/foto/:fotoName`, async (req, res) => {
+        try {
+          const { userId, id, fotoName } = req.params;
+          if (!userId || !id || !fotoName) return badRequest(res, 'Faltan parámetros');
+          const account = await findAccountByUserId(req, userId);
+          if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+          await ensureDatabase(req, dbName);
+          const existing = await getDocument(req, dbName, id);
+          if (!existing || existing.type !== entityCfg.type || existing.user_id !== userId) {
+            return res.status(404).json({ ok: false, error: 'Documento no encontrado' });
+          }
+          const name = decodeURIComponent(String(fotoName || '').trim());
+          const { buffer, contentType } = await getDocumentAttachment(req, dbName, id, name);
+          res.setHeader('Content-Type', contentType || 'image/jpeg');
+          res.setHeader('Cache-Control', 'private, max-age=3600');
+          return res.send(buffer);
+        } catch (error) {
+          console.error('[verticalCrud] GET foto failed', error);
+          return res.status(404).json({ ok: false, error: error.message || 'Foto no encontrada' });
+        }
+      });
+
+      // Una foto por request (evita JSON gigante y fallos “en silencio” del PUT del doc).
+      router.post(`/${entityKey}/:userId/:id/foto`, async (req, res) => {
+        try {
+          const { userId, id } = req.params;
+          const dataUrl = String(req.body?.dataUrl || req.body?.foto || '').trim();
+          if (!userId || !id) return badRequest(res, 'Falta userId o id');
+          if (!isDataUrlFoto(dataUrl)) {
+            return badRequest(res, 'Falta dataUrl de imagen (data:image/...)');
+          }
+          const account = await findAccountByUserId(req, userId);
+          if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+          await ensureDatabase(req, dbName);
+          const existing = await getDocument(req, dbName, id);
+          if (!existing || existing.type !== entityCfg.type || existing.user_id !== userId) {
+            return res.status(404).json({ ok: false, error: 'Documento no encontrado' });
+          }
+          const idx = Array.isArray(existing.fotos) ? existing.fotos.length : 0;
+          const finalDoc = await appendOneFotoAttachment(req, dbName, existing, dataUrl, idx);
+          delete finalDoc._attachedName;
+          const item = sanitizeForClient(config.name, entityKey, entityCfg, finalDoc);
+          return res.status(201).json({ ok: true, item });
+        } catch (error) {
+          console.error('[verticalCrud] POST foto failed', error);
+          return res.status(500).json({
+            ok: false,
+            error: error.message || 'No se pudo subir la foto',
+          });
+        }
+      });
+    }
 
     // UPDATE
     router.put(`/${entityKey}/:userId/:id`, async (req, res) => {
@@ -203,12 +519,32 @@ export function createVerticalRouter(config) {
           return res.status(404).json({ ok: false, error: 'Documento no encontrado' });
         }
 
-        const doc = buildDocument(entityCfg, userId, data, existing);
+        const rawFotos = entityCfg.fields.includes('fotos') && Array.isArray(data.fotos)
+          ? [...data.fotos]
+          : null;
+        const slimData = rawFotos
+          ? {
+            ...data,
+            fotos: rawFotos
+              .filter((f) => !isDataUrlFoto(f))
+              .map((f) => {
+                const name = attachmentNameFromFotoRef(f);
+                return name ? `att:${name}` : f;
+              }),
+          }
+          : data;
+        const doc = buildDocument(entityCfg, userId, slimData, existing);
         const saved = await putDocument(req, dbName, doc._id, doc);
-        const item = sanitize(entityCfg, { ...doc, _rev: saved.rev });
+        let finalDoc = { ...doc, _rev: saved.rev };
+        if (rawFotos && rawFotos.some(isDataUrlFoto)) {
+          finalDoc = await persistFotosField(req, dbName, entityKey, userId, finalDoc, rawFotos);
+        } else if (rawFotos) {
+          finalDoc = { ...finalDoc, fotos: slimData.fotos };
+        }
+        const item = sanitizeForClient(config.name, entityKey, entityCfg, finalDoc);
         if (config.name === 'butcher-ops' && entityKey === 'catalog') {
           import('./butcherCatalogBridge.js')
-            .then((m) => m.syncButcherCatalogToCore(req, userId, { ...doc, _rev: saved.rev }))
+            .then((m) => m.syncButcherCatalogToCore(req, userId, finalDoc))
             .catch(() => {});
         }
         return res.json({ ok: true, item });

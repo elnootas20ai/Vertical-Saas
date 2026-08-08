@@ -110,6 +110,27 @@ function parseScheduleMs(dateStr: string, timeHHMM: string): number {
   return new Date(`${dateStr}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`).getTime();
 }
 
+function madridDayKey(iso: string): string {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Madrid',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(iso));
+  } catch {
+    return String(iso || '').slice(0, 10);
+  }
+}
+
+function isOvernightSchedule(scheduledStart?: string, scheduledEnd?: string): boolean {
+  if (!scheduledStart || !scheduledEnd) return false;
+  const [sh, sm] = scheduledStart.split(':').map(Number);
+  const [eh, em] = scheduledEnd.split(':').map(Number);
+  if (![sh, sm, eh, em].every(Number.isFinite)) return false;
+  return eh * 60 + em <= sh * 60 + sm;
+}
+
 function computeMinutes(
   entries: ClockEntry[],
   scheduledStart?: string,
@@ -129,8 +150,20 @@ function computeMinutes(
       if (startMs < schedStartMs) startMs = schedStartMs;
     }
     if (dateStr && scheduledEnd) {
-      const schedEndMs = parseScheduleMs(dateStr, scheduledEnd);
+      let schedEndMs = parseScheduleMs(dateStr, scheduledEnd);
+      if (scheduledStart) {
+        const schedStartMs = parseScheduleMs(dateStr, scheduledStart);
+        if (schedEndMs <= schedStartMs) schedEndMs += 24 * 60 * 60 * 1000;
+      }
       if (endMs > schedEndMs) endMs = schedEndMs;
+    } else if (
+      clockOut
+      && !isOvernightSchedule(scheduledStart, scheduledEnd)
+      && madridDayKey(clockOut.time) > madridDayKey(clockIn.time)
+    ) {
+      // Salida al día siguiente sin turno noche → no contar ~24 h (tope 4 h).
+      const safetyEnd = startMs + 4 * 60 * 60 * 1000;
+      if (endMs > safetyEnd) endMs = safetyEnd;
     }
 
     totalMinutes = Math.round(Math.max(0, endMs - startMs) / 60000);

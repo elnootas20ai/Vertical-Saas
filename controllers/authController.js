@@ -38,6 +38,9 @@ import {
   resolveBusinessDocumentForPointOfSale,
   workerCanAccessPdvForTablet,
   sanitizePointOfSale,
+  buildPointOfSaleDocument,
+  getDeliveryDbName,
+  putDocument,
   incrementFailedLoginAttempts,
   isAccountLocked,
   listAllBusinesses,
@@ -239,6 +242,7 @@ async function sendWorkerLinkedWelcomeEmail(req, {
 
 /**
  * Genera OTP, lo guarda y lo envía al correo de seguridad.
+ * Si el destino ≠ email de la cuenta, también lo espeja a la cuenta (así uriel@admin.com lo recibe en local).
  * @returns {{ ok: true, to: string, hint: string } | { ok: false, status: number, code: string, error: string }}
  */
 async function dispatchLoginOtp(req, account) {
@@ -247,7 +251,7 @@ async function dispatchLoginOtp(req, account) {
       ok: false,
       status: 429,
       code: 'LOGIN_CODE_COOLDOWN',
-      error: 'Ya enviamos un código recientemente. Revisa tu correo o espera 1 minuto.',
+      error: 'Ya enviamos un código recientemente. Revisa tu correo (y spam) o espera 1 minuto.',
       hint: maskEmailForHint(resolveLoginOtpDestination(account)),
     };
   }
@@ -255,8 +259,26 @@ async function dispatchLoginOtp(req, account) {
   const code = String(crypto.randomInt(100000, 1000000));
   await saveLoginOtp(req, account, code);
   const to = resolveLoginOtpDestination(account);
+  const accountEmail = String(account?.email || '').trim().toLowerCase();
   const { subject, html } = buildLoginCodeEmail(account.email, code);
   await sendEmail({ to, subject, html, requireDelivery: true });
+
+  // Espejo al email de login si el OTP va a buzón de seguridad distinto.
+  if (accountEmail.includes('@') && accountEmail !== to) {
+    try {
+      await sendEmail({ to: accountEmail, subject, html, requireDelivery: false });
+      logger.info({ tag: 'AUTH_LOGIN_CODE', to: accountEmail, primary: to }, 'OTP espejado al email de cuenta');
+    } catch (mirrorErr) {
+      logger.warn(
+        { tag: 'AUTH_LOGIN_CODE', to: accountEmail, err: mirrorErr?.message || mirrorErr },
+        'No se pudo espejar OTP al email de cuenta',
+      );
+    }
+  }
+
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(`[AUTH_LOGIN_OTP] account=${accountEmail} primary=${to} code=${code}`);
+  }
 
   return {
     ok: true,
@@ -993,6 +1015,7 @@ export async function login(req, res) {
           requiresLoginCode: true,
           email: unlockedAccount.email,
           message: LOGIN_OTP_CLIENT_MESSAGE,
+          otpHint: otp.hint,
         });
       } catch (otpErr) {
         console.error('[AUTH] Error enviando OTP admin:', otpErr?.message || otpErr);
@@ -1103,7 +1126,8 @@ export async function requestLoginCode(req, res) {
 
     return res.json({
       ok: true,
-      message: 'Si el email existe, recibirás un código en breve',
+      message: `Código enviado. Revisa ${otp.hint} y también tu email de cuenta (y spam).`,
+      otpHint: otp.hint,
     });
   } catch (error) {
     return res.status(500).json({
@@ -1389,6 +1413,10 @@ export async function updateProfile(req, res) {
           const extraWorkers = Math.floor(Number(subscription.extraWorkerSlots) || 0);
           merged.extraWorkerSlots = Math.max(0, Math.min(999, extraWorkers));
         }
+        if (Object.prototype.hasOwnProperty.call(subscription, 'extraTpvTabletSlots')) {
+          const extraTablets = Math.floor(Number(subscription.extraTpvTabletSlots) || 0);
+          merged.extraTpvTabletSlots = Math.max(0, Math.min(99, extraTablets));
+        }
         if (Object.prototype.hasOwnProperty.call(subscription, 'adminProAccess')) {
           merged.adminProAccess = Boolean(subscription.adminProAccess);
         }
@@ -1413,6 +1441,7 @@ export async function updateProfile(req, res) {
         merged.extraCommercialBrandSlots = account.subscription?.extraCommercialBrandSlots ?? 0;
         merged.extraBusinessSlots = account.subscription?.extraBusinessSlots ?? 0;
         merged.extraWorkerSlots = account.subscription?.extraWorkerSlots ?? 0;
+        merged.extraTpvTabletSlots = account.subscription?.extraTpvTabletSlots ?? 0;
         merged.adminProAccess = Boolean(account.subscription?.adminProAccess);
         merged.billingExempt = Boolean(account.subscription?.billingExempt);
       }
@@ -4605,7 +4634,16 @@ async function resolveAccountForTpvTabletLogin(req, business, pdv) {
   return { account: null, accessDenied: true, code: 'STORE_NOT_ASSIGNED' };
 }
 
-async function performTpvTabletLogin(req, res, { terminalCode }) {
+async function persistPdvDevices(req, pdv, devices) {
+  const db = getDeliveryDbName();
+  const ownerUserId = String(pdv.user_id || '').trim();
+  if (!ownerUserId || !pdv._id) return pdv;
+  const doc = buildPointOfSaleDocument(ownerUserId, { tpvAllowedDevices: devices }, pdv);
+  const saved = await putDocument(req, db, doc._id, doc);
+  return { ...doc, _rev: saved.rev };
+}
+
+async function performTpvTabletLogin(req, res, { terminalCode, deviceId, deviceLabel }) {
   const ip = getClientIp(req);
 
   if (!terminalCode) {
@@ -4617,7 +4655,35 @@ async function performTpvTabletLogin(req, res, { terminalCode }) {
     return res.status(401).json({ ok: false, error: 'Código de tienda incorrecto' });
   }
 
-  const pdv = resolved.pdv;
+  let pdv = resolved.pdv;
+
+  const { evaluateTabletDeviceAccess } = await import('../services/tpvTabletDevices.js');
+  const deviceResult = evaluateTabletDeviceAccess(pdv, {
+    deviceId,
+    label: deviceLabel || String(req.headers['user-agent'] || '').slice(0, 80) || 'Dispositivo',
+  });
+
+  if (deviceResult.devices) {
+    try {
+      pdv = await persistPdvDevices(req, pdv, deviceResult.devices);
+    } catch {
+      // si falla el save, seguimos con la evaluación en memoria
+    }
+  }
+
+  if (!deviceResult.ok) {
+    const status =
+      deviceResult.code === 'DEVICE_BLOCKED' || deviceResult.code === 'DEVICE_NOT_ALLOWED'
+        ? 403
+        : deviceResult.code === 'DEVICE_ID_REQUIRED'
+          ? 400
+          : 403;
+    return res.status(status).json({
+      ok: false,
+      error: deviceResult.error,
+      code: deviceResult.code,
+    });
+  }
 
   const business = await resolveBusinessForPointOfSale(req, pdv);
   if (!business) {
@@ -4717,8 +4783,8 @@ async function performTpvTabletLogin(req, res, { terminalCode }) {
 
 export async function tpvTabletActivate(req, res) {
   try {
-    const { terminalCode } = req.body || {};
-    return performTpvTabletLogin(req, res, { terminalCode });
+    const { terminalCode, deviceId, deviceLabel } = req.body || {};
+    return performTpvTabletLogin(req, res, { terminalCode, deviceId, deviceLabel });
   } catch (error) {
     return res.status(500).json({
       ok: false,
@@ -4729,8 +4795,8 @@ export async function tpvTabletActivate(req, res) {
 
 export async function tpvTabletSwitch(req, res) {
   try {
-    const { terminalCode } = req.body || {};
-    return performTpvTabletLogin(req, res, { terminalCode });
+    const { terminalCode, deviceId, deviceLabel } = req.body || {};
+    return performTpvTabletLogin(req, res, { terminalCode, deviceId, deviceLabel });
   } catch (error) {
     return res.status(500).json({
       ok: false,

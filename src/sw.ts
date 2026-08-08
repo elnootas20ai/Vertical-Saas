@@ -41,6 +41,12 @@ registerRoute(
   new NetworkOnly(),
 );
 
+// Fotos adjuntas: nunca cachear (binario + auth; un 404 cacheado = “sin foto” en silencio).
+registerRoute(
+  ({ url }) => url.pathname.startsWith('/api/') && url.pathname.includes('/foto'),
+  new NetworkOnly(),
+);
+
 // ─── NetworkFirst para API ───────────────────────────────────────────────────
 registerRoute(
   ({ url }) => url.pathname.startsWith('/api/'),

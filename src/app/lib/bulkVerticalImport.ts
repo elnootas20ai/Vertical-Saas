@@ -21,9 +21,16 @@ export function entryNum(entry: Record<string, unknown>, ...keys: string[]): num
 
 export async function bulkCreateVerticalEntries<T extends Record<string, unknown>>(
   userId: string,
-  api: { create: (uid: string, data: Partial<T>) => Promise<unknown> },
+  api: {
+    create: (
+      uid: string,
+      data: Partial<T>,
+      options?: { businessId?: string | null; salesPointId?: string | null },
+    ) => Promise<unknown>;
+  },
   entries: Record<string, unknown>[],
   mapEntry: (entry: Record<string, unknown>) => Partial<T> | null,
+  options?: { businessId?: string | null; salesPointId?: string | null },
 ): Promise<number> {
   if (!userId) return 0;
   let created = 0;
@@ -31,7 +38,7 @@ export async function bulkCreateVerticalEntries<T extends Record<string, unknown
     const data = mapEntry(entry);
     if (!data) continue;
     try {
-      await api.create(userId, data);
+      await api.create(userId, data, options);
       created++;
     } catch {
       /* skip failed row */

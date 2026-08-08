@@ -165,8 +165,8 @@ export async function loadVerticalKpiSnapshot(
         };
       }
       case 'realEstate': {
-        const propsApi = createVerticalApi('realEstate', 'properties');
-        const list = await propsApi.list(userId);
+        const propsApi = createVerticalApi('realestate', 'properties');
+        const list = await propsApi.list(userId, { businessId });
         return {
           label: 'Propiedades',
           value: String(list.length),

@@ -38,7 +38,7 @@ export function TpvTabletLogin() {
     if (fromState) return normalizeTpvTabletCode(fromState);
     return binding?.terminalCode || '';
   });
-  const [errors, setErrors] = useState<{ terminalCode?: string; general?: string }>({});
+  const [errors, setErrors] = useState<{ terminalCode?: string; general?: string; code?: string }>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [storeLabel, setStoreLabel] = useState(binding?.pdvName || binding?.businessName || '');
 
@@ -72,7 +72,18 @@ export function TpvTabletLogin() {
     setIsSubmitting(false);
 
     if (!result.success) {
-      setErrors({ general: result.error || 'No se pudo iniciar sesión' });
+      const code = String(result.code || '');
+      let msg = result.error || 'No se pudo iniciar sesión';
+      if (code === 'DEVICE_PENDING_APPROVAL') {
+        msg = 'Esperando aprobación del administrador. Este dispositivo quedará vinculado a este punto de venta.';
+      } else if (code === 'DEVICE_REJECTED') {
+        msg = 'Acceso denegado. Puedes volver a solicitar aprobación o contactar con el administrador.';
+      } else if (code === 'DEVICE_BLOCKED') {
+        msg = 'Demasiados intentos rechazados. Contacta con el administrador para desbloquear este dispositivo.';
+      } else if (code === 'DEVICE_NOT_ALLOWED') {
+        msg = 'Este dispositivo no está autorizado. Pide al administrador que lo reactive.';
+      }
+      setErrors({ general: msg, code });
       return;
     }
 
@@ -190,7 +201,13 @@ export function TpvTabletLogin() {
             </div>
 
             {errors.general ? (
-              <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
+              <div
+                className={`mb-4 rounded-lg p-3 text-sm ${
+                  errors.code === 'DEVICE_PENDING_APPROVAL'
+                    ? 'bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200'
+                    : 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300'
+                }`}
+              >
                 {errors.general}
               </div>
             ) : null}

@@ -8,14 +8,15 @@
 import { getAuthHeaders } from './authApi';
 import { getApiBase } from './apiBase';
 
-const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
-
-
 const API_BASE = getApiBase();
 
 function normalizeUserId(userId: string): string {
   const value = String(userId || '').trim();
   return value.startsWith('account:') ? value.slice('account:'.length) : value;
+}
+
+function normalizeBusinessId(raw?: string | null): string {
+  return String(raw || '').replace(/^business:/, '').trim();
 }
 
 function getCouchHeaders(): Record<string, string> {
@@ -49,8 +50,16 @@ export interface VerticalEntity {
   user_id: string;
   createdAt: string;
   updatedAt: string;
+  businessId?: string;
+  business_id?: string;
+  salesPointId?: string;
   [key: string]: unknown;
 }
+
+export type VerticalListOptions = {
+  businessId?: string | null;
+  salesPointId?: string | null;
+};
 
 // ─── Dashboard types ────────────────────────────────────────────────────────
 
@@ -60,32 +69,76 @@ export interface VerticalDashboardData {
   total: number;
 }
 
+function scopeQuery(options?: VerticalListOptions): string {
+  const params = new URLSearchParams();
+  const bid = normalizeBusinessId(options?.businessId);
+  const pdv = String(options?.salesPointId || '').trim();
+  if (bid) params.set('businessId', bid);
+  if (pdv) params.set('salesPointId', pdv);
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
+}
+
+function withScopeFields<T extends VerticalEntity>(
+  data: Partial<T>,
+  options?: VerticalListOptions,
+): Partial<T> {
+  const bid = normalizeBusinessId(options?.businessId || (data as { businessId?: string }).businessId);
+  const pdv = String(
+    options?.salesPointId
+    || (data as { salesPointId?: string }).salesPointId
+    || '',
+  ).trim();
+  return {
+    ...data,
+    ...(bid ? { businessId: bid, business_id: bid } : {}),
+    ...(pdv ? { salesPointId: pdv } : {}),
+  };
+}
+
 // ─── Factory ────────────────────────────────────────────────────────────────
 
 export function createVerticalApi<T extends VerticalEntity>(vertical: string, entity: string) {
   const base = `/api/${vertical}/${entity}`;
 
   return {
-    list: async (userId: string): Promise<T[]> => {
+    list: async (userId: string, options?: VerticalListOptions): Promise<T[]> => {
       const id = normalizeUserId(userId);
-      const res = await request<{ ok: boolean; items: T[] }>(`${base}/${encodeURIComponent(id)}`);
+      const res = await request<{ ok: boolean; items: T[] }>(
+        `${base}/${encodeURIComponent(id)}${scopeQuery(options)}`,
+      );
       return res.items || [];
     },
 
-    create: async (userId: string, data: Partial<T>): Promise<T> => {
+    create: async (userId: string, data: Partial<T>, options?: VerticalListOptions): Promise<T> => {
       const id = normalizeUserId(userId);
       const res = await request<{ ok: boolean; item: T }>(`${base}/${encodeURIComponent(id)}`, {
         method: 'POST',
-        body: JSON.stringify({ data }),
+        body: JSON.stringify({ data: withScopeFields(data, options) }),
       });
       return res.item;
     },
 
-    update: async (userId: string, docId: string, data: Partial<T>): Promise<T> => {
+    update: async (
+      userId: string,
+      docId: string,
+      data: Partial<T>,
+      options?: VerticalListOptions,
+    ): Promise<T> => {
       const id = normalizeUserId(userId);
       const res = await request<{ ok: boolean; item: T }>(
         `${base}/${encodeURIComponent(id)}/${encodeURIComponent(docId)}`,
-        { method: 'PUT', body: JSON.stringify({ data }) },
+        { method: 'PUT', body: JSON.stringify({ data: withScopeFields(data, options) }) },
+      );
+      return res.item;
+    },
+
+    /** Sube una foto (data URL) como adjunto Couch — una por request. */
+    uploadFoto: async (userId: string, docId: string, dataUrl: string): Promise<T> => {
+      const id = normalizeUserId(userId);
+      const res = await request<{ ok: boolean; item: T }>(
+        `${base}/${encodeURIComponent(id)}/${encodeURIComponent(docId)}/foto`,
+        { method: 'POST', body: JSON.stringify({ dataUrl }) },
       );
       return res.item;
     },
@@ -102,10 +155,10 @@ export function createVerticalApi<T extends VerticalEntity>(vertical: string, en
 
 export function createVerticalDashboardApi(vertical: string) {
   return {
-    load: async (userId: string): Promise<VerticalDashboardData> => {
+    load: async (userId: string, options?: VerticalListOptions): Promise<VerticalDashboardData> => {
       const id = normalizeUserId(userId);
       const res = await request<{ ok: boolean } & VerticalDashboardData>(
-        `/api/${vertical}/dashboard/${encodeURIComponent(id)}`,
+        `/api/${vertical}/dashboard/${encodeURIComponent(id)}${scopeQuery(options)}`,
       );
       return { counts: res.counts, recentActivity: res.recentActivity, total: res.total };
     },

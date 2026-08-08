@@ -549,6 +549,21 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
   const [shiftTemplates, setShiftTemplates] = useState<ShiftTemplate[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
 
+  // Al cambiar negocio: si el rol ya no existe en el catálogo, resetear.
+  // Inmobiliaria: preseleccionar Comercial (rol operativo de visitas).
+  useEffect(() => {
+    const ids = new Set(roleOptions.map((r) => r.id));
+    if (inviteBusinessType === 'realEstate' && ids.has('Comercial')) {
+      setRole((prev) => (prev && ids.has(prev) ? prev : 'Comercial'));
+      setPosition((prev) => {
+        if (prev.trim()) return prev;
+        return suggestPositionForInviteRole('Comercial', 'realEstate');
+      });
+      return;
+    }
+    setRole((prev) => (prev && ids.has(prev) ? prev : null));
+  }, [inviteBusinessType, roleOptions, selectedBusinessId]);
+
   useEffect(() => {
     setWorkCenterId(null);
     setScheduleTemplateId(null);

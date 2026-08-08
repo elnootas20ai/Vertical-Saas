@@ -57,6 +57,7 @@ import {
   LayoutGrid, LayoutDashboard, Scale, UtensilsCrossed, ListChecks, Banknote,
 } from 'lucide-react';
 import { DashboardFinanceWidget } from '../../components/saas/finance/DashboardFinanceWidget';
+import { LiveBadge } from '../../components/saas/LiveBadge';
 import { GeneralDashboard } from '../../components/saas/GeneralDashboard';
 import { useDashboardView } from '../../context/DashboardViewContext';
 import { usePortfolioPlanAccess } from '../../hooks/usePortfolioPlanAccess';
@@ -609,7 +610,13 @@ function DashboardPage() {
     return <VerticalDashboard onSelectGeneral={() => setShowUnifiedDashboard(true)} />;
   }
 
-  return <UnifiedDashboard onBackToVertical={VerticalDashboard ? () => setShowUnifiedDashboard(false) : undefined} />;
+  return (
+    <UnifiedDashboard
+      onBackToVertical={
+        VerticalDashboard ? () => setShowUnifiedDashboard(false) : undefined
+      }
+    />
+  );
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -992,7 +999,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
     }
   }, [loadDeliveryDashboard, loadCrmClientsCount, authUser?.user_id]);
 
-  useDeliveryOrdersLive({
+  const { sseOk: liveSseOk } = useDeliveryOrdersLive({
     authUserId: authUser?.user_id || authUser?.id || null,
     businessId: businessId || null,
     onRefresh: refreshDashboardLive,
@@ -1444,7 +1451,13 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
 
       <div className="flex flex-col gap-5">
         {/* Controles mínimos: sin franja vacía a ancho completo */}
-        <div className="flex items-center justify-end gap-1.5 -mt-1">
+        <div className="flex flex-wrap items-center justify-end gap-1.5 -mt-1">
+          <LiveBadge
+            live={liveSseOk}
+            refreshing={serverLoading}
+            updatedAt={serverUpdatedAt ? new Date(serverUpdatedAt) : null}
+            className="mr-auto"
+          />
           {onBackToVertical ? (
             <button
               type="button"
@@ -1454,12 +1467,6 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
               <LayoutDashboard className="h-3.5 w-3.5" />
               Vertical
             </button>
-          ) : null}
-          {authUser?.user_id && serverLoading ? (
-            <span className="text-[10px] text-gray-400">
-              <RefreshCw className="mr-1 inline h-3 w-3 animate-spin" />
-              Sync…
-            </span>
           ) : null}
           <button
             type="button"

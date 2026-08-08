@@ -26,4 +26,19 @@ describe('inviteFunctionRoles', () => {
     expect(suggestPositionForInviteRole('Cocina', 'restaurant')).toBe('Cocinero/a');
     expect(getInvitePositionSuggestions('restaurant')).toContain('Barista');
   });
+
+  it('realEstate: roles inmobiliaria con Comercial (sin Reparto/Cocina)', () => {
+    const roles = getFunctionRolesForBusiness('realEstate');
+    expect(roles.map((r) => r.id)).toEqual([
+      'Administrador',
+      'Gestor',
+      'Encargado',
+      'Comercial',
+    ]);
+    expect(roles.map((r) => r.id)).not.toContain('Reparto');
+    expect(roles.map((r) => r.id)).not.toContain('Cocina');
+    expect(roles.find((r) => r.id === 'Comercial')?.description).toMatch(/Visitas/i);
+    expect(suggestPositionForInviteRole('Comercial', 'realEstate')).toBe('Comercial');
+    expect(getInvitePositionSuggestions('realEstate')).toContain('Agente inmobiliario');
+  });
 });

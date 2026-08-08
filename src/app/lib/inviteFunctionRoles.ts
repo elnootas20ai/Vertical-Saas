@@ -63,6 +63,34 @@ export const EVENTS_FUNCTION_ROLES: RoleDefinition[] = [
   { id: 'Operaciones', description: 'Planificación del día del evento e invitados.', permissions: [], users: 0 },
 ];
 
+/** Inmobiliaria — Comercial = visitas, captación y seguimiento. */
+export const REAL_ESTATE_FUNCTION_ROLES: RoleDefinition[] = [
+  {
+    id: 'Administrador',
+    description: 'Responsable de la inmobiliaria. Supervisa equipo, cartera y operación.',
+    permissions: [],
+    users: 0,
+  },
+  {
+    id: 'Gestor',
+    description: 'Gestiona equipo, altas, horarios y nóminas (RRHH).',
+    permissions: [],
+    users: 0,
+  },
+  {
+    id: 'Encargado',
+    description: 'Coordina comerciales, visitas del día y captación.',
+    permissions: [],
+    users: 0,
+  },
+  {
+    id: 'Comercial',
+    description: 'Visitas, captación, clientes y seguimiento comercial.',
+    permissions: [],
+    users: 0,
+  },
+];
+
 /** Carnicería — IDs estables; Reparto se usa si el negocio activa entregas a domicilio. */
 export const BUTCHER_FUNCTION_ROLES: RoleDefinition[] = [
   {
@@ -125,11 +153,16 @@ export function isButcherBusinessType(businessType?: string | null): boolean {
   return String(businessType || '').trim() === 'butcherShop';
 }
 
+export function isRealEstateBusinessType(businessType?: string | null): boolean {
+  return String(businessType || '').trim() === 'realEstate';
+}
+
 export function getFunctionRolesForBusiness(
   businessType?: string | null,
   opts?: { ownDeliveryEnabled?: boolean },
 ): RoleDefinition[] {
   if (businessType === 'events') return EVENTS_FUNCTION_ROLES;
+  if (isRealEstateBusinessType(businessType)) return REAL_ESTATE_FUNCTION_ROLES;
   if (isRestaurantBusinessType(businessType)) return RESTAURANT_FUNCTION_ROLES;
   if (isButcherBusinessType(businessType)) {
     if (opts?.ownDeliveryEnabled) return BUTCHER_FUNCTION_ROLES;
@@ -170,6 +203,15 @@ export function getInvitePositionSuggestions(businessType?: string | null): stri
   if (businessType === 'events') {
     return ['Comercial', 'Coordinación', 'Operaciones', 'Montaje'];
   }
+  if (isRealEstateBusinessType(businessType)) {
+    return [
+      'Comercial',
+      'Agente inmobiliario',
+      'Captación',
+      'Encargado/a de zona',
+      'Administración',
+    ];
+  }
   if (isButcherBusinessType(businessType)) {
     return [
       'Mostrador',
@@ -195,6 +237,13 @@ export function suggestPositionForInviteRole(
   businessType?: string | null,
 ): string {
   const role = String(roleId || '').trim();
+  if (isRealEstateBusinessType(businessType)) {
+    if (role === 'Comercial') return 'Comercial';
+    if (role === 'Encargado') return 'Encargado/a de zona';
+    if (role === 'Gestor') return 'Gestor RRHH';
+    if (role === 'Administrador') return 'Administrador';
+    return '';
+  }
   if (isButcherBusinessType(businessType)) {
     if (role === 'Reparto') return 'Repartidor/a';
     if (role === 'Obrador / Corte') return 'Carnicero/a';
@@ -209,6 +258,7 @@ export function suggestPositionForInviteRole(
     if (role === 'Cocina') return 'Cocinero/a';
     if (role === 'Mostrador / Atención') return 'Mostrador';
     if (role === 'Encargado') return 'Encargado/a';
+    if (role === 'Comercial') return 'Comercial';
     return '';
   }
   if (role === 'Cocina') return 'Cocinero/a';

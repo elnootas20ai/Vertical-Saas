@@ -66,6 +66,11 @@ export function applyAddonSlots(subscription, addonId, quantity = 1) {
       99,
       Math.max(0, Math.floor(Number(sub.extraBusinessSlots) || 0)) + delta,
     );
+  } else if (addonId === 'extra_tpv_tablet') {
+    sub.extraTpvTabletSlots = Math.min(
+      99,
+      Math.max(0, Math.floor(Number(sub.extraTpvTabletSlots) || 0)) + delta,
+    );
   }
 
   return sub;

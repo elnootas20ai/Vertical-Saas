@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import { formatMoneyEs, formatNumberEs } from '../../../../lib/formatNumberEs';
+import { LiveBadge } from '../../LiveBadge';
 import { SOURCE_LABELS } from '../../../../lib/alertCenterApi';
 import { BUSINESS_TYPE_LABELS } from '../../BusinessCarousel';
 import type { BusinessType } from '../../../../lib/businessApi';
@@ -31,26 +32,28 @@ import { useScrollPagination } from '../../../../hooks/useInViewOnce';
 export function CeoVisionTopBar({
   companyCount,
   critical,
-  liveLabel,
+  live,
+  updatedAt,
   refreshing,
   onRefresh,
 }: {
   companyCount: number;
   critical: number;
-  liveLabel?: string | null;
+  live?: boolean;
+  updatedAt?: Date | null;
   refreshing?: boolean;
   onRefresh: () => void;
 }) {
   return (
     <header className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-stone-200/80 bg-white px-4 py-3.5 dark:border-stone-800 dark:bg-stone-950 sm:px-5">
       <div className="min-w-0">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="h-1.5 w-8 rounded-full bg-[linear-gradient(90deg,#22c55e,#14b8a6,#2563eb)]" />
           <h1 className="vsaas-title text-lg sm:text-xl">Visión general</h1>
+          <LiveBadge live={Boolean(live)} refreshing={refreshing} updatedAt={updatedAt} />
         </div>
           <p className="mt-0.5 text-[12px] text-stone-500">
             {companyCount} empresa{companyCount !== 1 ? 's' : ''} del grupo
-            {liveLabel ? ` · ${liveLabel}` : ''}
             {' · '}totales consolidados
           </p>
       </div>
@@ -358,6 +361,43 @@ function TrendBadge({ trend }: { trend: 'up' | 'down' | 'flat' | 'unknown' }) {
 
 /* ── Líneas por empresa (tabla desktop · filas apiladas móvil) ───────── */
 
+/** Margen del mes: resultado / ingresos contables. null si no hay ingresos. */
+function marginPercent(result: number, financeIncome: number): number | null {
+  if (!(financeIncome > 0)) return null;
+  return (result / financeIncome) * 100;
+}
+
+function MarginCell({ pct }: { pct: number | null }) {
+  if (pct == null) return <span className="text-[12px] text-stone-400">—</span>;
+  return (
+    <span
+      className={`text-[12px] font-extrabold tabular-nums ${
+        pct >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-600'
+      }`}
+    >
+      {formatNumberEs(pct, { maxFraction: 0 })}%
+    </span>
+  );
+}
+
+/** Posición en el ranking por facturación del mes (1 = la que más factura). */
+function RankBadge({ rank }: { rank: number }) {
+  const cls =
+    rank === 1
+      ? 'bg-[var(--v-blue,#2563eb)] text-white'
+      : rank <= 3
+        ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300'
+        : 'bg-stone-100 text-stone-500 dark:bg-stone-800 dark:text-stone-400';
+  return (
+    <span
+      className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-extrabold tabular-nums ${cls}`}
+      aria-label={`Puesto ${rank}`}
+    >
+      {rank}
+    </span>
+  );
+}
+
 function companyLineMeta(v: CeoCompanyVision, canViewEbitda: boolean) {
   const result = canViewEbitda ? v.ebitda : v.profit;
   const typeLabel =
@@ -402,13 +442,34 @@ export function CeoCompanyTable({
     () => visions.reduce((s, v) => s + (Number(v.income) || 0), 0),
     [visions],
   );
+  const groupTotals = useMemo(() => {
+    const t = {
+      today: 0,
+      financeIncome: 0,
+      expenses: 0,
+      result: 0,
+      personal: 0,
+      clockedIn: 0,
+      staffing: 0,
+    };
+    for (const v of visions) {
+      t.today += Number(v.today) || 0;
+      t.financeIncome += Number(v.financeIncome) || 0;
+      t.expenses += Number(v.expenses) || 0;
+      t.result += Number(canViewEbitda ? v.ebitda : v.profit) || 0;
+      t.personal += Number(laborByBiz[v.businessId]) || 0;
+      t.clockedIn += Number(v.clockedIn) || 0;
+      t.staffing += Number(v.staffing) || 0;
+    }
+    return t;
+  }, [visions, canViewEbitda, laborByBiz]);
   const {
     visibleItems: mobileVisions,
     hasMore: mobileHasMore,
     sentinelRef: mobileSentinelRef,
     shown: mobileShown,
     total: mobileTotal,
-  } = useScrollPagination(visions, 4);
+  } = useScrollPagination(visions, 6);
 
   return (
     <section>
@@ -419,7 +480,7 @@ export function CeoCompanyTable({
             Líneas por empresa
           </h2>
           <p className="text-[11px] text-stone-500">
-            % grupo · mes · personal · ingresos · gastos · ticket
+            Ranking por facturación del mes · de más a menos
           </p>
         </div>
       </div>
@@ -430,9 +491,9 @@ export function CeoCompanyTable({
         </div>
       ) : (
         <>
-          {/* Móvil — paginación al bajar */}
-          <ul className="flex flex-col gap-2 md:hidden">
-            {mobileVisions.map((v) => {
+          {/* Móvil y tablet — tarjetas (2 columnas desde sm) con paginación al bajar */}
+          <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:hidden">
+            {mobileVisions.map((v, idx) => {
               const { result, typeLabel, m, isOps } = companyLineMeta(v, canViewEbitda);
               const personal = laborByBiz[v.businessId] || 0;
               const share = groupSharePercent(v.income, groupTotal);
@@ -445,6 +506,7 @@ export function CeoCompanyTable({
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex min-w-0 items-center gap-2">
+                        <RankBadge rank={idx + 1} />
                         <span
                           className="h-2 w-2 shrink-0 rounded-full"
                           style={{ backgroundColor: v.brandColor }}
@@ -491,6 +553,19 @@ export function CeoCompanyTable({
 
                     <div className="mt-2.5 grid grid-cols-2 gap-1.5">
                       <MobileStat
+                        label="Hoy"
+                        value={v.today > 0 ? formatMoneyEs(v.today) : '—'}
+                        emphasize
+                      />
+                      <MobileStat
+                        label="Equipo"
+                        value={
+                          v.staffing > 0
+                            ? `${formatNumberEs(v.clockedIn, { maxFraction: 0 })}/${formatNumberEs(v.staffing, { maxFraction: 0 })} fichados`
+                            : '—'
+                        }
+                      />
+                      <MobileStat
                         label="Pago trabajadores"
                         value={
                           laborLoading && personal === 0
@@ -519,6 +594,11 @@ export function CeoCompanyTable({
                         >
                           {formatMoneyEs(result)}
                         </span>
+                        {marginPercent(result, v.financeIncome) != null ? (
+                          <span className="ml-1 tabular-nums">
+                            · {formatNumberEs(marginPercent(result, v.financeIncome) as number, { maxFraction: 0 })}% margen
+                          </span>
+                        ) : null}
                       </span>
                       {v.alertsHigh > 0 ? (
                         <span className="font-bold text-rose-600">
@@ -533,21 +613,78 @@ export function CeoCompanyTable({
             {mobileHasMore ? (
               <li
                 ref={mobileSentinelRef}
-                className="rounded-xl border border-dashed border-stone-200 px-3 py-3 text-center text-[11px] text-stone-400 dark:border-stone-800"
+                className="sm:col-span-2"
+                aria-label={`Cargando más empresas (${mobileShown}/${mobileTotal})`}
               >
-                Cargando más empresas… ({mobileShown}/{mobileTotal})
+                <div className="grid animate-pulse grid-cols-1 gap-2 sm:grid-cols-2">
+                  {[0, 1].map((i) => (
+                    <div
+                      key={i}
+                      className="rounded-2xl border border-stone-200/80 bg-white px-3 py-3 dark:border-stone-800 dark:bg-stone-950"
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className="h-5 w-5 rounded-md bg-stone-200 dark:bg-stone-800" />
+                        <div className="h-3.5 w-32 rounded bg-stone-200 dark:bg-stone-800" />
+                        <div className="ml-auto h-3.5 w-14 rounded bg-stone-100 dark:bg-stone-900" />
+                      </div>
+                      <div className="mt-2.5 grid grid-cols-2 gap-1.5">
+                        <div className="h-9 rounded-xl bg-stone-100 dark:bg-stone-900" />
+                        <div className="h-9 rounded-xl bg-stone-100 dark:bg-stone-900" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </li>
             ) : null}
           </ul>
 
-          {/* Desktop — columnas limpia */}
-          <div className="hidden overflow-hidden rounded-2xl border border-stone-200/80 bg-white md:block dark:border-stone-800 dark:bg-stone-950">
+          {/* Total del grupo — visible también en móvil/tablet (en desktop va en la tabla) */}
+          <div className="mt-2 rounded-2xl border border-stone-200/80 bg-stone-50/80 px-3 py-2.5 dark:border-stone-800 dark:bg-stone-900/50 lg:hidden">
+            <p className="text-[9px] font-bold uppercase tracking-wide text-stone-500">
+              Total grupo
+            </p>
+            <div className="mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+              <span className="text-[15px] font-extrabold tabular-nums text-stone-900 dark:text-white">
+                {formatMoneyEs(groupTotal)}
+                <span className="ml-1 text-[10px] font-bold text-stone-400">mes</span>
+              </span>
+              {groupTotals.today > 0 ? (
+                <span className="text-[12px] font-bold tabular-nums text-stone-700 dark:text-stone-200">
+                  {formatMoneyEs(groupTotals.today)}
+                  <span className="ml-1 text-[10px] font-semibold text-stone-400">hoy</span>
+                </span>
+              ) : null}
+              <span
+                className={`text-[12px] font-bold tabular-nums ${
+                  groupTotals.result >= 0
+                    ? 'text-emerald-700 dark:text-emerald-400'
+                    : 'text-rose-600'
+                }`}
+              >
+                {formatMoneyEs(groupTotals.result)}
+                <span className="ml-1 text-[10px] font-semibold text-stone-400">
+                  {resultLabel.toLowerCase()}
+                </span>
+              </span>
+              {groupTotals.staffing > 0 ? (
+                <span className="text-[12px] font-bold tabular-nums text-stone-700 dark:text-stone-200">
+                  {formatNumberEs(groupTotals.clockedIn, { maxFraction: 0 })}/
+                  {formatNumberEs(groupTotals.staffing, { maxFraction: 0 })}
+                  <span className="ml-1 text-[10px] font-semibold text-stone-400">fichados</span>
+                </span>
+              ) : null}
+            </div>
+          </div>
+
+          {/* Desktop — columnas limpia (tablet usa tarjetas) */}
+          <div className="hidden overflow-hidden rounded-2xl border border-stone-200/80 bg-white lg:block dark:border-stone-800 dark:bg-stone-950">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[860px] border-collapse text-left">
+              <table className="w-full min-w-[1080px] border-collapse text-left">
                 <thead>
                   <tr className="border-b border-stone-100 bg-stone-50/80 text-[10px] font-bold uppercase tracking-wide text-stone-500 dark:border-stone-800 dark:bg-stone-900/60">
                     <th className="sticky left-0 z-[1] bg-stone-50 px-4 py-2.5 dark:bg-stone-900">Empresa</th>
                     <th className="px-2.5 py-2.5 text-right">% grupo</th>
+                    <th className="px-2.5 py-2.5 text-right">Hoy</th>
                     <th className="px-2.5 py-2.5 text-right">Mes</th>
                     <th className="px-2.5 py-2.5 text-right" title="Mismo tramo de días del mes anterior">
                       vs mismo tramo
@@ -556,14 +693,21 @@ export function CeoCompanyTable({
                     <th className="px-2.5 py-2.5 text-right">Ingresos</th>
                     <th className="px-2.5 py-2.5 text-right">Gastos</th>
                     <th className="px-2.5 py-2.5 text-right">Ticket</th>
+                    <th className="px-2.5 py-2.5 text-right" title="Resultado del mes / ingresos contables">
+                      Margen
+                    </th>
                     <th className="px-2.5 py-2.5 text-right">{resultLabel}</th>
+                    <th className="px-2.5 py-2.5 text-right" title="Fichados ahora / plantilla">
+                      Equipo
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {visions.map((v) => {
+                  {visions.map((v, idx) => {
                     const { result, typeLabel, m, isOps } = companyLineMeta(v, canViewEbitda);
                     const personal = laborByBiz[v.businessId] || 0;
                     const share = groupSharePercent(v.income, groupTotal);
+                    const margin = marginPercent(result, v.financeIncome);
                     return (
                       <tr
                         key={v.businessId}
@@ -571,7 +715,8 @@ export function CeoCompanyTable({
                         onClick={() => onOpen(v.businessId)}
                       >
                         <td className="sticky left-0 z-[1] bg-white px-4 py-2.5 dark:bg-stone-950">
-                          <div className="flex min-w-[140px] items-center gap-2">
+                          <div className="flex min-w-[160px] items-center gap-2">
+                            <RankBadge rank={idx + 1} />
                             <span
                               className="h-2 w-2 shrink-0 rounded-full"
                               style={{ backgroundColor: v.brandColor }}
@@ -593,6 +738,9 @@ export function CeoCompanyTable({
                           <div className="inline-flex justify-end">
                             <SharePctCell pct={share} />
                           </div>
+                        </td>
+                        <td className="px-2.5 py-2.5 text-right text-[12px] font-semibold tabular-nums text-stone-700 dark:text-stone-200">
+                          {v.today > 0 ? formatMoneyEs(v.today) : '—'}
                         </td>
                         <td className="px-2.5 py-2.5 text-right text-[12px] font-extrabold tabular-nums text-stone-900 dark:text-white">
                           {formatMoneyEs(v.income)}
@@ -618,6 +766,9 @@ export function CeoCompanyTable({
                         <td className="px-2.5 py-2.5 text-right text-[12px] font-semibold tabular-nums text-stone-700 dark:text-stone-200">
                           {isOps && m.avgTicketMonth > 0 ? formatMoneyEs(m.avgTicketMonth) : '—'}
                         </td>
+                        <td className="px-2.5 py-2.5 text-right">
+                          <MarginCell pct={margin} />
+                        </td>
                         <td
                           className={`px-2.5 py-2.5 text-right text-[12px] font-extrabold tabular-nums ${
                             result >= 0
@@ -627,10 +778,59 @@ export function CeoCompanyTable({
                         >
                           {formatMoneyEs(result)}
                         </td>
+                        <td className="px-2.5 py-2.5 text-right text-[12px] font-semibold tabular-nums text-stone-700 dark:text-stone-200">
+                          {v.staffing > 0
+                            ? `${formatNumberEs(v.clockedIn, { maxFraction: 0 })}/${formatNumberEs(v.staffing, { maxFraction: 0 })}`
+                            : '—'}
+                        </td>
                       </tr>
                     );
                   })}
                 </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-stone-200 bg-stone-50/80 dark:border-stone-700 dark:bg-stone-900/60">
+                    <td className="sticky left-0 z-[1] bg-stone-50 px-4 py-2.5 text-[11px] font-extrabold uppercase tracking-wide text-stone-600 dark:bg-stone-900 dark:text-stone-300">
+                      Total grupo
+                    </td>
+                    <td className="px-2.5 py-2.5 text-right text-[12px] font-extrabold tabular-nums text-stone-900 dark:text-white">
+                      100%
+                    </td>
+                    <td className="px-2.5 py-2.5 text-right text-[12px] font-extrabold tabular-nums text-stone-900 dark:text-white">
+                      {groupTotals.today > 0 ? formatMoneyEs(groupTotals.today) : '—'}
+                    </td>
+                    <td className="px-2.5 py-2.5 text-right text-[12px] font-extrabold tabular-nums text-stone-900 dark:text-white">
+                      {formatMoneyEs(groupTotal)}
+                    </td>
+                    <td className="px-2.5 py-2.5" />
+                    <td className="px-2.5 py-2.5 text-right text-[12px] font-extrabold tabular-nums text-stone-900 dark:text-white">
+                      {groupTotals.personal > 0 ? formatMoneyEs(groupTotals.personal) : '—'}
+                    </td>
+                    <td className="px-2.5 py-2.5 text-right text-[12px] font-extrabold tabular-nums text-stone-900 dark:text-white">
+                      {formatMoneyEs(groupTotals.financeIncome)}
+                    </td>
+                    <td className="px-2.5 py-2.5 text-right text-[12px] font-extrabold tabular-nums text-stone-900 dark:text-white">
+                      {formatMoneyEs(groupTotals.expenses)}
+                    </td>
+                    <td className="px-2.5 py-2.5" />
+                    <td className="px-2.5 py-2.5 text-right">
+                      <MarginCell pct={marginPercent(groupTotals.result, groupTotals.financeIncome)} />
+                    </td>
+                    <td
+                      className={`px-2.5 py-2.5 text-right text-[12px] font-extrabold tabular-nums ${
+                        groupTotals.result >= 0
+                          ? 'text-emerald-700 dark:text-emerald-400'
+                          : 'text-rose-600'
+                      }`}
+                    >
+                      {formatMoneyEs(groupTotals.result)}
+                    </td>
+                    <td className="px-2.5 py-2.5 text-right text-[12px] font-extrabold tabular-nums text-stone-900 dark:text-white">
+                      {groupTotals.staffing > 0
+                        ? `${formatNumberEs(groupTotals.clockedIn, { maxFraction: 0 })}/${formatNumberEs(groupTotals.staffing, { maxFraction: 0 })}`
+                        : '—'}
+                    </td>
+                  </tr>
+                </tfoot>
               </table>
             </div>
           </div>
@@ -711,6 +911,41 @@ function MiniStat({
 
 /* ── Drawer detalle ────────────────────────────────────────────────── */
 
+function DrawerSectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-stone-400">{children}</p>
+  );
+}
+
+function DrawerSparkline({ points, color }: { points: number[]; color: string }) {
+  const data = (points || []).filter((v) => Number.isFinite(v));
+  if (data.length < 2 || !data.some((v) => v > 0)) return null;
+  const max = Math.max(...data);
+  const min = Math.min(...data);
+  const span = max - min || 1;
+  const w = 92;
+  const h = 30;
+  const step = w / (data.length - 1);
+  const path = data
+    .map(
+      (v, i) =>
+        `${i === 0 ? 'M' : 'L'}${(i * step).toFixed(1)},${(h - 2 - ((v - min) / span) * (h - 4)).toFixed(1)}`,
+    )
+    .join(' ');
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden className="shrink-0 opacity-80">
+      <path
+        d={path}
+        fill="none"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function CeoCompanyDrawer({
   vision,
   alert,
@@ -766,67 +1001,185 @@ export function CeoCompanyDrawer({
             </div>
           ) : null}
 
+          {/* Héroe: facturación del mes con tendencia */}
+          <div
+            className="rounded-2xl border border-stone-100 px-3.5 py-3 dark:border-stone-800"
+            style={{
+              background: `linear-gradient(135deg, color-mix(in srgb, ${vision.brandColor} 7%, transparent), transparent 60%)`,
+            }}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <DrawerSectionLabel>Facturación del mes</DrawerSectionLabel>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <p className="text-2xl font-black tabular-nums text-stone-900 dark:text-white">
+                    {formatMoneyEs(vision.income)}
+                  </p>
+                  <MomBadge pct={vision.mom} />
+                </div>
+              </div>
+              <DrawerSparkline points={vision.pulse} color={vision.brandColor} />
+            </div>
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px]">
+              <span className="text-stone-500">
+                Hoy{' '}
+                <strong className="tabular-nums text-stone-900 dark:text-white">
+                  {formatMoneyEs(vision.today)}
+                </strong>
+              </span>
+              <span className="text-stone-500">
+                Año{' '}
+                <strong className="tabular-nums text-stone-900 dark:text-white">
+                  {formatMoneyEs(vision.year)}
+                </strong>
+              </span>
+            </div>
+          </div>
+
+          {/* Resultado del mes (si hay contabilidad) */}
+          {vision.financeIncome > 0 || vision.expenses > 0 ? (
+            <div className="rounded-2xl border border-stone-100 px-3.5 py-3 dark:border-stone-800">
+              <DrawerSectionLabel>Resultado del mes</DrawerSectionLabel>
+              <div className="mt-2 grid grid-cols-3 gap-2 text-[11px]">
+                <div>
+                  <p className="text-stone-400">Ingresos</p>
+                  <p className="mt-0.5 font-extrabold tabular-nums text-stone-900 dark:text-white">
+                    {formatMoneyEs(vision.financeIncome)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-stone-400">Gastos</p>
+                  <p className="mt-0.5 font-extrabold tabular-nums text-stone-900 dark:text-white">
+                    {formatMoneyEs(vision.expenses)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-stone-400">Resultado</p>
+                  <p
+                    className={`mt-0.5 font-extrabold tabular-nums ${
+                      vision.profit >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-600'
+                    }`}
+                  >
+                    {formatMoneyEs(vision.profit)}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {/* Dinero disponible y pendiente */}
           <div className="grid grid-cols-2 gap-2">
-            <MiniStat label="Hoy" value={formatMoneyEs(vision.today)} />
-            <MiniStat label="Mes" value={formatMoneyEs(vision.income)} extra={<MomBadge pct={vision.mom} />} />
-            <MiniStat label="Año" value={formatMoneyEs(vision.year)} />
             <MiniStat label="Caja / bancos" value={formatMoneyEs(vision.cash)} />
-            <MiniStat label="Pendiente" value={formatMoneyEs(vision.pending)} />
             <MiniStat
-              label="Dotación"
-              value={`${formatNumberEs(vision.clockedIn, { maxFraction: 0 })} fichados / ${formatNumberEs(vision.staffing, { maxFraction: 0 })}`}
+              label="Pendiente de cobro"
+              value={formatMoneyEs(vision.pending)}
+              tone={vision.pending > 0 ? 'warn' : undefined}
             />
-            {vision.alertsHigh > 0 || vision.alertsUnresolved > 0 ? (
-              <MiniStat
-                label="Alertas abiertas"
-                value={
-                  vision.alertsHigh > 0
-                    ? `${formatNumberEs(vision.alertsUnresolved, { maxFraction: 0 })} (${formatNumberEs(vision.alertsHigh, { maxFraction: 0 })} críticas)`
-                    : formatNumberEs(vision.alertsUnresolved, { maxFraction: 0 })
-                }
-                tone={vision.alertsHigh > 0 ? 'bad' : undefined}
-              />
+          </div>
+
+          {/* Equipo ahora */}
+          <div className="rounded-2xl border border-stone-100 px-3.5 py-3 dark:border-stone-800">
+            <div className="flex items-center justify-between gap-2">
+              <DrawerSectionLabel>Equipo ahora</DrawerSectionLabel>
+              <span className="inline-flex items-center gap-1.5 text-[12px] font-bold tabular-nums text-stone-900 dark:text-white">
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    vision.clockedIn > 0 ? 'bg-emerald-500' : 'bg-stone-300 dark:bg-stone-700'
+                  }`}
+                />
+                {formatNumberEs(vision.clockedIn, { maxFraction: 0 })} de{' '}
+                {formatNumberEs(vision.staffing, { maxFraction: 0 })} fichados
+              </span>
+            </div>
+            {vision.staffing > 0 ? (
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-stone-100 dark:bg-stone-800">
+                <div
+                  className="h-full rounded-full bg-emerald-500 transition-[width]"
+                  style={{
+                    width: `${Math.min(100, Math.round((vision.clockedIn / vision.staffing) * 100))}%`,
+                  }}
+                />
+              </div>
             ) : null}
           </div>
+
+          {vision.alertsHigh > 0 || vision.alertsUnresolved > 0 ? (
+            <MiniStat
+              label="Alertas abiertas"
+              value={
+                vision.alertsHigh > 0
+                  ? `${formatNumberEs(vision.alertsUnresolved, { maxFraction: 0 })} (${formatNumberEs(vision.alertsHigh, { maxFraction: 0 })} críticas)`
+                  : formatNumberEs(vision.alertsUnresolved, { maxFraction: 0 })
+              }
+              tone={vision.alertsHigh > 0 ? 'bad' : undefined}
+            />
+          ) : null}
 
           {vision.row.isDelivery ? (
             <div className="space-y-2">
               <div className="grid grid-cols-2 gap-2">
-                <MiniStat label="Cajas abiertas" value={String(vision.row.metrics.openCashRegisters)} />
-                <MiniStat label="Ticket medio" value={formatMoneyEs(vision.row.metrics.avgTicketMonth)} />
+                <MiniStat
+                  label="Cajas abiertas"
+                  value={String(vision.row.metrics.openCashRegisters)}
+                />
+                <MiniStat
+                  label="Ticket medio"
+                  value={formatMoneyEs(vision.row.metrics.avgTicketMonth)}
+                />
               </div>
-              {deliveryBrandSheet(vision.row, 4).length > 0 ? (
-                <div className="rounded-2xl border border-stone-100 px-3 py-2.5 dark:border-stone-800">
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-stone-400">
-                    Marcas · mes
-                  </p>
-                  <div className="mt-2 space-y-1.5">
-                    {deliveryBrandSheet(vision.row, 4).map((b) => (
-                      <div key={b.id} className="flex items-center justify-between gap-2 text-[11px]">
-                        <span className="inline-flex min-w-0 items-center gap-1.5">
-                          <span
-                            className="h-1.5 w-1.5 shrink-0 rounded-full"
-                            style={{ backgroundColor: b.color || vision.brandColor }}
-                          />
-                          <span className="truncate font-semibold text-stone-700 dark:text-stone-200">
-                            {b.name}
-                          </span>
-                        </span>
-                        <span className="shrink-0 font-semibold tabular-nums">
-                          {formatMoneyEs(b.revenueMonth)}
-                        </span>
-                      </div>
-                    ))}
+              {(() => {
+                const brands = deliveryBrandSheet(vision.row, 4);
+                if (brands.length === 0) return null;
+                const brandTotal = brands.reduce((s, b) => s + Math.max(0, b.revenueMonth), 0);
+                return (
+                  <div className="rounded-2xl border border-stone-100 px-3.5 py-3 dark:border-stone-800">
+                    <DrawerSectionLabel>Marcas · mes</DrawerSectionLabel>
+                    <div className="mt-2 space-y-2">
+                      {brands.map((b) => {
+                        const share =
+                          brandTotal > 0
+                            ? Math.round((Math.max(0, b.revenueMonth) / brandTotal) * 100)
+                            : 0;
+                        const color = b.color || vision.brandColor;
+                        return (
+                          <div key={b.id}>
+                            <div className="flex items-center justify-between gap-2 text-[11px]">
+                              <span className="inline-flex min-w-0 items-center gap-1.5">
+                                <span
+                                  className="h-1.5 w-1.5 shrink-0 rounded-full"
+                                  style={{ backgroundColor: color }}
+                                />
+                                <span className="truncate font-semibold text-stone-700 dark:text-stone-200">
+                                  {b.name}
+                                </span>
+                                <span className="shrink-0 text-stone-400 tabular-nums">
+                                  {share}%
+                                </span>
+                              </span>
+                              <span className="shrink-0 font-semibold tabular-nums">
+                                {formatMoneyEs(b.revenueMonth)}
+                              </span>
+                            </div>
+                            <div className="mt-1 h-1 overflow-hidden rounded-full bg-stone-100 dark:bg-stone-800">
+                              <div
+                                className="h-full rounded-full"
+                                style={{ width: `${share}%`, backgroundColor: color }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              ) : null}
+                );
+              })()}
             </div>
           ) : null}
 
           {vision.row.cajaMix && vision.row.cajaMix.total > 0 ? (
-            <div className="rounded-2xl border border-stone-100 px-3 py-2.5 dark:border-stone-800">
-              <p className="text-[10px] font-bold uppercase tracking-wide text-stone-400">Cierre por canales</p>
-              <div className="mt-2 grid grid-cols-2 gap-1.5 text-[11px]">
+            <div className="rounded-2xl border border-stone-100 px-3.5 py-3 dark:border-stone-800">
+              <DrawerSectionLabel>Cierre por canales</DrawerSectionLabel>
+              <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
                 {(
                   [
                     ['Efectivo', vision.row.cajaMix.efectivo],
@@ -838,12 +1191,22 @@ export function CeoCompanyDrawer({
                   ] as const
                 )
                   .filter(([, a]) => a > 0)
-                  .map(([label, amount]) => (
-                    <div key={label} className="flex justify-between gap-2">
-                      <span className="text-stone-500">{label}</span>
-                      <span className="font-semibold tabular-nums">{formatMoneyEs(amount)}</span>
-                    </div>
-                  ))}
+                  .map(([label, amount]) => {
+                    const pct = Math.round((amount / vision.row.cajaMix!.total) * 100);
+                    return (
+                      <div key={label} className="flex items-baseline justify-between gap-2">
+                        <span className="text-stone-500">{label}</span>
+                        <span className="shrink-0">
+                          <span className="font-semibold tabular-nums">
+                            {formatMoneyEs(amount)}
+                          </span>
+                          <span className="ml-1 text-[10px] text-stone-400 tabular-nums">
+                            {pct}%
+                          </span>
+                        </span>
+                      </div>
+                    );
+                  })}
               </div>
             </div>
           ) : null}

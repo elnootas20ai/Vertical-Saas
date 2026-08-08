@@ -51,7 +51,7 @@ export function DeliveryIntegrations() {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [uberCfg, setUberCfg] = useState<UberEatsOAuthConfig | null>(null);
   const [uberStores, setUberStores] = useState<UberEatsStoreOption[]>([]);
-  const [advancedOpen, setAdvancedOpen] = useState(true);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const apiBase = useMemo(() => getApiBase(), []);
   const buildWebhookUrl = useCallback(
@@ -238,13 +238,13 @@ export function DeliveryIntegrations() {
 
   return (
     <Layout backTo="/saas/delivery-ops" title={pageTitle}>
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+      <div className="max-w-2xl mx-auto px-3 sm:px-4 py-4 space-y-4">
         <div>
-          <h1 className="text-2xl font-bold text-stone-900 dark:text-stone-100 flex items-center gap-2">
-            <Plug className="w-6 h-6 text-[var(--v-blue,#2563eb)]" />
+          <h1 className="text-lg font-bold text-stone-900 dark:text-stone-100 flex items-center gap-2">
+            <Plug className="w-5 h-5 text-[var(--v-blue,#2563eb)]" />
             {pageTitle}
           </h1>
-          <p className="text-sm text-stone-500 mt-1">
+          <p className="text-xs text-stone-500 mt-0.5">
             Conecta tus plataformas para recibir pedidos en Vertial.
             {activeCount > 0 && (
               <span className="ml-1 text-emerald-600 font-medium">
@@ -253,7 +253,7 @@ export function DeliveryIntegrations() {
             )}
           </p>
           {!businessId && !loading && (
-            <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">
+            <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-400">
               Selecciona un negocio activo para conectar.
             </p>
           )}
@@ -264,16 +264,16 @@ export function DeliveryIntegrations() {
             <Loader2 className="w-7 h-7 animate-spin text-stone-400" />
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-3">
             {platformCards.map(({ key, urlSlug, label, colorClass, accentClass, devUrl }) => {
               const entry = integrations[key] ?? DEFAULT_DELIVERY_INTEGRATIONS[key];
               const uberReady = key === 'uber' && uberOauth && uberStoreLinked;
 
               return (
-                <div key={key} className={`${VERTIAL_SURFACE} border ${accentClass} p-5 space-y-4`}>
+                <div key={key} className={`${VERTIAL_SURFACE} border ${accentClass} p-3.5 space-y-2.5`}>
                   <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2.5 flex-wrap min-w-0">
-                      <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${colorClass}`}>{label}</span>
+                    <div className="flex items-center gap-2 flex-wrap min-w-0">
+                      <span className={`px-2 py-0.5 rounded-lg text-[11px] font-bold ${colorClass}`}>{label}</span>
                       {key === 'uber' ? (
                         <>
                           {uberReady ? (
@@ -305,14 +305,14 @@ export function DeliveryIntegrations() {
                       title={entry.enabled ? 'Desactivar' : 'Activar'}
                     >
                       {entry.enabled
-                        ? <ToggleRight className="w-8 h-8 text-emerald-500" />
-                        : <ToggleLeft className="w-8 h-8" />}
+                        ? <ToggleRight className="w-7 h-7 text-emerald-500" />
+                        : <ToggleLeft className="w-7 h-7" />}
                     </button>
                   </div>
 
                   {key === 'uber' ? (
-                    <div className="space-y-3">
-                      <p className="text-sm text-stone-600 dark:text-stone-400">
+                    <div className="space-y-2">
+                      <p className="text-xs text-stone-600 dark:text-stone-400">
                         {uberReady
                           ? `Pedidos de ${integrations.uber.storeName || 'tu tienda Uber'} llegarán a Vertial.`
                           : uberOauth
@@ -337,10 +337,10 @@ export function DeliveryIntegrations() {
                       )}
 
                       {uberOauth && (
-                        <div className="space-y-2">
+                        <div className="space-y-1.5">
                           <div className="flex items-center justify-between gap-2">
-                            <p className="text-sm font-semibold text-stone-800 dark:text-stone-100 flex items-center gap-1.5">
-                              <Store className="w-4 h-4" />
+                            <p className="text-xs font-semibold text-stone-800 dark:text-stone-100 flex items-center gap-1.5">
+                              <Store className="w-3.5 h-3.5" />
                               Tu tienda
                             </p>
                             <button
@@ -354,36 +354,36 @@ export function DeliveryIntegrations() {
                           </div>
 
                           {uberStoreLinked && (
-                            <p className="text-sm text-emerald-700 dark:text-emerald-400">
+                            <p className="text-xs text-emerald-700 dark:text-emerald-400">
                               Vinculada: <strong>{integrations.uber.storeName || integrations.uber.storeId}</strong>
                             </p>
                           )}
 
                           {loadingStores ? (
-                            <div className="flex items-center gap-2 text-sm text-stone-500">
-                              <Loader2 className="w-4 h-4 animate-spin" /> Cargando tiendas…
+                            <div className="flex items-center gap-2 text-xs text-stone-500">
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Cargando tiendas…
                             </div>
                           ) : uberStores.length === 0 ? (
-                            <p className="text-sm text-stone-500">
+                            <p className="text-xs text-stone-500">
                               No hay tiendas en esta cuenta. Conecta con la cuenta del restaurante.
                             </p>
                           ) : (
-                            <ul className="space-y-2">
+                            <ul className="space-y-1.5">
                               {uberStores.map((store) => {
                                 const selected = integrations.uber.storeId === store.storeId;
                                 const busy = selectingStoreId === store.storeId;
                                 return (
                                   <li
                                     key={store.storeId}
-                                    className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2.5 ${
+                                    className={`flex items-center justify-between gap-2 rounded-xl border px-2.5 py-1.5 ${
                                       selected
                                         ? 'border-emerald-300 bg-emerald-50/80 dark:border-emerald-800 dark:bg-emerald-950/40'
                                         : 'border-stone-200 dark:border-stone-700 bg-stone-50/80 dark:bg-stone-950'
                                     }`}
                                   >
                                     <div className="min-w-0">
-                                      <p className="text-sm font-semibold text-stone-900 dark:text-stone-100 truncate">{store.name}</p>
-                                      <p className="text-xs text-stone-500 truncate">
+                                      <p className="text-xs font-semibold text-stone-900 dark:text-stone-100 truncate">{store.name}</p>
+                                      <p className="text-[10px] text-stone-500 truncate">
                                         {[store.address, store.city].filter(Boolean).join(', ') || store.storeId}
                                       </p>
                                     </div>
@@ -391,7 +391,7 @@ export function DeliveryIntegrations() {
                                       type="button"
                                       disabled={busy || selected}
                                       onClick={() => void selectStore(store)}
-                                      className={`shrink-0 px-3 py-1.5 rounded-xl text-xs font-semibold disabled:opacity-50 ${
+                                      className={`shrink-0 px-2.5 py-1 rounded-lg text-[11px] font-semibold disabled:opacity-50 ${
                                         selected
                                           ? 'bg-emerald-600 text-white'
                                           : 'bg-[var(--v-blue,#2563eb)] text-white hover:bg-[#1d4ed8]'
@@ -408,7 +408,7 @@ export function DeliveryIntegrations() {
                       )}
                     </div>
                   ) : (
-                    <p className="text-sm text-stone-600 dark:text-stone-400">
+                    <p className="text-xs text-stone-600 dark:text-stone-400">
                       Activa la plataforma cuando Vertial te lo indique. Los pedidos llegarán solos.
                     </p>
                   )}

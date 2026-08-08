@@ -26,6 +26,12 @@ export const PLAN_ADDON_CATALOG = {
     monthlyPrice: 500,
     annualPrice: 4800,
   },
+  extra_tpv_tablet: {
+    id: 'extra_tpv_tablet',
+    name: 'SVA · Tablet TPV extra',
+    monthlyPrice: 990,
+    annualPrice: 9504,
+  },
 };
 
 export function getPlanAddon(addonId) {

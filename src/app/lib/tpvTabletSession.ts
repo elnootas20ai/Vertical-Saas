@@ -38,6 +38,23 @@ export interface TpvTabletBinding {
 }
 
 const STORAGE_KEY = 'vertial_tpv_tablet_binding';
+const DEVICE_ID_KEY = 'vertial_tpv_device_id';
+
+/** Id estable del navegador/tablet para vincular al código de tienda. */
+export function getOrCreateTpvDeviceId(): string {
+  try {
+    const existing = String(localStorage.getItem(DEVICE_ID_KEY) || '').trim();
+    if (existing.length >= 8) return existing;
+    const id =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `dev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    localStorage.setItem(DEVICE_ID_KEY, id);
+    return id;
+  } catch {
+    return `dev-fallback-${Date.now().toString(36)}`;
+  }
+}
 
 function normalizeBusinessScopeId(value?: string | null): string {
   return String(value || '').replace(/^business:/, '').trim();

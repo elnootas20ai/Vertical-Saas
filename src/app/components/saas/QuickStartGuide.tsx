@@ -326,8 +326,14 @@ const IMPORT_OPTIONS = [
 
 function ImportDropdown() {
   const navigate = useNavigate();
+  const { currentBusiness } = useBusiness();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const isRealEstate = currentBusiness?.businessType === 'realEstate';
+  const options = IMPORT_OPTIONS.filter((opt) => {
+    if (!isRealEstate) return true;
+    return opt.id !== 'catalog' && opt.id !== 'suppliers';
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -337,6 +343,8 @@ function ImportDropdown() {
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
+
+  if (options.length === 0) return null;
 
   return (
     <div className="relative" ref={ref}>
@@ -354,7 +362,7 @@ function ImportDropdown() {
           <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
             Importar desde CSV / Excel
           </p>
-          {IMPORT_OPTIONS.map(opt => {
+          {options.map(opt => {
             const Icon = opt.icon;
             return (
               <button

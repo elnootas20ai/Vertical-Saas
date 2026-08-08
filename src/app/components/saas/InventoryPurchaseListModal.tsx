@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   ArrowUpCircle,
@@ -7,7 +6,6 @@ import {
   PackagePlus,
   ScanLine,
   ShoppingCart,
-  Truck,
   X,
 } from 'lucide-react';
 import type { CatalogItem } from '../../lib/deliveryApi';
@@ -18,7 +16,6 @@ import {
   readInventoryCategoryLabel,
 } from '../../lib/inventoryUtils';
 import { createAdjustmentRequest } from '../../lib/stockMovementApi';
-import { createBulkPurchaseOrdersRequest } from '../../lib/purchaseOrderApi';
 import { SaasTabPrimaryButton, SaasTabSecondaryButton } from './SaasTabWorkspace';
 
 type PurchaseListRow = {
@@ -43,11 +40,9 @@ export function InventoryPurchaseListModal({
   onStockUpdated?: () => void;
   onScanInvoice?: () => void;
 }) {
-  const navigate = useNavigate();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [quantities, setQuantities] = useState<Record<string, string>>({});
   const [registering, setRegistering] = useState(false);
-  const [creatingOrders, setCreatingOrders] = useState(false);
 
   const purchaseItems = useMemo((): PurchaseListRow[] => {
     return items
@@ -168,69 +163,6 @@ export function InventoryPurchaseListModal({
     }
   };
 
-  const handleCreateOrders = async () => {
-    if (!userId) return;
-    if (selectedRows.length === 0) {
-      toast.error('Selecciona al menos un artículo');
-      return;
-    }
-
-    const groups: Record<string, PurchaseListRow[]> = {};
-    for (const row of selectedRows) {
-      const key = row.item.supplierId || '__no_supplier__';
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(row);
-    }
-
-    const orderDataList = Object.values(groups).map((rows) => {
-      const orderItems = rows.map(({ item, suggestion }, idx) => {
-        const qty = readQuantity(item._id, suggestion.quantity);
-        return {
-          id: `poi-list-${Date.now()}-${idx}`,
-          catalogItemId: item._id,
-          sku: item.sku || '',
-          name: item.name || '',
-          quantity: qty,
-          unitCost: Number(item.costPrice || 0),
-          total: qty * Number(item.costPrice || 0),
-          received: 0,
-          notes: '',
-        };
-      });
-      const subtotal = orderItems.reduce((s, line) => s + line.total, 0);
-      const first = rows[0].item;
-      return {
-        supplierId: first.supplierId || '',
-        supplierName: first.supplierName || 'Sin proveedor',
-        items: orderItems,
-        subtotal,
-        taxRate: 21,
-        taxAmount: subtotal * 0.21,
-        total: subtotal * 1.21,
-        status: 'draft' as const,
-        source: 'auto' as const,
-        urgency: rows.some((r) => inventoryStatus(r.item) === 'out') ? 'high' as const : 'normal' as const,
-        notes: `Generado desde lista de compra — ${rows.length} artículo(s)`,
-      };
-    });
-
-    setCreatingOrders(true);
-    try {
-      const result = await createBulkPurchaseOrdersRequest(userId, orderDataList);
-      if (result.created > 0) {
-        toast.success(`${result.created} pedido(s) en borrador creado(s)`);
-        onClose();
-        navigate('/saas/catalog?tab=purchase-orders');
-      } else {
-        toast.error('No se pudo crear ningún pedido');
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Error al crear pedidos');
-    } finally {
-      setCreatingOrders(false);
-    }
-  };
-
   if (!isOpen) return null;
 
   return (
@@ -250,7 +182,7 @@ export function InventoryPurchaseListModal({
                 Lista de compra
               </h3>
               <p className="text-sm text-gray-500 mt-0.5">
-                Repón stock, pide a proveedores o escanea la factura
+                Repón stock o escanea la factura del proveedor
               </p>
             </div>
             <button type="button" onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
@@ -364,22 +296,13 @@ export function InventoryPurchaseListModal({
                 </SaasTabSecondaryButton>
               ) : null}
               {purchaseItems.length > 0 ? (
-                <>
-                  <SaasTabSecondaryButton
-                    onClick={() => void handleCreateOrders()}
-                    disabled={creatingOrders || registering || selectedRows.length === 0 || !userId}
-                  >
-                    {creatingOrders ? <Loader2 className="w-4 h-4 animate-spin" /> : <Truck className="w-4 h-4" />}
-                    Pedir a proveedores
-                  </SaasTabSecondaryButton>
-                  <SaasTabPrimaryButton
-                    onClick={() => void handleRegisterStock()}
-                    disabled={registering || creatingOrders || selectedRows.length === 0 || !userId}
-                  >
-                    {registering ? <Loader2 className="w-4 h-4 animate-spin" /> : <PackagePlus className="w-4 h-4" />}
-                    Registrar entrada
-                  </SaasTabPrimaryButton>
-                </>
+                <SaasTabPrimaryButton
+                  onClick={() => void handleRegisterStock()}
+                  disabled={registering || selectedRows.length === 0 || !userId}
+                >
+                  {registering ? <Loader2 className="w-4 h-4 animate-spin" /> : <PackagePlus className="w-4 h-4" />}
+                  Registrar entrada
+                </SaasTabPrimaryButton>
               ) : null}
             </div>
           </div>

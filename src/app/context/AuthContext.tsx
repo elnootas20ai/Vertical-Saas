@@ -18,6 +18,7 @@ import {
   type TeamInvitation,
   acceptInviteRequest,
   acceptInvitationRequest,
+  redeemWorkerInviteLinkRequest,
   clearAuthTokens,
   deleteUserRequest,
   fetchCurrentUserRequest,
@@ -189,6 +190,7 @@ export interface AuthContextType {
   listMyInvitations: () => Promise<TeamInvitation[]>;
   listBusinessInvitations: (businessId: string, includeAll?: boolean) => Promise<TeamInvitation[]>;
   acceptInvitation: (invitationId: string) => Promise<{ success: boolean; redirectTo?: string; alreadyAccepted?: boolean; error?: string; code?: string }>;
+  joinByInviteLink: (token: string) => Promise<{ success: boolean; redirectTo?: string; alreadyMember?: boolean; error?: string; code?: string }>;
   rejectInvitation: (invitationId: string) => Promise<{ success: boolean; error?: string }>;
   resendInvitation: (invitationId: string) => Promise<{ success: boolean; inviteExpiresAt?: string; error?: string }>;
   revokeInvitation: (invitationId: string) => Promise<{ success: boolean; error?: string }>;
@@ -635,10 +637,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const requestLoginCode = async (email: string): Promise<{ success: boolean; error?: string; info?: string }> => {
     try {
       const res = await requestLoginCodeRequest(email);
-      return {
-        success: true,
-        info: typeof res.message === 'string' ? res.message : 'Si el email existe, recibirás un código en breve',
-      };
+      const hint =
+        typeof (res as { otpHint?: string }).otpHint === 'string'
+          ? (res as { otpHint: string }).otpHint
+          : '';
+      const message =
+        typeof res.message === 'string' && res.message.trim()
+          ? res.message
+          : hint
+            ? `Código enviado. Revisa ${hint} (y spam).`
+            : 'Código enviado. Revisa tu correo (y spam). Caduca en 10 minutos.';
+      return { success: true, info: message };
     } catch (error) {
       return {
         success: false,
@@ -947,6 +956,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const joinByInviteLink = async (token: string) => {
+    try {
+      const response = await redeemWorkerInviteLinkRequest(token);
+      if (response.user) {
+        setSessionUser(response.user);
+      }
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('vertial:invitation-accepted'));
+      }
+      return {
+        success: true,
+        redirectTo: response.redirectTo,
+        alreadyMember: Boolean(response.alreadyMember),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Error al unirse al equipo';
+      const code = (error as Error & { code?: string }).code;
+      return { success: false, error: message, code };
+    }
+  };
+
   const rejectInvitation = async (invitationId: string) => {
     try {
       await rejectInvitationRequest(invitationId);
@@ -1247,9 +1277,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     needsClockIn?: boolean;
   }> => {
     try {
+      const { getOrCreateTpvDeviceId } = await import('../lib/tpvTabletSession');
+      const deviceId = getOrCreateTpvDeviceId();
+      const deviceLabel =
+        typeof navigator !== 'undefined'
+          ? String(navigator.userAgent || '').slice(0, 80)
+          : 'Dispositivo';
       const response = isSwitch
-        ? await tpvTabletSwitchRequest(terminalCode)
-        : await tpvTabletActivateRequest(terminalCode);
+        ? await tpvTabletSwitchRequest(terminalCode, deviceId, deviceLabel)
+        : await tpvTabletActivateRequest(terminalCode, deviceId, deviceLabel);
       if (!response.user) {
         return { success: false, error: 'No se recibió usuario desde el backend' };
       }
@@ -1328,6 +1364,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         listMyInvitations,
         listBusinessInvitations,
         acceptInvitation,
+        joinByInviteLink,
         rejectInvitation,
         resendInvitation,
         revokeInvitation,

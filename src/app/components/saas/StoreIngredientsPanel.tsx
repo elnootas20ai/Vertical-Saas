@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import {
   Loader2,
@@ -10,10 +9,10 @@ import {
   Save,
   AlertCircle,
   Package,
-  Warehouse,
   Pencil,
-  Calculator,
-  Truck,
+  ChevronDown,
+  ChevronRight,
+  X,
 } from 'lucide-react';
 import {
   catalogItemsUsingIngredient,
@@ -48,6 +47,7 @@ import {
   SaasTabSearch,
   SaasTabSecondaryButton,
   SaasTabEmpty,
+  SaasTabToolbarRow,
   SaasTabWorkspace,
 } from './SaasTabWorkspace';
 
@@ -58,7 +58,9 @@ const PART_OPTIONS: Array<{ value: TpvCategoryTemplateKey; label: string }> = [
 
 type ListFilter = 'all' | 'extra' | 'base' | 'inventario';
 type SortMode = 'name-asc' | 'name-desc' | 'extra-first';
-type IngredientBadge = 'activo' | 'extra' | 'quitar' | 'inventario';
+
+/** Filas visibles por grupo antes del «mostrar más»: evita listas infinitas. */
+const GROUP_PREVIEW_ROWS = 15;
 
 function ingredientNameFold(name: string): string {
   return String(name || '').trim().toLowerCase();
@@ -73,59 +75,81 @@ function catalogInventoryItemsForIngredient(catalogItems: CatalogItem[], name: s
   });
 }
 
-function ingredientBadges(ing: StoreIngredient, catalogItems: CatalogItem[]): IngredientBadge[] {
-  const badges: IngredientBadge[] = [];
-  const flags = readStoreIngredientTpvFlags(ing);
-  if (resolveIngredientRole(ing) !== 'escandallo') badges.push('activo');
-  if (flags.chargeExtra) badges.push('extra');
-  if (flags.allowRemove) badges.push('quitar');
-  if (catalogInventoryItemsForIngredient(catalogItems, ing.name).length > 0) {
-    badges.push('inventario');
-  }
-  return badges;
-}
-
 function ingredientMatchesInventarioFilter(ing: StoreIngredient, catalogItems: CatalogItem[]): boolean {
   return catalogInventoryItemsForIngredient(catalogItems, ing.name).length > 0;
 }
 
-function DetailCard({
+/** Interruptor en línea para las tablas (mismo look que el toggle Web del catálogo). */
+function InlineToggle({
+  checked,
+  onChange,
   title,
-  children,
-  className = '',
 }: {
-  title: string;
-  children: ReactNode;
-  className?: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  title?: string;
 }) {
   return (
-    <section
-      className={`rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/40 p-3 h-auto ${className}`}
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      title={title}
+      onClick={() => onChange(!checked)}
+      className={`w-9 h-5 rounded-full transition-colors relative inline-block align-middle ${
+        checked ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
+      }`}
     >
-      <h3 className="text-[11px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">
-        {title}
-      </h3>
-      {children}
-    </section>
+      <span
+        className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+          checked ? 'translate-x-4' : 'translate-x-0.5'
+        }`}
+      />
+    </button>
   );
 }
 
-function IngredientBadgePill({ kind }: { kind: IngredientBadge }) {
-  const styles: Record<IngredientBadge, string> = {
-    activo: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300',
-    extra: 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300',
-    quitar: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
-    inventario: 'bg-sky-100 text-sky-800 dark:bg-sky-950/50 dark:text-sky-300',
+/** Celda de coste editable: escribe y sal del campo (o Enter) para aplicar. */
+function IngredientCostCell({
+  ingredient,
+  onCommit,
+}: {
+  ingredient: StoreIngredient;
+  onCommit: (value: number) => void;
+}) {
+  const [draft, setDraft] = useState(ingredient.baseCost != null ? String(ingredient.baseCost) : '');
+
+  useEffect(() => {
+    setDraft(ingredient.baseCost != null ? String(ingredient.baseCost) : '');
+  }, [ingredient.id, ingredient.baseCost]);
+
+  const commit = () => {
+    const raw = draft.trim().replace(',', '.');
+    const n = raw === '' ? 0 : Number(raw);
+    if (!Number.isFinite(n) || n < 0) {
+      setDraft(ingredient.baseCost != null ? String(ingredient.baseCost) : '');
+      return;
+    }
+    const rounded = Math.round(n * 100) / 100;
+    setDraft(String(rounded));
+    if (rounded !== (ingredient.baseCost ?? 0)) onCommit(rounded);
   };
-  const labels: Record<IngredientBadge, string> = {
-    activo: 'Activo',
-    extra: 'Extra',
-    quitar: 'Quitar',
-    inventario: 'Inventario',
-  };
+
   return (
-    <span className={`text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${styles[kind]}`}>
-      {labels[kind]}
+    <span className="inline-flex items-center gap-1">
+      <input
+        type="text"
+        inputMode="decimal"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+        }}
+        placeholder="0,00"
+        className="w-20 px-2 py-1 text-right text-sm tabular-nums border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 outline-none focus:border-[var(--v-blue,#2563eb)]"
+      />
+      <span className="text-xs text-gray-400">€</span>
     </span>
   );
 }
@@ -242,7 +266,7 @@ function IngredientRow({
     <div
       className={`flex flex-col gap-2 rounded-xl border px-3 py-2.5 ${
         isNew
-          ? 'border-indigo-200 bg-indigo-50/40 dark:border-indigo-800 dark:bg-indigo-950/20'
+          ? 'border-blue-200 bg-blue-50/40 dark:border-blue-800 dark:bg-blue-950/20'
           : chargeExtra
             ? 'border-amber-200 bg-amber-50/30 dark:border-amber-900/40'
             : 'border-gray-200 bg-white dark:bg-gray-900 dark:border-gray-700'
@@ -347,7 +371,7 @@ function IngredientRow({
                 }}
                 className={`px-2.5 py-1 rounded-full text-xs font-semibold border ${
                   on
-                    ? 'border-indigo-500 bg-indigo-50 text-indigo-800'
+                    ? 'border-[var(--v-blue,#2563eb)] bg-blue-50 text-blue-800'
                     : 'border-gray-200 text-gray-500'
                 }`}
               >
@@ -373,369 +397,6 @@ function sortIngredientList(items: StoreIngredient[], sortMode: SortMode): Store
     return sortMode === 'name-desc' ? -cmp : cmp;
   });
   return list;
-}
-
-function IngredientMasterList({
-  items,
-  selectedId,
-  onSelect,
-  search,
-  listFilter,
-  sortMode,
-  catalogItems,
-}: {
-  items: StoreIngredient[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-  search: string;
-  listFilter: ListFilter;
-  sortMode: SortMode;
-  catalogItems: CatalogItem[];
-}) {
-  const filtered = useMemo(
-    () => sortIngredientList(filterVisibleItems(items, search, listFilter, catalogItems), sortMode),
-    [items, search, listFilter, sortMode, catalogItems],
-  );
-
-  if (items.length === 0) {
-    return (
-      <SaasTabEmpty
-        icon={<Package className="w-8 h-8" />}
-        title="Sin ingredientes"
-        description="Importa Excel en Catálogo o añade una lista."
-      />
-    );
-  }
-
-  if (filtered.length === 0) {
-    return (
-      <div className="py-6 px-4 text-center text-xs text-gray-500">
-        Sin resultados{search.trim() ? ` para «${search.trim()}»` : ''}.
-      </div>
-    );
-  }
-
-  return (
-    <ul className="divide-y divide-gray-100 dark:divide-gray-800 overflow-y-auto flex-1 min-h-0">
-      {filtered.map((ing) => {
-        const active = ing.id === selectedId;
-        const badges = ingredientBadges(ing, catalogItems);
-        return (
-          <li key={ing.id}>
-            <button
-              type="button"
-              onClick={() => onSelect(ing.id)}
-              className={`w-full flex flex-col gap-1 px-2.5 py-2 text-left transition-colors ${
-                active
-                  ? 'bg-indigo-50 dark:bg-indigo-950/40 border-l-2 border-indigo-500'
-                  : 'hover:bg-gray-50 dark:hover:bg-gray-800/60 border-l-2 border-transparent'
-              }`}
-            >
-              <span className="w-full text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                {ing.name}
-              </span>
-              <span className="flex flex-wrap gap-0.5">
-                {badges.map((b) => (
-                  <IngredientBadgePill key={b} kind={b} />
-                ))}
-              </span>
-            </button>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-function TpvToggleRow({
-  label,
-  checked,
-  onChange,
-  disabled,
-  highlight,
-}: {
-  label: string;
-  checked: boolean;
-  onChange?: (checked: boolean) => void;
-  disabled?: boolean;
-  highlight?: boolean;
-}) {
-  return (
-    <label
-      className={`flex items-center justify-between gap-3 py-2 px-2.5 rounded-lg border text-sm ${
-        highlight
-          ? 'border-amber-200 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-950/20'
-          : 'border-gray-200 dark:border-gray-700'
-      } ${disabled ? 'opacity-60 cursor-default' : 'cursor-pointer'}`}
-    >
-      <span className="font-medium text-gray-800 dark:text-gray-200">{label}</span>
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={disabled}
-        onChange={onChange ? (e) => onChange(e.target.checked) : undefined}
-        readOnly={!onChange}
-        className="rounded border-gray-300"
-      />
-    </label>
-  );
-}
-
-function IngredientDetailSheet({
-  ingredient,
-  brands,
-  allBrandIds,
-  multiBrand,
-  activeBrandId,
-  catalogItems,
-  editMode,
-  onEditModeChange,
-  onUpdateTpvFlags,
-  onUpdate,
-  onRemove,
-  onUpdateBaseCost,
-}: {
-  ingredient: StoreIngredient;
-  brands: Brand[];
-  allBrandIds: string[];
-  multiBrand: boolean;
-  activeBrandId: string;
-  catalogItems: CatalogItem[];
-  editMode: boolean;
-  onEditModeChange: (open: boolean) => void;
-  onUpdateTpvFlags: (patch: Partial<{ chargeExtra: boolean; allowRemove: boolean }>) => void;
-  onUpdate: (draft: IngredientDraft) => void;
-  onRemove: () => void;
-  onUpdateBaseCost: (baseCost: number) => void;
-}) {
-  const [showAllProducts, setShowAllProducts] = useState(false);
-  const tpvFlags = readStoreIngredientTpvFlags(ingredient);
-  const badges = ingredientBadges(ingredient, catalogItems);
-  const relatedProducts = useMemo(
-    () =>
-      catalogItemsUsingIngredient(catalogItems, ingredient.name, {
-        brandId: multiBrand ? activeBrandId : undefined,
-      }),
-    [catalogItems, ingredient.name, multiBrand, activeBrandId],
-  );
-  const inventoryItems = useMemo(
-    () => catalogInventoryItemsForIngredient(catalogItems, ingredient.name),
-    [catalogItems, ingredient.name],
-  );
-  const ingredientBrands = useMemo(() => {
-    const ids = resolveStoreIngredientBrandIds(ingredient, allBrandIds);
-    return brands.filter((b) => ids.includes(b._id));
-  }, [ingredient, allBrandIds, brands]);
-  const primarySupplier = inventoryItems.find((i) => i.supplierName)?.supplierName || null;
-
-  const hasInventoryData = inventoryItems.length > 0;
-  const visibleProducts = showAllProducts ? relatedProducts : relatedProducts.slice(0, 5);
-  const [baseCostDraft, setBaseCostDraft] = useState(
-    () => (ingredient.baseCost != null ? String(ingredient.baseCost) : ''),
-  );
-
-  useEffect(() => {
-    setShowAllProducts(false);
-    setBaseCostDraft(ingredient.baseCost != null ? String(ingredient.baseCost) : '');
-  }, [ingredient.id]);
-
-  return (
-    <div className="flex flex-col h-full min-h-0">
-      <div className="shrink-0 px-4 pt-3 pb-3 border-b border-gray-100 dark:border-gray-700/80">
-        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-0.5">
-              Ingrediente
-            </p>
-            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 truncate">{ingredient.name}</h2>
-            <div className="flex flex-wrap items-center gap-1 mt-1.5">
-              {badges.map((b) => (
-                <IngredientBadgePill key={b} kind={b} />
-              ))}
-            </div>
-            <div className="flex flex-wrap gap-1 mt-1.5">
-              {ingredientBrands.length > 0 ? (
-                ingredientBrands.map((b) => (
-                  <span
-                    key={b._id}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300"
-                  >
-                    <span
-                      className="w-1.5 h-1.5 rounded-full shrink-0"
-                      style={{ backgroundColor: b.primaryColor || '#6366f1' }}
-                    />
-                    {b.name}
-                  </span>
-                ))
-              ) : (
-                <span className="text-xs text-gray-500">Todas las marcas</span>
-              )}
-            </div>
-          </div>
-          {!editMode ? (
-            <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-              <SaasTabSecondaryButton onClick={() => onEditModeChange(true)}>
-                <Pencil className="w-3.5 h-3.5" />
-                Editar
-              </SaasTabSecondaryButton>
-              <SaasTabSecondaryButton
-                onClick={onRemove}
-                className="!border-red-200 !text-red-700 hover:!bg-red-50 dark:hover:!bg-red-950/30"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                Eliminar
-              </SaasTabSecondaryButton>
-            </div>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3">
-        {editMode ? (
-          <DetailCard title="Editar ingrediente" className="mb-3">
-            <IngredientRow
-              brands={multiBrand ? brands.filter((b) => b._id === activeBrandId) : brands}
-              draft={itemToDraft(ingredient, allBrandIds)}
-              onChange={onUpdate}
-              onRemove={onRemove}
-            />
-            <button
-              type="button"
-              onClick={() => onEditModeChange(false)}
-              className="mt-2 text-xs font-semibold text-gray-500 hover:text-gray-700"
-            >
-              Cerrar edición
-            </button>
-          </DetailCard>
-        ) : null}
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 items-start auto-rows-min">
-          <DetailCard title="TPV">
-            <div className="space-y-1.5">
-              <TpvToggleRow label="Visible en TPV" checked disabled />
-              <TpvToggleRow
-                label="Puede añadirse como extra"
-                checked={tpvFlags.chargeExtra}
-                highlight
-                onChange={(checked) => onUpdateTpvFlags({ chargeExtra: checked })}
-              />
-              <TpvToggleRow
-                label="Puede quitarse del producto"
-                checked={tpvFlags.allowRemove}
-                onChange={(checked) => onUpdateTpvFlags({ allowRemove: checked })}
-              />
-              {tpvFlags.chargeExtra ? (
-                <p className="text-[11px] text-amber-800 dark:text-amber-300 px-1 pt-0.5">
-                  El precio del extra se configura arriba en la barra de estadísticas.
-                </p>
-              ) : null}
-              <div className="flex flex-wrap gap-1 pt-0.5">
-                {(ingredient.productParts?.length
-                  ? ingredient.productParts
-                  : (['pizzas', 'hamburguesas'] as TpvCategoryTemplateKey[])
-                ).map((part) => (
-                  <span
-                    key={part}
-                    className="px-2 py-0.5 rounded text-[11px] font-semibold bg-gray-100 text-gray-700 dark:bg-gray-800"
-                  >
-                    {part === 'pizzas' ? 'Pizzas' : 'Hamburguesas'}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </DetailCard>
-
-          <DetailCard title="Relaciones">
-            <div className="space-y-2 text-sm">
-              {relatedProducts.length === 0 ? (
-                <p className="text-xs text-gray-500">Ningún producto utiliza este ingrediente</p>
-              ) : (
-                <>
-                  <p className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                    {relatedProducts.length} producto{relatedProducts.length !== 1 ? 's' : ''}
-                  </p>
-                  <ul className="space-y-1">
-                    {visibleProducts.map((p) => (
-                      <li key={p._id}>
-                        <Link
-                          to="/saas/catalog"
-                          className="text-xs font-medium text-indigo-600 hover:underline dark:text-indigo-400 line-clamp-1"
-                        >
-                          {p.name}
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                  {relatedProducts.length > 5 ? (
-                    <button
-                      type="button"
-                      onClick={() => setShowAllProducts((v) => !v)}
-                      className="text-xs font-semibold text-indigo-600 hover:underline"
-                    >
-                      {showAllProducts ? 'Ver menos' : `Ver todos (${relatedProducts.length})`}
-                    </button>
-                  ) : null}
-                </>
-              )}
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-2 mt-1 border-t border-gray-100 dark:border-gray-800 text-xs">
-                <Link
-                  to="/saas/catalog?tab=escandallo"
-                  className="inline-flex items-center gap-1 font-semibold text-gray-600 dark:text-gray-400 hover:underline"
-                >
-                  <Calculator className="w-3 h-3" />
-                  Escandallos
-                </Link>
-                <span className="inline-flex items-center gap-1 text-gray-600 dark:text-gray-400">
-                  <Truck className="w-3 h-3 text-gray-400" />
-                  {primarySupplier || 'Sin proveedor'}
-                </span>
-              </div>
-            </div>
-          </DetailCard>
-
-          <DetailCard title="Inventario">
-            <div className="space-y-2">
-              <label className="block text-xs text-gray-600 dark:text-gray-400">
-                Coste base (€ / unidad)
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={baseCostDraft}
-                  onChange={(e) => setBaseCostDraft(e.target.value)}
-                  onBlur={() => {
-                    const raw = baseCostDraft.trim().replace(',', '.');
-                    const n = raw === '' ? 0 : Number(raw);
-                    if (!Number.isFinite(n) || n < 0) {
-                      setBaseCostDraft(ingredient.baseCost != null ? String(ingredient.baseCost) : '');
-                      return;
-                    }
-                    const rounded = Math.round(n * 100) / 100;
-                    setBaseCostDraft(String(rounded));
-                    onUpdateBaseCost(rounded);
-                  }}
-                  placeholder="0,00"
-                  className="mt-1 w-full px-2 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg text-sm bg-white dark:bg-gray-900"
-                />
-              </label>
-              <p className="text-[11px] text-gray-400">Se usa en escandallos. Guarda TPV para persistir.</p>
-              {hasInventoryData ? (
-                <div className="space-y-2 opacity-70 pt-1 border-t border-gray-100 dark:border-gray-800">
-                  <TpvToggleRow label="Controlar inventario" checked={false} disabled />
-                  <Link
-                    to="/saas/catalog?tab=stock"
-                    className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:underline"
-                  >
-                    <Warehouse className="w-3 h-3" />
-                    Ver en inventario
-                  </Link>
-                </div>
-              ) : null}
-            </div>
-          </DetailCard>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function filterVisibleItems(
@@ -774,10 +435,13 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
   const [search, setSearch] = useState('');
   const [listFilter, setListFilter] = useState<ListFilter>('all');
   const [sortMode, setSortMode] = useState<SortMode>('name-asc');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [editMode, setEditMode] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [dirty, setDirty] = useState(false);
   const [showBulkPanel, setShowBulkPanel] = useState(false);
+  const [showBatchPanel, setShowBatchPanel] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   const commitItems = useCallback((updater: StoreIngredient[] | ((prev: StoreIngredient[]) => StoreIngredient[])) => {
     setItems((prev) => {
@@ -822,12 +486,49 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
     [brandScopedItems, catalogItems],
   );
 
+  const visibleIngredients = useMemo(
+    () => sortIngredientList(filterVisibleItems(brandScopedItems, search, listFilter, catalogItems), sortMode),
+    [brandScopedItems, search, listFilter, catalogItems, sortMode],
+  );
+
+  /** Grupos estilo catálogo: extras de pago arriba, incluidos debajo. */
+  const ingredientGroups = useMemo(
+    () => [
+      {
+        id: 'extras',
+        title: 'Extras de pago',
+        hint: 'Se cobran al añadirlos a un producto en el TPV',
+        items: visibleIngredients.filter((i) => readStoreIngredientTpvFlags(i).chargeExtra),
+      },
+      {
+        id: 'incluidos',
+        title: 'Incluidos en los productos',
+        hint: 'Parte de la receta; el cliente puede quitarlos sin coste',
+        items: visibleIngredients.filter((i) => !readStoreIngredientTpvFlags(i).chargeExtra),
+      },
+    ],
+    [visibleIngredients],
+  );
+
+  const editingIngredient = useMemo(
+    () => (editingId ? items.find((i) => i.id === editingId) ?? null : null),
+    [items, editingId],
+  );
+
+  const toggleGroup = (id: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   const handleBrandChange = (id: string) => {
     setSelectedBrandId(id);
     setSearch('');
     setListFilter('all');
-    setSelectedId(null);
-    setEditMode(false);
+    setEditingId(null);
     setNewDraft(emptyDraft([id], false));
   };
 
@@ -932,8 +633,6 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
     setNewDraft(emptyDraft(allBrandIds, false));
     setSearch('');
     setDirty(true);
-    setSelectedId(row.id);
-    setEditMode(false);
     toast.success(`«${row.name}» añadido`);
   };
 
@@ -1057,7 +756,7 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
 
   const removeItem = (id: string) => {
     commitItems((prev) => prev.filter((i) => i.id !== id));
-    if (selectedId === id) setSelectedId(null);
+    if (editingId === id) setEditingId(null);
     setDirty(true);
   };
 
@@ -1083,32 +782,9 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
     setDirty(true);
   };
 
-  const selectedIngredient = useMemo(
-    () => brandScopedItems.find((i) => i.id === selectedId) ?? null,
-    [brandScopedItems, selectedId],
-  );
-
-  useEffect(() => {
-    setEditMode(false);
-  }, [selectedId]);
-
-  useEffect(() => {
-    if (brandScopedItems.length === 0) {
-      setSelectedId(null);
-      return;
-    }
-    if (!selectedId || !brandScopedItems.some((i) => i.id === selectedId)) {
-      const first =
-        sortIngredientList(filterVisibleItems(brandScopedItems, search, listFilter, catalogItems), sortMode)[0]
-          ?.id ??
-        brandScopedItems[0]?.id ??
-        null;
-      setSelectedId(first);
-    }
-  }, [brandScopedItems, selectedId, search, listFilter, sortMode, catalogItems]);
-
   const updateIngredientBaseCost = (id: string, baseCost: number) => {
     commitItems((prev) => prev.map((i) => (i.id === id ? { ...i, baseCost } : i)));
+    setDirty(true);
   };
 
   const save = async () => {
@@ -1161,7 +837,7 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-24">
-        <Loader2 className="w-8 h-8 animate-spin text-indigo-600 mb-3" />
+        <Loader2 className="w-8 h-8 animate-spin text-[var(--v-blue,#2563eb)] mb-3" />
         <p className="text-sm text-gray-500">Cargando…</p>
       </div>
     );
@@ -1211,16 +887,17 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
     <div className="pb-20 lg:pb-4">
       <SaasTabWorkspace
         stats={[
-          { label: 'total', value: brandScopedItems.length },
-          { label: 'extras', value: extraItems.length, tone: 'amber' },
-          { label: 'quitar', value: baseItems.length },
-          { label: 'inventario', value: inventarioItems.length, tone: 'indigo' },
+          { label: 'ingredientes', value: brandScopedItems.length },
+          { label: 'extras de pago', value: extraItems.length, tone: extraItems.length > 0 ? 'amber' : 'default' },
         ]}
         statsTrailing={
           <>
-            <label className="inline-flex items-center gap-1">
+            <label
+              className="inline-flex items-center gap-1"
+              title="Precio que se suma al producto por cada extra añadido en el TPV"
+            >
               <Euro className="w-3 h-3 text-gray-400" />
-              <span className="text-gray-500">Extra</span>
+              <span className="text-gray-500">Precio por extra</span>
               <input
                 type="text"
                 inputMode="decimal"
@@ -1256,184 +933,455 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
               Cambios pendientes — no llegan al TPV hasta guardar.
               {hasExtras && !priceOk ? ' Indica el precio del extra.' : ''}
             </p>
-          ) : undefined
+          ) : (
+            <p className="text-gray-500 dark:text-gray-400">
+              Ingredientes de tus productos en el TPV: marca cuáles se cobran como{' '}
+              <strong className="text-amber-700 dark:text-amber-400">extra</strong> y cuáles puede{' '}
+              <strong className="text-gray-700 dark:text-gray-300">quitar</strong> el cliente.
+              Elige un ingrediente de la lista para ver su ficha.
+            </p>
+          )
         }
-      >
-        <div className="grid grid-cols-1 lg:grid-cols-[minmax(200px,25%)_1fr] lg:h-[min(72vh,680px)] divide-y lg:divide-y-0 lg:divide-x divide-gray-100 dark:divide-gray-700">
-          <aside className="flex flex-col min-h-[240px] lg:min-h-0 lg:max-h-full bg-gray-50/40 dark:bg-gray-900/20 overflow-hidden">
-            <div className="p-2.5 space-y-2 border-b border-gray-100 dark:border-gray-700 shrink-0">
-              <SaasTabSearch value={search} onChange={setSearch} className="relative w-full" />
-              {multiBrand ? (
-                <label className="block text-xs text-gray-500">
-                  Marca
-                  <select
-                    value={activeBrandId}
-                    onChange={(e) => handleBrandChange(e.target.value)}
-                    className="mt-1 w-full py-1.5 pl-2 pr-7 border border-gray-200 dark:border-gray-700 rounded-lg text-sm font-medium bg-white dark:bg-gray-900 outline-none"
-                  >
-                    {brands.map((b) => (
-                      <option key={b._id} value={b._id}>
-                        {b.name} ({countStoreIngredientsByBrand(items, b._id, allBrandIds)})
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
-              <div className="flex flex-wrap gap-1">
-                {([
-                  { id: 'all' as const, label: 'Todos', count: brandScopedItems.length },
-                  { id: 'extra' as const, label: 'Extras', count: extraItems.length },
-                  { id: 'base' as const, label: 'Quitar', count: baseItems.length },
-                  { id: 'inventario' as const, label: 'Inventario', count: inventarioItems.length },
-                ]).map(({ id, label, count }) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setListFilter(id)}
-                    className={`px-2 py-1 rounded-md text-[11px] font-bold transition-colors ${
-                      listFilter === id
-                        ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900'
-                        : 'bg-white dark:bg-gray-800 text-gray-600 border border-gray-200 dark:border-gray-700'
-                    }`}
-                  >
-                    {label} {count}
-                  </button>
-                ))}
-              </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <select
-                  value={sortMode}
-                  onChange={(e) => setSortMode(e.target.value as SortMode)}
-                  className="py-1 pl-1.5 pr-6 border border-gray-200 dark:border-gray-700 rounded-lg text-[11px] font-semibold bg-white dark:bg-gray-900 outline-none"
-                  title="Ordenar"
-                >
-                  <option value="name-asc">A→Z</option>
-                  <option value="name-desc">Z→A</option>
-                  <option value="extra-first">Extras primero</option>
-                </select>
-                <SaasTabSecondaryButton
-                  onClick={() => setShowBulkPanel((v) => !v)}
-                  className="!border-emerald-200 !text-emerald-800 !bg-emerald-50 dark:!bg-emerald-950/30 dark:!text-emerald-200"
-                >
-                  <ListPlus className="w-3.5 h-3.5" />
-                  Lista
-                </SaasTabSecondaryButton>
-              </div>
-              <details className="text-[11px]">
-                <summary className="cursor-pointer font-semibold text-gray-500 hover:text-gray-700 select-none">
-                  Marcar en lote
-                </summary>
-                <div className="flex flex-wrap gap-1 mt-1.5">
-                  <button
-                    type="button"
-                    onClick={markAllBrandAsExtra}
-                    disabled={brandScopedItems.length === 0}
-                    className="px-2 py-1 rounded-md font-semibold border border-amber-200 text-amber-800 bg-amber-50 disabled:opacity-40"
-                  >
-                    Todos extra
-                  </button>
-                  <button
-                    type="button"
-                    onClick={markVisibleAsExtra}
-                    disabled={filteredVisible === 0}
-                    className="px-2 py-1 rounded-md font-semibold border border-amber-200 text-amber-800 bg-amber-50 disabled:opacity-40"
-                  >
-                    Visibles → extra
-                  </button>
-                  <button
-                    type="button"
-                    onClick={markVisibleAsBase}
-                    disabled={filteredVisible === 0}
-                    className="px-2 py-1 rounded-md font-semibold border border-gray-200 text-gray-600 bg-white disabled:opacity-40"
-                  >
-                    Visibles → quitar
-                  </button>
-                </div>
-              </details>
-              {showBulkPanel ? (
-                <div className="space-y-1.5">
-                  <textarea
-                    value={bulkText}
-                    onChange={(e) => setBulkText(e.target.value)}
-                    rows={3}
-                    placeholder={'Mozzarella, Tomate, Bacon…'}
-                    className="w-full px-2 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg text-xs bg-white dark:bg-gray-900 resize-none focus:border-emerald-400 outline-none"
+        toolbar={
+          <>
+            <SaasTabToolbarRow
+              left={
+                <>
+                  <SaasTabSearch
+                    value={search}
+                    onChange={setSearch}
+                    placeholder="Buscar ingrediente…"
+                    className="relative w-full sm:w-48"
                   />
-                  <SaasTabPrimaryButton
+                  {multiBrand ? (
+                    <select
+                      value={activeBrandId}
+                      onChange={(e) => handleBrandChange(e.target.value)}
+                      className="py-1.5 pl-2 pr-7 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-semibold bg-white dark:bg-gray-900 outline-none"
+                      title="Marca"
+                    >
+                      {brands.map((b) => (
+                        <option key={b._id} value={b._id}>
+                          {b.name} ({countStoreIngredientsByBrand(items, b._id, allBrandIds)})
+                        </option>
+                      ))}
+                    </select>
+                  ) : null}
+                  <select
+                    value={listFilter}
+                    onChange={(e) => setListFilter(e.target.value as ListFilter)}
+                    className="py-1.5 pl-2 pr-7 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-semibold bg-white dark:bg-gray-900 outline-none"
+                    title="Filtrar por estado"
+                  >
+                    <option value="all">Todos ({brandScopedItems.length})</option>
+                    <option value="extra">Extras de pago ({extraItems.length})</option>
+                    <option value="base">Se pueden quitar ({baseItems.length})</option>
+                    <option value="inventario">Con inventario ({inventarioItems.length})</option>
+                  </select>
+                  <select
+                    value={sortMode}
+                    onChange={(e) => setSortMode(e.target.value as SortMode)}
+                    className="py-1.5 pl-2 pr-7 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-semibold bg-white dark:bg-gray-900 outline-none"
+                    title="Ordenar"
+                  >
+                    <option value="name-asc">A→Z</option>
+                    <option value="name-desc">Z→A</option>
+                    <option value="extra-first">Extras primero</option>
+                  </select>
+                </>
+              }
+              right={
+                <>
+                  <SaasTabSecondaryButton
                     onClick={() => {
-                      importBulk();
+                      setShowBatchPanel((v) => !v);
                       setShowBulkPanel(false);
                     }}
-                    disabled={!bulkText.trim()}
-                    className="!bg-emerald-600 hover:!bg-emerald-700"
                   >
-                    <Plus className="w-3 h-3" />
-                    Añadir
+                    Marcar en lote
+                  </SaasTabSecondaryButton>
+                  <SaasTabSecondaryButton
+                    onClick={() => {
+                      setShowBulkPanel((v) => !v);
+                      setShowBatchPanel(false);
+                    }}
+                  >
+                    <ListPlus className="w-3.5 h-3.5" />
+                    Añadir lista
+                  </SaasTabSecondaryButton>
+                  <SaasTabPrimaryButton
+                    onClick={() => {
+                      setCreating(true);
+                      setEditingId(null);
+                    }}
+                    className="!bg-[var(--v-blue,#2563eb)] hover:!bg-blue-700"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Nuevo ingrediente
                   </SaasTabPrimaryButton>
-                </div>
-              ) : null}
-            </div>
-            <IngredientMasterList
-              items={brandScopedItems}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
-              search={search}
-              listFilter={listFilter}
-              sortMode={sortMode}
-              catalogItems={catalogItems}
+                </>
+              }
             />
-          </aside>
-
-          <main className="min-h-[280px] lg:min-h-0 lg:h-full flex flex-col overflow-hidden bg-white dark:bg-gray-800/50">
-            {selectedIngredient ? (
-              <IngredientDetailSheet
-                ingredient={selectedIngredient}
-                brands={brands}
-                allBrandIds={allBrandIds}
-                multiBrand={multiBrand}
-                activeBrandId={activeBrandId}
-                catalogItems={catalogItems}
-                editMode={editMode}
-                onEditModeChange={setEditMode}
-                onUpdateTpvFlags={(patch) => updateIngredientTpvFlags(selectedIngredient.id, patch)}
-                onUpdate={(draft) => updateItem(selectedIngredient.id, draft)}
-                onRemove={() => {
-                  removeItem(selectedIngredient.id);
-                  toast.success(`«${selectedIngredient.name}» eliminado`);
-                }}
-                onUpdateBaseCost={(baseCost) => updateIngredientBaseCost(selectedIngredient.id, baseCost)}
-              />
-            ) : (
-              <div className="flex flex-col h-full overflow-y-auto">
-                <SaasTabEmpty
-                  icon={<Package className="w-10 h-10" />}
-                  title="Selecciona un ingrediente"
-                  description="Elige uno de la lista o crea uno nuevo abajo."
+            {showBatchPanel ? (
+              <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                <span className="font-semibold text-gray-500">Aplicar a esta marca:</span>
+                <button
+                  type="button"
+                  onClick={markAllBrandAsExtra}
+                  disabled={brandScopedItems.length === 0}
+                  className="px-2 py-1 rounded-lg font-semibold border border-amber-200 text-amber-800 bg-amber-50 disabled:opacity-40"
+                >
+                  Todos extra
+                </button>
+                <button
+                  type="button"
+                  onClick={markVisibleAsExtra}
+                  disabled={filteredVisible === 0}
+                  className="px-2 py-1 rounded-lg font-semibold border border-amber-200 text-amber-800 bg-amber-50 disabled:opacity-40"
+                >
+                  Visibles → extra
+                </button>
+                <button
+                  type="button"
+                  onClick={markVisibleAsBase}
+                  disabled={filteredVisible === 0}
+                  className="px-2 py-1 rounded-lg font-semibold border border-gray-200 text-gray-600 bg-white disabled:opacity-40"
+                >
+                  Visibles → quitar
+                </button>
+              </div>
+            ) : null}
+            {showBulkPanel ? (
+              <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start">
+                <textarea
+                  value={bulkText}
+                  onChange={(e) => setBulkText(e.target.value)}
+                  rows={2}
+                  placeholder={'Mozzarella, Tomate, Bacon… (comas o una línea por ingrediente)'}
+                  className="flex-1 px-2.5 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg text-xs bg-white dark:bg-gray-900 resize-none focus:border-[var(--v-blue,#2563eb)] outline-none"
                 />
-                <div className="px-4 pb-4 shrink-0">
-                  <IngredientRow
-                  brands={multiBrand && activeBrand ? [activeBrand] : brands}
-                  draft={
+                <SaasTabPrimaryButton
+                  onClick={() => {
+                    importBulk();
+                    setShowBulkPanel(false);
+                  }}
+                  disabled={!bulkText.trim()}
+                  className="!bg-[var(--v-blue,#2563eb)] hover:!bg-blue-700 shrink-0"
+                >
+                  <Plus className="w-3 h-3" />
+                  Añadir lista
+                </SaasTabPrimaryButton>
+              </div>
+            ) : null}
+          </>
+        }
+      >
+        <div className="p-3 space-y-3">
+          {creating ? (
+            <section className="rounded-2xl border border-blue-200 dark:border-blue-900 bg-blue-50/40 dark:bg-blue-950/20 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100">Nuevo ingrediente</h2>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Nombre, dónde se usa y si se cobra como extra. El coste se pone después en su fila.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCreating(false)}
+                  className="shrink-0 text-xs font-semibold text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                >
+                  Cancelar
+                </button>
+              </div>
+              <IngredientRow
+                brands={multiBrand && activeBrand ? [activeBrand] : brands}
+                draft={
+                  multiBrand && activeBrandId
+                    ? { ...newDraft, brandIds: [activeBrandId] }
+                    : newDraft
+                }
+                onChange={setNewDraft}
+                isNew
+                onAdd={() => {
+                  const draft =
                     multiBrand && activeBrandId
                       ? { ...newDraft, brandIds: [activeBrandId] }
-                      : newDraft
-                  }
-                  onChange={setNewDraft}
-                  isNew
-                  onAdd={() =>
-                    addItem(
-                      multiBrand && activeBrandId
-                        ? { ...newDraft, brandIds: [activeBrandId] }
-                        : newDraft,
-                    )
-                  }
-                />
-                </div>
+                      : newDraft;
+                  const err = validateDraft(draft);
+                  addItem(draft);
+                  if (!err) setCreating(false);
+                }}
+              />
+            </section>
+          ) : null}
+
+          {visibleIngredients.length === 0 ? (
+            brandScopedItems.length === 0 ? (
+              <SaasTabEmpty
+                icon={<Package className="w-10 h-10" />}
+                title="Sin ingredientes"
+                description="Crea el primero con «Nuevo ingrediente» o pega varios con «Añadir lista»."
+              />
+            ) : (
+              <div className="py-8 px-4 text-center text-xs text-gray-500">
+                Sin resultados{search.trim() ? ` para «${search.trim()}»` : ''}.
               </div>
-            )}
-          </main>
+            )
+          ) : (
+            ingredientGroups.map((group) => {
+              if (group.items.length === 0) return null;
+              const isCollapsed = collapsedGroups.has(group.id);
+              const isExpanded = expandedGroups.has(group.id);
+              const rows = isExpanded ? group.items : group.items.slice(0, GROUP_PREVIEW_ROWS);
+              const hiddenCount = group.items.length - rows.length;
+              return (
+                <section
+                  key={group.id}
+                  className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden"
+                >
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(group.id)}
+                    aria-expanded={!isCollapsed}
+                    className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors border-b border-gray-100 dark:border-gray-700"
+                  >
+                    {isCollapsed ? (
+                      <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />
+                    ) : (
+                      <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />
+                    )}
+                    <span className="font-semibold text-sm text-gray-900 dark:text-gray-100">{group.title}</span>
+                    <span className="text-xs text-gray-400 dark:text-gray-500 tabular-nums">{group.items.length}</span>
+                    <span className="ml-auto hidden sm:block text-[11px] text-gray-400 dark:text-gray-500">
+                      {group.hint}
+                    </span>
+                  </button>
+                  {!isCollapsed && (
+                    <>
+                    {/* Móvil: tarjetas de ingrediente */}
+                    <ul className="md:hidden divide-y divide-gray-100 dark:divide-gray-800">
+                      {rows.map((ing) => {
+                        const flags = readStoreIngredientTpvFlags(ing);
+                        const hasInventory =
+                          catalogInventoryItemsForIngredient(catalogItems, ing.name).length > 0;
+                        const usageCount = catalogItemsUsingIngredient(catalogItems, ing.name, {
+                          brandId: multiBrand ? activeBrandId : undefined,
+                        }).length;
+                        return (
+                          <li key={ing.id} className="px-3 py-2.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 min-w-0 flex-1">
+                                <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                                  {ing.name}
+                                </span>
+                                {hasInventory ? (
+                                  <span
+                                    className="w-1.5 h-1.5 rounded-full bg-sky-500 shrink-0"
+                                    title="Con inventario vinculado"
+                                  />
+                                ) : null}
+                                <span className="text-[10px] text-gray-400 tabular-nums shrink-0">
+                                  {usageCount > 0 ? `${usageCount} prod.` : ''}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-0.5 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingId(ing.id)}
+                                  className="p-2 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                                  title="Editar nombre, marcas y uso"
+                                >
+                                  <Pencil className="w-4 h-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    removeItem(ing.id);
+                                    toast.success(`«${ing.name}» eliminado`);
+                                  }}
+                                  className="p-2 rounded-lg text-gray-400 hover:text-red-600"
+                                  title="Eliminar"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                            <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                              <IngredientCostCell
+                                ingredient={ing}
+                                onCommit={(value) => updateIngredientBaseCost(ing.id, value)}
+                              />
+                              <label className="inline-flex items-center gap-1.5 text-[11px] font-medium text-gray-500 dark:text-gray-400">
+                                Extra
+                                <InlineToggle
+                                  checked={flags.chargeExtra}
+                                  onChange={(checked) => updateIngredientTpvFlags(ing.id, { chargeExtra: checked })}
+                                  title="Se cobra como extra al añadirlo en el TPV"
+                                />
+                              </label>
+                              <label className="inline-flex items-center gap-1.5 text-[11px] font-medium text-gray-500 dark:text-gray-400">
+                                Se puede quitar
+                                <InlineToggle
+                                  checked={flags.allowRemove}
+                                  onChange={(checked) => updateIngredientTpvFlags(ing.id, { allowRemove: checked })}
+                                  title="El cliente puede quitarlo del producto"
+                                />
+                              </label>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    {/* Desktop: tabla completa */}
+                    <div className="hidden md:block overflow-x-auto">
+                      <table className="w-full min-w-[680px]">
+                        <thead>
+                          <tr className="border-b border-gray-100 dark:border-gray-700">
+                            <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Ingrediente</th>
+                            <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Coste base</th>
+                            <th className="px-4 py-2.5 text-center text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Extra de pago</th>
+                            <th className="px-4 py-2.5 text-center text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Se puede quitar</th>
+                            <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Se usa en</th>
+                            <th className="px-4 py-2.5" />
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                          {rows.map((ing) => {
+                            const flags = readStoreIngredientTpvFlags(ing);
+                            const hasInventory =
+                              catalogInventoryItemsForIngredient(catalogItems, ing.name).length > 0;
+                            const usageCount = catalogItemsUsingIngredient(catalogItems, ing.name, {
+                              brandId: multiBrand ? activeBrandId : undefined,
+                            }).length;
+                            return (
+                              <tr key={ing.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors">
+                                <td className="px-4 py-2">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                                      {ing.name}
+                                    </span>
+                                    {hasInventory ? (
+                                      <span
+                                        className="w-1.5 h-1.5 rounded-full bg-sky-500 shrink-0"
+                                        title="Con inventario vinculado"
+                                      />
+                                    ) : null}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-2 text-right">
+                                  <IngredientCostCell
+                                    ingredient={ing}
+                                    onCommit={(value) => updateIngredientBaseCost(ing.id, value)}
+                                  />
+                                </td>
+                                <td className="px-4 py-2 text-center">
+                                  <InlineToggle
+                                    checked={flags.chargeExtra}
+                                    onChange={(checked) => updateIngredientTpvFlags(ing.id, { chargeExtra: checked })}
+                                    title="Se cobra como extra al añadirlo en el TPV"
+                                  />
+                                </td>
+                                <td className="px-4 py-2 text-center">
+                                  <InlineToggle
+                                    checked={flags.allowRemove}
+                                    onChange={(checked) => updateIngredientTpvFlags(ing.id, { allowRemove: checked })}
+                                    title="El cliente puede quitarlo del producto"
+                                  />
+                                </td>
+                                <td className="px-4 py-2 text-right text-xs text-gray-500 dark:text-gray-400 tabular-nums">
+                                  {usageCount > 0 ? `${usageCount} prod.` : '—'}
+                                </td>
+                                <td className="px-4 py-2">
+                                  <div className="flex items-center justify-end gap-0.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingId(ing.id)}
+                                      className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-gray-700 transition-colors"
+                                      title="Editar nombre, marcas y uso"
+                                    >
+                                      <Pencil className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        removeItem(ing.id);
+                                        toast.success(`«${ing.name}» eliminado`);
+                                      }}
+                                      className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:text-red-400 dark:hover:bg-red-950/30 transition-colors"
+                                      title="Eliminar"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    {group.items.length > GROUP_PREVIEW_ROWS ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedGroups((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(group.id)) next.delete(group.id);
+                            else next.add(group.id);
+                            return next;
+                          })
+                        }
+                        className="w-full px-4 py-2.5 text-xs font-semibold text-[var(--v-blue,#2563eb)] hover:bg-blue-50/60 dark:hover:bg-blue-950/20 border-t border-gray-100 dark:border-gray-700 transition-colors"
+                      >
+                        {isExpanded ? 'Mostrar menos' : `Mostrar los ${hiddenCount} restantes`}
+                      </button>
+                    ) : null}
+                    </>
+                  )}
+                </section>
+              );
+            })
+          )}
         </div>
       </SaasTabWorkspace>
+
+      {editingIngredient ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setEditingId(null)}
+        >
+          <div
+            className="w-full max-w-2xl rounded-2xl bg-white dark:bg-gray-900 p-4 space-y-3 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Editar ingrediente</h3>
+              <button
+                type="button"
+                onClick={() => setEditingId(null)}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-gray-700"
+                aria-label="Cerrar"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <IngredientRow
+              brands={multiBrand ? brands.filter((b) => b._id === activeBrandId) : brands}
+              draft={itemToDraft(editingIngredient, allBrandIds)}
+              onChange={(draft) => updateItem(editingIngredient.id, draft)}
+              onRemove={() => {
+                removeItem(editingIngredient.id);
+                setEditingId(null);
+              }}
+            />
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[11px] text-gray-400">Los cambios se aplican al pulsar «Guardar TPV».</p>
+              <SaasTabSecondaryButton onClick={() => setEditingId(null)}>Hecho</SaasTabSecondaryButton>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {dirty ? (
         <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 border-t border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-gray-900 px-4 py-2.5 shadow-[0_-4px_20px_rgba(0,0,0,0.1)]">

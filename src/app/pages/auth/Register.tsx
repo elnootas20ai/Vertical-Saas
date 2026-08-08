@@ -33,9 +33,13 @@ function destinationAfterSignup(opts: {
   emailVerified?: boolean;
   redirectTo?: string;
   isUserAccount: boolean;
+  joinToken?: string;
 }) {
   if (opts.emailVerified === false) {
     return '/auth/verify-email-pending';
+  }
+  if (opts.joinToken) {
+    return `/auth/join?token=${encodeURIComponent(opts.joinToken)}`;
   }
   return opts.redirectTo ?? (opts.isUserAccount ? '/saas/user-dashboard' : '/auth/onboarding/business-type');
 }
@@ -52,7 +56,12 @@ export function Register() {
   const incomingApple = locationState.appleUser || null;
   const incomingCredential = locationState.googleCredential || '';
   const incomingAppleCredential = locationState.appleCredential || '';
-  const accountType: AccountType = locationState.accountType || 'company';
+  const joinToken = String(searchParams.get('join') || '').trim();
+  const accountTypeFromQuery = searchParams.get('accountType') === 'user' ? 'user' as const : null;
+  const accountType: AccountType =
+    locationState.accountType
+    || accountTypeFromQuery
+    || (joinToken ? 'user' : 'company');
   const isUserAccount = accountType === 'user';
 
   const [googleCredential, setGoogleCredential] = useState(incomingCredential);
@@ -122,6 +131,7 @@ export function Register() {
             emailVerified: true,
             redirectTo: result.redirectTo,
             isUserAccount,
+            joinToken,
           }),
         );
         return;
@@ -143,7 +153,7 @@ export function Register() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [googleLogin, navigate, isUserAccount]);
+  }, [googleLogin, navigate, isUserAccount, joinToken]);
 
   const handleAppleSignIn = useCallback(async () => {
     setIsSubmitting(true);
@@ -161,6 +171,7 @@ export function Register() {
             emailVerified: true,
             redirectTo: result.redirectTo,
             isUserAccount,
+            joinToken,
           }),
         );
         return;
@@ -188,7 +199,7 @@ export function Register() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [appleLogin, navigate, isUserAccount]);
+  }, [appleLogin, navigate, isUserAccount, joinToken]);
 
   const hideGoogleOnIos = shouldHideThirdPartyAuthOnIos();
   const showAppleAuth = isAppleSignInAvailable();
@@ -254,6 +265,7 @@ export function Register() {
         emailVerified: result.emailVerified,
         redirectTo: result.redirectTo,
         isUserAccount,
+        joinToken,
       });
       if (path === '/auth/verify-email-pending') {
         setPendingVerifyEmail(formData.email);

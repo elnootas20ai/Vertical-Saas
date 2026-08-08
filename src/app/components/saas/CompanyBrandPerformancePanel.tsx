@@ -695,60 +695,120 @@ export function CompanyBrandPerformancePanel({
       </div>
 
       {loading ? (
-        <p className="mt-2 text-xs text-gray-500">Cargando…</p>
+        <div
+          className="mt-2.5 grid animate-pulse grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3"
+          aria-label="Cargando marcas"
+        >
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="rounded-xl border border-gray-100 bg-gray-50/60 px-3 py-2.5 dark:border-gray-800 dark:bg-gray-800/40"
+            >
+              <div className="flex items-center gap-1.5">
+                <div className="h-2 w-2 rounded-full bg-gray-200 dark:bg-gray-700" />
+                <div className="h-3 w-24 rounded bg-gray-200 dark:bg-gray-700" />
+              </div>
+              <div className="mt-2 h-5 w-20 rounded bg-gray-200 dark:bg-gray-700" />
+              <div className="mt-2 h-1.5 w-full rounded-full bg-gray-200/70 dark:bg-gray-700" />
+              <div className="mt-2 h-2.5 w-32 rounded bg-gray-100 dark:bg-gray-800" />
+            </div>
+          ))}
+        </div>
       ) : selectedId === 'all' ? (
-        <div className="mt-2 space-y-2">
-          <div className="divide-y divide-gray-100 dark:divide-gray-800">
-            {rows.length === 0 ? (
-              <p className="py-3 text-center text-[11px] text-gray-400">{emptyLabel}</p>
-            ) : (
-              rows.map((row) => {
-                const prev = prevById.get(row.brandId);
-                const mom = monthOverMonthPct(row.revenue, prev?.revenue || 0);
-                const foodTxt = foodLine(row.food);
-                return (
-                  <button
-                    key={row.brandId}
-                    type="button"
-                    onClick={() => setSelectedId(row.brandId)}
-                    className="flex w-full items-center justify-between gap-2 py-1.5 text-left transition-colors hover:bg-gray-50/80 dark:hover:bg-gray-800/40"
-                  >
-                    <span className="min-w-0 flex items-center gap-1.5">
-                      <span
-                        className="h-1.5 w-1.5 shrink-0 rounded-full"
-                        style={{ backgroundColor: row.color }}
+        <div className="mt-2.5 space-y-2.5">
+          {rows.length === 0 ? (
+            <p className="py-3 text-center text-[11px] text-gray-400">{emptyLabel}</p>
+          ) : (
+            <>
+              {/* Reparto del periodo entre marcas (barra apilada) */}
+              {totalRevenue > 0 ? (
+                <div
+                  className="flex h-2.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800"
+                  aria-label="Reparto de facturación por marca"
+                >
+                  {rows
+                    .filter((r) => r.revenue > 0)
+                    .map((r) => (
+                      <div
+                        key={r.brandId}
+                        className="h-full"
+                        style={{
+                          width: `${Math.max(2, r.sharePercent)}%`,
+                          backgroundColor: r.color,
+                        }}
+                        title={`${r.name} · ${formatNumberEs(r.sharePercent, { maxFraction: 0 })}%`}
                       />
-                      <span className="min-w-0">
-                        <span className="block truncate text-[11px] font-semibold text-gray-900 dark:text-gray-100">
-                          {row.name}
+                    ))}
+                </div>
+              ) : null}
+
+              {/* Comparativa de marcas */}
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                {rows.map((row) => {
+                  const prev = prevById.get(row.brandId);
+                  const mom = monthOverMonthPct(row.revenue, prev?.revenue || 0);
+                  const foodTxt = foodLine(row.food);
+                  const avgTicket = row.orderCount > 0 ? row.revenue / row.orderCount : 0;
+                  return (
+                    <button
+                      key={row.brandId}
+                      type="button"
+                      onClick={() => setSelectedId(row.brandId)}
+                      className="rounded-xl border border-gray-100 bg-gray-50/60 px-3 py-2.5 text-left transition-colors hover:border-gray-200 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800/40 dark:hover:border-gray-700"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <span
+                            className="h-2 w-2 shrink-0 rounded-full"
+                            style={{ backgroundColor: row.color }}
+                          />
+                          <span className="truncate text-[11px] font-bold text-gray-900 dark:text-gray-100">
+                            {row.name}
+                          </span>
                           {row.lineLabel ? (
-                            <span className="ml-1 text-[9px] font-normal text-gray-400">
+                            <span className="shrink-0 text-[9px] text-gray-400">
                               {row.lineLabel}
                             </span>
                           ) : null}
                         </span>
-                        {foodTxt ? (
-                          <span className="block truncate text-[9px] text-gray-400">{foodTxt}</span>
-                        ) : null}
-                      </span>
-                    </span>
-                    <span className="shrink-0 text-right">
-                      <span className="flex items-center justify-end gap-1">
-                        <span className="text-[11px] font-bold tabular-nums text-gray-900 dark:text-gray-100">
-                          {formatMoneyEs(row.revenue)}
-                        </span>
                         <VsBadge pct={mom} />
-                      </span>
-                      <span className="text-[9px] text-gray-400">
-                        {formatNumberEs(row.sharePercent, { maxFraction: 0 })}% ·{' '}
+                      </div>
+
+                      <p className="mt-1 text-lg font-black tabular-nums tracking-tight text-gray-900 dark:text-gray-100">
+                        {formatMoneyEs(row.revenue)}
+                      </p>
+
+                      <div className="mt-1 flex items-center gap-2">
+                        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-gray-200/70 dark:bg-gray-700">
+                          <div
+                            className="h-full rounded-full"
+                            style={{
+                              width: `${Math.min(100, Math.max(row.revenue > 0 ? 3 : 0, row.sharePercent))}%`,
+                              backgroundColor: row.color,
+                            }}
+                          />
+                        </div>
+                        <span className="shrink-0 text-[10px] font-bold tabular-nums text-gray-500">
+                          {formatNumberEs(row.sharePercent, { maxFraction: 0 })}%
+                        </span>
+                      </div>
+
+                      <p className="mt-1 truncate text-[10px] text-gray-500">
                         {formatNumberEs(row.orderCount, { maxFraction: 0 })} ped.
-                      </span>
-                    </span>
-                  </button>
-                );
-              })
-            )}
-          </div>
+                        {avgTicket > 0 ? ` · ticket ${formatMoneyEs(avgTicket)}` : ''}
+                        {row.units > 0
+                          ? ` · ${formatNumberEs(row.units, { maxFraction: 0 })} uds`
+                          : ''}
+                      </p>
+                      {foodTxt ? (
+                        <p className="truncate text-[10px] text-gray-400">{foodTxt}</p>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
 
           <IntegratorsBlock
             rows={integratorRows}

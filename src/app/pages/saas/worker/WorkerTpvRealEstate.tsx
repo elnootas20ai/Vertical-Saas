@@ -1,552 +1,696 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router';
-import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
-import { useAuth } from '../../../context/AuthContext';
-import { useModalClose } from '../../../hooks/useModalClose';
 import {
   Building2,
   MapPin,
-  Users,
-  Calendar,
   ArrowLeft,
   Search,
-  Eye,
-  X,
-  CheckCircle2,
+  Plus,
+  Loader2,
   Home,
-  KeyRound,
-  Ban,
-  Clock,
+  Calendar,
+  ChevronRight,
 } from 'lucide-react';
+import { useAuth } from '../../../context/AuthContext';
+import { createVerticalApi, type VerticalEntity } from '../../../lib/verticalApiFactory';
+import { useRealEstateScope } from '../../../lib/realEstateScope';
+import {
+  RE_SITUACION_LABEL,
+  RE_SIGUIENTE_ACCION_LABEL,
+  situacionToResultado,
+  type ReSituacion,
+  type ReSiguienteAccion,
+} from '../../../verticals/realEstate';
 
-type VisitDealType = 'compra' | 'alquiler';
-type VisitStatus = 'programada' | 'realizada' | 'cancelada';
-type PropertyKind = 'piso' | 'casa' | 'local' | 'oficina';
-type PropertyStatus = 'disponible' | 'reservado' | 'vendido';
-
-interface PropertyVisit {
-  id: string;
-  date: string;
-  time: string;
-  propertyAddress: string;
-  clientName: string;
-  dealType: VisitDealType;
-  status: VisitStatus;
-  feedbackNotes: string;
+interface ReProperty extends VerticalEntity {
+  referencia?: string;
+  tipo?: string;
+  direccion?: string;
+  m2?: number;
+  habitaciones?: number;
+  precio?: number;
+  operacion?: string;
+  estado?: string;
 }
 
-interface ListedProperty {
-  id: string;
-  address: string;
-  kind: PropertyKind;
-  price: number;
-  status: PropertyStatus;
+interface ReVisit extends VerticalEntity {
+  propiedad?: string;
+  propiedadId?: string;
+  direccion?: string;
+  cliente?: string;
+  telefono?: string;
+  email?: string;
+  fecha?: string;
+  hora?: string;
+  agente?: string;
+  agenteUserId?: string;
+  tipoVisita?: string;
+  situacion?: string;
+  resultado?: string;
+  siguienteAccion?: string;
+  fechaSeguimiento?: string;
+  notas?: string;
 }
 
-const DEAL_LABEL: Record<VisitDealType, string> = {
-  compra: 'Compra',
-  alquiler: 'Alquiler',
-};
+type Screen = 'hoy' | 'cartera' | 'flow';
+type FlowStep = 'direccion' | 'puerta' | 'contacto' | 'siguiente';
 
-const VISIT_STATUS_CFG: Record<VisitStatus, { label: string; color: string; bg: string }> = {
-  programada: { label: 'Programada', color: 'text-blue-700 dark:text-blue-300', bg: 'bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800' },
-  realizada: { label: 'Realizada', color: 'text-emerald-700 dark:text-emerald-300', bg: 'bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200 dark:border-emerald-800' },
-  cancelada: { label: 'Cancelada', color: 'text-gray-600 dark:text-gray-400', bg: 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700' },
-};
+const SITUACIONES_PUERTA: ReSituacion[] = [
+  'nadie',
+  'hablo',
+  'interesado',
+  'no_interesado',
+  'segunda_visita',
+  'pendiente_doc',
+];
 
-const PROPERTY_KIND_LABEL: Record<PropertyKind, string> = {
-  piso: 'Piso',
-  casa: 'Casa',
-  local: 'Local',
-  oficina: 'Oficina',
-};
-
-const PROPERTY_STATUS_CFG: Record<PropertyStatus, { label: string; color: string; bg: string }> = {
-  disponible: { label: 'Disponible', color: 'text-emerald-700 dark:text-emerald-300', bg: 'bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200 dark:border-emerald-800' },
-  reservado: { label: 'Reservado', color: 'text-amber-700 dark:text-amber-300', bg: 'bg-amber-50 dark:bg-amber-900/30 border-amber-200 dark:border-amber-800' },
-  vendido: { label: 'Vendido', color: 'text-violet-700 dark:text-violet-300', bg: 'bg-violet-50 dark:bg-violet-900/30 border-violet-200 dark:border-violet-800' },
-};
-
-function formatCurrency(n: number) {
-  return n.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' });
-}
+const NEXT_ACTIONS: Exclude<ReSiguienteAccion, ''>[] = ['llamar', 'segunda_visita', 'descartar'];
 
 function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function seedVisits(): PropertyVisit[] {
-  const d = todayStr();
-  return [
-    {
-      id: uuidv4(),
-      date: d,
-      time: '10:00',
-      propertyAddress: 'Calle Mayor 12, 3º B, Madrid',
-      clientName: 'Ana García',
-      dealType: 'compra',
-      status: 'programada',
-      feedbackNotes: '',
-    },
-    {
-      id: uuidv4(),
-      date: d,
-      time: '12:30',
-      propertyAddress: 'Av. Diagonal 440, Barcelona',
-      clientName: 'Luis Fernández',
-      dealType: 'alquiler',
-      status: 'programada',
-      feedbackNotes: '',
-    },
-    {
-      id: uuidv4(),
-      date: d,
-      time: '09:00',
-      propertyAddress: 'Plaza España 2, Valencia',
-      clientName: 'María López',
-      dealType: 'compra',
-      status: 'realizada',
-      feedbackNotes: 'Interesada, pide segunda visita con pareja.',
-    },
-  ];
+function formatCurrency(n: number) {
+  return n.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' });
 }
 
-function seedProperties(): ListedProperty[] {
-  return [
-    { id: uuidv4(), address: 'Calle Mayor 12, 3º B, Madrid', kind: 'piso', price: 285000, status: 'disponible' },
-    { id: uuidv4(), address: 'C/ Rosalía 8, Sevilla', kind: 'casa', price: 420000, status: 'reservado' },
-    { id: uuidv4(), address: 'Gran Vía 45, local 2, Bilbao', kind: 'local', price: 195000, status: 'disponible' },
-    { id: uuidv4(), address: 'Paseo de la Castellana 200, Madrid', kind: 'oficina', price: 890000, status: 'vendido' },
-  ];
+function visitAddress(v: ReVisit): string {
+  return String(v.direccion || v.propiedad || '').trim() || 'Sin dirección';
+}
+
+function agentName(user: { fullName?: string; firstName?: string; lastName?: string } | null | undefined): string {
+  if (!user) return 'Agente';
+  if (user.fullName) return user.fullName;
+  return [user.firstName, user.lastName].filter(Boolean).join(' ') || 'Agente';
 }
 
 export function WorkerTpvRealEstate() {
   const { user } = useAuth();
+  const { userId: dataUserId, listOptions, ready } = useRealEstateScope();
   const navigate = useNavigate();
-  const agentLabel = user?.fullName || [user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'Agente';
 
-  const [activeTab, setActiveTab] = useState<'visitas' | 'propiedades'>('visitas');
-  const [visits, setVisits] = useState<PropertyVisit[]>(seedVisits);
-  const [properties, setProperties] = useState<ListedProperty[]>(seedProperties);
+  const selfUserId = String(user?.user_id || user?.id || '').trim();
+  const myName = agentName(user);
+
+  const visitsApi = useMemo(() => createVerticalApi<ReVisit>('realestate', 'visits'), []);
+  const propsApi = useMemo(() => createVerticalApi<ReProperty>('realestate', 'properties'), []);
+
+  const [screen, setScreen] = useState<Screen>('hoy');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [visits, setVisits] = useState<ReVisit[]>([]);
+  const [properties, setProperties] = useState<ReProperty[]>([]);
   const [search, setSearch] = useState('');
-  const [visitStatusFilter, setVisitStatusFilter] = useState<VisitStatus | 'todas'>('todas');
-  const [propertyStatusFilter, setPropertyStatusFilter] = useState<PropertyStatus | 'todas'>('todas');
-  const [propertyKindFilter, setPropertyKindFilter] = useState<PropertyKind | 'todas'>('todas');
 
-  const [completeModalVisit, setCompleteModalVisit] = useState<PropertyVisit | null>(null);
-  const [completeNotes, setCompleteNotes] = useState('');
-
-  useModalClose(!!completeModalVisit, () => {
-    setCompleteModalVisit(null);
-    setCompleteNotes('');
-  });
+  const [flowStep, setFlowStep] = useState<FlowStep>('direccion');
+  const [editingVisitId, setEditingVisitId] = useState<string | null>(null);
+  const [direccion, setDireccion] = useState('');
+  const [propiedadId, setPropiedadId] = useState('');
+  const [situacion, setSituacion] = useState<ReSituacion>('hablo');
+  const [cliente, setCliente] = useState('');
+  const [telefono, setTelefono] = useState('');
+  const [email, setEmail] = useState('');
+  const [notas, setNotas] = useState('');
+  const [siguienteAccion, setSiguienteAccion] = useState<Exclude<ReSiguienteAccion, ''>>('llamar');
+  const [fechaSeguimiento, setFechaSeguimiento] = useState('');
 
   const today = todayStr();
 
-  const stats = useMemo(() => {
-    const visitasHoy = visits.filter((v) => v.date === today).length;
-    const propiedadesActivas = properties.filter((p) => p.status === 'disponible' || p.status === 'reservado').length;
-    const operacionesCerradas =
-      properties.filter((p) => p.status === 'vendido').length + visits.filter((v) => v.status === 'realizada').length;
-    return { visitasHoy, propiedadesActivas, operacionesCerradas };
-  }, [visits, properties, today]);
+  const loadAll = useCallback(async () => {
+    if (!dataUserId || !ready) {
+      setVisits([]);
+      setProperties([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      const [vList, pList] = await Promise.all([
+        visitsApi.list(dataUserId, listOptions),
+        propsApi.list(dataUserId, listOptions),
+      ]);
+      setVisits(vList);
+      setProperties(pList);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudieron cargar los datos');
+    } finally {
+      setLoading(false);
+    }
+  }, [dataUserId, ready, listOptions, visitsApi, propsApi]);
 
-  const filteredVisits = useMemo(() => {
+  useEffect(() => {
+    void loadAll();
+  }, [loadAll]);
+
+  const isMine = useCallback(
+    (v: ReVisit) => {
+      const aid = String(v.agenteUserId || '').trim();
+      if (aid && selfUserId && aid === selfUserId) return true;
+      const an = String(v.agente || '').trim().toLowerCase();
+      if (an && myName && an === myName.toLowerCase()) return true;
+      if (!aid && !an) return true;
+      return false;
+    },
+    [selfUserId, myName],
+  );
+
+  const myTodayVisits = useMemo(() => {
     const q = search.trim().toLowerCase();
     return visits
-      .filter((v) => v.date === today)
-      .filter((v) => (visitStatusFilter === 'todas' ? true : v.status === visitStatusFilter))
+      .filter((v) => String(v.fecha || '').slice(0, 10) === today)
+      .filter(isMine)
       .filter((v) => {
         if (!q) return true;
         return (
-          v.propertyAddress.toLowerCase().includes(q) ||
-          v.clientName.toLowerCase().includes(q) ||
-          v.id.toLowerCase().includes(q)
+          visitAddress(v).toLowerCase().includes(q) ||
+          String(v.cliente || '').toLowerCase().includes(q) ||
+          String(v.telefono || '').includes(q)
         );
       })
-      .sort((a, b) => a.time.localeCompare(b.time));
-  }, [visits, search, visitStatusFilter, today]);
+      .sort((a, b) => String(a.hora || '').localeCompare(String(b.hora || '')));
+  }, [visits, today, isMine, search]);
+
+  const followUps = useMemo(() => {
+    return visits
+      .filter(isMine)
+      .filter((v) => {
+        const fs = String(v.fechaSeguimiento || '').slice(0, 10);
+        return fs && fs <= today && v.resultado !== 'descartado' && v.siguienteAccion !== 'descartar';
+      });
+  }, [visits, isMine, today]);
 
   const filteredProperties = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return properties
-      .filter((p) => (propertyStatusFilter === 'todas' ? true : p.status === propertyStatusFilter))
-      .filter((p) => (propertyKindFilter === 'todas' ? true : p.kind === propertyKindFilter))
-      .filter((p) => {
-        if (!q) return true;
-        return p.address.toLowerCase().includes(q) || p.id.toLowerCase().includes(q);
-      });
-  }, [properties, search, propertyStatusFilter, propertyKindFilter]);
+    return properties.filter((p) => {
+      if (!q) return true;
+      return (
+        String(p.direccion || '').toLowerCase().includes(q) ||
+        String(p.referencia || '').toLowerCase().includes(q)
+      );
+    });
+  }, [properties, search]);
 
-  const openCompleteModal = useCallback((v: PropertyVisit) => {
-    setCompleteModalVisit(v);
-    setCompleteNotes(v.feedbackNotes || '');
-  }, []);
+  const resetFlow = () => {
+    setFlowStep('direccion');
+    setEditingVisitId(null);
+    setDireccion('');
+    setPropiedadId('');
+    setSituacion('hablo');
+    setCliente('');
+    setTelefono('');
+    setEmail('');
+    setNotas('');
+    setSiguienteAccion('llamar');
+    setFechaSeguimiento('');
+  };
 
-  const confirmCompleteVisit = useCallback(() => {
-    if (!completeModalVisit) return;
-    setVisits((prev) =>
-      prev.map((x) =>
-        x.id === completeModalVisit.id
-          ? { ...x, status: 'realizada' as const, feedbackNotes: completeNotes.trim() }
-          : x,
-      ),
+  const startCaptacion = (prefill?: { direccion?: string; propiedadId?: string; visit?: ReVisit }) => {
+    resetFlow();
+    if (prefill?.visit) {
+      const v = prefill.visit;
+      setEditingVisitId(v._id);
+      setDireccion(visitAddress(v));
+      setPropiedadId(String(v.propiedadId || ''));
+      setSituacion((v.situacion as ReSituacion) || 'hablo');
+      setCliente(String(v.cliente || ''));
+      setTelefono(String(v.telefono || ''));
+      setEmail(String(v.email || ''));
+      setNotas(String(v.notas || ''));
+      const next = (v.siguienteAccion as Exclude<ReSiguienteAccion, ''>) || 'llamar';
+      setSiguienteAccion(next === 'descartar' || next === 'segunda_visita' || next === 'llamar' ? next : 'llamar');
+      setFechaSeguimiento(String(v.fechaSeguimiento || '').slice(0, 10));
+      setFlowStep(v.situacion && v.situacion !== 'pendiente' ? 'contacto' : 'puerta');
+    } else {
+      setDireccion(prefill?.direccion || '');
+      setPropiedadId(prefill?.propiedadId || '');
+    }
+    setScreen('flow');
+  };
+
+  const saveVisit = async () => {
+    if (!dataUserId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const addr = direccion.trim();
+    if (!addr) {
+      toast.error('Indica la dirección');
+      setFlowStep('direccion');
+      return;
+    }
+
+    const resultado =
+      siguienteAccion === 'descartar' ? 'descartado' : situacionToResultado(situacion);
+    let fs = fechaSeguimiento;
+    if (siguienteAccion === 'llamar' || siguienteAccion === 'segunda_visita') {
+      if (!fs) {
+        const d = new Date();
+        d.setDate(d.getDate() + (siguienteAccion === 'segunda_visita' ? 3 : 1));
+        fs = d.toISOString().slice(0, 10);
+      }
+    } else {
+      fs = '';
+    }
+
+    const payload: Partial<ReVisit> = {
+      propiedad: addr,
+      direccion: addr,
+      propiedadId: propiedadId || undefined,
+      cliente: cliente.trim(),
+      telefono: telefono.trim(),
+      email: email.trim(),
+      fecha: today,
+      hora: new Date().toTimeString().slice(0, 5),
+      agente: myName,
+      agenteUserId: selfUserId,
+      tipoVisita: editingVisitId ? 'seguimiento' : 'captacion',
+      situacion,
+      resultado,
+      siguienteAccion: siguienteAccion === 'descartar' ? 'descartar' : siguienteAccion,
+      fechaSeguimiento: fs || undefined,
+      notas: notas.trim(),
+    };
+
+    setSaving(true);
+    try {
+      if (editingVisitId) {
+        await visitsApi.update(dataUserId, editingVisitId, payload, listOptions);
+      } else {
+        await visitsApi.create(dataUserId, payload, listOptions);
+      }
+      toast.success('Visita guardada');
+      resetFlow();
+      setScreen('hoy');
+      await loadAll();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo guardar');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const scheduleFromProperty = (p: ReProperty) => {
+    startCaptacion({
+      direccion: String(p.direccion || ''),
+      propiedadId: p._id,
+    });
+  };
+
+  if (screen === 'flow') {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col">
+        <header className="sticky top-0 z-10 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-4 py-3 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              if (flowStep === 'direccion') {
+                resetFlow();
+                setScreen('hoy');
+              } else if (flowStep === 'puerta') setFlowStep('direccion');
+              else if (flowStep === 'contacto') setFlowStep('puerta');
+              else setFlowStep('contacto');
+            }}
+            className="p-2 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">
+              {editingVisitId ? 'Completar visita' : 'Nueva captación'}
+            </p>
+            <p className="text-xs text-gray-500">
+              {flowStep === 'direccion' && '1/4 Dirección'}
+              {flowStep === 'puerta' && '2/4 En puerta'}
+              {flowStep === 'contacto' && '3/4 Contacto'}
+              {flowStep === 'siguiente' && '4/4 Siguiente paso'}
+            </p>
+          </div>
+        </header>
+
+        <main className="flex-1 p-4 max-w-lg mx-auto w-full space-y-4">
+          {flowStep === 'direccion' && (
+            <>
+              <label className="block">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Dirección *</span>
+                <input
+                  value={direccion}
+                  onChange={(e) => {
+                    setDireccion(e.target.value);
+                    setPropiedadId('');
+                  }}
+                  placeholder="Calle, número, piso…"
+                  className="mt-1 w-full px-3 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-base"
+                />
+              </label>
+              {properties.length > 0 ? (
+                <div>
+                  <p className="text-xs font-semibold uppercase text-gray-500 mb-2">O elige de cartera</p>
+                  <ul className="space-y-2 max-h-64 overflow-y-auto">
+                    {properties.slice(0, 20).map((p) => (
+                      <li key={p._id}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDireccion(String(p.direccion || ''));
+                            setPropiedadId(p._id);
+                          }}
+                          className={`w-full text-left px-3 py-2.5 rounded-xl border text-sm ${
+                            propiedadId === p._id
+                              ? 'border-[var(--v-blue,#2563eb)] bg-blue-50 dark:bg-blue-950/40'
+                              : 'border-gray-200 dark:border-gray-700'
+                          }`}
+                        >
+                          {p.direccion || p.referencia || p._id}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              <button
+                type="button"
+                disabled={!direccion.trim()}
+                onClick={() => setFlowStep('puerta')}
+                className="w-full py-3 rounded-xl bg-[var(--v-blue,#2563eb)] text-white font-semibold disabled:opacity-40 inline-flex items-center justify-center gap-2"
+              >
+                Continuar <ChevronRight className="w-4 h-4" />
+              </button>
+            </>
+          )}
+
+          {flowStep === 'puerta' && (
+            <>
+              <p className="text-sm text-gray-600 dark:text-gray-300">
+                <MapPin className="w-4 h-4 inline mr-1" />
+                {direccion}
+              </p>
+              <p className="text-sm font-medium text-gray-800 dark:text-gray-100">¿Qué pasó en puerta?</p>
+              <div className="grid grid-cols-1 gap-2">
+                {SITUACIONES_PUERTA.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setSituacion(s)}
+                    className={`px-4 py-3 rounded-xl border text-left text-sm font-medium ${
+                      situacion === s
+                        ? 'border-[var(--v-blue,#2563eb)] bg-blue-50 dark:bg-blue-950/40 text-blue-800 dark:text-blue-200'
+                        : 'border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-200'
+                    }`}
+                  >
+                    {RE_SITUACION_LABEL[s]}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => setFlowStep('contacto')}
+                className="w-full py-3 rounded-xl bg-[var(--v-blue,#2563eb)] text-white font-semibold inline-flex items-center justify-center gap-2"
+              >
+                Continuar <ChevronRight className="w-4 h-4" />
+              </button>
+            </>
+          )}
+
+          {flowStep === 'contacto' && (
+            <>
+              <label className="block">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Nombre</span>
+                <input
+                  value={cliente}
+                  onChange={(e) => setCliente(e.target.value)}
+                  className="mt-1 w-full px-3 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900"
+                />
+              </label>
+              <label className="block">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Teléfono</span>
+                <input
+                  value={telefono}
+                  onChange={(e) => setTelefono(e.target.value)}
+                  inputMode="tel"
+                  className="mt-1 w-full px-3 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900"
+                />
+              </label>
+              <label className="block">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Email</span>
+                <input
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  inputMode="email"
+                  className="mt-1 w-full px-3 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900"
+                />
+              </label>
+              <label className="block">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Notas</span>
+                <textarea
+                  value={notas}
+                  onChange={(e) => setNotas(e.target.value)}
+                  rows={3}
+                  className="mt-1 w-full px-3 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 resize-none"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => setFlowStep('siguiente')}
+                className="w-full py-3 rounded-xl bg-[var(--v-blue,#2563eb)] text-white font-semibold inline-flex items-center justify-center gap-2"
+              >
+                Continuar <ChevronRight className="w-4 h-4" />
+              </button>
+            </>
+          )}
+
+          {flowStep === 'siguiente' && (
+            <>
+              <p className="text-sm font-medium text-gray-800 dark:text-gray-100">Siguiente paso</p>
+              <div className="grid grid-cols-1 gap-2">
+                {NEXT_ACTIONS.map((a) => (
+                  <button
+                    key={a}
+                    type="button"
+                    onClick={() => setSiguienteAccion(a)}
+                    className={`px-4 py-3 rounded-xl border text-left text-sm font-medium ${
+                      siguienteAccion === a
+                        ? 'border-[var(--v-blue,#2563eb)] bg-blue-50 dark:bg-blue-950/40'
+                        : 'border-gray-200 dark:border-gray-700'
+                    }`}
+                  >
+                    {RE_SIGUIENTE_ACCION_LABEL[a]}
+                  </button>
+                ))}
+              </div>
+              {siguienteAccion !== 'descartar' ? (
+                <label className="block">
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Fecha seguimiento</span>
+                  <input
+                    type="date"
+                    value={fechaSeguimiento}
+                    onChange={(e) => setFechaSeguimiento(e.target.value)}
+                    className="mt-1 w-full px-3 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900"
+                  />
+                </label>
+              ) : null}
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => void saveVisit()}
+                className="w-full py-3 rounded-xl bg-[var(--v-blue,#2563eb)] text-white font-semibold disabled:opacity-50 inline-flex items-center justify-center gap-2"
+              >
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                Guardar visita
+              </button>
+            </>
+          )}
+        </main>
+      </div>
     );
-    toast.success('Visita marcada como realizada');
-    setCompleteModalVisit(null);
-    setCompleteNotes('');
-  }, [completeModalVisit, completeNotes]);
-
-  const cancelVisit = useCallback((id: string) => {
-    setVisits((prev) => prev.map((v) => (v.id === id ? { ...v, status: 'cancelada' as const } : v)));
-    toast.message('Visita cancelada');
-  }, []);
-
-  const updatePropertyStatus = useCallback((id: string, status: PropertyStatus) => {
-    setProperties((prev) => prev.map((p) => (p.id === id ? { ...p, status } : p)));
-    toast.success(`Estado: ${PROPERTY_STATUS_CFG[status].label}`);
-  }, []);
+  }
 
   return (
-    <div className="flex flex-col h-full min-h-0">
-      <div className="shrink-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-4 py-3">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <button
-              type="button"
-              onClick={() => navigate('/saas/worker/tasks')}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors shrink-0"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              <span className="hidden sm:inline">Volver</span>
-            </button>
-            <div className="h-6 w-px bg-gray-200 dark:bg-gray-700 shrink-0" />
-            <div className="w-10 h-10 bg-teal-100 dark:bg-teal-900/30 rounded-xl flex items-center justify-center shrink-0">
-              <Building2 className="w-5 h-5 text-teal-600 dark:text-teal-400" />
-            </div>
-            <div className="min-w-0">
-              <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100 truncate">Mi Puesto - Inmobiliaria</h1>
-              <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{agentLabel}</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-3 gap-2 mb-3">
-          <div className="rounded-2xl border-2 border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/20 p-2.5 text-center">
-            <p className="text-lg font-bold text-teal-800 dark:text-teal-300">{stats.visitasHoy}</p>
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-teal-700 dark:text-teal-400">Visitas hoy</p>
-          </div>
-          <div className="rounded-2xl border-2 border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 p-2.5 text-center">
-            <p className="text-lg font-bold text-emerald-800 dark:text-emerald-300">{stats.propiedadesActivas}</p>
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">Prop. activas</p>
-          </div>
-          <div className="rounded-2xl border-2 border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-900/20 p-2.5 text-center">
-            <p className="text-lg font-bold text-violet-800 dark:text-violet-300">{stats.operacionesCerradas}</p>
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-400">Op. cerradas</p>
-          </div>
-        </div>
-
-        <div className="flex gap-1.5 mb-2">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col">
+      <header className="sticky top-0 z-10 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-4 py-3">
+        <div className="flex items-center gap-3 mb-3">
           <button
             type="button"
-            onClick={() => setActiveTab('visitas')}
-            className={`flex-1 px-3 py-2 rounded-2xl text-xs font-semibold border-2 transition-all ${
-              activeTab === 'visitas'
-                ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 border-gray-900 dark:border-gray-100 shadow-md'
-                : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-transparent hover:border-gray-300 dark:hover:border-gray-600'
+            onClick={() => navigate(-1)}
+            className="p-2 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">TPV Inmobiliaria</p>
+            <p className="text-xs text-gray-500 truncate">{myName}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => startCaptacion()}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[var(--v-blue,#2563eb)] text-white text-sm font-semibold"
+          >
+            <Plus className="w-4 h-4" />
+            Captación
+          </button>
+        </div>
+        <div className="flex rounded-xl border border-gray-200 dark:border-gray-700 p-0.5 bg-gray-50 dark:bg-gray-950">
+          <button
+            type="button"
+            onClick={() => setScreen('hoy')}
+            className={`flex-1 inline-flex items-center justify-center py-2.5 text-sm font-medium rounded-lg text-center ${
+              screen === 'hoy' ? 'bg-white dark:bg-gray-800 shadow-sm text-gray-900 dark:text-white' : 'text-gray-500'
             }`}
           >
-            <span className="inline-flex items-center justify-center gap-1.5">
-              <Calendar className="w-3.5 h-3.5" />
-              Visitas
-            </span>
+            Hoy
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab('propiedades')}
-            className={`flex-1 px-3 py-2 rounded-2xl text-xs font-semibold border-2 transition-all ${
-              activeTab === 'propiedades'
-                ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 border-gray-900 dark:border-gray-100 shadow-md'
-                : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-transparent hover:border-gray-300 dark:hover:border-gray-600'
+            onClick={() => setScreen('cartera')}
+            className={`flex-1 inline-flex items-center justify-center py-2.5 text-sm font-medium rounded-lg text-center ${
+              screen === 'cartera' ? 'bg-white dark:bg-gray-800 shadow-sm text-gray-900 dark:text-white' : 'text-gray-500'
             }`}
           >
-            <span className="inline-flex items-center justify-center gap-1.5">
-              <Home className="w-3.5 h-3.5" />
-              Propiedades
-            </span>
+            Cartera
           </button>
         </div>
+      </header>
 
-        {activeTab === 'visitas' && (
-          <div className="flex flex-wrap gap-1.5 mb-2">
-            {(['todas', 'programada', 'realizada', 'cancelada'] as const).map((f) => (
-              <button
-                key={f}
-                type="button"
-                onClick={() => setVisitStatusFilter(f)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold border-2 transition-all ${
-                  visitStatusFilter === f
-                    ? 'border-gray-900 dark:border-gray-100 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900'
-                    : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400'
-                }`}
-              >
-                {f === 'todas' ? 'Todas' : VISIT_STATUS_CFG[f].label}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {activeTab === 'propiedades' && (
-          <div className="flex flex-wrap gap-1.5 mb-2">
-            <div className="flex flex-wrap gap-1.5">
-              <span className="text-[10px] font-bold uppercase text-gray-400 self-center mr-1">Estado</span>
-              {(['todas', 'disponible', 'reservado', 'vendido'] as const).map((f) => (
-                <button
-                  key={f}
-                  type="button"
-                  onClick={() => setPropertyStatusFilter(f)}
-                  className={`px-2.5 py-1 rounded-xl text-xs font-semibold border-2 transition-all ${
-                    propertyStatusFilter === f
-                      ? 'border-gray-900 dark:border-gray-100 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900'
-                      : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400'
-                  }`}
-                >
-                  {f === 'todas' ? 'Todos' : PROPERTY_STATUS_CFG[f].label}
-                </button>
-              ))}
-            </div>
-            <div className="flex flex-wrap gap-1.5 w-full sm:w-auto">
-              <span className="text-[10px] font-bold uppercase text-gray-400 self-center mr-1">Tipo</span>
-              {(['todas', 'piso', 'casa', 'local', 'oficina'] as const).map((f) => (
-                <button
-                  key={f}
-                  type="button"
-                  onClick={() => setPropertyKindFilter(f)}
-                  className={`px-2.5 py-1 rounded-xl text-xs font-semibold border-2 transition-all ${
-                    propertyKindFilter === f
-                      ? 'border-teal-600 dark:border-teal-400 bg-teal-50 dark:bg-teal-900/30 text-teal-900 dark:text-teal-200'
-                      : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400'
-                  }`}
-                >
-                  {f === 'todas' ? 'Todos' : PROPERTY_KIND_LABEL[f]}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
+      <div className="px-4 pt-3">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
-            type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder={activeTab === 'visitas' ? 'Buscar dirección, cliente o UUID…' : 'Buscar dirección o UUID…'}
-            className="w-full pl-9 pr-9 py-2 rounded-2xl border-2 border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 text-sm placeholder:text-gray-400 focus:ring-2 focus:ring-teal-500 focus:border-transparent outline-none"
+            placeholder={screen === 'hoy' ? 'Buscar visita…' : 'Buscar propiedad…'}
+            className="w-full pl-10 pr-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm"
           />
-          {search && (
-            <button
-              type="button"
-              onClick={() => setSearch('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700"
-            >
-              <X className="w-4 h-4 text-gray-400" />
-            </button>
-          )}
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto p-4">
-        {activeTab === 'visitas' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-            {filteredVisits.length === 0 ? (
-              <div className="col-span-full flex flex-col items-center justify-center py-16 text-gray-400 rounded-2xl border-2 border-dashed border-gray-200 dark:border-gray-700">
-                <Eye className="w-10 h-10 mb-2 opacity-60" />
-                <p className="text-sm font-medium">No hay visitas que coincidan</p>
-              </div>
-            ) : (
-              filteredVisits.map((v) => {
-                const st = VISIT_STATUS_CFG[v.status];
-                return (
-                  <div
-                    key={v.id}
-                    className={`rounded-2xl border-2 p-4 transition-all hover:shadow-lg ${st.bg}`}
-                  >
-                    <div className="flex items-start justify-between gap-2 mb-2">
-                      <div className="min-w-0">
-                        <p className="font-mono text-[10px] text-gray-500 dark:text-gray-400 truncate" title={v.id}>
-                          {v.id}
-                        </p>
-                        <p className="text-lg font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-                          <Clock className="w-5 h-5 text-teal-600 dark:text-teal-400 shrink-0" />
-                          {v.time}
-                        </p>
-                      </div>
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-semibold shrink-0 border ${st.color} ${st.bg}`}>
-                        {st.label}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 mb-1">
-                      <MapPin className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-                      <span className="truncate">{v.propertyAddress}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 mb-2">
-                      <Users className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-                      <span className="truncate">{v.clientName}</span>
-                    </div>
-                    <div className="flex items-center gap-2 mb-3">
-                      <span
-                        className={`text-xs px-2 py-0.5 rounded-lg font-semibold border-2 ${
-                          v.dealType === 'compra'
-                            ? 'border-blue-300 bg-blue-50 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200 dark:border-blue-700'
-                            : 'border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-700'
-                        }`}
-                      >
-                        {v.dealType === 'compra' ? <KeyRound className="w-3 h-3 inline mr-1" /> : null}
-                        {DEAL_LABEL[v.dealType]}
-                      </span>
-                    </div>
-                    {v.feedbackNotes && v.status === 'realizada' && (
-                      <p className="text-xs text-gray-600 dark:text-gray-400 border-t border-gray-200 dark:border-gray-600 pt-2 mt-1 line-clamp-3">
-                        {v.feedbackNotes}
-                      </p>
-                    )}
-                    {v.status === 'programada' && (
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        <button
-                          type="button"
-                          onClick={() => openCompleteModal(v)}
-                          className="flex-1 min-w-[120px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 border-2 border-emerald-700"
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          Completar visita
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => cancelVisit(v.id)}
-                          className="inline-flex items-center justify-center gap-1 px-3 py-2 rounded-xl bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 text-xs font-semibold border-2 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
-                        >
-                          <Ban className="w-3.5 h-3.5" />
-                          Cancelar
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })
-            )}
+      <main className="flex-1 p-4 max-w-lg mx-auto w-full space-y-3 pb-24">
+        {loading ? (
+          <div className="flex justify-center py-16">
+            <Loader2 className="w-8 h-8 animate-spin text-[var(--v-blue,#2563eb)]" />
           </div>
-        )}
-
-        {activeTab === 'propiedades' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-            {filteredProperties.length === 0 ? (
-              <div className="col-span-full flex flex-col items-center justify-center py-16 text-gray-400 rounded-2xl border-2 border-dashed border-gray-200 dark:border-gray-700">
-                <Building2 className="w-10 h-10 mb-2 opacity-60" />
-                <p className="text-sm font-medium">No hay propiedades que coincidan</p>
+        ) : screen === 'hoy' ? (
+          <>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3">
+                <p className="text-xs text-gray-500">Visitas hoy</p>
+                <p className="text-xl font-bold text-gray-900 dark:text-white">{myTodayVisits.length}</p>
               </div>
-            ) : (
-              filteredProperties.map((p) => {
-                const st = PROPERTY_STATUS_CFG[p.status];
-                return (
-                  <div key={p.id} className={`rounded-2xl border-2 p-4 transition-all hover:shadow-lg ${st.bg}`}>
-                    <div className="flex items-start justify-between gap-2 mb-2">
-                      <p className="font-mono text-[10px] text-gray-500 dark:text-gray-400 truncate flex-1" title={p.id}>
-                        {p.id}
-                      </p>
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-semibold shrink-0 border ${st.color}`}>
-                        {st.label}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1">
-                      <Home className="w-4 h-4 text-teal-600 dark:text-teal-400 shrink-0" />
-                      <span className="truncate">{PROPERTY_KIND_LABEL[p.kind]}</span>
-                    </div>
-                    <div className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300 mb-3">
-                      <MapPin className="w-3.5 h-3.5 text-gray-400 shrink-0 mt-0.5" />
-                      <span>{p.address}</span>
-                    </div>
-                    <p className="text-base font-bold text-gray-900 dark:text-gray-100 mb-3">{formatCurrency(p.price)}</p>
-                    <label className="block text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 mb-1">
-                      Cambio rápido de estado
-                    </label>
-                    <select
-                      value={p.status}
-                      onChange={(e) => updatePropertyStatus(p.id, e.target.value as PropertyStatus)}
-                      className="w-full rounded-xl border-2 border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm py-2 px-3 font-medium text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-teal-500 outline-none"
-                    >
-                      {(Object.keys(PROPERTY_STATUS_CFG) as PropertyStatus[]).map((s) => (
-                        <option key={s} value={s}>
-                          {PROPERTY_STATUS_CFG[s].label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        )}
-      </div>
-
-      {completeModalVisit && (
-        <div
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/50"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="visit-complete-title"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) {
-              setCompleteModalVisit(null);
-              setCompleteNotes('');
-            }
-          }}
-        >
-          <div
-            className="w-full max-w-md rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-xl p-5"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between mb-3">
-              <h2 id="visit-complete-title" className="text-lg font-bold text-gray-900 dark:text-gray-100">
-                Completar visita
-              </h2>
-              <button
-                type="button"
-                onClick={() => {
-                  setCompleteModalVisit(null);
-                  setCompleteNotes('');
-                }}
-                className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
-              >
-                <X className="w-5 h-5 text-gray-500" />
-              </button>
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3">
+                <p className="text-xs text-gray-500">Seguimientos</p>
+                <p className="text-xl font-bold text-amber-600">{followUps.length}</p>
+              </div>
             </div>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">
-              {completeModalVisit.time} · {completeModalVisit.clientName}
+
+            {followUps.length > 0 ? (
+              <div>
+                <p className="text-xs font-semibold uppercase text-amber-700 mb-2">Pendientes de seguimiento</p>
+                <ul className="space-y-2">
+                  {followUps.slice(0, 5).map((v) => (
+                    <li key={v._id}>
+                      <button
+                        type="button"
+                        onClick={() => startCaptacion({ visit: v })}
+                        className="w-full text-left rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30 px-3 py-3"
+                      >
+                        <p className="text-sm font-medium text-gray-900 dark:text-white">{visitAddress(v)}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          {String(v.fechaSeguimiento || '').slice(0, 10)}
+                          {v.cliente ? ` · ${v.cliente}` : ''}
+                        </p>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            <div>
+              <p className="text-xs font-semibold uppercase text-gray-500 mb-2 flex items-center gap-1">
+                <Calendar className="w-3.5 h-3.5" /> Hoy
+              </p>
+              {myTodayVisits.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 p-6 text-center">
+                  <p className="text-sm text-gray-500 mb-3">No hay visitas asignadas hoy</p>
+                  <button
+                    type="button"
+                    onClick={() => startCaptacion()}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[var(--v-blue,#2563eb)] text-white text-sm font-semibold"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Nueva captación
+                  </button>
+                </div>
+              ) : (
+                <ul className="space-y-2">
+                  {myTodayVisits.map((v) => {
+                    const sit = (v.situacion || 'pendiente') as ReSituacion;
+                    return (
+                      <li key={v._id}>
+                        <button
+                          type="button"
+                          onClick={() => startCaptacion({ visit: v })}
+                          className="w-full text-left rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-3"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                                {visitAddress(v)}
+                              </p>
+                              <p className="text-xs text-gray-500 mt-0.5">
+                                {v.hora || '—'} · {RE_SITUACION_LABEL[sit] || sit}
+                                {v.cliente ? ` · ${v.cliente}` : ''}
+                              </p>
+                            </div>
+                            <ChevronRight className="w-4 h-4 text-gray-400 shrink-0 mt-1" />
+                          </div>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="text-xs font-semibold uppercase text-gray-500 flex items-center gap-1">
+              <Building2 className="w-3.5 h-3.5" /> Propiedades ({filteredProperties.length})
             </p>
-            <p className="text-xs text-gray-500 mb-3 truncate">{completeModalVisit.propertyAddress}</p>
-            <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-              Notas de feedback
-            </label>
-            <textarea
-              value={completeNotes}
-              onChange={(e) => setCompleteNotes(e.target.value)}
-              rows={4}
-              placeholder="Impresiones del cliente, próximos pasos…"
-              className="w-full rounded-xl border-2 border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 text-sm p-3 resize-none focus:ring-2 focus:ring-teal-500 outline-none mb-4"
-            />
-            <button
-              type="button"
-              onClick={confirmCompleteVisit}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-emerald-600 text-white font-semibold text-sm hover:bg-emerald-700 border-2 border-emerald-700"
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              Guardar y marcar realizada
-            </button>
-          </div>
-        </div>
-      )}
+            {filteredProperties.length === 0 ? (
+              <p className="text-sm text-gray-500 text-center py-10">Sin propiedades en cartera</p>
+            ) : (
+              <ul className="space-y-2">
+                {filteredProperties.map((p) => (
+                  <li
+                    key={p._id}
+                    className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-3"
+                  >
+                    <div className="flex items-start gap-2">
+                      <Home className="w-4 h-4 text-gray-400 mt-0.5 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-gray-900 dark:text-white">
+                          {p.direccion || p.referencia || 'Sin dirección'}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          {p.tipo || '—'} · {p.operacion || '—'} · {formatCurrency(Number(p.precio) || 0)}
+                          {p.estado ? ` · ${p.estado}` : ''}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => scheduleFromProperty(p)}
+                          className="mt-2 text-sm font-semibold text-[var(--v-blue,#2563eb)]"
+                        >
+                          Programar visita
+                        </button>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+      </main>
     </div>
   );
 }

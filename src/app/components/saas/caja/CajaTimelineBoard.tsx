@@ -36,27 +36,43 @@ import {
 
 const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
 
+/** KPI del día, mismo patrón de tabla densa que los paneles de Dashboard. */
+function DayStat({ label, value, good }: { label: string; value: string; good?: boolean }) {
+  return (
+    <div className="rounded-lg border border-stone-100 bg-stone-50/60 px-2.5 py-1.5 dark:border-stone-800 dark:bg-stone-800/40">
+      <p className="truncate text-[9px] font-bold uppercase tracking-wide text-stone-500">{label}</p>
+      <p
+        className={`mt-0.5 text-[15px] font-black tabular-nums leading-tight ${
+          good ? 'text-emerald-600 dark:text-emerald-400' : 'text-stone-900 dark:text-stone-100'
+        }`}
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
+
 function statusTag(kind: CajaTimelineBarKind): { text: string; className: string } {
   if (kind === 'live') {
     return { text: 'En curso', className: 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300' };
   }
   if (kind === 'warn') {
-    return { text: 'Arrastrada', className: 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300' };
+    return { text: 'De otro día', className: 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300' };
   }
-  return { text: 'Cerrada', className: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400' };
+  return { text: 'Cerrada', className: 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-400' };
 }
 
 function barClass(kind: CajaTimelineBarKind, selected: boolean): string {
   const base =
-    'absolute top-0.5 h-[22px] rounded-[5px] cursor-pointer flex items-center px-2 text-[10.5px] font-semibold font-mono whitespace-nowrap overflow-hidden border transition-shadow hover:shadow-sm';
-  const sel = selected ? ' outline outline-2 outline-[#030213] dark:outline-zinc-100 outline-offset-1 z-10' : '';
+    'absolute top-0.5 h-[22px] rounded-[5px] cursor-pointer flex items-center px-2 text-[10.5px] font-semibold tabular-nums whitespace-nowrap overflow-hidden border transition-shadow hover:shadow-sm';
+  const sel = selected ? ' outline outline-2 outline-[var(--v-blue,#2563eb)] dark:outline-blue-400 outline-offset-1 z-10' : '';
   if (kind === 'live') {
     return `${base}${sel} bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800`;
   }
   if (kind === 'warn') {
     return `${base}${sel} text-amber-800 border-amber-300 dark:text-amber-300 dark:border-amber-700`;
   }
-  return `${base}${sel} bg-zinc-100 text-zinc-600 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:border-zinc-700`;
+  return `${base}${sel} bg-stone-100 text-stone-600 border-stone-200 dark:bg-stone-800 dark:text-stone-400 dark:border-stone-700`;
 }
 
 export type CajaTimelineBoardProps = {
@@ -214,8 +230,8 @@ export function CajaTimelineBoard({
   };
 
   return (
-    <div className="min-h-screen bg-[#f3f3f5] dark:bg-zinc-950 text-[#030213] dark:text-zinc-100">
-      <div className="max-w-[980px] mx-auto px-4 sm:px-6 py-8 pb-20">
+    <div className="text-stone-900 dark:text-stone-100">
+      <div className="mx-auto w-full max-w-[1100px] pb-12">
         {/* Head — Volver a la izquierda (mismo patrón que TPV / resto de Vertial) */}
         <div className="flex items-center justify-between flex-wrap gap-3.5 mb-1.5">
           <div className="flex items-center gap-3 flex-wrap min-w-0">
@@ -223,21 +239,54 @@ export function CajaTimelineBoard({
               type="button"
               onClick={onBack}
               aria-label="Volver"
-              className="w-8 h-8 shrink-0 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 inline-flex items-center justify-center text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+              className="w-8 h-8 shrink-0 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 inline-flex items-center justify-center text-stone-500 hover:bg-stone-50 dark:hover:bg-stone-800"
             >
               <ArrowLeft className="w-4 h-4" />
             </button>
-            <div className="flex items-baseline gap-3.5 flex-wrap min-w-0">
-              <h1 className="font-mono text-[19px] font-bold uppercase tracking-tight m-0 text-[#030213] dark:text-zinc-50">
-                Caja
-              </h1>
-              <div className="flex flex-wrap gap-4 text-[13px] text-zinc-500 dark:text-zinc-400">
-                <span><b className="font-mono font-semibold text-[#030213] dark:text-zinc-100">{dayStats.stores}</b> {locPlural}</span>
-                <span><b className="font-mono font-semibold text-[#030213] dark:text-zinc-100">{dayStats.turns}</b> turnos</span>
-                <span><b className="font-mono font-semibold text-[#030213] dark:text-zinc-100">{dayStats.openNow}</b> abiertas</span>
-                <span><b className="font-mono font-semibold text-[#030213] dark:text-zinc-100">{Math.round(dayStats.sales)}€</b> ventas</span>
+            <div className="flex items-center gap-2 flex-wrap min-w-0">
+              <div className="flex items-center gap-1 rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-1.5 py-1">
+                <button
+                  type="button"
+                  onClick={() => onSelectedDateChange(addDaysIso(selectedDate, -1))}
+                  aria-label="Día anterior"
+                  className="w-6 h-6 rounded-md inline-flex items-center justify-center text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+                <span className="px-1 text-[12.5px] font-semibold text-stone-900 dark:text-stone-100 whitespace-nowrap">
+                  {formatDayShort(selectedDate)}
+                  <span className="ml-1.5 font-normal text-stone-400 tabular-nums">
+                    {new Date(`${selectedDate}T12:00:00`).toLocaleDateString('es-ES')}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onSelectedDateChange(addDaysIso(selectedDate, 1))}
+                  disabled={selectedDate >= todayStr}
+                  aria-label="Día siguiente"
+                  className="w-6 h-6 rounded-md inline-flex items-center justify-center text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800 disabled:opacity-40"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+                <input
+                  type="date"
+                  value={selectedDate}
+                  max={todayStr}
+                  onChange={(e) => e.target.value && onSelectedDateChange(e.target.value)}
+                  aria-label="Elegir fecha"
+                  className="ml-0.5 text-xs px-1.5 py-0.5 rounded-md border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-600 dark:text-stone-300"
+                />
               </div>
-              {refreshing && <span className="text-[11px] text-zinc-400">Actualizando…</span>}
+              {!isToday ? (
+                <button
+                  type="button"
+                  onClick={() => onSelectedDateChange(todayStr)}
+                  className="text-[11px] font-bold text-[var(--v-blue,#2563eb)] hover:underline"
+                >
+                  Ir a hoy
+                </button>
+              ) : null}
+              {refreshing && <span className="text-[11px] text-stone-400">Actualizando…</span>}
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -260,7 +309,7 @@ export function CajaTimelineBoard({
                   className={`inline-flex items-center gap-1.5 border px-3 py-1.5 rounded-lg text-[12.5px] font-medium disabled:cursor-wait ${
                     excelDownloading
                       ? 'border-blue-300 bg-blue-50 text-blue-800 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-200'
-                      : 'border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800'
+                      : 'border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-500 dark:text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-800'
                   }`}
                 >
                   {excelDownloading ? (
@@ -270,7 +319,7 @@ export function CajaTimelineBoard({
                   )}
                   {excelDownloading ? 'Descargando…' : 'Facturación'}
                   {!excelDownloading && excelClosedCount > 0 ? (
-                    <span className="text-zinc-400">({excelClosedCount})</span>
+                    <span className="text-stone-400">({excelClosedCount})</span>
                   ) : null}
                   {!excelDownloading ? (
                     <ChevronDown className={`w-3.5 h-3.5 transition-transform ${downloadOpen ? 'rotate-180' : ''}`} />
@@ -279,12 +328,12 @@ export function CajaTimelineBoard({
                 {downloadOpen && (
                   <>
                     <div className="fixed inset-0 z-10" onClick={() => setDownloadOpen(false)} />
-                    <div className="absolute right-0 top-full mt-2 w-[19rem] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-xl overflow-hidden z-20">
-                      <div className="px-3.5 py-2 border-b border-zinc-100 dark:border-zinc-800 space-y-1">
-                        <p className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
+                    <div className="absolute right-0 top-full mt-2 w-[19rem] bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 rounded-xl shadow-xl overflow-hidden z-20">
+                      <div className="px-3.5 py-2 border-b border-stone-100 dark:border-stone-800 space-y-1">
+                        <p className="text-[10px] font-semibold text-stone-500 dark:text-stone-400 uppercase tracking-wide">
                           Facturación · Excel
                         </p>
-                        <p className="text-[10px] text-zinc-400 dark:text-zinc-500 leading-snug">
+                        <p className="text-[10px] text-stone-400 dark:text-stone-500 leading-snug">
                           Se carga mes a mes. Empieza por este mes; año/historial van por trozos.
                         </p>
                       </div>
@@ -318,11 +367,11 @@ export function CajaTimelineBoard({
                           onClick={() => {
                             void runExcelDownload(() => onDownloadFormat(opt.id, opt.range));
                           }}
-                          className="w-full px-3.5 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-left transition-colors flex items-start gap-2.5 border-b border-zinc-100 dark:border-zinc-800 disabled:opacity-50"
+                          className="w-full px-3.5 py-3 hover:bg-stone-50 dark:hover:bg-stone-800 text-left transition-colors flex items-start gap-2.5 border-b border-stone-100 dark:border-stone-800 disabled:opacity-50"
                         >
                           <div className="mt-0.5 shrink-0">{opt.icon}</div>
                           <div className="min-w-0">
-                            <p className="font-semibold text-[13px] text-[#030213] dark:text-zinc-100">
+                            <p className="font-semibold text-[13px] text-stone-900 dark:text-stone-100">
                               {opt.label}
                               {opt.range === 'month' ? (
                                 <span className="ml-1.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
@@ -330,12 +379,12 @@ export function CajaTimelineBoard({
                                 </span>
                               ) : null}
                             </p>
-                            <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5 leading-snug">{opt.description}</p>
+                            <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5 leading-snug">{opt.description}</p>
                           </div>
                         </button>
                       ))}
-                      <div className="px-3.5 py-2 border-b border-zinc-100 dark:border-zinc-800">
-                        <p className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
+                      <div className="px-3.5 py-2 border-b border-stone-100 dark:border-stone-800">
+                        <p className="text-[10px] font-semibold text-stone-500 dark:text-stone-400 uppercase tracking-wide">
                           Otros formatos (este mes)
                         </p>
                       </div>
@@ -360,15 +409,15 @@ export function CajaTimelineBoard({
                             onClick={() => {
                               void runExcelDownload(() => onDownloadFormat(opt.id, 'month'));
                             }}
-                            className="w-full px-3.5 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-left transition-colors flex items-start gap-2.5 disabled:opacity-50"
+                            className="w-full px-3.5 py-3 hover:bg-stone-50 dark:hover:bg-stone-800 text-left transition-colors flex items-start gap-2.5 disabled:opacity-50"
                           >
                             <div className="mt-0.5 shrink-0">{opt.icon}</div>
                             <div className="min-w-0">
-                              <p className="font-semibold text-[13px] text-[#030213] dark:text-zinc-100">{opt.label}</p>
-                              <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5 leading-snug">{opt.description}</p>
+                              <p className="font-semibold text-[13px] text-stone-900 dark:text-stone-100">{opt.label}</p>
+                              <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5 leading-snug">{opt.description}</p>
                             </div>
                           </button>
-                          {i < arr.length - 1 && <div className="border-t border-zinc-100 dark:border-zinc-800" />}
+                          {i < arr.length - 1 && <div className="border-t border-stone-100 dark:border-stone-800" />}
                         </div>
                       ))}
                     </div>
@@ -387,7 +436,7 @@ export function CajaTimelineBoard({
                 className={`inline-flex items-center gap-1.5 border px-3 py-1.5 rounded-lg text-[12.5px] font-medium disabled:opacity-40 ${
                   excelDownloading
                     ? 'border-blue-300 bg-blue-50 text-blue-800 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-200'
-                    : 'border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800'
+                    : 'border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-500 dark:text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-800'
                 }`}
               >
                 {excelDownloading ? (
@@ -417,77 +466,63 @@ export function CajaTimelineBoard({
           </div>
         ) : null}
 
-        {/* Date + legend */}
-        <div className="flex items-center justify-between flex-wrap gap-2.5 my-3.5 mb-5">
-          <div className="flex items-center gap-2.5 text-[13px] text-zinc-500">
-            <button
-              type="button"
-              onClick={() => onSelectedDateChange(addDaysIso(selectedDate, -1))}
-              className="w-[22px] h-[22px] rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 inline-flex items-center justify-center"
-            >
-              <ChevronLeft className="w-3 h-3" />
-            </button>
-            <span className={`font-semibold ${isToday ? 'text-[#030213] dark:text-zinc-100' : ''}`}>
-              {formatDayShort(selectedDate)}
-            </span>
-            <span className="font-mono text-zinc-600 dark:text-zinc-300">
-              {new Date(`${selectedDate}T12:00:00`).toLocaleDateString('es-ES')}
-            </span>
-            <button
-              type="button"
-              onClick={() => onSelectedDateChange(addDaysIso(selectedDate, 1))}
-              disabled={selectedDate >= todayStr}
-              className="w-[22px] h-[22px] rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 inline-flex items-center justify-center disabled:opacity-40"
-            >
-              <ChevronRight className="w-3 h-3" />
-            </button>
-            <input
-              type="date"
-              value={selectedDate}
-              max={todayStr}
-              onChange={(e) => e.target.value && onSelectedDateChange(e.target.value)}
-              className="ml-1 text-xs px-2 py-1 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900"
-            />
-          </div>
-          <div className="flex gap-4 text-[11.5px] text-zinc-500">
-            <span className="inline-flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-sm bg-emerald-700" />
-              en curso
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-sm bg-zinc-400" />
-              cerrada
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span
-                className="w-2 h-2 rounded-sm border border-amber-300"
-                style={{
-                  background: 'repeating-linear-gradient(135deg,#fffbeb,#fffbeb 2px,#fde68a 2px,#fde68a 4px)',
-                }}
-              />
-              arrastrada
-            </span>
-          </div>
+        {/* KPIs del día seleccionado */}
+        <div className="my-3.5 grid grid-cols-2 gap-1.5 lg:grid-cols-4">
+          <DayStat
+            label={locPlural.charAt(0).toUpperCase() + locPlural.slice(1)}
+            value={String(dayStats.stores)}
+          />
+          <DayStat label="Turnos de caja" value={String(dayStats.turns)} />
+          <DayStat
+            label="Abiertas ahora"
+            value={String(dayStats.openNow)}
+            good={dayStats.openNow > 0}
+          />
+          <DayStat label="Ventas del día" value={formatMoneyEs(dayStats.sales)} />
         </div>
 
         {/* Timeline panel */}
-        <section className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-[10px] px-4 sm:px-5 pt-5 pb-2.5 mb-6">
-          <p className="text-[11px] font-semibold tracking-[0.08em] uppercase text-zinc-400 m-0 mb-4 flex items-center justify-between gap-2">
-            <span>Turnos · 00:00 – 24:00</span>
-            {isToday && (
-              <span className="font-mono font-semibold tracking-normal normal-case text-[#030213] dark:text-zinc-100">
-                {nowClock}
+        <section className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 rounded-2xl px-4 sm:px-5 pt-4 pb-2.5 mb-6">
+          <div className="mb-1 flex items-center justify-between gap-2 flex-wrap">
+            <p className="text-[11px] font-semibold tracking-[0.08em] uppercase text-stone-400 m-0">
+              Turnos por {locSingular.toLowerCase()} · 00:00 – 24:00
+            </p>
+            <div className="flex items-center gap-3 text-[10.5px] text-stone-500">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-sm bg-emerald-600" />
+                En curso
               </span>
-            )}
+              <span className="inline-flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-sm bg-stone-400" />
+                Cerrada
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span
+                  className="w-2 h-2 rounded-sm border border-amber-300"
+                  style={{
+                    background: 'repeating-linear-gradient(135deg,#fffbeb,#fffbeb 2px,#fde68a 2px,#fde68a 4px)',
+                  }}
+                />
+                De otro día
+              </span>
+              {isToday && (
+                <span className="tabular-nums font-semibold text-stone-900 dark:text-stone-100">
+                  {nowClock}
+                </span>
+              )}
+            </div>
+          </div>
+          <p className="m-0 mb-4 text-[10px] text-stone-400">
+            Cada barra es un turno de caja: empieza al abrir y termina al cerrar. Toca una barra para ver su detalle y movimientos.
           </p>
 
           {tracks.length === 0 ? (
-            <p className="text-sm text-zinc-400 text-center py-10">Ningún turno este día</p>
+            <p className="text-sm text-stone-400 text-center py-10">Ningún turno este día</p>
           ) : (
             <div className="overflow-x-auto -mx-0.5 px-0.5">
               <div className="min-w-[640px]">
                 <div
-                  className="grid font-mono text-[10px] text-zinc-400 mb-1.5"
+                  className="grid tabular-nums text-[10px] text-stone-400 mb-1.5"
                   style={{ gridTemplateColumns: '120px repeat(24, 1fr)' }}
                 >
                   <span />
@@ -501,17 +536,17 @@ export function CajaTimelineBoard({
                 {tracks.map((track) => (
                   <div
                     key={track.pdvId}
-                    className="grid items-center min-h-[46px] border-t border-zinc-100 dark:border-zinc-800"
+                    className="grid items-center min-h-[46px] border-t border-stone-100 dark:border-stone-800"
                     style={{ gridTemplateColumns: '120px repeat(24, 1fr)' }}
                   >
                     <div className="pr-2.5">
                       <div className="text-[12.5px] font-semibold truncate">{track.storeName}</div>
-                      <div className="text-[10.5px] text-zinc-400 font-mono truncate">{track.subLabel}</div>
+                      <div className="text-[10.5px] text-stone-400 tabular-nums truncate">{track.subLabel}</div>
                     </div>
                     <div className="relative h-[26px]" style={{ gridColumn: '2 / span 24' }}>
                       <div className="absolute inset-0 grid" style={{ gridTemplateColumns: 'repeat(24, 1fr)' }}>
                         {HOURS.map((h) => (
-                          <div key={h} className="border-l border-zinc-100 dark:border-zinc-800" />
+                          <div key={h} className="border-l border-stone-100 dark:border-stone-800" />
                         ))}
                       </div>
                       {track.bars.map((bar) => (
@@ -541,10 +576,10 @@ export function CajaTimelineBoard({
                       ))}
                       {nowPct != null && (
                         <div
-                          className="absolute top-[-4px] bottom-[-4px] w-px bg-[#030213] dark:bg-zinc-100 z-[2] pointer-events-none"
+                          className="absolute top-[-4px] bottom-[-4px] w-px bg-[var(--v-blue,#2563eb)] dark:bg-blue-400 z-[2] pointer-events-none"
                           style={{ left: `${nowPct}%` }}
                         >
-                          <span className="absolute top-[-18px] -translate-x-1/2 text-[9.5px] font-mono font-semibold text-[#030213] dark:text-zinc-100">
+                          <span className="absolute top-[-18px] -translate-x-1/2 text-[9.5px] font-semibold text-[var(--v-blue,#2563eb)] dark:text-blue-400">
                             ahora
                           </span>
                         </div>
@@ -559,16 +594,16 @@ export function CajaTimelineBoard({
 
         {/* Detail */}
         {selected && selectedKind && selectedSummary && (
-          <section className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-[10px] px-4 sm:px-5 py-4 mb-6">
+          <section className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 rounded-2xl px-4 sm:px-5 py-4 mb-6">
             <div className="flex justify-between items-start flex-wrap gap-3 mb-3.5">
               <div>
                 <div className="text-[15px] font-semibold">
                   {selected.pointOfSaleName || locSingular}
-                  <span className="text-zinc-400 font-normal">
-                    {' '}· {selectedKind === 'live' ? 'en curso' : selectedKind === 'warn' ? 'arrastrada' : 'cerrada'}
+                  <span className="text-stone-400 font-normal">
+                    {' '}· {selectedKind === 'live' ? 'en curso' : selectedKind === 'warn' ? 'caja de otro día' : 'cerrada'}
                   </span>
                 </div>
-                <div className="text-[12.5px] text-zinc-500 font-mono mt-0.5">
+                <div className="text-[12.5px] text-stone-500 tabular-nums mt-0.5">
                   {selected.workerName} · {selected.terminalName} ·{' '}
                   {selectedKind === 'closed'
                     ? `${formatClock(selected.openedAt)} – ${formatClock(selected.closedAt)}`
@@ -582,19 +617,19 @@ export function CajaTimelineBoard({
               <div className="flex items-start gap-3.5">
                 <div className="flex gap-6">
                   <div className="text-right">
-                    <div className="font-mono text-base font-bold">{formatMoneyEs(selectedSummary.totalSales)}</div>
-                    <div className="text-[10.5px] text-zinc-400 uppercase tracking-wide mt-0.5">Total</div>
+                    <div className="tabular-nums text-base font-bold">{formatMoneyEs(selectedSummary.totalSales)}</div>
+                    <div className="text-[10.5px] text-stone-400 uppercase tracking-wide mt-0.5">Total</div>
                   </div>
                   <div className="text-right">
-                    <div className="font-mono text-base font-bold">{formatMoneyEs(selectedExpected)}</div>
-                    <div className="text-[10.5px] text-zinc-400 uppercase tracking-wide mt-0.5">Efectivo</div>
+                    <div className="tabular-nums text-base font-bold">{formatMoneyEs(selectedExpected)}</div>
+                    <div className="text-[10.5px] text-stone-400 uppercase tracking-wide mt-0.5">Efectivo</div>
                   </div>
                 </div>
                 <button
                   type="button"
                   aria-label="Cerrar detalle"
                   onClick={() => onSelectSession(null)}
-                  className="p-0.5 rounded-md text-zinc-400 hover:text-[#030213] hover:bg-[#f3f3f5] dark:hover:bg-zinc-800"
+                  className="p-0.5 rounded-md text-stone-400 hover:text-stone-900 hover:bg-stone-100 dark:hover:bg-stone-800"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -617,7 +652,7 @@ export function CajaTimelineBoard({
                     type="button"
                     disabled={busyForce}
                     onClick={() => setConfirmForce(true)}
-                    className="border border-amber-300 bg-white dark:bg-zinc-900 text-amber-800 text-[11.5px] font-semibold px-2.5 py-1 rounded-md"
+                    className="border border-amber-300 bg-white dark:bg-stone-900 text-amber-800 text-[11.5px] font-semibold px-2.5 py-1 rounded-md"
                   >
                     Forzar cierre
                   </button>
@@ -627,14 +662,14 @@ export function CajaTimelineBoard({
                       type="button"
                       disabled={busyForce}
                       onClick={() => onForceClose(selected)}
-                      className="border border-red-300 bg-white dark:bg-zinc-900 text-red-800 text-[11.5px] font-semibold px-2.5 py-1 rounded-md disabled:opacity-60"
+                      className="border border-red-300 bg-white dark:bg-stone-900 text-red-800 text-[11.5px] font-semibold px-2.5 py-1 rounded-md disabled:opacity-60"
                     >
                       {busyForce ? 'Cerrando…' : 'Sí, forzar cierre'}
                     </button>
                     <button
                       type="button"
                       onClick={() => setConfirmForce(false)}
-                      className="border border-zinc-200 text-zinc-500 text-[11.5px] font-medium px-2.5 py-1 rounded-md"
+                      className="border border-stone-200 text-stone-500 text-[11.5px] font-medium px-2.5 py-1 rounded-md"
                     >
                       Cancelar
                     </button>
@@ -647,27 +682,27 @@ export function CajaTimelineBoard({
               <button
                 type="button"
                 onClick={() => onViewFullClosing(selected)}
-                className="text-xs font-medium text-zinc-500 underline mb-3 hover:text-[#030213]"
+                className="text-xs font-medium text-stone-500 underline mb-3 hover:text-stone-900"
               >
                 Ver cierre completo
               </button>
             )}
 
-            <p className="text-[11px] font-semibold tracking-[0.08em] uppercase text-zinc-400 m-0 mb-2">
+            <p className="text-[11px] font-semibold tracking-[0.08em] uppercase text-stone-400 m-0 mb-2">
               Movimientos
             </p>
-            <div className="border-t border-zinc-100 dark:border-zinc-800 pt-2.5">
+            <div className="border-t border-stone-100 dark:border-stone-800 pt-2.5">
               {selectedMoves.length === 0 ? (
-                <p className="text-[12.5px] text-zinc-400 text-center py-2.5">Sin movimientos</p>
+                <p className="text-[12.5px] text-stone-400 text-center py-2.5">Sin movimientos</p>
               ) : (
                 selectedMoves.map((t) => (
-                  <div key={t.id || `${t.date}-${t.amount}`} className="flex justify-between text-[12.5px] py-1.5 text-zinc-500">
+                  <div key={t.id || `${t.date}-${t.amount}`} className="flex justify-between text-[12.5px] py-1.5 text-stone-500">
                     <span className="truncate pr-3">
                       {t.type === 'sale' ? 'Venta' : t.type}
                       {t.paymentMethod ? ` · ${t.paymentMethod}` : ''}
                       {t.orderNumber ? ` · #${t.orderNumber}` : ''}
                     </span>
-                    <span className="font-mono font-medium text-[#030213] dark:text-zinc-100 shrink-0">
+                    <span className="tabular-nums font-medium text-stone-900 dark:text-stone-100 shrink-0">
                       {t.amount >= 0 ? '+' : ''}{formatMoneyEs(t.amount)}
                     </span>
                   </div>
@@ -685,7 +720,7 @@ export function CajaTimelineBoard({
               <select
                 value={filterPdv}
                 onChange={(e) => onFilterPdvChange(e.target.value)}
-                className="border border-zinc-200 dark:border-zinc-700 rounded-md px-2.5 py-1.5 text-xs bg-white dark:bg-zinc-900 text-zinc-500"
+                className="border border-stone-200 dark:border-stone-700 rounded-md px-2.5 py-1.5 text-xs bg-white dark:bg-stone-900 text-stone-500"
               >
                 <option value="">{locFilterAll}</option>
                 {pointsOfSale.map((p) => (
@@ -696,10 +731,10 @@ export function CajaTimelineBoard({
             <button
               type="button"
               onClick={() => onOnlyOpenNowChange(!onlyOpenNow)}
-              className={`border rounded-md px-2.5 py-1.5 text-xs cursor-pointer ${
+              className={`border rounded-lg px-2.5 py-1.5 text-xs cursor-pointer ${
                 onlyOpenNow
-                  ? 'bg-[#030213] text-white border-[#030213] dark:bg-zinc-100 dark:text-zinc-900 dark:border-zinc-100'
-                  : 'border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-500'
+                  ? 'bg-[var(--v-blue,#2563eb)] text-white border-[var(--v-blue,#2563eb)]'
+                  : 'border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-500'
               }`}
             >
               Solo abiertas
@@ -707,14 +742,14 @@ export function CajaTimelineBoard({
           </div>
         </div>
 
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-[10px] overflow-hidden overflow-x-auto">
+        <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 rounded-2xl overflow-hidden overflow-x-auto">
           <table className="w-full border-collapse min-w-[640px]">
             <thead>
               <tr>
                 {['Estado', locSingular, 'Empleado', 'Horario', 'Total', 'Efectivo', 'Diferencia'].map((h, i) => (
                   <th
                     key={h}
-                    className={`text-left text-[10.5px] uppercase tracking-wide text-zinc-400 font-semibold px-3.5 py-2.5 border-b border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800/80 ${
+                    className={`text-left text-[10.5px] uppercase tracking-wide text-stone-400 font-semibold px-3.5 py-2.5 border-b border-stone-200 dark:border-stone-700 bg-stone-100 dark:bg-stone-800/80 ${
                       i >= 4 ? 'text-right' : ''
                     }`}
                   >
@@ -726,7 +761,7 @@ export function CajaTimelineBoard({
             <tbody>
               {tableRows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-3.5 py-8 text-center text-sm text-zinc-400">
+                  <td colSpan={7} className="px-3.5 py-8 text-center text-sm text-stone-400">
                     Sin turnos
                   </td>
                 </tr>
@@ -759,32 +794,32 @@ export function CajaTimelineBoard({
                       }}
                       className={`cursor-pointer ${
                         active
-                          ? 'bg-[#f3f1e9] dark:bg-zinc-800 [&>td:first-child]:shadow-[inset_2px_0_0_#030213] dark:[&>td:first-child]:shadow-[inset_2px_0_0_#fafafa]'
-                          : 'hover:bg-[#f3f3f5] dark:hover:bg-zinc-800/60'
+                          ? 'bg-blue-50/70 dark:bg-blue-950/30 [&>td:first-child]:shadow-[inset_2px_0_0_#2563eb]'
+                          : 'hover:bg-stone-50 dark:hover:bg-stone-800/60'
                       }`}
                     >
-                      <td className="px-3.5 py-2.5 text-[13px] border-b border-zinc-100 dark:border-zinc-800">
+                      <td className="px-3.5 py-2.5 text-[13px] border-b border-stone-100 dark:border-stone-800">
                         <span className={`text-[10.5px] font-semibold px-2 py-0.5 rounded-full inline-block ${tag.className}`}>
                           {tag.text}
                         </span>
                       </td>
-                      <td className="px-3.5 py-2.5 text-[13px] border-b border-zinc-100 dark:border-zinc-800">
+                      <td className="px-3.5 py-2.5 text-[13px] border-b border-stone-100 dark:border-stone-800">
                         {s.pointOfSaleName || locSingular}
                       </td>
-                      <td className="px-3.5 py-2.5 text-[13px] border-b border-zinc-100 dark:border-zinc-800">
+                      <td className="px-3.5 py-2.5 text-[13px] border-b border-stone-100 dark:border-stone-800">
                         <div className="font-medium">{s.workerName}</div>
-                        <div className="text-[11px] text-zinc-400">{s.terminalName}</div>
+                        <div className="text-[11px] text-stone-400">{s.terminalName}</div>
                       </td>
-                      <td className="px-3.5 py-2.5 text-[13px] border-b border-zinc-100 dark:border-zinc-800 font-mono">
+                      <td className="px-3.5 py-2.5 text-[13px] border-b border-stone-100 dark:border-stone-800 tabular-nums">
                         {timeLabel}
                       </td>
-                      <td className="px-3.5 py-2.5 text-[13px] border-b border-zinc-100 dark:border-zinc-800 text-right font-mono">
+                      <td className="px-3.5 py-2.5 text-[13px] border-b border-stone-100 dark:border-stone-800 text-right tabular-nums">
                         {formatMoneyEs(summary.totalSales)}
                       </td>
-                      <td className="px-3.5 py-2.5 text-[13px] border-b border-zinc-100 dark:border-zinc-800 text-right font-mono">
+                      <td className="px-3.5 py-2.5 text-[13px] border-b border-stone-100 dark:border-stone-800 text-right tabular-nums">
                         {formatMoneyEs(expected)}
                       </td>
-                      <td className="px-3.5 py-2.5 text-[13px] border-b border-zinc-100 dark:border-zinc-800 text-right font-mono">
+                      <td className="px-3.5 py-2.5 text-[13px] border-b border-stone-100 dark:border-stone-800 text-right tabular-nums">
                         {s.status === 'closed' ? (
                           <span className={s.difference >= 0 ? 'text-emerald-700' : 'text-red-600'}>
                             {s.difference >= 0 ? '+' : ''}{formatMoneyEs(s.difference)}

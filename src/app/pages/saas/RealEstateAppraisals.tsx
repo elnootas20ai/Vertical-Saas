@@ -1,7 +1,10 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Layout } from '../../components/saas/Layout';
-import { useAuth } from '../../context/AuthContext';
+import { RealEstateNav } from '../../components/saas/RealEstateNav';
 import { createVerticalApi, type VerticalEntity } from '../../lib/verticalApiFactory';
+import { useRealEstateScope } from '../../lib/realEstateScope';
+import { useBusiness } from '../../context/BusinessContext';
+import { ensureRealEstateAppraisalFinance } from '../../lib/realEstateFinanceSync';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
   Search, X, Edit3, Trash2, TrendingUp,
@@ -10,7 +13,6 @@ import {
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
 import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
-import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 
 type Metodo = 'comparacion' | 'capitalizacion' | 'coste';
@@ -19,9 +21,12 @@ type EstadoTasacion = 'solicitada' | 'en_proceso' | 'completada';
 interface Appraisal extends VerticalEntity {
   propiedad: string;
   solicitante: string;
+  solicitanteNif?: string;
   fecha: string;
   tasador: string;
   valorTasado: number;
+  /** Honorarios de la tasación (IVA incl.) → Finanzas al completar. */
+  honorarios?: number;
   metodo: Metodo;
   estado: EstadoTasacion;
 }
@@ -44,8 +49,8 @@ const METODOS: Metodo[] = ['comparacion', 'capitalizacion', 'coste'];
 const ESTADOS: EstadoTasacion[] = ['solicitada', 'en_proceso', 'completada'];
 
 const EMPTY: AppraisalForm = {
-  propiedad: '', solicitante: '', fecha: '', tasador: '',
-  valorTasado: 0, metodo: 'comparacion', estado: 'solicitada',
+  propiedad: '', solicitante: '', solicitanteNif: '', fecha: '', tasador: '',
+  valorTasado: 0, honorarios: 0, metodo: 'comparacion', estado: 'solicitada',
 };
 
 function currentYearMonth(): string {
@@ -53,9 +58,17 @@ function currentYearMonth(): string {
 }
 
 export function RealEstateAppraisals() {
-  const { user } = useAuth();
+  const { userId, businessId, listOptions, ready } = useRealEstateScope();
+  const { currentBusiness } = useBusiness();
   const api = useMemo(() => createVerticalApi<Appraisal>('realestate', 'appraisals'), []);
-  const userId = user?.user_id || user?.id || '';
+  const financeScope = useMemo(
+    () => ({
+      businessId: businessId || currentBusiness?.business_id || '',
+      businessName: String(currentBusiness?.name || '').trim(),
+      salesPointId: listOptions.salesPointId,
+    }),
+    [businessId, currentBusiness, listOptions.salesPointId],
+  );
 
   const [data, setData] = useState<Appraisal[]>([]);
   const [loading, setLoading] = useState(true);
@@ -64,16 +77,7 @@ export function RealEstateAppraisals() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Appraisal | null>(null);
   const [form, setForm] = useState<AppraisalForm>(EMPTY);
-  const [showAIModal, setShowAIModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
-
-  const MODULE_AI_FIELDS: AIFieldDef[] = [
-    { key: 'property', label: 'Inmueble' },
-    { key: 'value', label: 'Valor' },
-    { key: 'date', label: 'Fecha' },
-    { key: 'appraiser', label: 'Tasador' },
-    { key: 'notes', label: 'Notas' },
-  ];
 
   const MODULE_IMPORT_FIELDS: ImportFieldDef[] = [
     { key: 'property', label: 'Inmueble', example: '' },
@@ -84,7 +88,7 @@ export function RealEstateAppraisals() {
   ];
 
   const persistEntries = async (entries: Record<string, unknown>[]) => {
-    if (!userId) {
+    if (!userId || !ready) {
       toast.error('Sesión no válida');
       return;
     }
@@ -100,7 +104,7 @@ export function RealEstateAppraisals() {
       metodo: entryStr(e, 'metodo') || 'comparacion',
       estado: entryStr(e, 'estado', 'status') || 'solicitada',
     };
-    });
+    }, listOptions);
     if (created > 0) {
       await loadData();
       toast.success(`${created} tasación creado(s)`);
@@ -109,24 +113,24 @@ export function RealEstateAppraisals() {
     }
   };
 
-  const handleAIEntries = persistEntries;
   const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   useModalClose(modalOpen, () => setModalOpen(false));
 
   const loadData = useCallback(async () => {
-    if (!userId) {
+    if (!userId || !ready) {
+      setData([]);
       setLoading(false);
       return;
     }
     setLoading(true);
     try {
-      const list = await api.list(userId);
+      const list = await api.list(userId, listOptions);
       setData(list);
     } finally {
       setLoading(false);
     }
-  }, [userId, api]);
+  }, [userId, ready, listOptions, api]);
 
   useEffect(() => {
     loadData();
@@ -144,26 +148,78 @@ export function RealEstateAppraisals() {
   const valorMedio = completadas.length > 0 ? Math.round(completadas.reduce((s, a) => s + a.valorTasado, 0) / completadas.length) : 0;
   const pendientes = useMemo(() => data.filter(a => a.estado !== 'completada').length, [data]);
 
-  const openCreate = () => { setEditing(null); setForm(EMPTY); setModalOpen(true); };
-  const openEdit = (a: Appraisal) => { setEditing(a); setForm({ propiedad: a.propiedad, solicitante: a.solicitante, fecha: a.fecha, tasador: a.tasador, valorTasado: a.valorTasado, metodo: a.metodo, estado: a.estado }); setModalOpen(true); };
+  const openCreate = () => {
+    setEditing(null);
+    setForm({
+      ...EMPTY,
+      fecha: new Date().toISOString().slice(0, 10),
+      estado: 'solicitada',
+    });
+    setModalOpen(true);
+  };
+  const openEdit = (a: Appraisal) => {
+    setEditing(a);
+    setForm({
+      propiedad: a.propiedad,
+      solicitante: a.solicitante,
+      fecha: a.fecha,
+      tasador: a.tasador,
+      valorTasado: a.valorTasado,
+      honorarios: Number(a.honorarios) || 0,
+      solicitanteNif: a.solicitanteNif || '',
+      metodo: a.metodo,
+      estado: a.estado,
+    });
+    setModalOpen(true);
+  };
 
   const handleSave = async () => {
-    if (!form.propiedad || !form.solicitante || !userId) return;
+    if (!userId || !ready) return;
+    const propiedad = String(form.propiedad || '').trim();
+    const fecha = String(form.fecha || '').trim();
+    if (!propiedad || !fecha) {
+      toast.error('Propiedad y fecha son obligatorias');
+      return;
+    }
+    const payload = {
+      ...form,
+      propiedad,
+      fecha,
+      solicitanteNif: String(form.solicitanteNif || '').trim() || undefined,
+      honorarios: Number(form.honorarios) || 0,
+      estado: form.estado || 'solicitada',
+      valorTasado: Number(form.valorTasado) || 0,
+    };
     try {
+      let saved: Appraisal;
       if (editing) {
-        await api.update(userId, editing._id, form);
+        saved = await api.update(userId, editing._id, payload, listOptions);
       } else {
-        await api.create(userId, form);
+        saved = await api.create(userId, payload, listOptions);
+      }
+      if (payload.estado === 'completada' && Number(payload.honorarios) > 0) {
+        const { synced, verifactu } = await ensureRealEstateAppraisalFinance(userId, saved, financeScope);
+        if (synced) {
+          toast.success(
+            verifactu
+              ? 'Tasación guardada · cobro en Finanzas · Verifactu emitido'
+              : 'Tasación guardada · cobro registrado en Finanzas',
+          );
+        } else {
+          toast.success(editing ? 'Tasación actualizada' : 'Tasación creada');
+        }
+      } else {
+        toast.success(editing ? 'Tasación actualizada' : 'Tasación creada');
       }
       await loadData();
       setModalOpen(false);
-    } catch {
-      /* error shown by fetch layer */
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo guardar');
     }
   };
 
   const handleRemove = async (docId: string) => {
-    if (!userId) return;
+    if (!userId || !ready) return;
     try {
       await api.remove(userId, docId);
       await loadData();
@@ -181,32 +237,33 @@ export function RealEstateAppraisals() {
   return (
     <Layout title="Tasaciones">
       <div className="space-y-6">
+        <RealEstateNav active="appraisals" />
+
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {stats.map(s => (
-            <div key={s.label} className={`${s.bg} rounded-xl p-4 flex items-center gap-4`}>
-              <div className={s.color}>{s.icon}</div>
-              <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">{s.label}</p>
-                <p className={`text-xl font-bold ${s.color}`}>{s.value}</p>
+            <div key={s.label} className={`${s.bg} rounded-xl p-4 flex items-center gap-3 min-h-[4.5rem]`}>
+              <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/70 dark:bg-black/20 ${s.color}`}>{s.icon}</div>
+              <div className="min-w-0">
+                <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{s.label}</p>
+                <p className={`text-xl font-bold tabular-nums leading-tight ${s.color}`}>{s.value}</p>
               </div>
             </div>
           ))}
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+        <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
           <div className="relative flex-1 max-w-md w-full">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por propiedad o solicitante..." disabled={loading} className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue-500 outline-none dark:text-gray-100" />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por propiedad o solicitante..." disabled={loading} className="w-full h-10 pl-10 pr-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue-500 outline-none dark:text-gray-100" />
           </div>
-          <div className="flex gap-2">
-            <select value={filterEstado} onChange={e => setFilterEstado(e.target.value as EstadoTasacion | '')} disabled={loading} className="px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm dark:text-gray-100">
+          <div className="flex flex-wrap items-center gap-2">
+            <select value={filterEstado} onChange={e => setFilterEstado(e.target.value as EstadoTasacion | '')} disabled={loading} className="h-10 px-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm dark:text-gray-100">
               <option value="">Estado</option>
               {ESTADOS.map(e => <option key={e} value={e}>{STATUS_CFG[e].label}</option>)}
             </select>
             <AddButtonDropdown
                 label="Nueva tasación"
                 onQuickAdd={openCreate}
-                onAIAdd={() => setShowAIModal(true)}
                 onImport={() => setShowImportModal(true)}
                 quickAddLabel="Alta rápida"
                 quickAddDesc="Formulario de tasación"
@@ -272,9 +329,11 @@ export function RealEstateAppraisals() {
               {([
                 { key: 'propiedad', label: 'Propiedad', type: 'text' },
                 { key: 'solicitante', label: 'Solicitante', type: 'text' },
+                { key: 'solicitanteNif', label: 'NIF solicitante (Verifactu)', type: 'text' },
                 { key: 'fecha', label: 'Fecha', type: 'date' },
                 { key: 'tasador', label: 'Tasador', type: 'text' },
                 { key: 'valorTasado', label: 'Valor tasado (€)', type: 'number' },
+                { key: 'honorarios', label: 'Honorarios tasación (€, IVA incl.)', type: 'number' },
               ] as const).map(f => (
                 <div key={f.key}>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{f.label}</label>
@@ -302,14 +361,6 @@ export function RealEstateAppraisals() {
         </div>
       )}
     
-      <AIAddModal
-        isOpen={showAIModal}
-        onClose={() => setShowAIModal(false)}
-        module="realestate_appraisals"
-        moduleLabel="Tasaciones"
-        fields={MODULE_AI_FIELDS}
-        onEntriesParsed={handleAIEntries}
-      />
       <GenericImportModal
         isOpen={showImportModal}
         onClose={() => setShowImportModal(false)}

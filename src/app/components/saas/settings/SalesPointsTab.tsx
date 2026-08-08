@@ -101,6 +101,8 @@ import { useActivationFocus } from '../../../hooks/useActivationFocus';
 import { ActivationFieldWrap } from '../ActivationGuideUi';
 import { ACCESO__AddressAutocomplete } from '../../design-system/ACCESO__AddressAutocomplete';
 import { SettingsWizardFooter, SettingsWizardShell, type SettingsWizardStep } from './SettingsWizardShell';
+import { TpvDevicesPanel } from './TpvDevicesPanel';
+import { formatAddonPriceShort } from '../../../lib/planAddonCatalog';
 import {
   Search,
   X,
@@ -127,7 +129,6 @@ import {
 } from 'lucide-react';
 import { AUTH_PATHS } from '../../../lib/authEntryPaths';
 import { writeBillingSelection } from '../../../lib/billingSelection';
-import { formatAddonPriceShort } from '../../../lib/planAddonCatalog';
 
 const WORK_CENTERS_CHANGED_EVENT = 'work-centers:changed';
 
@@ -2525,7 +2526,7 @@ export function SalesPointsTab() {
         </div>
       ) : (
         <div
-          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
+          className="grid grid-cols-1 lg:grid-cols-2 gap-5"
           data-activation-field="pdv-list"
         >
           {filtered.map(wc => {
@@ -2544,7 +2545,7 @@ export function SalesPointsTab() {
                   openEdit();
                 }
               }}
-              className={`cursor-pointer bg-white text-left dark:bg-gray-800 border-2 rounded-xl p-5 transition-all hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 dark:focus-visible:ring-gray-100 ${
+              className={`cursor-pointer bg-white text-left dark:bg-gray-800 border-2 rounded-2xl p-6 sm:p-7 transition-all hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 dark:focus-visible:ring-gray-100 ${
                 primary
                   ? 'border-indigo-300 dark:border-indigo-700 ring-1 ring-indigo-100 dark:ring-indigo-900/40'
                   : wc.active !== false
@@ -2552,13 +2553,13 @@ export function SalesPointsTab() {
                     : 'border-dashed border-gray-300 dark:border-gray-600 opacity-80'
               }`}
             >
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${CENTER_TYPE_COLORS[wc.centerType]}`}>
+              <div className="flex items-start justify-between mb-4">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 ${CENTER_TYPE_COLORS[wc.centerType]}`}>
                     {CENTER_TYPE_ICONS[wc.centerType]}
                   </div>
                   <div className="min-w-0">
-                    <div className="font-semibold text-gray-900 dark:text-gray-100 text-sm truncate">{wc.name}</div>
+                    <div className="font-bold text-gray-900 dark:text-gray-100 text-base sm:text-lg truncate">{wc.name}</div>
                     <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                       <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${CENTER_TYPE_COLORS[wc.centerType]}`}>
                         {getTypeLabel(wc)}
@@ -2620,17 +2621,17 @@ export function SalesPointsTab() {
                   </p>
                 )}
                 {wc.centerType === 'punto_de_venta' && deliveryPdvsByWorkCenter[wc._id]?.terminalCode && (
-                  <div className="rounded-lg border border-indigo-200 dark:border-indigo-800/60 bg-indigo-50/80 dark:bg-indigo-950/30 px-2.5 py-2 space-y-1.5">
-                    <div className="flex items-center justify-between gap-2">
+                  <div className="rounded-xl border-2 border-indigo-200 dark:border-indigo-800/60 bg-indigo-50/90 dark:bg-indigo-950/40 px-4 py-4 space-y-3">
+                    <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-700 dark:text-indigo-300">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700 dark:text-indigo-300">
                           Código para activar tablet
                         </p>
-                        <p className="font-mono text-sm font-bold tracking-widest text-indigo-900 dark:text-indigo-100">
+                        <p className="font-mono text-2xl sm:text-3xl font-bold tracking-[0.2em] text-indigo-900 dark:text-indigo-100 mt-1">
                           {deliveryPdvsByWorkCenter[wc._id]?.terminalCode}
                         </p>
                       </div>
-                      <div className="flex items-center gap-1 shrink-0">
+                      <div className="flex items-center gap-1.5 shrink-0">
                         <button
                           type="button"
                           title="Copiar código"
@@ -2638,9 +2639,9 @@ export function SalesPointsTab() {
                             e.stopPropagation();
                             void handleCopyTerminalCode(String(deliveryPdvsByWorkCenter[wc._id]?.terminalCode || ''));
                           }}
-                          className="p-1.5 rounded-md hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300"
+                          className="p-2.5 rounded-xl border border-indigo-200 dark:border-indigo-700 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300"
                         >
-                          <Copy className="w-3.5 h-3.5" />
+                          <Copy className="w-4 h-4" />
                         </button>
                         <button
                           type="button"
@@ -2650,14 +2651,14 @@ export function SalesPointsTab() {
                             e.stopPropagation();
                             void handleRegenerateTerminalCode(wc);
                           }}
-                          className="p-1.5 rounded-md hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 disabled:opacity-50"
+                          className="p-2.5 rounded-xl border border-indigo-200 dark:border-indigo-700 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 disabled:opacity-50"
                         >
-                          <RefreshCw className={`w-3.5 h-3.5 ${regeneratingTerminal === wc._id ? 'animate-spin' : ''}`} />
+                          <RefreshCw className={`w-4 h-4 ${regeneratingTerminal === wc._id ? 'animate-spin' : ''}`} />
                         </button>
                       </div>
                     </div>
-                    <p className="text-[10px] leading-snug text-indigo-800/90 dark:text-indigo-200/90">
-                      La activación es en la tablet: Acceso → TPV en tablet → introduce este código.
+                    <p className="text-sm leading-snug text-indigo-900/90 dark:text-indigo-100/90">
+                      En la tablet: Acceso → TPV en tablet → introduce este código. El dispositivo quedará vinculado a esta tienda (2 tablets incluidas; la 3ª es SVA {formatAddonPriceShort('extra_tpv_tablet')}).
                     </p>
                     <button
                       type="button"
@@ -2665,12 +2666,23 @@ export function SalesPointsTab() {
                         e.stopPropagation();
                         void handleCopyTabletActivationUrl();
                       }}
-                      className="text-[10px] font-semibold text-indigo-700 dark:text-indigo-300 hover:underline inline-flex items-center gap-1"
+                      className="text-sm font-semibold text-indigo-700 dark:text-indigo-300 hover:underline inline-flex items-center gap-1.5"
                     >
-                      <Monitor className="w-3 h-3" />
+                      <Monitor className="w-4 h-4" />
                       Copiar enlace para la tablet
-                      <ExternalLink className="w-3 h-3 opacity-70" />
+                      <ExternalLink className="w-3.5 h-3.5 opacity-70" />
                     </button>
+                    {dataUserId && deliveryPdvsByWorkCenter[wc._id]?._id ? (
+                      <div onClick={(e) => e.stopPropagation()}>
+                        <TpvDevicesPanel
+                          userId={dataUserId}
+                          pdvId={deliveryPdvsByWorkCenter[wc._id]!._id}
+                          onNeedAddon={() => {
+                            toast.message(`Contrata SVA Tablet TPV extra (${formatAddonPriceShort('extra_tpv_tablet')}) en Mi plan`);
+                          }}
+                        />
+                      </div>
+                    ) : null}
                   </div>
                 )}
                 {wc.email && (

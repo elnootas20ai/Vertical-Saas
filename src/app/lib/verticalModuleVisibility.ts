@@ -53,6 +53,8 @@ export const VERTICAL_HIDDEN_MENU_ITEMS: Partial<Record<BusinessType, readonly s
     'quotes',
     'worker-tpv',
   ],
+  /** Inmobiliaria: sin catálogo TPV ni proveedores (cartera = propiedades). */
+  realEstate: ['catalog', 'catalog-stock', 'costing', 'suppliers', 'compras-stock'],
 };
 
 /** Tienda web / pedidos online — no aplica a bar/restaurante (solo sala, reservas y caja). */

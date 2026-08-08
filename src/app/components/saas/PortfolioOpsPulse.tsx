@@ -46,7 +46,7 @@ import {
 } from '../../lib/portfolioMetrics';
 import { localCalendarDayKey } from '../../lib/tpvCajaScope';
 
-type RangeMode = '7d' | 'month';
+type RangeMode = 'day' | '7d' | 'month';
 
 type Props = {
   pulses7d: StoreOpsPulse[];
@@ -197,9 +197,40 @@ export function PortfolioOpsPulse({
     };
   }, [businessId]);
 
+  /** "Hoy": último día de cada tienda, derivado del pulso de 7 días. */
+  const pulsesDay = useMemo(
+    () =>
+      pulses7d.map((p): StoreOpsPulse => {
+        const last = p.days.length > 0 ? p.days[p.days.length - 1] : null;
+        const prev = p.days.length > 1 ? p.days[p.days.length - 2] : null;
+        const revenue = last?.revenue || 0;
+        const dayOrders = last?.orders || 0;
+        return {
+          ...p,
+          days: last ? [last] : [],
+          revenuePeriod: revenue,
+          revenuePrevPeriod: prev?.revenue || 0,
+          revenueMomPct: prev ? monthOverMonthPct(revenue, prev.revenue) : null,
+          ordersPeriod: dayOrders,
+          avgTicket: dayOrders > 0 ? Math.round((revenue / dayOrders) * 100) / 100 : 0,
+          pizza: last?.pizza || 0,
+          burger: last?.burger || 0,
+          taco: last?.taco || 0,
+          kebab: last?.kebab || 0,
+          revenueToday: revenue,
+          sharePercent: 0,
+          channels: last?.channels || emptyOpsExcelChannels(),
+        };
+      }),
+    [pulses7d],
+  );
+
   const pulses = useMemo(
-    () => rankStoreOpsPulses(range === '7d' ? pulses7d : pulsesMonth),
-    [pulses7d, pulsesMonth, range],
+    () =>
+      rankStoreOpsPulses(
+        range === 'day' ? pulsesDay : range === '7d' ? pulses7d : pulsesMonth,
+      ),
+    [pulsesDay, pulses7d, pulsesMonth, range],
   );
 
   const totals = useMemo(() => aggregateStoreOpsPulses(pulses), [pulses]);
@@ -269,8 +300,9 @@ export function PortfolioOpsPulse({
     return worst.dayKey !== bestDayKey ? worst.dayKey : null;
   }, [selected, bestDayKey]);
 
-  const rangeLabel = range === '7d' ? 'últimos 7 días' : 'mes en curso';
-  const rangeShort = range === '7d' ? '7 días' : 'Mes';
+  const rangeLabel =
+    range === 'day' ? 'hoy (vs ayer)' : range === '7d' ? 'últimos 7 días' : 'mes en curso';
+  const rangeShort = range === 'day' ? 'Hoy' : range === '7d' ? '7 días' : 'Mes';
 
   if (pulses.length === 0) {
     return (
@@ -313,7 +345,7 @@ export function PortfolioOpsPulse({
         </div>
         <div className="flex items-center gap-1.5">
           <div className="flex rounded-lg border border-gray-200 bg-gray-50 p-0.5 dark:border-gray-600 dark:bg-gray-900/50">
-            {(['7d', 'month'] as const).map((key) => (
+            {(['day', '7d', 'month'] as const).map((key) => (
               <button
                 key={key}
                 type="button"
@@ -326,7 +358,7 @@ export function PortfolioOpsPulse({
                     : 'text-gray-600 dark:text-gray-400'
                 }`}
               >
-                {key === '7d' ? '7 días' : 'Mes'}
+                {key === 'day' ? 'Hoy' : key === '7d' ? '7 días' : 'Mes'}
               </button>
             ))}
           </div>
@@ -347,8 +379,8 @@ export function PortfolioOpsPulse({
           dense={compact}
         />
         <HeaderStat
-          label="Hoy"
-          value={fmtEuro(totals.revenueToday)}
+          label={range === 'day' ? 'Ayer' : 'Hoy'}
+          value={fmtEuro(range === 'day' ? totals.revenuePrevPeriod : totals.revenueToday)}
           sub={compact ? undefined : 'Tiendas'}
           dense={compact}
         />

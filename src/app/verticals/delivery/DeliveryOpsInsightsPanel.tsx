@@ -3,7 +3,7 @@
  * pizzas, pérdida atención rápida y clientes nuevos.
  */
 import { useMemo, useState, type ReactNode } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate } from 'react-router-dom';
 import { ChevronDown, MapPin, Timer, UserMinus, UserPlus } from 'lucide-react';
 import { formatNumberEs } from '../../lib/formatNumberEs';
 import { monthOverMonthPct } from '../../lib/portfolioMetrics';
@@ -77,9 +77,50 @@ function baselineTone(status: BaselineStatus): string {
 function baselineShort(status: BaselineStatus, kind: 'prep' | 'order'): string {
   if (status === 'empty') return '—';
   const base = kind === 'prep' ? PREP_BASELINE_MIN : ORDER_BASELINE_MIN;
-  if (status === 'ok') return `≤${base}`;
-  if (status === 'warn') return `>${base}`;
-  return `≫${base}`;
+  if (status === 'ok') return `≤${base}′`;
+  if (status === 'warn') return `>${base}′`;
+  return `≫${base}′`;
+}
+
+/** Tarjeta de un tiempo medio, con su comparativa y objetivo si aplica. */
+function TimingTile({
+  label,
+  sub,
+  bucket,
+  status,
+}: {
+  label: string;
+  sub: string;
+  bucket: TimingBucket;
+  status?: BaselineStatus;
+}) {
+  const tone =
+    status === 'ok'
+      ? 'border-emerald-100 bg-emerald-50/60 dark:border-emerald-900/40 dark:bg-emerald-950/20'
+      : status === 'warn'
+        ? 'border-amber-100 bg-amber-50/70 dark:border-amber-900/40 dark:bg-amber-950/20'
+        : status === 'bad'
+          ? 'border-rose-100 bg-rose-50/70 dark:border-rose-900/40 dark:bg-rose-950/20'
+          : 'border-gray-100 bg-gray-50/60 dark:border-gray-800 dark:bg-gray-800/40';
+  return (
+    <div className={`rounded-lg border px-2 py-1.5 ${tone}`}>
+      <p className="truncate text-[9px] font-bold uppercase tracking-wide text-gray-500">
+        {label}
+      </p>
+      <div className="mt-0.5 flex flex-wrap items-center gap-1">
+        <span
+          className={`text-[13px] font-black tabular-nums ${
+            bucket.avgMinutes == null ? 'text-gray-400' : 'text-gray-900 dark:text-gray-100'
+          }`}
+        >
+          {formatMinutesEs(bucket.avgMinutes)}
+        </span>
+        <VsBadge pct={bucket.pct} invert />
+        <DiffMinutes bucket={bucket} />
+      </div>
+      <p className="text-[9px] leading-tight text-gray-400">{sub}</p>
+    </div>
+  );
 }
 
 function MetricChip({
@@ -127,66 +168,83 @@ function StoreTimingBlock({
   const empty = store.deliveredCount === 0;
   const [open, setOpen] = useState(Boolean(defaultOpen));
 
-  const timingRows: Array<[string, TimingBucket]> = [
-    ['Cliente', store.times.total],
-    ['Montaje', store.times.assembly],
-    ['Reparto (ida≈)', store.times.delivery],
-    ['Prep', store.times.prep],
-    ['Pizzas', store.times.pizzaKitchen],
-  ];
-
   const body = empty ? null : (
-    <div className="mt-1.5 space-y-1.5">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        {timingRows.map(([label, bucket]) => (
-          <MetricChip
-            key={label}
-            label={label}
-            value={formatMinutesEs(bucket.avgMinutes)}
-            muted={bucket.avgMinutes == null}
-            badge={<VsBadge pct={bucket.pct} invert />}
-            sub={<DiffMinutes bucket={bucket} />}
-          />
-        ))}
+    <div className="mt-2 space-y-2">
+      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-5">
+        <TimingTile
+          label="Espera del cliente"
+          sub={`pedido → entregado · objetivo ≤${ORDER_BASELINE_MIN}′`}
+          bucket={store.times.total}
+          status={store.vsOrderBase}
+        />
+        <TimingTile
+          label="Preparación"
+          sub={`cocina + montaje · objetivo ≤${PREP_BASELINE_MIN}′`}
+          bucket={store.times.prep}
+          status={store.vsPrepBase}
+        />
+        <TimingTile
+          label="Montaje"
+          sub="hasta pedido listo"
+          bucket={store.times.assembly}
+        />
+        <TimingTile
+          label="Reparto"
+          sub="ida estimada al cliente"
+          bucket={store.times.delivery}
+        />
+        <TimingTile
+          label="Horno pizzas"
+          sub="solo pedidos con pizza"
+          bucket={store.times.pizzaKitchen}
+        />
       </div>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-gray-100 pt-1.5 text-[10px] text-gray-500 dark:border-gray-800">
         <span>
-          {formatNumberEs(store.deliveredCount, { maxFraction: 0 })} ped ·{' '}
-          {formatMinutesEs(store.busyMinutes)} ocup.
-          {store.clockMinutesPerOrder != null
-            ? ` · ${formatNumberEs(store.clockMinutesPerOrder, { maxFraction: 1 })}′/ped`
-            : ''}
+          <strong className="tabular-nums text-gray-800 dark:text-gray-200">
+            {formatNumberEs(store.deliveredCount, { maxFraction: 0 })}
+          </strong>{' '}
+          entrega{store.deliveredCount === 1 ? '' : 's'}
         </span>
-        <MetricChip
-          label="Ritmo"
-          value={
-            store.ordersPerBusyHour != null
-              ? `${formatNumberEs(store.ordersPerBusyHour, { maxFraction: 1 })}/h`
-              : '—'
-          }
-        />
-        <MetricChip
-          label="Paral."
-          value={
-            store.parallelFactor != null
-              ? `×${formatNumberEs(store.parallelFactor, { maxFraction: 1 })}`
-              : '—'
-          }
-        />
-        {!compact ? (
-          <MetricChip
-            label="Vs 1 línea"
-            value={
-              store.throughputVsBaseline != null
-                ? `×${formatNumberEs(store.throughputVsBaseline, { maxFraction: 1 })}`
-                : '—'
-            }
-          />
+        {store.busyMinutes != null ? (
+          <span>
+            cocina activa{' '}
+            <strong className="tabular-nums text-gray-800 dark:text-gray-200">
+              {formatMinutesEs(store.busyMinutes)}
+            </strong>
+          </span>
+        ) : null}
+        {store.ordersPerBusyHour != null ? (
+          <span>
+            ritmo{' '}
+            <strong className="tabular-nums text-gray-800 dark:text-gray-200">
+              {formatNumberEs(store.ordersPerBusyHour, { maxFraction: 1 })} ped/h
+            </strong>
+          </span>
+        ) : null}
+        {store.parallelFactor != null ? (
+          <span title="Pedidos que se preparan a la vez de media">
+            en paralelo{' '}
+            <strong className="tabular-nums text-gray-800 dark:text-gray-200">
+              ×{formatNumberEs(store.parallelFactor, { maxFraction: 1 })}
+            </strong>
+          </span>
         ) : null}
         {store.peakConcurrency > 0 ? (
-          <span className="text-gray-400">
-            Pico {formatNumberEs(store.peakConcurrency, { maxFraction: 0 })}
+          <span title="Máximo de pedidos preparándose a la vez">
+            pico{' '}
+            <strong className="tabular-nums text-gray-800 dark:text-gray-200">
+              {formatNumberEs(store.peakConcurrency, { maxFraction: 0 })} a la vez
+            </strong>
+          </span>
+        ) : null}
+        {!compact && store.throughputVsBaseline != null ? (
+          <span title={`Capacidad real vs una línea de cocina que hace 1 pedido cada ${PREP_BASELINE_MIN} min`}>
+            capacidad{' '}
+            <strong className="tabular-nums text-gray-800 dark:text-gray-200">
+              ×{formatNumberEs(store.throughputVsBaseline, { maxFraction: 1 })} vs 1 línea
+            </strong>
           </span>
         ) : null}
         <span className="sr-only">{vsLabel}</span>
@@ -212,39 +270,49 @@ function StoreTimingBlock({
           <>
             <span
               className={`rounded px-1 py-0.5 text-[9px] font-bold ${baselineTone(store.vsPrepBase)}`}
-              title={`Prep base ${PREP_BASELINE_MIN} min`}
+              title={`Preparación media vs objetivo de ${PREP_BASELINE_MIN} min`}
             >
               Prep {baselineShort(store.vsPrepBase, 'prep')}
             </span>
             <span
               className={`rounded px-1 py-0.5 text-[9px] font-bold ${baselineTone(store.vsOrderBase)}`}
-              title={`Cliente base ${ORDER_BASELINE_MIN} min`}
+              title={`Espera media del cliente vs objetivo de ${ORDER_BASELINE_MIN} min`}
             >
-              Cli {baselineShort(store.vsOrderBase, 'order')}
+              Cliente {baselineShort(store.vsOrderBase, 'order')}
             </span>
           </>
         ) : null}
-        <ChevronDown
-          className={`h-3.5 w-3.5 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`}
-        />
+        {!empty ? (
+          <span className="hidden shrink-0 text-[9px] font-bold text-[var(--v-blue,#2563eb)] sm:inline">
+            {open ? 'Ocultar' : 'Ver detalle'}
+          </span>
+        ) : null}
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 dark:border-gray-600 dark:bg-gray-800">
+          <ChevronDown
+            className={`h-3.5 w-3.5 transition-transform ${open ? 'rotate-180' : ''}`}
+          />
+        </span>
       </div>
     </div>
   );
 
   return (
     <div
-      className={`py-1.5 ${
-        highlight ? 'border-l-2 border-[var(--v-blue,#2563eb)] pl-2' : 'pl-0.5'
+      className={`rounded-lg border ${
+        highlight
+          ? 'border-blue-100 bg-blue-50/40 dark:border-blue-900/40 dark:bg-blue-950/20'
+          : 'border-gray-100 dark:border-gray-800'
       }`}
     >
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className={`w-full text-left ${compact ? 'min-h-9' : ''}`}
+        aria-expanded={open}
+        className={`w-full rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/60 ${compact ? 'min-h-9' : ''}`}
       >
         {header}
       </button>
-      {open ? body : null}
+      {open ? <div className="px-2 pb-2">{body}</div> : null}
     </div>
   );
 }
@@ -284,10 +352,11 @@ export function DeliveryOpsInsightsPanel({
         <div className="min-w-0 flex items-center gap-2">
           <Timer className="h-3.5 w-3.5 shrink-0 text-[var(--v-blue,#2563eb)]" />
           <p className="truncate text-xs font-bold text-gray-900 dark:text-gray-100">
-            Tiempos · {rangeLabel.toLowerCase()}
+            Tiempos de entrega · {rangeLabel.toLowerCase()}
           </p>
           <span className="hidden text-[10px] text-gray-400 sm:inline">
-            base {PREP_BASELINE_MIN}/{ORDER_BASELINE_MIN} · {insights.vsLabel}
+            Objetivo: preparar en ≤{PREP_BASELINE_MIN} min y servir en ≤{ORDER_BASELINE_MIN} min
+            · comparado con {insights.vsLabel}
           </span>
         </div>
         <div className="flex items-center gap-1.5">
@@ -325,7 +394,7 @@ export function DeliveryOpsInsightsPanel({
         <p className="mt-2 text-xs text-gray-500">Cargando…</p>
       ) : (
         <div className="mt-2 space-y-2">
-          <div className="divide-y divide-gray-100 dark:divide-gray-800">
+          <div className="space-y-1.5">
             <StoreTimingBlock
               store={insights.overall}
               vsLabel={insights.vsLabel}
@@ -346,7 +415,7 @@ export function DeliveryOpsInsightsPanel({
 
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-gray-100 pt-1.5 dark:border-gray-800">
             <span className="text-[9px] font-bold uppercase tracking-wide text-gray-400">
-              Comida
+              Comida vendida (uds)
             </span>
             <MetricChip
               label="Pizzas"
@@ -377,7 +446,7 @@ export function DeliveryOpsInsightsPanel({
             <div className="min-w-0">
               <p className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">
                 <UserPlus className="h-3 w-3" />
-                Nuevos
+                Clientes nuevos
               </p>
               <div className="mt-0.5 flex items-center gap-1.5">
                 <span className="text-xs font-black tabular-nums text-gray-900 dark:text-gray-100">
@@ -402,9 +471,12 @@ export function DeliveryOpsInsightsPanel({
             </div>
 
             <div className="min-w-0">
-              <p className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide text-[var(--v-rose,#e11d48)]">
+              <p
+                className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide text-[var(--v-rose,#e11d48)]"
+                title="Pedidos atendidos solo con nombre, sin teléfono: no quedan guardados como cliente"
+              >
                 <UserMinus className="h-3 w-3" />
-                Pérdida atención rápida
+                Pedidos sin ficha de cliente
               </p>
               <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                 <span className="text-xs font-black tabular-nums text-gray-900 dark:text-gray-100">
@@ -412,12 +484,15 @@ export function DeliveryOpsInsightsPanel({
                 </span>
                 <VsBadge pct={insights.clients.lostPct} invert />
                 <span className="text-[9px] text-gray-400">
-                  {formatNumberEs(insights.clients.lostSharePercent, { maxFraction: 1 })}% ped
+                  {formatNumberEs(insights.clients.lostSharePercent, { maxFraction: 1 })}% de los pedidos
                   {insights.clients.lostQuickAttentionPrev > 0
                     ? ` · ${insights.vsLabel}: ${formatNumberEs(insights.clients.lostQuickAttentionPrev, { maxFraction: 0 })}`
                     : ''}
                 </span>
               </div>
+              <p className="mt-0.5 text-[9px] text-gray-400">
+                Se cobraron sin teléfono, así que no entran en tu lista de clientes.
+              </p>
             </div>
           </div>
         </div>

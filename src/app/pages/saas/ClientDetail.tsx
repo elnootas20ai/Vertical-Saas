@@ -21,6 +21,7 @@ import { sendAppointmentReminderRequest, getClientQuotesRequest, getClientDetail
 import { getApiBase } from '../../lib/apiBase';
 import { resolveClientLocationFields } from '../../lib/clientAddressUtils';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { listTeamAgentOptions, resolveTeamAgent } from '../../lib/realEstateTeamAgents';
 import { getClientOrderHistoryRequest, type DeliveryOrder } from '../../lib/deliveryApi';
 import { listDiningOrdersRequest, type DiningOrder } from '../../lib/salaApi';
 import { diningOrdersToCrmDeliveryOrders } from '../../lib/restaurantCrmOrders';
@@ -227,6 +228,7 @@ interface Client {
   postalCode?: string;
   status: 'active' | 'inactive';
   responsible: string;
+  responsibleUserId?: string;
   createdAt: string;
   clientType?: 'particular' | 'empresa';
   legalName?: string;
@@ -285,6 +287,7 @@ function mapStoredClientToDetail(found: CrmClient | AppContextClient): Client {
     postalCode: location.postalCode,
     status: (found.status as Client['status']) || 'active',
     responsible: String(found.responsible || 'Sin asignar'),
+    responsibleUserId: String((found as { responsibleUserId?: string }).responsibleUserId || '').trim(),
     createdAt: found.createdAt instanceof Date ? found.createdAt.toISOString() : String(found.createdAt || ''),
     clientType: String((found as Record<string, unknown>).clientType || 'particular'),
     legalName: String((found as Record<string, unknown>).legalName || ''),
@@ -317,8 +320,9 @@ export function ClientDetail() {
   const isDeliveryBusiness = currentBusiness?.businessType === 'delivery';
   const isRestaurantBusiness = currentBusiness?.businessType === 'restaurant';
   const isHeladeriaBusiness = currentBusiness?.businessType === 'iceCreamShop';
-  /** CRM operativo (delivery, bar/restaurante o heladería). */
-  const isOpsCrmBusiness = isDeliveryBusiness || isRestaurantBusiness || isHeladeriaBusiness;
+  const isRealEstateBusiness = currentBusiness?.businessType === 'realEstate';
+  /** Solo delivery mantiene CRM ops (pedidos/stats). Resto → ficha core sin enlace delivery. */
+  const isOpsCrmBusiness = isDeliveryBusiness;
   const clientPlan = useClientDetailPlanAccess();
   const [activeTab, setActiveTab] = useState('resumen');
   const [showCreateContractModal, setShowCreateContractModal] = useState(false);
@@ -342,6 +346,7 @@ export function ClientDetail() {
     city: '',
     postalCode: '',
     responsible: '',
+    responsibleUserId: '',
     notes: '',
     referralCode: '',
     status: 'active' as Client['status'],
@@ -367,6 +372,10 @@ export function ClientDetail() {
   useModalClose(!!previewDoc, () => setPreviewDoc(null));
   const [signatureDoc, setSignatureDoc] = useState<{ id: string; name: string; fileUrl?: string; mimeType?: string; fileSize?: number } | null>(null);
   const [platformUsers, setPlatformUsers] = useState<AuthUser[]>([]);
+  const reAgents = useMemo(
+    () => listTeamAgentOptions(currentBusiness?.members, platformUsers),
+    [currentBusiness?.members, platformUsers],
+  );
 
   // New tab states
   const [clientSummary, setClientSummary] = useState<ClientSummary | null>(null);
@@ -577,6 +586,7 @@ export function ClientDetail() {
       city: location.city,
       postalCode: location.postalCode,
       responsible: client.responsible,
+      responsibleUserId: client.responsibleUserId || '',
       notes: client.notes || '',
       referralCode: (client as Record<string, unknown>).referralCode as string || '',
       status: client.status,
@@ -1158,7 +1168,17 @@ export function ClientDetail() {
       address: editForm.address,
       city: editForm.city,
       postalCode: editForm.postalCode,
-      ...(!isOpsCrmBusiness ? { responsible: editForm.responsible } : {}),
+      ...(!isOpsCrmBusiness
+        ? isRealEstateBusiness
+          ? (() => {
+              const agent = resolveTeamAgent(reAgents, { userId: editForm.responsibleUserId });
+              return {
+                responsibleUserId: agent?.userId || editForm.responsibleUserId || '',
+                responsible: agent?.name || editForm.responsible || 'Sin asignar',
+              };
+            })()
+          : { responsible: editForm.responsible }
+        : {}),
       notes: editForm.notes,
       referralCode: editForm.referralCode,
       status: editForm.status,
@@ -1312,18 +1332,40 @@ export function ClientDetail() {
                 className="w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none"
               />
               {!isOpsCrmBusiness && (
-                <select
-                  value={editForm.responsible}
-                  onChange={(e) => setEditForm((prev) => ({ ...prev, responsible: e.target.value }))}
-                  className="w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none bg-white dark:bg-gray-800"
-                >
-                  <option value="">Seleccionar responsable</option>
-                  {platformUsers.map((user) => (
-                    <option key={user.id} value={user.fullName}>
-                      {user.fullName}{user.employment?.position ? ` — ${user.employment.position}` : ''}
-                    </option>
-                  ))}
-                </select>
+                isRealEstateBusiness ? (
+                  <select
+                    value={editForm.responsibleUserId}
+                    onChange={(e) => {
+                      const agent = resolveTeamAgent(reAgents, { userId: e.target.value });
+                      setEditForm((prev) => ({
+                        ...prev,
+                        responsibleUserId: agent?.userId || '',
+                        responsible: agent?.name || 'Sin asignar',
+                      }));
+                    }}
+                    className="w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none bg-white dark:bg-gray-800"
+                  >
+                    <option value="">Sin asignar</option>
+                    {reAgents.map((a) => (
+                      <option key={a.userId} value={a.userId}>
+                        {a.name}{a.role ? ` · ${a.role}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <select
+                    value={editForm.responsible}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, responsible: e.target.value }))}
+                    className="w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none bg-white dark:bg-gray-800"
+                  >
+                    <option value="">Seleccionar responsable</option>
+                    {platformUsers.map((user) => (
+                      <option key={user.id} value={user.fullName}>
+                        {user.fullName}{user.employment?.position ? ` — ${user.employment.position}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                )
               )}
               <select
                 value={editForm.status}
@@ -1505,7 +1547,9 @@ export function ClientDetail() {
         <div className={`grid gap-4 ${isOpsCrmBusiness ? 'grid-cols-1' : 'grid-cols-2'}`}>
           {!isOpsCrmBusiness && (
             <div>
-              <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Responsable</label>
+              <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">
+                {isRealEstateBusiness ? 'Agente' : 'Responsable'}
+              </label>
               <div className="text-gray-900 dark:text-gray-100 font-semibold">{client.responsible}</div>
             </div>
           )}
@@ -1514,6 +1558,24 @@ export function ClientDetail() {
             <div className="text-gray-900 dark:text-gray-100">{new Date(client.createdAt).toLocaleDateString('es-ES')}</div>
           </div>
         </div>
+        {isRealEstateBusiness ? (
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => navigate(`/saas/realestate-visits?clientId=${encodeURIComponent(client.id)}&nuevo=1`)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[var(--v-blue,#2563eb)] text-white text-sm font-semibold"
+            >
+              Nueva visita
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/saas/realestate-contracts?nuevo=1')}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-stone-200 dark:border-stone-700 text-sm font-semibold text-stone-700 dark:text-stone-200"
+            >
+              Nuevo contrato
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -1802,10 +1864,32 @@ export function ClientDetail() {
               <input value={editForm.phone} onChange={(e) => setEditForm((p) => ({ ...p, phone: e.target.value }))} placeholder="Teléfono" className="w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none" />
               <input type="email" value={editForm.email} onChange={(e) => setEditForm((p) => ({ ...p, email: e.target.value }))} placeholder="Email" className="w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none" />
               {!isDeliveryBusiness && (
-                <select value={editForm.responsible} onChange={(e) => setEditForm((p) => ({ ...p, responsible: e.target.value }))} className="w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none bg-white dark:bg-gray-800">
-                  <option value="">Seleccionar responsable</option>
-                  {platformUsers.map((user) => (<option key={user.id} value={user.fullName}>{user.fullName}{user.employment?.position ? ` — ${user.employment.position}` : ''}</option>))}
-                </select>
+                isRealEstateBusiness ? (
+                  <select
+                    value={editForm.responsibleUserId}
+                    onChange={(e) => {
+                      const agent = resolveTeamAgent(reAgents, { userId: e.target.value });
+                      setEditForm((p) => ({
+                        ...p,
+                        responsibleUserId: agent?.userId || '',
+                        responsible: agent?.name || 'Sin asignar',
+                      }));
+                    }}
+                    className="w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none bg-white dark:bg-gray-800"
+                  >
+                    <option value="">Sin asignar</option>
+                    {reAgents.map((a) => (
+                      <option key={a.userId} value={a.userId}>
+                        {a.name}{a.role ? ` · ${a.role}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <select value={editForm.responsible} onChange={(e) => setEditForm((p) => ({ ...p, responsible: e.target.value }))} className="w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none bg-white dark:bg-gray-800">
+                    <option value="">Seleccionar responsable</option>
+                    {platformUsers.map((user) => (<option key={user.id} value={user.fullName}>{user.fullName}{user.employment?.position ? ` — ${user.employment.position}` : ''}</option>))}
+                  </select>
+                )
               )}
               <select value={editForm.status} onChange={(e) => setEditForm((p) => ({ ...p, status: e.target.value as Client['status'] }))} className="w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none bg-white dark:bg-gray-800">
                 <option value="active">Activo</option>

@@ -79,12 +79,12 @@ export const academyConfig = {
 export const realEstateConfig = {
   name: 'realestate', dbSuffix: 'realestate',
   entities: {
-    properties: { type: 're_property',  idPrefix: 'rep', fields: ['referencia','tipo','direccion','m2','habitaciones','precio','operacion','estado'], required: ['direccion'] },
-    visits:     { type: 're_visit',     idPrefix: 'rev', fields: ['propiedad','cliente','fecha','hora','agente','resultado','notas'], required: ['propiedad','fecha'] },
-    contracts:  { type: 're_contract',  idPrefix: 'rec', fields: ['referencia','propiedad','cliente','tipo','fechaInicio','fechaFin','importeMensual','importeTotal','estado'], required: ['propiedad','cliente'] },
-    owners:     { type: 're_owner',     idPrefix: 'reo', fields: ['nombre','dniCif','telefono','email','propiedades','comision','ingresosGenerados'], required: ['nombre'] },
-    tenants:    { type: 're_tenant',    idPrefix: 'ret', fields: ['nombre','dni','telefono','email','propiedad','contrato','rentaMensual','estadoPagos','fechaFinContrato'], required: ['nombre'] },
-    appraisals: { type: 're_appraisal', idPrefix: 'rea', fields: ['propiedad','solicitante','fecha','tasador','valorTasado','metodo','estado'], required: ['propiedad','fecha'] },
+    properties: { type: 're_property',  idPrefix: 'rep', fields: ['businessId','salesPointId','referencia','tipo','direccion','ciudad','zona','codigoPostal','m2','habitaciones','banos','planta','anioConstruccion','certificadoEnergetico','amueblado','plazaGaraje','ascensor','terraza','precio','operacion','estado','fechaCaptacion','exclusividad','llavesUbicacion','propietarioNombre','propietarioTelefono','comisionPct','descripcion','agente','agenteUserId','fotos'], required: ['direccion'] },
+    visits:     { type: 're_visit',     idPrefix: 'rev', fields: ['businessId','salesPointId','propiedad','propiedadId','direccion','cliente','clientId','telefono','email','fecha','hora','agente','agenteUserId','tipoVisita','situacion','resultado','siguienteAccion','fechaSeguimiento','notas'], required: ['fecha'] },
+    contracts:  { type: 're_contract',  idPrefix: 'rec', fields: ['businessId','salesPointId','referencia','propiedad','propiedadId','cliente','clientId','clienteNif','tipo','fechaInicio','fechaFin','importeMensual','importeTotal','honorarios','estado'], required: ['propiedad','cliente'] },
+    owners:     { type: 're_owner',     idPrefix: 'reo', fields: ['businessId','salesPointId','nombre','dniCif','telefono','email','propiedades','comision','ingresosGenerados'], required: ['nombre'] },
+    tenants:    { type: 're_tenant',    idPrefix: 'ret', fields: ['businessId','salesPointId','nombre','dni','telefono','email','propiedad','contrato','rentaMensual','estadoPagos','fechaFinContrato'], required: ['nombre'] },
+    appraisals: { type: 're_appraisal', idPrefix: 'rea', fields: ['businessId','salesPointId','propiedad','solicitante','solicitanteNif','fecha','tasador','valorTasado','honorarios','metodo','estado'], required: ['propiedad','fecha'] },
   },
 };
 

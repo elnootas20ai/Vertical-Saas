@@ -55,6 +55,13 @@ import {
   updateProfile,
   verifyEmail,
 } from '../controllers/authController.js';
+import {
+  createWorkerInviteLink,
+  listWorkerInviteLinks,
+  previewWorkerInviteLink,
+  redeemWorkerInviteLink,
+  revokeWorkerInviteLink,
+} from '../controllers/workerInviteLinkController.js';
 import { requireAuth, requireAuthAndEmailVerified, requireAuthForProfileUpdate, optionalAuth } from '../middleware/auth.js';
 import { authSessionLimiter, emailVerificationLimiter, loginCodeLimiter, loginLimiter, oauthLoginLimiter, registerLimiter, recoverLimiter, teamLoginLimiter, tpvTabletAuthLimiter } from '../middleware/rateLimiter.js';
 import {
@@ -62,6 +69,7 @@ import {
   validateParams,
   acceptInviteSchema,
   businessIdParamSchema,
+  createWorkerInviteLinkSchema,
   googleLoginSchema,
   appleLoginSchema,
   inviteUserSchema,
@@ -72,6 +80,7 @@ import {
   loginCodeVerifySchema,
   posSwitchUserSchema,
   recoverSchema,
+  redeemWorkerInviteLinkSchema,
   refreshTokenSchema,
   registerSchema,
   resetPasswordSchema,
@@ -82,6 +91,7 @@ import {
   tpvTabletLoginSchema,
   updatePasswordSchema,
   userIdParamSchema,
+  workerInviteLinkIdParamSchema,
 } from '../middleware/validate.js';
 
 const authRouter = Router();
@@ -101,6 +111,9 @@ authRouter.get('/verify-email', emailVerificationLimiter, verifyEmail);
 authRouter.post('/resend-verification', emailVerificationLimiter, validate(recoverSchema), resendVerificationEmail);
 // A-04: Aceptación de invitación de miembro
 authRouter.post('/accept-invite', recoverLimiter, validate(acceptInviteSchema), acceptInvite);
+// Core: preview público de enlace/QR de invitación por tienda
+authRouter.get('/join/preview', recoverLimiter, previewWorkerInviteLink);
+authRouter.post('/join', requireAuth, validate(redeemWorkerInviteLinkSchema), redeemWorkerInviteLink);
 // Team login: miembros entran con código de empresa + usuario + contraseña
 authRouter.post('/team-login', teamLoginLimiter, validate(teamLoginSchema), teamLogin);
 // TPV tablet: código de tienda (conserva sesión actual si ya estás logueado)
@@ -164,6 +177,10 @@ authRouter.post('/invitations/:invitationId/resend', requireAuthAndEmailVerified
 authRouter.delete('/invitations/:invitationId', requireAuthAndEmailVerified, validateParams(invitationIdParamSchema), revokeInvitation);
 authRouter.get('/businesses/:businessId/invitations', requireAuthAndEmailVerified, validateParams(businessIdParamSchema), listBusinessInvitations);
 authRouter.get('/businesses/:businessId/worker-seats', requireAuthAndEmailVerified, validateParams(businessIdParamSchema), getWorkerSeatStatus);
+// Core: enlaces/QR de invitación por centro (RRHH)
+authRouter.post('/invite-links', requireAuthAndEmailVerified, validate(createWorkerInviteLinkSchema), createWorkerInviteLink);
+authRouter.get('/businesses/:businessId/invite-links', requireAuthAndEmailVerified, validateParams(businessIdParamSchema), listWorkerInviteLinks);
+authRouter.delete('/invite-links/:linkId', requireAuthAndEmailVerified, validateParams(workerInviteLinkIdParamSchema), revokeWorkerInviteLink);
 
 // Preferencias personales de notificación (silenciar categorías concretas)
 authRouter.get('/preferences', requireAuth, getNotificationPreferences);

@@ -152,10 +152,16 @@ export async function couchRequest(req, pathname, init = {}) {
   }
 
   const auth = buildCouchAuthHeader(req);
+  const body = init.body;
+  const isBinaryBody = Buffer.isBuffer(body)
+    || body instanceof Uint8Array
+    || (typeof Blob !== 'undefined' && body instanceof Blob);
+
   const response = await fetch(`${cfg.baseUrl}${pathname}`, {
     ...init,
     headers: {
-      'Content-Type': 'application/json',
+      // JSON por defecto; NUNCA forzar json sobre adjuntos binarios (rompe fotos).
+      ...(isBinaryBody ? {} : { 'Content-Type': 'application/json' }),
       ...(auth ? { Authorization: auth } : {}),
       ...(init.headers || {}),
     },
@@ -508,6 +514,62 @@ export async function putDocument(req, dbName, docId, document) {
   }
 
   return payload;
+}
+
+/**
+ * Adjunta binario a un doc CouchDB (p. ej. fotos inmobiliaria).
+ * Devuelve { ok, id, rev }.
+ */
+export async function putDocumentAttachment(
+  req,
+  dbName,
+  docId,
+  attachmentName,
+  data,
+  contentType = 'application/octet-stream',
+  rev,
+) {
+  const encodedDbName = encodeURIComponent(dbName);
+  const encodedDocId = encodeURIComponent(docId);
+  const encodedName = encodeURIComponent(attachmentName);
+  const revQ = rev ? `?rev=${encodeURIComponent(rev)}` : '';
+  const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+  // Uint8Array: undici/fetch a veces maltrata Buffer + Content-Type JSON por defecto.
+  const body = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+  const response = await couchRequest(
+    req,
+    `/${encodedDbName}/${encodedDocId}/${encodedName}${revQ}`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': contentType || 'application/octet-stream' },
+      body,
+    },
+  );
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.reason || payload?.error || `No se pudo guardar adjunto ${attachmentName}`);
+  }
+  cacheService.invalidateDb(dbName);
+  return payload;
+}
+
+/** Lee un adjunto como Buffer + content-type. */
+export async function getDocumentAttachment(req, dbName, docId, attachmentName) {
+  const encodedDbName = encodeURIComponent(dbName);
+  const encodedDocId = encodeURIComponent(docId);
+  const encodedName = encodeURIComponent(attachmentName);
+  const response = await couchRequest(
+    req,
+    `/${encodedDbName}/${encodedDocId}/${encodedName}`,
+    { headers: { Accept: '*/*' } },
+  );
+  if (!response.ok) {
+    const payload = await response.text().catch(() => '');
+    throw new Error(payload || `No se pudo leer adjunto ${attachmentName}`);
+  }
+  const contentType = response.headers.get('content-type') || 'application/octet-stream';
+  const buffer = Buffer.from(await response.arrayBuffer());
+  return { buffer, contentType };
 }
 
 export async function bulkPutDocuments(req, dbName, docs) {
@@ -3847,7 +3909,14 @@ export function buildClientDocument(userId, data = {}, existing = null) {
     socialLinks: rawSocialLinks.map(sanitizeSocialLink).filter(Boolean),
     contacts: rawContacts.map(sanitizeContactPerson).filter(Boolean),
     status: normalizeClientStatus(data.status),
-    responsible: String(data.responsible || 'Sin asignar'),
+    responsible: String(
+      data.responsible != null ? data.responsible : (existing?.responsible || 'Sin asignar'),
+    ),
+    responsibleUserId: String(
+      data.responsibleUserId != null
+        ? data.responsibleUserId
+        : (existing?.responsibleUserId || ''),
+    ).trim().replace(/^account:/, ''),
     notes: String(data.notes || ''),
     consents: {
       dataProcessing: Boolean(data.consents?.dataProcessing),
@@ -3939,6 +4008,7 @@ export function sanitizeClient(client) {
     contacts: Array.isArray(client.contacts) ? client.contacts : [],
     status: normalizeClientStatus(client.status),
     responsible: client.responsible || 'Sin asignar',
+    responsibleUserId: String(client.responsibleUserId || '').trim().replace(/^account:/, ''),
     notes: client.notes || '',
     consents: {
       dataProcessing: Boolean(client.consents?.dataProcessing),
@@ -4007,6 +4077,7 @@ export function sanitizeClientSummary(client) {
     postalCode: location.postalCode,
     status: normalizeClientStatus(client.status),
     responsible: client.responsible || 'Sin asignar',
+    responsibleUserId: String(client.responsibleUserId || '').trim().replace(/^account:/, ''),
     documentsCount: Number(client.documentsCount || 0),
     tags: Array.isArray(client.tags) ? client.tags : [],
     stats: {
@@ -7010,6 +7081,14 @@ export function buildPointOfSaleDocument(userId, data = {}, existing = null) {
     data.businessId || data.business_id || existing?.businessId || existing?.business_id,
   );
 
+  const hasDevicesInData = Object.prototype.hasOwnProperty.call(data, 'tpvAllowedDevices');
+  const hasDevicesInExisting = Object.prototype.hasOwnProperty.call(existing || {}, 'tpvAllowedDevices');
+  const tpvAllowedDevices = hasDevicesInData
+    ? (Array.isArray(data.tpvAllowedDevices) ? data.tpvAllowedDevices : [])
+    : hasDevicesInExisting
+      ? (Array.isArray(existing.tpvAllowedDevices) ? existing.tpvAllowedDevices : [])
+      : undefined;
+
   return {
     _id: id,
     _rev: existing?._rev,
@@ -7024,6 +7103,7 @@ export function buildPointOfSaleDocument(userId, data = {}, existing = null) {
     ...(businessId ? { businessId, business_id: businessId } : {}),
     terminals,
     ...resolvePrinterConfigField(data, existing),
+    ...(tpvAllowedDevices !== undefined ? { tpvAllowedDevices } : {}),
     active: data.active !== undefined ? Boolean(data.active) : (existing?.active !== false),
     createdAt: existing?.createdAt || now,
     updatedAt: now,
@@ -7057,6 +7137,9 @@ export function sanitizePointOfSale(doc) {
         }))
       : [],
     ...(doc.printerConfig ? { printerConfig: sanitizePrinterConfig(doc.printerConfig) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(doc, 'tpvAllowedDevices')
+      ? { tpvAllowedDevices: Array.isArray(doc.tpvAllowedDevices) ? doc.tpvAllowedDevices : [] }
+      : {}),
     active: doc.active !== false,
     createdAt: doc.createdAt || new Date().toISOString(),
     updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
@@ -12239,6 +12322,126 @@ export async function findPendingInvitationForEmailAndBusiness(req, email, busin
   const docs = await getAllDocuments(req, TEAM_INVITATIONS_DB);
   return docs.find((d) => isInvitationActive(d) && d.email === normalized && d.business_id === businessId) || null;
 }
+
+// ─── Worker invite links (QR / enlace abierto por centro de trabajo) ─────────
+// Core RRHH: el gerente genera un enlace/QR por tienda; el trabajador se registra
+// y entra al equipo con rol + salesPointId. No es el código tablet TPV.
+export const WORKER_INVITE_LINKS_DB = 'worker_invite_links';
+
+export function buildWorkerInviteLinkDocument({
+  tokenHash,
+  businessId,
+  businessName = '',
+  workCenterId,
+  workCenterName = '',
+  role = 'Usuario',
+  permissions = null,
+  landingPage = WORKER_DEFAULT_LANDING_PATH,
+  employment = null,
+  scheduleTemplateId = '',
+  invitedBy = '',
+  invitedByName = '',
+  maxUses = null,
+  expiresInDays = 90,
+}) {
+  const linkId = uuidv4();
+  const now = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + Math.max(1, expiresInDays) * 24 * 60 * 60 * 1000).toISOString();
+  const wcId = String(workCenterId || '').trim();
+  return {
+    _id: `worker_invite_link:${linkId}`,
+    type: 'worker_invite_link',
+    link_id: linkId,
+    tokenHash: String(tokenHash || '').trim(),
+    business_id: String(businessId || '').trim(),
+    businessName: String(businessName || '').trim(),
+    workCenterId: wcId,
+    workCenterName: String(workCenterName || '').trim(),
+    role: String(role || 'Usuario').trim() || 'Usuario',
+    permissions: permissions || null,
+    landingPage: String(landingPage || WORKER_DEFAULT_LANDING_PATH),
+    employment: employment || {
+      salesPointId: wcId,
+      position: String(role || '').trim() || undefined,
+      workday: 'completa',
+    },
+    scheduleTemplateId: String(scheduleTemplateId || '').trim(),
+    invitedBy: String(invitedBy || '').trim(),
+    invitedByName: String(invitedByName || '').trim(),
+    status: 'active', // active | revoked | exhausted
+    maxUses: maxUses == null || maxUses === '' ? null : Math.max(1, Number(maxUses) || 1),
+    useCount: 0,
+    expiresAt,
+    createdAt: now,
+    updatedAt: now,
+    revokedAt: '',
+  };
+}
+
+function isWorkerInviteLinkRedeemable(doc) {
+  if (!doc || doc.type !== 'worker_invite_link' || doc.deletedAt) return false;
+  if (doc.status !== 'active') return false;
+  if (doc.expiresAt && new Date(doc.expiresAt).getTime() < Date.now()) return false;
+  if (doc.maxUses != null && Number(doc.useCount || 0) >= Number(doc.maxUses)) return false;
+  return Boolean(doc.tokenHash);
+}
+
+export async function saveWorkerInviteLink(req, doc) {
+  if (!doc?._id) throw new Error('Documento de enlace de invitación inválido');
+  await ensureDatabase(req, WORKER_INVITE_LINKS_DB);
+  const result = await putDocument(req, WORKER_INVITE_LINKS_DB, doc._id, doc);
+  return { ...doc, _rev: result.rev };
+}
+
+export async function findWorkerInviteLinkById(req, linkId) {
+  if (!linkId) return null;
+  await ensureDatabase(req, WORKER_INVITE_LINKS_DB);
+  return getDocument(req, WORKER_INVITE_LINKS_DB, `worker_invite_link:${linkId}`);
+}
+
+export async function findWorkerInviteLinkByToken(req, rawToken) {
+  const token = String(rawToken || '').trim();
+  if (!token) return null;
+  const hashed = hashToken(token);
+  await ensureDatabase(req, WORKER_INVITE_LINKS_DB);
+  const docs = await getAllDocuments(req, WORKER_INVITE_LINKS_DB);
+  return docs.find((d) => d?.type === 'worker_invite_link' && !d?.deletedAt && d?.tokenHash === hashed) || null;
+}
+
+export async function listWorkerInviteLinksByBusiness(req, businessId, { includeInactive = false } = {}) {
+  if (!businessId) return [];
+  await ensureDatabase(req, WORKER_INVITE_LINKS_DB);
+  const docs = await getAllDocuments(req, WORKER_INVITE_LINKS_DB);
+  return docs.filter((d) => {
+    if (!d || d.type !== 'worker_invite_link' || d.deletedAt) return false;
+    if (d.business_id !== businessId) return false;
+    if (includeInactive) return true;
+    return isWorkerInviteLinkRedeemable(d);
+  });
+}
+
+export function sanitizeWorkerInviteLink(doc) {
+  if (!doc) return null;
+  return {
+    link_id: doc.link_id,
+    business_id: doc.business_id,
+    businessName: doc.businessName || '',
+    workCenterId: doc.workCenterId || '',
+    workCenterName: doc.workCenterName || '',
+    role: doc.role || 'Usuario',
+    landingPage: doc.landingPage || WORKER_DEFAULT_LANDING_PATH,
+    scheduleTemplateId: doc.scheduleTemplateId || '',
+    status: doc.status || 'active',
+    maxUses: doc.maxUses == null ? null : Number(doc.maxUses),
+    useCount: Number(doc.useCount || 0),
+    expiresAt: doc.expiresAt || '',
+    createdAt: doc.createdAt || '',
+    updatedAt: doc.updatedAt || '',
+    invitedByName: doc.invitedByName || '',
+  };
+}
+
+export { isWorkerInviteLinkRedeemable };
 
 export async function listAllBusinesses(req) {
   await ensureDatabase(req, BUSINESSES_DB);

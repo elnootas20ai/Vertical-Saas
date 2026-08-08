@@ -56,6 +56,13 @@ function fileBelongsToVertical(filePath, moduleDef) {
     const base = r.split('/').pop() || '';
     if (r.startsWith('src/app/pages/saas/') && /^Heladeria/i.test(base)) return true;
   }
+  if (moduleDef.id === 'realEstate') {
+    if (r.startsWith('src/app/verticals/realEstate')) return true;
+    const base = r.split('/').pop() || '';
+    if (r.startsWith('src/app/pages/saas/') && /^RealEstate/i.test(base)) return true;
+    if (r.startsWith('src/app/pages/saas/dashboards/') && /^RealEstate/i.test(base)) return true;
+    if (r.startsWith('src/app/pages/saas/worker/') && /RealEstate/i.test(base)) return true;
+  }
   return false;
 }
 
@@ -116,6 +123,13 @@ const HELADERIA_ONLY_IMPORT_PATTERNS = [
   /\/pages\/saas\/Heladeria/,
 ];
 
+const REAL_ESTATE_ONLY_IMPORT_PATTERNS = [
+  /\/verticals\/realEstate\//,
+  /\/pages\/saas\/RealEstate/,
+  /\/pages\/saas\/dashboards\/RealEstate/,
+  /\/pages\/saas\/worker\/WorkerTpvRealEstate/,
+];
+
 const IMPORT_RE =
   /\bfrom\s+['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
 
@@ -156,19 +170,22 @@ function scanCrossVerticalViolations(ownerModule, forbiddenPatterns, isLegacySha
 }
 
 describe('vertical module boundaries', () => {
-  it('registro delivery, restaurant, compraventa, butcher y heladeria tienen ids distintos', async () => {
+  it('registro delivery, restaurant, compraventa, butcher, heladeria y realEstate tienen ids distintos', async () => {
     const { DELIVERY_MODULE } = await import('../src/app/verticals/delivery/module.ts');
     const { RESTAURANT_MODULE } = await import('../src/app/verticals/restaurant/module.ts');
     const { COMPRAVENTA_MODULE } = await import('../src/app/verticals/compraventa/module.ts');
     const { BUTCHER_MODULE } = await import('../src/app/verticals/butcher/module.ts');
     const { HELADERIA_MODULE } = await import('../src/app/verticals/heladeria/module.ts');
+    const { REAL_ESTATE_MODULE } = await import('../src/app/verticals/realEstate/module.ts');
     expect(DELIVERY_MODULE.id).toBe('delivery');
     expect(RESTAURANT_MODULE.id).toBe('restaurant');
     expect(COMPRAVENTA_MODULE.id).toBe('compraventa');
     expect(BUTCHER_MODULE.id).toBe('butcher');
     expect(HELADERIA_MODULE.id).toBe('heladeria');
+    expect(REAL_ESTATE_MODULE.id).toBe('realEstate');
     expect(BUTCHER_MODULE.businessType).toBe('butcherShop');
     expect(HELADERIA_MODULE.businessType).toBe('iceCreamShop');
+    expect(REAL_ESTATE_MODULE.businessType).toBe('realEstate');
     expect(DELIVERY_MODULE.businessType).not.toBe(HELADERIA_MODULE.businessType);
   });
 
@@ -274,6 +291,28 @@ describe('vertical module boundaries', () => {
     const violations = scanCrossVerticalViolations(
       DELIVERY_MODULE,
       HELADERIA_ONLY_IMPORT_PATTERNS,
+      isLegacySharedCrossVerticalImport,
+    );
+    expect(violations).toEqual([]);
+  });
+
+  it('realEstate no importa pantallas/lib de negocio delivery', async () => {
+    const { REAL_ESTATE_MODULE } = await import('../src/app/verticals/realEstate/module.ts');
+    const { isLegacySharedCrossVerticalImport } = await import('../src/app/verticals/registry.ts');
+    const violations = scanCrossVerticalViolations(
+      REAL_ESTATE_MODULE,
+      DELIVERY_ONLY_IMPORT_PATTERNS,
+      isLegacySharedCrossVerticalImport,
+    );
+    expect(violations).toEqual([]);
+  });
+
+  it('delivery no importa pantallas/lib de negocio realEstate', async () => {
+    const { DELIVERY_MODULE } = await import('../src/app/verticals/delivery/module.ts');
+    const { isLegacySharedCrossVerticalImport } = await import('../src/app/verticals/registry.ts');
+    const violations = scanCrossVerticalViolations(
+      DELIVERY_MODULE,
+      REAL_ESTATE_ONLY_IMPORT_PATTERNS,
       isLegacySharedCrossVerticalImport,
     );
     expect(violations).toEqual([]);

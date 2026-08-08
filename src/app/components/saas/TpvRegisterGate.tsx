@@ -2313,10 +2313,15 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
           className="flex-1 min-h-0 overflow-hidden px-2 py-1.5 flex flex-col"
         >
           {restaurantWarnings.length > 0 && closingStep === 1 ? (
-            <div className="shrink-0 mb-1 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 px-2 py-1">
+            <div className="shrink-0 mb-1 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 px-2 py-1.5 space-y-0.5">
               <p className="text-[10px] font-semibold text-amber-900 dark:text-amber-100 flex items-center gap-1">
                 <AlertTriangle className="w-3 h-3 shrink-0" /> Sala pendiente
               </p>
+              {restaurantWarnings.map((w) => (
+                <p key={w} className="pl-4 text-[10px] leading-snug text-amber-800 dark:text-amber-200">
+                  {w}
+                </p>
+              ))}
             </div>
           ) : null}
 
@@ -6143,7 +6148,7 @@ export function TpvRegisterGate({
         const check = await checkRestaurantRegisterClose(dataUserId);
         setRestaurantCloseWarnings(check.warnings);
         if (check.warnings.length > 0) {
-          toast.warning('Hay mesas o cuentas abiertas en sala', { duration: 5000 });
+          toast.warning(`Sala pendiente: ${check.warnings.join(' · ')}`, { duration: 6000 });
         }
       } catch {
         setRestaurantCloseWarnings([]);

@@ -50,6 +50,11 @@ import {
   updatePointOfSale,
   removePointOfSale,
   regeneratePointOfSaleTerminalCode,
+  listPdvTpvDevices,
+  approvePdvTpvDevice,
+  rejectPdvTpvDevice,
+  revokePdvTpvDevice,
+  unblockPdvTpvDevice,
   getDeliveryConfig,
   updateDeliveryConfig,
   listStaffConsumptions,
@@ -180,6 +185,11 @@ deliveryRouter.get('/points-of-sale/:userId', listPointsOfSale);
 deliveryRouter.post('/points-of-sale/:userId', createPointOfSale);
 deliveryRouter.put('/points-of-sale/:userId/:pdvId', updatePointOfSale);
 deliveryRouter.post('/points-of-sale/:userId/:pdvId/regenerate-terminal-code', regeneratePointOfSaleTerminalCode);
+deliveryRouter.get('/points-of-sale/:userId/:pdvId/tpv-devices', listPdvTpvDevices);
+deliveryRouter.post('/points-of-sale/:userId/:pdvId/tpv-devices/approve', approvePdvTpvDevice);
+deliveryRouter.post('/points-of-sale/:userId/:pdvId/tpv-devices/reject', rejectPdvTpvDevice);
+deliveryRouter.post('/points-of-sale/:userId/:pdvId/tpv-devices/revoke', revokePdvTpvDevice);
+deliveryRouter.post('/points-of-sale/:userId/:pdvId/tpv-devices/unblock', unblockPdvTpvDevice);
 deliveryRouter.delete('/points-of-sale/:userId/:pdvId', removePointOfSale);
 
 deliveryRouter.get('/drivers/:userId', listDrivers);

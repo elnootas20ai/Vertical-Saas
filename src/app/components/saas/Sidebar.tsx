@@ -258,6 +258,11 @@ const menuItemDefs = [
   // ── Catálogo y Proveedores ───────────────────────────────────────────────────
   { id: 'catalog',          navKey: 'catalog',         icon: <BookOpen className="w-5 h-5" />,    path: '/saas/catalog?tab=catalog' },
   { id: 'catalog-stock',    navKey: 'articles',        icon: <Boxes className="w-5 h-5" />,       path: '/saas/inventory' },
+  // TPV (delivery / restaurante / heladería): las 4 secciones del módulo catálogo.
+  { id: 'catalog-carta',    navKey: 'cartaTpv',        icon: <BookOpen className="w-5 h-5" />,    path: '/saas/catalog?tab=catalog' },
+  { id: 'catalog-stock-tpv', navKey: 'almacenTpv',     icon: <Boxes className="w-5 h-5" />,       path: '/saas/catalog?tab=stock' },
+  { id: 'catalog-purchases', navKey: 'catalogPurchases', icon: <ShoppingCart className="w-5 h-5" />, path: '/saas/catalog?tab=suppliers' },
+  { id: 'catalog-consumos', navKey: 'staffConsumption', icon: <UtensilsCrossed className="w-5 h-5" />, path: '/saas/catalog?tab=staff-consumption' },
   { id: 'costing',          navKey: 'costing',         icon: <Calculator className="w-5 h-5" />,  path: '/saas/catalog?tab=escandallo' },
   { id: 'suppliers',        navKey: 'suppliers',       icon: <Factory className="w-5 h-5" />,     path: '/saas/suppliers' },
 
@@ -558,6 +563,7 @@ const VERTICAL_GROUPS: Record<BusinessType, Set<string>> = {
   hotel:         new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'hotel']),
   construction:  new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'construction']),
   academy:       new Set(['clientesCrm', 'equipo', 'finanzas', 'documentacion', 'academy']),
+  // Sin catalogProviders (Catálogo / Inventario / Proveedores): no aplica a inmobiliaria.
   realEstate:    new Set(['clientesCrm', 'equipo', 'finanzas', 'documentacion', 'realEstate']),
   lawyer:        new Set(['clientesCrm', 'equipo', 'finanzas', 'documentacion', 'lawyer']),
   nightclub:     new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'nightclub']),
@@ -628,6 +634,10 @@ const VERTICAL_GROUP_ITEM_OVERRIDES: Partial<Record<BusinessType, Record<string,
       'heladeria-encargos',
       'heladeria-integraciones',
     ],
+  },
+  realEstate: {
+    // CRM core (no delivery): Clientes + presupuestos/promos.
+    clientesCrm: ['clients', 'quotes', 'promotions'],
   },
 };
 
@@ -1176,8 +1186,13 @@ function SidebarInner({
     const override = vertical ? VERTICAL_GROUP_ITEM_OVERRIDES[vertical]?.[g.id] : undefined;
     const isCompraventaCommercial = g.id === 'commercial' && vertical === 'carDealership';
     let itemIds = override ? [...override] : [...g.itemIds];
-    if (g.id === 'catalogProviders' && !usesDeliverySidebarCore) {
-      itemIds = itemIds.filter((id) => id !== 'costing');
+    if (g.id === 'catalogProviders') {
+      if (usesDeliverySidebarCore || isRestaurantVertical) {
+        // TPV: las 4 secciones del módulo (Carta · Almacén · Compras · Consumos), sin Escandallo suelto.
+        itemIds = ['catalog-carta', 'catalog-stock-tpv', 'catalog-purchases', 'catalog-consumos'];
+      } else {
+        itemIds = itemIds.filter((id) => id !== 'costing');
+      }
     }
     if (g.id === 'butcherShop' && vertical === 'butcherShop' && !currentBusiness?.ownDeliveryEnabled) {
       itemIds = itemIds.filter((id) => id !== 'butcher-reparto');
@@ -1371,7 +1386,7 @@ function SidebarInner({
     'dashboard', 'alertas', 'reports', 'team', 'team-schedules', 'hr-requests', 'horarios-vacaciones', 'commissions', 'payroll', 'gestoria',
     'finance', 'income-expenses', 'ebitda', 'taxes', 'verifactu', 'bank-reconciliation',
     'client-billing', 'costing', 'billing',
-    'suppliers', 'compras-stock',
+    'suppliers', 'compras-stock', 'catalog-purchases',
     'configuracion', 'settings', 'admin', 'gdpr',
     'pipeline', 'sales-metrics', 'operations', 'affiliates',
     // 'delivery-clients' apunta a /saas/delivery-ops?panel=clients (también owner-only).
@@ -1552,7 +1567,11 @@ function SidebarInner({
     (item.id === 'cleaning-reports' && (location.pathname.startsWith('/saas/cleaning-reports') || location.pathname.startsWith('/saas/vertical/limpieza/informes'))) ||
     (item.id === 'cleaning-execution' && location.pathname.startsWith('/saas/cleaning-execution')) ||
     (item.id === 'catalog' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'catalog') ||
+    (item.id === 'catalog-carta' && location.pathname.startsWith('/saas/catalog') && ['catalog', 'tpv-templates', 'escandallo'].includes(catalogTab)) ||
     (item.id === 'catalog-stock' && location.pathname.startsWith('/saas/inventory')) ||
+    (item.id === 'catalog-stock-tpv' && location.pathname.startsWith('/saas/catalog') && ['stock', 'ingredientes'].includes(catalogTab)) ||
+    (item.id === 'catalog-purchases' && location.pathname.startsWith('/saas/catalog') && ['suppliers', 'purchase-orders', 'invoices'].includes(catalogTab)) ||
+    (item.id === 'catalog-consumos' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'staff-consumption') ||
     (item.id === 'costing' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'escandallo') ||
     (item.id === 'costing' && location.pathname.startsWith('/saas/costing')) ||
     (item.id === 'suppliers' && location.pathname.startsWith('/saas/suppliers')) ||

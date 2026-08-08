@@ -478,6 +478,8 @@ export interface Client {
   status: 'active' | 'inactive';
   commercialStatus?: string;
   responsible?: string;
+  /** Agente/trabajador asignado (userId de Equipo). Clave para cartera inmobiliaria. */
+  responsibleUserId?: string;
   branch_id?: string;
   businessId?: string;
   business_id?: string;
@@ -631,6 +633,7 @@ export interface Subscription {
   extraBusinessSlots?: number;
   /** Trabajadores extra (además del cupo del plan). */
   extraWorkerSlots?: number;
+  extraTpvTabletSlots?: number;
   /** Funciones PRO activadas manualmente por superadmin. */
   adminProAccess?: boolean;
   /** Exento de suspensión automática (MONEI/cron). Cuentas manuales como clientes sin pasarela. */
@@ -1122,6 +1125,7 @@ function deserializeSubscription(
     extraCommercialBrandSlots: subscription.extraCommercialBrandSlots,
     extraBusinessSlots: subscription.extraBusinessSlots,
     extraWorkerSlots: subscription.extraWorkerSlots,
+    extraTpvTabletSlots: subscription.extraTpvTabletSlots,
     adminProAccess: Boolean(subscription.adminProAccess),
     billingExempt: Boolean(subscription.billingExempt),
     moneiSubscriptionId: subscription.moneiSubscriptionId,

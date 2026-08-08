@@ -37,6 +37,7 @@ function resolveVertical(movement: FinanceMovementRecord): string {
   const src = (movement.source || '').toLowerCase();
   if (src === 'sale' || src === 'invoice') return 'Facturación';
   if (src === 'tpv_session') return 'TPV / Caja';
+  if (src === 'realestate_contract' || src === 'realestate_appraisal') return 'Inmobiliaria';
 
   const cat = (movement.category || '').toLowerCase();
   for (const [key, label] of Object.entries(VERTICAL_CATEGORY_MAP)) {
@@ -47,6 +48,9 @@ function resolveVertical(movement: FinanceMovementRecord): string {
   if (concept.includes('delivery') || concept.includes('reparto')) return 'Delivery';
   if (concept.includes('web') || concept.includes('ecommerce')) return 'Web / eCommerce';
   if (concept.includes('taller') || concept.includes('reparación')) return 'Taller';
+  if (concept.includes('inmobiliaria') || concept.includes('tasación') || concept.includes('tasacion')) {
+    return 'Inmobiliaria';
+  }
 
   return 'General';
 }

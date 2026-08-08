@@ -360,6 +360,10 @@ const CONNECTIONS = [
   { id: 'onboarding',       label: 'Incorporación inicial', icon: Zap,          path: '/saas/configuracion' },
 ] as const;
 
+/** Módulos / conexiones de catálogo-proveedores ocultos en inmobiliaria. */
+const REAL_ESTATE_HIDDEN_MODULE_IDS = new Set(['catalog', 'stock', 'suppliers', 'invoices', 'tpv', 'sales']);
+const REAL_ESTATE_HIDDEN_CONNECTION_IDS = new Set(['stock', 'suppliers', 'invoices', 'tpv', 'ocr']);
+
 // ─── Main component ────────────────────────────────────────────────────────────
 
 export function ConfiguracionGeneral() {
@@ -393,6 +397,7 @@ export function ConfiguracionGeneral() {
   const isRestaurantBiz = isRestaurantBusinessType(biz?.businessType);
   const isHeladeriaBiz = isIceCreamShopBusinessType(biz?.businessType);
   const isEventsBiz = biz?.businessType === 'events';
+  const isRealEstateBiz = biz?.businessType === 'realEstate';
   const isDeliveryOpsBiz = isDeliveryOpsBusinessType(biz?.businessType);
   /** Delivery, bar/restaurante y heladería: catálogo TPV + import Excel. */
   const usesTpvCatalogOps = isDeliveryOpsBiz || isRestaurantBiz || isHeladeriaBiz;
@@ -407,13 +412,14 @@ export function ConfiguracionGeneral() {
   const retailCeoTpvPath = resolveRetailCeoTpvPath(biz?.businessType);
   const visibleConnections = useMemo(
     () => CONNECTIONS.filter((conn) => {
+      if (isRealEstateBiz && REAL_ESTATE_HIDDEN_CONNECTION_IDS.has(conn.id)) return false;
       if (conn.id === 'tpv') return usesTpvCatalogOps;
       if (conn.id === 'stock' && isCarDealershipBiz) return false;
       return true;
     }).map((conn) => (
       conn.id === 'tpv' ? { ...conn, path: retailCeoTpvPath } : conn
     )),
-    [usesTpvCatalogOps, isCarDealershipBiz, retailCeoTpvPath],
+    [usesTpvCatalogOps, isCarDealershipBiz, isRealEstateBiz, retailCeoTpvPath],
   );
   const resolvedImportStatus = importData || biz?.initialImportStatus || null;
   const catalogImportDone =
@@ -925,7 +931,7 @@ export function ConfiguracionGeneral() {
       status: (activeModulesSet.has('tpv') ? 'complete' : 'empty') as BlockStatus,
       route: '#tpv-config',
       stats: activeModulesSet.has('tpv') ? 'Activo' : 'Inactivo',
-      hidden: isEventsBiz || (!activeModulesSet.has('tpv') && !contractedModulesSet.has('tpv')),
+      hidden: isEventsBiz || isRealEstateBiz || (!activeModulesSet.has('tpv') && !contractedModulesSet.has('tpv')),
     },
     {
       id: 'correo-facturas',
@@ -935,6 +941,7 @@ export function ConfiguracionGeneral() {
       status: (invoiceEmailData?.enabled ? 'complete' : 'empty') as BlockStatus,
       route: '#correo-facturas',
       stats: invoiceEmailData?.enabled ? 'Activo' : 'Pendiente',
+      hidden: isRealEstateBiz,
     },
     {
       id: 'importacion',
@@ -944,7 +951,7 @@ export function ConfiguracionGeneral() {
       status: (() => {
         const s = importData || biz?.initialImportStatus;
         if (!s) return 'empty' as BlockStatus;
-        const vals = [s.stock, s.clients, s.catalog];
+        const vals = isRealEstateBiz ? [s.clients] : [s.stock, s.clients, s.catalog];
         if (vals.every((v) => v === 'completed')) return 'complete' as BlockStatus;
         if (vals.some((v) => v === 'completed' || v === 'skipped')) return 'partial' as BlockStatus;
         return 'empty' as BlockStatus;
@@ -952,11 +959,14 @@ export function ConfiguracionGeneral() {
       route: '#importacion',
       stats: (() => {
         const s = importData || biz?.initialImportStatus;
-        if (!s) return '0/3';
+        if (!s) return isRealEstateBiz ? '0/1' : '0/3';
+        if (isRealEstateBiz) {
+          return `${s.clients === 'completed' ? 1 : 0}/1 completados`;
+        }
         return `${[s.stock, s.clients, s.catalog].filter((v) => v === 'completed').length}/3 completados`;
       })(),
     },
-  ], [biz, activeCenters.length, sedesDescription, sedesStats, loadingCenters, invitedAccepted, modulesData, invoiceEmailData, importData, activeModulesSet, contractedModulesSet]);
+  ], [biz, activeCenters.length, sedesDescription, sedesStats, loadingCenters, invitedAccepted, modulesData, invoiceEmailData, importData, activeModulesSet, contractedModulesSet, isEventsBiz, isRealEstateBiz]);
 
   const visibleBlocks = blocks.filter((b) => !('hidden' in b && b.hidden));
 
@@ -1105,7 +1115,7 @@ export function ConfiguracionGeneral() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {MODULE_DEFS.map((mod) => {
+            {MODULE_DEFS.filter((mod) => !(isRealEstateBiz && REAL_ESTATE_HIDDEN_MODULE_IDS.has(mod.id))).map((mod) => {
               const Icon = mod.icon;
               const isActive = activeModulesSet.has(mod.id);
               const isContracted = contractedModulesSet.size === 0 || contractedModulesSet.has(mod.id);
@@ -1152,6 +1162,7 @@ export function ConfiguracionGeneral() {
         </section>
 
         {/* ── Correo recepción facturas ───────────────────────────────────── */}
+        {!isRealEstateBiz && (
         <section id="correo-facturas" className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800">
           <div className="flex items-center gap-3 mb-5">
             <div className="w-10 h-10 rounded-xl bg-violet-50 dark:bg-violet-900/30 flex items-center justify-center">
@@ -1309,6 +1320,7 @@ export function ConfiguracionGeneral() {
             ) : null}
           </div>
         </section>
+        )}
 
         {/* ── Importación inicial ─────────────────────────────────────────── */}
         <section id="importacion" className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800">
@@ -1319,7 +1331,9 @@ export function ConfiguracionGeneral() {
             <div>
               <h2 className="font-bold text-gray-900 dark:text-gray-100">Importación inicial</h2>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                {usesTpvCatalogOps
+                {isRealEstateBiz
+                  ? 'Inmobiliaria: importa tu base de clientes para empezar a operar.'
+                  : usesTpvCatalogOps
                   ? isRestaurantBiz
                     ? 'Bar/restaurante: primero catálogo (carta + precios TPV), luego stock (unidades) y clientes.'
                     : 'Delivery: primero catálogo (carta + precios), luego stock (unidades). El coste de compra se calcula al recibir pedidos a proveedores.'
@@ -1337,7 +1351,11 @@ export function ConfiguracionGeneral() {
           ) : null}
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {(usesTpvCatalogOps
+            {(isRealEstateBiz
+              ? [
+                  { key: 'clients' as const, step: 1, label: 'Clientes', desc: 'Base de datos de clientes', icon: Users },
+                ]
+              : usesTpvCatalogOps
               ? [
                   { key: 'catalog' as const, step: 1, label: 'Catálogo', desc: 'Productos y precios de venta (TPV)', icon: LayoutGrid },
                   { key: 'stock' as const, step: 2, label: 'Stock', desc: 'Unidades en almacén (tras el catálogo)', icon: Truck, needsCatalog: true },

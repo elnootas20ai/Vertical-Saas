@@ -179,6 +179,27 @@ export const joinRequestActionSchema = z.object({
   action: z.enum(['accepted', 'rejected']),
 });
 
+/** Core: crear enlace/QR de invitación por centro de trabajo. */
+export const createWorkerInviteLinkSchema = z.object({
+  businessId: z.string().min(1, 'businessId obligatorio').max(100).trim(),
+  workCenterId: z.string().min(1, 'Centro de trabajo obligatorio').max(100).trim(),
+  role: z.string().min(1).max(100).trim().optional(),
+  permissions: z.any().optional(),
+  landingPage: z.string().max(200).trim().optional(),
+  scheduleTemplateId: z.string().max(200).trim().optional().default(''),
+  position: z.string().max(200).trim().optional().default(''),
+  maxUses: z.coerce.number().int().min(1).max(9999).optional().nullable(),
+  expiresInDays: z.coerce.number().int().min(1).max(365).optional().default(90),
+});
+
+export const redeemWorkerInviteLinkSchema = z.object({
+  token: z.string().min(1, 'Token obligatorio').max(128).trim(),
+});
+
+export const workerInviteLinkIdParamSchema = z.object({
+  linkId: z.string().min(1, 'linkId obligatorio').max(100),
+});
+
 export const teamLoginSchema = z.object({
   companyCode: z.string().min(1, 'El código de empresa es obligatorio').max(20).trim(),
   username: z.string().min(1, 'El usuario es obligatorio').max(100).trim(),
@@ -192,6 +213,8 @@ export const posSwitchUserSchema = z.object({
 
 export const tpvTabletLoginSchema = z.object({
   terminalCode: z.string().min(4, 'El código de tienda es obligatorio').max(12).trim(),
+  deviceId: z.string().min(8, 'Falta el dispositivo').max(80).trim(),
+  deviceLabel: z.string().max(120).trim().optional(),
 });
 
 export const setPosPinSchema = z.object({

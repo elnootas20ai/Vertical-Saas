@@ -1,6 +1,6 @@
 /**
  * Plano de mesas del TPV sala (tras fichaje + caja abierta).
- * Libres arriba (compactos). En servicio abajo (mini-ticket + €).
+ * En servicio arriba (mini-ticket + € + acciones). Libres abajo (compactas).
  * Tocar mesa → abre el TPV de esa mesa.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -11,7 +11,6 @@ import {
   ArrowLeftRight,
   CalendarDays,
   LayoutGrid,
-  Loader2,
   Plus,
   Store,
   Users,
@@ -56,6 +55,7 @@ import { seatGuest } from '../../lib/restaurantReservationsApi';
 import type { RestaurantReservation } from '../../lib/restaurantReservationTypes';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
 import { readTpvTabletBinding } from '../../lib/tpvTabletSession';
 import { useLiveClock } from '../../hooks/useLiveClock';
 import { useTodayReservationsPoll } from '../../hooks/useTodayReservationsPoll';
@@ -77,49 +77,60 @@ type Props = {
 
 const STATUS_UI: Record<
   DiningTableStatus,
-  { label: string; card: string; badge: string }
+  { label: string; card: string; badge: string; accent: string }
 > = {
   available: {
     label: 'Libre',
     card: 'border-stone-200 bg-white text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-50',
     badge: 'bg-emerald-600 text-white',
+    accent: 'bg-emerald-500',
   },
   occupied: {
     label: 'Ocupada',
-    card: 'border-red-300 bg-white text-stone-900 dark:border-red-800 dark:bg-stone-900 dark:text-stone-50',
+    card: 'border-stone-200 bg-white text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-50',
     badge: 'bg-red-600 text-white',
+    accent: 'bg-red-500',
   },
   pending_order: {
     label: 'Ocupada',
-    card: 'border-red-300 bg-white text-stone-900 dark:border-red-800 dark:bg-stone-900 dark:text-stone-50',
+    card: 'border-stone-200 bg-white text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-50',
     badge: 'bg-red-600 text-white',
+    accent: 'bg-red-500',
   },
   served: {
     label: 'Ocupada',
-    card: 'border-red-300 bg-white text-stone-900 dark:border-red-800 dark:bg-stone-900 dark:text-stone-50',
+    card: 'border-stone-200 bg-white text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-50',
     badge: 'bg-red-600 text-white',
+    accent: 'bg-red-500',
   },
   pending_payment: {
     label: 'Por cobrar',
-    card: 'border-amber-400 bg-amber-50 text-stone-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-stone-50',
-    badge: 'bg-amber-600 text-white',
+    card: 'border-blue-200 bg-blue-50/60 text-stone-900 dark:border-blue-900 dark:bg-blue-950/30 dark:text-stone-50',
+    badge: 'bg-[var(--v-blue,#2563eb)] text-white',
+    accent: 'bg-[var(--v-blue,#2563eb)]',
   },
   unavailable: {
     label: 'Limpiar',
     card: 'border-stone-200 bg-stone-100 text-stone-800 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200',
     badge: 'bg-neutral-500 text-white',
+    accent: 'bg-stone-400',
   },
   reserved: {
     label: 'Reservada',
-    card: 'border-violet-300 bg-violet-50 text-stone-900 dark:border-violet-800 dark:bg-violet-950/30 dark:text-stone-50',
+    card: 'border-violet-200 bg-violet-50/60 text-stone-900 dark:border-violet-800 dark:bg-violet-950/30 dark:text-stone-50',
     badge: 'bg-violet-600 text-white',
+    accent: 'bg-violet-500',
   },
   hidden: {
     label: 'Oculta',
     card: 'border-stone-200 bg-stone-50 text-stone-700 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-300',
     badge: 'bg-neutral-400 text-white',
+    accent: 'bg-stone-300',
   },
 };
+
+/** Mesa con más de 90 min ocupada → resaltar tiempo. */
+const LONG_STAY_MIN = 90;
 
 type TicketLine = { key: string; label: string; amount: number };
 
@@ -375,6 +386,15 @@ export function RestaurantTpvFloorBoard({
     });
     return { activeTables: active, freeTables: free };
   }, [visibleTables, openOrdersByTable]);
+
+  const pendingPaymentCount = useMemo(
+    () =>
+      activeTables.filter((t) => {
+        const openOrder = openOrdersByTable.get(String(t._id || t.id || '')) || null;
+        return resolveTpvFloorVisualStatus(t, openOrder) === 'pending_payment';
+      }).length,
+    [activeTables, openOrdersByTable],
+  );
 
   const clearMesaParam = useCallback(() => {
     if (!searchParams.has('mesa')) return;
@@ -640,10 +660,23 @@ export function RestaurantTpvFloorBoard({
 
   if (loading) {
     return (
-      <div className="flex h-full min-h-0 flex-1 items-center justify-center bg-stone-100 dark:bg-stone-950">
-        <div className="px-6 text-center">
-          <Loader2 className="mx-auto mb-3 h-8 w-8 animate-spin text-stone-400" />
-          <p className="text-sm text-stone-500">Cargando plano de mesas…</p>
+      <div className="flex h-full min-h-0 flex-col overflow-hidden bg-stone-100 dark:bg-stone-950">
+        <header className="shrink-0 border-b border-stone-200 bg-white px-4 py-3 dark:border-stone-800 dark:bg-stone-900">
+          <div className="mx-auto max-w-6xl">
+            <div className="h-5 w-40 animate-pulse rounded-md bg-stone-200 dark:bg-stone-800" />
+            <div className="mt-1.5 h-3.5 w-56 animate-pulse rounded-md bg-stone-100 dark:bg-stone-800/60" />
+          </div>
+        </header>
+        <div className="mx-auto w-full max-w-6xl flex-1 overflow-hidden px-3 py-3 sm:px-4 sm:py-4">
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3" aria-busy>
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div
+                key={i}
+                className="h-36 animate-pulse rounded-2xl border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900"
+              />
+            ))}
+          </div>
+          <p className="sr-only">Cargando plano de mesas…</p>
         </div>
       </div>
     );
@@ -657,7 +690,22 @@ export function RestaurantTpvFloorBoard({
             <h1 className="truncate text-lg font-semibold text-stone-900 dark:text-stone-50">
               {pdvName || 'Tu local'}
             </h1>
-            <p className="text-xs text-stone-500">TPV sala · mesas, reservas y cobro</p>
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-semibold">
+              <span className="inline-flex items-center gap-1.5 text-stone-600 dark:text-stone-300">
+                <span className="h-2 w-2 rounded-full bg-emerald-500" aria-hidden />
+                {freeTables.length} libres
+              </span>
+              <span className="inline-flex items-center gap-1.5 text-stone-600 dark:text-stone-300">
+                <span className="h-2 w-2 rounded-full bg-red-500" aria-hidden />
+                {activeTables.length} en servicio
+              </span>
+              {pendingPaymentCount > 0 ? (
+                <span className="inline-flex items-center gap-1.5 text-[var(--v-blue,#2563eb)] dark:text-blue-400">
+                  <span className="h-2 w-2 rounded-full bg-[var(--v-blue,#2563eb)]" aria-hidden />
+                  {pendingPaymentCount} por cobrar
+                </span>
+              ) : null}
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
             <button
@@ -723,7 +771,7 @@ export function RestaurantTpvFloorBoard({
               <button
                 type="button"
                 onClick={handleOpenCounter}
-                className="h-10 rounded-xl bg-emerald-600 px-4 text-sm font-semibold text-white"
+                className={VERTIAL_BTN_PRIMARY}
               >
                 Cobro rápido mostrador
               </button>
@@ -743,19 +791,20 @@ export function RestaurantTpvFloorBoard({
             <button
               type="button"
               onClick={handleOpenCounter}
-              className="mb-3 flex w-full items-center gap-3 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2.5 text-left hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:hover:bg-emerald-950/60"
+              className="mb-3 flex min-h-11 w-full items-center gap-3 rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-left shadow-sm transition-colors hover:border-blue-200 hover:bg-blue-50/50 dark:border-stone-700 dark:bg-stone-900 dark:hover:border-blue-800 dark:hover:bg-blue-950/30"
             >
-              <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-600 text-white">
+              <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--v-blue,#2563eb)] text-white shadow-sm shadow-blue-600/20">
                 <Store className="h-4 w-4" strokeWidth={1.75} />
               </span>
-              <span className="min-w-0">
-                <span className="block text-sm font-semibold text-emerald-950 dark:text-emerald-50">
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-stone-900 dark:text-stone-50">
                   Cobro rápido · mostrador
                 </span>
-                <span className="block text-[11px] text-emerald-800/80 dark:text-emerald-200/80">
+                <span className="block text-[11px] text-stone-500">
                   Sin mesa ni cocina · para llevar / barra
                 </span>
               </span>
+              <Plus className="h-4 w-4 shrink-0 text-stone-400" strokeWidth={2} aria-hidden />
             </button>
 
             {sortedRooms.length > 0 && (
@@ -770,12 +819,12 @@ export function RestaurantTpvFloorBoard({
                       onClick={() => setActiveRoomId(room.id)}
                       className={`h-9 shrink-0 rounded-lg border px-3 text-left text-xs transition-colors ${
                         selected
-                          ? 'border-stone-900 bg-stone-900 text-white'
-                          : 'border-stone-200 bg-white text-stone-800 hover:border-stone-300 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100'
+                          ? 'border-[var(--v-blue,#2563eb)] bg-[var(--v-blue,#2563eb)] text-white shadow-sm shadow-blue-600/20'
+                          : 'border-stone-200 bg-white text-stone-800 hover:border-blue-200 hover:text-[var(--v-blue,#2563eb)] dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100'
                       }`}
                     >
                       <span className="font-semibold">{room.name}</span>
-                      <span className={`ml-1.5 ${selected ? 'text-stone-300' : 'text-stone-500'}`}>
+                      <span className={`ml-1.5 ${selected ? 'text-blue-100' : 'text-stone-500'}`}>
                         {count}
                       </span>
                     </button>
@@ -793,40 +842,6 @@ export function RestaurantTpvFloorBoard({
               </div>
             ) : (
               <div className="space-y-4">
-                {freeTables.length > 0 ? (
-                  <section>
-                    <div className="mb-2 flex items-baseline justify-between gap-2">
-                      <h2 className="text-xs font-bold uppercase tracking-wide text-stone-500">
-                        Libres
-                      </h2>
-                      <span className="text-[11px] text-stone-400">{freeTables.length}</span>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6">
-                      {freeTables.map((table) => {
-                        const tableId = String(table._id || table.id || '');
-                        const busy = busyId === tableId;
-                        const capacity = resolveTableCapacity(table);
-                        const tableTitle = table.name?.trim() || `Mesa ${table.number}`;
-                        return (
-                          <button
-                            key={tableId}
-                            type="button"
-                            disabled={busy}
-                            onClick={() => handleTableClick(table)}
-                            className="rounded-xl border border-emerald-200 bg-emerald-50 px-2.5 py-3 text-left transition-opacity hover:opacity-90 disabled:opacity-60 dark:border-emerald-900 dark:bg-emerald-950/30"
-                          >
-                            <p className="truncate text-sm font-bold text-emerald-950 dark:text-emerald-50">
-                              {tableTitle}
-                            </p>
-                            <p className="mt-0.5 text-[11px] text-emerald-800/80 dark:text-emerald-200/70">
-                              Libre · {capacity} pax
-                            </p>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </section>
-                ) : null}
                 {activeTables.length > 0 ? (
                   <section>
                     <div className="mb-2 flex items-baseline justify-between gap-2">
@@ -844,7 +859,10 @@ export function RestaurantTpvFloorBoard({
                         const capacity = resolveTableCapacity(table);
                         const busy = busyId === tableId;
                         const ticket = buildTableTicket(openOrder);
-                        const mins = formatOccupiedTime(occupiedMinutes(table, nowMs));
+                        const minsVal = occupiedMinutes(table, nowMs);
+                        const mins = formatOccupiedTime(minsVal);
+                        const longStay =
+                          visualStatus !== 'reserved' && (minsVal ?? 0) >= LONG_STAY_MIN;
                         const guests = table.currentGuests > 0 ? table.currentGuests : 0;
                         const tableTitle = table.name?.trim() || `Mesa ${table.number}`;
                         const visibleLines = ticket?.lines.slice(0, 6) || [];
@@ -858,8 +876,12 @@ export function RestaurantTpvFloorBoard({
                         return (
                           <div
                             key={tableId}
-                            className={`flex flex-col rounded-xl border-2 p-3 text-left shadow-sm ${ui.card}`}
+                            className={`relative flex flex-col overflow-hidden rounded-2xl border p-3 pl-4 text-left shadow-sm ${ui.card}`}
                           >
+                            <span
+                              className={`absolute inset-y-0 left-0 w-1.5 ${ui.accent}`}
+                              aria-hidden
+                            />
                             <button
                               type="button"
                               disabled={busy || seatingThis}
@@ -880,16 +902,28 @@ export function RestaurantTpvFloorBoard({
                                 <div className="min-w-0">
                                   <p className="truncate text-base font-bold leading-tight">{tableTitle}</p>
                                   <p className="mt-0.5 text-[11px] text-stone-500 dark:text-stone-400">
-                                    {visualStatus === 'reserved' && reservationHint
-                                      ? formatReservationHint(reservationHint)
-                                      : guests > 0
-                                        ? `${guests} sentados`
-                                        : `${capacity} pax`}
-                                    {visualStatus !== 'reserved' && mins ? ` · ${mins}` : ''}
-                                    {ticket ? ` · ${ticket.itemCount} art.` : ''}
-                                    {visualStatus === 'reserved' && reservationHint
-                                      ? ` · ${reservationHint.partySize} pers.`
-                                      : ''}
+                                    {visualStatus === 'reserved' && reservationHint ? (
+                                      `${formatReservationHint(reservationHint)} · ${reservationHint.partySize} pers.`
+                                    ) : (
+                                      <>
+                                        {guests > 0 ? `${guests} sentados` : `${capacity} pax`}
+                                        {mins ? (
+                                          <>
+                                            {' · '}
+                                            <span
+                                              className={
+                                                longStay
+                                                  ? 'font-bold text-amber-700 dark:text-amber-400'
+                                                  : undefined
+                                              }
+                                            >
+                                              {mins}
+                                            </span>
+                                          </>
+                                        ) : null}
+                                        {ticket ? ` · ${ticket.itemCount} art.` : ''}
+                                      </>
+                                    )}
                                   </p>
                                 </div>
                                 <span className={`shrink-0 rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${ui.badge}`}>
@@ -969,7 +1003,7 @@ export function RestaurantTpvFloorBoard({
                                     e.stopPropagation();
                                     void openAccount(table, undefined, 'order');
                                   }}
-                                  className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-stone-900 px-3 py-2.5 text-sm font-semibold text-white disabled:opacity-50 dark:bg-stone-100 dark:text-stone-900"
+                                  className={`${VERTIAL_BTN_SECONDARY} !px-3`}
                                 >
                                   <Plus className="h-4 w-4 shrink-0" strokeWidth={2} />
                                   Añadir
@@ -985,7 +1019,7 @@ export function RestaurantTpvFloorBoard({
                                     }
                                     void openAccount(table, undefined, 'pay');
                                   }}
-                                  className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2.5 text-sm font-semibold text-white disabled:opacity-40"
+                                  className={`${VERTIAL_BTN_PRIMARY} !px-3`}
                                 >
                                   <Wallet className="h-4 w-4 shrink-0" strokeWidth={2} />
                                   Cobrar
@@ -999,6 +1033,41 @@ export function RestaurantTpvFloorBoard({
                   </section>
                 ) : null}
 
+                {freeTables.length > 0 ? (
+                  <section>
+                    <div className="mb-2 flex items-baseline justify-between gap-2">
+                      <h2 className="text-xs font-bold uppercase tracking-wide text-stone-500">
+                        Libres
+                      </h2>
+                      <span className="text-[11px] text-stone-400">{freeTables.length}</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6">
+                      {freeTables.map((table) => {
+                        const tableId = String(table._id || table.id || '');
+                        const busy = busyId === tableId;
+                        const capacity = resolveTableCapacity(table);
+                        const tableTitle = table.name?.trim() || `Mesa ${table.number}`;
+                        return (
+                          <button
+                            key={tableId}
+                            type="button"
+                            disabled={busy}
+                            onClick={() => handleTableClick(table)}
+                            className="min-h-16 rounded-xl border border-emerald-200 bg-emerald-50/80 px-2.5 py-3 text-left transition-colors hover:border-emerald-300 hover:bg-emerald-100/80 disabled:opacity-60 dark:border-emerald-900 dark:bg-emerald-950/30 dark:hover:bg-emerald-950/50"
+                          >
+                            <p className="truncate text-sm font-bold text-emerald-950 dark:text-emerald-50">
+                              {tableTitle}
+                            </p>
+                            <p className="mt-0.5 flex items-center gap-1 text-[11px] text-emerald-800/80 dark:text-emerald-200/70">
+                              <Users className="h-3 w-3 shrink-0" strokeWidth={2} aria-hidden />
+                              {capacity} pax
+                            </p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ) : null}
               </div>
             )}
           </>

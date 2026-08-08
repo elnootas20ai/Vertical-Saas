@@ -17,6 +17,7 @@ import { WorkerLogin } from './pages/auth/WorkerLogin';
 import { Recover } from './pages/auth/Recover';
 import { ResetPassword } from './pages/auth/ResetPassword';
 import { AcceptInvite } from './pages/auth/AcceptInvite';
+import { JoinByInviteLink } from './pages/auth/JoinByInviteLink';
 import { Register } from './pages/auth/Register';
 import { BusinessType } from './pages/auth/onboarding/BusinessType';
 import { Company } from './pages/auth/onboarding/Company';
@@ -136,6 +137,7 @@ import { RequireBusinessOwner } from './components/saas/RequireBusinessOwner';
 import { RequireDeliveryVertical } from './components/saas/RequireDeliveryVertical';
 import { RequireCompraventaVertical } from './components/saas/RequireCompraventaVertical';
 import { RequireCleaningVertical } from './components/saas/RequireCleaningVertical';
+import { RequireRealEstateVertical } from './components/saas/RequireRealEstateVertical';
 import { RequireTeamManager } from './components/saas/RequireTeamManager';
 import { RequireWebOrderingVertical } from './components/saas/RequireWebOrderingVertical';
 import { RedirectEventsFromRetailRoutes } from './components/saas/RedirectEventsFromRetailRoutes';
@@ -176,7 +178,6 @@ import { ArticlesPage } from './pages/saas/ArticlesPage';
 import { SuppliersPage } from './pages/saas/SuppliersPage';
 import { SuppliersLayout } from './pages/saas/suppliers/SuppliersLayout';
 import { SupplierDetailPage } from './pages/saas/SupplierDetailPage';
-import { PurchaseOrdersPage } from './pages/saas/PurchaseOrdersPage';
 import { ComprasStockPage } from './pages/saas/ComprasStockPage';
 import { PromotionsPage } from './pages/saas/PromotionsPage';
 
@@ -500,6 +501,10 @@ export const router = createBrowserRouter([
         Component: AcceptInvite,
       },
       {
+        path: 'auth/join',
+        Component: JoinByInviteLink,
+      },
+      {
         path: 'auth/register',
         Component: Register,
       },
@@ -653,9 +658,9 @@ export const router = createBrowserRouter([
           { path: 'taxes', element: <RequireBusinessOwner><TaxesPage /></RequireBusinessOwner> },
           { path: 'bank-reconciliation', element: <RequireBusinessOwner><BankReconciliationPage /></RequireBusinessOwner> },
           { path: 'catalog', element: <RedirectEventsFromRetailRoutes><VerticalCatalogEntry /></RedirectEventsFromRetailRoutes> },
-          { path: 'inventory', element: <RequireBusinessOwner><InventoryPage /></RequireBusinessOwner> },
+          { path: 'inventory', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><InventoryPage /></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
           { path: 'articles', element: <RedirectEventsFromRetailRoutes><VerticalArticlesRedirect /></RedirectEventsFromRetailRoutes> },
-          { path: 'suppliers', element: <RequireBusinessOwner><Outlet /></RequireBusinessOwner>, children: [
+          { path: 'suppliers', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><Outlet /></RedirectEventsFromRetailRoutes></RequireBusinessOwner>, children: [
             {
               element: <SuppliersLayout />,
               children: [
@@ -668,7 +673,7 @@ export const router = createBrowserRouter([
           ]},
           { path: 'orders', element: <Navigate to="/saas/suppliers/facturas" replace /> },
           { path: 'purchase-orders', element: <Navigate to="/saas/catalog?tab=purchase-orders" replace /> },
-          { path: 'compras-stock', element: <RequireBusinessOwner><ComprasStockPage /></RequireBusinessOwner> },
+          { path: 'compras-stock', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><ComprasStockPage /></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
           { path: 'supplier-billing', element: <Navigate to="/saas/suppliers/facturas" replace /> },
           { path: 'finanzas/facturacion-clientes', element: <RequireBusinessOwner><ClientBillingPage /></RequireBusinessOwner> },
           { path: 'client-billing', element: <RequireBusinessOwner><ClientBillingPage /></RequireBusinessOwner> },
@@ -782,12 +787,12 @@ export const router = createBrowserRouter([
           { path: 'academy-schedule', element: <Navigate to="/saas/calendar" replace /> },
 
           // Real Estate
-          { path: 'realestate-properties', element: <RequireBusinessOwner><RealEstateProperties /></RequireBusinessOwner> },
-          { path: 'realestate-visits', Component: RealEstateVisits },
-          { path: 'realestate-contracts', element: <RequireBusinessOwner><RealEstateContracts /></RequireBusinessOwner> },
-          { path: 'realestate-owners', element: <Navigate to="/saas/clients" replace /> },
-          { path: 'realestate-tenants', element: <Navigate to="/saas/clients" replace /> },
-          { path: 'realestate-appraisals', element: <RequireBusinessOwner><RealEstateAppraisals /></RequireBusinessOwner> },
+          { path: 'realestate-properties', element: <RequireBusinessOwner><RequireRealEstateVertical><RealEstateProperties /></RequireRealEstateVertical></RequireBusinessOwner> },
+          { path: 'realestate-visits', element: <RequireRealEstateVertical><RealEstateVisits /></RequireRealEstateVertical> },
+          { path: 'realestate-contracts', element: <RequireBusinessOwner><RequireRealEstateVertical><RealEstateContracts /></RequireRealEstateVertical></RequireBusinessOwner> },
+          { path: 'realestate-owners', element: <Navigate to="/saas/crm/clientes?tab=clients" replace /> },
+          { path: 'realestate-tenants', element: <Navigate to="/saas/crm/clientes?tab=clients" replace /> },
+          { path: 'realestate-appraisals', element: <RequireBusinessOwner><RequireRealEstateVertical><RealEstateAppraisals /></RequireRealEstateVertical></RequireBusinessOwner> },
 
           // Lawyer
           { path: 'lawyer-cases', element: <RequireBusinessOwner><LawyerCases /></RequireBusinessOwner> },

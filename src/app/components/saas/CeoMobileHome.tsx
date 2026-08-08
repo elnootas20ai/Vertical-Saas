@@ -33,6 +33,7 @@ import {
   DeliveryMobileHomeAlerts,
 } from '../../verticals/delivery';
 import { MobileLazySection } from './MobileLazySection';
+import { LiveBadge } from './LiveBadge';
 
 function formatClockIn(iso: string | null): string {
   if (!iso) return '—';
@@ -125,7 +126,7 @@ export function CeoMobileHome() {
     void load();
   }, [load]);
 
-  useDeliveryOrdersLive({
+  const { sseOk: liveSseOk } = useDeliveryOrdersLive({
     authUserId: user?.user_id || user?.id || null,
     businessId,
     onRefresh: () => {
@@ -168,13 +169,18 @@ export function CeoMobileHome() {
 
   return (
     <Layout title="Inicio" subtitle={businessName}>
-      <div className="mx-auto max-w-lg space-y-3 pb-24">
+      <div className="mx-auto max-w-lg space-y-3 pb-24 md:max-w-3xl">
         <div className="flex items-start justify-between gap-3 px-0.5">
           <div className="min-w-0">
             <p className="text-xs font-medium text-stone-500">{greeting}</p>
-            <h1 className="truncate text-xl font-bold text-stone-900 dark:text-stone-100">
-              {user?.firstName || user?.fullName || 'CEO'}
-            </h1>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="truncate text-xl font-bold text-stone-900 dark:text-stone-100">
+                {user?.firstName || user?.fullName || 'CEO'}
+              </h1>
+              {isDelivery ? (
+                <LiveBadge live={liveSseOk} refreshing={cashLoading} />
+              ) : null}
+            </div>
           </div>
           <button
             type="button"
@@ -261,68 +267,68 @@ export function CeoMobileHome() {
             ) : null}
 
             {isDelivery && (
-              <button
-                type="button"
-                onClick={() => navigate('/saas/vertical/delivery/caja')}
-                className={`w-full rounded-2xl border p-4 text-left ${
-                  cashNeedsAttention
-                    ? 'border-amber-200 bg-amber-50/70 dark:border-amber-900/40 dark:bg-amber-950/20'
-                    : VERTIAL_SURFACE_STONE
-                }`}
-              >
-                <div className="mb-3 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <Banknote className="h-5 w-5 text-stone-600 dark:text-stone-300" />
-                    <p className="text-sm font-bold text-stone-900 dark:text-stone-100">Estado de cajas</p>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => navigate('/saas/vertical/delivery/caja')}
+                  className={`w-full rounded-2xl border p-4 text-left ${
+                    cashNeedsAttention
+                      ? 'border-amber-200 bg-amber-50/70 dark:border-amber-900/40 dark:bg-amber-950/20'
+                      : VERTIAL_SURFACE_STONE
+                  }`}
+                >
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Banknote className="h-5 w-5 text-stone-600 dark:text-stone-300" />
+                      <p className="text-sm font-bold text-stone-900 dark:text-stone-100">Estado de cajas</p>
+                    </div>
+                    <ChevronRight className="h-4 w-4 text-stone-400" />
                   </div>
-                  <ChevronRight className="h-4 w-4 text-stone-400" />
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <CashStat
-                    label="Abiertas"
-                    value={cashLoading ? '…' : String(openCajas)}
-                  />
-                  <CashStat
-                    label="Por validar"
-                    value={cashLoading ? '…' : String(pendingValidation)}
-                    warn={pendingValidation > 0}
-                  />
-                  <CashStat
-                    label="En cajón"
-                    value={cashLoading ? '…' : formatMoneyEs(cashInDrawer)}
-                  />
-                </div>
-                {pendingCloseLate > 0 && (
-                  <p className="mt-2 text-xs font-semibold text-amber-800 dark:text-amber-300">
-                    {pendingCloseLate} caja{pendingCloseLate !== 1 ? 's' : ''} abierta{pendingCloseLate !== 1 ? 's' : ''} +14 h
-                  </p>
-                )}
-              </button>
-            )}
-
-            {isDelivery && (
-              <button
-                type="button"
-                onClick={() => navigate('/saas/delivery-ops')}
-                className={`flex w-full items-center justify-between gap-2 rounded-2xl border p-4 text-left ${
-                  unpaidCount > 0
-                    ? 'border-rose-200 bg-rose-50/80 dark:border-rose-900/40 dark:bg-rose-950/20'
-                    : VERTIAL_SURFACE_STONE
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <Wallet className={`h-5 w-5 ${unpaidCount > 0 ? 'text-[var(--v-rose,#e11d48)]' : 'text-stone-400'}`} />
-                  <div>
-                    <p className="text-sm font-bold text-stone-900 dark:text-stone-100">Sin cobrar</p>
-                    <p className="mt-0.5 text-xs text-stone-500">
-                      {unpaidCount > 0
-                        ? `${unpaidCount} pedido${unpaidCount !== 1 ? 's' : ''} · ${formatMoneyEs(unpaidAmount)}`
-                        : 'Ningún pedido activo pendiente de cobro'}
+                  <div className="grid grid-cols-3 gap-2">
+                    <CashStat
+                      label="Abiertas"
+                      value={cashLoading ? '…' : String(openCajas)}
+                    />
+                    <CashStat
+                      label="Por validar"
+                      value={cashLoading ? '…' : String(pendingValidation)}
+                      warn={pendingValidation > 0}
+                    />
+                    <CashStat
+                      label="En cajón"
+                      value={cashLoading ? '…' : formatMoneyEs(cashInDrawer)}
+                    />
+                  </div>
+                  {pendingCloseLate > 0 && (
+                    <p className="mt-2 text-xs font-semibold text-amber-800 dark:text-amber-300">
+                      {pendingCloseLate} caja{pendingCloseLate !== 1 ? 's' : ''} abierta{pendingCloseLate !== 1 ? 's' : ''} +14 h
                     </p>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => navigate('/saas/delivery-ops')}
+                  className={`flex w-full items-center justify-between gap-2 rounded-2xl border p-4 text-left ${
+                    unpaidCount > 0
+                      ? 'border-rose-200 bg-rose-50/80 dark:border-rose-900/40 dark:bg-rose-950/20'
+                      : VERTIAL_SURFACE_STONE
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Wallet className={`h-5 w-5 ${unpaidCount > 0 ? 'text-[var(--v-rose,#e11d48)]' : 'text-stone-400'}`} />
+                    <div>
+                      <p className="text-sm font-bold text-stone-900 dark:text-stone-100">Sin cobrar</p>
+                      <p className="mt-0.5 text-xs text-stone-500">
+                        {unpaidCount > 0
+                          ? `${unpaidCount} pedido${unpaidCount !== 1 ? 's' : ''} · ${formatMoneyEs(unpaidAmount)}`
+                          : 'Ningún pedido activo pendiente de cobro'}
+                      </p>
+                    </div>
                   </div>
-                </div>
-                <ChevronRight className="h-4 w-4 shrink-0 text-stone-400" />
-              </button>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-stone-400" />
+                </button>
+              </div>
             )}
 
             {/* KPIs/marcas en paralelo — no esperan al ops-center */}
@@ -343,10 +349,11 @@ export function CeoMobileHome() {
               />
             ) : null}
 
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {isRestaurant && (
               <section className={`${VERTIAL_SURFACE_STONE} p-4`}>
                 <p className="mb-3 text-sm font-bold text-stone-900 dark:text-stone-100">Operativa del local</p>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 content-start gap-2">
                   <QuickLink label="Centro ops" onClick={() => navigate('/saas/restaurant-ops')} />
                   <QuickLink label="Sala" onClick={() => navigate('/saas/sala')} />
                   <QuickLink label="TPV sala" onClick={() => navigate('/saas/caja/tpv')} />
@@ -371,7 +378,16 @@ export function CeoMobileHome() {
                   Ver →
                 </button>
               </div>
-              {active.length === 0 ? (
+              {cashLoading && active.length === 0 ? (
+                <div className="animate-pulse space-y-2" aria-label="Cargando equipo fichado">
+                  {[0, 1].map((i) => (
+                    <div key={i} className="flex items-center justify-between gap-2">
+                      <div className="h-3.5 w-32 rounded bg-stone-200 dark:bg-stone-800" />
+                      <div className="h-3 w-16 rounded bg-stone-100 dark:bg-stone-900" />
+                    </div>
+                  ))}
+                </div>
+              ) : active.length === 0 ? (
                 <p className="text-xs text-stone-500">Nadie fichado ahora mismo.</p>
               ) : (
                 <ul className="space-y-2">
@@ -395,7 +411,7 @@ export function CeoMobileHome() {
               )}
             </section>
 
-            <div className="grid grid-cols-2 gap-2 pt-1">
+            <div className="grid grid-cols-2 content-start gap-2 pt-1 md:pt-0">
               {isDelivery && (
                 <QuickLink label="TPV" onClick={() => navigate('/saas/vertical/delivery/tpv')} />
               )}
@@ -413,6 +429,7 @@ export function CeoMobileHome() {
                 <QuickLink label="Reservas" onClick={() => navigate('/saas/reservations')} />
               )}
               <QuickLink label="Documentos OCR" onClick={() => navigate('/saas/documents')} />
+            </div>
             </div>
           </>
       </div>

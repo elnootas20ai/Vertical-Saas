@@ -762,31 +762,6 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
         {/* ═══════════════════════════════════════════ LIST VIEW */}
         {activeView === 'list' && (
           <>
-            <div className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3.5 dark:border-stone-700 dark:bg-stone-900/50">
-              <p className="text-sm font-semibold text-stone-900 dark:text-stone-100">
-                Cómo se usan en el TPV
-              </p>
-              <ul className="mt-2 space-y-1.5 text-xs leading-relaxed text-stone-600 dark:text-stone-400">
-                <li>
-                  <span className="font-semibold text-stone-800 dark:text-stone-200">Código:</span>{' '}
-                  crea aquí una promo <span className="font-medium">Activa</span> con un código
-                  (ej. VERANO10). En el TPV → Promoción → Código aparece en una lista para
-                  elegirlo (sin teclear). Las sin fecha fin salen primero. También puedes
-                  «Otro (escribir)» si hace falta.
-                </li>
-                <li>
-                  <span className="font-semibold text-stone-800 dark:text-stone-200">Cliente:</span>{' '}
-                  el desplegable «Cliente» del TPV no usa esta pantalla. Se crea en{' '}
-                  <span className="font-medium">Clientes → ficha → pestaña Promociones</span>.
-                </li>
-                <li>
-                  <span className="font-semibold text-stone-800 dark:text-stone-200">Sin código:</span>{' '}
-                  si marcas «Aplicar sola en el TPV», el descuento puede entrar automático (según
-                  reglas). Si quieres usarla a mano, pon siempre un código.
-                </li>
-              </ul>
-            </div>
-
             {/* Filters + New button */}
             <div className="flex flex-wrap items-center gap-3">
               <div className="relative flex-1 min-w-48">

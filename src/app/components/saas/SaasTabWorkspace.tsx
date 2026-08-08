@@ -36,13 +36,19 @@ export function SaasTabWorkspace({
   return (
     <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm">
       {hasStats ? (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 border-b border-gray-100 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/40 text-xs text-gray-600 dark:text-gray-400 rounded-t-xl">
-          {stats?.map((s) => (
-            <span key={s.label}>
-              <strong className={`tabular-nums ${statToneClass[s.tone || 'default']}`}>{s.value}</strong>{' '}
-              {s.label}
-            </span>
-          ))}
+        <div className="flex flex-wrap items-center gap-y-1.5 px-3 py-2 border-b border-gray-100 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/40 rounded-t-xl">
+          <div className="flex flex-wrap items-center gap-y-1.5 divide-x divide-gray-200/80 dark:divide-gray-700">
+            {stats?.map((s) => (
+              <div key={s.label} className="flex items-baseline gap-1.5 px-3 first:pl-0">
+                <span className={`text-sm font-bold tabular-nums ${statToneClass[s.tone || 'default']}`}>
+                  {s.value}
+                </span>
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                  {s.label}
+                </span>
+              </div>
+            ))}
+          </div>
           {statsTrailing ? <div className="ml-auto flex flex-wrap items-center gap-2">{statsTrailing}</div> : null}
         </div>
       ) : null}
@@ -50,7 +56,7 @@ export function SaasTabWorkspace({
         <div className="px-3 py-2 border-b border-gray-100 dark:border-gray-700 text-xs">{banner}</div>
       ) : null}
       {toolbar ? (
-        <div className="relative z-20 p-2 border-b border-gray-100 dark:border-gray-700 space-y-2 overflow-visible">
+        <div className="relative z-20 px-3 py-2.5 border-b border-gray-100 dark:border-gray-700 space-y-2 overflow-visible">
           {toolbar}
         </div>
       ) : null}

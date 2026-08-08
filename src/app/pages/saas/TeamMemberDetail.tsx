@@ -60,6 +60,10 @@ import type {
 } from '../../lib/authApi';
 import { listClockins, formatMinutes, mapsUrlForGeo, clockinPrimaryGeo } from '../../lib/clockinsApi';
 import type { ClockinRecord } from '../../lib/clockinsApi';
+import { createVerticalApi, type VerticalEntity } from '../../lib/verticalApiFactory';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { visitBelongsToAgent } from '../../lib/realEstateTeamAgents';
+import { formatMoneyEs } from '../../lib/formatNumberEs';
 import {
   getSchedule,
   saveSchedule,
@@ -583,12 +587,35 @@ export function TeamMemberDetail() {
   useEffect(() => {
     const tabParam = searchParams.get('tab');
     if (tabParam === 'clockins') setActiveTab('clockins');
+    if (tabParam === 'labor-cost') setActiveTab('labor-cost');
   }, [searchParams]);
 
   // Clockins
   const [clockins, setClockins] = useState<ClockinRecord[]>([]);
   const [clockinsLoading, setClockinsLoading] = useState(false);
   const [clockinMonth, setClockinMonth] = useState(() => new Date().toISOString().slice(0, 7));
+
+  // Inmobiliaria ↔ RRHH (visitas / cartera del agente)
+  type ReVisitRow = VerticalEntity & {
+    fecha?: string;
+    resultado?: string;
+    cliente?: string;
+    direccion?: string;
+    propiedad?: string;
+    agente?: string;
+    agenteUserId?: string;
+  };
+  type RePropRow = VerticalEntity & {
+    direccion?: string;
+    referencia?: string;
+    estado?: string;
+    agenteUserId?: string;
+    agente?: string;
+  };
+  const isRealEstate = currentBusiness?.businessType === 'realEstate';
+  const [reVisits, setReVisits] = useState<ReVisitRow[]>([]);
+  const [reProps, setReProps] = useState<RePropRow[]>([]);
+  const [reOpsLoading, setReOpsLoading] = useState(false);
 
   // Schedule
   const [schedule, setSchedule] = useState<ScheduleTemplate | null>(null);
@@ -1054,6 +1081,57 @@ export function TeamMemberDetail() {
     return { totalMinutes, totalSessions, completedSessions };
   }, [clockins]);
 
+  const loadRealEstateOps = useCallback(async () => {
+    if (!isRealEstate || !userId || !currentBusiness) {
+      setReVisits([]);
+      setReProps([]);
+      return;
+    }
+    const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
+    if (!dataUserId) return;
+    setReOpsLoading(true);
+    try {
+      const visitsApi = createVerticalApi<ReVisitRow>('realestate', 'visits');
+      const propsApi = createVerticalApi<RePropRow>('realestate', 'properties');
+      const opts = { businessId: currentBusiness.business_id || undefined };
+      const [visits, props] = await Promise.all([
+        visitsApi.list(dataUserId, opts).catch(() => [] as ReVisitRow[]),
+        propsApi.list(dataUserId, opts).catch(() => [] as RePropRow[]),
+      ]);
+      const mid = String(userId).trim().replace(/^account:/, '');
+      setReVisits(visits.filter((v) => visitBelongsToAgent(v, userId)));
+      setReProps(props.filter((p) => String(p.agenteUserId || '').trim().replace(/^account:/, '') === mid));
+    } finally {
+      setReOpsLoading(false);
+    }
+  }, [isRealEstate, userId, currentBusiness, user]);
+
+  useEffect(() => {
+    if (isRealEstate && (activeTab === 'labor-cost' || activeTab === 'info')) {
+      void loadRealEstateOps();
+    }
+  }, [isRealEstate, activeTab, loadRealEstateOps]);
+
+  const reOpsSummary = useMemo(() => {
+    const monthKey = clockinMonth;
+    const monthVisits = reVisits.filter((v) => String(v.fecha || '').startsWith(monthKey));
+    const interesados = monthVisits.filter((v) => v.resultado === 'interesado' || v.resultado === 'oferta').length;
+    const ofertas = monthVisits.filter((v) => v.resultado === 'oferta').length;
+    const monthlyCost = computeTotalLaborCost(buildEmploymentInfo(member?.employment));
+    const costPerVisit = monthVisits.length > 0 ? monthlyCost / monthVisits.length : 0;
+    return {
+      monthVisits: monthVisits.length,
+      totalVisits: reVisits.length,
+      interesados,
+      ofertas,
+      propsAssigned: reProps.length,
+      costPerVisit,
+      recent: [...monthVisits]
+        .sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')))
+        .slice(0, 5),
+    };
+  }, [reVisits, reProps, clockinMonth, member]);
+
   // ─── Weekday labels ─────────────────────────────────────────────────────────
 
   const weekdayLabels = WEEKDAY_LABELS[lang] || WEEKDAY_LABELS.es;
@@ -1169,6 +1247,17 @@ export function TeamMemberDetail() {
             </div>
             <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{emp.grossSalary ? formatCurrency(computeTotalLaborCost(emp)) : '—'}</p>
           </div>
+          {isRealEstate ? (
+            <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 cursor-pointer hover:border-teal-300 dark:hover:border-teal-700 transition-colors" onClick={() => setActiveTab('labor-cost')}>
+              <div className="flex items-center gap-2 mb-1">
+                <Building2 className="w-3.5 h-3.5 text-teal-500" />
+                <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase">Visitas mes</span>
+              </div>
+              <p className="text-lg font-bold text-gray-900 dark:text-gray-100">
+                {reOpsLoading ? '…' : reOpsSummary.monthVisits || '—'}
+              </p>
+            </div>
+          ) : null}
           <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 cursor-pointer hover:border-amber-300 dark:hover:border-amber-700 transition-colors" onClick={() => setActiveTab('documents')}>
             <div className="flex items-center gap-2 mb-1">
               <FileText className="w-3.5 h-3.5 text-amber-500" />
@@ -1728,6 +1817,24 @@ export function TeamMemberDetail() {
                       </div>
                     </div>
                   )}
+                  {isRealEstate && emp.baseProductivity.type === 'units' && emp.baseProductivity.target > 0 && (
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-semibold text-gray-500">Visitas este mes vs objetivo</span>
+                        <span className="text-xs font-bold text-gray-900 dark:text-gray-100">
+                          {reOpsSummary.monthVisits} / {emp.baseProductivity.target}
+                          {' · '}
+                          {Math.round((reOpsSummary.monthVisits / emp.baseProductivity.target) * 100)}%
+                        </span>
+                      </div>
+                      <div className="h-2 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-teal-500 to-emerald-500 transition-all"
+                          style={{ width: `${Math.min(100, Math.round((reOpsSummary.monthVisits / emp.baseProductivity.target) * 100))}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="text-center py-8 text-gray-500 dark:text-gray-400">
@@ -1737,6 +1844,78 @@ export function TeamMemberDetail() {
                 </div>
               )}
             </div>
+
+            {isRealEstate ? (
+              <div className="rounded-2xl border border-teal-200 dark:border-teal-800 bg-white dark:bg-gray-800 p-6 space-y-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                      <Building2 className="w-4 h-4 text-teal-500" />
+                      Operativa inmobiliaria
+                    </h3>
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      Visitas y cartera vinculadas a este agente del Equipo · mes {clockinMonth}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/saas/realestate-visits')}
+                    className="text-xs font-semibold text-[var(--v-blue,#2563eb)] hover:underline"
+                  >
+                    Ir a Visitas
+                  </button>
+                </div>
+                {reOpsLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-gray-500">
+                    <Loader2 className="w-4 h-4 animate-spin" /> Cargando visitas…
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div className="rounded-xl border border-gray-100 dark:border-gray-700 p-3">
+                        <p className="text-[10px] font-semibold uppercase text-gray-400">Visitas mes</p>
+                        <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{reOpsSummary.monthVisits}</p>
+                      </div>
+                      <div className="rounded-xl border border-gray-100 dark:border-gray-700 p-3">
+                        <p className="text-[10px] font-semibold uppercase text-gray-400">Interés / oferta</p>
+                        <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
+                          {reOpsSummary.interesados}
+                          <span className="text-sm font-semibold text-gray-400"> / {reOpsSummary.ofertas}</span>
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-gray-100 dark:border-gray-700 p-3">
+                        <p className="text-[10px] font-semibold uppercase text-gray-400">Inmuebles</p>
+                        <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{reOpsSummary.propsAssigned}</p>
+                      </div>
+                      <div className="rounded-xl border border-gray-100 dark:border-gray-700 p-3">
+                        <p className="text-[10px] font-semibold uppercase text-gray-400">Coste / visita</p>
+                        <p className="text-xl font-bold text-teal-700 dark:text-teal-300">
+                          {reOpsSummary.monthVisits > 0
+                            ? formatMoneyEs(reOpsSummary.costPerVisit)
+                            : '—'}
+                        </p>
+                      </div>
+                    </div>
+                    {reOpsSummary.recent.length > 0 ? (
+                      <ul className="divide-y divide-gray-100 dark:divide-gray-700 rounded-xl border border-gray-100 dark:border-gray-700">
+                        {reOpsSummary.recent.map((v) => (
+                          <li key={v._id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                            <span className="truncate text-gray-700 dark:text-gray-200">
+                              {String(v.direccion || v.propiedad || v.cliente || 'Visita')}
+                            </span>
+                            <span className="shrink-0 text-xs text-gray-400 tabular-nums">{String(v.fecha || '').slice(0, 10)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        Sin visitas asignadas este mes. En Visitas elige este agente del Equipo.
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+            ) : null}
           </div>
         )}
 

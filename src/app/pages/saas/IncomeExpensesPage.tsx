@@ -90,6 +90,9 @@ function SourceBadge({ source }: { source: string }) {
     invoice: { label: 'Factura', color: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400' },
     ocr: { label: 'OCR', color: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400' },
     sale: { label: 'Venta', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
+    realestate_contract: { label: 'Inmobiliaria', color: 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400' },
+    realestate_appraisal: { label: 'Tasación', color: 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400' },
+    labor_month: { label: 'Nómina', color: 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400' },
   };
   const info = map[source];
   if (!info) return null;

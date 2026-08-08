@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   CheckCircle2, ClipboardCheck, PackagePlus, AlertTriangle, Loader2, MapPin,
@@ -280,7 +279,6 @@ export function StockTabPanel({
   onReload,
   catalogLoading = false,
 }: StockTabPanelProps) {
-  const navigate = useNavigate();
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
   const actorUserId = String(user?.user_id || user?.id || '').trim();
@@ -298,10 +296,6 @@ export function StockTabPanel({
   const [warehouseId, setWarehouseId] = useState('');
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
   const [purchaseListHistoryId, setPurchaseListHistoryId] = useState<string | null>(null);
-
-  const goToPurchaseOrders = useCallback((countId: string) => {
-    navigate(`/saas/catalog?tab=purchase-orders&fromCount=${encodeURIComponent(countId)}`);
-  }, [navigate]);
 
   const q = searchQuery.toLowerCase().trim();
 
@@ -700,7 +694,6 @@ export function StockTabPanel({
               countId={lastCompletedCount._id}
               countName={lastCompletedCount.name}
               compact
-              onGoToPurchaseOrders={goToPurchaseOrders}
             />
           )}
 
@@ -942,7 +935,6 @@ export function StockTabPanel({
                                     userId={userId}
                                     countId={count._id}
                                     countName={count.name}
-                                    onGoToPurchaseOrders={goToPurchaseOrders}
                                   />
                                 </div>
                               )}

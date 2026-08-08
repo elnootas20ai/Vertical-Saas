@@ -59,12 +59,12 @@ import {
 import {
   Calculator,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Edit3,
   Layers,
   Loader2,
   Minus,
-  Package,
   Plus,
   Trash2,
   X,
@@ -98,12 +98,12 @@ function statusLabel(status: ReturnType<typeof productCostingStatus>): string {
 }
 
 function statusClass(status: ReturnType<typeof productCostingStatus>): string {
-  if (status === 'fixed') return 'bg-sky-100 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300';
-  if (status === 'recipe') return 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300';
+  if (status === 'fixed') return 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300';
+  if (status === 'recipe') return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300';
   return 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400';
 }
 
-function ProductCostingModal({
+export function ProductCostingModal({
   product,
   storeIngredients,
   brands,
@@ -441,6 +441,7 @@ export function EscandalloPanel() {
   const [categoryFilter, setCategoryFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
   const [editingProduct, setEditingProduct] = useState<CatalogItem | null>(null);
   const [showCategoryPanel, setShowCategoryPanel] = useState(false);
   const [regeneratingEscandallo, setRegeneratingEscandallo] = useState(false);
@@ -515,6 +516,27 @@ export function EscandalloPanel() {
     return [...list].sort((a, b) => a.name.localeCompare(b.name, 'es'));
   }, [catalogItems, categoryFilter, statusFilter, search]);
 
+  /** Mismo esquema que el Catálogo: los productos agrupados por categoría y el escandallo dentro de cada uno. */
+  const groupedProducts = useMemo(() => {
+    const map = new Map<string, CatalogItem[]>();
+    for (const item of filteredProducts) {
+      const cat = String(item.category || '').trim() || 'Sin categoría';
+      const arr = map.get(cat) || [];
+      arr.push(item);
+      map.set(cat, arr);
+    }
+    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0], 'es'));
+  }, [filteredProducts]);
+
+  const toggleCategory = (cat: string) => {
+    setCollapsedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat);
+      else next.add(cat);
+      return next;
+    });
+  };
+
   const kpis = useMemo(() => {
     const fixed = catalogItems.filter((item) => productCostingStatus(item) === 'fixed').length;
     const recipe = catalogItems.filter((item) => productCostingStatus(item) === 'recipe').length;
@@ -560,10 +582,8 @@ export function EscandalloPanel() {
     }
   }, [businessId, dataUserId, load, regeneratingEscandallo, user?.id]);
 
-  if (!isDeliveryOpsBusinessType(businessType)) {
-    const escandalloCopy = getRetailOpsUiCopy(
-      isRestaurantBusinessType(businessType) ? 'restaurant' : businessType,
-    );
+  if (!isDeliveryOpsBusinessType(businessType) && !isRestaurantBusinessType(businessType)) {
+    const escandalloCopy = getRetailOpsUiCopy(businessType);
     return (
       <SaasTabEmpty
         title="Escandallo no disponible"
@@ -577,13 +597,12 @@ export function EscandalloPanel() {
       <SaasTabWorkspace
         stats={[
           { label: 'productos', value: kpis.total },
-          { label: 'escandallo', value: kpis.recipe, tone: 'amber' },
-          { label: 'coste fijo', value: kpis.fixed, tone: 'indigo' },
-          { label: 'sin configurar', value: kpis.none },
+          { label: 'con escandallo', value: kpis.recipe, tone: 'emerald' },
+          { label: 'coste fijo', value: kpis.fixed },
+          { label: 'sin configurar', value: kpis.none, tone: kpis.none > 0 ? 'amber' : 'default' },
           {
             label: 'food cost medio',
             value: kpis.avgFc > 0 ? `${kpis.avgFc.toFixed(1)}%` : '—',
-            tone: 'amber',
           },
           { label: 'FC >35%', value: kpis.highCostCount, tone: kpis.highCostCount > 0 ? 'red' : 'default' },
         ]}
@@ -676,8 +695,42 @@ export function EscandalloPanel() {
             }
           />
         ) : (
-          <div className="overflow-hidden">
-            <div className="hidden md:grid grid-cols-[1fr_110px_90px_90px_80px_90px_36px] gap-2 px-4 py-3 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+          <div className="p-3 space-y-3">
+            {groupedProducts.map(([category, products]) => {
+              const isCollapsed = collapsedCategories.has(category);
+              const pendingCount = products.filter((p) => productCostingStatus(p) === 'none').length;
+              return (
+            <section
+              key={category}
+              className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden"
+            >
+              <button
+                type="button"
+                onClick={() => toggleCategory(category)}
+                aria-expanded={!isCollapsed}
+                className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors border-b border-gray-100 dark:border-gray-700"
+              >
+                {isCollapsed ? (
+                  <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />
+                ) : (
+                  <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />
+                )}
+                <span className="font-semibold text-sm text-gray-900 dark:text-gray-100">{category}</span>
+                <span className="text-xs text-gray-400 dark:text-gray-500 tabular-nums">{products.length}</span>
+                {pendingCount > 0 ? (
+                  <span className="ml-auto text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                    {pendingCount} sin coste
+                  </span>
+                ) : (
+                  <span className="ml-auto text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
+                    Completo
+                  </span>
+                )}
+              </button>
+
+              {!isCollapsed && (
+            <>
+            <div className="hidden md:grid grid-cols-[1fr_110px_90px_90px_80px_90px_36px] gap-2 px-4 py-2.5 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
               <span>Producto</span>
               <span>Tipo</span>
               <span className="text-right">Coste</span>
@@ -688,7 +741,7 @@ export function EscandalloPanel() {
             </div>
 
             <div className="divide-y divide-gray-100 dark:divide-gray-800">
-              {filteredProducts.map((product) => {
+              {products.map((product) => {
                 const status = productCostingStatus(product);
                 const unitCost = resolveProductUnitCost(product, ingredientsById, brands);
                 const salePrice = Number(product.unitPrice) || 0;
@@ -705,14 +758,9 @@ export function EscandalloPanel() {
                       onClick={() => setExpandedId(isExpanded ? null : product._id)}
                       className="w-full px-4 py-3 flex items-center md:grid md:grid-cols-[1fr_110px_90px_90px_80px_90px_36px] gap-2 text-left hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
                     >
-                      <div className="flex-1 min-w-0 md:flex-none flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center shrink-0">
-                          <Package className="w-4 h-4 text-amber-600" />
-                        </div>
-                        <div className="min-w-0">
-                          <h3 className="font-bold text-sm text-gray-900 dark:text-gray-100 truncate">{product.name}</h3>
-                          <p className="text-[10px] text-gray-500 truncate">{product.category || '—'}</p>
-                        </div>
+                      <div className="flex-1 min-w-0 md:flex-none">
+                        <h3 className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate">{product.name}</h3>
+                        <p className="text-[10px] text-gray-400 dark:text-gray-500 truncate">{product.category || '—'}</p>
                       </div>
                       <div className="hidden md:block">
                         <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${statusClass(status)}`}>
@@ -827,6 +875,11 @@ export function EscandalloPanel() {
                 );
               })}
             </div>
+            </>
+              )}
+            </section>
+              );
+            })}
           </div>
         )}
           </div>

@@ -26,7 +26,6 @@ import { NuevoClienteModal } from '../../components/saas/NuevoClienteModal';
 import { CrmAlertsPanel } from '../../components/saas/CrmAlertsPanel';
 import { useActivationFocus } from '../../hooks/useActivationFocus';
 import { ActivationFieldWrap } from '../../components/saas/ActivationGuideUi';
-import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { toast } from 'sonner';
 import { DuplicatesMergeModal } from '../../components/saas/DuplicatesMergeModal';
 import { SegmentBuilder, applySegmentFilters, type FilterCondition } from '../../components/saas/SegmentBuilder';
@@ -35,6 +34,7 @@ import { resolveClientLocationFields } from '../../lib/clientAddressUtils';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { usesBusinessScopedClients } from '../../lib/clientSearchScope';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { clientBelongsToAgent } from '../../lib/realEstateTeamAgents';
 import type { Client as AppContextClient } from '../../context/AppContext';
 import { ColumnCustomizer } from '../../components/saas/ColumnCustomizer';
 import {
@@ -1590,23 +1590,31 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   const isDeliveryBusiness = currentBusiness?.businessType === 'delivery';
   const isRestaurantBusiness = currentBusiness?.businessType === 'restaurant';
   const isHeladeriaBusiness = currentBusiness?.businessType === 'iceCreamShop';
-  /** CRM operativo + Excel acotado (delivery, restaurante, heladería). */
-  const isOpsCrmBusiness = isDeliveryBusiness || isRestaurantBusiness || isHeladeriaBusiness;
-  /** Acciones CRM tipo delivery (import Excel sin responsable, borrar masivo, menú). */
-  const usesDeliveryLikeCrmActions = isDeliveryBusiness || isHeladeriaBusiness;
+  const isRealEstateBusiness = currentBusiness?.businessType === 'realEstate';
+  const reManagerRoles = useMemo(
+    () => new Set([
+      'Admin', 'Gerente', 'GerenteGrupo', 'Administrador', 'Gestor', 'Encargado', 'Superadmin', 'Administración',
+    ]),
+    [],
+  );
+  const canSeeAllReClients = reManagerRoles.has(String(authUser?.role || ''));
   /**
-   * Stats desde pedidos delivery/sala. Heladería NO: en el mismo SaaS disparaba
-   * listDeliveryOrdersByUser de todo el titular y el listado quedaba en «Cargando…».
+   * Solo el vertical delivery usa CRM “ops” (columnas/stats de pedidos).
+   * Restaurante, heladería, inmobiliaria y el resto → CRM core, sin enlace a delivery.
    */
-  const useClientLiveStats = isDeliveryBusiness || isRestaurantBusiness;
+  const isOpsCrmBusiness = isDeliveryBusiness;
+  const usesDeliveryLikeCrmActions = isDeliveryBusiness;
+  /** Stats desde pedidos delivery: únicamente en empresa delivery. */
+  const useClientLiveStats = isDeliveryBusiness;
   const isBusinessScopedClients = usesBusinessScopedClients(currentBusiness?.businessType);
   const scopedClientsBusinessId = isBusinessScopedClients && businessScopeId ? businessScopeId : undefined;
+  const clientsBusinessType = String(currentBusiness?.businessType || '').trim() || undefined;
   const listPlan = useClientsListPlanAccess();
   const clientColDefsForUi = useMemo(() => {
+    if (isDeliveryBusiness) return DELIVERY_CLIENT_COL_DEFS;
     if (isHeladeriaBusiness) return HELADERIA_CLIENT_COL_DEFS;
-    if (isOpsCrmBusiness) return DELIVERY_CLIENT_COL_DEFS;
     return CLIENT_COL_DEFS;
-  }, [isHeladeriaBusiness, isOpsCrmBusiness]);
+  }, [isDeliveryBusiness, isHeladeriaBusiness]);
   const viewClientDetail = useCallback((clientId: string) => {
     const path = `/saas/crm/clientes/${clientId}`;
     if (embedDeliveryOps) {
@@ -1670,7 +1678,6 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   const [showConvertModal,        setShowConvertModal]        = useState(false);
   const [showCreateContractModal, setShowCreateContractModal] = useState(false);
   const [crmImportMode,           setCrmImportMode]           = useState<'leads' | 'clients' | null>(null);
-  const [showAIClientModal,       setShowAIClientModal]       = useState(false);
   const [showDuplicates,          setShowDuplicates]          = useState(false);
   const [showSegmentBuilder,      setShowSegmentBuilder]      = useState(false);
   const [segmentConditions,       setSegmentConditions]       = useState<FilterCondition[]>([]);
@@ -1717,7 +1724,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
       clientsDataUserId,
       undefined,
       scopedClientsBusinessId,
-      { liveStats: useClientLiveStats },
+      { liveStats: useClientLiveStats, businessType: clientsBusinessType },
     )
       .then((all) => {
         if (!cancelled) setSegmentAllClients(all);
@@ -1726,7 +1733,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
         if (!cancelled) setLoadingSegmentClients(false);
       });
     return () => { cancelled = true; };
-  }, [useSegmentMode, clientsDataUserId, segmentConditions.length, useClientLiveStats, businessScopeId]);
+  }, [useSegmentMode, clientsDataUserId, segmentConditions.length, useClientLiveStats, businessScopeId, clientsBusinessType, scopedClientsBusinessId]);
 
   const [invoiceClientOptions, setInvoiceClientOptions] = useState<Client[]>([]);
 
@@ -1741,6 +1748,8 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   const [cFilterName,   setCFilterName]   = useState<string[]>([]);
   const [cFilterStatus, setCFilterStatus] = useState<string[]>([]);
   const [cFilterCity,   setCFilterCity]   = useState<string[]>([]);
+  /** Inmobiliaria: cartera del agente vs toda la empresa. */
+  const [reAgentScope, setReAgentScope] = useState<'mine' | 'all'>('mine');
   const [cSort,         setCSort]         = useState<SortState>({ key: 'name', dir: 'asc' });
 
   const {
@@ -1751,7 +1760,13 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   } = usePaginatedClients({
     userId: clientsDataUserId,
     businessId: scopedClientsBusinessId,
-    enabled: useServerClients && activeTab === 'clients' && !useSegmentMode,
+    businessType: clientsBusinessType,
+    // Fuera de delivery: sin empresa activa no listar (evita cartera delivery del titular).
+    enabled:
+      useServerClients
+      && activeTab === 'clients'
+      && !useSegmentMode
+      && (isDeliveryBusiness || Boolean(scopedClientsBusinessId)),
     search: debouncedSearch,
     sort: cSort,
     branchId: filterBranch,
@@ -1774,6 +1789,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
       skip: 0,
       lite: true,
       businessId: scopedClientsBusinessId,
+      businessType: clientsBusinessType,
     })
       .then(({ clients }) => {
         if (!cancelled) {
@@ -1782,7 +1798,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [activeTab, clientsDataUserId, isOpsCrmBusiness, businessScopeId]);
+  }, [activeTab, clientsDataUserId, isOpsCrmBusiness, businessScopeId, scopedClientsBusinessId, clientsBusinessType]);
 
   const withBusinessScope = useCallback(
     <T extends Record<string, unknown>>(payload: T): T => {
@@ -1833,17 +1849,6 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     applyToStatuses: ['new'],
     escalationUser: '',
   });
-
-  const CLIENT_AI_FIELDS: AIFieldDef[] = [
-    { key: 'name', label: 'Nombre completo' },
-    { key: 'phone', label: 'Teléfono' },
-    { key: 'email', label: 'Email' },
-    { key: 'dni', label: 'DNI / NIF / CIF' },
-    { key: 'address', label: 'Dirección' },
-    { key: 'city', label: 'Ciudad' },
-    { key: 'postalCode', label: 'Código postal' },
-    { key: 'notes', label: 'Notas' },
-  ];
 
   const allLeads = useMemo<Lead[]>(
     () =>
@@ -2041,12 +2046,25 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     if (cFilterStatus.length) r = r.filter(c => cFilterStatus.includes(c.status === 'active' ? 'Activo' : 'Inactivo'));
     if (cFilterCity.length)   r = r.filter(c => c.city && cFilterCity.includes(c.city));
 
+    if (isRealEstateBusiness) {
+      const scope = canSeeAllReClients ? reAgentScope : 'mine';
+      if (scope === 'mine') {
+        const selfId = String(authUser?.user_id || '').trim().replace(/^account:/, '');
+        const selfName = String(authUser?.fullName || '').trim();
+        r = r.filter((c) => clientBelongsToAgent(c, selfId, selfName));
+      }
+    }
+
     if (segmentConditions.length > 0 && activeTab === 'clients') {
       const ctxMap = new Map((useSegmentMode ? segmentAllClients : contextClients || []).map(c => [c.id, c]));
       r = applySegmentFilters(r.map(c => ({ ...c, ...ctxMap.get(c.id) } as unknown as Client)), segmentConditions) as Client[];
     }
     return r;
-  }, [allClients, filterBranch, filterWorkCenter, searchQuery, cFilterName, cFilterStatus, cFilterCity, cSort, segmentConditions, activeTab, contextClients, useServerClients, useSegmentMode, segmentAllClients, filterClientTag]);
+  }, [
+    allClients, filterBranch, filterWorkCenter, searchQuery, cFilterName, cFilterStatus, cFilterCity, cSort,
+    segmentConditions, activeTab, contextClients, useServerClients, useSegmentMode, segmentAllClients, filterClientTag,
+    isRealEstateBusiness, canSeeAllReClients, reAgentScope, authUser?.user_id, authUser?.fullName,
+  ]);
 
   const clientsListTotal = useServerClients && !useSegmentMode
     ? serverClientsPagination.total
@@ -2066,7 +2084,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
         clientsDataUserId,
         undefined,
         scopedClientsBusinessId,
-        { liveStats: useClientLiveStats },
+        { liveStats: useClientLiveStats, businessType: clientsBusinessType },
       );
       downloadClientsExport(
         all.map((c) => mapClientToExportRow(c)),
@@ -2084,6 +2102,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   }, [
     businessScopeId,
     clientsDataUserId,
+    clientsBusinessType,
     exportingClients,
     scopedClientsBusinessId,
     useClientLiveStats,
@@ -3237,7 +3256,6 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
           exportingClients={exportingClients}
           requiredPlanLabel={listPlan.requiredPlanLabel}
           onQuickAddClient={() => setShowAddClientModal(true)}
-          onAIAddClient={() => setShowAIClientModal(true)}
           onImportClients={() => setCrmImportMode('clients')}
           onToggleSegmentBuilder={() => setShowSegmentBuilder((prev) => !prev)}
           onImportFromBusiness={() => {
@@ -3384,6 +3402,42 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
           />
         </div>
       )}
+
+      {isRealEstateBusiness ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex rounded-xl border border-stone-200 dark:border-stone-700 p-0.5 bg-white dark:bg-stone-900">
+            <button
+              type="button"
+              onClick={() => setReAgentScope('mine')}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-[10px] transition-colors ${
+                reAgentScope === 'mine' || !canSeeAllReClients
+                  ? 'bg-[var(--v-blue,#2563eb)] text-white'
+                  : 'text-stone-600 dark:text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-800'
+              }`}
+            >
+              Mis clientes
+            </button>
+            {canSeeAllReClients ? (
+              <button
+                type="button"
+                onClick={() => setReAgentScope('all')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-[10px] transition-colors ${
+                  reAgentScope === 'all'
+                    ? 'bg-[var(--v-blue,#2563eb)] text-white'
+                    : 'text-stone-600 dark:text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-800'
+                }`}
+              >
+                Toda la inmobiliaria
+              </button>
+            ) : null}
+          </div>
+          <p className="text-xs text-stone-500">
+            {canSeeAllReClients
+              ? 'Los comerciales ven su cartera; tú puedes ver toda la empresa.'
+              : 'Solo ves los clientes que te están asignados. Al crear uno, se te asigna.'}
+          </p>
+        </div>
+      ) : null}
 
       {/* Filtro por tags — heladería ya los lleva en la toolbar */}
       {!isHeladeriaBusiness && (() => {
@@ -3549,6 +3603,26 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                               : 'Nuevo pedido'
                         }
                       />
+                    ) : isRealEstateBusiness ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/saas/realestate-visits?clientId=${encodeURIComponent(client.id)}&nuevo=1`)}
+                          className="p-1.5 hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded-lg"
+                          title="Nueva visita"
+                        >
+                          <Calendar className="w-4 h-4 text-[var(--v-blue,#2563eb)]" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/saas/realestate-contracts?nuevo=1`)}
+                          className="p-1.5 hover:bg-blue-50 rounded-lg"
+                          title="Contrato inmobiliario"
+                        >
+                          <FileText className="w-4 h-4 text-blue-500" />
+                        </button>
+                        <button onClick={() => viewClientDetail(client.id)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Ver ficha"><Eye className="w-4 h-4 text-gray-500 dark:text-gray-400" /></button>
+                      </>
                     ) : !isOpsCrmBusiness ? (
                       <>
                         <button onClick={() => handleCreateContract(client)} className="p-1.5 hover:bg-blue-50 rounded-lg" title="Contrato"><FileText className="w-4 h-4 text-blue-500" /></button>
@@ -3825,6 +3899,26 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                                   : 'Nuevo pedido'
                             }
                           />
+                        ) : isRealEstateBusiness ? (
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              type="button"
+                              onClick={() => navigate(`/saas/realestate-visits?clientId=${encodeURIComponent(client.id)}&nuevo=1`)}
+                              className="p-1.5 hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded-lg"
+                              title="Nueva visita"
+                            >
+                              <Calendar className="w-4 h-4 text-[var(--v-blue,#2563eb)]" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => navigate('/saas/realestate-contracts?nuevo=1')}
+                              className="p-1.5 hover:bg-blue-50 rounded-lg"
+                              title="Contrato inmobiliario"
+                            >
+                              <FileText className="w-4 h-4 text-blue-500" />
+                            </button>
+                            <button onClick={() => viewClientDetail(client.id)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Ver ficha"><Eye className="w-4 h-4 text-gray-500 dark:text-gray-400" /></button>
+                          </div>
                         ) : !isOpsCrmBusiness ? (
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button onClick={() => handleCreateContract(client)} className="p-1.5 hover:bg-blue-50 rounded-lg" title="Contrato"><FileText className="w-4 h-4 text-blue-500" /></button>
@@ -4741,38 +4835,6 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
           </div>
         </div>
       )}
-      <AIAddModal
-        isOpen={showAIClientModal}
-        onClose={() => setShowAIClientModal(false)}
-        module="clients"
-        moduleLabel="Clientes"
-        fields={CLIENT_AI_FIELDS}
-        onEntriesParsed={async (entries) => {
-          let created = 0;
-          for (const entry of entries) {
-            try {
-              await addClient(withBusinessScope({
-                name: String(entry.name || ''),
-                phone: String(entry.phone || ''),
-                email: String(entry.email || ''),
-                dni: String(entry.dni || ''),
-                address: String(entry.address || ''),
-                city: String(entry.city || ''),
-                postalCode: String(entry.postalCode || ''),
-                notes: String(entry.notes || ''),
-                status: 'active',
-                responsible: '',
-                interactions: [],
-                documentsList: [],
-              }));
-              created++;
-            } catch { /* skip failed */ }
-          }
-          if (created > 0) toast.success(`${created} cliente(s) creado(s) con IA`);
-          setShowAIClientModal(false);
-        }}
-        placeholder="Ej: Juan García, teléfono 600123456, email juan@email.com, DNI 12345678A, vive en Madrid..."
-      />
       {showDuplicates && (
         <DuplicatesMergeModal
           leads={contextLeads || []}

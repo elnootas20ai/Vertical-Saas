@@ -687,7 +687,7 @@ function CreateItemModal({
               </div>
             )}
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className={labelClass}>SKU</label>
               <input className={inputClass} placeholder="Se genera automáticamente" value={form.sku} onChange={e => setForm(f => ({ ...f, sku: e.target.value }))} />
@@ -1394,7 +1394,60 @@ export function CatalogPage() {
           </div>
         ) : (
           <div className="bg-white dark:bg-gray-800 rounded-xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
-            <div className="overflow-x-auto">
+            {/* Móvil: tarjetas de artículo */}
+            <ul className="md:hidden divide-y divide-gray-100 dark:divide-gray-800">
+              {filteredCatalog.map(item => (
+                <li key={item._id} className="px-3 py-2.5">
+                  <div className="flex items-start gap-2.5">
+                    {(item.image || item.images?.[0]) ? (
+                      <img src={item.image || item.images[0]} alt="" className="w-11 h-11 rounded-lg object-cover shrink-0" />
+                    ) : (
+                      <div className="w-11 h-11 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center shrink-0">
+                        {item.itemType === 'service' ? <Wrench className="w-4 h-4 text-gray-400" /> : item.itemType === 'combo' ? <LayoutGrid className="w-4 h-4 text-gray-400" /> : <Package className="w-4 h-4 text-gray-400" />}
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate">{item.name}</p>
+                        <span className={`px-2 py-0.5 text-[10px] font-semibold rounded-full shrink-0 ${typeBadgeClass(item.itemType)}`}>
+                          {typeLabel(item.itemType)}
+                        </span>
+                        {(duplicateMetaById[item._id]?.name || duplicateMetaById[item._id]?.sku) && (
+                          <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 shrink-0">
+                            Duplicado
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
+                        {[item.category, `IVA ${item.taxRate ?? 21}%`].filter(Boolean).join(' · ')}
+                      </p>
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100 mt-0.5 tabular-nums">
+                        {item.unitPrice.toFixed(2)}€
+                        {item.costPrice > 0 && (
+                          <span className="ml-1.5 text-xs font-normal text-gray-400">Coste: {item.costPrice.toFixed(2)}€</span>
+                        )}
+                      </p>
+                    </div>
+                    <div className="flex items-center shrink-0">
+                      <button onClick={() => { setEditingItem(item); setShowCreateItem(true); }} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors" title="Editar"><Edit3 className="w-4 h-4 text-gray-600 dark:text-gray-400" /></button>
+                      <button onClick={() => handleDeleteItem(item)} className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors" title="Eliminar"><Trash2 className="w-4 h-4 text-red-500" /></button>
+                    </div>
+                  </div>
+                  <div className="mt-1.5 flex items-center gap-1.5 pl-[54px]">
+                    <button onClick={() => handleToggleField(item, 'available')}
+                      className={`px-2.5 py-1 text-[11px] font-semibold rounded-full border transition-colors ${item.available ? 'bg-green-100 text-green-700 border-green-200' : 'bg-red-100 text-red-700 border-red-200'}`}>
+                      {item.available ? 'Disponible' : 'No disponible'}
+                    </button>
+                    <button onClick={() => handleToggleField(item, 'active')}
+                      className={`px-2.5 py-1 text-[11px] font-semibold rounded-full border transition-colors ${item.active ? 'bg-green-100 text-green-700 border-green-200' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700'}`}>
+                      {item.active ? 'Activo' : 'Inactivo'}
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+            {/* Desktop: tabla completa */}
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full min-w-[900px]">
                 <thead>
                   <tr className="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">

@@ -232,6 +232,103 @@ export function deriveClockinStatus(entries) {
   return 'active';
 }
 
+/** Cierre automático: fin de turno + 10 min (misma regla que el cliente). */
+export const AUTO_OUT_GRACE_MS = 10 * 60 * 1000;
+/** Sin horario: tope de seguridad 4 h continuas. */
+export const SAFETY_CONTINUOUS_MS = 4 * 60 * 60 * 1000;
+
+function pad2(n) {
+  return String(n).padStart(2, '0');
+}
+
+function parseLocalDateTime(dateStr, hhmm) {
+  const [h, m] = String(hhmm || '').split(':').map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  const d = new Date(`${dateStr}T${pad2(h)}:${pad2(m)}:00`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function calendarDayKeyLocal(iso) {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Madrid',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(iso));
+  } catch {
+    return String(iso || '').slice(0, 10);
+  }
+}
+
+function isOvernightSchedule(scheduledStart, scheduledEnd) {
+  if (!scheduledStart || !scheduledEnd) return false;
+  const [sh, sm] = String(scheduledStart).split(':').map(Number);
+  const [eh, em] = String(scheduledEnd).split(':').map(Number);
+  if (![sh, sm, eh, em].every(Number.isFinite)) return false;
+  return eh * 60 + em <= sh * 60 + sm;
+}
+
+/**
+ * Momento (ms) en que debe cerrarse solo el fichaje (ignora status completed).
+ * Con turno: scheduled_end (+1 día si cruza medianoche) + 10 min.
+ * Sin turno: 4 h desde la última reanudación (entrada / fin descanso).
+ */
+export function getAutoClockOutDeadlineMs(record) {
+  if (!record) return null;
+  const dateStr = String(record.date || '').slice(0, 10);
+  const end = dateStr && record.scheduled_end
+    ? parseLocalDateTime(dateStr, record.scheduled_end)
+    : null;
+  const start = dateStr && record.scheduled_start
+    ? parseLocalDateTime(dateStr, record.scheduled_start)
+    : null;
+
+  if (end) {
+    if (start && end.getTime() <= start.getTime()) {
+      end.setDate(end.getDate() + 1);
+    }
+    return end.getTime() + AUTO_OUT_GRACE_MS;
+  }
+
+  let lastResume = null;
+  for (const e of record.entries || []) {
+    // Ignorar clock_out: el deadline es el momento en que debió cerrarse, no tras cerrar.
+    if (e.type === 'clock_out') break;
+    if (e.type === 'clock_in' || e.type === 'break_end') {
+      lastResume = new Date(e.time).getTime();
+    }
+    if (e.type === 'break_start') {
+      lastResume = null;
+    }
+  }
+  if (lastResume == null) return null;
+  return lastResume + SAFETY_CONTINUOUS_MS;
+}
+
+export function getAutoClockOutAtMs(record, nowMs = Date.now()) {
+  if (!record || record.status === 'completed') return null;
+  return getAutoClockOutDeadlineMs(record);
+}
+
+export function shouldAutoClockOut(record, nowMs = Date.now()) {
+  if (!record || record.status === 'completed' || record.status === 'break') return false;
+  const at = getAutoClockOutDeadlineMs(record);
+  if (at == null) return false;
+  return nowMs >= at;
+}
+
+/** Salida al día siguiente sin turno noche → cierre tardío erróneo (p. ej. al fichar al día). */
+function isStaleNextDayClockOut(entries, scheduledStart, scheduledEnd) {
+  const clockIn = (entries || []).find((e) => e.type === 'clock_in');
+  const clockOut = (entries || []).find((e) => e.type === 'clock_out');
+  if (!clockIn?.time || !clockOut?.time) return false;
+  if (isOvernightSchedule(scheduledStart, scheduledEnd)) return false;
+  const inDay = calendarDayKeyLocal(clockIn.time);
+  const outDay = calendarDayKeyLocal(clockOut.time);
+  return Boolean(inDay && outDay && outDay > inDay);
+}
+
 export function computeClockinMinutes(entries, scheduledStart, scheduledEnd, dateStr) {
   let totalMinutes = 0;
   let breakMinutes = 0;
@@ -244,13 +341,27 @@ export function computeClockinMinutes(entries, scheduledStart, scheduledEnd, dat
 
   if (dateStr && scheduledStart) {
     const [h, m] = scheduledStart.split(':').map(Number);
-    const schedStartMs = new Date(`${dateStr}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`).getTime();
+    const schedStartMs = new Date(`${dateStr}T${pad2(h)}:${pad2(m)}:00`).getTime();
     if (startMs < schedStartMs) startMs = schedStartMs;
   }
   if (dateStr && scheduledEnd) {
     const [h, m] = scheduledEnd.split(':').map(Number);
-    const schedEndMs = new Date(`${dateStr}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`).getTime();
+    let schedEndMs = new Date(`${dateStr}T${pad2(h)}:${pad2(m)}:00`).getTime();
+    if (scheduledStart) {
+      const [sh, sm] = scheduledStart.split(':').map(Number);
+      const schedStartMs = new Date(`${dateStr}T${pad2(sh)}:${pad2(sm)}:00`).getTime();
+      if (schedEndMs <= schedStartMs) schedEndMs += 24 * 60 * 60 * 1000;
+    }
     if (endMs > schedEndMs) endMs = schedEndMs;
+  } else if (isStaleNextDayClockOut(entries, scheduledStart, scheduledEnd)) {
+    // Sin horario y salida al día siguiente: no contar ~24 h; tope = auto-cierre (4 h).
+    const deadline = getAutoClockOutDeadlineMs({
+      date: dateStr,
+      scheduled_start: scheduledStart,
+      scheduled_end: scheduledEnd,
+      entries,
+    });
+    if (deadline != null && endMs > deadline) endMs = deadline;
   }
 
   totalMinutes = Math.round(Math.max(0, endMs - startMs) / 60000);

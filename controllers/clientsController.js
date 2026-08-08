@@ -77,19 +77,39 @@ async function countActiveBusinesses(req, userId) {
   return count;
 }
 
+async function resolveBusinessTypeForScope(req, userId, businessId) {
+  const fromQuery = String(req.query?.businessType || req.query?.business_type || '').trim();
+  if (fromQuery) return fromQuery;
+  const bid = normalizeBusinessScopeId(businessId);
+  if (!bid) return '';
+  try {
+    const businesses = await listBusinessesByUser(req, userId);
+    const biz = businesses.find(
+      (b) => normalizeBusinessScopeId(b.business_id || b._id) === bid,
+    );
+    return String(biz?.businessType || '').trim();
+  } catch {
+    return '';
+  }
+}
+
 async function resolveClientListOptions(req, userId, businessId) {
   const bid = normalizeBusinessScopeId(businessId);
   if (!bid) return {};
   const count = await countActiveBusinesses(req, userId);
   const multiBusiness = count > 1;
+  const businessType = await resolveBusinessTypeForScope(req, userId, bid);
+  const bt = businessType.toLowerCase();
+  /**
+   * Solo delivery (1 empresa) mantiene legacy CRM/TPV histórico.
+   * Resto de verticales: NUNCA mezclar clientes de delivery u otra sede.
+   */
+  const allowDeliveryLegacy = bt === 'delivery' && !multiBusiness;
+  const strictBusinessScope = !allowDeliveryLegacy;
   return {
     businessId: bid,
-    legacySingleBusiness: !multiBusiness,
-    /**
-     * Con varias empresas: ocultar clientes antiguos sin business_id (evitar mezclar).
-     * Con una sola empresa: sí mostrarlos — son el CRM histórico del local (TPV incluido).
-     */
-    excludeUnscopedLegacy: multiBusiness,
+    legacySingleBusiness: allowDeliveryLegacy,
+    excludeUnscopedLegacy: strictBusinessScope,
   };
 }
 
@@ -132,6 +152,16 @@ export async function listClients(req, res) {
     }
 
     const businessId = resolveQueryBusinessId(req);
+    const businessTypeHint = String(req.query?.businessType || req.query?.business_type || '').trim();
+    const btHint = businessTypeHint.toLowerCase();
+    // Fuera de delivery: sin empresa activa → lista vacía (no tirar de cartera delivery).
+    if (btHint && btHint !== 'delivery' && !businessId) {
+      return res.json({
+        ok: true,
+        clients: [],
+        meta: { total: 0, skip: 0, limit: 0, hasMore: false },
+      });
+    }
     const listOptions = await resolveClientListOptions(req, ownerUserId, businessId);
     const searchParam = typeof req.query.search === 'string' ? req.query.search.trim() : '';
     const query = { ...req.query };
@@ -154,9 +184,8 @@ export async function listClients(req, res) {
     let clients = pageDocs.map(sanitizer).filter(Boolean);
     const enrichLiveStats = req.query.liveStats === '1' || req.query.liveStats === 'true';
     if (enrichLiveStats && clients.length > 0) {
-      // Heladería (y verticales sin pedidos delivery/sala): no escanear pedidos del titular.
-      // En cuentas multi-empresa eso bloqueaba el CRM minutos enteros.
-      let skipOrderEnrichment = false;
+      // Solo delivery puede enriquecer con pedidos. Resto de verticales: CRM core.
+      let skipOrderEnrichment = true;
       if (businessId) {
         try {
           const businesses = await listBusinessesByUser(req, ownerUserId);
@@ -164,9 +193,9 @@ export async function listClients(req, res) {
             (b) => normalizeBusinessScopeId(b.business_id || b._id) === businessId,
           );
           const bt = String(biz?.businessType || '').trim().toLowerCase();
-          if (bt === 'icecreamshop') skipOrderEnrichment = true;
+          skipOrderEnrichment = bt !== 'delivery';
         } catch {
-          /* si falla el lookup, seguir con enrich (comportamiento anterior) */
+          skipOrderEnrichment = true;
         }
       }
       if (!skipOrderEnrichment) {

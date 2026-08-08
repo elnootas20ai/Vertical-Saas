@@ -57,6 +57,7 @@ export function getVertialAccessPermissionModules(businessType?: string | null) 
   const isButcher = type === 'butcherShop';
   const isScrap = type === 'scrapyard';
   const isCleaning = type === 'cleaning';
+  const isRealEstate = type === 'realEstate';
   const isAuto = type === 'carDealership' || type === 'workshop' || type === 'spareParts';
   const isRestaurant = isRestaurantBusinessType(businessType);
 
@@ -69,6 +70,10 @@ export function getVertialAccessPermissionModules(businessType?: string | null) 
     }
     if (module.key === 'sala' || module.key === 'reservations') {
       return isRestaurant || !type;
+    }
+    // Inmobiliaria: sin compras / caja TPV / flota delivery.
+    if (isRealEstate && (module.key === 'acquisitions' || module.key === 'cash_register' || module.key === 'fleet' || module.key === 'delivery')) {
+      return false;
     }
     // clients, finance, sales, documents, team, delivery, cash_register, reports, fleet, acquisitions…
     return true;

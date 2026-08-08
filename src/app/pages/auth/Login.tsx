@@ -176,8 +176,7 @@ export function Login() {
     } else if (result.code === 'REQUIRES_LOGIN_CODE') {
       setLoginMode('emailCode');
       setCodeValue('');
-      // No mostrar a qué correo va el código (buzón de seguridad admin).
-      setCodeInfo(null);
+      setCodeInfo(result.error || 'Te hemos enviado un código por email. Caduca en 10 minutos.');
       setErrors({});
     } else if (result.code === 'ACCOUNT_LOCKED') {
       setLockInfo({ lockUntil: result.lockUntil });

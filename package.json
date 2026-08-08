@@ -13,7 +13,7 @@
     "test:watch": "vitest",
     "start": "node index.js",
     "backend": "node index.js",
-    "backend:dev": "cross-env NODE_ENV=development node index.js",
+    "backend:dev": "cross-env NODE_ENV=development node --watch index.js",
     "backend:staging": "cross-env NODE_ENV=staging node index.js",
     "backend:prod": "cross-env NODE_ENV=production node index.js",
     "cap:sync": "npm run build && npx cap sync",

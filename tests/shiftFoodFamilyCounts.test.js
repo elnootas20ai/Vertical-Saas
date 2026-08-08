@@ -7,6 +7,7 @@ import {
   mergeTpvAndAppsFoodCounts,
   sumProductClosingCountsForDay,
 } from '../src/app/lib/shiftFoodFamilyCounts.ts';
+import { buildFoodFamilyCountsFromOrders } from '../shared/delivery/foodFamilyCounts.js';
 import { localCalendarDayKey } from '../src/app/lib/tpvCajaScope.ts';
 
 describe('classifyFoodFamily', () => {
@@ -144,6 +145,51 @@ describe('buildShiftFoodFamilyReport', () => {
     expect(report.total).toEqual({ pizza: 2, burger: 0, taco: 0 });
   });
 
+  it('menú de tacos con extras ▸: los principales cuentan como taco, no como pizza', () => {
+    const report = buildShiftFoodFamilyReport([
+      {
+        _id: 't1',
+        channel: 'tpv',
+        status: 'entregado',
+        items: [
+          {
+            name: 'Menú Tacos',
+            category: 'Combos',
+            quantity: 1,
+            extras: ['▸ Pastor ×3', '▸ Coca-Cola'],
+          },
+          {
+            name: 'Dúo Tacos',
+            category: 'Tacos',
+            quantity: 2,
+            extras: ['▸ Carnitas', '▸ Agua'],
+          },
+        ],
+      },
+    ]);
+    // Pastor×3 + Carnitas×(qty 2) = 5 tacos, 0 pizzas
+    expect(report.total).toEqual({ pizza: 0, burger: 0, taco: 5 });
+  });
+
+  it('menú de burger con extras ▸ sin palabra clave: cuentan como burger', () => {
+    const report = buildShiftFoodFamilyReport([
+      {
+        _id: 'bm1',
+        channel: 'tpv',
+        status: 'entregado',
+        items: [
+          {
+            name: 'Menú Doble',
+            category: 'Burger',
+            quantity: 1,
+            extras: ['▸ Doble queso', '▸ Patatas', '▸ Fanta'],
+          },
+        ],
+      },
+    ]);
+    expect(report.total).toEqual({ pizza: 0, burger: 1, taco: 0 });
+  });
+
   it('no convierte burgers con “Familiar” en pizzas', () => {
     const report = buildShiftFoodFamilyReport([
       {
@@ -265,6 +311,37 @@ describe('tpvOnly + merge cierre', () => {
         { glovo: { pizza: 5, burger: 0, taco: 0 }, ubereats: { pizza: 1, burger: 2, taco: 0 } },
       ),
     ).toEqual({ pizza: 6, burger: 3, taco: 0 });
+  });
+});
+
+describe('paridad backend (shared/delivery/foodFamilyCounts)', () => {
+  it('el backend cuenta igual que el TPV (Moritz en Dúo y menú de tacos)', () => {
+    const orders = [
+      {
+        _id: 'p1',
+        channel: 'tpv',
+        status: 'entregado',
+        items: [
+          {
+            name: 'Dúo',
+            category: 'Combos',
+            quantity: 1,
+            extras: ['▸ 4 Quesos', '▸ Pepperoni', '▸ Patatas Monalisa', '▸ Coca-Cola', '▸ Moritz 0,0'],
+          },
+          {
+            name: 'Menú Tacos',
+            category: 'Combos',
+            quantity: 1,
+            extras: ['▸ Pastor ×3', '▸ Coca-Cola'],
+          },
+          { name: 'Simple', category: 'Burger', quantity: 2 },
+        ],
+      },
+    ];
+    const frontend = buildShiftFoodFamilyReport(orders).total;
+    const backend = buildFoodFamilyCountsFromOrders(orders);
+    expect(frontend).toEqual({ pizza: 2, burger: 2, taco: 3 });
+    expect(backend).toEqual(frontend);
   });
 });
 

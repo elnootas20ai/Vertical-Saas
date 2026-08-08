@@ -18,6 +18,8 @@ export const INVITE_LANDING_PAGE_DEFS = [
   { id: '/saas/cocina', key: 'cocina' },
   { id: '/saas/payroll', key: 'payroll' },
   { id: '/saas/team', key: 'team' },
+  { id: '/saas/realestate-visits', key: 'realestate-visits' },
+  { id: '/saas/realestate-properties', key: 'realestate-properties' },
 ] as const;
 
 export type InviteLandingPageId = (typeof INVITE_LANDING_PAGE_DEFS)[number]['id'];
@@ -70,6 +72,17 @@ const GENERIC_LANDING_IDS = new Set<InviteLandingPageId>([
   '/saas/team',
 ]);
 
+const REAL_ESTATE_LANDING_IDS = new Set<InviteLandingPageId>([
+  WORKER_DEFAULT_LANDING_PATH,
+  '/saas/realestate-visits',
+  '/saas/realestate-properties',
+  '/saas/clients',
+  '/saas/calendar',
+  '/saas/documents',
+  '/saas/payroll',
+  '/saas/team',
+]);
+
 /** Páginas iniciales visibles según la vertical del negocio. */
 export function getInviteLandingPagesForBusiness(
   businessType?: string | null,
@@ -86,6 +99,9 @@ export function getInviteLandingPagesForBusiness(
   }
   if (bt === 'workshop' || bt === 'spareParts' || bt === 'scrapyard') {
     return INVITE_LANDING_PAGE_DEFS.filter((p) => RETAIL_LANDING_IDS.has(p.id));
+  }
+  if (bt === 'realEstate') {
+    return INVITE_LANDING_PAGE_DEFS.filter((p) => REAL_ESTATE_LANDING_IDS.has(p.id));
   }
   return INVITE_LANDING_PAGE_DEFS.filter((p) => GENERIC_LANDING_IDS.has(p.id));
 }
@@ -110,6 +126,11 @@ export function getDefaultInviteLandingPage(
   if (isRestaurantBusinessType(businessType)) {
     if (role === 'Cocina') return '/saas/cocina';
     if (role === 'Mostrador / Atención' || role === 'Encargado') return '/saas/sala';
+    return WORKER_DEFAULT_LANDING_PATH;
+  }
+  if (businessType === 'realEstate') {
+    // Encargado/Gestor/Admin ya van a nóminas vía isHrManagerRole.
+    if (role === 'Comercial') return '/saas/realestate-visits';
     return WORKER_DEFAULT_LANDING_PATH;
   }
   return WORKER_DEFAULT_LANDING_PATH;

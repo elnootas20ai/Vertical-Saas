@@ -7,8 +7,8 @@ const CHROMELESS_EXACT = new Set([
 
 const CHROMELESS_PREFIXES = [
   '/saas/vertical/delivery/tpv',
-  '/saas/vertical/delivery/caja',
-  '/saas/caja',
+  /** TPV restaurante a pantalla completa; la caja del CEO (/saas/caja) va con sidebar. */
+  '/saas/caja/tpv',
   '/saas/tpv/punto/',
   /** TPV operativo tras código de tienda (no es la caja del CEO en /saas/caja). */
   '/saas/worker/tpv',

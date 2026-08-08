@@ -239,6 +239,7 @@ import {
   getClockinsDbName,
   getCatalogDbName,
   getPartsDbName,
+  getDeliveryDbName,
   getLeadsDbName as getLeadsDbNameFromService,
   getClientsDbName,
   couchRequest,
@@ -3309,12 +3310,13 @@ if (backgroundEnginesEnabled) {
   // CARN-ALR: Motor alertas carniceria — principal 30 min + bascula 5 min
   startButcherAlertEngine();
 
-  // PO-01: Pedidos automáticos a proveedores — cada 2 horas (pausado si no hay actividad)
-  setTimeout(() => runAutoOrdersForAllUsers().catch(() => null), 15000);
-  setInterval(() => {
-    if (!shouldRunBackgroundEngine('auto_orders')) return;
-    runAutoOrdersForAllUsers().catch(() => null);
-  }, 2 * 3600000);
+  // PO-01: Pedidos automáticos a proveedores — DESACTIVADO (generaba borradores basura
+  // cada 2 h; se reactivará cuando se reconstruya el flujo de pedidos a proveedores).
+  // setTimeout(() => runAutoOrdersForAllUsers().catch(() => null), 15000);
+  // setInterval(() => {
+  //   if (!shouldRunBackgroundEngine('auto_orders')) return;
+  //   runAutoOrdersForAllUsers().catch(() => null);
+  // }, 2 * 3600000);
 }
 
 // I-05: Backup automático de CouchDB con gzip + rotación (siempre activo: protege datos)

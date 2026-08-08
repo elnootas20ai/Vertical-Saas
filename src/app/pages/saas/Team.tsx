@@ -47,6 +47,7 @@ import {
   Users,
   UsersRound,
   Network,
+  QrCode,
   Wrench,
   X,
   Zap,
@@ -59,6 +60,7 @@ import { StaffConsumptionsTab } from '../../components/saas/StaffConsumptionsTab
 import { CreateRoleModal } from '../../components/saas/CreateRoleModal';
 import { toast } from 'sonner';
 import { InviteUserModal, type InviteUserPayload } from '../../components/saas/InviteUserModal';
+import { WorkerInviteQrModal } from '../../components/saas/WorkerInviteQrModal';
 import { loadInviteWorkCenters } from '../../lib/inviteWorkCenters';
 import type { WorkCenter } from '../../lib/workCentersApi';
 import {
@@ -2840,6 +2842,7 @@ export function Team() {
     return 'members';
   });
   const [showInvite, setShowInvite] = useState(false);
+  const [showInviteQr, setShowInviteQr] = useState(false);
   const [showSeatBillingWarn, setShowSeatBillingWarn] = useState(false);
   const [workerSeats, setWorkerSeats] = useState<WorkerSeatStatus | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -3257,6 +3260,21 @@ export function Team() {
             <button type="button" onClick={() => setShowOrgChart(true)} className="inline-flex items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-200 transition-colors hover:bg-gray-50 dark:hover:bg-gray-600">
               <Network className="w-4 h-4" />
               {t('team.orgchart.button')}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (workerSeats && !workerSeats.canInvite) {
+                  setShowSeatBillingWarn(true);
+                  return;
+                }
+                setShowInviteQr(true);
+              }}
+              className="inline-flex items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-200 transition-colors hover:bg-gray-50 dark:hover:bg-gray-600"
+              title="QR / enlace por tienda u oficina"
+            >
+              <QrCode className="w-4 h-4" />
+              QR invitación
             </button>
             <ActivationFieldWrap fieldKey="team-invite" activeKey={activationFocus}>
               <button
@@ -3855,6 +3873,13 @@ export function Team() {
             return await handleInvite(payload);
           }}
           onLookupEmail={lookupInviteEmail}
+        />
+      )}
+
+      {showInviteQr && (
+        <WorkerInviteQrModal
+          onClose={() => setShowInviteQr(false)}
+          business={currentBusiness}
         />
       )}
 

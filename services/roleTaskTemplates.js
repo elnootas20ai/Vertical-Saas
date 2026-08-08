@@ -132,6 +132,38 @@ const RESTAURANT = [
   { ...deliveryCocina(), summary: 'Preparar comandas de sala y cocina a tiempo.' },
 ];
 
+const REAL_ESTATE = [
+  {
+    roleId: 'Administrador',
+    roleLabel: 'Administrador',
+    summary: 'Responsable de la inmobiliaria: equipo, cartera y operación.',
+    tasks: [
+      { key: 're-admin-equipo', title: 'Revisar equipo y comerciales activos', description: 'Quién cubre visitas, captación y seguimiento del día.', priority: 'high' },
+      { key: 're-admin-cartera', title: 'Revisar cartera y visitas pendientes', description: 'Inmuebles activos, citas del día e incidencias.', priority: 'medium' },
+    ],
+  },
+  deliveryGestor(),
+  {
+    roleId: 'Encargado',
+    roleLabel: 'Encargado',
+    summary: 'Coordina comerciales, visitas del día y captación.',
+    tasks: [
+      { key: 're-enc-agenda', title: 'Coordinar agenda de visitas del día', description: 'Asignar comerciales, horarios e inmuebles a mostrar.', priority: 'urgent' },
+      { key: 're-enc-captacion', title: 'Supervisar captación y seguimiento', description: 'Que cada comercial avance leads y cierre pendientes.', priority: 'high' },
+    ],
+  },
+  {
+    roleId: 'Comercial',
+    roleLabel: 'Comercial',
+    summary: 'Visitas, captación, clientes y seguimiento comercial.',
+    tasks: [
+      { key: 're-com-visitas', title: 'Preparar y realizar visitas del día', description: 'Confirmar cita, revisar ficha del inmueble y dejar notas tras la visita.', priority: 'urgent' },
+      { key: 're-com-seguimiento', title: 'Seguimiento de clientes y leads', description: 'Llamar o escribir a interesados pendientes de respuesta.', priority: 'high' },
+      { key: 're-com-captacion', title: 'Avanzar captación de inmuebles', description: 'Contactar propietarios y actualizar estado comercial.', priority: 'medium' },
+    ],
+  },
+];
+
 const EVENTS = [
   {
     roleId: 'Administrador',
@@ -175,6 +207,7 @@ const EVENTS = [
 function bundlesForBusinessType(businessType) {
   const t = String(businessType || '').trim().toLowerCase();
   if (t === 'events') return EVENTS;
+  if (t === 'realestate') return REAL_ESTATE;
   if (t === 'restaurant' || t === 'bar' || t === 'cafe') return RESTAURANT;
   return DELIVERY;
 }

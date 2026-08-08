@@ -234,6 +234,7 @@ export interface BillingSubscription {
   extraBusinessSlots?: number;
   /** Trabajadores extra (además del maxUsers del plan). */
   extraWorkerSlots?: number;
+  extraTpvTabletSlots?: number;
   /** PRO manual sin pasarela (solo superadmin). */
   adminProAccess?: boolean;
   /** Exento de suspensión automática por MONEI/cron. */
@@ -1570,6 +1571,107 @@ export async function reviewJoinRequestRequest(requestId: string, action: 'accep
 export async function searchBusinessesRequest(query: string) {
   const qs = query ? `?q=${encodeURIComponent(query)}` : '';
   return request<AuthUser>(`/api/auth/businesses/search${qs}`);
+}
+
+// ─── Worker invite links (QR / enlace por centro) ────────────────────────────
+
+export interface WorkerInviteLink {
+  link_id: string;
+  business_id: string;
+  businessName: string;
+  workCenterId: string;
+  workCenterName: string;
+  role: string;
+  landingPage: string;
+  scheduleTemplateId: string;
+  status: string;
+  maxUses: number | null;
+  useCount: number;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+  invitedByName: string;
+}
+
+export interface WorkerInviteLinkPreview {
+  businessName: string;
+  workCenterName: string;
+  role: string;
+  expiresAt: string;
+}
+
+export async function previewWorkerInviteLinkRequest(token: string): Promise<{
+  ok: boolean;
+  preview?: WorkerInviteLinkPreview;
+  error?: string;
+  code?: string;
+}> {
+  const url = `${API_BASE}/api/auth/join/preview?token=${encodeURIComponent(token)}`;
+  const response = await fetch(url, { credentials: 'include' });
+  const data = (await response.json().catch(() => ({}))) as {
+    ok?: boolean;
+    preview?: WorkerInviteLinkPreview;
+    error?: string;
+    code?: string;
+  };
+  if (!response.ok || !data.ok) {
+    return {
+      ok: false,
+      error: data.error || 'Enlace no válido',
+      code: data.code,
+    };
+  }
+  return { ok: true, preview: data.preview };
+}
+
+export async function createWorkerInviteLinkRequest(payload: {
+  businessId: string;
+  workCenterId: string;
+  role?: string;
+  permissions?: AccountPermissionMatrix;
+  landingPage?: string;
+  scheduleTemplateId?: string;
+  position?: string;
+  maxUses?: number | null;
+  expiresInDays?: number;
+}) {
+  return request<AuthUser>('/api/auth/invite-links', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }) as Promise<{
+    ok: boolean;
+    inviteLink?: WorkerInviteLink;
+    token?: string;
+    joinUrl?: string;
+    error?: string;
+  }>;
+}
+
+export async function listWorkerInviteLinksRequest(businessId: string, includeInactive = false) {
+  const qs = includeInactive ? '?includeInactive=true' : '';
+  return request<AuthUser>(
+    `/api/auth/businesses/${encodeURIComponent(businessId)}/invite-links${qs}`,
+  ) as Promise<{ ok: boolean; inviteLinks?: WorkerInviteLink[]; error?: string }>;
+}
+
+export async function revokeWorkerInviteLinkRequest(linkId: string) {
+  return request<AuthUser>(`/api/auth/invite-links/${encodeURIComponent(linkId)}`, {
+    method: 'DELETE',
+  }) as Promise<{ ok: boolean; inviteLink?: WorkerInviteLink; error?: string }>;
+}
+
+export async function redeemWorkerInviteLinkRequest(token: string) {
+  return request<AuthUser>('/api/auth/join', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  }) as Promise<{
+    ok: boolean;
+    user?: AuthUser;
+    redirectTo?: string;
+    alreadyMember?: boolean;
+    error?: string;
+    code?: string;
+  }>;
 }
 
 // RGPD: Descargar mis datos personales como JSON

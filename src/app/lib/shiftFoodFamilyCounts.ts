@@ -103,7 +103,7 @@ export function parseComboExtraLine(raw: string): { name: string; units: number 
 function isLikelyNonMainComboExtra(name: string): boolean {
   const n = fold(name);
   // Bebidas / cervezas / sides del combo: NUNCA suman como pizza (p. ej. «Moritz 0,0» en un Dúo).
-  return /bebida|refresco|agua|coca|fanta|sprite|cerveza|vino|cafe|te\b|patata|frita|complemento|acompan|postre|helado|tiramisu|nugget|alita|ensalada|salad|dip|salsa|brownie|cookie|batido|smoothie|zumo|nestea|aquarius|red.?bull|monster|maiz|pan\b|aros|tequeno|salchipapa|chicken\s*balls?|moritz|estrella|mahou|heineken|amstel|cruzcampo|san\s*miguel|coronita|desperados|free\s*damm|0[,.]0|sin\s*alcohol|radler|clara\b|tonica|schweppes|seven\s*up|7\s*up|kas\b|trinkata|powerade|gatorade|monster|burn\b|appletiser/.test(
+  return /bebida|refresco|agua|coca|fanta|sprite|cerveza|vino|cafe|te\b|patata|frita|complemento|acompan|postre|helado|tiramisu|nugget|alita|ensalada|salad|dip|salsa|brownie|cookie|batido|smoothie|zumo|nestea|aquarius|red.?bull|monster|burn\b|maiz|pan\b|aros|tequeno|salchipapa|chicken\s*balls?|moritz|estrella|mahou|heineken|amstel|cruzcampo|san\s*miguel|coronita|desperados|free\s*damm|0[,.]0|sin\s*alcohol|radler|clara\b|tonica|schweppes|seven\s*up|7\s*up|kas\b|trinkata|powerade|gatorade|appletiser/.test(
     n,
   );
 }
@@ -146,11 +146,12 @@ function countItem(item: DeliveryOrderItem): FoodFamilyCounts {
 
   // Menús TPV: las pizzas reales van en extras (▸ Pizza), no en el nombre del combo.
   if (comboParts.length > 0) {
+    const burgerMenu = family === 'burger';
+    const tacoMenu = family === 'taco';
     const pizzaMenu =
       sizeUnits != null ||
       family === 'pizza' ||
-      (looksLikeMenuProduct(item.category, item.name) && family !== 'burger');
-    const burgerMenu = family === 'burger';
+      (looksLikeMenuProduct(item.category, item.name) && !burgerMenu && !tacoMenu);
 
     for (const part of comboParts) {
       if (isLikelyNonMainComboExtra(part.name)) continue;
@@ -167,8 +168,9 @@ function countItem(item: DeliveryOrderItem): FoodFamilyCounts {
         addCounts(out, 'pizza', part.units * qty);
         continue;
       }
-      // Margarita, Pepperoni… sin la palabra “pizza”: cuentan como principal del menú.
+      // Margarita, Pastor, Doble queso… sin la palabra clave: cuentan como principal del menú.
       if (burgerMenu) addCounts(out, 'burger', part.units * qty);
+      else if (tacoMenu) addCounts(out, 'taco', part.units * qty);
       else if (pizzaMenu) addCounts(out, 'pizza', part.units * qty);
     }
 

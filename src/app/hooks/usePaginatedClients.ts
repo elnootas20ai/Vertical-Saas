@@ -6,6 +6,8 @@ import type { PaginationState } from './usePagination';
 export interface UsePaginatedClientsOptions {
   userId?: string;
   businessId?: string;
+  /** realEstate → el API no mezcla clientes de delivery / otras empresas. */
+  businessType?: string;
   pageSize?: number;
   search?: string;
   sort?: string | null;
@@ -33,6 +35,7 @@ export function usePaginatedClients(options: UsePaginatedClientsOptions) {
   const {
     userId,
     businessId,
+    businessType,
     pageSize = 20,
     search = '',
     sort = null,
@@ -81,6 +84,7 @@ export function usePaginatedClients(options: UsePaginatedClientsOptions) {
         branchId,
         workCenterId,
         businessId,
+        businessType,
         lite: true,
         liveStats,
         signal: controller.signal,
@@ -100,11 +104,11 @@ export function usePaginatedClients(options: UsePaginatedClientsOptions) {
         setIsLoading(false);
       }
     }
-  }, [userId, enabled, pageSize, search, sortQuery, branchId, workCenterId, businessId, liveStats]);
+  }, [userId, enabled, pageSize, search, sortQuery, branchId, workCenterId, businessId, businessType, liveStats]);
 
   useEffect(() => {
     setPageRaw(1);
-  }, [search, sortQuery, branchId, workCenterId, pageSize, userId, businessId]);
+  }, [search, sortQuery, branchId, workCenterId, pageSize, userId, businessId, businessType]);
 
   useEffect(() => {
     void fetchPage(page);

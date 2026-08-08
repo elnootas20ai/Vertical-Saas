@@ -24,6 +24,8 @@ import {
   canAccessStoreClockins,
   computeClockinMinutes,
   deriveClockinStatus,
+  getAutoClockOutDeadlineMs,
+  shouldAutoClockOut,
   normalizeClockinUserId,
   resolveVisibleMemberIds,
   salesPointRefsSameStore,
@@ -70,13 +72,22 @@ function clockinLocalDayKey(record) {
   return String(record?.date || '').slice(0, 10);
 }
 
+/**
+ * Cierra un fichaje abierto. La salida se estampa en min(ahora, fin turno + 10 min / tope 4 h),
+ * no en "ahora" del día siguiente (eso inventaba ~24 h).
+ */
 async function autoCloseOpenClockin(req, clockinsDb, openDoc, nowIso) {
+  const nowMs = Date.parse(nowIso) || Date.now();
+  const deadlineMs = getAutoClockOutDeadlineMs(openDoc);
+  const closeMs = deadlineMs != null ? Math.min(nowMs, deadlineMs) : nowMs;
+  const closeIso = new Date(closeMs).toISOString();
+
   let entries = [...(openDoc.entries || [])];
   const status = deriveClockinStatus(entries);
   if (status === 'break') {
-    entries = [...entries, { type: 'break_end', time: nowIso }];
+    entries = [...entries, { type: 'break_end', time: closeIso }];
   }
-  entries = [...entries, { type: 'clock_out', time: nowIso }];
+  entries = [...entries, { type: 'clock_out', time: closeIso }];
   const { totalMinutes, breakMinutes } = computeClockinMinutes(
     entries,
     openDoc.scheduled_start,
@@ -89,10 +100,118 @@ async function autoCloseOpenClockin(req, clockinsDb, openDoc, nowIso) {
     totalMinutes,
     breakMinutes,
     status: 'completed',
+    auto_closed: true,
     updatedAt: nowIso,
   };
   await putDocument(req, clockinsDb, openDoc._id, closed);
   return closed;
+}
+
+/** Cierra fichajes vencidos (fin turno + 10 min) al listar / consultar activos. */
+async function autoCloseOverdueOpenClockins(req, clockinsDb, records, nowMs = Date.now()) {
+  const nowIso = new Date(nowMs).toISOString();
+  const out = [];
+  for (const r of records || []) {
+    if (!isOpenClockinRecord(r)) {
+      out.push(r);
+      continue;
+    }
+    if (!shouldAutoClockOut(r, nowMs)) {
+      out.push(r);
+      continue;
+    }
+    try {
+      const closed = await autoCloseOpenClockin(req, clockinsDb, r, nowIso);
+      out.push(closed);
+    } catch {
+      out.push(r);
+    }
+  }
+  return out;
+}
+
+/** Recalcula horas (y corrige salida fantasma al día siguiente) en registros ya cerrados. */
+async function repairClockinMinutesIfNeeded(req, clockinsDb, record) {
+  if (!record || !Array.isArray(record.entries)) return record;
+  const { totalMinutes, breakMinutes } = computeClockinMinutes(
+    record.entries,
+    record.scheduled_start,
+    record.scheduled_end,
+    record.date,
+  );
+  const clockOutIdx = record.entries.findIndex((e) => e?.type === 'clock_out');
+  let entries = record.entries;
+  let mutated = totalMinutes !== Number(record.totalMinutes || 0)
+    || breakMinutes !== Number(record.breakMinutes || 0);
+
+  if (record.status === 'completed' && clockOutIdx >= 0) {
+    const deadlineMs = getAutoClockOutDeadlineMs({
+      ...record,
+      // Para deadline con turno usamos schedule; sin turno, 4 h desde entrada.
+      status: 'active',
+      entries: record.entries.filter((e) => e.type !== 'clock_out'),
+    });
+    const outMs = Date.parse(record.entries[clockOutIdx].time);
+    const inEntry = record.entries.find((e) => e.type === 'clock_in');
+    const inDay = inEntry?.time
+      ? calendarDayKeyMadrid(new Date(inEntry.time))
+      : String(record.date || '').slice(0, 10);
+    const outDay = Number.isFinite(outMs) ? calendarDayKeyMadrid(new Date(outMs)) : '';
+    let overnight = false;
+    if (record.scheduled_start && record.scheduled_end) {
+      const [sh, sm] = String(record.scheduled_start).split(':').map(Number);
+      const [eh, em] = String(record.scheduled_end).split(':').map(Number);
+      if ([sh, sm, eh, em].every(Number.isFinite)) {
+        overnight = eh * 60 + em <= sh * 60 + sm;
+      }
+    }
+    if (
+      deadlineMs != null
+      && Number.isFinite(outMs)
+      && outMs > deadlineMs + 60_000
+      && outDay
+      && inDay
+      && outDay > inDay
+      && !overnight
+    ) {
+      entries = record.entries.map((e, i) =>
+        (i === clockOutIdx ? { ...e, time: new Date(deadlineMs).toISOString() } : e));
+      const recomputed = computeClockinMinutes(
+        entries,
+        record.scheduled_start,
+        record.scheduled_end,
+        record.date,
+      );
+      mutated = true;
+      const fixed = {
+        ...record,
+        entries,
+        totalMinutes: recomputed.totalMinutes,
+        breakMinutes: recomputed.breakMinutes,
+        updatedAt: new Date().toISOString(),
+      };
+      try {
+        await putDocument(req, clockinsDb, record._id, fixed);
+      } catch {
+        /* best-effort */
+      }
+      return fixed;
+    }
+  }
+
+  if (!mutated) return record;
+  const fixed = {
+    ...record,
+    totalMinutes,
+    breakMinutes,
+    updatedAt: new Date().toISOString(),
+  };
+  try {
+    await putDocument(req, clockinsDb, record._id, fixed);
+  } catch {
+    /* best-effort: devolver corregido en respuesta */
+  }
+  return fixed;
 }
 
 function getSchedulesDbName() {
@@ -389,6 +508,10 @@ export async function listClockins(req, res) {
     const memberIdFilter = req.query.memberId ? String(req.query.memberId) : null;
 
     let records = await listClockinsByBusiness(req, businessId);
+    const clockinsDb = getClockinsDbName();
+    await ensureDatabase(req, clockinsDb);
+    // Cerrar vencidos (fin turno + 10 min) aunque la app del trabajador esté cerrada.
+    records = await autoCloseOverdueOpenClockins(req, clockinsDb, records);
 
     if (dateFilter) {
       records = records.filter((r) => r.date === dateFilter);
@@ -426,6 +549,8 @@ export async function listClockins(req, res) {
       records = records.filter((r) => isMemberVisible(visibleIds, r.member_id));
     }
     records = dedupeClockinDocumentsById(records);
+    // Corregir horas infladas (~24 h) por cierres al fichar al día siguiente.
+    records = await Promise.all(records.map((r) => repairClockinMinutesIfNeeded(req, clockinsDb, r)));
 
     const memberMap = await enrichMemberMap(req, business, visibleIds);
     const enrichRecord = (r) => ({
@@ -483,8 +608,11 @@ export async function listActiveNow(req, res) {
     const orgchart = await loadOrgChart(req, businessId);
     const visibleIds = await resolveVisibleMemberIds(req, business, orgchart, requesterId);
 
-    const today = new Date().toISOString().slice(0, 10);
-    const records = await listClockinsByBusiness(req, businessId);
+    const today = calendarDayKeyMadrid();
+    const clockinsDb = getClockinsDbName();
+    await ensureDatabase(req, clockinsDb);
+    let records = await listClockinsByBusiness(req, businessId);
+    records = await autoCloseOverdueOpenClockins(req, clockinsDb, records);
 
     const active = records
       .filter(

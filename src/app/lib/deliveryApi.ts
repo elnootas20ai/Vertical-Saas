@@ -1128,6 +1128,24 @@ export interface TerminalConfig {
   maxCashOutAmount?: number;
 }
 
+export type TpvTabletDeviceStatus =
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'revoked'
+  | 'blocked';
+
+export interface TpvTabletDevice {
+  deviceId: string;
+  label: string;
+  status: TpvTabletDeviceStatus;
+  rejectCount?: number;
+  createdAt?: string;
+  approvedAt?: string;
+  lastSeenAt?: string;
+  lastRequestAt?: string;
+}
+
 export interface PointOfSale {
   _id: string;
   _rev?: string;
@@ -1143,6 +1161,8 @@ export interface PointOfSale {
   code: string;
   /** Código de activación TPV tablet (6 caracteres). */
   terminalCode?: string;
+  /** Dispositivos TPV vinculados (aprobación CEO). */
+  tpvAllowedDevices?: TpvTabletDevice[];
   address: string;
   /** Config de impresión por defecto de la tienda (todos los TPV la heredan). */
   printerConfig?: VertialPrinterConfig;
@@ -1748,6 +1768,94 @@ export async function regenerateTerminalCodeRequest(userId: string, pdvId: strin
   invalidatePointsOfSaleCache();
   return result.pointOfSale;
 }
+
+export interface TpvDevicesListResult {
+  devices: TpvTabletDevice[];
+  includedSlots: number;
+  slotLimit: number;
+  approvedCount: number;
+  extraTpvTabletSlots: number;
+}
+
+export async function listPdvTpvDevicesRequest(
+  userId: string,
+  pdvId: string,
+): Promise<TpvDevicesListResult> {
+  const id = normalizeUserId(userId);
+  const result = await request<{ ok: boolean } & TpvDevicesListResult>(
+    `/api/delivery/points-of-sale/${encodeURIComponent(id)}/${encodeURIComponent(pdvId)}/tpv-devices`,
+  );
+  return {
+    devices: result.devices || [],
+    includedSlots: Number(result.includedSlots) || 2,
+    slotLimit: Number(result.slotLimit) || 2,
+    approvedCount: Number(result.approvedCount) || 0,
+    extraTpvTabletSlots: Number(result.extraTpvTabletSlots) || 0,
+  };
+}
+
+async function mutatePdvTpvDeviceRequest(
+  userId: string,
+  pdvId: string,
+  action: 'approve' | 'reject' | 'revoke' | 'unblock',
+  deviceId: string,
+): Promise<{ devices: TpvTabletDevice[]; pointOfSale?: PointOfSale; code?: string; error?: string }> {
+  const id = normalizeUserId(userId);
+  const path = `/api/delivery/points-of-sale/${encodeURIComponent(id)}/${encodeURIComponent(pdvId)}/tpv-devices/${action}`;
+  const response = await authFetch(
+    `${API_BASE}${path}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getCouchHeaders(),
+      },
+      body: JSON.stringify({ deviceId }),
+    },
+    0,
+    false,
+  );
+  const payload = (await response.json().catch(() => ({}))) as {
+    ok?: boolean;
+    devices?: TpvTabletDevice[];
+    pointOfSale?: PointOfSale;
+    code?: string;
+    error?: string;
+  };
+  if (!response.ok || payload.ok === false) {
+    return {
+      devices: [],
+      code: payload.code,
+      error: deliveryRequestErrorMessage(payload, 'No se pudo actualizar el dispositivo'),
+    };
+  }
+  if (payload.pointOfSale) invalidatePointsOfSaleCache();
+  return { devices: payload.devices || [], pointOfSale: payload.pointOfSale };
+}
+
+export const approvePdvTpvDeviceRequest = (
+  userId: string,
+  pdvId: string,
+  deviceId: string,
+) => mutatePdvTpvDeviceRequest(userId, pdvId, 'approve', deviceId);
+
+export const rejectPdvTpvDeviceRequest = (
+  userId: string,
+  pdvId: string,
+  deviceId: string,
+) => mutatePdvTpvDeviceRequest(userId, pdvId, 'reject', deviceId);
+
+export const revokePdvTpvDeviceRequest = (
+  userId: string,
+  pdvId: string,
+  deviceId: string,
+) => mutatePdvTpvDeviceRequest(userId, pdvId, 'revoke', deviceId);
+
+export const unblockPdvTpvDeviceRequest = (
+  userId: string,
+  pdvId: string,
+  deviceId: string,
+) => mutatePdvTpvDeviceRequest(userId, pdvId, 'unblock', deviceId);
 
 export async function deletePointOfSaleRequest(userId: string, pdvId: string): Promise<void> {
   const id = normalizeUserId(userId);

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
+import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
@@ -1141,17 +1142,19 @@ export function CajaPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#f3f3f5] dark:bg-zinc-950">
-        <div className="text-center">
-          <div className="animate-spin w-8 h-8 border-2 border-zinc-300 border-t-[#030213] rounded-full mx-auto mb-3" />
-          <p className="text-sm text-zinc-500">Cargando cajas...</p>
+      <Layout title="Caja">
+        <div className="flex items-center justify-center py-24">
+          <div className="text-center">
+            <div className="animate-spin w-8 h-8 border-2 border-stone-300 border-t-[var(--v-blue,#2563eb)] rounded-full mx-auto mb-3" />
+            <p className="text-sm text-stone-500">Cargando cajas...</p>
+          </div>
         </div>
-      </div>
+      </Layout>
     );
   }
 
   return (
-    <>
+    <Layout title="Caja">
       <CajaTimelineBoard
         sessions={sessions}
         selectedDate={selectedDate}
@@ -1178,6 +1181,6 @@ export function CajaPage() {
           onClose={() => setViewingClosingSession(null)}
         />
       )}
-    </>
+    </Layout>
   );
 }

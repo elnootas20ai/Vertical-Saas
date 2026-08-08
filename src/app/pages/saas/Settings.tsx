@@ -4282,11 +4282,11 @@ export function Settings() {
                           key={tab.id}
                           type="button"
                           onClick={() => setActiveTab(tab.id)}
-                          className={`flex-shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                          className={`flex-shrink-0 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors ${
                             activeTab === tab.id
-                              ? 'bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-gray-100'
-                              : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100'
-                          } ${tab.id === 'users' && usersTabMeta ? 'text-left min-w-[9.5rem]' : ''}`}
+                              ? 'bg-gray-200 text-gray-900 shadow-sm dark:bg-gray-700 dark:text-gray-100 ring-1 ring-gray-300/80 dark:ring-gray-600'
+                              : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100'
+                          } ${tab.id === 'users' && usersTabMeta ? 'text-left min-w-[10.5rem]' : ''}`}
                         >
                           {tab.id === 'users' && usersTabMeta ? (
                             <span className="flex flex-col items-start gap-0.5 leading-tight">

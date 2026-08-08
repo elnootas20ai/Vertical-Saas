@@ -5,7 +5,6 @@ import {
   FileSpreadsheet,
   Lock,
   MoreHorizontal,
-  Sparkles,
   TrendingUp,
   Trash2,
   Upload,
@@ -55,7 +54,6 @@ export interface ClientsActionsMenuProps {
   exportingClients?: boolean;
   requiredPlanLabel: (id: ClientsListFeatureId) => string;
   onQuickAddClient: () => void;
-  onAIAddClient: () => void;
   onImportClients: () => void;
   onToggleSegmentBuilder: () => void;
   onImportFromBusiness?: () => void;
@@ -78,7 +76,6 @@ export function ClientsActionsMenu({
   exportingClients = false,
   requiredPlanLabel,
   onQuickAddClient,
-  onAIAddClient,
   onImportClients,
   onToggleSegmentBuilder,
   onImportFromBusiness,
@@ -137,16 +134,6 @@ export function ClientsActionsMenu({
           highlight: true,
           action: () => {
             onQuickAddClient();
-            close();
-          },
-        },
-        {
-          id: 'ai-add',
-          label: 'Crear con IA',
-          description: 'Describe el cliente y la IA lo organiza',
-          icon: <Sparkles className="w-4 h-4 text-violet-500" />,
-          action: () => {
-            onAIAddClient();
             close();
           },
         },

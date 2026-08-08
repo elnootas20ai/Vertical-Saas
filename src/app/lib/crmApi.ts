@@ -197,6 +197,9 @@ function normalizeClientRecord(value: unknown): Client | null {
     status: (doc.status as Client['status']) || 'active',
     commercialStatus: raw.commercialStatus ? String(raw.commercialStatus) : 'active',
     responsible: doc.responsible ? String(doc.responsible) : 'Sin asignar',
+    responsibleUserId: raw.responsibleUserId
+      ? String(raw.responsibleUserId).trim().replace(/^account:/, '')
+      : '',
     notes: doc.notes ? String(doc.notes) : '',
     defaultPaymentMethod: (raw.defaultPaymentMethod as Client['defaultPaymentMethod']) || '',
     tags: Array.isArray(raw.tags) ? (raw.tags as string[]) : [],
@@ -411,6 +414,8 @@ export async function listClientsPageRequest(
     branchId?: string;
     workCenterId?: string;
     businessId?: string;
+    /** Vertical activa (p. ej. realEstate → scope estricto, sin mezclar delivery). */
+    businessType?: string;
     /** Calcula stats/loyalty desde pedidos delivery (columnas Pro del listado). */
     liveStats?: boolean;
     /** Invalida caché servidor de clientes del titular (TPV / cuentas grandes). */
@@ -427,6 +432,7 @@ export async function listClientsPageRequest(
   if (options.sort) params.set('sort', options.sort);
   if (options.lite !== false) params.set('lite', '1');
   if (options.businessId?.trim()) params.set('businessId', options.businessId.trim());
+  if (options.businessType?.trim()) params.set('businessType', options.businessType.trim());
   if (options.branchId && options.branchId !== 'all') {
     params.set('filter[branch_id]', options.branchId);
   }
@@ -453,7 +459,7 @@ export async function fetchAllClientsForExport(
   userId: string,
   onProgress?: (done: number, total: number) => void,
   businessId?: string,
-  options?: { liveStats?: boolean },
+  options?: { liveStats?: boolean; businessType?: string },
 ): Promise<Client[]> {
   const pageSize = 500;
   let skip = 0;
@@ -466,6 +472,7 @@ export async function fetchAllClientsForExport(
       skip,
       lite: true,
       businessId,
+      businessType: options?.businessType,
       liveStats: options?.liveStats,
     });
     if (skip === 0) total = meta.total;

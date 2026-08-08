@@ -27,7 +27,6 @@ import { EscandalloPanel } from './CostingPage';
 import JSZip from 'jszip';
 import { Layout } from '../../components/saas/Layout';
 import { useModalClose } from '../../hooks/useModalClose';
-import { Tabs } from '../../components/saas/Tabs';
 import {
   SaasTabEmpty,
   SaasTabPrimaryButton,
@@ -124,6 +123,8 @@ import {
   Zap,
   Archive,
   Sparkles,
+  Globe,
+  ArrowLeft,
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
@@ -624,7 +625,7 @@ function CreateCatalogItemModal({
       )
     ) {
       toast.error(
-        'Pizza al gusto: configura ingredientes base en Catálogo → Ingredientes TPV (paso 1, sin precio extra).',
+        'Pizza al gusto: crea antes los ingredientes base en la ficha de un producto → «Gestionar ingredientes» (sin precio extra).',
       );
       return false;
     }
@@ -1259,7 +1260,7 @@ function CreateCatalogItemModal({
               'Cargando ingredientes del TPV…'
             ) : (
               <>
-                Aún no hay ingredientes base en <strong>Catálogo → Ingredientes TPV</strong>. Créalos primero (paso 1, sin precio extra).
+                Aún no hay ingredientes base. Créalos desde la ficha de un producto → <strong>Gestionar ingredientes</strong> (sin precio extra).
               </>
             )}
           </p>
@@ -1503,15 +1504,15 @@ function CreateCatalogItemModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
       <div
-        className={`bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-h-[90vh] overflow-y-auto ${
+        className={`bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-h-[95vh] sm:max-h-[90vh] overflow-y-auto ${
           showComboBuilder ? 'max-w-3xl' : 'max-w-2xl'
         }`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="sticky top-0 bg-white dark:bg-gray-800 z-10 p-6 border-b border-gray-200 dark:border-gray-700">
+        <div className="sticky top-0 bg-white dark:bg-gray-800 z-10 p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
@@ -1587,7 +1588,7 @@ function CreateCatalogItemModal({
         </div>
 
         {/* Step content */}
-        <div className="p-6 min-h-[280px]">
+        <div className="p-4 sm:p-6 min-h-[280px]">
           {isEditMode ? (
             <div className="space-y-8">
               <section className="space-y-5">
@@ -1595,7 +1596,7 @@ function CreateCatalogItemModal({
                 {renderBrandPicker()}
                 <div>
                   <label className={labelClass}>Tipo de elemento</label>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     {[
                       { value: 'product', label: 'Producto', desc: 'Se vende y puede tener stock' },
                       { value: 'service', label: 'Servicio', desc: 'No descuenta inventario' },
@@ -1726,7 +1727,7 @@ function CreateCatalogItemModal({
               {renderCategoryUnit()}
               <div>
                 <label className={labelClass}>Tipo de elemento</label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   {[
                     { value: 'product', label: 'Producto', desc: 'Se vende y puede tener stock' },
                     { value: 'service', label: 'Servicio', desc: 'No descuenta inventario' },
@@ -1882,7 +1883,7 @@ function CreateCatalogItemModal({
         </div>
 
         {/* Footer */}
-        <div className="sticky bottom-0 bg-gray-50 dark:bg-gray-900 p-6 border-t border-gray-200 dark:border-gray-700 flex gap-3">
+        <div className="sticky bottom-0 bg-gray-50 dark:bg-gray-900 p-4 sm:p-6 border-t border-gray-200 dark:border-gray-700 flex flex-wrap gap-2 sm:gap-3">
           {isEditMode ? (
             <>
               <button type="button" onClick={onClose} className="px-5 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-white dark:hover:bg-gray-800 transition-colors">
@@ -2018,9 +2019,9 @@ function CreateSupplierModal({ isOpen, onClose, onCreate, editItem }: CreateSupp
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[95vh] sm:max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700">
           <div>
             <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
               {editItem ? 'Editar proveedor' : 'Nuevo proveedor'}
@@ -2034,8 +2035,8 @@ function CreateSupplierModal({ isOpen, onClose, onCreate, editItem }: CreateSupp
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
-          <div className="grid grid-cols-2 gap-4">
+        <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Nombre *</label>
               <input
@@ -2056,7 +2057,7 @@ function CreateSupplierModal({ isOpen, onClose, onCreate, editItem }: CreateSupp
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Email</label>
               <input
@@ -2088,7 +2089,7 @@ function CreateSupplierModal({ isOpen, onClose, onCreate, editItem }: CreateSupp
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Persona de contacto</label>
               <input
@@ -2130,7 +2131,7 @@ function CreateSupplierModal({ isOpen, onClose, onCreate, editItem }: CreateSupp
             />
           </div>
 
-          <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 -mx-6 px-6 -mb-6 pb-6 pt-4 flex gap-3 rounded-b-2xl">
+          <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 -mx-4 px-4 -mb-4 pb-4 sm:-mx-6 sm:px-6 sm:-mb-6 sm:pb-6 pt-4 flex gap-3 rounded-b-2xl">
             <button
               type="button"
               onClick={onClose}
@@ -2267,9 +2268,9 @@ function CreateInvoiceModal({ isOpen, onClose, onCreate, suppliers, editItem }: 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[95vh] sm:max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700">
           <div>
             <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
               {editItem ? 'Editar factura' : 'Nueva factura de compra'}
@@ -2283,8 +2284,8 @@ function CreateInvoiceModal({ isOpen, onClose, onCreate, suppliers, editItem }: 
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
-          <div className="grid grid-cols-2 gap-4">
+        <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Proveedor *</label>
               {suppliers.length > 0 ? (
@@ -2319,7 +2320,7 @@ function CreateInvoiceModal({ isOpen, onClose, onCreate, suppliers, editItem }: 
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Fecha factura</label>
               <input
@@ -2355,16 +2356,16 @@ function CreateInvoiceModal({ isOpen, onClose, onCreate, suppliers, editItem }: 
             </div>
             <div className="space-y-2">
               {lines.map((line, idx) => (
-                <div key={idx} className="flex gap-2 items-start">
+                <div key={idx} className="flex flex-wrap sm:flex-nowrap gap-2 items-center">
                   <input
-                    className="flex-1 px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm"
+                    className="w-full sm:w-auto sm:flex-1 px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm"
                     placeholder="Artículo"
                     value={line.itemName}
                     onChange={e => updateLine(idx, 'itemName', e.target.value)}
                   />
                   <input
                     type="number"
-                    className="w-24 px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm"
+                    className="w-20 sm:w-24 px-2 sm:px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm"
                     placeholder="Cant."
                     value={line.quantity}
                     onChange={e => updateLine(idx, 'quantity', e.target.value)}
@@ -2372,12 +2373,12 @@ function CreateInvoiceModal({ isOpen, onClose, onCreate, suppliers, editItem }: 
                   <input
                     type="number"
                     step="0.01"
-                    className="w-28 px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm"
+                    className="w-24 sm:w-28 px-2 sm:px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm"
                     placeholder="Precio €"
                     value={line.unitPrice}
                     onChange={e => updateLine(idx, 'unitPrice', e.target.value)}
                   />
-                  <div className="w-24 px-3 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 text-right">
+                  <div className="flex-1 sm:flex-none sm:w-24 px-1 sm:px-3 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 text-right tabular-nums">
                     {((Number(line.quantity) || 0) * (Number(line.unitPrice) || 0)).toFixed(2)}€
                   </div>
                   <button
@@ -2418,7 +2419,7 @@ function CreateInvoiceModal({ isOpen, onClose, onCreate, suppliers, editItem }: 
             />
           </div>
 
-          <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 -mx-6 px-6 -mb-6 pb-6 pt-4 flex gap-3 rounded-b-2xl">
+          <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 -mx-4 px-4 -mb-4 pb-4 sm:-mx-6 sm:px-6 sm:-mb-6 sm:pb-6 pt-4 flex gap-3 rounded-b-2xl">
             <button
               type="button"
               onClick={onClose}
@@ -2591,6 +2592,69 @@ function sortCatalogSectionKeys(categories: string[]): string[] {
   });
 }
 
+// ─── Navegación del módulo (grupos: Carta · Almacén · Compras · Equipo) ───────
+
+type CatalogNavTab = { id: string; label: string; count?: number };
+type CatalogNavGroup = { id: string; label: string; tabs: CatalogNavTab[] };
+
+/**
+ * Nav agrupada del catálogo TPV: misma mecánica que las tabs planas (?tab=…),
+ * pero contando la historia del módulo: Carta → Almacén → Compras → Equipo.
+ */
+function CatalogModuleNav({
+  groups,
+  activeTab,
+  onChange,
+}: {
+  groups: CatalogNavGroup[];
+  activeTab: string;
+  onChange: (tab: string) => void;
+}) {
+  return (
+    <nav
+      className="flex w-full items-center gap-1 overflow-x-auto rounded-2xl border border-gray-200 bg-white p-1.5 shadow-sm dark:border-gray-700 dark:bg-gray-800 [&::-webkit-scrollbar]:hidden"
+      style={{ scrollbarWidth: 'none' }}
+    >
+      {groups.map((group, gi) => {
+        const singleTab = group.tabs.length === 1;
+        return (
+          <div key={group.id} className="flex shrink-0 items-center gap-1">
+            {gi !== 0 && <span className="mx-0.5 h-5 w-px shrink-0 bg-gray-200 dark:bg-gray-700" />}
+            {group.tabs.map((tab) => {
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => onChange(tab.id)}
+                  className={`flex items-center gap-1.5 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-semibold transition-colors md:px-3.5 md:text-sm ${
+                    isActive
+                      ? 'bg-[var(--v-blue,#2563eb)] text-white shadow-sm'
+                      : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-700/60 dark:hover:text-gray-200'
+                  }`}
+                >
+                  {singleTab ? group.label : tab.label}
+                  {tab.count !== undefined && (
+                    <span
+                      className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${
+                        isActive
+                          ? 'bg-white/25 text-white'
+                          : 'bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500'
+                      }`}
+                    >
+                      {tab.count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        );
+      })}
+    </nav>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export function CatalogPage() {
@@ -2700,11 +2764,12 @@ export function CatalogPage() {
   const [showCreateItem, setShowCreateItem] = useState(false);
   const [editingItem, setEditingItem] = useState<CatalogItem | null>(null);
   const [detailItem, setDetailItem] = useState<CatalogItem | null>(null);
+  /** Organizador (categoría) activo en la pestaña Catálogo: una tabla a la vez, sin lista infinita. */
+  const [activeCatalogCategory, setActiveCatalogCategory] = useState<string | null>(null);
   const [deliveryOrders, setDeliveryOrders] = useState<DeliveryOrder[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [searchCatalog, setSearchCatalog] = useState('');
   /** Categorías desplegadas por el usuario; vacío = todas cerradas al cargar. */
-  const [catalogSectionsOpen, setCatalogSectionsOpen] = useState<Set<string>>(() => new Set());
   const [deletingItemIds, setDeletingItemIds] = useState<Set<string>>(new Set());
   const [bulkDeletingCatalog, setBulkDeletingCatalog] = useState(false);
   const [bulkMovingCatalog, setBulkMovingCatalog] = useState(false);
@@ -3833,15 +3898,6 @@ export function CatalogPage() {
     }));
   }, [filteredCatalog]);
 
-  const toggleCatalogSection = useCallback((category: string) => {
-    setCatalogSectionsOpen((prev) => {
-      const next = new Set(prev);
-      if (next.has(category)) next.delete(category);
-      else next.add(category);
-      return next;
-    });
-  }, []);
-
   const selectedCatalogCount = useMemo(
     () => filteredCatalog.filter((item) => selectedCatalogIds.has(item._id)).length,
     [filteredCatalog, selectedCatalogIds],
@@ -4046,7 +4102,6 @@ export function CatalogPage() {
                   <SaasTabSecondaryButton
                     onClick={startCatalogMoveMode}
                     disabled={bulkDeletingCatalog || bulkMovingCatalog || filteredCatalog.length === 0}
-                    className="!border-indigo-300 !text-indigo-700 dark:!text-indigo-300"
                   >
                     <ArrowRightLeft className="w-3.5 h-3.5" />
                     Mover
@@ -4084,7 +4139,6 @@ export function CatalogPage() {
                   <SaasTabSecondaryButton
                     onClick={() => openCatalogMoveModal()}
                     disabled={bulkDeletingCatalog || bulkMovingCatalog || selectedCatalogCount === 0}
-                    className="!border-indigo-300 !text-indigo-700"
                   >
                     <ArrowRightLeft className="w-3.5 h-3.5" />
                     {bulkMovingCatalog ? 'Moviendo…' : `Mover (${selectedCatalogCount})`}
@@ -4194,85 +4248,245 @@ export function CatalogPage() {
           }
         />
       ) : !loading ? (
-        <div className="space-y-3">
-          {catalogGroupedByCategory.map(({ category, items }) => {
-            const isCollapsed = !catalogSectionsOpen.has(category);
-            return (
+        (() => {
+          const searchActive = Boolean(searchCatalog.trim());
+          const groups = catalogGroupedByCategory;
+          const singleCategory = groups.length === 1 ? groups[0].category : null;
+          const selectedCategory = searchActive
+            ? null
+            : activeCatalogCategory && groups.some((g) => g.category === activeCatalogCategory)
+              ? activeCatalogCategory
+              : singleCategory;
+          const selectedGroup = selectedCategory
+            ? groups.find((g) => g.category === selectedCategory) ?? null
+            : null;
+          const showGrid = !searchActive && !selectedGroup;
+          const items = searchActive ? groups.flatMap((g) => g.items) : selectedGroup?.items ?? [];
+          const shownTitle = searchActive ? `Resultados de «${searchCatalog.trim()}»` : selectedCategory ?? '';
+          return (
+        <div className="p-3 space-y-3">
+              {showGrid ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
+                  {groups.map(({ category, items: groupItems }) => (
+                    <button
+                      key={category}
+                      type="button"
+                      onClick={() => setActiveCatalogCategory(category)}
+                      className="group flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-4 text-left shadow-sm transition-all hover:border-blue-300 hover:shadow-md dark:border-gray-700 dark:bg-gray-800 dark:hover:border-blue-700"
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <div className="flex -space-x-3">
+                          {groupItems.slice(0, 3).map((it) => (
+                            <img
+                              key={it._id}
+                              src={resolveCatalogProductImage(it)}
+                              alt=""
+                              className="w-10 h-10 rounded-full object-cover border-2 border-white dark:border-gray-800 bg-gray-50 dark:bg-gray-900"
+                            />
+                          ))}
+                          {groupItems.length > 3 && (
+                            <span className="flex w-10 h-10 items-center justify-center rounded-full border-2 border-white bg-gray-100 text-[11px] font-bold text-gray-500 dark:border-gray-800 dark:bg-gray-700 dark:text-gray-300">
+                              +{groupItems.length - 3}
+                            </span>
+                          )}
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-[var(--v-blue,#2563eb)] group-hover:translate-x-0.5 transition-all shrink-0" />
+                      </div>
+                      <div className="min-w-0 w-full">
+                        <p className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate group-hover:text-[var(--v-blue,#2563eb)]">
+                          {category}
+                        </p>
+                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 tabular-nums">
+                          {groupItems.length} artículo{groupItems.length !== 1 ? 's' : ''}
+                        </p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
               <div
-                key={category}
-                className="bg-white dark:bg-gray-800 rounded-xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden"
+                className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden"
               >
-                <div className="flex items-stretch bg-gray-50 dark:bg-gray-800/80 border-b border-gray-200 dark:border-gray-700">
-                  <button
-                    type="button"
-                    onClick={() => toggleCatalogSection(category)}
-                    className="flex-1 flex items-center justify-between gap-3 px-4 py-3.5 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors text-left min-w-0"
-                    aria-expanded={!isCollapsed}
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      {isCollapsed ? (
-                        <ChevronRight className="w-5 h-5 text-gray-500 shrink-0" />
-                      ) : (
-                        <ChevronDown className="w-5 h-5 text-gray-500 shrink-0" />
-                      )}
-                      <span className="font-semibold text-gray-900 dark:text-gray-100 truncate">{category}</span>
-                      <span className="text-xs font-medium text-gray-500 dark:text-gray-400 tabular-nums shrink-0">
-                        {items.length} producto{items.length !== 1 ? 's' : ''}
-                      </span>
-                    </div>
-                  </button>
-                  {!catalogSelectMode ? (
+                <div className="flex items-center gap-2 px-3 py-2.5 border-b border-gray-100 dark:border-gray-700">
+                  {!searchActive && groups.length > 1 ? (
                     <button
                       type="button"
-                      onClick={() => handleDeleteCategorySection(category, items)}
-                      disabled={bulkDeletingCatalog || bulkMovingCatalog}
-                      className="inline-flex items-center gap-1.5 px-3 py-2 m-1.5 rounded-lg text-xs font-semibold border border-red-200 text-red-700 hover:bg-red-50 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30 disabled:opacity-50 shrink-0"
-                      title={`Eliminar organizador «${category}» y todos sus productos`}
+                      onClick={() => setActiveCatalogCategory(null)}
+                      className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200 transition-colors shrink-0"
+                      title="Volver a las categorías"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      Eliminar
+                      <ArrowLeft className="w-4 h-4" />
+                      Categorías
+                    </button>
+                  ) : null}
+                  <span className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate">{shownTitle}</span>
+                  <span className="text-xs text-gray-400 dark:text-gray-500 tabular-nums shrink-0">
+                    {items.length}
+                  </span>
+                  {!searchActive && selectedGroup && !catalogSelectMode ? (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteCategorySection(selectedCategory!, selectedGroup.items)}
+                      disabled={bulkDeletingCatalog || bulkMovingCatalog}
+                      className="ml-auto p-2 rounded-lg text-gray-300 hover:text-red-600 hover:bg-red-50 dark:text-gray-600 dark:hover:text-red-400 dark:hover:bg-red-950/30 disabled:opacity-50 shrink-0 transition-colors"
+                      title={`Eliminar organizador «${selectedCategory}» y todos sus productos`}
+                    >
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   ) : null}
                 </div>
-                {!isCollapsed && (
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[820px]">
+                  {/* Móvil: tarjetas táctiles (sin scroll horizontal) */}
+                  <ul className="md:hidden divide-y divide-gray-100 dark:divide-gray-800">
+                    {items.map((item) => {
+                      const itemType = item.itemType || 'product';
+                      const isLowStock = itemType === 'product' && item.stockQuantity <= item.minStock;
+                      const sales = catalogSalesIndex.get(item._id);
+                      const brandLabel = catalogItemBrandNames(item, brands);
+                      const subtitleParts = [
+                        itemType === 'service' ? 'Servicio' : itemType === 'combo' ? `Combo · ${item.comboItems?.length ?? 0} art.` : null,
+                        brandLabel || null,
+                        !item.active ? 'Inactivo' : null,
+                      ].filter(Boolean) as string[];
+                      const selected = catalogSelectMode && selectedCatalogIds.has(item._id);
+                      return (
+                        <li
+                          key={item._id}
+                          className={`px-3 py-2.5 ${selected ? 'bg-blue-50/70 dark:bg-blue-950/20' : ''}`}
+                        >
+                          <div className="flex items-start gap-2.5">
+                            {catalogSelectMode && (
+                              <input
+                                type="checkbox"
+                                checked={selectedCatalogIds.has(item._id)}
+                                onChange={() => toggleCatalogItemSelected(item._id)}
+                                className="mt-2.5 w-4 h-4 shrink-0 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                aria-label={`Seleccionar ${item.name}`}
+                              />
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setDetailItem(item)}
+                              className="flex items-start gap-2.5 min-w-0 flex-1 text-left"
+                              title="Ver ficha: ventas, escandallo e ingredientes"
+                            >
+                              <img
+                                src={resolveCatalogProductImage(item)}
+                                alt=""
+                                className="w-12 h-12 rounded-lg object-cover shrink-0 border border-gray-200/80 dark:border-gray-600 bg-gray-50 dark:bg-gray-800"
+                              />
+                              <span className="min-w-0 flex-1">
+                                <span className={`block font-semibold text-sm leading-snug line-clamp-2 ${
+                                  item.active ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500'
+                                }`}>
+                                  {item.name}
+                                </span>
+                                {subtitleParts.length > 0 && (
+                                  <span className="block text-[11px] text-gray-400 dark:text-gray-500 truncate mt-0.5">
+                                    {subtitleParts.join(' · ')}
+                                  </span>
+                                )}
+                                <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
+                                  <span className="font-bold text-gray-900 dark:text-gray-100 tabular-nums">
+                                    {item.unitPrice.toFixed(2)}€
+                                  </span>
+                                  <span className="text-gray-400 tabular-nums">
+                                    {sales?.totalUnits ?? 0} ud vendidas
+                                  </span>
+                                  {itemType !== 'service' && (
+                                    <span className={`tabular-nums ${isLowStock ? 'font-semibold text-red-600' : 'text-gray-400'}`}>
+                                      Stock: {item.stockQuantity} {item.unit}
+                                    </span>
+                                  )}
+                                </span>
+                              </span>
+                            </button>
+                          </div>
+                          <div className="mt-1.5 flex items-center gap-1 pl-[58px]" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={() => handleToggleField(item, 'available')}
+                              className={`px-2.5 py-1 text-[11px] font-semibold rounded-full border transition-colors ${
+                                item.available
+                                  ? 'bg-green-100 text-green-700 border-green-200'
+                                  : 'bg-red-100 text-red-700 border-red-200'
+                              }`}
+                            >
+                              {item.available ? 'Disponible' : 'Agotado'}
+                            </button>
+                            {itemType !== 'service' && (
+                              <button
+                                onClick={() => setStockAdjustItem(item)}
+                                className="px-2.5 py-1 text-[11px] font-semibold rounded-full border border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-300"
+                              >
+                                Ajustar stock
+                              </button>
+                            )}
+                            <span className="flex-1" />
+                            <button
+                              onClick={() => handleToggleField(item, 'webVisible')}
+                              title={item.webVisible ? 'Visible en web' : 'Oculto de la web'}
+                              className={`p-2 rounded-lg ${
+                                item.webVisible
+                                  ? 'text-emerald-600 dark:text-emerald-400'
+                                  : 'text-gray-300 dark:text-gray-600'
+                              }`}
+                            >
+                              <Globe className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => { setEditingItem(item); setShowCreateItem(true); }}
+                              className="p-2 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                              title="Editar"
+                            >
+                              <Edit3 className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteItem(item)}
+                              disabled={bulkDeletingCatalog || deletingItemIds.has(item._id)}
+                              className="p-2 rounded-lg text-gray-400 hover:text-red-600 disabled:opacity-40"
+                              title="Eliminar"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {/* Desktop: tabla completa */}
+                  <div className="hidden md:block overflow-x-auto">
+                    <table className="w-full min-w-[640px]">
                       <thead>
-                        <tr className="bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700">
+                        <tr className="bg-gray-50/80 dark:bg-gray-900/40 border-b border-gray-100 dark:border-gray-700">
                           {catalogSelectMode && (
                             <th className="px-4 py-2.5 w-10">
                               <span className="sr-only">Seleccionar</span>
                             </th>
                           )}
-                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Nombre</th>
-                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Marca</th>
-                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Tipo</th>
+                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Producto</th>
                           <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Precio</th>
                           <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Ventas</th>
                           <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Stock</th>
-                          <th className="px-4 py-2.5 text-center text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Web</th>
                           <th className="px-4 py-2.5 text-center text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Disponible</th>
-                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Estado</th>
-                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Acciones</th>
+                          <th className="px-4 py-2.5" />
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                         {items.map((item) => {
                           const itemType = item.itemType || 'product';
                           const isLowStock = itemType === 'product' && item.stockQuantity <= item.minStock;
-                          const typeBadgeClass = itemType === 'service'
-                            ? 'bg-purple-100 text-purple-700 border-purple-200'
-                            : itemType === 'combo'
-                              ? 'bg-amber-100 text-amber-700 border-amber-200'
-                              : 'bg-blue-100 text-blue-700 border-blue-200';
-                          const typeLabel = itemType === 'service' ? 'Servicio' : itemType === 'combo' ? 'Combo' : 'Producto';
                           const sales = catalogSalesIndex.get(item._id);
+                          const brandLabel = catalogItemBrandNames(item, brands);
+                          const subtitleParts = [
+                            itemType === 'service' ? 'Servicio' : itemType === 'combo' ? `Combo · ${item.comboItems?.length ?? 0} art.` : null,
+                            brandLabel || null,
+                            !item.active ? 'Inactivo' : null,
+                          ].filter(Boolean) as string[];
                           return (
                             <tr
                               key={item._id}
                               className={`transition-colors ${
                                 catalogSelectMode && selectedCatalogIds.has(item._id)
-                                  ? 'bg-indigo-50/70 dark:bg-indigo-950/20'
+                                  ? 'bg-blue-50/70 dark:bg-blue-950/20'
                                   : 'hover:bg-gray-50 dark:hover:bg-gray-800'
                               }`}
                             >
@@ -4288,88 +4502,30 @@ export function CatalogPage() {
                                 </td>
                               )}
                               <td className="px-4 py-3">
-                                <div className="flex items-center gap-3">
+                                <button
+                                  type="button"
+                                  onClick={() => setDetailItem(item)}
+                                  className="flex items-center gap-3 w-full text-left group"
+                                  title="Ver ficha: ventas, escandallo e ingredientes"
+                                >
                                   <img
                                     src={resolveCatalogProductImage(item)}
                                     alt=""
-                                    className="w-12 h-12 rounded-lg object-cover shrink-0 border border-gray-200/80 dark:border-gray-600 bg-gray-50 dark:bg-gray-800"
+                                    className="w-11 h-11 rounded-lg object-cover shrink-0 border border-gray-200/80 dark:border-gray-600 bg-gray-50 dark:bg-gray-800"
                                   />
                                   <div className="min-w-0 flex-1">
-                                    <button
-                                      type="button"
-                                      onClick={() => setDetailItem(item)}
-                                      className="block w-full text-left group"
-                                      title="Ver ficha, ventas e ingredientes"
-                                    >
-                                      <span className="font-semibold text-gray-900 dark:text-gray-100 text-sm leading-snug group-hover:text-indigo-600 dark:group-hover:text-indigo-400 line-clamp-2">
-                                        {item.name}
+                                    <span className={`block font-semibold text-sm leading-snug group-hover:text-[var(--v-blue,#2563eb)] line-clamp-2 ${
+                                      item.active ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500'
+                                    }`}>
+                                      {item.name}
+                                    </span>
+                                    {subtitleParts.length > 0 && (
+                                      <span className="block text-[11px] text-gray-400 dark:text-gray-500 truncate mt-0.5">
+                                        {subtitleParts.join(' · ')}
                                       </span>
-                                      <span className="mt-0.5 inline-flex items-center gap-1 text-xs text-indigo-600 dark:text-indigo-400 opacity-80 group-hover:opacity-100 group-hover:underline">
-                                        <Eye className="w-3 h-3 shrink-0" />
-                                        Ver ficha
-                                      </span>
-                                    </button>
-                                    {typeof item.customFields?.ingredients === 'string' && item.customFields.ingredients.trim() && (
-                                      <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1 line-clamp-1" title={item.customFields.ingredients}>
-                                        {item.customFields.ingredients}
-                                      </p>
-                                    )}
-                                    {(item.comboItems?.length ?? 0) > 0 && (
-                                      <div className="flex flex-wrap gap-1 mt-1.5">
-                                        {item.comboItems!.map((c) => {
-                                          const slotKind = resolveComboRefSlotKind(c, catalogItems);
-                                          const slotStyle = COMBO_SLOT_META[slotKind];
-                                          return (
-                                            <span
-                                              key={c.productId}
-                                              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 max-w-full"
-                                              title={`${slotStyle.label}: ${c.productName}`}
-                                            >
-                                              <span className="shrink-0">{slotStyle.emoji}</span>
-                                              <span className="truncate">{c.productName}</span>
-                                              {c.quantity > 1 ? (
-                                                <span className="shrink-0 font-bold">×{c.quantity}</span>
-                                              ) : null}
-                                            </span>
-                                          );
-                                        })}
-                                      </div>
-                                    )}
-                                    {isCatalogTpvConfigurable(item, brands) && (
-                                      <p className="text-[10px] mt-1 inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400 font-semibold">
-                                        <Zap className="w-3 h-3 shrink-0" />
-                                        TPV
-                                        {item.customFields?.ingredients
-                                          ? ` · ${parseIngredientsBulkText(String(item.customFields.ingredients)).length} ing.`
-                                          : ' · sin ingredientes'}
-                                        {(item.comboItems?.length ?? 0) > 0
-                                          ? ` · ${item.comboItems!.length} en combo`
-                                          : ''}
-                                      </p>
-                                    )}
-                                    {item.description && (
-                                      <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 truncate max-w-[240px]">{item.description}</div>
                                     )}
                                   </div>
-                                </div>
-                              </td>
-                              <td className="px-4 py-3">
-                                {(() => {
-                                  const brandLabel = catalogItemBrandNames(item, brands);
-                                  return brandLabel ? (
-                                    <span className="inline-flex items-center gap-1 px-2 py-1 bg-violet-50 dark:bg-violet-900/20 text-violet-800 dark:text-violet-300 text-xs font-medium rounded-lg border border-violet-200 dark:border-violet-800 max-w-[140px] truncate" title={brandLabel}>
-                                      <Tag className="w-3 h-3 shrink-0" />
-                                      {brandLabel}
-                                    </span>
-                                  ) : (
-                                    <span className="text-gray-400 text-sm">—</span>
-                                  );
-                                })()}
-                              </td>
-                              <td className="px-4 py-3">
-                                <span className={`px-2 py-1 text-xs font-semibold rounded-lg border ${typeBadgeClass}`}>
-                                  {typeLabel}
-                                </span>
+                                </button>
                               </td>
                               <td className="px-4 py-3">
                                 <div className="text-sm font-bold text-gray-900 dark:text-gray-100">{item.unitPrice.toFixed(2)}€</div>
@@ -4391,26 +4547,24 @@ export function CatalogPage() {
                               </td>
                               <td className="px-4 py-3">
                                 {itemType === 'service' ? (
-                                  <span className="text-sm text-gray-400">No aplica</span>
+                                  <span className="text-sm text-gray-400">—</span>
                                 ) : (
-                                  <div className={`text-sm font-bold ${isLowStock ? 'text-red-600' : 'text-gray-900 dark:text-gray-100'}`}>
-                                    {item.stockQuantity} {item.unit}
-                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => setStockAdjustItem(item)}
+                                    title="Clic para ajustar stock"
+                                    className="text-left rounded-lg px-1.5 py-0.5 -mx-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                                  >
+                                    <span className={`block text-sm font-bold tabular-nums ${isLowStock ? 'text-red-600' : 'text-gray-900 dark:text-gray-100'}`}>
+                                      {item.stockQuantity} {item.unit}
+                                    </span>
+                                    {isLowStock && (
+                                      <span className="text-xs text-red-500 flex items-center gap-1 mt-0.5">
+                                        <AlertTriangle className="w-3 h-3" /> Min: {item.minStock}
+                                      </span>
+                                    )}
+                                  </button>
                                 )}
-                                {isLowStock && (
-                                  <div className="text-xs text-red-500 flex items-center gap-1 mt-0.5">
-                                    <AlertTriangle className="w-3 h-3" /> Min: {item.minStock}
-                                  </div>
-                                )}
-                              </td>
-                              <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
-                                <button
-                                  onClick={() => handleToggleField(item, 'webVisible')}
-                                  title={item.webVisible ? 'Visible en web — clic para ocultar' : 'Oculto de la web — clic para mostrar'}
-                                  className={`w-9 h-5 rounded-full transition-colors relative inline-block ${item.webVisible ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`}
-                                >
-                                  <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${item.webVisible ? 'translate-x-4' : 'translate-x-0.5'}`} />
-                                </button>
                               </td>
                               <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                                 <button
@@ -4426,62 +4580,32 @@ export function CatalogPage() {
                                 </button>
                               </td>
                               <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                                <button
-                                  onClick={() => handleToggleField(item, 'active')}
-                                  className={`px-2 py-1 text-xs font-semibold rounded-full border cursor-pointer transition-colors ${
-                                    item.active
-                                      ? 'bg-green-100 text-green-700 border-green-200 hover:bg-green-200'
-                                      : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700 hover:bg-gray-200'
-                                  }`}
-                                >
-                                  {item.active ? 'Activo' : 'Inactivo'}
-                                </button>
-                              </td>
-                              <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                                <div className="flex items-center gap-1">
+                                <div className="flex items-center justify-end gap-0.5">
                                   <button
-                                    onClick={() => { setDetailItem(item); }}
-                                    className="p-1.5 hover:bg-emerald-100 dark:hover:bg-emerald-950/40 rounded-lg transition-colors"
-                                    title="Configurar TPV (ingredientes y combo)"
+                                    onClick={() => handleToggleField(item, 'webVisible')}
+                                    title={item.webVisible ? 'Visible en web — clic para ocultar' : 'Oculto de la web — clic para mostrar'}
+                                    className={`p-1.5 rounded-lg transition-colors ${
+                                      item.webVisible
+                                        ? 'text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950/30'
+                                        : 'text-gray-300 hover:text-gray-500 hover:bg-gray-100 dark:text-gray-600 dark:hover:text-gray-400 dark:hover:bg-gray-700'
+                                    }`}
                                   >
-                                    <Zap className="w-4 h-4 text-emerald-600" />
-                                  </button>
-                                  <button
-                                    onClick={() => { setDetailItem(item); }}
-                                    className="p-1.5 hover:bg-indigo-100 dark:hover:bg-indigo-950/40 rounded-lg transition-colors"
-                                    title="Ficha y estadísticas"
-                                  >
-                                    <BarChart3 className="w-4 h-4 text-indigo-600" />
-                                  </button>
-                                  <button
-                                    onClick={() => openCatalogMoveModal([item])}
-                                    disabled={bulkDeletingCatalog || bulkMovingCatalog}
-                                    className="p-1.5 hover:bg-indigo-100 dark:hover:bg-indigo-950/40 rounded-lg transition-colors disabled:opacity-40"
-                                    title="Mover a otra categoría o línea"
-                                  >
-                                    <ArrowRightLeft className="w-4 h-4 text-indigo-600" />
+                                    <Globe className="w-4 h-4" />
                                   </button>
                                   <button
                                     onClick={() => { setEditingItem(item); setShowCreateItem(true); }}
-                                    className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                                    className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-gray-700 transition-colors"
                                     title="Editar"
                                   >
-                                    <Edit3 className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-                                  </button>
-                                  <button
-                                    onClick={() => setStockAdjustItem(item)}
-                                    className="p-1.5 hover:bg-blue-100 rounded-lg transition-colors"
-                                    title="Ajustar stock"
-                                  >
-                                    <ArrowUpDown className="w-4 h-4 text-blue-600" />
+                                    <Edit3 className="w-4 h-4" />
                                   </button>
                                   <button
                                     onClick={() => handleDeleteItem(item)}
                                     disabled={bulkDeletingCatalog || deletingItemIds.has(item._id)}
-                                    className="p-1.5 hover:bg-red-100 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                    className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:text-red-400 dark:hover:bg-red-950/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                                     title="Eliminar"
                                   >
-                                    <Trash2 className="w-4 h-4 text-red-500" />
+                                    <Trash2 className="w-4 h-4" />
                                   </button>
                                 </div>
                               </td>
@@ -4491,11 +4615,11 @@ export function CatalogPage() {
                       </tbody>
                     </table>
                   </div>
-                )}
               </div>
-            );
-          })}
+              )}
         </div>
+          );
+        })()
       ) : null}
     </SaasTabWorkspace>
   );
@@ -4537,11 +4661,59 @@ export function CatalogPage() {
           }
         />
       ) : (
-        <div className="overflow-x-auto">
+        <>
+        {/* Móvil: tarjetas de proveedor */}
+        <ul className="md:hidden divide-y divide-gray-100 dark:divide-gray-800">
+          {suppliers.map(supplier => (
+            <li key={supplier._id} className="px-3 py-2.5">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate">{supplier.name}</p>
+                    <span className={`px-2 py-0.5 text-[10px] font-semibold rounded-full border shrink-0 ${
+                      supplier.active
+                        ? 'bg-green-100 text-green-700 border-green-200'
+                        : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700'
+                    }`}>
+                      {supplier.active ? 'Activo' : 'Inactivo'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
+                    {[supplier.contactPerson, supplier.phone, supplier.email].filter(Boolean).join(' · ') || 'Sin datos de contacto'}
+                  </p>
+                  {(supplier.cif || supplier.category) && (
+                    <p className="text-[11px] text-gray-400 mt-0.5 truncate">
+                      {[supplier.cif, supplier.category].filter(Boolean).join(' · ')}
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center shrink-0">
+                  <button
+                    onClick={() => { setEditingSupplier(supplier); setShowCreateSupplier(true); }}
+                    className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                    title="Editar"
+                  >
+                    <Edit3 className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+                  </button>
+                  <button
+                    onClick={() => handleDeleteSupplier(supplier)}
+                    className="p-2 hover:bg-red-100 rounded-lg transition-colors"
+                    title="Eliminar"
+                  >
+                    <Trash2 className="w-4 h-4 text-red-500" />
+                  </button>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+        {/* Desktop: tabla completa */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full min-w-[900px]">
             <thead>
               <tr className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Nombre</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Le compras</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">CIF</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Email</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Teléfono</th>
@@ -4559,6 +4731,24 @@ export function CatalogPage() {
                     {supplier.address && (
                       <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate max-w-xs">{supplier.address}</div>
                     )}
+                  </td>
+                  <td className="px-4 py-3">
+                    {(() => {
+                      const linked = catalogItems.filter((i) => i.supplierId === supplier._id && i.active && !i.deletedAt);
+                      if (linked.length === 0) return <span className="text-gray-400 text-sm">—</span>;
+                      const names = linked.map((i) => i.name).filter(Boolean);
+                      return (
+                        <div className="max-w-[220px]">
+                          <span className="text-sm font-bold text-gray-900 dark:text-gray-100 tabular-nums">
+                            {linked.length} artículo{linked.length !== 1 ? 's' : ''}
+                          </span>
+                          <span className="block text-[11px] text-gray-400 dark:text-gray-500 truncate" title={names.join(', ')}>
+                            {names.slice(0, 3).join(', ')}
+                            {names.length > 3 ? '…' : ''}
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td className="px-4 py-3">
                     <span className="font-mono text-sm text-gray-700 dark:text-gray-300">{supplier.cif || '—'}</span>
@@ -4591,6 +4781,14 @@ export function CatalogPage() {
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1">
                       <button
+                        onClick={() => setSearchParams({ tab: 'purchase-orders', supplier: supplier._id })}
+                        className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold text-[var(--v-blue,#2563eb)] border border-blue-200 hover:bg-blue-50 dark:border-blue-900 dark:hover:bg-blue-950/30 transition-colors"
+                        title="Crear pedido a este proveedor"
+                      >
+                        <Truck className="w-3.5 h-3.5" />
+                        Pedir
+                      </button>
+                      <button
                         onClick={() => { setEditingSupplier(supplier); setShowCreateSupplier(true); }}
                         className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
                         title="Editar"
@@ -4611,6 +4809,7 @@ export function CatalogPage() {
             </tbody>
           </table>
         </div>
+        </>
       )}
     </SaasTabWorkspace>
   );
@@ -4665,7 +4864,87 @@ export function CatalogPage() {
             }
           />
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          {/* Móvil: tarjetas de factura */}
+          <ul className="md:hidden divide-y divide-gray-100 dark:divide-gray-800">
+            {invoicesWithOverdue.map(invoice => {
+              const statusCfg = INVOICE_STATUS_CONFIG[invoice.status] || INVOICE_STATUS_CONFIG.pending;
+              const originalInvoice = invoices.find(i => i._id === invoice._id)!;
+              return (
+                <li key={invoice._id} className="px-3 py-2.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate">
+                          {invoice.supplierName}
+                        </p>
+                        <span className={`px-2 py-0.5 text-[10px] font-semibold rounded-full border shrink-0 ${statusCfg.badgeClass}`}>
+                          {statusCfg.label}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
+                        {invoice.invoiceNumber ? `${invoice.invoiceNumber} · ` : ''}
+                        {invoice.date ? new Date(invoice.date).toLocaleDateString('es-ES') : '—'}
+                        {invoice.dueDate ? ` · vence ${new Date(invoice.dueDate).toLocaleDateString('es-ES')}` : ''}
+                      </p>
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100 mt-0.5 tabular-nums">
+                        {(invoice.total || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })}€
+                        {invoice.lines.length > 0 && (
+                          <span className="ml-1.5 text-xs font-normal text-gray-400">
+                            {invoice.lines.length} línea{invoice.lines.length !== 1 ? 's' : ''}
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                    <div className="flex items-center shrink-0">
+                      {!invoiceFinanceLinks.has(originalInvoice._id) && (
+                        <button
+                          onClick={() => handleLinkInvoiceToFinance(originalInvoice)}
+                          className="p-2 hover:bg-violet-100 rounded-lg transition-colors"
+                          title="Registrar pago en finanzas"
+                        >
+                          <Wallet className="w-4 h-4 text-violet-600" />
+                        </button>
+                      )}
+                      {originalInvoice.status !== 'paid' ? (
+                        <button
+                          onClick={() => handleToggleInvoiceStatus(originalInvoice)}
+                          className="p-2 hover:bg-green-100 rounded-lg transition-colors"
+                          title="Marcar como pagada"
+                        >
+                          <CheckCircle2 className="w-4 h-4 text-green-600" />
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleToggleInvoiceStatus(originalInvoice)}
+                          className="p-2 hover:bg-amber-100 rounded-lg transition-colors"
+                          title="Marcar como pendiente"
+                        >
+                          <Clock className="w-4 h-4 text-amber-600" />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => { setEditingInvoice(originalInvoice); setShowCreateInvoice(true); }}
+                        className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                        title="Editar"
+                      >
+                        <Edit3 className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteInvoice(originalInvoice)}
+                        className="p-2 hover:bg-red-100 rounded-lg transition-colors"
+                        title="Eliminar"
+                      >
+                        <Trash2 className="w-4 h-4 text-red-500" />
+                      </button>
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          {/* Desktop: tabla completa */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full min-w-[900px]">
               <thead>
                 <tr className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
@@ -4766,6 +5045,7 @@ export function CatalogPage() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </SaasTabWorkspace>
     );
@@ -4779,15 +5059,37 @@ export function CatalogPage() {
 
   // ── Tabs config ─────────────────────────────────────────────────────────────
 
-  const tabsConfig = useMemo(() => [
-    { id: 'catalog', label: 'Catálogo', count: catalogMenuItems.filter((i) => i.active).length || undefined },
-    { id: 'ingredientes', label: 'Ingredientes' },
-    { id: 'escandallo', label: 'Escandallos' },
-    { id: 'stock', label: 'Inventario', count: stockTabCount || undefined },
-    { id: 'suppliers', label: 'Proveedores', count: supplierKpis.active || undefined },
-    { id: 'purchase-orders', label: 'Compras' },
-    { id: 'invoices', label: 'Facturas', count: invoiceKpis.pending || undefined },
-    { id: 'staff-consumption', label: 'Consumos de equipo' },
+  const navGroups = useMemo<CatalogNavGroup[]>(() => [
+    {
+      id: 'carta',
+      label: 'Carta',
+      // Ingredientes y escandallo viven dentro de la ficha de cada producto (popup).
+      tabs: [
+        { id: 'catalog', label: 'Catálogo', count: catalogMenuItems.filter((i) => i.active).length || undefined },
+      ],
+    },
+    {
+      id: 'almacen',
+      label: 'Almacén',
+      // Los ingredientes se gestionan desde la ficha de cada producto («Gestionar ingredientes»).
+      tabs: [
+        { id: 'stock', label: 'Inventario', count: stockTabCount || undefined },
+      ],
+    },
+    {
+      id: 'compras',
+      label: 'Compras',
+      tabs: [
+        { id: 'suppliers', label: 'Proveedores', count: supplierKpis.active || undefined },
+        { id: 'purchase-orders', label: 'Pedidos' },
+        { id: 'invoices', label: 'Facturas', count: invoiceKpis.pending || undefined },
+      ],
+    },
+    {
+      id: 'equipo',
+      label: 'Equipo',
+      tabs: [{ id: 'staff-consumption', label: 'Consumos' }],
+    },
   ], [stockTabCount, catalogMenuItems, supplierKpis.active, invoiceKpis.pending]);
 
   const brandSetupCtx = useMemo(
@@ -4814,7 +5116,7 @@ export function CatalogPage() {
   const catalogBusy = loading && catalogItems.length === 0;
 
   return (
-    <Layout backTo="/saas/delivery-ops" title="Catálogo" subtitle="Gestión de productos, proveedores y compras">
+    <Layout backTo="/saas/delivery-ops" title="Catálogo" subtitle="Carta · Almacén · Compras · Consumos">
       <div className="space-y-3">
         {!pageReady && (
           <CatalogTabLoadingState phase="session" />
@@ -4851,7 +5153,7 @@ export function CatalogPage() {
           />
         )}
 
-        <Tabs tabs={tabsConfig} activeTab={activeTab} onChange={setActiveTab} />
+        <CatalogModuleNav groups={navGroups} activeTab={activeTab} onChange={setActiveTab} />
 
         {activeTab === 'catalog' && (
           catalogBusy ? <CatalogTabLoadingState phase="catalog" /> : renderCatalogTab()
@@ -4886,7 +5188,13 @@ export function CatalogPage() {
             : renderSuppliersTab()
         )}
 
-        {activeTab === 'purchase-orders' && <PurchaseOrdersPage />}
+        {activeTab === 'purchase-orders' && (
+          <PurchaseOrdersPage
+            suppliers={suppliers}
+            catalogItems={catalogItems}
+            onGoToInvoices={() => setActiveTab('invoices')}
+          />
+        )}
 
         {activeTab === 'invoices' && (
           (invoicesLoading || suppliersLoading) && invoices.length === 0
@@ -4921,6 +5229,13 @@ export function CatalogPage() {
           catalogItems={catalogForComboEditor}
           stats={catalogSalesIndex.get(detailItem._id) || computeCatalogItemSalesStats(detailItem, deliveryOrders)}
           statsLoading={ordersLoading}
+          storeIngredients={storeIngredients}
+          dataUserId={dataUserId}
+          businessId={businessId}
+          onCostingSaved={(saved) => {
+            setAllCatalogItems((prev) => prev.map((i) => (i._id === saved._id ? saved : i)));
+            setDetailItem(saved);
+          }}
           onClose={() => setDetailItem(null)}
           onSave={handleSaveDetailItem}
         />

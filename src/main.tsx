@@ -35,8 +35,13 @@ async function boot() {
     /* no bloquear arranque */
   }
 
-  // React primero tras el wipe: la limpieza de SW/caché puede colgarse y no debe bloquear.
-  void clearStaleWebCachesInDev();
+  // En DEV: limpiar SW/caché ANTES de montar. Si no, a veces queda HTML en blanco
+  // («Cargando…» / root vacío) tras reiniciar Vite.
+  try {
+    await clearStaleWebCachesInDev();
+  } catch {
+    /* no bloquear */
+  }
   registerPwaServiceWorker();
   void prepareNativeWebView();
   void configureNativeSafeArea();

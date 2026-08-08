@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { Building2, RefreshCw } from 'lucide-react';
+import { Building2 } from 'lucide-react';
 import { Layout } from './Layout';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
@@ -74,14 +74,6 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
     [visions, drawerBizId],
   );
 
-  const liveStatusText = liveSseOk
-    ? 'En vivo'
-    : isRefreshing
-      ? 'Actualizando…'
-      : lastUpdatedAt
-        ? `Actualizado ${lastUpdatedAt.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`
-        : null;
-
   const handleRefresh = useCallback(async () => {
     await Promise.all([reload({ force: true }), reloadAlerts()]);
   }, [reload, reloadAlerts]);
@@ -129,7 +121,8 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
         <CeoVisionTopBar
           companyCount={visions.length || businesses.length}
           critical={alertTotals.critical}
-          liveLabel={liveStatusText}
+          live={liveSseOk}
+          updatedAt={lastUpdatedAt}
           refreshing={isRefreshing || loading || alertsLoading}
           onRefresh={() => void handleRefresh()}
         />
@@ -141,14 +134,19 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
         ) : null}
 
         {loading && visions.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 text-stone-500">
-            <RefreshCw className="mb-3 h-8 w-8 animate-spin" />
-            <p className="text-sm font-medium">Cargando visión del grupo…</p>
-          </div>
+          <GroupVisionSkeleton />
         ) : visions.length === 0 ? (
           <EmptyPortfolio onCreate={() => navigate('/saas/settings/empresas')} />
         ) : (
           <>
+            <CeoCompanyTable
+              visions={visions}
+              canViewEbitda={canViewEbitda}
+              onOpen={(id) => openBusinessDrawer(id)}
+              laborByBiz={laborByBiz}
+              laborLoading={laborLoading}
+            />
+
             <CeoActionRequestsPanel
               visions={visions}
               alerts={feed}
@@ -161,8 +159,17 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
             <MobileLazySection
               rootMargin="120px 0px"
               placeholder={
-                <div className="rounded-2xl border border-dashed border-stone-200 px-4 py-8 text-center text-[11px] text-stone-400 dark:border-stone-800">
-                  Desliza para ver dinero y clientes del grupo…
+                <div className="grid animate-pulse gap-3 sm:grid-cols-2" aria-label="Cargando dinero y clientes del grupo">
+                  {[0, 1].map((i) => (
+                    <div
+                      key={i}
+                      className="h-32 rounded-2xl border border-stone-200/80 bg-white p-4 dark:border-stone-800 dark:bg-stone-950"
+                    >
+                      <div className="h-3 w-24 rounded bg-stone-200 dark:bg-stone-800" />
+                      <div className="mt-3 h-3 w-3/4 rounded bg-stone-100 dark:bg-stone-900" />
+                      <div className="mt-2 h-3 w-1/2 rounded bg-stone-100 dark:bg-stone-900" />
+                    </div>
+                  ))}
                 </div>
               }
             >
@@ -174,23 +181,6 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
                 laborByBiz={laborByBiz}
                 laborLoading={laborLoading}
                 onOpen={(id) => openBusinessDrawer(id)}
-              />
-            </MobileLazySection>
-
-            <MobileLazySection
-              rootMargin="160px 0px"
-              placeholder={
-                <div className="rounded-2xl border border-dashed border-stone-200 px-4 py-8 text-center text-[11px] text-stone-400 dark:border-stone-800">
-                  Desliza para ver empresas…
-                </div>
-              }
-            >
-              <CeoCompanyTable
-                visions={visions}
-                canViewEbitda={canViewEbitda}
-                onOpen={(id) => openBusinessDrawer(id)}
-                laborByBiz={laborByBiz}
-                laborLoading={laborLoading}
               />
             </MobileLazySection>
           </>
@@ -210,6 +200,51 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
         />
       </div>
     </Layout>
+  );
+}
+
+/** Esqueleto de carga: ranking + paneles, para que se sienta que la página ya está viva. */
+function GroupVisionSkeleton() {
+  return (
+    <div className="flex animate-pulse flex-col gap-3 sm:gap-5" aria-label="Cargando visión del grupo">
+      {/* Ranking de empresas */}
+      <div className="overflow-hidden rounded-2xl border border-stone-200/80 bg-white dark:border-stone-800 dark:bg-stone-950">
+        <div className="border-b border-stone-100 px-4 py-3 dark:border-stone-800">
+          <div className="h-3 w-24 rounded bg-stone-200 dark:bg-stone-800" />
+          <div className="mt-2 h-4 w-40 rounded bg-stone-200 dark:bg-stone-800" />
+        </div>
+        {[0, 1, 2, 3, 4].map((i) => (
+          <div
+            key={i}
+            className="flex items-center gap-3 border-b border-stone-100 px-4 py-3 last:border-0 dark:border-stone-800"
+          >
+            <div className="h-5 w-5 rounded-md bg-stone-200 dark:bg-stone-800" />
+            <div className="h-2 w-2 rounded-full bg-stone-200 dark:bg-stone-800" />
+            <div className="h-3.5 flex-1 rounded bg-stone-200 dark:bg-stone-800" />
+            <div className="hidden h-3.5 w-16 rounded bg-stone-200 dark:bg-stone-800 sm:block" />
+            <div className="h-3.5 w-20 rounded bg-stone-100 dark:bg-stone-900" />
+          </div>
+        ))}
+      </div>
+      {/* Paneles */}
+      <div className="grid gap-3 sm:grid-cols-2">
+        {[0, 1].map((i) => (
+          <div
+            key={i}
+            className="h-40 rounded-2xl border border-stone-200/80 bg-white dark:border-stone-800 dark:bg-stone-950"
+          >
+            <div className="border-b border-stone-100 px-4 py-3 dark:border-stone-800">
+              <div className="h-3 w-20 rounded bg-stone-200 dark:bg-stone-800" />
+            </div>
+            <div className="space-y-2 p-4">
+              <div className="h-3 w-3/4 rounded bg-stone-100 dark:bg-stone-900" />
+              <div className="h-3 w-1/2 rounded bg-stone-100 dark:bg-stone-900" />
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="text-center text-xs font-medium text-stone-400">Cargando visión del grupo…</p>
+    </div>
   );
 }
 

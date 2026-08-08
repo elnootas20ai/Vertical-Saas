@@ -3818,6 +3818,153 @@ export async function regeneratePointOfSaleTerminalCode(req, res) {
   }
 }
 
+async function countApprovedTabletsForBusiness(req, ownerUserId, businessId) {
+  const bizId = String(businessId || '').replace(/^business:/, '').trim();
+  const uid = String(ownerUserId || '').trim();
+  if (!bizId || !uid) return 0;
+  const pdvs = await listScopedPointsOfSaleForBusiness(req, uid, bizId, {
+    includeInactive: true,
+  }).catch(() => []);
+  const {
+    countApprovedDevices,
+    normalizeTpvAllowedDevices,
+  } = await import('../services/tpvTabletDevices.js');
+  let total = 0;
+  for (const pdv of pdvs || []) {
+    total += countApprovedDevices(normalizeTpvAllowedDevices(pdv?.tpvAllowedDevices));
+  }
+  return total;
+}
+
+async function resolveOwnerSubscriptionForPdv(req, pdv) {
+  const business = await resolveBusinessDocumentForPointOfSale(req, pdv).catch(() => null);
+  const ownerId = String(business?.owner_user_id || pdv?.user_id || '').trim();
+  const account = ownerId ? await findAccountByUserId(req, ownerId) : null;
+  return {
+    business,
+    account,
+    subscription: account?.subscription || {},
+  };
+}
+
+export async function listPdvTpvDevices(req, res) {
+  try {
+    const { userId, pdvId } = req.params;
+    const existing = await ensurePointOfSaleOwner(req, userId, pdvId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Punto de venta no encontrado' });
+    const {
+      normalizeTpvAllowedDevices,
+      resolveTabletSlotLimit,
+      TPV_INCLUDED_TABLET_SLOTS,
+    } = await import('../services/tpvTabletDevices.js');
+    const { business, account, subscription } = await resolveOwnerSubscriptionForPdv(req, existing);
+    const devices = normalizeTpvAllowedDevices(existing.tpvAllowedDevices);
+    const limit = resolveTabletSlotLimit(subscription);
+    const ownerId = String(account?.user_id || existing.user_id || userId || '').trim();
+    const approvedBusiness = await countApprovedTabletsForBusiness(
+      req,
+      ownerId,
+      business?.business_id || existing.businessId || existing.business_id,
+    );
+    return res.json({
+      ok: true,
+      devices,
+      includedSlots: TPV_INCLUDED_TABLET_SLOTS,
+      slotLimit: limit,
+      approvedCount: approvedBusiness,
+      extraTpvTabletSlots: Math.max(0, Math.floor(Number(subscription.extraTpvTabletSlots) || 0)),
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al listar dispositivos' });
+  }
+}
+
+async function mutatePdvTpvDevice(req, res, action) {
+  try {
+    const { userId, pdvId } = req.params;
+    const deviceId = String(req.body?.deviceId || req.params.deviceId || '').trim();
+    if (!deviceId) return badRequest(res, 'Falta deviceId');
+    const existing = await ensurePointOfSaleOwner(req, userId, pdvId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Punto de venta no encontrado' });
+
+    const {
+      normalizeTpvAllowedDevices,
+      approveDeviceInList,
+      rejectDeviceInList,
+      revokeDeviceInList,
+      unblockDeviceInList,
+      resolveTabletSlotLimit,
+      countApprovedDevices,
+      TPV_INCLUDED_TABLET_SLOTS,
+    } = await import('../services/tpvTabletDevices.js');
+
+    let result;
+    if (action === 'approve') {
+      const { business, account, subscription } = await resolveOwnerSubscriptionForPdv(req, existing);
+      const limit = resolveTabletSlotLimit(subscription);
+      const ownerId = String(account?.user_id || existing.user_id || userId || '').trim();
+      const approvedBusiness = await countApprovedTabletsForBusiness(
+        req,
+        ownerId,
+        business?.business_id || existing.businessId || existing.business_id,
+      );
+      const current = normalizeTpvAllowedDevices(existing.tpvAllowedDevices).find(
+        (d) => d.deviceId === deviceId,
+      );
+      const alreadyApproved = current?.status === 'approved';
+      if (!alreadyApproved && approvedBusiness >= limit) {
+        return res.status(402).json({
+          ok: false,
+          code: 'TABLET_SLOT_LIMIT',
+          error: `Tienes ${approvedBusiness}/${limit} tablets. La siguiente es un SVA: Tablet TPV extra (+9,90 €/mes).`,
+          includedSlots: TPV_INCLUDED_TABLET_SLOTS,
+          slotLimit: limit,
+          approvedCount: approvedBusiness,
+          requestedAddon: 'extra_tpv_tablet',
+        });
+      }
+      result = approveDeviceInList(existing.tpvAllowedDevices, deviceId);
+    } else if (action === 'reject') {
+      result = rejectDeviceInList(existing.tpvAllowedDevices, deviceId);
+    } else if (action === 'revoke') {
+      result = revokeDeviceInList(existing.tpvAllowedDevices, deviceId);
+    } else if (action === 'unblock') {
+      result = unblockDeviceInList(existing.tpvAllowedDevices, deviceId);
+    } else {
+      return badRequest(res, 'Acción no válida');
+    }
+
+    if (!result.found) {
+      return res.status(404).json({ ok: false, error: 'Dispositivo no encontrado' });
+    }
+
+    const db = getDeliveryDbName();
+    const doc = buildPointOfSaleDocument(userId, { tpvAllowedDevices: result.devices }, existing);
+    const saved = await putDocument(req, db, doc._id, doc);
+    return res.json({
+      ok: true,
+      devices: normalizeTpvAllowedDevices(result.devices),
+      pointOfSale: sanitizePointOfSale({ ...doc, _rev: saved.rev }),
+      approvedOnPdv: countApprovedDevices(result.devices),
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al actualizar dispositivo' });
+  }
+}
+
+export async function approvePdvTpvDevice(req, res) {
+  return mutatePdvTpvDevice(req, res, 'approve');
+}
+export async function rejectPdvTpvDevice(req, res) {
+  return mutatePdvTpvDevice(req, res, 'reject');
+}
+export async function revokePdvTpvDevice(req, res) {
+  return mutatePdvTpvDevice(req, res, 'revoke');
+}
+export async function unblockPdvTpvDevice(req, res) {
+  return mutatePdvTpvDevice(req, res, 'unblock');
+}
+
 // ─── DELIVERY CONFIG ─────────────────────────────────────────────────────────
 
 export async function getDeliveryConfig(req, res) {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   X, User, Phone, Mail, MapPin, FileText, CreditCard, Plus,
   Trash2, AlertTriangle, Check, ChevronDown, Building2, Merge,
@@ -15,6 +15,7 @@ import { useClientDuplicateSearch } from '../../hooks/useClientDuplicateSearch';
 import { getDniOrNieError, getCifError } from '../../lib/dniCifValidator';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
+import { listTeamAgentOptions, resolveTeamAgent } from '../../lib/realEstateTeamAgents';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -45,7 +46,10 @@ interface AddressForm {
   postalCode: string;
 }
 
-const MANAGER_ROLES = ['Admin', 'Gerente', 'Comercial', 'Administración'];
+const MANAGER_ROLES = [
+  'Admin', 'Gerente', 'GerenteGrupo', 'Comercial', 'Administración',
+  'Administrador', 'Gestor', 'Encargado', 'Superadmin',
+];
 
 const PAYMENT_OPTIONS: { value: PaymentMethod | ''; label: string }[] = [
   { value: '', label: 'Sin definir' },
@@ -127,7 +131,7 @@ export function NuevoClienteModal({
   businessId: businessIdProp,
   dataUserId: dataUserIdProp,
 }: NuevoClienteModalProps) {
-  const { user } = useAuth();
+  const { user, listUsers } = useAuth();
   const currentBusiness = useBusinessOptional()?.currentBusiness ?? null;
   const { addClient, clients, leads, updateClient, deleteClient } = useApp();
   const authUserId = user?.user_id || '';
@@ -135,8 +139,10 @@ export function NuevoClienteModal({
   const resolvedBusinessId = String(
     businessIdProp || resolveBusinessScopeId(currentBusiness) || '',
   ).trim();
+  const isRealEstate = currentBusiness?.businessType === 'realEstate';
   const effectivePerfil: Perfil = perfilProp || (MANAGER_ROLES.includes(user?.role || '') ? 'gerente' : 'trabajador');
   const isGerente = effectivePerfil === 'gerente';
+  const canPickAgent = isRealEstate && (isGerente || MANAGER_ROLES.includes(user?.role || ''));
 
   // ─── Form state ─────────────────────────────────────────────────────────
   const [clientType, setClientType] = useState<'particular' | 'empresa'>('particular');
@@ -151,6 +157,15 @@ export function NuevoClienteModal({
   const [saving, setSaving] = useState(false);
   const [showExtraAddresses, setShowExtraAddresses] = useState(false);
   const [showMergeModal, setShowMergeModal] = useState(false);
+  const [responsibleUserId, setResponsibleUserId] = useState('');
+  const [accountDirectory, setAccountDirectory] = useState<
+    { user_id?: string; fullName?: string; name?: string; email?: string }[]
+  >([]);
+
+  const agents = useMemo(
+    () => listTeamAgentOptions(currentBusiness?.members, accountDirectory),
+    [currentBusiness?.members, accountDirectory],
+  );
 
   const nameRef = useRef<HTMLInputElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -205,16 +220,34 @@ export function NuevoClienteModal({
       setSaving(false);
       setShowExtraAddresses(false);
       setShowMergeModal(false);
+      setResponsibleUserId('');
       clearDuplicates();
     }
   }, [open, clearDuplicates]);
 
-  // ─── Focus name on open ────────────────────────────────────────────────
+  // ─── Focus name on open + default agent (inmobiliaria → yo) ────────────
   useEffect(() => {
     if (open) {
       setTimeout(() => nameRef.current?.focus(), 150);
+      if (isRealEstate) {
+        const selfId = String(authUserId || '').trim().replace(/^account:/, '');
+        setResponsibleUserId(selfId);
+      }
     }
-  }, [open]);
+  }, [open, isRealEstate, authUserId]);
+
+  useEffect(() => {
+    if (!open || !isRealEstate) return;
+    let cancelled = false;
+    void listUsers()
+      .then((users) => {
+        if (!cancelled && Array.isArray(users)) setAccountDirectory(users as typeof accountDirectory);
+      })
+      .catch(() => {
+        if (!cancelled) setAccountDirectory([]);
+      });
+    return () => { cancelled = true; };
+  }, [open, isRealEstate, listUsers]);
 
   useModalClose(open, onClose);
 
@@ -306,6 +339,17 @@ export function NuevoClienteModal({
           lastUsedAt: null,
         }));
 
+      const selfId = String(authUserId || '').trim().replace(/^account:/, '');
+      const assignId = isRealEstate
+        ? String(responsibleUserId || selfId).trim().replace(/^account:/, '')
+        : '';
+      const assignAgent = assignId
+        ? resolveTeamAgent(agents, { userId: assignId })
+          || (assignId === selfId
+            ? { userId: selfId, name: String(user?.fullName || user?.firstName || 'Sin asignar') }
+            : null)
+        : null;
+
       const clientData: Partial<Client> = {
         clientType: isGerente ? clientType : 'particular',
         name: name.trim(),
@@ -321,6 +365,12 @@ export function NuevoClienteModal({
         user_id: dataUserId || authUserId,
         businessId: resolvedBusinessId,
         business_id: resolvedBusinessId,
+        ...(assignAgent
+          ? {
+              responsibleUserId: assignAgent.userId,
+              responsible: assignAgent.name,
+            }
+          : {}),
       };
 
       if (isGerente) {
@@ -715,6 +765,35 @@ export function NuevoClienteModal({
               </>
             )}
           </div>
+
+          {/* ── Asignación inmobiliaria ── */}
+          {isRealEstate ? (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                Agente responsable
+              </p>
+              {canPickAgent && agents.length > 0 ? (
+                <select
+                  value={responsibleUserId}
+                  onChange={(e) => setResponsibleUserId(e.target.value)}
+                  className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800 border-2 border-gray-100 dark:border-gray-800 rounded-2xl text-sm text-gray-900 dark:text-gray-100 focus:border-gray-900 dark:focus:border-gray-500 focus:bg-white dark:focus:bg-gray-700 focus:outline-none"
+                >
+                  {agents.map((a) => (
+                    <option key={a.userId} value={a.userId}>
+                      {a.name}{a.role ? ` · ${a.role}` : ''}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <div className="rounded-2xl border border-blue-100 dark:border-blue-900 bg-blue-50/80 dark:bg-blue-950/40 px-4 py-3 text-sm text-blue-800 dark:text-blue-200">
+                  Se te asignará a ti ({user?.fullName || 'tú'}). Quedará en tu cartera de la inmobiliaria.
+                </div>
+              )}
+              <p className="text-xs text-gray-400 dark:text-gray-500">
+                El cliente queda ligado a esta empresa inmobiliaria y al agente del Equipo.
+              </p>
+            </div>
+          ) : null}
 
           {/* ── Notes ── */}
           <div className="space-y-2">

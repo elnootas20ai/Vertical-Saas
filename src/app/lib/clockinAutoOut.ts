@@ -56,10 +56,11 @@ export function getAutoClockOutAtMs(
   // Sin fin de turno: 4 h continuas desde la última reanudación (entrada / fin descanso).
   let lastResume: number | null = null;
   for (const e of record.entries || []) {
+    if (e.type === 'clock_out') break;
     if (e.type === 'clock_in' || e.type === 'break_end') {
       lastResume = new Date(e.time).getTime();
     }
-    if (e.type === 'break_start' || e.type === 'clock_out') {
+    if (e.type === 'break_start') {
       lastResume = null;
     }
   }

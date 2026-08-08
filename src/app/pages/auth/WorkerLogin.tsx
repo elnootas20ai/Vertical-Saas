@@ -15,8 +15,7 @@ import { WORKER_DEFAULT_LANDING_PATH } from '../../lib/workerProfileCompletion';
 import { useGoogleSignIn, googleClientConfigured } from '../../hooks/useGoogleSignIn';
 import { shouldHideThirdPartyAuthOnIos, isAppleSignInAvailable } from '../../lib/appStoreCompliance';
 import { signInWithApple } from '../../lib/appleSignIn';
-import { normalizeTpvTabletCode } from '../../lib/tpvTabletLoginUrl';
-import { clearTpvTabletReturnCode, peekTpvTabletReturnCode } from '../../lib/tpvTabletSession';
+import { clearTpvTabletReturnCode } from '../../lib/tpvTabletSession';
 
 const CREDENTIALS_KEY = 'vertial_saved_worker_login';
 
@@ -33,26 +32,12 @@ function loadSavedLogin(): { email: string } | null {
 export function WorkerLogin() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { login, googleLogin, appleLogin } = useAuth();
+  const { login, googleLogin, appleLogin, requestLoginCode, verifyLoginCode } = useAuth();
   const { t } = useTranslation();
   const { resolvedTheme } = useTheme();
 
   const search = new URLSearchParams(location.search);
-  const fromQueryTablet = search.get('from') === 'tpv-tablet';
-  const codeFromQuery = normalizeTpvTabletCode(search.get('code') || '');
-  const codeFromSession = peekTpvTabletReturnCode();
-
-  const tpvReturn = location.state as {
-    fromTpvTablet?: boolean;
-    terminalCode?: string;
-    returnTo?: string;
-    message?: string;
-  } | null;
-
-  const fromTpvTablet = Boolean(tpvReturn?.fromTpvTablet || fromQueryTablet || codeFromQuery || codeFromSession);
-  const tabletCode = normalizeTpvTabletCode(
-    tpvReturn?.terminalCode || codeFromQuery || codeFromSession || '',
-  );
+  const joinToken = String(search.get('join') || '').trim();
 
   const saved = loadSavedLogin();
   const [formData, setFormData] = useState({
@@ -62,24 +47,34 @@ export function WorkerLogin() {
   });
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
   const [lockInfo, setLockInfo] = useState<{ lockUntil?: string } | null>(null);
+  const [loginMode, setLoginMode] = useState<'password' | 'emailCode'>('password');
+  const [codeValue, setCodeValue] = useState('');
+  const [codeInfo, setCodeInfo] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [peekPassword, setPeekPassword] = useState(false);
   const [googleTimedOut, setGoogleTimedOut] = useState(false);
 
+  // Limpiar restos de TPV tablet (query/session) para no interferir con login admin/trabajador.
+  useEffect(() => {
+    clearTpvTabletReturnCode();
+    const params = new URLSearchParams(location.search);
+    const dirty = params.has('from') || params.has('code');
+    if (!dirty) return;
+    params.delete('from');
+    params.delete('code');
+    const qs = params.toString();
+    navigate(`${location.pathname}${qs ? `?${qs}` : ''}`, { replace: true, state: null });
+  }, [location.pathname, location.search, navigate]);
+
   const goAfterLogin = useCallback(
     (fallback?: string) => {
-      if (fromTpvTablet) {
-        const code = tabletCode;
-        clearTpvTabletReturnCode();
-        navigate(tpvReturn?.returnTo || AUTH_PATHS.tpvTabletLogin, {
-          replace: true,
-          state: code ? { terminalCode: code } : undefined,
-        });
+      if (joinToken) {
+        navigate(`/auth/join?token=${encodeURIComponent(joinToken)}`, { replace: true });
         return;
       }
       navigate(fallback || WORKER_DEFAULT_LANDING_PATH);
     },
-    [navigate, fromTpvTablet, tabletCode, tpvReturn?.returnTo],
+    [navigate, joinToken],
   );
 
   const handlePasswordPeekStart = (e: PointerEvent<HTMLButtonElement>) => {
@@ -114,6 +109,7 @@ export function WorkerLogin() {
 
     setIsSubmitting(true);
     setLockInfo(null);
+    setCodeInfo(null);
     const result = await login(formData.email.trim(), formData.password);
     setIsSubmitting(false);
 
@@ -122,15 +118,71 @@ export function WorkerLogin() {
       return;
     }
 
+    if (result.code === 'REQUIRES_LOGIN_CODE') {
+      setLoginMode('emailCode');
+      setCodeValue('');
+      setCodeInfo(result.error || 'Te hemos enviado un código por email. Caduca en 10 minutos.');
+      setErrors({});
+      return;
+    }
+
     if (result.code === 'ACCOUNT_LOCKED') {
       setLockInfo({ lockUntil: result.lockUntil });
-      setErrors({ email: result.error || 'Cuenta bloqueada temporalmente' });
+      setLoginMode('emailCode');
+      setCodeValue('');
+      setErrors({
+        email: result.error || 'Cuenta bloqueada temporalmente. Usa el código por email.',
+      });
       return;
     }
 
     const msg = (result.error ?? '').trim();
     if (msg) console.warn('[auth/worker-login]', msg);
+    const rateLimited = /demasiados intentos/i.test(msg) || /rate_limit/i.test(msg);
+    if (rateLimited) setLoginMode('emailCode');
     setErrors({ email: msg || t('auth.errors.loginError') });
+  };
+
+  const handleRequestCode = async () => {
+    const email = formData.email.trim();
+    if (!email) {
+      setErrors({ email: t('auth.errors.emailRequired') });
+      return;
+    }
+    setIsSubmitting(true);
+    setCodeInfo(null);
+    setErrors({});
+    const result = await requestLoginCode(email);
+    setIsSubmitting(false);
+    if (result.success) {
+      setLoginMode('emailCode');
+      setCodeInfo(result.info || 'Revisa tu correo. El código caduca en 10 minutos.');
+    } else {
+      setErrors({ email: result.error || 'No se pudo enviar el código' });
+    }
+  };
+
+  const handleVerifyCode = async (e: FormEvent) => {
+    e.preventDefault();
+    const email = formData.email.trim();
+    const code = codeValue.replace(/\D/g, '').slice(0, 6);
+    if (!email) {
+      setErrors({ email: t('auth.errors.emailRequired') });
+      return;
+    }
+    if (code.length !== 6) {
+      setErrors({ password: 'Introduce el código de 6 dígitos' });
+      return;
+    }
+    setIsSubmitting(true);
+    setErrors({});
+    const result = await verifyLoginCode(email, code);
+    setIsSubmitting(false);
+    if (result.success) {
+      goAfterLogin(result.redirectTo || WORKER_DEFAULT_LANDING_PATH);
+    } else {
+      setErrors({ password: result.error || 'Código inválido o expirado' });
+    }
   };
 
   const handleGoogleCredential = useCallback(async (credential: string) => {
@@ -247,33 +299,90 @@ export function WorkerLogin() {
             </h1>
           </div>
 
-          {(tpvReturn?.message || fromTpvTablet) && !lockInfo && (
-            <div className="mb-4 rounded-xl bg-amber-50 border border-amber-200 p-4 flex items-start gap-3">
-              <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-              <p className="text-sm text-amber-800">
-                {tpvReturn?.message
-                  || (tabletCode
-                    ? `TPV tablet · inicia sesión y vuelve a la tienda (${tabletCode}).`
-                    : 'TPV tablet · inicia sesión de trabajador para continuar.')}
-              </p>
-            </div>
-          )}
-
           {lockInfo && (
             <div className="mb-4 rounded-xl bg-red-50 border border-red-200 p-4 flex items-start gap-3">
               <ShieldAlert className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm font-semibold text-red-700">Cuenta bloqueada temporalmente</p>
+                <p className="text-sm font-semibold text-red-700">Acceso con contraseña bloqueado temporalmente</p>
                 <p className="text-xs text-red-500 mt-0.5">
                   Demasiados intentos fallidos.
                   {lockInfo.lockUntil
-                    ? ` Podrás volver a intentarlo a las ${new Date(lockInfo.lockUntil).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}.`
+                    ? ` Podrás usar la contraseña otra vez a las ${new Date(lockInfo.lockUntil).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}.`
                     : ''}
+                  {' '}Puedes entrar ahora con un código por email.
                 </p>
               </div>
             </div>
           )}
 
+          {codeInfo && (
+            <div className="mb-4 rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-sm text-emerald-800">
+              {codeInfo}
+            </div>
+          )}
+
+          {loginMode === 'emailCode' ? (
+            <form onSubmit={handleVerifyCode} className="space-y-4">
+              <p className="text-sm text-gray-600 dark:text-gray-400 -mt-1 leading-snug">
+                Te enviamos un <strong className="font-semibold text-gray-800 dark:text-gray-200">código de 6 dígitos</strong> al correo. Escríbelo aquí para entrar.
+              </p>
+              <ACCESO__Input
+                label={t('auth.email')}
+                type="email"
+                placeholder={t('auth.emailPlaceholder')}
+                icon={<Mail className="w-5 h-5" />}
+                value={formData.email}
+                onChange={(e) => {
+                  setFormData({ ...formData, email: e.target.value });
+                  setErrors({ ...errors, email: undefined });
+                }}
+                error={errors.email}
+                autoComplete="email"
+              />
+              <ACCESO__Input
+                label="Código del correo"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder="123456"
+                icon={<Lock className="w-5 h-5" />}
+                value={codeValue}
+                onChange={(e) => {
+                  setCodeValue(e.target.value.replace(/\D/g, '').slice(0, 6));
+                  setErrors({ ...errors, password: undefined });
+                }}
+                error={errors.password}
+                autoFocus
+              />
+              <div className="flex flex-col gap-3 pt-1">
+                <ACCESO__Button type="submit" variant="primary" fullWidth size="lg" disabled={isSubmitting}>
+                  {isSubmitting ? 'Verificando…' : 'Entrar'}
+                </ACCESO__Button>
+                <ACCESO__Button
+                  type="button"
+                  variant="outline"
+                  fullWidth
+                  size="md"
+                  disabled={isSubmitting}
+                  onClick={() => void handleRequestCode()}
+                >
+                  No me ha llegado — reenviar
+                </ACCESO__Button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginMode('password');
+                    setCodeInfo(null);
+                    setCodeValue('');
+                    setErrors({});
+                  }}
+                  className="pt-1 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
+                >
+                  {lockInfo ? 'Probar otra vez con contraseña' : 'Entrar con contraseña'}
+                </button>
+              </div>
+            </form>
+          ) : (
           <form onSubmit={handleSubmit} className="space-y-6">
             <ACCESO__Input
               label={t('auth.email')}
@@ -334,6 +443,19 @@ export function WorkerLogin() {
               {isSubmitting ? 'Entrando...' : 'Entrar a mi panel'}
             </ACCESO__Button>
 
+            <button
+              type="button"
+              onClick={() => {
+                setLoginMode('emailCode');
+                setCodeInfo(null);
+                setCodeValue('');
+                setErrors({});
+              }}
+              className="w-full text-sm text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
+            >
+              Entrar con código por email
+            </button>
+
             {!hideGoogleOnIos && (
               <>
                 <div className="relative my-1">
@@ -380,12 +502,18 @@ export function WorkerLogin() {
               </>
             )}
           </form>
+          )}
 
           <p className="mt-6 text-center text-sm text-gray-600 dark:text-gray-400">
             ¿No tienes cuenta?{' '}
             <button
               type="button"
-              onClick={() => navigate(AUTH_PATHS.register, { state: { accountType: 'user' as const } })}
+              onClick={() => navigate(
+                joinToken
+                  ? `${AUTH_PATHS.register}?join=${encodeURIComponent(joinToken)}`
+                  : AUTH_PATHS.register,
+                { state: { accountType: 'user' as const } },
+              )}
               className="font-medium text-blue-600 hover:underline dark:text-blue-400"
             >
               Crear cuenta de trabajador
