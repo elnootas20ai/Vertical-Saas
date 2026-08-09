@@ -1122,17 +1122,20 @@ function channelsForOpsDay(
   sessions: TpvRegisterSession[] | undefined,
   dayKey: string,
   pdvId: string,
-): OpsExcelChannels {
+): { channels: OpsExcelChannels; fromClosing: boolean } {
   const base = channelsFromOrders(orders);
-  if (!sessions?.length) return base;
+  if (!sessions?.length) return { channels: base, fromClosing: false };
   const fromClosing = aggregatorChannelsFromClosingSessions(sessions, dayKey, pdvId);
-  if (!fromClosing) return base;
+  if (!fromClosing) return { channels: base, fromClosing: false };
   return {
-    ...base,
-    glovo: fromClosing.glovo,
-    uber: fromClosing.uber,
-    justEat: fromClosing.justEat,
-    app: fromClosing.app,
+    channels: {
+      ...base,
+      glovo: fromClosing.glovo,
+      uber: fromClosing.uber,
+      justEat: fromClosing.justEat,
+      app: fromClosing.app,
+    },
+    fromClosing: true,
   };
 }
 
@@ -1317,15 +1320,20 @@ export function buildStoreOpsPulse(
   const days: StoreOpsDay[] = dayKeys.map((dayKey, index) => {
     const food = foodCountsForDay(scoped, dayKey);
     const revenueOrders = scoped.filter((o) => isRevenueOnDay(o, dayKey));
-    const revenue = Math.round(revenueOrders.reduce((s, o) => s + deliveryOrderRevenueAmount(o), 0) * 100) / 100;
+    const orderRevenue =
+      Math.round(revenueOrders.reduce((s, o) => s + deliveryOrderRevenueAmount(o), 0) * 100) / 100;
     const ordersCount = revenueOrders.length;
-    const channels = channelsForOpsDay(revenueOrders, sessions, dayKey, pdvId);
+    const { channels, fromClosing } = channelsForOpsDay(revenueOrders, sessions, dayKey, pdvId);
+    // Con Caja 2: Ventas = suma de canales (pedidos locales + integradores declarados).
+    // Sin cierre: Ventas = pedidos cobrados (coincide con el desglose de canales).
+    const revenue = fromClosing ? opsExcelChannelsTotal(channels) : orderRevenue;
     const prevKey = index > 0 ? dayKeys[index - 1] : null;
     let revenueDeltaPct: number | null = null;
     if (prevKey) {
-      const prevRev = scoped
-        .filter((o) => isRevenueOnDay(o, prevKey))
-        .reduce((s, o) => s + deliveryOrderRevenueAmount(o), 0);
+      const prevOrders = scoped.filter((o) => isRevenueOnDay(o, prevKey));
+      const prevOrderRev = prevOrders.reduce((s, o) => s + deliveryOrderRevenueAmount(o), 0);
+      const prevCh = channelsForOpsDay(prevOrders, sessions, prevKey, pdvId);
+      const prevRev = prevCh.fromClosing ? opsExcelChannelsTotal(prevCh.channels) : prevOrderRev;
       revenueDeltaPct = monthOverMonthPct(revenue, prevRev);
     }
     const labels = formatOpsDayLabel(dayKey);
@@ -1355,9 +1363,10 @@ export function buildStoreOpsPulse(
   const prevKeys = resolvePrevComparableDayKeys(dayKeys, todayKey);
   let revenuePrevPeriod = 0;
   for (const pk of prevKeys) {
-    revenuePrevPeriod += scoped
-      .filter((o) => isRevenueOnDay(o, pk))
-      .reduce((s, o) => s + deliveryOrderRevenueAmount(o), 0);
+    const prevOrders = scoped.filter((o) => isRevenueOnDay(o, pk));
+    const prevOrderRev = prevOrders.reduce((s, o) => s + deliveryOrderRevenueAmount(o), 0);
+    const prevCh = channelsForOpsDay(prevOrders, sessions, pk, pdvId);
+    revenuePrevPeriod += prevCh.fromClosing ? opsExcelChannelsTotal(prevCh.channels) : prevOrderRev;
   }
   revenuePrevPeriod = Math.round(revenuePrevPeriod * 100) / 100;
 

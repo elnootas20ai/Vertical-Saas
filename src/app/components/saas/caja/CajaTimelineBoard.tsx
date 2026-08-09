@@ -237,7 +237,7 @@ export function CajaTimelineBoard({
           <div className="flex items-center gap-3 flex-wrap min-w-0">
             <button
               type="button"
-              onClick={onBack}
+              onClick={() => onBack?.()}
               aria-label="Volver"
               className="w-8 h-8 shrink-0 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 inline-flex items-center justify-center text-stone-500 hover:bg-stone-50 dark:hover:bg-stone-800"
             >

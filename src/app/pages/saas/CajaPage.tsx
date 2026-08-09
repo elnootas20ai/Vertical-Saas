@@ -57,6 +57,7 @@ import {
   sessionBelongsToCajaDay,
   sortRegisterSessionsForDisplay,
 } from '../../lib/tpvCajaScope';
+import { DELIVERY_OPS_HOME_PATH } from '../../lib/retailOpsPaths';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -778,9 +779,15 @@ export function CajaPage() {
         dateFrom,
       });
       // Filtrado PDV en cliente (scopedPdvKey no debe re-disparar este fetch).
-      const pdvIds = scopedPdvKeyRef.current ? scopedPdvKeyRef.current.split('|') : [];
-      const unique = Array.from(new Map(sessData.map((s) => [s._id, s])).values())
-        .filter((s) => tpvSessionBelongsToBusiness(s, businessId, pdvIds));
+      // Si el scope de tiendas aún no ha cargado, no descartar: el API ya filtró por empresa.
+      const pdvIds = scopedPdvKeyRef.current
+        ? scopedPdvKeyRef.current.split('|').map((id) => id.trim()).filter(Boolean)
+        : [];
+      const unique = Array.from(new Map(sessData.map((s) => [s._id, s])).values()).filter((s) => {
+        if (!businessId) return true;
+        if (pdvIds.length === 0) return true;
+        return tpvSessionBelongsToBusiness(s, businessId, pdvIds);
+      });
       setSessions(unique);
       setDriverSessions(driverData);
       hasLoadedOnceRef.current = true;
@@ -807,7 +814,9 @@ export function CajaPage() {
   useEffect(() => {
     if (!businessId || !hasLoadedOnceRef.current) return;
     setSessions((prev) => {
-      const pdvIds = scopedPdvKey ? scopedPdvKey.split('|') : [];
+      const pdvIds = scopedPdvKey
+        ? scopedPdvKey.split('|').map((id) => id.trim()).filter(Boolean)
+        : [];
       if (!pdvIds.length) return prev;
       return prev.filter((s) => tpvSessionBelongsToBusiness(s, businessId, pdvIds));
     });
@@ -1129,15 +1138,22 @@ export function CajaPage() {
   };
 
   const handleBack = () => {
-    if ((location.state as { returnToOps?: boolean } | null)?.returnToOps) {
-      navigate('/saas/delivery-ops');
+    // Si hay un turno abierto en el panel, primero se cierra el detalle.
+    if (expandedSessionId) {
+      setExpandedSessionId(null);
       return;
     }
-    if (typeof window !== 'undefined' && window.history.length > 1) {
-      navigate(-1);
-    } else {
-      navigate('/saas/vertical/delivery');
+    if (viewingClosingSession) {
+      setViewingClosingSession(null);
+      return;
     }
+    if ((location.state as { returnToOps?: boolean } | null)?.returnToOps) {
+      navigate(DELIVERY_OPS_HOME_PATH, { replace: true });
+      return;
+    }
+    // Nunca history(-1): desde Dashboard a menudo se llega vía /saas/caja (restaurante)
+    // y el redirect crea un bucle Volver → /saas/caja → delivery/caja.
+    navigate(DELIVERY_OPS_HOME_PATH, { replace: true });
   };
 
   if (loading) {

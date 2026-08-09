@@ -43,6 +43,7 @@ import { subDays, eachDayOfInterval, startOfDay, format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import type { BusinessType } from '../../lib/businessApi';
 import { clientsRouteForVertical, DELIVERY_CRM_UI_ENABLED } from '../../lib/deliveryCrmFeature';
+import { DELIVERY_CAJA_PATH, RESTAURANT_CAJA_PATH } from '../../lib/retailOpsPaths';
 
 import { isWorkerAccount } from '../../lib/authApi';
 import {
@@ -776,6 +777,15 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
         }).catch(() => ({ orders: [], total: 0 })),
         listTpvRegisterSessionsRequest(dataUserId, {
           ...(scopeBusinessId ? { businessId: scopeBusinessId } : {}),
+          // Misma ventana útil que el resumen (mes + MoM): sin dateFrom el listado
+          // puede truncar y los integradores de Caja 2 no entran en CANALES.
+          dateFrom: localDayBoundsForKey(
+            (() => {
+              const d = new Date(`${todayKey}T12:00:00`);
+              d.setDate(d.getDate() - 45);
+              return localCalendarDayKey(d);
+            })(),
+          ).from,
         }).catch(() => []),
         // Total real de la empresa (sin recortar por fechas del dashboard)
         filterDeliveryOrdersRequest(dataUserId, {
@@ -1242,19 +1252,9 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
     : (sk?.salesMonth ?? soldThisMonth.reduce((s, v) => s + (v.salePrice || 0), 0));
   const expensesMonth    = sk?.expensesMonth ?? 0;
   const estimatedProfit  = sk?.estimatedProfit ?? (salesMonth - expensesMonth);
-  // Delivery: misma fuente que Ventas (pedidos cobrados del negocio activo).
-  // El KPI de servidor es por cuenta y suele no tener cobros finance sync → Caja en 0 €.
-  const cashBalance = isDeliveryVertical && deliveryScope
-    ? (() => {
-        const scoped = filterOrdersToPortfolioScope(
-          deliveryScope.orders,
-          deliveryScope.pdvIds,
-          deliveryScope.primaryPdvId,
-          new Set(deliveryScope.wcScopeIds),
-        );
-        const fromOrders = scoped.reduce((sum, o) => sum + deliveryOrderRevenueAmount(o), 0);
-        return Math.round(fromOrders * 100) / 100;
-      })()
+  // Delivery: efectivo en cajones abiertos (no la suma de todos los pedidos del año).
+  const cashBalance = isDeliveryVertical && deliveryMetrics
+    ? Number(deliveryMetrics.cashInRegisters || 0)
     : (sk?.cashBalance ?? 0);
   const criticalStock    = sk?.criticalStockCount ?? 0;
   const activeWorkers    = sk?.activeWorkers ?? 0;
@@ -1597,7 +1597,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                     iconBg={openIncidents > 0 ? 'bg-red-100 dark:bg-red-900/40' : 'bg-emerald-100 dark:bg-emerald-900/40'}
                     iconColor={openIncidents > 0 ? 'text-red-600' : 'text-emerald-600'}
                     trend={openIncidents > 0 ? { value: `${openIncidents} abierta${openIncidents > 1 ? 's' : ''}`, up: false } : undefined}
-                    onClick={() => navigate(isDeliveryVertical ? '/saas/delivery-ops' : '/saas/caja')}
+                    onClick={() => navigate(isDeliveryVertical ? '/saas/delivery-ops' : RESTAURANT_CAJA_PATH)}
                     loading={serverLoading}
                   />
                 )}
@@ -1703,7 +1703,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                   iconBg={cashBalance >= 0 ? 'bg-cyan-100 dark:bg-cyan-900/40' : 'bg-red-100 dark:bg-red-900/40'}
                   iconColor={cashBalance >= 0 ? 'text-cyan-600' : 'text-red-600'}
                   trend={cashBalance !== 0 ? { value: formatEur(Math.abs(cashBalance)), up: cashBalance >= 0 ? true : false } : undefined}
-                  onClick={() => navigate(isDeliveryVertical ? '/saas/caja' : '/saas/finance')}
+                  onClick={() => navigate(isDeliveryVertical ? DELIVERY_CAJA_PATH : '/saas/finance')}
                   loading={isDeliveryVertical ? deliveryDataLoading : serverLoading}
                 />
                 <KPICard

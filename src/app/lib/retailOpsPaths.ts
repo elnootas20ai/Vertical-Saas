@@ -52,7 +52,7 @@ export function resolveTpvCeoExitPath(
 ): string {
   // Restaurant: volver al centro operativo, no a la pantalla Caja.
   if (pathname.startsWith('/saas/caja')) return RESTAURANT_OPS_HOME_PATH;
-  if (pathname.startsWith('/saas/vertical/delivery/caja')) return DELIVERY_CAJA_PATH;
+  if (pathname.startsWith('/saas/vertical/delivery')) return DELIVERY_OPS_HOME_PATH;
   if (pathname.startsWith('/saas/vertical/heladeria')) return HELADERIA_OPS_HOME_PATH;
   if (pathname.startsWith('/saas/heladeria-')) return HELADERIA_OPS_HOME_PATH;
   return resolveRetailOpsHomePath(businessType);

@@ -296,7 +296,11 @@ describe('buildStoreOpsPulse', () => {
     expect(pulse.channels.uber).toBe(80);
     expect(pulse.channels.justEat).toBe(40);
     expect(pulse.channels.app).toBe(15);
+    // Ventas = canales (30 local + 120.5+80+40+15 integradores)
+    expect(pulse.revenuePeriod).toBe(285.5);
+    expect(pulse.revenueToday).toBe(285.5);
     const todayRow = pulse.days.find((d) => d.dayKey === today);
     expect(todayRow?.channels.glovo).toBe(120.5);
+    expect(todayRow?.revenue).toBe(285.5);
   });
 });

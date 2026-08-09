@@ -21,7 +21,9 @@ describe('retailOpsPaths — restaurant vs delivery', () => {
   it('delivery paths stay on delivery vertical', () => {
     expect(resolveRetailOpsHomePath('delivery')).toBe(DELIVERY_OPS_HOME_PATH);
     expect(resolveRetailCeoTpvPath('delivery')).toBe('/saas/vertical/delivery/tpv');
+    expect(resolveRetailCajaPath('delivery')).toBe('/saas/vertical/delivery/caja');
     expect(resolveTpvCeoExitPath('/saas/vertical/delivery/tpv', 'delivery')).toBe(DELIVERY_OPS_HOME_PATH);
+    expect(resolveTpvCeoExitPath('/saas/vertical/delivery/caja', 'delivery')).toBe(DELIVERY_OPS_HOME_PATH);
   });
 
   it('shouldForceRetailStoreReload covers restaurant ops screens', () => {

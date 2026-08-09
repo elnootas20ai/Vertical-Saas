@@ -5,6 +5,7 @@
 import { useNavigate } from 'react-router';
 import { Wallet, Users } from 'lucide-react';
 import { formatMoneyEs, formatNumberEs } from '../../lib/formatNumberEs';
+import { DELIVERY_CAJA_PATH } from '../../lib/retailOpsPaths';
 import type { WorkerPayMonthSummary } from './workerPayFromTpv';
 
 type Props = {
@@ -47,7 +48,7 @@ export function WorkerPayMonthPanel({ summary, loading = false, compact = false 
         </div>
         <button
           type="button"
-          onClick={() => navigate('/saas/caja')}
+          onClick={() => navigate(DELIVERY_CAJA_PATH)}
           className="min-h-11 shrink-0 rounded-xl border border-gray-200 px-3 py-2 text-[11px] font-bold text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
         >
           Ver caja
