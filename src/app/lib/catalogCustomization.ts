@@ -1949,25 +1949,100 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-export function cartLineExtrasUnitPrice(customization: CartLineCustomization): number {
-  const lineExtras = customization.addedSupplements.reduce((sum, s) => sum + Number(s.price || 0), 0);
+/**
+ * Regla 1×1 gratis: por cada ingrediente quitado, 1 extra añadido va a 0 €.
+ * Preferencia: config de tienda (Catálogo → Menú). Legacy: flag en la ficha.
+ */
+export function catalogItemAllowsFreeSwapOnRemove(
+  item: Pick<CatalogItem, 'customFields'> | null | undefined,
+  options?: { storeFreeSwapOnRemove?: boolean },
+): boolean {
+  if (options?.storeFreeSwapOnRemove === true) return true;
+  return item?.customFields?.tpvFreeSwapOnRemove === true;
+}
+
+/**
+ * Aplica créditos 1×1: N quitados → N extras (en orden de añadido) a precio 0.
+ * No cambia ingredientes quitados; solo el cobro de extras.
+ */
+export function applyFreeSwapCreditsToSupplements(
+  addedSupplements: CatalogSupplement[],
+  removedCount: number,
+): CatalogSupplement[] {
+  const credits = Math.max(0, Math.floor(Number(removedCount) || 0));
+  if (credits <= 0 || !Array.isArray(addedSupplements) || addedSupplements.length === 0) {
+    return Array.isArray(addedSupplements) ? addedSupplements : [];
+  }
+  let remaining = credits;
+  return addedSupplements.map((s) => {
+    const price = Number(s.price || 0);
+    if (remaining > 0 && price > 0) {
+      remaining -= 1;
+      return { ...s, price: 0 };
+    }
+    return s;
+  });
+}
+
+export function cartLineExtrasUnitPrice(
+  customization: CartLineCustomization,
+  options?: { freeSwapOnRemove?: boolean },
+): number {
+  const freeSwap = Boolean(options?.freeSwapOnRemove);
+  const removedCount = freeSwap ? (customization.removedIngredients || []).length : 0;
+  const priced = freeSwap
+    ? applyFreeSwapCreditsToSupplements(customization.addedSupplements || [], removedCount)
+    : customization.addedSupplements || [];
+  const lineExtras = priced.reduce((sum, s) => sum + Number(s.price || 0), 0);
   const comboExtras = (customization.comboSelections ?? []).reduce((sum, ref) => {
-    const unitExtras = (ref.addedSupplements ?? []).reduce((s, x) => s + Number(x.price || 0), 0);
+    const refRemoved = freeSwap ? (ref.removedIngredients ?? []).length : 0;
+    const unitPriced = freeSwap
+      ? applyFreeSwapCreditsToSupplements(ref.addedSupplements ?? [], refRemoved)
+      : ref.addedSupplements ?? [];
+    const unitExtras = unitPriced.reduce((s, x) => s + Number(x.price || 0), 0);
     return sum + unitExtras * Math.max(1, Number(ref.quantity) || 1);
   }, 0);
   return round2(lineExtras + comboExtras);
 }
 
-export function cartLineUnitPrice(baseUnitPrice: number, customization: CartLineCustomization): number {
-  return round2(Number(baseUnitPrice || 0) + cartLineExtrasUnitPrice(customization));
+export function cartLineUnitPrice(
+  baseUnitPrice: number,
+  customization: CartLineCustomization,
+  options?: { freeSwapOnRemove?: boolean },
+): number {
+  return round2(Number(baseUnitPrice || 0) + cartLineExtrasUnitPrice(customization, options));
 }
 
 export function cartLineTotal(
   baseUnitPrice: number,
   quantity: number,
   customization: CartLineCustomization,
+  options?: { freeSwapOnRemove?: boolean },
 ): number {
-  return round2(cartLineUnitPrice(baseUnitPrice, customization) * quantity);
+  return round2(cartLineUnitPrice(baseUnitPrice, customization, options) * quantity);
+}
+
+/** Normaliza extras del pedido aplicando la regla 1×1 antes de guardar/cobrar. */
+export function withFreeSwapApplied(
+  customization: CartLineCustomization,
+  freeSwapOnRemove: boolean,
+): CartLineCustomization {
+  if (!freeSwapOnRemove) return customization;
+  const removedCount = (customization.removedIngredients || []).length;
+  const addedSupplements = applyFreeSwapCreditsToSupplements(
+    customization.addedSupplements || [],
+    removedCount,
+  );
+  const comboSelections = (customization.comboSelections ?? []).map((ref) => {
+    const refRemoved = (ref.removedIngredients ?? []).length;
+    const added = applyFreeSwapCreditsToSupplements(ref.addedSupplements ?? [], refRemoved);
+    return { ...ref, addedSupplements: added };
+  });
+  return {
+    ...customization,
+    addedSupplements,
+    ...(comboSelections.length > 0 ? { comboSelections } : {}),
+  };
 }
 
 export function customizationSignature(customization: CartLineCustomization): string {

@@ -17,8 +17,10 @@ import {
   sessionBelongsToCajaDay,
   sessionWorkDayKey,
   buildTpvRegisterSummaryForDay,
+  shouldKeepTpvSessionInClientList,
   tpvSessionBelongsToBusiness,
 } from '../src/app/lib/tpvCajaScope.js';
+import { filterTpvRegisterSessionsForBusiness } from '../services/couchdb.js';
 
 describe('mergeTpvRegisterSessionsPreservingOpen', () => {
   const openA = { _id: 's-open', status: 'open', pointOfSaleId: 'pdv-1', openedAt: '2026-07-20T08:00:00.000Z' };
@@ -365,6 +367,36 @@ describe('tpvSessionBelongsToBusiness', () => {
         new Set(['pdv-blackburger']),
       ),
     ).toBe(false);
+  });
+});
+
+describe('shouldKeepTpvSessionInClientList + filter open with wrong business_id', () => {
+  const pdvs = [{ _id: 'pdv-pizzeria', workCenterId: 'wc-pizzeria' }];
+
+  it('keeps open session on visible PDV even if business_id is another vertical', () => {
+    const openWrongBiz = {
+      _id: 's-open',
+      status: 'open',
+      pointOfSaleId: 'pdv-pizzeria',
+      business_id: 'biz-realsate',
+    };
+    expect(shouldKeepTpvSessionInClientList(openWrongBiz, pdvs, 'biz-pizzeria')).toBe(true);
+    expect(
+      filterTpvRegisterSessionsForBusiness([openWrongBiz], 'biz-pizzeria', new Set(['pdv-pizzeria'])),
+    ).toEqual([openWrongBiz]);
+  });
+
+  it('still hides closed sessions from another business', () => {
+    const closedWrongBiz = {
+      _id: 's-closed',
+      status: 'closed',
+      pointOfSaleId: 'pdv-pizzeria',
+      business_id: 'biz-realsate',
+    };
+    expect(shouldKeepTpvSessionInClientList(closedWrongBiz, pdvs, 'biz-pizzeria')).toBe(false);
+    expect(
+      filterTpvRegisterSessionsForBusiness([closedWrongBiz], 'biz-pizzeria', new Set(['pdv-pizzeria'])),
+    ).toEqual([]);
   });
 });
 

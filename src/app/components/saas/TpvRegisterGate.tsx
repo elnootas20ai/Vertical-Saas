@@ -45,6 +45,7 @@ import {
   findReopenableClosedTpvSession,
   calendarDayMadrid,
   resolvePreviousCloseCashAmount,
+  shouldKeepTpvSessionInClientList,
   tpvSessionBelongsToBusiness,
   tpvSessionMatchesStoreRef,
 } from '../../lib/tpvCajaScope';
@@ -281,19 +282,7 @@ function shouldKeepTpvSessionInList(
   scopedPdvs: PointOfSale[],
   businessId?: string,
 ): boolean {
-  const pid = String(session.pointOfSaleId || '').trim();
-  const matchesScopedPdv = () =>
-    Boolean(pid && (scopedPdvs.some((p) => p._id === pid) || scopedPdvs.some((p) => String(p.workCenterId || '').trim() === pid)));
-  // Tiendas aún no cargadas: no tirar abiertas ni cierres (hace falta «Reabrir» / recuperar).
-  if (scopedPdvs.length === 0) return true;
-
-  const pdvIds = new Set(scopedPdvs.map((p) => p._id));
-  if (businessId && !tpvSessionBelongsToBusiness(session, businessId, pdvIds)) {
-    return false;
-  }
-  if (isTpvRegisterSessionOpen(session)) return matchesScopedPdv();
-  if (!pid) return !businessId;
-  return matchesScopedPdv();
+  return shouldKeepTpvSessionInClientList(session, scopedPdvs, businessId);
 }
 
 // ─── Cash Count Grid ────────────────────────────────────────────────────────
@@ -925,7 +914,7 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
   const openBlockedReason = !hasWorkers
     ? 'Añade trabajadores en Equipo'
     : !effectiveWorkerName()
-      ? 'Ficha o elige quién abre la caja'
+      ? 'Elige quién abre (botón Abrir en el equipo)'
       : selectedWorkerVacationMsg
         ? selectedWorkerVacationMsg
         : !hasResolvedPdv
@@ -949,11 +938,11 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
             <p className="text-[11px] text-stone-500 dark:text-stone-400 truncate">
               {isTabletMode
                 ? tabletStep === 1
-                  ? '1 · Ficha o elige quién abre'
+                  ? '1 · Quién abre (fichar opcional)'
                   : '2 · Cuenta el efectivo e abre'
                 : storeAlreadyFixed
                   ? `Apertura${terminalLabel ? ` · ${terminalLabel}` : ''}`
-                  : 'Elige tienda, ficha y cuenta el efectivo'}
+                  : 'Elige tienda, quién abre y cuenta el efectivo'}
             </p>
           </div>
           {cashCountReady ? (
@@ -983,7 +972,7 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
           <div className="shrink-0 px-3 sm:px-4 py-2 border-b border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-950/60">
             <p className="text-[11px] font-medium text-stone-600 dark:text-stone-300">
               {tabletStep === 1
-                ? 'Ficha tu entrada o pulsa Abrir si ya estás en turno'
+                ? 'Elige quién abre con Abrir (fichar es opcional)'
                 : 'Cuenta el dinero del cajón (0 € si está vacío)'}
             </p>
           </div>
@@ -1036,10 +1025,11 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
               ) : selectedWorkerId ? (
                 <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium shrink-0">
                   Abre la caja: <strong>{effectiveWorkerName()}</strong>
+                  {' · '}pulsa «Abrir caja» abajo
                 </p>
               ) : (
                 <p className="text-xs text-violet-700 dark:text-violet-300 font-medium shrink-0">
-                  Pulsa <strong>Fichar</strong> o, si ya estás en turno, <strong>Abrir</strong>
+                  Pulsa <strong>Abrir</strong> en tu nombre (fichar es opcional)
                 </p>
               )}
             </div>
@@ -3398,7 +3388,7 @@ function ClockInModal({
   const storeClockinOpts = { store_team_clockin: true as const };
 
   const selectOpener = useCallback(
-    (memberId: string, opts?: { silent?: boolean }) => {
+    (memberId: string, opts?: { silent?: boolean; alreadyOnShift?: boolean }) => {
       const mid = normalizeClockinUserId(memberId);
       if (!mid) return;
       if (vacationBlockedById[mid]) {
@@ -3414,14 +3404,16 @@ function ClockInModal({
         const label = member?.fullName || member?.email || 'Trabajador';
         setActionMsg({
           type: 'ok',
-          text: `${label} abrirá la caja (ya en turno — no hace falta fichar otra vez).`,
+          text: opts?.alreadyOnShift
+            ? `${label} abrirá la caja (ya en turno — no hace falta fichar otra vez).`
+            : `${label} abrirá la caja (puedes fichar después).`,
         });
       }
     },
     [onMemberClockedIn, team, vacationBlockedById],
   );
 
-  // Embedded: si ya hay gente en turno, seleccionar opener sin exigir un fichaje nuevo.
+  // Embedded: elegir quién abre sin exigir fichaje (turno presente o primer miembro disponible).
   useEffect(() => {
     if (!embedded || loading || didAutoSelectOpenerRef.current) return;
     const present = team
@@ -3432,12 +3424,21 @@ function ClockInModal({
         return mid && isClockinPresent(st) && !vacationBlockedById[mid] ? mid : '';
       })
       .filter(Boolean);
-    if (present.length === 0) return;
+    const available = team
+      .map((m) => {
+        const mid = memberKey(m);
+        return mid && !vacationBlockedById[mid] ? mid : '';
+      })
+      .filter(Boolean);
+    const pool = present.length > 0 ? present : available;
+    if (pool.length === 0) return;
     didAutoSelectOpenerRef.current = true;
-    const prefer = selectedOpenerId && present.includes(selectedOpenerId)
-      ? selectedOpenerId
-      : present[0];
-    selectOpener(prefer, { silent: true });
+    const ownerNorm = normalizeClockinUserId(ownerUserId);
+    const prefer =
+      (selectedOpenerId && pool.includes(selectedOpenerId) && selectedOpenerId)
+      || (ownerNorm && pool.includes(ownerNorm) && ownerNorm)
+      || pool[0];
+    selectOpener(prefer, { silent: true, alreadyOnShift: present.includes(prefer) });
   }, [
     embedded,
     loading,
@@ -3445,6 +3446,7 @@ function ClockInModal({
     todayRecords,
     vacationBlockedById,
     selectedOpenerId,
+    ownerUserId,
     selectOpener,
   ]);
 
@@ -3574,7 +3576,7 @@ function ClockInModal({
             </h2>
             <p className="text-[11px] text-stone-500 dark:text-stone-400 truncate">
               {embedded
-                ? 'Ficha o, si ya estás en turno, pulsa Abrir'
+                ? 'Pulsa Abrir en tu nombre (fichar es opcional)'
                 : `${storeLabel || 'Tienda'} · Pulsa Fichar al entrar`}
             </p>
           </div>
@@ -3677,28 +3679,48 @@ function ClockInModal({
                     </p>
                   </div>
                   {canFichar ? (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void handleClockIn(member)}
-                      className="shrink-0 min-h-9 px-3 rounded-lg bg-[#2563EB] hover:bg-blue-700 text-white text-xs font-bold disabled:opacity-40 inline-flex items-center gap-1"
-                    >
-                      {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogIn className="w-3.5 h-3.5" />}
-                      Fichar
-                    </button>
+                    <div className="shrink-0 flex gap-1">
+                      <button
+                        type="button"
+                        disabled={busy || onVacation || isOpener}
+                        onClick={() => selectOpener(mid, { alreadyOnShift: false })}
+                        className={`min-h-9 px-2.5 rounded-lg text-[10px] font-bold disabled:opacity-40 ${
+                          isOpener
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-[#2563EB] hover:bg-blue-700 text-white'
+                        }`}
+                        title="Abrir la caja con este trabajador (sin fichar)"
+                      >
+                        {isOpener ? 'Elegido' : 'Abrir'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void handleClockIn(member)}
+                        className="min-h-9 px-2.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-bold disabled:opacity-40 inline-flex items-center gap-1"
+                        title="Registrar entrada (opcional)"
+                      >
+                        {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogIn className="w-3.5 h-3.5" />}
+                        Fichar
+                      </button>
+                    </div>
                   ) : (
                     <div className="shrink-0 flex gap-1">
-                      {isWorking && !isOpener ? (
+                      {!isOpener ? (
                         <button
                           type="button"
                           disabled={busy || onVacation}
-                          onClick={() => selectOpener(mid)}
+                          onClick={() => selectOpener(mid, { alreadyOnShift: isWorking })}
                           className="min-h-9 px-2.5 rounded-lg text-[10px] font-bold bg-[#2563EB] hover:bg-blue-700 text-white disabled:opacity-40"
-                          title="Usar este fichaje para abrir la caja"
+                          title="Usar este trabajador para abrir la caja"
                         >
                           Abrir
                         </button>
-                      ) : null}
+                      ) : (
+                        <span className="min-h-9 px-2.5 rounded-lg text-[10px] font-bold bg-emerald-600 text-white inline-flex items-center">
+                          Elegido
+                        </span>
+                      )}
                       <button
                         type="button"
                         disabled={busy || !canBreak}
@@ -3842,11 +3864,19 @@ function ClockInModal({
             </button>
           </div>
         )}
-        {embedded && clockedInCount > 0 ? (
+        {embedded && selectedOpenerId ? (
+          <div className="shrink-0 px-3 py-1.5 border-t border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-950/40">
+            <p className="text-[11px] font-medium text-emerald-700 dark:text-emerald-300 text-center">
+              Listo · pulsa «Abrir caja» abajo
+              {clockedInCount > 0
+                ? ` · ${clockedInCount} fichado${clockedInCount === 1 ? '' : 's'}`
+                : ' · sin fichar también vale'}
+            </p>
+          </div>
+        ) : embedded ? (
           <div className="shrink-0 px-3 py-1.5 border-t border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-950/40">
             <p className="text-[11px] font-medium text-stone-600 dark:text-stone-300 text-center">
-              {clockedInCount} fichado{clockedInCount === 1 ? '' : 's'}
-              {selectedOpenerId ? ' · ya puedes abrir caja' : ' · pulsa Abrir en tu nombre'}
+              Pulsa <strong>Abrir</strong> en tu nombre (no hace falta fichar)
             </p>
           </div>
         ) : null}

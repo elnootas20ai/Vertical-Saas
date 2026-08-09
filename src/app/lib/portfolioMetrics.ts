@@ -3,7 +3,7 @@ import {
   deliveryOrderIncomeAmount,
   shouldSyncDeliveryOrderIncome,
 } from './deliveryOrderFinanceRules';
-import { dedupeOpenRegisterSessions, localCalendarDayKey } from './tpvCajaScope';
+import { dedupeOpenRegisterSessions, localCalendarDayKey, sessionWorkDayKey } from './tpvCajaScope';
 import { countsTowardNewClientMetrics } from './clientAcquisition';
 import {
   foodFamilyCountsFromOrdersToday,
@@ -1061,6 +1061,81 @@ function channelsFromOrders(orders: DeliveryOrder[]): OpsExcelChannels {
   return acc;
 }
 
+const VERTIAL_APP_CHANNELS = ['flipdish', 'app'] as const;
+
+/**
+ * Totales de integradores declarados a mano al cierre (Caja 2).
+ * Misma prioridad que el Excel Uriel: aggregatorClosingTotals > salesByChannel.
+ */
+export function aggregatorChannelsFromClosingSessions(
+  sessions: TpvRegisterSession[],
+  dayKey: string,
+  pdvId: string,
+): Pick<OpsExcelChannels, 'app' | 'uber' | 'justEat' | 'glovo'> | null {
+  const pid = String(pdvId || '').trim();
+  if (!pid || !dayKey || !Array.isArray(sessions) || sessions.length === 0) return null;
+
+  const daySessions = sessions.filter((s) => {
+    if (String(s.pointOfSaleId || '').trim() !== pid) return false;
+    const workDay = sessionWorkDayKey(s);
+    return workDay === dayKey;
+  });
+  if (daySessions.length === 0) return null;
+
+  const channelAmt = (session: TpvRegisterSession, channel: string): number => {
+    const fromAgg = Number(session.aggregatorClosingTotals?.[channel] || 0);
+    if (fromAgg > 0) return Math.round(fromAgg * 100) / 100;
+    const fromSummary = Number(session.summary?.salesByChannel?.[channel] || 0);
+    const fromSession = Number(session.salesByChannel?.[channel] || 0);
+    return Math.round((fromAgg || fromSummary || fromSession) * 100) / 100;
+  };
+
+  let glovo = 0;
+  let uber = 0;
+  let justEat = 0;
+  let app = 0;
+  let declared = false;
+  for (const s of daySessions) {
+    const hasAgg =
+      s.aggregatorClosingTotals &&
+      Object.values(s.aggregatorClosingTotals).some((v) => Number(v) > 0);
+    if (hasAgg) declared = true;
+    glovo += channelAmt(s, 'glovo');
+    uber += channelAmt(s, 'ubereats');
+    justEat += channelAmt(s, 'justeat');
+    for (const ch of VERTIAL_APP_CHANNELS) {
+      app += channelAmt(s, ch);
+    }
+  }
+  glovo = Math.round(glovo * 100) / 100;
+  uber = Math.round(uber * 100) / 100;
+  justEat = Math.round(justEat * 100) / 100;
+  app = Math.round(app * 100) / 100;
+
+  if (!declared && glovo <= 0 && uber <= 0 && justEat <= 0 && app <= 0) return null;
+  return { glovo, uber, justEat, app };
+}
+
+/** Pedidos locales + overlay de lo tecleado en Caja 2 (Glovo / Uber / Just Eat / App). */
+function channelsForOpsDay(
+  orders: DeliveryOrder[],
+  sessions: TpvRegisterSession[] | undefined,
+  dayKey: string,
+  pdvId: string,
+): OpsExcelChannels {
+  const base = channelsFromOrders(orders);
+  if (!sessions?.length) return base;
+  const fromClosing = aggregatorChannelsFromClosingSessions(sessions, dayKey, pdvId);
+  if (!fromClosing) return base;
+  return {
+    ...base,
+    glovo: fromClosing.glovo,
+    uber: fromClosing.uber,
+    justEat: fromClosing.justEat,
+    app: fromClosing.app,
+  };
+}
+
 export type StoreOpsDay = {
   dayKey: string;
   /** Ej. "Lun 22" */
@@ -1217,9 +1292,21 @@ export function buildStoreOpsPulse(
     workCenterId?: string | null;
     todayKey: string;
     dayKeys: string[];
+    /** Sesiones de caja: Glovo/Uber/JE/App desde lo declarado al cierre (Caja 2). */
+    sessions?: TpvRegisterSession[];
   },
 ): StoreOpsPulse {
-  const { storeId, storeName, businessId, businessName, pdvId, workCenterId, todayKey, dayKeys } = opts;
+  const {
+    storeId,
+    storeName,
+    businessId,
+    businessName,
+    pdvId,
+    workCenterId,
+    todayKey,
+    dayKeys,
+    sessions,
+  } = opts;
   if (!pdvId || dayKeys.length === 0) {
     return emptyStoreOpsPulse({ storeId, storeName, businessId, businessName, pdvId });
   }
@@ -1232,7 +1319,7 @@ export function buildStoreOpsPulse(
     const revenueOrders = scoped.filter((o) => isRevenueOnDay(o, dayKey));
     const revenue = Math.round(revenueOrders.reduce((s, o) => s + deliveryOrderRevenueAmount(o), 0) * 100) / 100;
     const ordersCount = revenueOrders.length;
-    const channels = channelsFromOrders(revenueOrders);
+    const channels = channelsForOpsDay(revenueOrders, sessions, dayKey, pdvId);
     const prevKey = index > 0 ? dayKeys[index - 1] : null;
     let revenueDeltaPct: number | null = null;
     if (prevKey) {

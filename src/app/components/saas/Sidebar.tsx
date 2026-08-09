@@ -1567,9 +1567,9 @@ function SidebarInner({
     (item.id === 'cleaning-reports' && (location.pathname.startsWith('/saas/cleaning-reports') || location.pathname.startsWith('/saas/vertical/limpieza/informes'))) ||
     (item.id === 'cleaning-execution' && location.pathname.startsWith('/saas/cleaning-execution')) ||
     (item.id === 'catalog' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'catalog') ||
-    (item.id === 'catalog-carta' && location.pathname.startsWith('/saas/catalog') && ['catalog', 'tpv-templates', 'escandallo'].includes(catalogTab)) ||
+    (item.id === 'catalog-carta' && location.pathname.startsWith('/saas/catalog') && ['catalog', 'escandallo', 'ingredientes', 'tpv-templates'].includes(catalogTab)) ||
     (item.id === 'catalog-stock' && location.pathname.startsWith('/saas/inventory')) ||
-    (item.id === 'catalog-stock-tpv' && location.pathname.startsWith('/saas/catalog') && ['stock', 'ingredientes'].includes(catalogTab)) ||
+    (item.id === 'catalog-stock-tpv' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'stock') ||
     (item.id === 'catalog-purchases' && location.pathname.startsWith('/saas/catalog') && ['suppliers', 'purchase-orders', 'invoices'].includes(catalogTab)) ||
     (item.id === 'catalog-consumos' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'staff-consumption') ||
     (item.id === 'costing' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'escandallo') ||

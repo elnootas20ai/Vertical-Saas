@@ -555,38 +555,41 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
       const { items: withCosts, appliedCount } = applyVertialDefaultsToStoreIngredients(deduped, lineBrands);
       const needsPersistSplit =
         lineBrands.length > 1 && storeIngredientsNeedPerBrandSplit(merged, brandIds);
+      const needsPersistCosts = appliedCount > 0;
+      const persistItems = withCosts;
 
       setConfigDocId(cfg._id || `dlvconf-${normalizeTenantUserId(userId)}`);
       setConfigRev(cfg._rev);
       setBrands(lineBrands);
-      setItems(withCosts);
+      setItems(persistItems);
       if (mergedCount > 0) {
         setDirty(true);
         toast.message(`Fusionamos ${mergedCount} duplicado(s) al cargar`, { duration: 5000 });
-      } else if (appliedCount > 0) {
-        setDirty(true);
-        toast.message(`Costes de referencia Vertial aplicados a ${appliedCount} ingrediente(s)`, {
-          duration: 5000,
-        });
       }
 
-      if (needsPersistSplit && deduped.length > 0) {
+      if ((needsPersistSplit || needsPersistCosts) && persistItems.length > 0) {
         try {
           const saved = await updateDeliveryConfigRequest(userId, {
             _id: cfg._id || `dlvconf-${normalizeTenantUserId(userId)}`,
             _rev: cfg._rev,
-            storeIngredients: normalizeStoreIngredients(deduped),
+            storeIngredients: normalizeStoreIngredients(persistItems),
           } as Parameters<typeof updateDeliveryConfigRequest>[1]);
           setConfigDocId(saved._id || cfg._id);
           setConfigRev(saved._rev);
           notifyDeliveryConfigChanged();
-          toast.success('Ingredientes separados por marca (modomio / blackburger…)', { duration: 5000 });
+          if (needsPersistSplit) {
+            toast.success('Ingredientes separados por marca (modomio / blackburger…)', { duration: 5000 });
+          }
+          // Costes de referencia Vertial: se guardan en silencio (evita toast en cada entrada).
+          setDirty(mergedCount > 0);
         } catch {
           setDirty(true);
-          toast.message('Revisa y guarda: hay ingredientes compartidos entre marcas', { duration: 6000 });
+          if (needsPersistSplit) {
+            toast.message('Revisa y guarda: hay ingredientes compartidos entre marcas', { duration: 6000 });
+          }
         }
       } else {
-        setDirty(false);
+        setDirty(mergedCount > 0);
       }
       setSelectedBrandId((prev) =>
         prev && brandIds.includes(prev) ? prev : brandIds[0] || '',

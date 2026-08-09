@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Plus, ChevronDown, Sparkles, Upload, Zap } from 'lucide-react';
+import { VERTIAL_BTN_PRIMARY } from '../../lib/vertialUiTokens';
 
 export interface AddButtonOption {
   id: 'quick' | 'ai' | 'import';
@@ -95,7 +96,7 @@ export function AddButtonDropdown({
           }
           setOpen(v => !v);
         }}
-        className="flex items-center gap-1.5 px-4 py-2.5 bg-gray-900 hover:bg-black dark:bg-gray-100 dark:hover:bg-white dark:text-gray-900 text-white rounded-xl text-sm font-medium transition-colors"
+        className={`${VERTIAL_BTN_PRIMARY} !min-h-0 px-3 py-1.5 text-xs gap-1.5`}
       >
         <Plus className="w-4 h-4" />
         <span className="hidden sm:inline">{label}</span>

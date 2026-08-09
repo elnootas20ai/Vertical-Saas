@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { isDeliveryBrandActivationComplete, isDefaultCommercialBrand, resolveBrandSetupContext, sortBrandsForDisplay } from '../../lib/brandUtils';
 import { DELIVERY_MARCA_SETTINGS_PATH } from '../../lib/deliveryActivationGates';
-import { notifyDeliveryBrandsChanged, notifyDeliveryCatalogChanged, resolveBusinessScopeId, DELIVERY_CONFIG_CHANGED } from '../../lib/deliverySetup';
+import { notifyDeliveryBrandsChanged, notifyDeliveryCatalogChanged, notifyDeliveryConfigChanged, resolveBusinessScopeId, DELIVERY_CONFIG_CHANGED } from '../../lib/deliverySetup';
 import {
   isDeliveryOpsBusinessType,
   isIceCreamShopBusinessType,
@@ -85,6 +85,7 @@ import {
   deletePurchaseInvoiceRequest,
   listDeliveryOrdersRequest,
   getDeliveryConfigRequest,
+  updateDeliveryConfigRequest,
   type CatalogItem,
   type CatalogComboRef,
   type DeliveryOrder,
@@ -164,6 +165,9 @@ import {
   normalizeCatalogIngredientsForSave,
   unifyStoreIngredientsFromConfig,
   resolveTpvBrandConfigFromDeliveryConfig,
+  ingredientChargesExtra,
+  normalizeTpvDefaultExtraPrice,
+  inferTpvDefaultExtraPrice,
   type StoreIngredient,
   type TpvBrandIngredientSelection,
 } from '../../lib/catalogCustomization';
@@ -186,6 +190,7 @@ import { syncInventoryCatalogFromSources } from '../../lib/inventorySync';
 import { syncRecipesFromCostingCatalog } from '../../lib/recipeSyncFromCosting';
 import { COMBO_SLOT_META, DEFAULT_COMBO_STRUCTURE, comboStructureFromCustomFields, isComboStructureConfirmed, resolveComboRefSlotKind, type ComboStructureSlot } from '../../lib/catalogComboSlots';
 import { buildCatalogSalesIndex, computeCatalogItemSalesStats } from '../../lib/catalogItemSalesStats';
+import { VERTIAL_BTN_PRIMARY } from '../../lib/vertialUiTokens';
 import {
   applyCatalogMoveTarget,
   commercialLinesWithoutCatalogItems,
@@ -305,6 +310,8 @@ interface CreateCatalogItemModalProps {
   onClose: () => void;
   onCreate: (data: Partial<CatalogItem>, options?: { keepOpen?: boolean }) => Promise<void>;
   editItem?: CatalogItem | null;
+  /** Al crear: arranca como combo con este producto ya metido en la composición. */
+  seedFromProduct?: CatalogItem | null;
   brands: Brand[];
   businessId: string;
   dataUserId?: string;
@@ -322,6 +329,7 @@ function CreateCatalogItemModal({
   onClose,
   onCreate,
   editItem,
+  seedFromProduct = null,
   brands,
   businessId,
   dataUserId,
@@ -448,11 +456,55 @@ function CreateCatalogItemModal({
     if (!justOpened) return;
 
     setSessionCreated([]);
+    setRecipePicks([]);
+    const defaultId = defaultBrandIdForCatalog(brands);
+
+    if (seedFromProduct) {
+      const seedRef: CatalogComboRef = {
+        productId: seedFromProduct._id,
+        productName: seedFromProduct.name,
+        quantity: 1,
+        slotKind: 'main',
+      };
+      setComboItems([seedRef]);
+      setComboStructure(DEFAULT_COMBO_STRUCTURE.map((s) => ({ ...s })));
+      setComboStructureConfirmed(true);
+      const seedBrands = Array.isArray(seedFromProduct.brandIds)
+        ? seedFromProduct.brandIds.filter(Boolean)
+        : [];
+      setForm({
+        itemType: 'combo',
+        name: `Menú con ${seedFromProduct.name}`,
+        description: '',
+        category: 'Combos',
+        unit: 'ud',
+        selectedBrandIds: seedBrands.length > 0 ? seedBrands : defaultId ? [defaultId] : [],
+        newBrandName: '',
+        showNewBrand: false,
+        unitPrice: '',
+        staffPrice: '',
+        costPrice: '',
+        stockQuantity: '',
+        minStock: '',
+        image: '',
+        allergens: [],
+        notes: '',
+        webVisible: true,
+        available: true,
+        ingredients: '',
+        supplements: [],
+        halfHalf: false,
+        buildYourOwn: false,
+        halfHalfAllowedProductIds: [],
+        buildYourOwnAllowedIngredientIds: [],
+      });
+      setStep(1);
+      return;
+    }
+
     setComboItems([]);
     setComboStructure(DEFAULT_COMBO_STRUCTURE.map((s) => ({ ...s })));
     setComboStructureConfirmed(true);
-    setRecipePicks([]);
-    const defaultId = defaultBrandIdForCatalog(brands);
     setForm({
       itemType: 'product', name: '', description: '', category: '', unit: 'ud',
       selectedBrandIds: defaultId ? [defaultId] : [],
@@ -465,15 +517,15 @@ function CreateCatalogItemModal({
       buildYourOwnAllowedIngredientIds: [],
     });
     setStep(1);
-  }, [editItem, isOpen]);
+  }, [editItem, seedFromProduct, isOpen, brands]);
 
   /** Si las marcas cargan después de abrir el modal, preselecciona la línea comercial por defecto. */
   useEffect(() => {
-    if (!isOpen || editItem) return;
+    if (!isOpen || editItem || seedFromProduct) return;
     const defaultId = defaultBrandIdForCatalog(brands);
     if (!defaultId) return;
     setForm((f) => (f.selectedBrandIds.length > 0 ? f : { ...f, selectedBrandIds: [defaultId] }));
-  }, [isOpen, editItem, brands]);
+  }, [isOpen, editItem, seedFromProduct, brands]);
 
   const reloadModalTpvIngredients = useCallback(async () => {
     if (!dataUserId) {
@@ -625,7 +677,7 @@ function CreateCatalogItemModal({
       )
     ) {
       toast.error(
-        'Pizza al gusto: crea antes los ingredientes base en la ficha de un producto → «Gestionar ingredientes» (sin precio extra).',
+        'Pizza al gusto: crea antes los ingredientes base en Catálogo → Ingredientes (sin precio extra).',
       );
       return false;
     }
@@ -1260,7 +1312,7 @@ function CreateCatalogItemModal({
               'Cargando ingredientes del TPV…'
             ) : (
               <>
-                Aún no hay ingredientes base. Créalos desde la ficha de un producto → <strong>Gestionar ingredientes</strong> (sin precio extra).
+                Aún no hay ingredientes base. Créalos en Catálogo → <strong>Ingredientes</strong> (sin precio extra).
               </>
             )}
           </p>
@@ -2561,7 +2613,8 @@ function CatalogTabLoadingState({ phase }: { phase: CatalogLoadPhase }) {
   );
 }
 
-const TABS_NEED_CATALOG = new Set(['catalog', 'stock', 'staff-consumption']);
+/** Incluye purchase-orders: el modal de pedido necesita artículos del catálogo. */
+const TABS_NEED_CATALOG = new Set(['catalog', 'stock', 'staff-consumption', 'purchase-orders']);
 
 /** Orden de secciones en la pestaña Catálogo (delivery / TPV). */
 const CATALOG_SECTION_ORDER = [
@@ -2690,6 +2743,10 @@ export function CatalogPage() {
   const [brandsLoading, setBrandsLoading] = useState(false);
   const [storeIngredients, setStoreIngredients] = useState<StoreIngredient[]>([]);
   const [brandIngredientSelection, setBrandIngredientSelection] = useState<TpvBrandIngredientSelection>({});
+  const [tpvFreeSwapOnRemove, setTpvFreeSwapOnRemove] = useState(false);
+  const [savingTpvFreeSwap, setSavingTpvFreeSwap] = useState(false);
+  const [tpvDefaultExtraPrice, setTpvDefaultExtraPrice] = useState('');
+  const [savingTpvExtraPrice, setSavingTpvExtraPrice] = useState(false);
   const accountBusinessCount = businesses.length;
   const [allCatalogItems, setAllCatalogItems] = useState<CatalogItem[]>([]);
   const catalogItems = useMemo(
@@ -2713,9 +2770,12 @@ export function CatalogPage() {
     [catalogMenuItemsRaw, businessId],
   );
 
-  /** Catálogo completo para armar menús/combos (pizzas + bebidas + complementos). */
+  /** Catálogo de carta para armar menús/combos (sin ingredientes de almacén). */
   const catalogForComboEditor = useMemo(
-    () => catalogItems.filter((item) => item.active !== false),
+    () =>
+      catalogItems.filter(
+        (item) => item.active !== false && (item.module || 'catalog') === 'catalog',
+      ),
     [catalogItems],
   );
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -2763,6 +2823,7 @@ export function CatalogPage() {
   // Catalog state
   const [showCreateItem, setShowCreateItem] = useState(false);
   const [editingItem, setEditingItem] = useState<CatalogItem | null>(null);
+  const [comboSeedProduct, setComboSeedProduct] = useState<CatalogItem | null>(null);
   const [detailItem, setDetailItem] = useState<CatalogItem | null>(null);
   /** Organizador (categoría) activo en la pestaña Catálogo: una tabla a la vez, sin lista infinita. */
   const [activeCatalogCategory, setActiveCatalogCategory] = useState<string | null>(null);
@@ -3227,6 +3288,8 @@ export function CatalogPage() {
     if (!dataUserId) {
       setStoreIngredients([]);
       setBrandIngredientSelection({});
+      setTpvFreeSwapOnRemove(false);
+      setTpvDefaultExtraPrice('');
       return;
     }
     try {
@@ -3243,12 +3306,61 @@ export function CatalogPage() {
       const { ingredientSelection } = resolveTpvBrandConfigFromDeliveryConfig(config, brandIds);
       setStoreIngredients(unified);
       setBrandIngredientSelection(ingredientSelection);
+      setTpvFreeSwapOnRemove(config?.tpvFreeSwapOnRemove === true);
+      setTpvDefaultExtraPrice(
+        String(inferTpvDefaultExtraPrice(unified, config?.tpvDefaultExtraPrice) || ''),
+      );
     } catch {
       setStoreIngredients([]);
       setBrandIngredientSelection({});
+      setTpvFreeSwapOnRemove(false);
+      setTpvDefaultExtraPrice('');
     }
   }, [dataUserId, businessId, brands]);
 
+  const handleToggleTpvFreeSwap = useCallback(
+    async (next: boolean) => {
+      if (!dataUserId || savingTpvFreeSwap) return;
+      const prev = tpvFreeSwapOnRemove;
+      setTpvFreeSwapOnRemove(next);
+      setSavingTpvFreeSwap(true);
+      try {
+        await updateDeliveryConfigRequest(dataUserId, { tpvFreeSwapOnRemove: next });
+        notifyDeliveryConfigChanged();
+        toast.success(
+          next
+            ? 'Regla TPV activada: 1 quitado = 1 extra gratis'
+            : 'Regla TPV desactivada',
+        );
+      } catch {
+        setTpvFreeSwapOnRemove(prev);
+        toast.error('No se pudo guardar la regla TPV');
+      } finally {
+        setSavingTpvFreeSwap(false);
+      }
+    },
+    [dataUserId, savingTpvFreeSwap, tpvFreeSwapOnRemove],
+  );
+
+  const handleSaveTpvExtraPrice = useCallback(async () => {
+    if (!dataUserId || savingTpvExtraPrice) return;
+    const price = normalizeTpvDefaultExtraPrice(tpvDefaultExtraPrice);
+    if (price == null) {
+      toast.error('Indica un precio válido para los extras (ej. 1,50)');
+      return;
+    }
+    setSavingTpvExtraPrice(true);
+    try {
+      await updateDeliveryConfigRequest(dataUserId, { tpvDefaultExtraPrice: price });
+      setTpvDefaultExtraPrice(String(price));
+      notifyDeliveryConfigChanged();
+      toast.success(`Precio por extra: ${price.toFixed(2).replace('.', ',')} €`);
+    } catch {
+      toast.error('No se pudo guardar el precio del extra');
+    } finally {
+      setSavingTpvExtraPrice(false);
+    }
+  }, [dataUserId, savingTpvExtraPrice, tpvDefaultExtraPrice]);
   useEffect(() => {
     if (!pageReady) return;
     const onConfigChanged = () => {
@@ -3274,8 +3386,8 @@ export function CatalogPage() {
     void loadTpvIngredients();
   }, [showCreateItem, editingItem, pageReady, loadTpvIngredients]);
 
-  const loadCatalog = useCallback(async () => {
-    if (!dataUserId || !businessId) return;
+  const loadCatalog = useCallback(async (): Promise<boolean> => {
+    if (!dataUserId || !businessId) return false;
     const requestUserId = dataUserId;
     const requestBusinessId = businessId;
     try {
@@ -3287,12 +3399,14 @@ export function CatalogPage() {
         requestUserId !== resolveBusinessDataUserId(user, currentBusiness)
         || requestBusinessId !== resolveBusinessScopeId(currentBusiness)
       ) {
-        return;
+        return false;
       }
       setAllCatalogItems(items);
       setWarehouses(wh);
+      return true;
     } catch {
       toast.error('Error al cargar el catálogo');
+      return false;
     }
   }, [dataUserId, businessId, user, currentBusiness]);
 
@@ -3304,6 +3418,8 @@ export function CatalogPage() {
       setSuppliers(data);
       suppliersFetchedRef.current = true;
     } catch {
+      // Permitir reintento al volver a la pestaña (p. ej. tras caída del backend local).
+      suppliersLoadStartedRef.current = false;
       toast.error('Error al cargar proveedores');
     } finally {
       setSuppliersLoading(false);
@@ -3318,6 +3434,7 @@ export function CatalogPage() {
       setInvoices(data);
       invoicesFetchedRef.current = true;
     } catch {
+      invoicesLoadStartedRef.current = false;
       toast.error('Error al cargar facturas');
     } finally {
       setInvoicesLoading(false);
@@ -3372,10 +3489,10 @@ export function CatalogPage() {
       toast.error('La carga está tardando mucho. Comprueba la conexión e inténtalo de nuevo.');
     }, 25_000);
 
-    void loadCatalog().finally(() => {
+    void loadCatalog().then((ok) => {
       if (cancelled) return;
       window.clearTimeout(timeoutId);
-      catalogLoadedRef.current = true;
+      if (ok) catalogLoadedRef.current = true;
       setLoading(false);
     });
 
@@ -3392,18 +3509,20 @@ export function CatalogPage() {
   }, [loadCatalog]);
 
   useEffect(() => {
-    if (activeTab !== 'suppliers' && activeTab !== 'invoices') return;
+    if (!pageReady || !dataUserId) return;
+    if (activeTab !== 'suppliers' && activeTab !== 'invoices' && activeTab !== 'purchase-orders') return;
     if (suppliersFetchedRef.current || suppliersLoadStartedRef.current) return;
     suppliersLoadStartedRef.current = true;
     void loadSuppliers();
-  }, [activeTab, loadSuppliers]);
+  }, [pageReady, dataUserId, activeTab, loadSuppliers]);
 
   useEffect(() => {
+    if (!pageReady || !dataUserId) return;
     if (activeTab !== 'invoices') return;
     if (invoicesFetchedRef.current || invoicesLoadStartedRef.current) return;
     invoicesLoadStartedRef.current = true;
     void loadInvoices();
-  }, [activeTab, loadInvoices]);
+  }, [pageReady, dataUserId, activeTab, loadInvoices]);
 
   const loadDeliveryOrders = useCallback(async () => {
     if (!dataUserId) return;
@@ -3473,6 +3592,7 @@ export function CatalogPage() {
       if (!options?.keepOpen) {
         setShowCreateItem(false);
         setEditingItem(null);
+        setComboSeedProduct(null);
       }
       if (businessId && savedItem && normalizeCatalogIngredientsForSave(savedItem.customFields?.ingredients)) {
         await syncStoreIngredientsFromCatalogImport(dataUserId, businessId, [savedItem]).catch(() => null);
@@ -3842,6 +3962,7 @@ export function CatalogPage() {
       return;
     }
     setEditingItem(null);
+    setComboSeedProduct(null);
     setShowCreateItem(true);
   }, [dataUserId]);
 
@@ -4091,7 +4212,7 @@ export function CatalogPage() {
             <SaasTabSearch
               value={searchCatalog}
               onChange={setSearchCatalog}
-              placeholder="Buscar en el catálogo…"
+              placeholder="Buscar en el menú…"
               className="relative w-full sm:w-64"
             />
           }
@@ -4266,6 +4387,7 @@ export function CatalogPage() {
           return (
         <div className="p-3 space-y-3">
               {showGrid ? (
+                <>
                 <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
                   {groups.map(({ category, items: groupItems }) => (
                     <button
@@ -4303,21 +4425,137 @@ export function CatalogPage() {
                     </button>
                   ))}
                 </div>
+
+                {usesTpvCatalogUi ? (
+                  <section className="rounded-2xl border-2 border-[var(--v-blue,#2563eb)]/35 bg-white dark:bg-gray-800 p-4 space-y-3 shadow-sm">
+                    <div className="flex items-start gap-2 min-w-0">
+                      <Zap className="w-5 h-5 text-[var(--v-blue,#2563eb)] shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">
+                          Cómo se aplica en el TPV
+                        </h3>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                          Precio de extras y regla de cambio gratis para todo el menú.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/40 p-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-1.5">
+                          Precio por extra (ajustable)
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <div className="relative flex-1 min-w-0">
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              placeholder="0,00"
+                              value={tpvDefaultExtraPrice}
+                              onChange={(e) => setTpvDefaultExtraPrice(e.target.value)}
+                              disabled={savingTpvExtraPrice || !dataUserId}
+                              className="w-full rounded-xl border-2 border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2.5 pr-8 text-sm font-bold tabular-nums text-gray-900 dark:text-gray-100 outline-none focus:border-[var(--v-blue,#2563eb)] disabled:opacity-50"
+                              title="Precio que se suma en el TPV por cada extra"
+                            />
+                            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-gray-400">
+                              €
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={savingTpvExtraPrice || !dataUserId}
+                            onClick={() => void handleSaveTpvExtraPrice()}
+                            className={`shrink-0 px-3 py-2.5 text-xs font-bold disabled:opacity-40 ${VERTIAL_BTN_PRIMARY}`}
+                          >
+                            {savingTpvExtraPrice ? '…' : 'Guardar'}
+                          </button>
+                        </div>
+                        <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400 leading-snug">
+                          Se cobra al añadir un extra en caja. Aplica a todos los extras del menú.
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">
+                          Extras de pago ({storeIngredients.filter((i) => ingredientChargesExtra(i)).length})
+                        </p>
+                        <p className="text-xs text-gray-800 dark:text-gray-200 mt-0.5 leading-snug">
+                          {storeIngredients.filter((i) => ingredientChargesExtra(i)).length > 0
+                            ? storeIngredients
+                                .filter((i) => ingredientChargesExtra(i))
+                                .slice(0, 12)
+                                .map((i) => i.name)
+                                .join(' · ') +
+                              (storeIngredients.filter((i) => ingredientChargesExtra(i)).length > 12
+                                ? '…'
+                                : '')
+                            : 'Aún no hay extras marcados. El precio de arriba ya queda listo para cuando los actives.'}
+                        </p>
+                        <p className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">
+                          Base / quitables:{' '}
+                          <span className="font-semibold text-gray-700 dark:text-gray-300 tabular-nums">
+                            {storeIngredients.filter((i) => !ingredientChargesExtra(i)).length}
+                          </span>
+                        </p>
+                      </div>
+                    </div>
+
+                    <label
+                      className={`flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition-colors ${
+                        tpvFreeSwapOnRemove
+                          ? 'border-[var(--v-blue,#2563eb)] bg-blue-50 dark:bg-blue-950/40'
+                          : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 hover:border-blue-300'
+                      } ${savingTpvFreeSwap ? 'opacity-60 pointer-events-none' : ''}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={tpvFreeSwapOnRemove}
+                        disabled={savingTpvFreeSwap || !dataUserId}
+                        onChange={(e) => {
+                          void handleToggleTpvFreeSwap(e.target.checked);
+                        }}
+                        className="mt-1 rounded border-gray-300 text-[var(--v-blue,#2563eb)] focus:ring-[var(--v-blue,#2563eb)]"
+                      />
+                      <span className="min-w-0">
+                        <span className="block text-sm font-bold text-gray-900 dark:text-gray-100">
+                          Regla TPV · 1 quitado = 1 extra gratis
+                        </span>
+                        <span className="block text-xs text-gray-600 dark:text-gray-300 mt-1 leading-snug">
+                          Ejemplo: quita mozzarella y pone bacon → bacon a 0 €. Dos quitados → dos extras gratis.
+                          El resto se cobra. Aplica a todo el menú en caja.
+                        </span>
+                        <span
+                          className={`mt-2 inline-flex text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md ${
+                            tpvFreeSwapOnRemove
+                              ? 'bg-[var(--v-blue,#2563eb)] text-white'
+                              : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
+                          }`}
+                        >
+                          {savingTpvFreeSwap
+                            ? 'Guardando…'
+                            : tpvFreeSwapOnRemove
+                              ? 'Activada'
+                              : 'Desactivada'}
+                        </span>
+                      </span>
+                    </label>
+                  </section>
+                ) : null}
+                </>
               ) : (
               <div
                 className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden"
               >
                 <div className="flex items-center gap-2 px-3 py-2.5 border-b border-gray-100 dark:border-gray-700">
                   {!searchActive && groups.length > 1 ? (
-                    <button
+                    <SaasTabSecondaryButton
                       type="button"
                       onClick={() => setActiveCatalogCategory(null)}
-                      className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200 transition-colors shrink-0"
                       title="Volver a las categorías"
+                      className="shrink-0"
                     >
                       <ArrowLeft className="w-4 h-4" />
                       Categorías
-                    </button>
+                    </SaasTabSecondaryButton>
                   ) : null}
                   <span className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate">{shownTitle}</span>
                   <span className="text-xs text-gray-400 dark:text-gray-500 tabular-nums shrink-0">
@@ -4433,7 +4671,7 @@ export function CatalogPage() {
                               <Globe className="w-4 h-4" />
                             </button>
                             <button
-                              onClick={() => { setEditingItem(item); setShowCreateItem(true); }}
+                              onClick={() => { setEditingItem(item); setComboSeedProduct(null); setShowCreateItem(true); }}
                               className="p-2 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
                               title="Editar"
                             >
@@ -4593,7 +4831,7 @@ export function CatalogPage() {
                                     <Globe className="w-4 h-4" />
                                   </button>
                                   <button
-                                    onClick={() => { setEditingItem(item); setShowCreateItem(true); }}
+                                    onClick={() => { setEditingItem(item); setComboSeedProduct(null); setShowCreateItem(true); }}
                                     className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-gray-700 transition-colors"
                                     title="Editar"
                                   >
@@ -5063,15 +5301,19 @@ export function CatalogPage() {
     {
       id: 'carta',
       label: 'Carta',
-      // Ingredientes y escandallo viven dentro de la ficha de cada producto (popup).
       tabs: [
-        { id: 'catalog', label: 'Catálogo', count: catalogMenuItems.filter((i) => i.active).length || undefined },
+        { id: 'catalog', label: 'Menú', count: catalogMenuItems.filter((i) => i.active).length || undefined },
+        {
+          id: 'ingredientes',
+          label: 'Ingredientes',
+          count: storeIngredients.length || undefined,
+        },
+        { id: 'escandallo', label: 'Escandallo' },
       ],
     },
     {
       id: 'almacen',
       label: 'Almacén',
-      // Los ingredientes se gestionan desde la ficha de cada producto («Gestionar ingredientes»).
       tabs: [
         { id: 'stock', label: 'Inventario', count: stockTabCount || undefined },
       ],
@@ -5090,7 +5332,7 @@ export function CatalogPage() {
       label: 'Equipo',
       tabs: [{ id: 'staff-consumption', label: 'Consumos' }],
     },
-  ], [stockTabCount, catalogMenuItems, supplierKpis.active, invoiceKpis.pending]);
+  ], [stockTabCount, catalogMenuItems, storeIngredients, supplierKpis.active, invoiceKpis.pending]);
 
   const brandSetupCtx = useMemo(
     () =>
@@ -5116,7 +5358,7 @@ export function CatalogPage() {
   const catalogBusy = loading && catalogItems.length === 0;
 
   return (
-    <Layout backTo="/saas/delivery-ops" title="Catálogo" subtitle="Carta · Almacén · Compras · Consumos">
+    <Layout backTo="/saas/delivery-ops" title="Catálogo" subtitle="Menú · Ingredientes · Inventario · Compras · Consumos">
       <div className="space-y-3">
         {!pageReady && (
           <CatalogTabLoadingState phase="session" />
@@ -5190,6 +5432,7 @@ export function CatalogPage() {
 
         {activeTab === 'purchase-orders' && (
           <PurchaseOrdersPage
+            dataUserId={dataUserId}
             suppliers={suppliers}
             catalogItems={catalogItems}
             onGoToInvoices={() => setActiveTab('invoices')}
@@ -5209,9 +5452,14 @@ export function CatalogPage() {
 
       <CreateCatalogItemModal
         isOpen={showCreateItem}
-        onClose={() => { setShowCreateItem(false); setEditingItem(null); }}
+        onClose={() => {
+          setShowCreateItem(false);
+          setEditingItem(null);
+          setComboSeedProduct(null);
+        }}
         onCreate={handleCreateItem}
         editItem={editingItem}
+        seedFromProduct={comboSeedProduct}
         brands={brands}
         businessId={businessId}
         dataUserId={dataUserId}
@@ -5232,6 +5480,13 @@ export function CatalogPage() {
           storeIngredients={storeIngredients}
           dataUserId={dataUserId}
           businessId={businessId}
+          onArmCombo={() => {
+            const seed = detailItem;
+            setDetailItem(null);
+            setEditingItem(null);
+            setComboSeedProduct(seed);
+            setShowCreateItem(true);
+          }}
           onCostingSaved={(saved) => {
             setAllCatalogItems((prev) => prev.map((i) => (i._id === saved._id ? saved : i)));
             setDetailItem(saved);

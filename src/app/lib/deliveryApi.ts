@@ -2236,11 +2236,34 @@ export async function listTpvRegisterSessionsRequest(
   if (options?.businessId?.trim()) params.set('businessId', options.businessId.trim());
   if (options?.lite) params.set('lite', '1');
   if (options?.dateFrom?.trim()) params.set('dateFrom', options.dateFrom.trim());
-  const qs = params.toString() ? `?${params.toString()}` : '';
-  const payload = await request<{ ok: boolean; sessions: TpvRegisterSession[] }>(
-    `/api/delivery/tpv-sessions/${encodeURIComponent(id)}${qs}`,
-  );
-  return payload.sessions || [];
+  // Cache-buster: algunos navegadores devolvían 304 sin cuerpo y el TPV creía
+  // que no había sesiones (OpeningScreen con caja viva en servidor).
+  params.set('_', String(Date.now()));
+  const qs = `?${params.toString()}`;
+  const response = await authFetch(`${API_BASE}/api/delivery/tpv-sessions/${encodeURIComponent(id)}${qs}`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getCouchHeaders(),
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
+    },
+  });
+  if (response.status === 304) {
+    throw new Error('Sesiones de caja en caché sin cuerpo');
+  }
+  const payload = (await response.json().catch(() => ({}))) as {
+    ok?: boolean;
+    sessions?: TpvRegisterSession[];
+    error?: string;
+  };
+  if (!response.ok) {
+    throw new Error(deliveryRequestErrorMessage(payload, 'No se pudo cargar las sesiones de caja'));
+  }
+  if (!Array.isArray(payload.sessions)) {
+    throw new Error('Respuesta de sesiones de caja inválida');
+  }
+  return payload.sessions;
 }
 
 export async function createTpvRegisterSessionRequest(userId: string, data: Partial<TpvRegisterSession>): Promise<TpvRegisterSession> {
@@ -2399,6 +2422,8 @@ export interface DeliveryConfig {
   storeIngredients?: StoreIngredient[];
   /** Precio único para todos los extras de pago en el TPV. */
   tpvDefaultExtraPrice?: number;
+  /** Menú TPV: por cada ingrediente quitado, 1 extra añadido va sin coste. */
+  tpvFreeSwapOnRemove?: boolean;
   /** Coste de envío automático en TPV (solo pedidos a domicilio). */
   tpvDeliveryFee?: number;
   tpvBrandIngredients?: TpvBrandIngredientSelection;

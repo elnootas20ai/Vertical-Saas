@@ -56,6 +56,7 @@ import {
   repairWorkCenterBusinessScopeForPdv,
   acceptPointOfSaleInBusinessScope,
   listOwnerBusinessesForUser,
+  findBusinessById,
   buildScaleDeviceDocument,
   sanitizeScaleDevice,
   listScaleDevicesByUser,
@@ -3007,17 +3008,20 @@ export async function listTpvRegisterSessions(req, res) {
     }
     const businessFilter = String(req.query.businessId || req.query.business_id || '').trim();
     if (businessFilter) {
-      // Si todas las sesiones ya llevan business_id, no hace falta otro _all_docs de PDVs.
-      const bid = businessFilter.replace(/^business:/, '').trim();
-      const allTagged = sessions.every((s) => Boolean(normalizeTpvSessionBusinessId(s)));
-      if (allTagged) {
-        sessions = sessions.filter((s) => normalizeTpvSessionBusinessId(s) === bid);
-      } else {
-        const scopedPdvs = await listScopedPointsOfSaleForBusiness(req, userId, businessFilter);
-        const scopedPdvIds = new Set(scopedPdvs.map((p) => p._id));
-        sessions = filterTpvRegisterSessionsForBusiness(sessions, businessFilter, scopedPdvIds);
-      }
+      // Siempre vía PDVs de la empresa (no atajo allTagged): hace falta para
+      // recuperar cajas abiertas con business_id desincronizado en el mismo PDV.
+      const beforeBizFilter = sessions;
+      const scopedPdvIds = await collectTpvSessionScopePdvIds(req, userId, businessFilter);
+      sessions = filterTpvRegisterSessionsForBusiness(sessions, businessFilter, scopedPdvIds);
+      sessions = await recoverOpenSessionsWithNonOpsBusinessStamp(
+        req,
+        userId,
+        businessFilter,
+        sessions,
+        beforeBizFilter,
+      );
     }
+    res.setHeader('Cache-Control', 'no-store');
     return res.json({
       ok: true,
       sessions: sessions.map((s) => sanitizeTpvRegisterSession(s, { slimClosed: true })),
@@ -3080,17 +3084,19 @@ export async function listCajaBootstrap(req, res) {
 
     const businessFilter = String(req.query.businessId || req.query.business_id || '').trim();
     if (businessFilter) {
-      const bid = businessFilter.replace(/^business:/, '').trim();
-      const allTagged = tpvSessions.every((s) => Boolean(normalizeTpvSessionBusinessId(s)));
-      if (allTagged) {
-        tpvSessions = tpvSessions.filter((s) => normalizeTpvSessionBusinessId(s) === bid);
-      } else {
-        const scopedPdvs = await listScopedPointsOfSaleForBusiness(req, userId, businessFilter);
-        const scopedPdvIds = new Set(scopedPdvs.map((p) => p._id));
-        tpvSessions = filterTpvRegisterSessionsForBusiness(tpvSessions, businessFilter, scopedPdvIds);
-      }
+      const beforeBizFilter = tpvSessions;
+      const scopedPdvIds = await collectTpvSessionScopePdvIds(req, userId, businessFilter);
+      tpvSessions = filterTpvRegisterSessionsForBusiness(tpvSessions, businessFilter, scopedPdvIds);
+      tpvSessions = await recoverOpenSessionsWithNonOpsBusinessStamp(
+        req,
+        userId,
+        businessFilter,
+        tpvSessions,
+        beforeBizFilter,
+      );
     }
 
+    res.setHeader('Cache-Control', 'no-store');
     return res.json({
       ok: true,
       sessions: tpvSessions.map((s) => sanitizeTpvRegisterSession(s, { slimClosed: true })),
@@ -3188,12 +3194,37 @@ export async function createTpvRegisterSession(req, res) {
       openSameStore[0] ||
       null;
     if (alreadyOpen) {
-      const pdvLabel = alreadyOpen.pointOfSaleName || 'esta tienda';
+      let recovered = alreadyOpen;
+      const openBid = normalizeBusinessScopeId(alreadyOpen.business_id || alreadyOpen.businessId);
+      const targetBid = normalizeBusinessScopeId(businessId);
+      // Si la caja viva quedó con otra empresa (PDV mal enlazado), realinéala al scope
+      // correcto antes de devolverla: el cliente puede entrar sin quedarse bloqueado.
+      if (targetBid && openBid && openBid !== targetBid) {
+        try {
+          const [openBiz, targetBiz] = await Promise.all([
+            findBusinessById(req, openBid),
+            findBusinessById(req, targetBid),
+          ]);
+          if (isTpvOpsBusinessType(targetBiz?.businessType) && !isTpvOpsBusinessType(openBiz?.businessType)) {
+            const repaired = {
+              ...alreadyOpen,
+              business_id: targetBid,
+              businessId: targetBid,
+              updatedAt: new Date().toISOString(),
+            };
+            const saved = await putDocument(req, db, repaired._id, repaired);
+            recovered = { ...repaired, _rev: saved.rev };
+          }
+        } catch {
+          recovered = alreadyOpen;
+        }
+      }
+      const pdvLabel = recovered.pointOfSaleName || 'esta tienda';
       return res.status(409).json({
         ok: false,
-        error: `Ya hay una caja abierta en ${pdvLabel} desde ${new Date(alreadyOpen.openedAt).toLocaleString('es-ES')}. Ciérrala antes de abrir otra.`,
-        existingSessionId: alreadyOpen._id,
-        existingSession: sanitizeTpvRegisterSession(alreadyOpen),
+        error: `Ya hay una caja abierta en ${pdvLabel} desde ${new Date(recovered.openedAt).toLocaleString('es-ES')}. Ciérrala antes de abrir otra.`,
+        existingSessionId: recovered._id,
+        existingSession: sanitizeTpvRegisterSession(recovered),
       });
     }
 
@@ -3468,6 +3499,96 @@ function calendarDayInTimeZone(value, timeZone = 'Europe/Madrid') {
 }
 
 /** Resuelve la empresa real del PDV (legacy sin businessId en tienda, tablet, etc.). */
+function isTpvOpsBusinessType(businessType) {
+  const t = String(businessType || '').trim();
+  return t === 'delivery' || t === 'restaurant' || t === 'iceCreamShop' || t === 'butcherShop';
+}
+
+/**
+ * PDVs visibles para filtrar sesiones de una empresa:
+ * - centros/WC de la empresa
+ * - PDVs cuyo documento ya lleva ese business_id (aunque el WC esté mal etiquetado)
+ */
+async function collectTpvSessionScopePdvIds(req, userId, businessFilter) {
+  const bid = String(businessFilter || '').replace(/^business:/, '').trim();
+  const scopedPdvs = await listScopedPointsOfSaleForBusiness(req, userId, businessFilter);
+  const ids = new Set((scopedPdvs || []).map((p) => String(p._id || '').trim()).filter(Boolean));
+  if (!bid) return ids;
+  try {
+    const allPdvs = await listPointsOfSaleByUser(req, userId);
+    for (const p of allPdvs || []) {
+      if (!p || p.deletedAt || p.active === false) continue;
+      const pb = normalizeBusinessScopeId(p.business_id || p.businessId);
+      if (pb === bid) {
+        const id = String(p._id || '').trim();
+        if (id) ids.add(id);
+      }
+    }
+  } catch {
+    /* scoped list alone */
+  }
+  return ids;
+}
+
+/**
+ * Si una caja ABIERTA quedó etiquetada a vertical no-TPV (realEstate, etc.)
+ * mientras el listado pide delivery/restaurante, inclúyela para no bloquear el TPV.
+ * No mezcla cajas de otra empresa delivery/ops del mismo dueño.
+ */
+async function recoverOpenSessionsWithNonOpsBusinessStamp(
+  req,
+  userId,
+  businessFilter,
+  filteredSessions,
+  allSessions,
+) {
+  const bid = normalizeBusinessScopeId(businessFilter);
+  if (!bid) return filteredSessions;
+  let reqBiz = null;
+  try {
+    reqBiz = await findBusinessById(req, bid);
+  } catch {
+    return filteredSessions;
+  }
+  if (!isTpvOpsBusinessType(reqBiz?.businessType)) return filteredSessions;
+
+  const kept = new Set(
+    (filteredSessions || []).map((s) => String(s?._id || '').trim()).filter(Boolean),
+  );
+  let userPdvById = new Map();
+  try {
+    const allPdvs = await listPointsOfSaleByUser(req, userId);
+    userPdvById = new Map(
+      (allPdvs || [])
+        .filter((p) => p && !p.deletedAt && pdvDocMatchesUser(p, userId))
+        .map((p) => [String(p._id || '').trim(), p]),
+    );
+  } catch {
+    return filteredSessions;
+  }
+
+  const extras = [];
+  for (const s of allSessions || []) {
+    const sid = String(s?._id || '').trim();
+    if (!sid || kept.has(sid)) continue;
+    if (String(s.status || '').toLowerCase() !== 'open' || s.deletedAt) continue;
+    const pdvId = String(s.pointOfSaleId || '').trim();
+    if (!pdvId || !userPdvById.has(pdvId)) continue;
+    const sBid = normalizeTpvSessionBusinessId(s);
+    if (!sBid || sBid === bid) continue;
+    let sBiz = null;
+    try {
+      sBiz = await findBusinessById(req, sBid);
+    } catch {
+      sBiz = null;
+    }
+    // Solo recuperar stamps no-ops; no cruzar dos marcas delivery.
+    if (isTpvOpsBusinessType(sBiz?.businessType)) continue;
+    extras.push(s);
+  }
+  return extras.length ? [...filteredSessions, ...extras] : filteredSessions;
+}
+
 async function resolveTpvSessionBusinessScope(req, userId, pdvId, requestedBusinessId) {
   const pdvDoc = await ensurePointOfSaleOwner(req, userId, pdvId);
   if (!pdvDoc) {
@@ -3480,6 +3601,34 @@ async function resolveTpvSessionBusinessScope(req, userId, pdvId, requestedBusin
     normalizeBusinessScopeId((await resolveBusinessDocumentForPointOfSale(req, pdvDoc))?.business_id);
   const requested = normalizeBusinessScopeId(requestedBusinessId);
   let businessId = fromPdv || requested;
+
+  // PDV mal enlazado a vertical no-TPV (p. ej. realEstate): preferir la empresa
+  // delivery/restaurante que pide el cliente y reparar el enlace.
+  if (requested && fromPdv && requested !== fromPdv) {
+    try {
+      const [reqBiz, pdvBiz] = await Promise.all([
+        findBusinessById(req, requested),
+        findBusinessById(req, fromPdv),
+      ]);
+      const reqOps = isTpvOpsBusinessType(reqBiz?.businessType);
+      const pdvOps = isTpvOpsBusinessType(pdvBiz?.businessType);
+      if (reqOps && !pdvOps) {
+        businessId = requested;
+        const db = getDeliveryDbName();
+        const currentPdvBid = normalizeBusinessScopeId(pdvDoc.business_id || pdvDoc.businessId);
+        if (currentPdvBid !== requested) {
+          await putDocument(req, db, pdvDoc._id, {
+            ...pdvDoc,
+            business_id: requested,
+            businessId: requested,
+            updatedAt: new Date().toISOString(),
+          }).catch(() => null);
+        }
+      }
+    } catch {
+      /* keep fromPdv */
+    }
+  }
 
   if (businessId) {
     await repairWorkCenterBusinessScopeForPdv(req, userId, pdvDoc, businessId).catch(() => false);

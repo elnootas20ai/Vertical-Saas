@@ -824,6 +824,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
               pdvId: pdvId || '',
               workCenterId: wc._id,
               todayKey,
+              sessions: tpvSessions || [],
             };
             return pdvId
               ? buildStoreOpsPulse(orderResult.orders || [], { ...pulseBase, dayKeys })

@@ -374,6 +374,30 @@ export function registerSessionSpansMultipleDays(
   return openKey !== endKey;
 }
 
+export function shouldKeepTpvSessionInClientList(
+  session: TpvRegisterSession,
+  scopedPdvs: Array<{ _id: string; workCenterId?: string }>,
+  businessId?: string,
+): boolean {
+  const pid = String(session.pointOfSaleId || '').trim();
+  const matchesScopedPdv = () =>
+    Boolean(
+      pid
+      && (
+        scopedPdvs.some((p) => p._id === pid)
+        || scopedPdvs.some((p) => String(p.workCenterId || '').trim() === pid)
+      ),
+    );
+  if (scopedPdvs.length === 0) return true;
+  if (String(session.status || '').toLowerCase() === 'open' && matchesScopedPdv()) return true;
+  const pdvIds = new Set(scopedPdvs.map((p) => p._id));
+  if (businessId && !tpvSessionBelongsToBusiness(session, businessId, pdvIds)) {
+    return false;
+  }
+  if (!pid) return !businessId;
+  return matchesScopedPdv();
+}
+
 /**
  * Al refrescar/recargar sesiones de caja, no tirar una caja abierta local
  * si el servidor la omite un momento (filtro businessId, PDVs aún vacíos, glitch de red).

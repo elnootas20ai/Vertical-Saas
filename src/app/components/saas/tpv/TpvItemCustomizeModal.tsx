@@ -4,7 +4,9 @@ import type { CatalogItem } from '../../../lib/deliveryApi';
 import {
   type CartLineCustomization,
   type CatalogSupplement,
+  applyFreeSwapCreditsToSupplements,
   cartLineUnitPrice,
+  catalogItemAllowsFreeSwapOnRemove,
   isCustomizableCatalogItem,
   isTpvBuildYourOwnCatalogItem,
   isTpvHalfHalfCatalogItem,
@@ -12,6 +14,7 @@ import {
   parseCatalogSupplements,
   resolveBuildYourOwnMaxIngredients,
   tpvBuildYourOwnIngredientPool,
+  withFreeSwapApplied,
   type StoreIngredient,
 } from '../../../lib/catalogCustomization';
 import { foldTpvSearchText } from '../../../lib/tpvCatalogNavigation';
@@ -29,6 +32,8 @@ type TpvItemCustomizeModalProps = {
   brandIngredientSelection?: import('../../../lib/catalogCustomization').TpvBrandIngredientSelection;
   brandSupplements?: import('../../../lib/catalogCustomization').TpvBrandSupplements;
   defaultExtraPrice?: number;
+  /** Config tienda (Catálogo → Menú): 1 quitado = 1 extra gratis. */
+  freeSwapOnRemove?: boolean;
   brands?: Array<{ _id: string; deliveryLineKind?: string; catalogCategories?: string[] }>;
   /** Catálogo TPV completo (combos → ingredientes de productos incluidos). */
   catalogItems?: CatalogItem[];
@@ -66,6 +71,7 @@ export function TpvItemCustomizeModal({
   brandIngredientSelection,
   brandSupplements,
   defaultExtraPrice,
+  freeSwapOnRemove: freeSwapOnRemoveProp,
   brands,
   catalogItems,
   stepHint,
@@ -184,6 +190,15 @@ export function TpvItemCustomizeModal({
     [supplements, searchQuery],
   );
 
+  const freeSwapOnRemove =
+    catalogItemAllowsFreeSwapOnRemove(item, {
+      storeFreeSwapOnRemove: freeSwapOnRemoveProp,
+    }) && !buildYourOwn;
+  const freeCredits = freeSwapOnRemove ? removed.length : 0;
+  const pricedAdded = useMemo(
+    () => applyFreeSwapCreditsToSupplements(added, freeCredits),
+    [added, freeCredits],
+  );
   const customization: CartLineCustomization = {
     removedIngredients: buildYourOwn ? [] : removed,
     addedBaseIngredients: buildYourOwn ? addedBase : undefined,
@@ -194,8 +209,12 @@ export function TpvItemCustomizeModal({
   };
 
   const basePrice = Number(item.unitPrice || 0);
-  const extrasTotal = added.reduce((sum, s) => sum + Number(s.price || 0), 0);
-  const unitTotal = cartLineUnitPrice(basePrice, customization);
+  const extrasTotal = pricedAdded.reduce((sum, s) => sum + Number(s.price || 0), 0);
+  const unitTotal = cartLineUnitPrice(basePrice, customization, { freeSwapOnRemove });
+  const freeExtrasCount = pricedAdded.filter((s, idx) => {
+    const original = Number(added[idx]?.price || 0);
+    return original > 0 && Number(s.price || 0) === 0;
+  }).length;
 
   const toggleIngredient = (name: string) => {
     if (buildYourOwn) {
@@ -457,10 +476,16 @@ export function TpvItemCustomizeModal({
             <section className="space-y-3">
               {addedCount > 0 && (
                 <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 px-0.5">
-                  {addedCount} extra(s) · +{formatPrice(extrasTotal)}
+                  {addedCount} extra(s)
+                  {extrasTotal > 0 ? ` · +${formatPrice(extrasTotal)}` : ''}
+                  {freeExtrasCount > 0 ? ` · ${freeExtrasCount} gratis por quitado` : ''}
                 </p>
               )}
-              {supplements.length === 0 ? (
+              {freeSwapOnRemove && freeCredits > 0 && addedCount === 0 ? (
+                <p className="text-xs text-blue-700 dark:text-blue-300 px-0.5">
+                  {freeCredits} crédito(s) gratis: el próximo extra que añadas no se cobra.
+                </p>
+              ) : null}              {supplements.length === 0 ? (
                 <div className="rounded-xl border-2 border-dashed border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20 px-4 py-6 text-center space-y-3">
                   <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">
                     Aún no hay extras de pago
@@ -478,7 +503,12 @@ export function TpvItemCustomizeModal({
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
                   {filteredSupplements.map((sup) => {
-                    const active = added.some((s) => s.id === sup.id);
+                    const activeIdx = added.findIndex((s) => s.id === sup.id);
+                    const active = activeIdx >= 0;
+                    const chargedPrice = active
+                      ? Number(pricedAdded[activeIdx]?.price || 0)
+                      : Number(sup.price || 0);
+                    const isFreeActive = active && Number(sup.price || 0) > 0 && chargedPrice === 0;
                     return (
                       <button
                         key={sup.id}
@@ -500,7 +530,9 @@ export function TpvItemCustomizeModal({
                               active ? 'text-white/90' : 'text-emerald-700 dark:text-emerald-400'
                             }`}
                           >
-                            +{formatPrice(sup.price)}
+                            {isFreeActive
+                              ? 'Gratis'
+                              : `+${formatPrice(active ? chargedPrice : Number(sup.price || 0))}`}
                           </span>
                         </span>
                       </button>
@@ -542,7 +574,13 @@ export function TpvItemCustomizeModal({
               {addedCount > 0 && (
                 <p>
                   <span className="font-semibold text-emerald-700 dark:text-emerald-400">Extras:</span>{' '}
-                  {added.map((s) => `${s.name} (+${formatPrice(s.price)})`).join(', ')}
+                  {pricedAdded
+                    .map((s, idx) => {
+                      const original = Number(added[idx]?.price || 0);
+                      if (original > 0 && Number(s.price || 0) === 0) return `${s.name} (gratis)`;
+                      return `${s.name} (+${formatPrice(s.price)})`;
+                    })
+                    .join(', ')}
                 </p>
               )}
             </div>
@@ -550,9 +588,11 @@ export function TpvItemCustomizeModal({
           <div className="flex items-center justify-between text-sm px-1">
             <span className="text-gray-600 dark:text-gray-400">Total unidad</span>
             <div className="text-right">
-              {extrasTotal > 0 && (
+              {(extrasTotal > 0 || freeExtrasCount > 0) && (
                 <p className="text-xs text-gray-500 tabular-nums">
-                  {formatPrice(basePrice)} + {formatPrice(extrasTotal)} extras
+                  {formatPrice(basePrice)}
+                  {extrasTotal > 0 ? ` + ${formatPrice(extrasTotal)} extras` : ''}
+                  {freeExtrasCount > 0 ? ` · ${freeExtrasCount} gratis` : ''}
                 </p>
               )}
               <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-400 tabular-nums">
@@ -562,7 +602,7 @@ export function TpvItemCustomizeModal({
           </div>
           <button
             type="button"
-            onClick={() => onConfirm(customization)}
+            onClick={() => onConfirm(withFreeSwapApplied(customization, freeSwapOnRemove))}
             className="w-full py-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-base transition-colors shadow-lg"
           >
             {confirmLabel || `Añadir al pedido · ${formatPrice(unitTotal)}`}

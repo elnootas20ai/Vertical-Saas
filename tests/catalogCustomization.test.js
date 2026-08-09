@@ -352,4 +352,40 @@ describe('catalogCustomization TPV', () => {
     expect(split.find((r) => r.brandIds?.[0] === 'mod')?.productParts).toEqual(['pizzas']);
     expect(split.find((r) => r.brandIds?.[0] === 'bb')?.productParts).toEqual(['hamburguesas']);
   });
+
+  it('1 quitado = 1 extra gratis (créditos en orden de añadido)', async () => {
+    const {
+      applyFreeSwapCreditsToSupplements,
+      cartLineExtrasUnitPrice,
+      catalogItemAllowsFreeSwapOnRemove,
+      withFreeSwapApplied,
+    } = await import('../src/app/lib/catalogCustomization.ts');
+
+    expect(catalogItemAllowsFreeSwapOnRemove({ customFields: { tpvFreeSwapOnRemove: true } })).toBe(true);
+    expect(catalogItemAllowsFreeSwapOnRemove({ customFields: {} })).toBe(false);
+    expect(
+      catalogItemAllowsFreeSwapOnRemove({ customFields: {} }, { storeFreeSwapOnRemove: true }),
+    ).toBe(true);
+
+    const priced = applyFreeSwapCreditsToSupplements(
+      [
+        { id: 'a', name: 'Bacon', price: 1.5 },
+        { id: 'b', name: 'Piña', price: 1.5 },
+      ],
+      1,
+    );
+    expect(priced[0].price).toBe(0);
+    expect(priced[1].price).toBe(1.5);
+
+    const custom = {
+      removedIngredients: ['Tomate'],
+      addedSupplements: [
+        { id: 'a', name: 'Bacon', price: 1.5 },
+        { id: 'b', name: 'Piña', price: 1.5 },
+      ],
+      notes: '',
+    };
+    expect(cartLineExtrasUnitPrice(custom, { freeSwapOnRemove: true })).toBe(1.5);
+    expect(withFreeSwapApplied(custom, true).addedSupplements.map((s) => s.price)).toEqual([0, 1.5]);
+  });
 });

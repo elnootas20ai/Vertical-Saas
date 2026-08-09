@@ -164,7 +164,7 @@ export function DeliveryMobileDashboardBlocks({
   });
 
   const rebuildPulses = useCallback(
-    (list: DeliveryOrder[]) => {
+    (list: DeliveryOrder[], sessions: TpvRegisterSession[] = tpvSessions) => {
       const todayKey = localCalendarDayKey();
       const keys7d = listTrailingDayKeys(todayKey, 7);
       const keysMonth = listMonthToDateDayKeys(todayKey);
@@ -182,18 +182,19 @@ export function DeliveryMobileDashboardBlocks({
               workCenterId: wcId,
               todayKey,
               dayKeys,
+              sessions,
             });
           })
           .filter((p) => Boolean(p.pdvId));
       setPulses7d(buildPulses(keys7d));
       setPulsesMonth(buildPulses(keysMonth));
     },
-    [pdvSources, businessId, businessName],
+    [pdvSources, businessId, businessName, tpvSessions],
   );
 
   useEffect(() => {
-    if (orders.length) rebuildPulses(orders);
-  }, [orders, rebuildPulses]);
+    if (orders.length || tpvSessions.length) rebuildPulses(orders, tpvSessions);
+  }, [orders, tpvSessions, rebuildPulses]);
 
   useEffect(() => {
     if (!onUnpaidSnapshot) return;

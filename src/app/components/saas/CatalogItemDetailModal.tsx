@@ -6,10 +6,22 @@ import {
   Loader2,
   Plus,
   Tag,
-  TrendingUp,
+  UtensilsCrossed,
   X,
   Zap,
 } from 'lucide-react';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import { toast } from 'sonner';
 import type { Brand } from '../../lib/brandsApi';
 import type { CatalogComboRef, CatalogItem } from '../../lib/deliveryApi';
@@ -18,6 +30,7 @@ import {
   mergeComboProductIngredients,
   parseIngredientsBulkText,
   readStoreIngredientTpvFlags,
+  resolveIngredientExtraPrice,
   resolveStoreIngredientBrandIds,
   type StoreIngredient,
 } from '../../lib/catalogCustomization';
@@ -29,7 +42,6 @@ import {
   productCostingStatus,
   readProductRecipeLines,
   resolveProductUnitCost,
-  resolveStoreIngredientBaseCost,
   storeIngredientsById,
 } from '../../lib/catalogCosting';
 import { ProductCostingModal } from './EscandalloPanel';
@@ -42,6 +54,30 @@ import {
   isComboStructureConfirmed,
   type ComboStructureSlot,
 } from '../../lib/catalogComboSlots';
+import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
+
+type DetailTab = 'datos' | 'menu' | 'ingredientes' | 'escandallo' | 'ventas';
+
+const DETAIL_TABS: Array<{
+  id: DetailTab;
+  label: string;
+  hint: string;
+  Icon: typeof Tag;
+}> = [
+  { id: 'datos', label: 'Precio y datos', hint: 'Nombre, PVP y coste', Icon: Tag },
+  { id: 'ventas', label: 'Resultados', hint: 'Control del producto', Icon: BarChart3 },
+  { id: 'ingredientes', label: 'Ingredientes', hint: 'Quitar / extras TPV', Icon: Zap },
+  { id: 'menu', label: 'Menú / combo', hint: 'Armar o editar combo', Icon: UtensilsCrossed },
+  { id: 'escandallo', label: 'Escandallo', hint: 'Receta y food cost', Icon: Calculator },
+];
+
+const CHART_BLUE = '#2563EB';
+const CHART_TEAL = '#14B8A6';
+const CHART_GREEN = '#22C55E';
+const CHART_AMBER = '#D97706';
+const CHART_RED = '#E11D48';
+const CHART_MUTED = '#94A3B8';
+const PIE_PALETTE = [CHART_BLUE, CHART_TEAL, CHART_GREEN, CHART_AMBER, CHART_MUTED];
 
 export type CatalogItemDetailSavePayload = {
   name: string;
@@ -65,6 +101,8 @@ type CatalogItemDetailModalProps = {
   /** Para abrir el gestor de ingredientes de la tienda desde la ficha. */
   dataUserId?: string;
   businessId?: string;
+  /** Producto normal → abre el flujo de crear combo partiendo de este artículo. */
+  onArmCombo?: () => void;
   onCostingSaved?: (saved: CatalogItem) => void;
   onClose: () => void;
   onSave: (payload: CatalogItemDetailSavePayload) => Promise<void>;
@@ -74,32 +112,89 @@ function formatMoney(n: number): string {
   return `${n.toFixed(2)}€`;
 }
 
-function StatCard({
+function formatEsDateTime(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mi = String(d.getMinutes()).padStart(2, '0');
+  return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
+}
+
+function formatEsNumber(n: number, digits = 0): string {
+  return n.toLocaleString('es-ES', {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
+function ChartTooltip({
+  active,
+  payload,
   label,
-  value,
-  sub,
-  compact,
 }: {
-  label: string;
-  value: string;
-  sub?: string;
-  compact?: boolean;
+  active?: boolean;
+  payload?: Array<{ name?: string; value?: number; color?: string; payload?: Record<string, unknown> }>;
+  label?: string;
 }) {
+  if (!active || !payload?.length) return null;
+  const row = payload[0]?.payload || {};
   return (
-    <div
-      className={`rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 ${
-        compact ? 'px-2.5 py-1.5' : 'px-3 py-2.5'
-      }`}
-    >
-      <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">{label}</p>
-      <p
-        className={`font-bold text-gray-900 dark:text-gray-100 tabular-nums ${
-          compact ? 'text-sm' : 'text-lg mt-0.5'
-        }`}
-      >
-        {value}
-      </p>
-      {sub ? <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">{sub}</p> : null}
+    <div className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs shadow-sm dark:border-stone-700 dark:bg-stone-900">
+      <p className="font-semibold text-stone-800 dark:text-stone-100">{label || String(row.name || '')}</p>
+      {payload.map((p) => (
+        <p key={String(p.name)} className="tabular-nums text-stone-600 dark:text-stone-300">
+          <span style={{ color: p.color }}>{p.name}</span>: {formatEsNumber(Number(p.value || 0), p.name === 'Ingresos' || p.name === '€' ? 2 : 0)}
+          {p.name === 'Ingresos' || p.name === '€' ? '€' : p.name === 'Unidades' || p.name === 'ud' ? ' ud' : ''}
+        </p>
+      ))}
+      {typeof row.profit === 'number' ? (
+        <p className="mt-0.5 tabular-nums text-stone-500">Beneficio ~ {formatMoney(Number(row.profit))}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function RankBars({
+  title,
+  tone,
+  rows,
+  empty,
+}: {
+  title: string;
+  tone: 'green' | 'red';
+  rows: Array<{ label: string; count: number }>;
+  empty: string;
+}) {
+  const max = Math.max(...rows.map((r) => r.count), 1);
+  const bar = tone === 'green' ? 'bg-emerald-500' : 'bg-[var(--destructive,#E11D48)]';
+  const text = tone === 'green' ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300';
+  return (
+    <div>
+      <p className={`text-xs font-bold mb-2 ${text}`}>{title}</p>
+      {rows.length === 0 ? (
+        <p className="text-xs text-stone-400">{empty}</p>
+      ) : (
+        <ul className="space-y-2">
+          {rows.map((row) => (
+            <li key={row.label}>
+              <div className="mb-0.5 flex justify-between gap-2 text-[11px]">
+                <span className="truncate font-medium text-stone-700 dark:text-stone-200">
+                  {tone === 'green' ? '+ ' : 'sin '}
+                  {row.label}
+                </span>
+                <span className="tabular-nums text-stone-500">{row.count}</span>
+              </div>
+              <div className="h-1.5 rounded-full bg-stone-100 dark:bg-stone-800 overflow-hidden">
+                <div className={`h-full rounded-full ${bar}`} style={{ width: `${Math.max(8, (row.count / max) * 100)}%` }} />
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -113,14 +208,13 @@ export function CatalogItemDetailModal({
   storeIngredients,
   dataUserId,
   businessId,
+  onArmCombo,
   onCostingSaved,
   onClose,
   onSave,
 }: CatalogItemDetailModalProps) {
   useModalClose(true, onClose);
 
-  const [showCosting, setShowCosting] = useState(false);
-  const [showRecipeLines, setShowRecipeLines] = useState(false);
   const [showIngredientsManager, setShowIngredientsManager] = useState(false);
   const costingEnabled = Array.isArray(storeIngredients) && isCatalogCostingProduct(item);
   const ingredientsById = useMemo(
@@ -175,6 +269,7 @@ export function CatalogItemDetailModal({
   );
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [activeTab, setActiveTab] = useState<DetailTab>('datos');
 
   useEffect(() => {
     const raw =
@@ -189,6 +284,7 @@ export function CatalogItemDetailModal({
     setComboStructureConfirmed(isComboStructureConfirmed(item.customFields, item.comboItems?.length ?? 0));
     setNewIngredient('');
     setDirty(false);
+    setActiveTab('datos');
   }, [item._id, item.name, item.unitPrice, item.costPrice, item.active, item.customFields?.ingredients, item.comboItems]);
 
   const ingredientList = useMemo(() => parseIngredientsBulkText(ingredientDraft), [ingredientDraft]);
@@ -265,7 +361,7 @@ export function CatalogItemDetailModal({
       onClick={onClose}
     >
       <div
-        className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] overflow-hidden flex flex-col"
+        className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-3xl h-[min(92vh,860px)] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="shrink-0 px-5 py-4 flex items-start justify-between gap-3">
@@ -306,7 +402,63 @@ export function CatalogItemDetailModal({
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6 border-t border-gray-200 dark:border-gray-700">
+        <div
+          role="tablist"
+          aria-label="Secciones de la ficha"
+          className="shrink-0 px-3 sm:px-5 pb-3 border-t border-gray-200 dark:border-gray-700 bg-stone-50/80 dark:bg-stone-950/40"
+        >
+          <p className="pt-2.5 pb-2 text-[10px] font-bold uppercase tracking-wider text-stone-400">
+            Elige sección · toca para cambiar
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+            {DETAIL_TABS.map(({ id, label, hint, Icon }) => {
+              const active = activeTab === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setActiveTab(id)}
+                  className={`min-h-[4.25rem] px-2.5 py-2.5 rounded-xl border-2 text-left touch-manipulation transition-colors active:scale-[0.98] ${
+                    active
+                      ? 'border-[var(--v-blue,#2563eb)] bg-blue-50 dark:bg-blue-950/40 shadow-sm'
+                      : 'border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 hover:border-blue-300 dark:hover:border-blue-700'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <Icon
+                      className={`w-4 h-4 shrink-0 ${
+                        active ? 'text-[var(--v-blue,#2563eb)]' : 'text-stone-400'
+                      }`}
+                    />
+                    <span
+                      className={`text-xs sm:text-sm font-bold truncate ${
+                        active
+                          ? 'text-[var(--v-blue,#2563eb)]'
+                          : 'text-stone-800 dark:text-stone-100'
+                      }`}
+                    >
+                      {label}
+                    </span>
+                  </div>
+                  <p
+                    className={`text-[10px] sm:text-[11px] mt-1 leading-snug line-clamp-2 ${
+                      active
+                        ? 'text-blue-700/80 dark:text-blue-300/80'
+                        : 'text-stone-500 dark:text-stone-400'
+                    }`}
+                  >
+                    {hint}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 py-4">
+          <div className={activeTab === 'datos' ? 'block space-y-4' : 'hidden'}>
           <section className="rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/40 p-4 space-y-3">
             <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Precio y datos</h3>
             <div>
@@ -370,16 +522,64 @@ export function CatalogItemDetailModal({
               </span>
             </label>
           </section>
+          </div>
 
-          <section className="rounded-2xl border-2 border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/40 dark:bg-emerald-950/20 p-4 space-y-4">
+          <div className={activeTab === 'menu' ? 'block space-y-4' : 'hidden'}>
+            {showComboBuilder ? (
+              <section className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <UtensilsCrossed className="w-4 h-4 text-[var(--v-blue,#2563eb)] shrink-0" />
+                  <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Composición del combo</h3>
+                </div>
+                <CatalogComboCompositionEditor
+                  comboItems={comboItems}
+                  catalogItems={catalogItems}
+                  excludeItemId={item._id}
+                  comboStructure={comboStructure}
+                  structureConfirmed={comboStructureConfirmed}
+                  onStructureChange={(next) => {
+                    setComboStructure(next);
+                    markDirty();
+                  }}
+                  onStructureConfirmedChange={(confirmed) => {
+                    setComboStructureConfirmed(confirmed);
+                    markDirty();
+                  }}
+                  onChange={(next) => {
+                    setComboItems(next);
+                    markDirty();
+                  }}
+                  onImportIngredients={importIngredientsFromCombo}
+                />
+              </section>
+            ) : (
+              <section className="flex flex-col items-center justify-center gap-4 py-10 px-4 text-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 dark:bg-blue-950/40">
+                  <UtensilsCrossed className="w-6 h-6 text-[var(--v-blue,#2563eb)]" />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onArmCombo?.()}
+                  disabled={!onArmCombo}
+                  className={`inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-bold disabled:opacity-40 ${VERTIAL_BTN_PRIMARY}`}
+                >
+                  <Plus className="w-4 h-4" />
+                  Armar combo con este producto
+                </button>
+              </section>
+            )}
+          </div>
+
+          <div className={activeTab === 'ingredientes' ? 'block space-y-4' : 'hidden'}>
+            <section className="rounded-2xl border-2 border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/40 dark:bg-emerald-950/20 p-4 space-y-4">
               <div className="flex items-start justify-between gap-2">
                 <div className="flex items-start gap-2 min-w-0">
                   <Zap className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
                   <div>
-                    <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Ingredientes y configuración TPV</h3>
+                    <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Ingredientes TPV</h3>
                     <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
                       {tpvConfigurable
-                        ? 'Pon o quita ingredientes de este producto. El cliente podrá quitarlos en el TPV.'
+                        ? 'Lista de la ficha: el cliente podrá quitarlos en el TPV. La regla 1 quitado = 1 extra gratis está en Catálogo → Menú.'
                         : 'Ingredientes de este producto (informativo para el equipo y la carta).'}
                     </p>
                   </div>
@@ -453,48 +653,27 @@ export function CatalogItemDetailModal({
                 />
               </div>
 
-              {showComboBuilder && (
-                <div className="space-y-3 pt-2 border-t border-emerald-200/80 dark:border-emerald-900/40">
-                  <p className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                    Composición del menú / combo
-                  </p>
-                  <CatalogComboCompositionEditor
-                    comboItems={comboItems}
-                    catalogItems={catalogItems}
-                    excludeItemId={item._id}
-                    comboStructure={comboStructure}
-                    structureConfirmed={comboStructureConfirmed}
-                    onStructureChange={(next) => {
-                      setComboStructure(next);
-                      markDirty();
-                    }}
-                    onStructureConfirmedChange={(confirmed) => {
-                      setComboStructureConfirmed(confirmed);
-                      markDirty();
-                    }}
-                    onChange={(next) => {
-                      setComboItems(next);
-                      markDirty();
-                    }}
-                    onImportIngredients={importIngredientsFromCombo}
-                  />
-                </div>
-              )}
-
               <div className="space-y-2 pt-2 border-t border-emerald-200/80 dark:border-emerald-900/40">
                 <p className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
                   Extras de pago disponibles ({applicableExtras.length})
                 </p>
                 {applicableExtras.length > 0 ? (
                   <div className="flex flex-wrap gap-1.5">
-                    {applicableExtras.map((ing) => (
-                      <span
-                        key={ing.id}
-                        className="px-2.5 py-1 rounded-full text-xs font-semibold border border-amber-300 dark:border-amber-800 bg-amber-50 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
-                      >
-                        + {ing.name}
-                      </span>
-                    ))}
+                    {applicableExtras.map((ing) => {
+                      const price = resolveIngredientExtraPrice(
+                        ing,
+                        Array.isArray(item.brandIds) ? item.brandIds : [],
+                      );
+                      return (
+                        <span
+                          key={ing.id}
+                          className="px-2.5 py-1 rounded-full text-xs font-semibold border border-amber-300 dark:border-amber-800 bg-amber-50 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
+                        >
+                          + {ing.name}
+                          {price > 0 ? ` · ${formatMoney(price)}` : ''}
+                        </span>
+                      );
+                    })}
                   </div>
                 ) : (
                   <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -502,199 +681,281 @@ export function CatalogItemDetailModal({
                   </p>
                 )}
                 <p className="text-[11px] text-gray-400 dark:text-gray-500">
-                  Los extras y su precio son de toda la marca: se cambian con «Gestionar ingredientes».
+                  Los extras y su precio son de toda la marca: se cambian en Catálogo → Ingredientes o con «Gestionar ingredientes».
                 </p>
               </div>
             </section>
+          </div>
 
-          {costingEnabled && (
-            <section className="rounded-2xl border-2 border-gray-200 dark:border-gray-700 p-3 space-y-2.5">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  <Calculator className="w-4 h-4 text-[var(--v-blue,#2563eb)] shrink-0" />
-                  <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Escandallo</h3>
-                  <span
-                    className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded shrink-0 ${
-                      costingStatus === 'recipe'
-                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
-                        : costingStatus === 'fixed'
-                          ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'
-                          : 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
-                    }`}
-                  >
-                    {costingStatus === 'recipe' ? 'Receta' : costingStatus === 'fixed' ? 'Coste fijo' : 'Sin configurar'}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {costingStatus === 'recipe' && costingRecipeLines.length > 0 ? (
-                    <button
-                      type="button"
-                      onClick={() => setShowRecipeLines((v) => !v)}
-                      className="px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-                    >
-                      {showRecipeLines ? 'Ocultar receta' : `Receta (${costingRecipeLines.length})`}
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    onClick={() => setShowCosting(true)}
-                    className="px-2.5 py-1.5 rounded-lg text-xs font-bold border border-gray-200 dark:border-gray-700 text-[var(--v-blue,#2563eb)] hover:bg-blue-50/60 dark:hover:bg-blue-950/20 transition-colors"
-                  >
-                    {costingStatus === 'none' ? 'Configurar' : 'Editar'}
-                  </button>
-                </div>
-              </div>
-
-              {costingStatus === 'none' ? (
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Sin coste configurado: no se puede calcular el margen real de este producto. El resumen de abajo usa el coste manual.
-                </p>
-              ) : (
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Coste, margen y food cost se muestran abajo, en el resumen de resultados.
-                </p>
-              )}
-
-              {showRecipeLines && costingStatus === 'recipe' && costingRecipeLines.length > 0 ? (
-                <div className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-                  <table className="w-full text-xs">
-                    <thead className="bg-gray-50 dark:bg-gray-900 text-gray-500">
-                      <tr>
-                        <th className="text-left px-3 py-2 font-semibold">Ingrediente</th>
-                        <th className="text-right px-3 py-2 font-semibold">Cant.</th>
-                        <th className="text-right px-3 py-2 font-semibold">Coste/u.</th>
-                        <th className="text-right px-3 py-2 font-semibold">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {costingRecipeLines.map((line, lineIdx) => {
-                        const ing = line.storeIngredientId
-                          ? ingredientsById.get(line.storeIngredientId)
-                          : undefined;
-                        const unit = ing ? resolveStoreIngredientBaseCost(ing, brands) : 0;
-                        return (
-                          <tr
-                            key={`${line.storeIngredientId || line.name}-${lineIdx}`}
-                            className="border-t border-gray-100 dark:border-gray-800"
-                          >
-                            <td className="px-3 py-2">{line.name}</td>
-                            <td className="px-3 py-2 text-right tabular-nums">
-                              {line.quantity} {line.unit}
-                            </td>
-                            <td className="px-3 py-2 text-right tabular-nums">{formatMoney(unit)}</td>
-                            <td className="px-3 py-2 text-right font-semibold tabular-nums">
-                              {formatMoney(unit * line.quantity)}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              ) : null}
-            </section>
-          )}
-
-          <section>
-            <div className="flex items-center gap-2 mb-3">
-              <BarChart3 className="w-4 h-4 text-indigo-600" />
-              <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Resultados y ventas</h3>
-              {statsLoading ? <Loader2 className="w-4 h-4 animate-spin text-gray-400" /> : null}
-            </div>
-            <div className="mb-3 grid grid-cols-3 sm:grid-cols-6 divide-x divide-gray-200/80 dark:divide-gray-700 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/40 overflow-hidden">
-              {(() => {
-                const pvp = unitPriceDraft !== '' && Number.isFinite(Number(unitPriceDraft))
-                  ? Number(unitPriceDraft)
-                  : Number(item.unitPrice) || 0;
-                const cost = costingEnabled && costingStatus !== 'none'
-                  ? costingUnitCost
-                  : Number(costPriceDraft) || 0;
-                const margin = marginPercent(cost, pvp);
-                const fc = foodCostPercent(cost, pvp);
-                const fcTone = fc == null
-                  ? 'text-gray-900 dark:text-gray-100'
-                  : fc > 35
-                    ? 'text-red-600 dark:text-red-400'
-                    : fc > 25
-                      ? 'text-amber-600 dark:text-amber-400'
-                      : 'text-emerald-600 dark:text-emerald-400';
-                const cells: { label: string; value: string; tone?: string; sub?: string }[] = [
-                  { label: 'PVP', value: formatMoney(pvp) },
-                  { label: 'Coste', value: formatMoney(cost), sub: costingStatus === 'recipe' ? 'receta' : costingStatus === 'fixed' ? 'fijo' : undefined },
-                  { label: 'Margen', value: margin != null ? `${margin.toFixed(1)}%` : '—' },
-                  { label: 'Food cost', value: fc != null ? `${fc.toFixed(1)}%` : '—', tone: fcTone },
-                  { label: 'Vendido', value: `${stats.totalUnits} ud`, sub: formatMoney(stats.totalRevenue) },
-                  { label: 'Hoy', value: `${stats.todayUnits} ud`, sub: formatMoney(stats.todayRevenue) },
-                ];
-                return cells.map((c) => (
-                  <div key={c.label} className="px-3 py-2 text-center min-w-0">
-                    <p className={`text-sm font-bold tabular-nums truncate ${c.tone ?? 'text-gray-900 dark:text-gray-100'}`}>
-                      {c.value}
-                    </p>
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 truncate">
-                      {c.label}
-                      {c.sub ? ` · ${c.sub}` : ''}
-                    </p>
-                  </div>
-                ));
-              })()}
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              <StatCard
-                label="Total vendido"
-                value={`${stats.totalUnits} ud`}
-                sub={`${formatMoney(stats.totalRevenue)} · ${stats.orderCount} pedido${stats.orderCount !== 1 ? 's' : ''}`}
+          <div className={activeTab === 'escandallo' ? 'block space-y-4' : 'hidden'}>
+            {costingEnabled ? (
+              <ProductCostingModal
+                key={`costing-${item._id}-${costingStatus}-${item.costPrice}-${costingRecipeLines.length}`}
+                product={item}
+                storeIngredients={storeIngredients || []}
+                brands={brands}
+                embedded
+                onClose={() => undefined}
+                onSaved={(saved) => onCostingSaved?.(saved)}
               />
-              <StatCard label="Hoy" value={`${stats.todayUnits} ud`} sub={formatMoney(stats.todayRevenue)} />
-              <StatCard label="7 días" value={`${stats.weekUnits} ud`} sub={formatMoney(stats.weekRevenue)} />
-              <StatCard label="Mes" value={`${stats.monthUnits} ud`} sub={formatMoney(stats.monthRevenue)} />
-              <StatCard
-                label="Ticket medio"
-                value={stats.orderCount > 0 ? formatMoney(stats.totalRevenue / stats.orderCount) : '—'}
-                sub="por pedido con este producto"
-              />
-            </div>
-            {(stats.topExtras.length > 0 || stats.topRemoved.length > 0) && (
-              <div className="mt-3 grid sm:grid-cols-2 gap-3">
-                {stats.topExtras.length > 0 && (
-                  <div className="rounded-xl border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/50 dark:bg-emerald-950/20 p-3">
-                    <p className="text-xs font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1 mb-2">
-                      <TrendingUp className="w-3.5 h-3.5" />
-                      Extras más pedidos
-                    </p>
-                    <ul className="space-y-1 text-xs text-emerald-900 dark:text-emerald-200">
-                      {stats.topExtras.map((row) => (
-                        <li key={row.label} className="flex justify-between gap-2">
-                          <span className="truncate">+ {row.label}</span>
-                          <span className="font-bold tabular-nums shrink-0">{row.count}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {stats.topRemoved.length > 0 && (
-                  <div className="rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50/50 dark:bg-red-950/20 p-3">
-                    <p className="text-xs font-bold text-red-800 dark:text-red-300 mb-2">Ingredientes más quitados</p>
-                    <ul className="space-y-1 text-xs text-red-900 dark:text-red-200">
-                      {stats.topRemoved.map((row) => (
-                        <li key={row.label} className="flex justify-between gap-2">
-                          <span className="truncate">sin {row.label}</span>
-                          <span className="font-bold tabular-nums shrink-0">{row.count}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+            ) : (
+              <div className="rounded-2xl border-2 border-dashed border-gray-200 dark:border-gray-700 px-4 py-8 text-center">
+                <Calculator className="w-8 h-8 mx-auto text-gray-300 dark:text-gray-600 mb-2" />
+                <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">Escandallo no disponible</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 max-w-sm mx-auto">
+                  Este producto no tiene escandallo automático, o la tienda aún no tiene ingredientes de coste.
+                </p>
               </div>
             )}
+          </div>
+
+          <div className={activeTab === 'ventas' ? 'block space-y-5' : 'hidden'}>
+          <section className="space-y-5">
+            {(() => {
+              const pvp = unitPriceDraft !== '' && Number.isFinite(Number(unitPriceDraft))
+                ? Number(unitPriceDraft)
+                : Number(item.unitPrice) || 0;
+              const cost = costingEnabled && costingStatus !== 'none'
+                ? costingUnitCost
+                : Number(costPriceDraft) || 0;
+              const margin = marginPercent(cost, pvp);
+              const fc = foodCostPercent(cost, pvp);
+              const profitPerUnit = Math.round((pvp - cost) * 100) / 100;
+              const profitTotal = Math.round(profitPerUnit * stats.totalUnits * 100) / 100;
+              const profitToday = Math.round(profitPerUnit * stats.todayUnits * 100) / 100;
+              const profitWeek = Math.round(profitPerUnit * stats.weekUnits * 100) / 100;
+              const profitMonth = Math.round(profitPerUnit * stats.monthUnits * 100) / 100;
+              const stockQty = Number(item.stockQuantity || 0);
+              const minStock = Number(item.minStock || 0);
+              const lowStock = minStock > 0 && stockQty <= minStock;
+              const coverDays =
+                stats.avgDailyUnits7d > 0
+                  ? Math.round((stockQty / stats.avgDailyUnits7d) * 10) / 10
+                  : null;
+              const customRate =
+                stats.orderCount > 0
+                  ? Math.round((stats.customizedOrderCount / stats.orderCount) * 1000) / 10
+                  : null;
+              const fcTone =
+                fc == null
+                  ? CHART_MUTED
+                  : fc > 35
+                    ? CHART_RED
+                    : fc > 25
+                      ? CHART_AMBER
+                      : CHART_GREEN;
+
+              const periodData = [
+                { name: 'Hoy', units: stats.todayUnits, revenue: stats.todayRevenue, profit: profitToday },
+                { name: '7 días', units: stats.weekUnits, revenue: stats.weekRevenue, profit: profitWeek },
+                { name: 'Mes', units: stats.monthUnits, revenue: stats.monthRevenue, profit: profitMonth },
+              ];
+
+              const mixSource = stats.byOrderType.length > 0 ? stats.byOrderType : stats.byChannel;
+              const mixTitle = stats.byOrderType.length > 0 ? 'Tipo de pedido' : 'Canal';
+              const mixData = mixSource.slice(0, 5).map((row) => ({
+                name: row.label,
+                value: row.units,
+                revenue: row.revenue,
+              }));
+              const hasMix = mixData.some((d) => d.value > 0);
+
+              const economyData = [
+                { name: 'Coste', value: Math.max(0, cost), fill: CHART_MUTED },
+                { name: 'Beneficio', value: Math.max(0, profitPerUnit), fill: CHART_BLUE },
+              ];
+
+              return (
+                <>
+                  <div className="flex flex-wrap items-end justify-between gap-3 border-b border-stone-200/80 dark:border-stone-800 pb-4">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100">Resultados</h3>
+                        {statsLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin text-stone-400" /> : null}
+                      </div>
+                      <p className="text-[11px] text-stone-500">
+                        {[item.category, brandLabel].filter(Boolean).join(' · ') || 'Producto de carta'}
+                        {stats.lastSoldAt ? ` · última venta ${formatEsDateTime(stats.lastSoldAt)}` : ''}
+                        {lowStock ? ' · stock bajo' : ''}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-2xl sm:text-3xl font-extrabold tracking-tight tabular-nums text-stone-900 dark:text-stone-50">
+                        {formatMoney(stats.totalRevenue)}
+                      </p>
+                      <p className="text-xs text-stone-500 tabular-nums">
+                        {stats.totalUnits} ud · {stats.orderCount} pedido{stats.orderCount !== 1 ? 's' : ''}
+                        {profitTotal !== 0 ? ` · ~${formatMoney(profitTotal)} ben.` : ''}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-4 sm:gap-8">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-400">PVP</p>
+                      <p className="text-lg font-bold tabular-nums text-stone-900 dark:text-stone-100">{formatMoney(pvp)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-400">Margen</p>
+                      <p className="text-lg font-bold tabular-nums text-[var(--v-blue,#2563eb)]">
+                        {margin != null ? `${margin.toFixed(1)}%` : '—'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-400">Food cost</p>
+                      <p className="text-lg font-bold tabular-nums" style={{ color: fcTone }}>
+                        {fc != null ? `${fc.toFixed(1)}%` : '—'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="mb-2 flex items-baseline justify-between gap-2">
+                      <p className="text-xs font-bold text-stone-800 dark:text-stone-200">Ventas por periodo</p>
+                      <p className="text-[10px] text-stone-400">unidades · ingresos en tooltip</p>
+                    </div>
+                    <div className="h-44 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={periodData} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e7e5e4" />
+                          <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#78716c' }} axisLine={false} tickLine={false} />
+                          <YAxis tick={{ fontSize: 10, fill: '#a8a29e' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                          <Tooltip content={<ChartTooltip />} />
+                          <Bar dataKey="units" name="Unidades" fill={CHART_BLUE} radius={[8, 8, 0, 0]} barSize={36} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="mt-1 flex justify-between text-[10px] tabular-nums text-stone-400 px-1">
+                      {periodData.map((p) => (
+                        <span key={p.name}>{formatMoney(p.revenue)}</span>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid sm:grid-cols-2 gap-6">
+                    <div>
+                      <p className="text-xs font-bold text-stone-800 dark:text-stone-200 mb-2">
+                        Mix · {mixTitle}
+                      </p>
+                      {hasMix ? (
+                        <div className="h-40 relative">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                              <Pie
+                                data={mixData}
+                                dataKey="value"
+                                nameKey="name"
+                                innerRadius={42}
+                                outerRadius={68}
+                                paddingAngle={2}
+                                stroke="none"
+                              >
+                                {mixData.map((entry, i) => (
+                                  <Cell key={entry.name} fill={PIE_PALETTE[i % PIE_PALETTE.length]} />
+                                ))}
+                              </Pie>
+                              <Tooltip
+                                formatter={(value: number, name: string) => [`${value} ud`, name]}
+                              />
+                            </PieChart>
+                          </ResponsiveContainer>
+                          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                            <p className="text-lg font-extrabold tabular-nums text-stone-900 dark:text-stone-100">
+                              {mixData.reduce((sum, d) => sum + d.value, 0)}
+                            </p>
+                            <p className="text-[10px] text-stone-400">ud</p>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-stone-400 py-10 text-center">Sin desglose todavía</p>
+                      )}
+                      {hasMix ? (
+                        <ul className="mt-1 space-y-1">
+                          {mixData.map((d, i) => (
+                            <li key={d.name} className="flex items-center gap-2 text-[11px] text-stone-600 dark:text-stone-300">
+                              <span
+                                className="h-2 w-2 rounded-full shrink-0"
+                                style={{ background: PIE_PALETTE[i % PIE_PALETTE.length] }}
+                              />
+                              <span className="truncate flex-1">{d.name}</span>
+                              <span className="tabular-nums text-stone-400">{d.value}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </div>
+
+                    <div>
+                      <p className="text-xs font-bold text-stone-800 dark:text-stone-200 mb-2">
+                        Economía por unidad
+                      </p>
+                      <div className="h-40">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart
+                            layout="vertical"
+                            data={economyData}
+                            margin={{ top: 8, right: 16, left: 8, bottom: 0 }}
+                          >
+                            <XAxis type="number" hide />
+                            <YAxis
+                              type="category"
+                              dataKey="name"
+                              width={64}
+                              tick={{ fontSize: 11, fill: '#78716c' }}
+                              axisLine={false}
+                              tickLine={false}
+                            />
+                            <Tooltip formatter={(v: number) => formatMoney(Number(v))} />
+                            <Bar dataKey="value" radius={[0, 8, 8, 0]} barSize={22}>
+                              {economyData.map((entry) => (
+                                <Cell key={entry.name} fill={entry.fill} />
+                              ))}
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                      <p className="text-[11px] text-stone-500 text-center -mt-1">
+                        PVP {formatMoney(pvp)} = coste + beneficio/ud
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid sm:grid-cols-2 gap-6 pt-1 border-t border-stone-200/80 dark:border-stone-800">
+                    <RankBars
+                      title="Extras más pedidos"
+                      tone="green"
+                      rows={stats.topExtras}
+                      empty="Sin extras registrados"
+                    />
+                    <RankBars
+                      title="Más quitados"
+                      tone="red"
+                      rows={stats.topRemoved}
+                      empty="Sin quitados registrados"
+                    />
+                  </div>
+
+                  <p className="text-[11px] text-stone-500 leading-relaxed">
+                    Stock {formatEsNumber(stockQty)} {item.unit || 'ud'}
+                    {minStock > 0 ? ` · mín. ${formatEsNumber(minStock)}` : ''}
+                    {coverDays != null ? ` · cobertura ~${formatEsNumber(coverDays, 1)} días` : ''}
+                    {customRate != null
+                      ? ` · personalizado ${formatEsNumber(customRate, 1)}% (+${stats.extrasHits}/−${stats.removedHits})`
+                      : ''}
+                    {item.supplierName ? ` · ${item.supplierName}` : ''}
+                  </p>
+                </>
+              );
+            })()}
           </section>
+          </div>
         </div>
 
         <div className="shrink-0 px-5 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-sm font-semibold"
+            className={`px-4 py-2.5 text-sm font-semibold ${VERTIAL_BTN_SECONDARY}`}
           >
             Cerrar
           </button>
@@ -702,24 +963,12 @@ export function CatalogItemDetailModal({
             type="button"
             disabled={!dirty || saving}
             onClick={() => void handleSave()}
-            className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-sm font-bold"
+            className={`px-5 py-2.5 text-sm font-bold disabled:opacity-40 ${VERTIAL_BTN_PRIMARY}`}
           >
             {saving ? 'Guardando…' : 'Guardar cambios'}
           </button>
         </div>
       </div>
-
-      {showCosting && costingEnabled ? (
-        <div onClick={(e) => e.stopPropagation()}>
-          <ProductCostingModal
-            product={item}
-            storeIngredients={storeIngredients || []}
-            brands={brands}
-            onClose={() => setShowCosting(false)}
-            onSaved={(saved) => onCostingSaved?.(saved)}
-          />
-        </div>
-      ) : null}
 
       {showIngredientsManager && dataUserId && businessId ? (
         <div

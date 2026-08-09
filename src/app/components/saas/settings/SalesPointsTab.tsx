@@ -694,10 +694,6 @@ function WorkCenterModal({
       const issue = getBusinessHoursIssue(openingHours);
       if (issue) {
         nextErr.horarios = issue;
-        return;
-      }
-      if (!editItem && !hoursConfirmed) {
-        nextErr.horarios = 'Confirma que has revisado el horario de cada día (L–D).';
       }
     };
 
@@ -1436,29 +1432,11 @@ function WorkCenterModal({
                 config={openingHours}
                 onChange={(next) => {
                   setOpeningHours(next);
-                  setHoursConfirmed(false);
                   clearFieldError('horarios');
                 }}
                 storeLabel={storeHoursLabel}
                 wizard
               />
-              {!editItem ? (
-                <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-stone-200 bg-white px-2.5 py-2 dark:border-stone-700 dark:bg-stone-900">
-                  <input
-                    type="checkbox"
-                    className="h-3.5 w-3.5 rounded border-stone-300 text-blue-600 focus:ring-blue-500"
-                    checked={hoursConfirmed}
-                    onChange={(e) => {
-                      setHoursConfirmed(e.target.checked);
-                      if (e.target.checked) clearFieldError('horarios');
-                    }}
-                  />
-                  <span className="text-xs text-stone-700 dark:text-stone-300">
-                    <span className="font-semibold">Confirmo el horario</span>
-                    <span className="text-stone-400"> · revisado L–D</span>
-                  </span>
-                </label>
-              ) : null}
               {schedulesBusinessId && editItem ? (
                 <button
                   type="button"

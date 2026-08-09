@@ -6590,6 +6590,10 @@ export function buildDeliveryConfigDocument(userId, data = {}, existing = null) 
       const p = Number(raw);
       return Number.isFinite(p) && p >= 0 ? Math.round(p * 100) / 100 : undefined;
     })(),
+    /** Catálogo → Menú: 1 ingrediente quitado → 1 extra añadido sin coste en TPV. */
+    tpvFreeSwapOnRemove: Boolean(
+      base.tpvFreeSwapOnRemove ?? existing?.tpvFreeSwapOnRemove,
+    ),
     /** Coste de envío automático en TPV cuando el pedido es a domicilio. */
     tpvDeliveryFee: (() => {
       const raw = base.tpvDeliveryFee ?? existing?.tpvDeliveryFee;
@@ -6660,6 +6664,7 @@ export function sanitizeDeliveryConfig(doc) {
       const p = Number(doc.tpvDefaultExtraPrice);
       return Number.isFinite(p) && p >= 0 ? Math.round(p * 100) / 100 : undefined;
     })(),
+    tpvFreeSwapOnRemove: Boolean(doc.tpvFreeSwapOnRemove),
     tpvDeliveryFee: (() => {
       const p = Number(doc.tpvDeliveryFee);
       return Number.isFinite(p) && p >= 0 ? Math.round(p * 100) / 100 : 0;
@@ -7397,7 +7402,23 @@ export async function repairWorkCenterBusinessScopeForPdv(req, userId, pdvDoc, t
     current &&
     owned.length === 1 &&
     normalizeBusinessScopeId(owned[0].business_id) === bid;
-  if (!canRepair && !canRetag) return false;
+  // PDV/WC mal enlazado a vertical no-TPV (p. ej. realEstate) mientras el TPV
+  // opera en delivery/restaurante: retiquetear aunque haya varias empresas.
+  let canRetagCrossVertical = false;
+  if (current && current !== bid && !canRetag) {
+    const targetOwned = owned.some((b) => normalizeBusinessScopeId(b.business_id) === bid);
+    if (targetOwned || pdvDocMatchesUser(pdvDoc, userId)) {
+      const [curBiz, tgtBiz] = await Promise.all([
+        findBusinessById(req, current).catch(() => null),
+        findBusinessById(req, bid).catch(() => null),
+      ]);
+      const opsTypes = new Set(['delivery', 'restaurant', 'iceCreamShop', 'butcherShop']);
+      const curOps = opsTypes.has(String(curBiz?.businessType || '').trim());
+      const tgtOps = opsTypes.has(String(tgtBiz?.businessType || '').trim());
+      canRetagCrossVertical = tgtOps && !curOps;
+    }
+  }
+  if (!canRepair && !canRetag && !canRetagCrossVertical) return false;
 
   const db = getWorkCentersDbName();
   await ensureDatabase(req, db);
@@ -8059,13 +8080,30 @@ export function tpvRegisterSessionBelongsToBusiness(session, businessId, scopedP
   return ids.has(pdvId);
 }
 
+function isOpenTpvRegisterSessionDoc(session) {
+  return Boolean(
+    session
+      && String(session.status || '').toLowerCase() === 'open'
+      && !session.deletedAt,
+  );
+}
+
+/**
+ * Filtra sesiones de caja por empresa.
+ * Conserva cajas ABIERTAS de un PDV de esa empresa aunque `session.business_id`
+ * esté mal (p. ej. PDV enlazado a realEstate): si no, el TPV no ve la caja viva
+ * y bloquea abrir/reabrir.
+ */
 export function filterTpvRegisterSessionsForBusiness(sessions, businessId, scopedPdvIds) {
-  const bid = String(businessId || '').trim();
+  const bid = String(businessId || '').replace(/^business:/, '').trim();
   if (!bid) return Array.isArray(sessions) ? sessions : [];
   const ids = scopedPdvIds instanceof Set ? scopedPdvIds : new Set(scopedPdvIds || []);
-  return (Array.isArray(sessions) ? sessions : []).filter((s) =>
-    tpvRegisterSessionBelongsToBusiness(s, bid, ids),
-  );
+  return (Array.isArray(sessions) ? sessions : []).filter((s) => {
+    if (tpvRegisterSessionBelongsToBusiness(s, bid, ids)) return true;
+    if (!isOpenTpvRegisterSessionDoc(s)) return false;
+    const pdvId = String(s?.pointOfSaleId || '').trim();
+    return Boolean(pdvId && ids.has(pdvId));
+  });
 }
 
 /** Sesión de caja TPV abierta para un PDV (la más reciente si hubiera varias). */
@@ -8084,11 +8122,15 @@ export function findOpenTpvRegisterSessionForPointOfSale(
         s &&
         s.status === 'open' &&
         !s.deletedAt &&
-        String(s.pointOfSaleId || '').trim() === pdvId &&
-        tpvRegisterSessionBelongsToBusiness(s, bid, scopedPdvIds),
+        String(s.pointOfSaleId || '').trim() === pdvId,
     )
     .sort((a, b) => String(b.openedAt || '').localeCompare(String(a.openedAt || '')));
-  return openForPdv[0] || null;
+  if (!openForPdv.length) return null;
+  if (!bid) return openForPdv[0];
+  const matchingBiz =
+    openForPdv.find((s) => tpvRegisterSessionBelongsToBusiness(s, bid, scopedPdvIds)) || null;
+  // Si el stamp de empresa está mal, igual hay caja viva en esa tienda.
+  return matchingBiz || openForPdv[0];
 }
 
 /** Cierra una sesión TPV sin conteo manual (mantenimiento / fin de jornada). */

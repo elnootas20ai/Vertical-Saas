@@ -1,5 +1,6 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { Search } from 'lucide-react';
+import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
 
 export type SaasTabStatTone = 'default' | 'amber' | 'emerald' | 'red' | 'indigo';
 
@@ -16,6 +17,10 @@ const statToneClass: Record<SaasTabStatTone, string> = {
   red: 'text-red-700 dark:text-red-400',
   indigo: 'text-indigo-700 dark:text-indigo-400',
 };
+
+/** Misma piel Vertial que PRIMARY/SECONDARY, tamaño toolbar de pestaña. */
+const TAB_BTN_COMPACT =
+  '!min-h-0 px-3 py-1.5 text-xs rounded-xl shadow-none gap-1.5';
 
 /** Contenedor unificado para el contenido de cada pestaña del SaaS (catálogo, ingredientes, etc.). */
 export function SaasTabWorkspace({
@@ -107,7 +112,7 @@ export function SaasTabPrimaryButton({
     <button
       type="button"
       {...props}
-      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-gray-900 hover:bg-gray-800 text-white disabled:opacity-50 transition-colors ${className}`}
+      className={`${VERTIAL_BTN_PRIMARY} ${TAB_BTN_COMPACT} ${className}`}
     >
       {children}
     </button>
@@ -123,7 +128,7 @@ export function SaasTabSecondaryButton({
     <button
       type="button"
       {...props}
-      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 transition-colors ${className}`}
+      className={`${VERTIAL_BTN_SECONDARY} ${TAB_BTN_COMPACT} ${className}`}
     >
       {children}
     </button>

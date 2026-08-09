@@ -278,7 +278,7 @@ export function CatalogProductRecipePicker({
 
       {storeIngredients.length === 0 ? (
         <p className="text-xs text-amber-800 dark:text-amber-300 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 px-3 py-2">
-          No hay ingredientes maestros. Crea algunos en <strong>Catálogo → Ingredientes TPV</strong> y vuelve.
+          No hay ingredientes maestros. Crea algunos en <strong>Catálogo → Ingredientes</strong> y vuelve.
         </p>
       ) : available.length === 0 ? (
         <p className="text-xs text-gray-500 text-center py-1">

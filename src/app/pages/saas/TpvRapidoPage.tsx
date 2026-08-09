@@ -1123,6 +1123,7 @@ export function TpvRapidoOrderFlow({
   const [tpvBrandIngredientSelection, setTpvBrandIngredientSelection] = useState<TpvBrandIngredientSelection>({});
   const [tpvBrandSupplements, setTpvBrandSupplements] = useState<TpvBrandSupplements>({});
   const [tpvDefaultExtraPrice, setTpvDefaultExtraPrice] = useState<number>(0);
+  const [tpvFreeSwapOnRemove, setTpvFreeSwapOnRemove] = useState(false);
   const [tpvDeliveryFee, setTpvDeliveryFee] = useState<number>(0);
   /** Si true, no se cobra el envío automático en este pedido. */
   const [waiveDeliveryFee, setWaiveDeliveryFee] = useState(false);
@@ -1252,6 +1253,7 @@ export function TpvRapidoOrderFlow({
         setTpvBrandIngredientSelection(ingredientSelection);
         setTpvBrandSupplements(brandSupplements);
         setTpvDefaultExtraPrice(inferTpvDefaultExtraPrice(unified, cfg?.tpvDefaultExtraPrice));
+        setTpvFreeSwapOnRemove(cfg?.tpvFreeSwapOnRemove === true);
         setTpvDeliveryFee(Number(cfg?.tpvDeliveryFee) > 0 ? Number(cfg.tpvDeliveryFee) : 0);
       })
       .catch(() => {});
@@ -1323,6 +1325,7 @@ export function TpvRapidoOrderFlow({
         setTpvBrandIngredientSelection(ingredientSelection);
         setTpvBrandSupplements(brandSupplements);
         setTpvDefaultExtraPrice(inferTpvDefaultExtraPrice(unified, cfg?.tpvDefaultExtraPrice));
+        setTpvFreeSwapOnRemove(cfg?.tpvFreeSwapOnRemove === true);
         setTpvDeliveryFee(Number(cfg?.tpvDeliveryFee) > 0 ? Number(cfg.tpvDeliveryFee) : 0);
       })
       .catch(() => {
@@ -1332,6 +1335,7 @@ export function TpvRapidoOrderFlow({
           setTpvBrandIngredientSelection({});
           setTpvBrandSupplements({});
           setTpvDefaultExtraPrice(0);
+          setTpvFreeSwapOnRemove(false);
           setTpvDeliveryFee(0);
         }
       });
@@ -1359,6 +1363,7 @@ export function TpvRapidoOrderFlow({
         setStoreIngredients(unified);
         setTpvBrandIngredientSelection(ingredientSelection);
         setTpvDefaultExtraPrice(inferTpvDefaultExtraPrice(unified, cfg?.tpvDefaultExtraPrice));
+        setTpvFreeSwapOnRemove(cfg?.tpvFreeSwapOnRemove === true);
         setTpvDeliveryFee(Number(cfg?.tpvDeliveryFee) > 0 ? Number(cfg.tpvDeliveryFee) : 0);
       })
       .catch(() => {});
@@ -5969,6 +5974,7 @@ export function TpvRapidoOrderFlow({
           brandSupplements={tpvBrandSupplements}
           storeIngredients={storeIngredients}
           defaultExtraPrice={tpvDefaultExtraPrice}
+          freeSwapOnRemove={tpvFreeSwapOnRemove}
           brands={brands}
           catalogItems={catalog}
           formatPrice={formatPrice}

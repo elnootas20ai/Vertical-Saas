@@ -109,14 +109,17 @@ export function ProductCostingModal({
   brands,
   onClose,
   onSaved,
+  embedded = false,
 }: {
   product: CatalogItem;
   storeIngredients: StoreIngredient[];
   brands: Array<{ _id: string; deliveryLineKind?: string }>;
   onClose: () => void;
   onSaved: (item: CatalogItem) => void;
+  /** Dentro de otra ficha: sin overlay ni segundo modal. */
+  embedded?: boolean;
 }) {
-  useModalClose(true, onClose);
+  useModalClose(!embedded, onClose);
   const ingredientsById = useMemo(() => storeIngredientsById(storeIngredients), [storeIngredients]);
   const initialType = readProductCostingType(product);
   const retailDefault = isDrinkCatalogProduct(product) || isDessertCatalogProduct(product);
@@ -211,7 +214,7 @@ export function ProductCostingModal({
       const saved = await updateCatalogItemRequest(product.user_id, next);
       onSaved(saved);
       toast.success('Escandallo guardado');
-      onClose();
+      if (!embedded) onClose();
     } catch {
       toast.error('No se pudo guardar');
     } finally {
@@ -227,7 +230,7 @@ export function ProductCostingModal({
       const saved = await updateCatalogItemRequest(product.user_id, next);
       onSaved(saved);
       toast.success('Receta eliminada');
-      onClose();
+      if (!embedded) onClose();
     } catch {
       toast.error('No se pudo eliminar');
     } finally {
@@ -235,15 +238,9 @@ export function ProductCostingModal({
     }
   };
 
-  return (
-    <div
-      className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/45 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-hidden flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
+  const body = (
+    <>
+        {!embedded ? (
         <div className="shrink-0 px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Escandallo</p>
@@ -256,8 +253,25 @@ export function ProductCostingModal({
             <X className="w-5 h-5 text-gray-500" />
           </button>
         </div>
+        ) : (
+        <div className="flex items-center gap-2 min-w-0 mb-1">
+          <Calculator className="w-4 h-4 text-[var(--v-blue,#2563eb)] shrink-0" />
+          <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Escandallo</h3>
+          <span
+            className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded shrink-0 ${statusClass(
+              productCostingStatus(product),
+            )}`}
+          >
+            {productCostingStatus(product) === 'recipe'
+              ? 'Receta'
+              : productCostingStatus(product) === 'fixed'
+                ? 'Coste fijo'
+                : 'Sin configurar'}
+          </span>
+        </div>
+        )}
 
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+        <div className={embedded ? 'space-y-4' : 'flex-1 overflow-y-auto px-5 py-4 space-y-4'}>
           <div className="flex flex-wrap gap-2">
             {(['fixed', 'recipe'] as const).map((type) => (
               <button
@@ -403,7 +417,13 @@ export function ProductCostingModal({
           </div>
         </div>
 
-        <div className="shrink-0 px-5 py-4 border-t border-gray-200 dark:border-gray-700 flex flex-wrap gap-2 justify-between">
+        <div
+          className={
+            embedded
+              ? 'pt-2 flex flex-wrap gap-2 justify-between'
+              : 'shrink-0 px-5 py-4 border-t border-gray-200 dark:border-gray-700 flex flex-wrap gap-2 justify-between'
+          }
+        >
           <div>
             {productCostingStatus(product) !== 'none' ? (
               <button
@@ -418,13 +438,36 @@ export function ProductCostingModal({
             ) : null}
           </div>
           <div className="flex gap-2 ml-auto">
-            <SaasTabSecondaryButton onClick={onClose}>Cancelar</SaasTabSecondaryButton>
+            {!embedded ? (
+              <SaasTabSecondaryButton onClick={onClose}>Cancelar</SaasTabSecondaryButton>
+            ) : null}
             <SaasTabPrimaryButton disabled={saving} onClick={() => void save()}>
               {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
               Guardar
             </SaasTabPrimaryButton>
           </div>
         </div>
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <section className="rounded-2xl border-2 border-gray-200 dark:border-gray-700 p-3 space-y-2.5">
+        {body}
+      </section>
+    );
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/45 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-hidden flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {body}
       </div>
     </div>
   );

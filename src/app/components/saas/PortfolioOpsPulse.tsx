@@ -70,6 +70,9 @@ const EXCEL_COLS: Array<{ key: keyof OpsExcelChannels; label: string }> = [
   { key: 'glovo', label: 'Glovo' },
 ];
 
+/** Clave de selección: suma de todas las tiendas del ranking. */
+const TOTAL_KEY = '__all__';
+
 function DeltaBadge({ pct }: { pct: number | null }) {
   if (pct === null) {
     return <span className="text-[10px] text-gray-400">—</span>;
@@ -235,6 +238,88 @@ export function PortfolioOpsPulse({
 
   const totals = useMemo(() => aggregateStoreOpsPulses(pulses), [pulses]);
 
+  /** Pulso sintético: suma de todas las tiendas (día a día + canales). */
+  const allStoresPulse = useMemo((): StoreOpsPulse | null => {
+    if (pulses.length === 0) return null;
+    const byDay = new Map<
+      string,
+      {
+        dayKey: string;
+        label: string;
+        weekdayLabel: string;
+        revenue: number;
+        orders: number;
+        pizza: number;
+        burger: number;
+        taco: number;
+        kebab: number;
+        channels: OpsExcelChannels;
+        revenueDeltaPct: number | null;
+      }
+    >();
+    for (const p of pulses) {
+      for (const d of p.days) {
+        const prev = byDay.get(d.dayKey);
+        if (!prev) {
+          byDay.set(d.dayKey, {
+            dayKey: d.dayKey,
+            label: d.label,
+            weekdayLabel: d.weekdayLabel,
+            revenue: d.revenue,
+            orders: d.orders,
+            pizza: d.pizza,
+            burger: d.burger,
+            taco: d.taco,
+            kebab: d.kebab,
+            channels: { ...(d.channels || emptyOpsExcelChannels()) },
+            revenueDeltaPct: d.revenueDeltaPct,
+          });
+        } else {
+          prev.revenue = Math.round((prev.revenue + d.revenue) * 100) / 100;
+          prev.orders += d.orders;
+          prev.pizza += d.pizza;
+          prev.burger += d.burger;
+          prev.taco += d.taco;
+          prev.kebab += d.kebab;
+          const ch = d.channels || emptyOpsExcelChannels();
+          for (const col of EXCEL_COLS) {
+            prev.channels[col.key] =
+              Math.round((Number(prev.channels[col.key] || 0) + Number(ch[col.key] || 0)) * 100) / 100;
+          }
+        }
+      }
+    }
+    const days = [...byDay.values()].sort((a, b) => a.dayKey.localeCompare(b.dayKey));
+    for (let i = 0; i < days.length; i += 1) {
+      const cur = days[i];
+      const prev = i > 0 ? days[i - 1] : null;
+      cur.revenueDeltaPct =
+        prev && prev.revenue > 0
+          ? Math.round(((cur.revenue - prev.revenue) / prev.revenue) * 1000) / 10
+          : null;
+    }
+    return {
+      storeId: '__all__',
+      storeName: `Total · ${pulses.length} tiendas`,
+      businessId: pulses[0]?.businessId || '',
+      businessName: pulses[0]?.businessName || '',
+      pdvId: '',
+      days,
+      revenuePeriod: totals.revenuePeriod,
+      revenuePrevPeriod: totals.revenuePrevPeriod,
+      revenueMomPct: totals.revenueMomPct,
+      ordersPeriod: totals.ordersPeriod,
+      avgTicket: totals.avgTicket,
+      pizza: totals.pizza,
+      burger: totals.burger,
+      taco: totals.taco,
+      kebab: totals.kebab,
+      revenueToday: totals.revenueToday,
+      sharePercent: 100,
+      channels: totals.channels,
+    };
+  }, [pulses, totals]);
+
   const brandCompare = useMemo((): PdvBrandSameDayCompare | null => {
     if (pulses.length < 2 || brands.length === 0 || orders.length === 0) return null;
     const a = pulses[0];
@@ -265,9 +350,16 @@ export function PortfolioOpsPulse({
 
   const selected = useMemo(() => {
     if (pulses.length === 0) return null;
-    const key = selectedKey || `${pulses[0].businessId}:${pulses[0].storeId}`;
-    return pulses.find((p) => `${p.businessId}:${p.storeId}` === key) || pulses[0];
-  }, [pulses, selectedKey]);
+    const wantTotal =
+      selectedKey === TOTAL_KEY || (selectedKey === null && pulses.length > 1 && !!allStoresPulse);
+    if (wantTotal && allStoresPulse) return allStoresPulse;
+    if (selectedKey && selectedKey !== TOTAL_KEY) {
+      return pulses.find((p) => `${p.businessId}:${p.storeId}` === selectedKey) || pulses[0];
+    }
+    return pulses[0];
+  }, [pulses, selectedKey, allStoresPulse]);
+
+  const totalSelected = Boolean(selected && selected.storeId === '__all__');
 
   const chartData = useMemo(() => {
     if (!selected) return [];
@@ -468,12 +560,59 @@ export function PortfolioOpsPulse({
         <div className="flex items-center justify-between gap-2">
           <p className="text-[9px] font-bold uppercase tracking-wide text-gray-400">Tiendas</p>
           <p className="text-[9px] font-semibold text-[var(--v-blue,#2563eb)]">
-            Pulsa una tienda →
+            Pulsa total o una tienda →
           </p>
         </div>
+        {allStoresPulse && pulses.length > 1 ? (
+          <button
+            type="button"
+            onClick={() => setSelectedKey(TOTAL_KEY)}
+            title="Ver suma de todas las tiendas"
+            className={`flex w-full min-h-11 items-center justify-between gap-2 rounded-xl border px-2.5 py-2 text-left transition-colors ${
+              totalSelected
+                ? 'border-[var(--v-blue,#2563eb)] bg-[rgba(37,99,235,0.08)] ring-1 ring-[rgba(37,99,235,0.25)] dark:border-blue-500 dark:bg-blue-950/40'
+                : 'border-[rgba(37,99,235,0.25)] bg-[rgba(37,99,235,0.04)] hover:border-[rgba(37,99,235,0.45)] dark:border-blue-800 dark:bg-blue-950/20'
+            }`}
+          >
+            <span className="min-w-0 flex items-center gap-1.5">
+              <span className="w-4 shrink-0 text-[10px] font-black text-[var(--v-blue,#2563eb)]">Σ</span>
+              <BarChart3 className="h-3.5 w-3.5 shrink-0 text-[var(--v-blue,#2563eb)]" />
+              <span className="min-w-0">
+                <span className="block truncate text-[11px] font-bold text-gray-900 dark:text-gray-100">
+                  Total · todas
+                  {totalSelected ? (
+                    <span className="ml-1 text-[9px] font-bold text-[var(--v-blue,#2563eb)]">
+                      · detalle
+                    </span>
+                  ) : null}
+                </span>
+                <span className="block truncate text-[9px] text-gray-400">
+                  {pulses.length} tiendas ·{' '}
+                  <MixLine
+                    pizza={allStoresPulse.pizza}
+                    burger={allStoresPulse.burger}
+                    taco={allStoresPulse.taco}
+                    kebab={allStoresPulse.kebab}
+                  />
+                </span>
+              </span>
+            </span>
+            <span className="flex shrink-0 items-center gap-1">
+              <span className="text-right">
+                <span className="block text-[11px] font-black tabular-nums">
+                  {fmtEuro(allStoresPulse.revenuePeriod)}
+                </span>
+                <DeltaBadge pct={allStoresPulse.revenueMomPct} />
+              </span>
+              <ChevronRight
+                className={`h-4 w-4 ${totalSelected ? 'text-[var(--v-blue,#2563eb)]' : 'text-gray-300'}`}
+              />
+            </span>
+          </button>
+        ) : null}
         {pulses.map((p, idx) => {
           const key = `${p.businessId}:${p.storeId}`;
-          const active = selected && `${selected.businessId}:${selected.storeId}` === key;
+          const active = !totalSelected && selected && `${selected.businessId}:${selected.storeId}` === key;
           return (
             <button
               key={key}
@@ -524,7 +663,7 @@ export function PortfolioOpsPulse({
           <div className="flex items-center justify-between gap-2 border-b border-gray-100 bg-gray-50 px-3 py-1.5 dark:border-gray-700 dark:bg-gray-900/40">
             <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">Tiendas</p>
             <p className="text-[10px] font-semibold text-[var(--v-blue,#2563eb)]">
-              Pulsa una tienda para ver el detalle ↓
+              Pulsa «Total» o una tienda para ver el detalle ↓
             </p>
           </div>
           <div className="overflow-x-auto">
@@ -548,9 +687,76 @@ export function PortfolioOpsPulse({
                 </tr>
               </thead>
               <tbody>
+                {allStoresPulse && pulses.length > 1 ? (
+                  <tr
+                    onClick={() => setSelectedKey(TOTAL_KEY)}
+                    title="Ver suma de todas las tiendas"
+                    className={`cursor-pointer border-t border-gray-100 transition-colors dark:border-gray-700/80 ${
+                      totalSelected
+                        ? 'border-l-4 border-l-[var(--v-blue,#2563eb)] bg-[rgba(37,99,235,0.08)] dark:bg-blue-950/40'
+                        : 'border-l-4 border-l-transparent bg-[rgba(37,99,235,0.03)] hover:bg-[rgba(37,99,235,0.06)] dark:bg-blue-950/15 dark:hover:bg-blue-950/25'
+                    }`}
+                  >
+                    <td className="px-3 py-2.5 text-xs font-black text-[var(--v-blue,#2563eb)]">Σ</td>
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center gap-1.5">
+                        <BarChart3 className="h-3.5 w-3.5 shrink-0 text-[var(--v-blue,#2563eb)]" />
+                        <div>
+                          <p className="text-xs font-bold text-gray-900 dark:text-gray-100">
+                            Total · todas las tiendas
+                            {totalSelected ? (
+                              <span className="ml-1.5 rounded bg-[rgba(37,99,235,0.12)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[var(--v-blue,#2563eb)]">
+                                Detalle
+                              </span>
+                            ) : null}
+                          </p>
+                          <p className="text-[10px] text-gray-400">
+                            Suma de {pulses.length} PDVs
+                          </p>
+                        </div>
+                      </div>
+                    </td>
+                    {EXCEL_COLS.map((c) => (
+                      <td key={c.key} className="px-2 py-2.5 text-right text-xs">
+                        <MoneyCell n={Number(allStoresPulse.channels[c.key]) || 0} />
+                      </td>
+                    ))}
+                    <td className="px-2 py-2.5 text-right text-xs font-black tabular-nums">
+                      {fmtEuro(allStoresPulse.revenuePeriod)}
+                    </td>
+                    <td className="px-2 py-2.5 text-right text-xs tabular-nums text-gray-600">
+                      100%
+                    </td>
+                    <td className="px-2 py-2.5 text-right text-xs tabular-nums">
+                      {formatNumberEs(allStoresPulse.ordersPeriod, { maxFraction: 0 })}
+                    </td>
+                    <td className="px-2 py-2.5">
+                      <MixLine
+                        pizza={allStoresPulse.pizza}
+                        burger={allStoresPulse.burger}
+                        taco={allStoresPulse.taco}
+                        kebab={allStoresPulse.kebab}
+                      />
+                    </td>
+                    <td className="px-2 py-2.5 text-right text-xs font-semibold tabular-nums">
+                      {fmtEuro(allStoresPulse.revenueToday)}
+                    </td>
+                    <td className="px-2 py-2.5 text-right">
+                      <DeltaBadge pct={allStoresPulse.revenueMomPct} />
+                    </td>
+                    <td className="px-2 py-2.5 text-right">
+                      <ChevronRight
+                        className={`inline h-4 w-4 ${
+                          totalSelected ? 'text-[var(--v-blue,#2563eb)]' : 'text-gray-300'
+                        }`}
+                      />
+                    </td>
+                  </tr>
+                ) : null}
                 {pulses.map((p, idx) => {
                   const key = `${p.businessId}:${p.storeId}`;
-                  const active = selected && `${selected.businessId}:${selected.storeId}` === key;
+                  const active =
+                    !totalSelected && selected && `${selected.businessId}:${selected.storeId}` === key;
                   const ch = p.channels || emptyOpsExcelChannels();
                   return (
                     <tr
@@ -638,7 +844,11 @@ export function PortfolioOpsPulse({
                   <p className="text-xs font-black text-gray-900 dark:text-gray-100">
                     {selected.storeName}
                   </p>
-                  <p className="text-[10px] text-gray-400">€ / día · tienda seleccionada</p>
+                  <p className="text-[10px] text-gray-400">
+                    {totalSelected
+                      ? '€ / día · suma de todas las tiendas'
+                      : '€ / día · tienda seleccionada'}
+                  </p>
                 </div>
                 <TrendingUp className="h-4 w-4 text-[var(--v-blue,#2563eb)]" />
               </div>

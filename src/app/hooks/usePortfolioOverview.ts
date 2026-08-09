@@ -220,6 +220,7 @@ function mapStores(
   monthKey: string,
   businessId: string,
   businessName: string,
+  sessions: TpvRegisterSession[] = [],
 ): PortfolioStore[] {
   const keys7d = listTrailingDayKeys(todayKey, 7);
   const keysMonth = listMonthToDateDayKeys(todayKey);
@@ -242,6 +243,7 @@ function mapStores(
         pdvId: pdvId || '',
         workCenterId: wc._id,
         todayKey,
+        sessions,
       };
       const ops7d = pdvId
         ? buildStoreOpsPulse(orders, { ...pulseBase, dayKeys: keys7d })
@@ -657,6 +659,8 @@ export function usePortfolioOverview(
       loaded = await Promise.all(
         structures.map(async (s) => {
           const orders = s.isDelivery && s.dataUserId ? ordersByUser.get(s.dataUserId) || [] : [];
+          const sessionsForStores =
+            s.isOps && s.dataUserId ? sessionsByUser.get(s.dataUserId) || [] : [];
           const stores = mapStores(
             s.workCenters,
             s.pdvWcIds,
@@ -666,6 +670,7 @@ export function usePortfolioOverview(
             monthKey,
             s.business.business_id,
             s.business.name || 'Empresa',
+            sessionsForStores,
           );
           const brandsBase = buildBrandRows(s.brandsRaw, stores, stores.length);
           let metrics = emptyPortfolioMetrics();

@@ -412,16 +412,19 @@ function NewPurchaseOrderModal({
  * → registrar factura en la pestaña Facturas.
  */
 export function PurchaseOrdersPage({
+  dataUserId,
   suppliers = [],
   catalogItems = [],
   onGoToInvoices,
 }: {
+  /** Titular del negocio (misma clave que proveedores/facturas/catálogo). */
+  dataUserId?: string;
   suppliers?: Supplier[];
   catalogItems?: CatalogItem[];
   onGoToInvoices?: () => void;
 }) {
   const { user } = useAuth();
-  const userId = String(user?.id || '').trim();
+  const userId = String(dataUserId || user?.id || '').trim();
 
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
   const [loading, setLoading] = useState(true);
