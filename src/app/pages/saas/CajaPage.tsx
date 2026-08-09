@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react';
-import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
@@ -708,7 +708,6 @@ export function CajaPage() {
     [currentBusiness],
   );
   const navigate = useNavigate();
-  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [sessions, setSessions] = useState<TpvRegisterSession[]>([]);
@@ -1147,14 +1146,7 @@ export function CajaPage() {
       setViewingClosingSession(null);
       return;
     }
-    const returnToOps = Boolean((location.state as { returnToOps?: boolean } | null)?.returnToOps);
-    navigate(
-      resolveCajaPageExitPath({
-        returnToOps,
-        businessType: currentBusiness?.businessType,
-      }),
-      { replace: true },
-    );
+    navigate(resolveCajaPageExitPath(), { replace: true });
   };
 
   if (loading) {

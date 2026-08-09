@@ -27,17 +27,17 @@ describe('retailOpsPaths — restaurant vs delivery', () => {
     expect(resolveTpvCeoExitPath('/saas/vertical/delivery/caja', 'delivery')).toBe(DELIVERY_OPS_HOME_PATH);
   });
 
-  it('caja Volver: ops solo si returnToOps; si no, dashboard', () => {
+  it('caja Volver (flecha): siempre dashboard, nunca ops', () => {
     expect(resolveCajaPageExitPath({ returnToOps: true, businessType: 'delivery' })).toBe(
-      DELIVERY_OPS_HOME_PATH,
+      '/saas/dashboard',
     );
     expect(resolveCajaPageExitPath({ returnToOps: true, businessType: 'restaurant' })).toBe(
-      '/saas/restaurant-ops',
+      '/saas/dashboard',
     );
     expect(resolveCajaPageExitPath({ returnToOps: false, businessType: 'delivery' })).toBe(
       '/saas/dashboard',
     );
-    expect(resolveCajaPageExitPath({ businessType: 'delivery' })).toBe('/saas/dashboard');
+    expect(resolveCajaPageExitPath()).toBe('/saas/dashboard');
   });
 
   it('shouldForceRetailStoreReload covers restaurant ops screens', () => {

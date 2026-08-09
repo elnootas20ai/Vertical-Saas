@@ -46,17 +46,14 @@ export function resolveRetailCajaPath(businessType?: string | null): string {
 }
 
 /**
- * Salida del botón Volver en la pantalla Caja (timeline).
- * - Desde Centro operativo (`returnToOps`) → ops de la vertical.
- * - Desde sidebar / dashboard / KPI → Panel principal (no forzar ops).
+ * Salida del botón Volver (flecha) en la pantalla Caja (timeline).
+ * Siempre Panel principal — no Centro operativo.
+ * Si el usuario vino de Ops, Layout muestra la franja «Volver al Centro Operativo».
  */
-export function resolveCajaPageExitPath(options?: {
+export function resolveCajaPageExitPath(_options?: {
   returnToOps?: boolean;
   businessType?: string | null;
 }): string {
-  if (options?.returnToOps) {
-    return resolveRetailOpsHomePath(options.businessType);
-  }
   return '/saas/dashboard';
 }
 

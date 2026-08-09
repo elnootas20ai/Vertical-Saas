@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
@@ -545,7 +545,6 @@ export function RestaurantCajaPage() {
     [currentBusiness],
   );
   const navigate = useNavigate();
-  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [sessions, setSessions] = useState<TpvRegisterSession[]>([]);
@@ -849,14 +848,7 @@ export function RestaurantCajaPage() {
             setViewingClosingSession(null);
             return;
           }
-          const returnToOps = Boolean((location.state as { returnToOps?: boolean } | null)?.returnToOps);
-          navigate(
-            resolveCajaPageExitPath({
-              returnToOps,
-              businessType: currentBusiness?.businessType,
-            }),
-            { replace: true },
-          );
+          navigate(resolveCajaPageExitPath(), { replace: true });
         }}
         selectedSessionId={expandedSessionId}
         onSelectSession={setExpandedSessionId}
