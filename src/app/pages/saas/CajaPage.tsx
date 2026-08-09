@@ -57,7 +57,7 @@ import {
   sessionBelongsToCajaDay,
   sortRegisterSessionsForDisplay,
 } from '../../lib/tpvCajaScope';
-import { DELIVERY_OPS_HOME_PATH } from '../../lib/retailOpsPaths';
+import { resolveCajaPageExitPath } from '../../lib/retailOpsPaths';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1147,13 +1147,14 @@ export function CajaPage() {
       setViewingClosingSession(null);
       return;
     }
-    if ((location.state as { returnToOps?: boolean } | null)?.returnToOps) {
-      navigate(DELIVERY_OPS_HOME_PATH, { replace: true });
-      return;
-    }
-    // Nunca history(-1): desde Dashboard a menudo se llega vía /saas/caja (restaurante)
-    // y el redirect crea un bucle Volver → /saas/caja → delivery/caja.
-    navigate(DELIVERY_OPS_HOME_PATH, { replace: true });
+    const returnToOps = Boolean((location.state as { returnToOps?: boolean } | null)?.returnToOps);
+    navigate(
+      resolveCajaPageExitPath({
+        returnToOps,
+        businessType: currentBusiness?.businessType,
+      }),
+      { replace: true },
+    );
   };
 
   if (loading) {

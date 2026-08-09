@@ -45,6 +45,21 @@ export function resolveRetailCajaPath(businessType?: string | null): string {
   return DELIVERY_CAJA_PATH;
 }
 
+/**
+ * Salida del botón Volver en la pantalla Caja (timeline).
+ * - Desde Centro operativo (`returnToOps`) → ops de la vertical.
+ * - Desde sidebar / dashboard / KPI → Panel principal (no forzar ops).
+ */
+export function resolveCajaPageExitPath(options?: {
+  returnToOps?: boolean;
+  businessType?: string | null;
+}): string {
+  if (options?.returnToOps) {
+    return resolveRetailOpsHomePath(options.businessType);
+  }
+  return '/saas/dashboard';
+}
+
 /** Salida del TPV CEO según ruta actual y vertical. */
 export function resolveTpvCeoExitPath(
   pathname: string,

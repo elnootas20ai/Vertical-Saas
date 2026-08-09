@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { RegisterClosingDetailPanel } from '../../components/saas/RegisterClosingDetailPanel';
 import { CajaTimelineBoard } from '../../components/saas/caja/CajaTimelineBoard';
+import { resolveCajaPageExitPath } from '../../lib/retailOpsPaths';
 import {
   downloadUrielCajaClosings,
   type UrielCajaDownloadFormat,
@@ -544,6 +545,7 @@ export function RestaurantCajaPage() {
     [currentBusiness],
   );
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [sessions, setSessions] = useState<TpvRegisterSession[]>([]);
@@ -838,7 +840,24 @@ export function RestaurantCajaPage() {
         dayStats={dayStats}
         excelClosedCount={excelClosedCount}
         onDownloadFormat={handleDownload}
-        onBack={() => navigate('/saas/restaurant-ops', { replace: true })}
+        onBack={() => {
+          if (expandedSessionId) {
+            setExpandedSessionId(null);
+            return;
+          }
+          if (viewingClosingSession) {
+            setViewingClosingSession(null);
+            return;
+          }
+          const returnToOps = Boolean((location.state as { returnToOps?: boolean } | null)?.returnToOps);
+          navigate(
+            resolveCajaPageExitPath({
+              returnToOps,
+              businessType: currentBusiness?.businessType,
+            }),
+            { replace: true },
+          );
+        }}
         selectedSessionId={expandedSessionId}
         onSelectSession={setExpandedSessionId}
         onViewFullClosing={handleViewClosing}

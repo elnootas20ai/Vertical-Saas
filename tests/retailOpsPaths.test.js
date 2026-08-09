@@ -4,6 +4,7 @@ import {
   resolveRetailCeoTpvPath,
   resolveRetailCajaPath,
   resolveTpvCeoExitPath,
+  resolveCajaPageExitPath,
   shouldForceRetailStoreReload,
   isDeliveryOnlyRoute,
   RESTAURANT_CEO_TPV_PATH,
@@ -24,6 +25,19 @@ describe('retailOpsPaths — restaurant vs delivery', () => {
     expect(resolveRetailCajaPath('delivery')).toBe('/saas/vertical/delivery/caja');
     expect(resolveTpvCeoExitPath('/saas/vertical/delivery/tpv', 'delivery')).toBe(DELIVERY_OPS_HOME_PATH);
     expect(resolveTpvCeoExitPath('/saas/vertical/delivery/caja', 'delivery')).toBe(DELIVERY_OPS_HOME_PATH);
+  });
+
+  it('caja Volver: ops solo si returnToOps; si no, dashboard', () => {
+    expect(resolveCajaPageExitPath({ returnToOps: true, businessType: 'delivery' })).toBe(
+      DELIVERY_OPS_HOME_PATH,
+    );
+    expect(resolveCajaPageExitPath({ returnToOps: true, businessType: 'restaurant' })).toBe(
+      '/saas/restaurant-ops',
+    );
+    expect(resolveCajaPageExitPath({ returnToOps: false, businessType: 'delivery' })).toBe(
+      '/saas/dashboard',
+    );
+    expect(resolveCajaPageExitPath({ businessType: 'delivery' })).toBe('/saas/dashboard');
   });
 
   it('shouldForceRetailStoreReload covers restaurant ops screens', () => {
