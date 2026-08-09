@@ -1071,12 +1071,17 @@ export function aggregatorChannelsFromClosingSessions(
   sessions: TpvRegisterSession[],
   dayKey: string,
   pdvId: string,
+  workCenterId?: string | null,
 ): Pick<OpsExcelChannels, 'app' | 'uber' | 'justEat' | 'glovo'> | null {
   const pid = String(pdvId || '').trim();
   if (!pid || !dayKey || !Array.isArray(sessions) || sessions.length === 0) return null;
+  const aliases = new Set([pid]);
+  const wc = String(workCenterId || '').trim();
+  if (wc) aliases.add(wc);
 
   const daySessions = sessions.filter((s) => {
-    if (String(s.pointOfSaleId || '').trim() !== pid) return false;
+    const sid = String(s.pointOfSaleId || '').trim();
+    if (!sid || !aliases.has(sid)) return false;
     const workDay = sessionWorkDayKey(s);
     return workDay === dayKey;
   });
@@ -1122,10 +1127,11 @@ function channelsForOpsDay(
   sessions: TpvRegisterSession[] | undefined,
   dayKey: string,
   pdvId: string,
+  workCenterId?: string | null,
 ): { channels: OpsExcelChannels; fromClosing: boolean } {
   const base = channelsFromOrders(orders);
   if (!sessions?.length) return { channels: base, fromClosing: false };
-  const fromClosing = aggregatorChannelsFromClosingSessions(sessions, dayKey, pdvId);
+  const fromClosing = aggregatorChannelsFromClosingSessions(sessions, dayKey, pdvId, workCenterId);
   if (!fromClosing) return { channels: base, fromClosing: false };
   return {
     channels: {
@@ -1323,7 +1329,13 @@ export function buildStoreOpsPulse(
     const orderRevenue =
       Math.round(revenueOrders.reduce((s, o) => s + deliveryOrderRevenueAmount(o), 0) * 100) / 100;
     const ordersCount = revenueOrders.length;
-    const { channels, fromClosing } = channelsForOpsDay(revenueOrders, sessions, dayKey, pdvId);
+    const { channels, fromClosing } = channelsForOpsDay(
+      revenueOrders,
+      sessions,
+      dayKey,
+      pdvId,
+      workCenterId,
+    );
     // Con Caja 2: Ventas = suma de canales (pedidos locales + integradores declarados).
     // Sin cierre: Ventas = pedidos cobrados (coincide con el desglose de canales).
     const revenue = fromClosing ? opsExcelChannelsTotal(channels) : orderRevenue;
@@ -1332,7 +1344,7 @@ export function buildStoreOpsPulse(
     if (prevKey) {
       const prevOrders = scoped.filter((o) => isRevenueOnDay(o, prevKey));
       const prevOrderRev = prevOrders.reduce((s, o) => s + deliveryOrderRevenueAmount(o), 0);
-      const prevCh = channelsForOpsDay(prevOrders, sessions, prevKey, pdvId);
+      const prevCh = channelsForOpsDay(prevOrders, sessions, prevKey, pdvId, workCenterId);
       const prevRev = prevCh.fromClosing ? opsExcelChannelsTotal(prevCh.channels) : prevOrderRev;
       revenueDeltaPct = monthOverMonthPct(revenue, prevRev);
     }
@@ -1365,7 +1377,7 @@ export function buildStoreOpsPulse(
   for (const pk of prevKeys) {
     const prevOrders = scoped.filter((o) => isRevenueOnDay(o, pk));
     const prevOrderRev = prevOrders.reduce((s, o) => s + deliveryOrderRevenueAmount(o), 0);
-    const prevCh = channelsForOpsDay(prevOrders, sessions, pk, pdvId);
+    const prevCh = channelsForOpsDay(prevOrders, sessions, pk, pdvId, workCenterId);
     revenuePrevPeriod += prevCh.fromClosing ? opsExcelChannelsTotal(prevCh.channels) : prevOrderRev;
   }
   revenuePrevPeriod = Math.round(revenuePrevPeriod * 100) / 100;
