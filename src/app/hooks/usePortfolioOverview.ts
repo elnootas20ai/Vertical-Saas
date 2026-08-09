@@ -579,7 +579,9 @@ export function usePortfolioOverview(
 
       await Promise.all(
         uniqueOpsUsers.map(async (dataUserId) => {
-          const sessions = await listTpvRegisterSessionsRequest(dataUserId).catch(() => []);
+          const sessions = await listTpvRegisterSessionsRequest(dataUserId, {
+            dateFrom: orderFetchFrom,
+          }).catch(() => []);
           sessionsByUser.set(dataUserId, sessions);
         }),
       );
