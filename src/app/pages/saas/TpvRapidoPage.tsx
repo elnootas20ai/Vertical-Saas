@@ -80,6 +80,12 @@ import {
 } from '../../lib/catalogCustomization';
 import { isCajaRegistrationOk, normalizeTpvPaymentMethod } from '../../lib/tpvCajaMath';
 import {
+  isJunkTpvCustomerName,
+  quickAttentionNameFromClientSearch,
+  resolveTpvCustomerDisplayName,
+  validateTpvQuickAttentionName,
+} from '../../lib/tpvCustomerDisplayName';
+import {
   buildTpvCatalogSections,
   categoriesForTpvScope,
   defaultTpvSectionId,
@@ -1150,10 +1156,11 @@ export function TpvRapidoOrderFlow({
     typeof window !== 'undefined' ? readStoredPromotions() : [],
   );
   const startQuickAttentionFlow = useCallback(() => {
-    setQuickNameDraft('');
+    // Si ya escribieron un nombre en el buscador, reutilizarlo (evita reescribir y el autofill «Buscar»).
+    setQuickNameDraft(quickAttentionNameFromClientSearch(phoneInput));
     setQuickPhoneDraft('');
     setQuickNamePromptOpen(true);
-  }, []);
+  }, [phoneInput]);
 
   const cancelQuickAttentionNamePrompt = useCallback(() => {
     setQuickNamePromptOpen(false);
@@ -2327,8 +2334,9 @@ export function TpvRapidoOrderFlow({
 
   const confirmQuickAttentionName = useCallback(async () => {
     const name = quickNameDraft.trim();
-    if (name.length < 2) {
-      toast.error('Escribe un nombre (mín. 2 letras) para el pedido rápido');
+    const nameError = validateTpvQuickAttentionName(name);
+    if (nameError) {
+      toast.error(nameError);
       return;
     }
     const searchUid = clientSearchUserId || userId;
@@ -2623,6 +2631,10 @@ export function TpvRapidoOrderFlow({
   const handleSubmitOrder = useCallback(
     async (status: DeliveryOrderStatus, methodOverride?: PaymentMethod, splitParts?: TpvSplitPaymentPart[] | null) => {
       if (!saleClient || !deliveryType || cart.length === 0) return;
+      if (isJunkTpvCustomerName(saleClient.name)) {
+        toast.error('Pon el nombre del cliente antes de cobrar (no vale «Buscar»)');
+        return;
+      }
       if (!register || !isTpvRegisterSessionOpen(register.session)) {
         toast.error('Abre la caja de la tienda para cobrar y enviar');
         return;
@@ -2729,7 +2741,7 @@ export function TpvRapidoOrderFlow({
         const orderData: Partial<DeliveryOrder> = {
           // Atención rápida sin teléfono: cliente sintético (sin CRM). Con teléfono: ficha CRM.
           clientId: walkInSale ? '' : saleClient.id,
-          customerName: saleClient.name,
+          customerName: resolveTpvCustomerDisplayName(saleClient.name, 'Cliente'),
           customerPhone: walkInSale
             ? (saleClient.phone
               ? formatTicketCustomerPhone(saleClient.phone, saleClient.phonePrefix || phonePrefix)
@@ -4208,7 +4220,7 @@ export function TpvRapidoOrderFlow({
 
   // No exigir caja abierta solo por un parpadeo del contexto: si el gate la pierde
   // un instante, el flujo de pedido no debe saltar a «Abre la caja».
-  const registerStable = register || (needsOpenRegister ? registerStickyRef.current : null);
+  const registerStable = register || registerStickyRef.current;
 
   const allowProductsWithoutRegister =
     (embeddedInRestaurantTpv
@@ -4216,7 +4228,9 @@ export function TpvRapidoOrderFlow({
       && currentStep === 'products'
       && !restaurantTable?.isCounter)
     // Editar pedido del tablero: no bloquear si el contexto de caja parpadea un frame.
-    || isEditingDeliveryOrder;
+    || isEditingDeliveryOrder
+    // Nuevo pedido desde tablero tablet: el sticky cubre el parpadeo.
+    || (tabletMode && Boolean(registerStickyRef.current));
 
   if (needsOpenRegister && !registerStable && !allowProductsWithoutRegister) {
     return (
@@ -4632,15 +4646,14 @@ export function TpvRapidoOrderFlow({
                 className="flex flex-col sm:flex-row gap-2"
                 autoComplete="off"
                 onSubmit={(e) => e.preventDefault()}
-                role="search"
               >
                 <div className="flex-1 relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" aria-hidden />
                   <input
                     ref={phoneRef}
                     id="tpv-client-search"
-                    name="vertial-client-search"
-                    type="search"
+                    name="vertial-client-search-q"
+                    type="text"
                     inputMode="search"
                     enterKeyHint="search"
                     value={phoneInput}
@@ -4672,6 +4685,7 @@ export function TpvRapidoOrderFlow({
                     spellCheck={false}
                     data-1p-ignore
                     data-lpignore="true"
+                    data-form-type="other"
                   />
                 </div>
               </form>
@@ -6252,6 +6266,11 @@ export function TpvRapidoOrderFlow({
                 autoFocus
                 name="vertial-quick-attention-name"
                 autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
+                data-1p-ignore
+                data-lpignore="true"
+                data-form-type="other"
                 disabled={creatingClient}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {

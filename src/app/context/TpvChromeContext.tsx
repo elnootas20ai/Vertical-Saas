@@ -122,3 +122,22 @@ export function useTpvOrderFlowChrome(active: boolean) {
 export function useTpvOrderFlowActive(): boolean {
   return useContext(TpvChromeContext)?.orderFlowActive ?? false;
 }
+
+/** Adquirir/liberar el lock a mano (p. ej. al pulsar «+» / Nuevo antes del setState). */
+export function useTpvOrderFlowLockControls(): {
+  acquire: () => void;
+  release: () => void;
+} {
+  const ctx = useContext(TpvChromeContext);
+  return useMemo(
+    () => ({
+      acquire: () => {
+        ctx?.acquireOrderFlowLock();
+      },
+      release: () => {
+        ctx?.releaseOrderFlowLock();
+      },
+    }),
+    [ctx],
+  );
+}
