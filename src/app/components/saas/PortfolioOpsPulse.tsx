@@ -126,9 +126,10 @@ function dayRowStickyBg(isBest: boolean, isWorst: boolean): string {
 }
 
 function ChannelMixStrip({ channels }: { channels: OpsExcelChannels }) {
-  const total = opsExcelChannelsTotal(channels) || 1;
+  const safe = channels || emptyOpsExcelChannels();
+  const total = opsExcelChannelsTotal(safe) || 1;
   const parts = EXCEL_COLS
-    .map((c) => ({ ...c, amount: Number(channels[c.key]) || 0 }))
+    .map((c) => ({ ...c, amount: Number(safe[c.key]) || 0 }))
     .filter((c) => c.amount > 0);
   if (parts.length === 0) return null;
   return (

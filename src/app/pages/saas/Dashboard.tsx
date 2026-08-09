@@ -82,7 +82,6 @@ import {
   deliveryOrderRevenueAmount,
   applyTpvCashMetrics,
   buildStoreOpsPulse,
-  emptyStoreOpsPulse,
   listTrailingDayKeys,
   listMonthToDateDayKeys,
   type PortfolioMetrics,
@@ -744,7 +743,13 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
       return;
     }
     const dataUserId = resolveBusinessDataUserId(authUser, currentBusiness);
-    if (!dataUserId) return;
+    if (!dataUserId) {
+      setDeliveryMetrics(emptyPortfolioMetrics());
+      setDeliveryScope(null);
+      setDeliveryOpsPulses({ pulses7d: [], pulsesMonth: [] });
+      setWorkerPayMonth(null);
+      return;
+    }
     const scopeBusinessId = String(currentBusiness.business_id || currentBusiness.id || '')
       .replace(/^business:/, '')
       .trim();
@@ -764,7 +769,9 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
         ordersCountResult,
         staffConsumptionsResult,
       ] = await Promise.all([
-        loadDeliveryStores(authUser, currentBusiness).catch(() => ({
+        loadDeliveryStores(authUser, currentBusiness, {
+          accountBusinessCount: businesses.length || 1,
+        }).catch(() => ({
           dataUserId: '',
           workCenters: [],
           pointsOfSale: [],
@@ -813,46 +820,70 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
       const keys7d = listTrailingDayKeys(todayKey, 7);
       const keysMonth = listMonthToDateDayKeys(todayKey);
       const pdvByWorkCenterId = new Map<string, string>();
+      const wcNameById = new Map<string, string>();
+      for (const wc of workCenters) {
+        if (wc?._id) wcNameById.set(String(wc._id), String(wc.name || wc._id));
+      }
       for (const p of pointsOfSale) {
         const wcId = String(p.workCenterId || '').trim();
-        if (wcId) pdvByWorkCenterId.set(wcId, p._id);
+        if (wcId) pdvByWorkCenterId.set(wcId, String(p._id));
       }
-      const buildPulses = (dayKeys: string[]): StoreOpsPulse[] =>
-        workCenters
-          .filter(
-            (wc) =>
-              !wc.deletedAt &&
-              (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
-          )
-          .map((wc) => {
-            const pdvId = pdvByWorkCenterId.get(wc._id);
-            const pulseBase = {
-              storeId: wc._id,
-              storeName: wc.name,
-              businessId: scopeBusinessId,
-              businessName,
-              pdvId: pdvId || '',
-              workCenterId: wc._id,
-              todayKey,
-              sessions: tpvSessions || [],
-            };
-            return pdvId
-              ? buildStoreOpsPulse(orderResult.orders || [], { ...pulseBase, dayKeys })
-              : emptyStoreOpsPulse({
-                  storeId: wc._id,
-                  storeName: wc.name,
-                  businessId: scopeBusinessId,
-                  businessName,
-                });
-          })
-          .filter((p) => Boolean(p.pdvId));
 
-      const deliveryStores = pointsOfSale
-        .filter((p) => p.active !== false)
-        .map((p) => ({
-          id: String(p._id || '').trim(),
-          name: String(p.name || p._id || 'Tienda').trim(),
-        }))
+      // Fuentes del resumen: PDVs cargados + pedidos + cierres de caja.
+      // Así la lista no se vacía si falla el enlace WC↔PDV o el filtro de scope.
+      const pulseStores: Array<{ id: string; name: string; workCenterId: string }> = [];
+      const pulseStoreMap = new Map<string, { id: string; name: string; workCenterId: string }>();
+      const addPulseStore = (idRaw: string, nameRaw?: string, wcRaw?: string) => {
+        const id = String(idRaw || '').trim();
+        if (!id) return;
+        const prev = pulseStoreMap.get(id);
+        const workCenterId = String(wcRaw || prev?.workCenterId || '').trim();
+        const name = String(nameRaw || prev?.name || wcNameById.get(workCenterId) || id).trim();
+        pulseStoreMap.set(id, { id, name, workCenterId });
+      };
+      for (const p of pointsOfSale) {
+        if (p.active === false) continue;
+        addPulseStore(String(p._id || ''), String(p.name || ''), String(p.workCenterId || ''));
+      }
+      for (const wc of workCenters) {
+        if (wc.deletedAt) continue;
+        if (wc.centerType !== 'punto_de_venta' && wc.centerType !== 'almacen') continue;
+        const linkedPdv = pdvByWorkCenterId.get(String(wc._id));
+        if (linkedPdv) addPulseStore(linkedPdv, String(wc.name || ''), String(wc._id));
+      }
+      for (const id of orderPdvIds) addPulseStore(id);
+      for (const s of tpvSessions || []) {
+        addPulseStore(String(s.pointOfSaleId || ''), undefined, String((s as { workCenterId?: string }).workCenterId || ''));
+      }
+      pulseStores.push(...pulseStoreMap.values());
+
+      const buildPulses = (dayKeys: string[]): StoreOpsPulse[] =>
+        pulseStores.map((store) =>
+          buildStoreOpsPulse(orderResult.orders || [], {
+            storeId: store.workCenterId || store.id,
+            storeName: store.name,
+            businessId: scopeBusinessId,
+            businessName,
+            pdvId: store.id,
+            workCenterId: store.workCenterId || undefined,
+            todayKey,
+            dayKeys,
+            sessions: tpvSessions || [],
+          }),
+        ).filter((p) => Boolean(p.pdvId));
+
+      const deliveryStores = (
+        pulseStores.length > 0
+          ? pulseStores
+          : pointsOfSale
+              .filter((p) => p.active !== false)
+              .map((p) => ({
+                id: String(p._id || '').trim(),
+                name: String(p.name || p._id || 'Tienda').trim(),
+                workCenterId: String(p.workCenterId || ''),
+              }))
+      )
+        .map((s) => ({ id: s.id, name: s.name }))
         .filter((s) => s.id);
 
       setWorkerPayMonth(
@@ -863,7 +894,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
         ),
       );
 
-      if (pdvIds.length === 0 && wcScope.size === 0 && (orderResult.orders || []).length === 0) {
+      if (pulseStores.length === 0 && (orderResult.orders || []).length === 0) {
         setDeliveryMetrics(emptyPortfolioMetrics());
         setDeliveryOpsPulses({ pulses7d: [], pulsesMonth: [] });
         setDeliveryScope({
@@ -912,13 +943,14 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
         ),
         stores: deliveryStores,
       });
-    } catch {
-      setDeliveryMetrics(null);
+    } catch (err) {
+      console.warn('[Dashboard] loadDeliveryDashboard', err);
+      setDeliveryMetrics(emptyPortfolioMetrics());
       setDeliveryScope(null);
       setDeliveryOpsPulses(null);
       setWorkerPayMonth(null);
     }
-  }, [isDeliveryVertical, authUser, currentBusiness]);
+  }, [isDeliveryVertical, authUser, currentBusiness, businesses.length]);
 
   useEffect(() => {
     void loadDeliveryDashboard();

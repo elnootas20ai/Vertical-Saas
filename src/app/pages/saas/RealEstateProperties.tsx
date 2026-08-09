@@ -858,7 +858,7 @@ function RealEstatePropertiesPage() {
                 disabled={loading}
                 className="w-full h-10 pl-10 pr-4 rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-sm focus:ring-2 focus:ring-blue-500 outline-none dark:text-stone-100"
               />
-            </div>
+          </div>
             <div className="flex flex-wrap items-center gap-2">
               <select
                 value={filterTipo}
@@ -868,7 +868,7 @@ function RealEstatePropertiesPage() {
               >
                 <option value="">Todos los tipos</option>
                 {TIPOS.map(t => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
-              </select>
+            </select>
               <select
                 value={sortBy}
                 onChange={e => setSortBy(e.target.value as CatalogSort)}
@@ -879,7 +879,7 @@ function RealEstatePropertiesPage() {
                 <option value="precio_desc">Precio: mayor a menor</option>
                 <option value="precio_asc">Precio: menor a mayor</option>
                 <option value="m2_desc">Más superficie</option>
-              </select>
+            </select>
               <div className="flex h-10 items-center gap-0.5 rounded-xl border border-stone-200 dark:border-stone-700 p-0.5">
                 <button
                   type="button"
@@ -926,8 +926,8 @@ function RealEstatePropertiesPage() {
                 <Plus className="h-4 w-4" />
                 Nuevo inmueble
               </button>
-            </div>
           </div>
+        </div>
 
           <div className="flex flex-wrap items-center gap-1.5">
             {([['', 'Todo'], ['venta', 'Venta'], ['alquiler', 'Alquiler']] as [Operacion | '', string][]).map(([op, label]) => (
@@ -979,7 +979,7 @@ function RealEstatePropertiesPage() {
           </p>
         ) : null}
 
-        {loading ? (
+              {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
             {Array.from({ length: 8 }).map((_, i) => (
               <div
@@ -1003,7 +1003,7 @@ function RealEstatePropertiesPage() {
           <div className="rounded-2xl border border-dashed border-stone-300 dark:border-stone-600 bg-white dark:bg-stone-900 px-6 py-16 text-center space-y-4">
             <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 via-teal-500 to-blue-600 text-white">
               <Building2 className="h-7 w-7" />
-            </span>
+                    </span>
             <div className="space-y-1">
               <p className="text-base font-bold text-stone-800 dark:text-stone-100">
                 {data.length === 0 ? 'Tu catálogo está vacío' : 'Ningún inmueble coincide'}
@@ -1527,8 +1527,8 @@ function RealEstatePropertiesPage() {
                       </ul>
                     )}
                   </section>
-                </div>
-              </div>
+        </div>
+      </div>
 
               <div className="sticky bottom-0 flex flex-wrap justify-end gap-2 p-4 border-t border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900">
                 <button type="button" onClick={() => setDetail(null)} className={`${VERTIAL_BTN_SECONDARY} !min-h-10`}>
@@ -1710,18 +1710,18 @@ function RealEstatePropertiesPage() {
 
               <div>
                 <p className="text-sm font-semibold text-stone-800 dark:text-stone-100 mb-2">3. Precio y operación</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Tipo</label>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Tipo</label>
                     <select value={form.tipo} onChange={e => setForm((f) => ({ ...f, tipo: e.target.value as TipoInmueble }))} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm dark:text-gray-100">
-                      {TIPOS.map(t => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Operación</label>
+                    {TIPOS.map(t => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Operación</label>
                     <select value={form.operacion} onChange={e => setForm((f) => ({ ...f, operacion: e.target.value as Operacion }))} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm dark:text-gray-100">
-                      {OPERACIONES.map(o => <option key={o} value={o}>{o.charAt(0).toUpperCase() + o.slice(1)}</option>)}
-                    </select>
+                    {OPERACIONES.map(o => <option key={o} value={o}>{o.charAt(0).toUpperCase() + o.slice(1)}</option>)}
+                  </select>
                   </div>
                 </div>
               </div>
@@ -1747,9 +1747,9 @@ function RealEstatePropertiesPage() {
 
               <div>
                 <p className="text-sm font-semibold text-stone-800 dark:text-stone-100 mb-2">4. Características</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Habitaciones</label>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Habitaciones</label>
                     <input
                       type="text"
                       inputMode="numeric"
@@ -1758,9 +1758,9 @@ function RealEstatePropertiesPage() {
                       placeholder="0"
                       className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm dark:text-gray-100 focus:ring-2 focus:ring-blue-500 outline-none tabular-nums"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">m²</label>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">m²</label>
                     <input
                       type="text"
                       inputMode="numeric"
@@ -1769,8 +1769,8 @@ function RealEstatePropertiesPage() {
                       placeholder="0"
                       className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm dark:text-gray-100 focus:ring-2 focus:ring-blue-500 outline-none tabular-nums"
                     />
-                  </div>
                 </div>
+              </div>
               </div>
 
               <div className="grid grid-cols-3 gap-3">
@@ -2037,7 +2037,7 @@ function RealEstatePropertiesPage() {
           </div>
         </div>
       )}
-
+    
       {/* Input siempre montado (fuera del modal) para que el selector de archivos abra bien. */}
       <input
         ref={photoInputRef}

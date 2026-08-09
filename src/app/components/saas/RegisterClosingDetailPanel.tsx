@@ -31,6 +31,7 @@ import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { ShiftBrandBillingSummary } from './ShiftBrandBillingSummary';
 import { buildBrandLabelsMap } from '../../lib/brandLabels';
 import { DeliveryFoodUnitLabel } from './delivery/DeliveryFoodUnitIcon';
+import { CajaCashMovementsList } from './caja/CajaCashMovementsList';
 
 const METHOD_CHIP =
   'bg-zinc-100 text-zinc-700 border border-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:border-zinc-600';
@@ -41,15 +42,6 @@ const METHOD_BADGES: Record<string, { icon: typeof Banknote; color: string; labe
   bizum: { icon: PhoneIcon, color: METHOD_CHIP, label: 'Bizum' },
   online: { icon: Wifi, color: METHOD_CHIP, label: 'Online' },
   otro: { icon: Wallet, color: METHOD_CHIP, label: 'Otros' },
-};
-
-const TPV_TX_LABELS: Record<string, string> = {
-  sale: 'Venta',
-  return: 'Devolución',
-  cash_in: 'Entrada',
-  cash_out: 'Salida',
-  expense: 'Gasto',
-  tip: 'Propina',
 };
 
 function fmtMoney(value: number | undefined | null): string {
@@ -373,66 +365,6 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
         <div className="flex justify-between"><span className="text-zinc-600 dark:text-zinc-300">+ Entradas de efectivo</span><span className="font-semibold tabular-nums">{fmtMoney(summary.totalCashIn)}€</span></div>
         <div className="flex justify-between"><span className="text-zinc-600 dark:text-zinc-300">− Devoluciones efectivo</span><span className="font-semibold tabular-nums">{fmtMoney(cashReturns)}€</span></div>
         <div className="flex justify-between"><span className="text-zinc-600 dark:text-zinc-300">− Salidas de efectivo</span><span className="font-semibold tabular-nums">{fmtMoney(summary.totalCashOut)}€</span></div>
-        {(() => {
-          const cashOuts = transactions
-            .filter((t) => t.type === 'cash_out' || t.type === 'expense')
-            .slice()
-            .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-          const voidedOuts = (session.voidedCashMovements || [])
-            .filter((v) => v.type === 'cash_out')
-            .slice()
-            .sort((a, b) => new Date(a.voidedAt).getTime() - new Date(b.voidedAt).getTime());
-          if (cashOuts.length === 0 && voidedOuts.length === 0) return null;
-          return (
-            <div className="mt-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900/60 p-2.5 space-y-1.5">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                Detalle salidas (motivo)
-              </p>
-              {cashOuts.map((tx) => (
-                <div key={tx.id} className="flex items-start justify-between gap-2 text-xs">
-                  <div className="min-w-0">
-                    <p className="font-medium text-zinc-900 dark:text-zinc-100 break-words">
-                      {tx.description?.trim() || 'Sin motivo indicado'}
-                    </p>
-                    <p className="text-[10px] text-zinc-500 dark:text-zinc-400">
-                      {new Date(tx.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })}
-                      {tx.registeredBy ? ` · ${tx.registeredBy}` : ''}
-                    </p>
-                  </div>
-                  <span className="font-semibold tabular-nums text-zinc-800 dark:text-zinc-200 shrink-0">
-                    −{fmtMoney(tx.amount)}€
-                  </span>
-                </div>
-              ))}
-              {voidedOuts.length > 0 ? (
-                <>
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-400 pt-1">
-                    Salidas eliminadas (motivo)
-                  </p>
-                  {voidedOuts.map((v) => (
-                    <div key={v.id} className="flex items-start justify-between gap-2 text-xs">
-                      <div className="min-w-0">
-                        <p className="font-medium text-zinc-900 dark:text-zinc-100 break-words">
-                          {v.originalDescription?.trim() || 'Salida'} · anulada
-                        </p>
-                        <p className="text-[10px] text-rose-700 dark:text-rose-300 break-words">
-                          Motivo eliminación: {v.voidReason}
-                        </p>
-                        <p className="text-[10px] text-zinc-500 dark:text-zinc-400">
-                          {new Date(v.voidedAt).toLocaleTimeString('es-ES', { timeStyle: 'short' })}
-                          {v.voidedBy ? ` · ${v.voidedBy}` : ''}
-                        </p>
-                      </div>
-                      <span className="font-semibold tabular-nums text-rose-700 dark:text-rose-300 shrink-0 line-through">
-                        −{fmtMoney(v.amount)}€
-                      </span>
-                    </div>
-                  ))}
-                </>
-              ) : null}
-            </div>
-          );
-        })()}
         <div className="border-t border-zinc-200 dark:border-zinc-700 pt-2 flex justify-between">
           <span className="text-zinc-700 dark:text-zinc-300 font-medium">Efectivo esperado</span>
           <span className="font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">{fmtMoney(session.expectedCash)}€</span>
@@ -472,31 +404,9 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
         title="Caja 2 · apps (declarado en cierre)"
       />
 
-      {transactions.some((t) => t.type === 'cash_in' || t.type === 'cash_out' || t.type === 'return') && (
-        <div>
-          <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Movimientos de caja</h4>
-          <div className="space-y-1">
-            {transactions
-              .filter((t) => t.type === 'cash_in' || t.type === 'cash_out' || t.type === 'return')
-              .slice()
-              .reverse()
-              .map((tx) => (
-                <div key={tx.id} className="flex items-center justify-between text-xs p-2 rounded-lg border border-zinc-100 bg-zinc-50/80 dark:border-zinc-800 dark:bg-zinc-900/50 gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-zinc-400 shrink-0">{new Date(tx.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })}</span>
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase shrink-0 ${METHOD_CHIP}`}>
-                      {TPV_TX_LABELS[tx.type] || tx.type}
-                    </span>
-                    <span className="text-zinc-600 dark:text-zinc-400 truncate">{tx.description || '—'}</span>
-                  </div>
-                  <span className="font-semibold tabular-nums shrink-0 text-zinc-900 dark:text-zinc-100">
-                    {tx.type === 'cash_in' ? '+' : '−'}{fmtMoney(tx.amount)}€
-                  </span>
-                </div>
-              ))}
-          </div>
-        </div>
-      )}
+      <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900/40 p-4">
+        <CajaCashMovementsList session={session} title="Entradas y salidas" />
+      </div>
 
       {cashCounts.length > 0 && (
         <div>

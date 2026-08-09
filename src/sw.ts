@@ -47,6 +47,26 @@ registerRoute(
   new NetworkOnly(),
 );
 
+// Verticales CRUD (inmobiliaria, etc.): nunca cachear — un 304/vacío rompe el sidebar.
+registerRoute(
+  ({ url }) => {
+    if (!url.pathname.startsWith('/api/')) return false;
+    return (
+      url.pathname.startsWith('/api/realestate')
+      || url.pathname.startsWith('/api/lawyer')
+      || url.pathname.startsWith('/api/academy')
+      || url.pathname.startsWith('/api/hotel')
+      || url.pathname.startsWith('/api/gym')
+      || url.pathname.startsWith('/api/clinic')
+      || url.pathname.startsWith('/api/events')
+      || url.pathname.startsWith('/api/nightclub')
+      || url.pathname.startsWith('/api/pharmacy')
+      || url.pathname.startsWith('/api/vet')
+    );
+  },
+  new NetworkOnly(),
+);
+
 // ─── NetworkFirst para API ───────────────────────────────────────────────────
 registerRoute(
   ({ url }) => url.pathname.startsWith('/api/'),

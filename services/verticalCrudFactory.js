@@ -340,6 +340,12 @@ export function createVerticalRouter(config) {
     process.env[`VITE_${config.name.toUpperCase()}_DB`] || `${getDbPrefix()}-${config.dbSuffix}`
   );
 
+  // APIs autenticadas: sin ETag/304 vacío (el cliente interpretaba 304 como error).
+  router.use((_req, res, next) => {
+    res.set('Cache-Control', 'private, no-store');
+    next();
+  });
+
   // Dashboard / KPI endpoint
   router.get('/dashboard/:userId', async (req, res) => {
     try {
@@ -393,10 +399,23 @@ export function createVerticalRouter(config) {
         const items = await listByUser(req, dbName, entityCfg, userId, { businessId, salesPointId });
         return res.json({
           ok: true,
-          items: items.map((d) => sanitizeForClient(config.name, entityKey, entityCfg, d)),
+          items: items
+            .map((d) => {
+              try {
+                return sanitizeForClient(config.name, entityKey, entityCfg, d);
+              } catch (err) {
+                console.error(`[verticalCrud] sanitize ${entityKey} ${d?._id}`, err);
+                return null;
+              }
+            })
+            .filter(Boolean),
         });
       } catch (error) {
-        return res.status(500).json({ ok: false, error: error.message || `Error al listar ${entityKey}` });
+        console.error(`[verticalCrud] list ${config.name}/${entityKey}`, error);
+        return res.status(500).json({
+          ok: false,
+          error: error?.message || `Error al listar ${entityKey}`,
+        });
       }
     });
 

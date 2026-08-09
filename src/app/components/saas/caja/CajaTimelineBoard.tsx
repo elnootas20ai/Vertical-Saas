@@ -33,6 +33,7 @@ import {
   nowMinutesOfDay,
   type CajaTimelineBarKind,
 } from '../../../lib/cajaTimelineLayout';
+import { CajaCashMovementsList } from './CajaCashMovementsList';
 
 const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
 
@@ -84,7 +85,7 @@ export type CajaTimelineBoardProps = {
   onFilterPdvChange: (id: string) => void;
   onlyOpenNow: boolean;
   onOnlyOpenNowChange: (v: boolean) => void;
-  dayStats: { stores: number; turns: number; openNow: number; sales: number };
+  dayStats: { stores: number; turns: number; openNow: number; sales: number; cashIn?: number; cashOut?: number };
   excelClosedCount: number;
   /** Un solo formato (p. ej. restaurant). Preferir onDownloadFormat en delivery. */
   onExcelClick?: () => void | Promise<void>;
@@ -214,7 +215,6 @@ export function CajaTimelineBoard({
 
   const selectedSummary = selected ? buildTpvRegisterSummaryForDay(selected, selectedDate) : null;
   const selectedExpected = selected ? calcTpvExpectedCash(selected) : 0;
-  const selectedMoves = selected?.transactions?.slice(-8).reverse() || [];
   const busyForce = forcingSessionId === selected?._id;
   const [excelDownloading, setExcelDownloading] = useState(false);
 
@@ -467,7 +467,7 @@ export function CajaTimelineBoard({
         ) : null}
 
         {/* KPIs del día seleccionado */}
-        <div className="my-3.5 grid grid-cols-2 gap-1.5 lg:grid-cols-4">
+        <div className="my-3.5 grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-6">
           <DayStat
             label={locPlural.charAt(0).toUpperCase() + locPlural.slice(1)}
             value={String(dayStats.stores)}
@@ -479,6 +479,8 @@ export function CajaTimelineBoard({
             good={dayStats.openNow > 0}
           />
           <DayStat label="Ventas del día" value={formatMoneyEs(dayStats.sales)} />
+          <DayStat label="Entradas" value={formatMoneyEs(dayStats.cashIn || 0)} />
+          <DayStat label="Salidas" value={formatMoneyEs(dayStats.cashOut || 0)} />
         </div>
 
         {/* Timeline panel */}
@@ -624,6 +626,18 @@ export function CajaTimelineBoard({
                     <div className="tabular-nums text-base font-bold">{formatMoneyEs(selectedExpected)}</div>
                     <div className="text-[10.5px] text-stone-400 uppercase tracking-wide mt-0.5">Efectivo</div>
                   </div>
+                  <div className="text-right">
+                    <div className="tabular-nums text-base font-bold text-emerald-700 dark:text-emerald-400">
+                      {formatMoneyEs(selectedSummary.totalCashIn)}
+                    </div>
+                    <div className="text-[10.5px] text-stone-400 uppercase tracking-wide mt-0.5">Entradas</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="tabular-nums text-base font-bold text-amber-800 dark:text-amber-300">
+                      {formatMoneyEs(selectedSummary.totalCashOut)}
+                    </div>
+                    <div className="text-[10.5px] text-stone-400 uppercase tracking-wide mt-0.5">Salidas</div>
+                  </div>
                 </div>
                 <button
                   type="button"
@@ -688,27 +702,12 @@ export function CajaTimelineBoard({
               </button>
             )}
 
-            <p className="text-[11px] font-semibold tracking-[0.08em] uppercase text-stone-400 m-0 mb-2">
-              Movimientos
-            </p>
-            <div className="border-t border-stone-100 dark:border-stone-800 pt-2.5">
-              {selectedMoves.length === 0 ? (
-                <p className="text-[12.5px] text-stone-400 text-center py-2.5">Sin movimientos</p>
-              ) : (
-                selectedMoves.map((t) => (
-                  <div key={t.id || `${t.date}-${t.amount}`} className="flex justify-between text-[12.5px] py-1.5 text-stone-500">
-                    <span className="truncate pr-3">
-                      {t.type === 'sale' ? 'Venta' : t.type}
-                      {t.paymentMethod ? ` · ${t.paymentMethod}` : ''}
-                      {t.orderNumber ? ` · #${t.orderNumber}` : ''}
-                    </span>
-                    <span className="tabular-nums font-medium text-stone-900 dark:text-stone-100 shrink-0">
-                      {t.amount >= 0 ? '+' : ''}{formatMoneyEs(t.amount)}
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
+            <CajaCashMovementsList
+              session={selected}
+              dayKey={selectedDate}
+              compact
+              title="Entradas y salidas"
+            />
           </section>
         )}
 

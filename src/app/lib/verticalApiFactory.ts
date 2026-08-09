@@ -5,7 +5,7 @@
  * the standard endpoints produced by verticalCrudFactory.js on the backend.
  */
 
-import { getAuthHeaders } from './authApi';
+import { authFetch, getAuthHeaders } from './authApi';
 import { getApiBase } from './apiBase';
 
 const API_BASE = getApiBase();
@@ -24,19 +24,82 @@ function getCouchHeaders(): Record<string, string> {
   return headers;
 }
 
+function extractApiErrorMessage(payload: unknown, status: number): string {
+  if (payload && typeof payload === 'object') {
+    const obj = payload as Record<string, unknown>;
+    const err = obj.error;
+    if (typeof err === 'string' && err.trim()) return err.trim();
+    if (err && typeof err === 'object') {
+      const nested = err as Record<string, unknown>;
+      if (typeof nested.message === 'string' && nested.message.trim()) return nested.message.trim();
+    }
+    if (typeof obj.message === 'string' && obj.message.trim()) return obj.message.trim();
+  }
+  if (status === 401) return 'Sesión expirada. Vuelve a iniciar sesión.';
+  if (status === 403) return 'No tienes permiso para esta acción.';
+  if (status === 404) return 'No encontrado.';
+  if (status === 304) return 'Respuesta en caché sin datos. Recarga la página (Ctrl+Shift+R).';
+  if (status >= 500) return 'No se pudieron cargar los datos. Prueba a recargar la página.';
+  return '';
+}
+
+function withCacheBust(path: string): string {
+  const sep = path.includes('?') ? '&' : '?';
+  return `${path}${sep}_=${Date.now()}`;
+}
+
+async function parseJsonSafe<T>(response: Response): Promise<T> {
+  return (await response.json().catch(() => ({}))) as T;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...getAuthHeaders(),
-      ...getCouchHeaders(),
-      ...(init?.headers || {}),
-    },
+  const method = String(init?.method || 'GET').toUpperCase();
+  const isGet = method === 'GET';
+  // GET autenticado: evitar 304 sin cuerpo (navegador/ETag/SW).
+  const urlPath = isGet ? withCacheBust(path) : path;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...getAuthHeaders(),
+    ...getCouchHeaders(),
+    ...(isGet ? { 'Cache-Control': 'no-cache', Pragma: 'no-cache' } : {}),
+    ...(init?.headers as Record<string, string> | undefined),
+  };
+
+  const fetchInit: RequestInit = {
     ...init,
-  });
-  const payload = (await response.json().catch(() => ({}))) as T & { error?: string };
+    headers,
+    ...(isGet ? { cache: 'no-store' as RequestCache } : {}),
+  };
+
+  let response = await authFetch(`${API_BASE}${urlPath}`, fetchInit);
+  // 304 vacío: reintento forzado (no tratar como 500 genérico).
+  if (response.status === 304 && isGet) {
+    response = await authFetch(`${API_BASE}${withCacheBust(path)}`, {
+      ...fetchInit,
+      headers: {
+        ...headers,
+        'Cache-Control': 'no-store',
+        Pragma: 'no-cache',
+        'If-None-Match': 'undefined',
+      },
+      cache: 'reload',
+    });
+  }
+
+  const payload = await parseJsonSafe<T & {
+    error?: string | { message?: string };
+    message?: string;
+    items?: unknown[];
+  }>(response);
+
+  if (response.status === 304 && isGet) {
+    // Último recurso: no tumbar la pantalla de inmobiliaria; lista vacía y log.
+    console.warn('[verticalApi] 304 sin cuerpo en', path);
+    return { ok: true, items: [] } as T;
+  }
   if (!response.ok) {
-    throw new Error(payload?.error || 'Error inesperado');
+    const msg = extractApiErrorMessage(payload, response.status) || 'No se pudo completar la petición';
+    throw new Error(msg);
   }
   return payload;
 }

@@ -85,6 +85,7 @@ import {
 
 import { getBrandBillingConfigRequest } from '../../lib/brandBillingApi';
 import {
+  brandsForBilling,
   closingSlotsFromBillingSheets,
   resolveBillingSheetsForClosing,
   suggestBillingSheetsFromBrands,
@@ -92,6 +93,7 @@ import {
   type BrandBillingSplitRules,
   type ClosingBillingBrandSlot,
 } from '../../lib/brandBillingConfig';
+import { isDefaultBrandNamePlaceholder, isDefaultCommercialBrand } from '../../lib/brandUtils';
 import {
   filterStoresForWorkerAssignment,
   isInvitedWorkerUser,
@@ -1821,10 +1823,13 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   showDeliveryClosingSlots?: boolean;
 }) {
   const { currentBusiness } = useBusiness();
-  /** Preferir empresa activa; si el TPV tablet no tiene selector, usar la de la sesión de caja. */
+  /**
+   * Cierre = empresa de la sesión de caja (PDV), no la del selector del menú.
+   * Si no, con inmobiliaria/otra empresa activa no cargan marcas → solo «Total app».
+   */
   const businessId =
-    resolveBusinessScopeId(currentBusiness)
-    || String(session.business_id || (session as { businessId?: string }).businessId || '').trim();
+    String(session.business_id || (session as { businessId?: string }).businessId || '').trim()
+    || resolveBusinessScopeId(currentBusiness);
   const sessionId = String(session._id || '').trim();
   const savedDraft = useMemo(() => readClosingFormDraft(sessionId), [sessionId]);
   const [counts, setCounts] = useState<CashDenominationCount>(() => savedDraft?.counts || {});
@@ -1855,6 +1860,8 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   );
   const [draftRestored] = useState(() => Boolean(savedDraft));
   const [showExtraDetail, setShowExtraDetail] = useState(false);
+  /** Movimientos de caja en paso cierre: plegado por defecto. */
+  const [cashMovesOpen, setCashMovesOpen] = useState(false);
   /** Aviso final antes de cerrar la caja de verdad. */
   const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
   /** Delivery: Tienda → Glovo → Uber → Just → Flip → Cierre. Restaurant: Arqueo / Confirmar. */
@@ -2172,6 +2179,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   /**
    * 2ª caja = hojas de Facturación (no marcas sueltas).
    * Ejemplo Pau: pizza + Black Burger + tacos → 2 slots; tacos bajo el nombre de Black Burger.
+   * Fallback: marcas activas del catálogo → nunca dejar solo «Total app» si hay 2 marcas.
    */
   const closingBrands = useMemo((): ClosingBillingBrandSlot[] => {
     // Siempre por hojas (como prod): tacos van con burger, no fila «Tacos».
@@ -2193,10 +2201,30 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
       });
     }
 
+    const fromCatalog = brandsForBilling(catalogBrands)
+      .filter((b) => !(isDefaultCommercialBrand(b) && isDefaultBrandNamePlaceholder(b.name)))
+      .map((b) => {
+        const brandId = String(b.id || b._id || '').trim();
+        const rawName = String(b.name || '').trim();
+        const name =
+          rawName && !looksLikeBrandTechnicalId(rawName)
+            ? rawName
+            : displayBrandName(brandId, brandLabels, rawName || 'Marca');
+        return {
+          brandId,
+          name,
+          memberBrandIds: [brandId],
+        };
+      })
+      .filter((b) => b.brandId)
+      .sort((a, b) => a.name.localeCompare(b.name, 'es'));
+    if (fromCatalog.length > 0) return fromCatalog;
+
+    // Último recurso: etiquetas ya guardadas en la sesión de caja.
     return Object.entries(brandLabels)
-      .filter(([, name]) => {
+      .filter(([id, name]) => {
         const n = String(name || '').trim();
-        return n && !looksLikeBrandTechnicalId(n);
+        return Boolean(id) && n && !looksLikeBrandTechnicalId(n);
       })
       .map(([id, name]) => ({
         brandId: id,
@@ -2625,6 +2653,10 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                   ) : null}
                   <p className="text-[10px] text-stone-400 tabular-nums">
                     Unidades {tpvClosingFood.pizza}P / {tpvClosingFood.burger}B / {tpvClosingFood.taco}T
+                    <span className="ml-1.5 font-semibold text-stone-500">
+                      · Total{' '}
+                      {tpvClosingFood.pizza + tpvClosingFood.burger + tpvClosingFood.taco}
+                    </span>
                   </p>
                 </div>
 
@@ -2638,9 +2670,17 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                         Integraciones (hecho en app)
                       </p>
                     </div>
-                    <p className="text-lg font-black tabular-nums text-blue-950 dark:text-blue-50">
-                      {formatMoneyEs(integratorsTotal)}
-                    </p>
+                    <div className="text-right shrink-0">
+                      <p className="text-lg font-black tabular-nums text-blue-950 dark:text-blue-50 leading-none">
+                        {formatMoneyEs(integratorsTotal)}
+                      </p>
+                      <p className="mt-0.5 text-[10px] font-semibold tabular-nums text-blue-700/75 dark:text-blue-200/70">
+                        {appsFoodTotals.pizza}P / {appsFoodTotals.burger}B / {appsFoodTotals.taco}T
+                        <span className="ml-1 opacity-90">
+                          · Σ {appsFoodTotals.pizza + appsFoodTotals.burger + appsFoodTotals.taco}
+                        </span>
+                      </p>
+                    </div>
                   </div>
                   <div className="space-y-1 text-[11px]">
                     {(appsSnapshot?.rows?.length
@@ -2679,6 +2719,10 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                   ) : null}
                   <p className="text-[10px] text-blue-700/70 dark:text-blue-200/60 tabular-nums">
                     Unidades {appsFoodTotals.pizza}P / {appsFoodTotals.burger}B / {appsFoodTotals.taco}T
+                    <span className="ml-1.5 font-semibold text-blue-800/80 dark:text-blue-100/80">
+                      · Total{' '}
+                      {appsFoodTotals.pizza + appsFoodTotals.burger + appsFoodTotals.taco}
+                    </span>
                   </p>
                 </div>
               </div>
@@ -2785,68 +2829,86 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                   (a, b) => new Date(a.voidedAt).getTime() - new Date(b.voidedAt).getTime(),
                 );
                 if (cashOps.length === 0 && voided.length === 0) return null;
+                const totalShown = cashOps.length + voided.length;
                 return (
-                  <div className="shrink-0 rounded-2xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-950 px-3 py-2.5 space-y-2">
-                    {cashOps.length > 0 ? (
-                      <div>
-                        <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400 mb-1.5">
-                          Movimientos de caja ({cashOps.length})
-                        </p>
-                        <div className="space-y-1 max-h-44 overflow-y-auto">
-                          {[...cashOps].reverse().map((tx) => (
-                            <div
-                              key={tx.id}
-                              className="flex items-center justify-between gap-2 text-xs px-2 py-1.5 rounded-lg bg-stone-50 dark:bg-stone-900"
-                            >
-                              <div className="min-w-0 flex-1">
-                                <span className="text-stone-400 mr-1.5">
-                                  {new Date(tx.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })}
-                                </span>
-                                <span className="font-semibold text-stone-700 dark:text-stone-200">
-                                  {cashMovementLabel(tx)}
-                                </span>
-                                {tx.description ? (
-                                  <span className="text-stone-500 ml-1.5 truncate">{tx.description}</span>
-                                ) : null}
-                              </div>
-                              <span className="shrink-0 font-bold tabular-nums">
-                                {tx.type === 'cash_in' ? '+' : '−'}
-                                {formatMoneyEs(tx.amount)}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-                    {voided.length > 0 ? (
-                      <div>
-                        <p className="text-[10px] font-bold uppercase tracking-wider text-rose-600 mb-1.5">
-                          Movimientos eliminados ({voided.length})
-                        </p>
-                        <div className="space-y-1 max-h-32 overflow-y-auto">
-                          {voided.map((v) => (
-                            <div
-                              key={v.id}
-                              className="text-xs p-2 rounded-lg border border-rose-200 bg-rose-50/80 dark:border-rose-900 dark:bg-rose-950/30"
-                            >
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="min-w-0">
-                                  <p className="font-semibold text-stone-800 dark:text-stone-100">
-                                    {TPV_CASH_TX_LABELS[v.type] || v.type} anulada
-                                    {v.originalDescription ? ` · ${v.originalDescription}` : ''}
-                                  </p>
-                                  <p className="text-[11px] text-rose-700 dark:text-rose-300 mt-0.5 break-words">
-                                    Motivo: {v.voidReason}
-                                  </p>
+                  <div className="shrink-0 rounded-2xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-950 overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setCashMovesOpen((v) => !v)}
+                      aria-expanded={cashMovesOpen}
+                      className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-stone-50 dark:hover:bg-stone-900/50 transition-colors"
+                    >
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
+                        Movimientos de caja ({totalShown})
+                      </span>
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-stone-500">
+                        {cashMovesOpen ? 'Ocultar' : 'Ver'}
+                        {cashMovesOpen ? (
+                          <ChevronUp className="w-3.5 h-3.5" />
+                        ) : (
+                          <ChevronDown className="w-3.5 h-3.5" />
+                        )}
+                      </span>
+                    </button>
+                    {cashMovesOpen ? (
+                      <div className="space-y-2 border-t border-stone-100 px-3 py-2.5 dark:border-stone-800">
+                        {cashOps.length > 0 ? (
+                          <div className="space-y-1 max-h-44 overflow-y-auto">
+                            {[...cashOps].reverse().map((tx) => (
+                              <div
+                                key={tx.id}
+                                className="flex items-center justify-between gap-2 text-xs px-2 py-1.5 rounded-lg bg-stone-50 dark:bg-stone-900"
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <span className="text-stone-400 mr-1.5">
+                                    {new Date(tx.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })}
+                                  </span>
+                                  <span className="font-semibold text-stone-700 dark:text-stone-200">
+                                    {cashMovementLabel(tx)}
+                                  </span>
+                                  {tx.description ? (
+                                    <span className="text-stone-500 ml-1.5 truncate">{tx.description}</span>
+                                  ) : null}
                                 </div>
-                                <span className="shrink-0 font-semibold tabular-nums text-rose-700 dark:text-rose-300">
-                                  {v.type === 'cash_in' ? '+' : '−'}
-                                  {formatMoneyEs(Number(v.amount || 0))}
+                                <span className="shrink-0 font-bold tabular-nums">
+                                  {tx.type === 'cash_in' ? '+' : '−'}
+                                  {formatMoneyEs(tx.amount)}
                                 </span>
                               </div>
+                            ))}
+                          </div>
+                        ) : null}
+                        {voided.length > 0 ? (
+                          <div>
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-rose-600 mb-1.5">
+                              Movimientos eliminados ({voided.length})
+                            </p>
+                            <div className="space-y-1 max-h-32 overflow-y-auto">
+                              {voided.map((v) => (
+                                <div
+                                  key={v.id}
+                                  className="text-xs p-2 rounded-lg border border-rose-200 bg-rose-50/80 dark:border-rose-900 dark:bg-rose-950/30"
+                                >
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                      <p className="font-semibold text-stone-800 dark:text-stone-100">
+                                        {TPV_CASH_TX_LABELS[v.type] || v.type} anulada
+                                        {v.originalDescription ? ` · ${v.originalDescription}` : ''}
+                                      </p>
+                                      <p className="text-[11px] text-rose-700 dark:text-rose-300 mt-0.5 break-words">
+                                        Motivo: {v.voidReason}
+                                      </p>
+                                    </div>
+                                    <span className="shrink-0 font-semibold tabular-nums text-rose-700 dark:text-rose-300">
+                                      {v.type === 'cash_in' ? '+' : '−'}
+                                      {formatMoneyEs(Number(v.amount || 0))}
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
                             </div>
-                          ))}
-                        </div>
+                          </div>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>
@@ -2855,15 +2917,21 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
 
               {/* Unidades = Tienda (paso 1) + Glovo+Uber+Just+Flip (pasos 2–5) */}
               <div className="shrink-0 rounded-2xl border border-stone-200 dark:border-stone-700 bg-stone-50/80 dark:bg-stone-900/40 px-3 py-2.5">
-                <div className="mb-2">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
-                    Unidades del día · todo lo hecho
-                  </p>
-                  <p className="text-[10px] text-stone-500 mt-0.5 tabular-nums leading-snug">
-                    Caja 1 {tpvClosingFood.pizza}P/{tpvClosingFood.burger}B/{tpvClosingFood.taco}T
-                    {' + '}
-                    Caja 2 {appsFoodTotals.pizza}P/{appsFoodTotals.burger}B/{appsFoodTotals.taco}T
-                    {' = total abajo'}
+                <div className="mb-2 flex items-start justify-between gap-2">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
+                      Unidades del día · todo lo hecho
+                    </p>
+                    <p className="text-[10px] text-stone-500 mt-0.5 tabular-nums leading-snug">
+                      Caja 1 {tpvClosingFood.pizza}P/{tpvClosingFood.burger}B/{tpvClosingFood.taco}T
+                      {' + '}
+                      Caja 2 {appsFoodTotals.pizza}P/{appsFoodTotals.burger}B/{appsFoodTotals.taco}T
+                      {' = total abajo'}
+                    </p>
+                  </div>
+                  <p className="shrink-0 text-[11px] font-black tabular-nums text-stone-700 dark:text-stone-200">
+                    Σ{' '}
+                    {closingFood.pizza + closingFood.burger + closingFood.taco}
                   </p>
                 </div>
                 <div className="grid grid-cols-3 gap-2">

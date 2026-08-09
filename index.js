@@ -252,6 +252,14 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 
+// APIs JSON autenticadas: sin ETag → evita HTTP 304 con cuerpo vacío (toasts falsos en el cliente).
+app.set('etag', false);
+app.use('/api', (_req, res, next) => {
+  res.setHeader('Cache-Control', 'private, no-store, no-cache, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  next();
+});
+
 /** CouchDB solo admite nombres en minúsculas; el front legacy envía p.ej. BBDDsaas-sales-points. */
 function normalizeCouchDbParam(name) {
   return String(name || '')

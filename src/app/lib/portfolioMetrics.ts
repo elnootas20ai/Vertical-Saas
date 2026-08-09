@@ -996,9 +996,16 @@ export function sumOpsExcelChannels(a: OpsExcelChannels, b: OpsExcelChannels): O
   };
 }
 
-export function opsExcelChannelsTotal(c: OpsExcelChannels): number {
+export function opsExcelChannelsTotal(c: OpsExcelChannels | null | undefined): number {
+  if (!c) return 0;
   return Math.round(
-    (c.efectivo + c.tpv + c.x + c.app + c.uber + c.justEat + c.glovo) * 100,
+    ((Number(c.efectivo) || 0)
+      + (Number(c.tpv) || 0)
+      + (Number(c.x) || 0)
+      + (Number(c.app) || 0)
+      + (Number(c.uber) || 0)
+      + (Number(c.justEat) || 0)
+      + (Number(c.glovo) || 0)) * 100,
   ) / 100;
 }
 

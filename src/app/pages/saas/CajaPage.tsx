@@ -46,6 +46,7 @@ import {
   syncBillingSheetsWithBrands,
 } from '../../lib/brandBillingConfig';
 import { RegisterClosingDetailPanel } from '../../components/saas/RegisterClosingDetailPanel';
+import { CajaCashMovementsList } from '../../components/saas/caja/CajaCashMovementsList';
 import { calcTpvExpectedCash, buildTpvRegisterSummary } from '../../lib/tpvCajaMath';
 import {
   buildTpvRegisterSummaryForDay,
@@ -70,15 +71,6 @@ const METHOD_BADGES: Record<string, { icon: typeof Banknote; color: string; labe
   bizum: { icon: PhoneIcon, color: METHOD_CHIP, label: 'Bizum' },
   online: { icon: Wifi, color: METHOD_CHIP, label: 'Online' },
   otro: { icon: Wallet, color: METHOD_CHIP, label: 'Otros' },
-};
-
-const TPV_TX_LABELS: Record<string, string> = {
-  sale: 'Venta',
-  return: 'Devolución',
-  cash_in: 'Entrada',
-  cash_out: 'Salida',
-  expense: 'Gasto',
-  tip: 'Propina',
 };
 
 function todayIsoDate(): string {
@@ -537,24 +529,7 @@ function RegisterCard({
         </>
       ) : (
         <>
-          <div>
-            <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Movimientos</h4>
-            <div className="space-y-1">
-              {ts.transactions.slice(-15).reverse().map(tx => (
-                <div key={tx.id} className="flex items-center justify-between text-xs py-1.5 px-2 hover:bg-gray-50 dark:hover:bg-gray-900 rounded-lg">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-gray-400 w-10 shrink-0">{new Date(tx.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })}</span>
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase shrink-0 ${METHOD_CHIP}`}>{TPV_TX_LABELS[tx.type] || tx.type}</span>
-                    <span className="text-gray-600 dark:text-gray-400 truncate">{tx.description || tx.orderNumber || '—'}</span>
-                  </div>
-                  <span className="font-semibold shrink-0 ml-2 text-gray-900 dark:text-gray-100">
-                    {tx.type === 'return' || tx.type === 'cash_out' || tx.type === 'expense' ? '-' : '+'}{tx.amount.toFixed(2)}€
-                  </span>
-                </div>
-              ))}
-              {ts.transactions.length === 0 && <div className="text-xs text-gray-400 text-center py-4">Sin movimientos</div>}
-            </div>
-          </div>
+          <CajaCashMovementsList session={ts} title="Entradas y salidas" />
           {(ts.incidents?.length || 0) > 0 && (
             <div>
               <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Incidencias</h4>
@@ -935,12 +910,16 @@ export function CajaPage() {
     const storesWithActivity = new Set(scopedDay.map((s) => s.pointOfSaleId).filter(Boolean)).size;
     const openNow = dedupeOpenRegisterSessions(scopedDay.filter((s) => s.status === 'open')).length;
     const sales = scopedDay.reduce((sum, s) => sum + buildTpvRegisterSummaryForDay(s, selectedDate).totalSales, 0);
+    const cashIn = scopedDay.reduce((sum, s) => sum + buildTpvRegisterSummaryForDay(s, selectedDate).totalCashIn, 0);
+    const cashOut = scopedDay.reduce((sum, s) => sum + buildTpvRegisterSummaryForDay(s, selectedDate).totalCashOut, 0);
     const diff = scopedDay.filter((s) => s.status === 'closed').reduce((sum, s) => sum + (s.difference || 0), 0);
     return {
       stores: storesWithActivity,
       turns: scopedDay.length,
       openNow,
       sales,
+      cashIn,
+      cashOut,
       diff,
     };
   }, [sessions, selectedDate, filterPdv]);
