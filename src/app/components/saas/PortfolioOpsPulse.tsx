@@ -201,33 +201,35 @@ export function PortfolioOpsPulse({
     };
   }, [businessId]);
 
-  /** "Hoy": último día de cada tienda, derivado del pulso de 7 días. */
-  const pulsesDay = useMemo(
-    () =>
-      pulses7d.map((p): StoreOpsPulse => {
-        const last = p.days.length > 0 ? p.days[p.days.length - 1] : null;
-        const prev = p.days.length > 1 ? p.days[p.days.length - 2] : null;
-        const revenue = last?.revenue || 0;
-        const dayOrders = last?.orders || 0;
-        return {
-          ...p,
-          days: last ? [last] : [],
-          revenuePeriod: revenue,
-          revenuePrevPeriod: prev?.revenue || 0,
-          revenueMomPct: prev ? monthOverMonthPct(revenue, prev.revenue) : null,
-          ordersPeriod: dayOrders,
-          avgTicket: dayOrders > 0 ? Math.round((revenue / dayOrders) * 100) / 100 : 0,
-          pizza: last?.pizza || 0,
-          burger: last?.burger || 0,
-          taco: last?.taco || 0,
-          kebab: last?.kebab || 0,
-          revenueToday: revenue,
-          sharePercent: 0,
-          channels: last?.channels || emptyOpsExcelChannels(),
-        };
-      }),
-    [pulses7d],
-  );
+  /** "Hoy": día calendario de hoy (no “el último del array”, por si el orden falla). */
+  const pulsesDay = useMemo(() => {
+    const todayKey = localCalendarDayKey();
+    return pulses7d.map((p): StoreOpsPulse => {
+      const todayIdx = p.days.findIndex((d) => d.dayKey === todayKey);
+      const lastIdx = p.days.length > 0 ? p.days.length - 1 : -1;
+      const idx = todayIdx >= 0 ? todayIdx : lastIdx;
+      const today = idx >= 0 ? p.days[idx] : null;
+      const prev = idx > 0 ? p.days[idx - 1] : null;
+      const revenue = today?.revenue || 0;
+      const dayOrders = today?.orders || 0;
+      return {
+        ...p,
+        days: today ? [today] : [],
+        revenuePeriod: revenue,
+        revenuePrevPeriod: prev?.revenue || 0,
+        revenueMomPct: prev ? monthOverMonthPct(revenue, prev.revenue) : null,
+        ordersPeriod: dayOrders,
+        avgTicket: dayOrders > 0 ? Math.round((revenue / dayOrders) * 100) / 100 : 0,
+        pizza: today?.pizza || 0,
+        burger: today?.burger || 0,
+        taco: today?.taco || 0,
+        kebab: today?.kebab || 0,
+        revenueToday: revenue,
+        sharePercent: 0,
+        channels: today?.channels || emptyOpsExcelChannels(),
+      };
+    });
+  }, [pulses7d]);
 
   const pulses = useMemo(
     () =>

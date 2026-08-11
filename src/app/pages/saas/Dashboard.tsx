@@ -739,14 +739,24 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
     const todayKey = localCalendarDayKey();
     const monthKey = todayKey.slice(0, 7);
     const yearKey = todayKey.slice(0, 4);
-    // Desde 1 ene del año anterior (marcas: vs día/mes/año ant. + YTD).
-    const prevYearKey = String(Number(yearKey) - 1);
-    const orderFetchFrom = `${prevYearKey}-01-01T00:00:00.000Z`;
+    // Operativa (7d / mes / MoM / marcas día-mes): ~100 días basta y escala con más clientes.
+    // YoY de marcas (año ant.): trozo aparte, no 2 años enteros a 8k.
+    const rollingStart = (() => {
+      const d = new Date(`${todayKey}T12:00:00`);
+      d.setDate(d.getDate() - 100);
+      return localDayBoundsForKey(localCalendarDayKey(d)).from;
+    })();
+    const ytdStart = localDayBoundsForKey(`${yearKey}-01-01`).from;
+    const orderFetchFrom = rollingStart < ytdStart ? rollingStart : ytdStart;
     const monthEnd = `${todayKey}T23:59:59.999Z`;
+    const prevYearKey = String(Number(yearKey) - 1);
+    const prevYtdFrom = localDayBoundsForKey(`${prevYearKey}-01-01`).from;
+    const prevYtdTo = `${prevYearKey}${todayKey.slice(4)}T23:59:59.999Z`;
     try {
       const [
         { pointsOfSale, workCenters },
         orderResult,
+        prevYearOrderResult,
         tpvSessions,
         ordersCountResult,
         staffConsumptionsResult,
@@ -761,7 +771,14 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
         filterDeliveryOrdersRequest(dataUserId, {
           dateFrom: orderFetchFrom,
           dateTo: monthEnd,
-          limit: 8000,
+          limit: 2500,
+          ...(scopeBusinessId ? { businessId: scopeBusinessId } : {}),
+        }).catch(() => ({ orders: [], total: 0 })),
+        // Solo YTD año anterior para “vs año ant.” en panel marcas (ligero).
+        filterDeliveryOrdersRequest(dataUserId, {
+          dateFrom: prevYtdFrom,
+          dateTo: prevYtdTo,
+          limit: 1500,
           ...(scopeBusinessId ? { businessId: scopeBusinessId } : {}),
         }).catch(() => ({ orders: [], total: 0 })),
         listTpvRegisterSessionsRequest(dataUserId, {
@@ -786,10 +803,19 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
           summary: { count: 0, total: 0, cashNowTotal: 0, payrollTotal: 0 },
         })),
       ]);
+      const mergedOrdersById = new Map<string, DeliveryOrder>();
+      for (const o of [...(orderResult.orders || []), ...(prevYearOrderResult.orders || [])]) {
+        const id = String(o?._id || '').trim();
+        if (id) mergedOrdersById.set(id, o);
+      }
+      const orderResultMerged = {
+        orders: Array.from(mergedOrdersById.values()),
+        total: ordersCountResult.total || mergedOrdersById.size,
+      };
       const activePdvIds = pointsOfSale.filter((p) => p.active !== false).map((p) => p._id);
       const orderPdvIds = [
         ...new Set(
-          (orderResult.orders || [])
+          (orderResultMerged.orders || [])
             .map((o) => String(o.salesPointId || '').trim())
             .filter(Boolean),
         ),
@@ -841,7 +867,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
 
       const buildPulses = (dayKeys: string[]): StoreOpsPulse[] =>
         pulseStores.map((store) =>
-          buildStoreOpsPulse(orderResult.orders || [], {
+          buildStoreOpsPulse(orderResultMerged.orders || [], {
             storeId: store.workCenterId || store.id,
             storeName: store.name,
             businessId: scopeBusinessId,
@@ -877,15 +903,15 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
       );
       setDeliveryTpvSessions(tpvSessions || []);
 
-      if (pulseStores.length === 0 && (orderResult.orders || []).length === 0) {
+      if (pulseStores.length === 0 && (orderResultMerged.orders || []).length === 0) {
         setDeliveryMetrics(emptyPortfolioMetrics());
         setDeliveryOpsPulses({ pulses7d: [], pulsesMonth: [] });
         setDeliveryScope({
-          orders: orderResult.orders,
+          orders: orderResultMerged.orders,
           pdvIds,
           primaryPdvId: null,
           wcScopeIds: [...wcScope],
-          ordersTotal: Number(ordersCountResult.total || orderResult.total || 0),
+          ordersTotal: Number(ordersCountResult.total || orderResultMerged.total || 0),
           stores: deliveryStores,
         });
         return;
@@ -897,7 +923,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
         scopePdvIds.length === 0
           ? emptyPortfolioMetrics()
           : computePortfolioMetrics(
-              orderResult.orders,
+              orderResultMerged.orders,
               scopePdvIds,
               primaryPdv,
               todayKey,
@@ -909,19 +935,19 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
         pulsesMonth: buildPulses(keysMonth),
       });
       const scopedForTotal = filterOrdersToPortfolioScope(
-        orderResult.orders || [],
+        orderResultMerged.orders || [],
         scopePdvIds,
         primaryPdv,
         wcScope,
       );
       setDeliveryScope({
-        orders: orderResult.orders,
+        orders: orderResultMerged.orders,
         pdvIds: scopePdvIds,
         primaryPdvId: primaryPdv,
         wcScopeIds: [...wcScope],
         ordersTotal: Math.max(
           Number(ordersCountResult.total || 0),
-          Number(orderResult.total || 0),
+          Number(orderResultMerged.total || 0),
           scopedForTotal.length,
         ),
         stores: deliveryStores,
@@ -1027,16 +1053,30 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
     }
   }, [loadDeliveryDashboard, loadCrmClientsCount, authUser?.user_id]);
 
+  /** Evita martillar Couch/API en cada SSE de pedido (escala con varios locales). */
+  const liveRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleDashboardLiveRefresh = useCallback(() => {
+    if (liveRefreshTimerRef.current) return;
+    liveRefreshTimerRef.current = setTimeout(() => {
+      liveRefreshTimerRef.current = null;
+      refreshDashboardLive();
+    }, 8_000);
+  }, [refreshDashboardLive]);
+
+  useEffect(() => () => {
+    if (liveRefreshTimerRef.current) clearTimeout(liveRefreshTimerRef.current);
+  }, []);
+
   const { sseOk: liveSseOk } = useDeliveryOrdersLive({
     authUserId: authUser?.user_id || authUser?.id || null,
     businessId: businessId || null,
-    onRefresh: refreshDashboardLive,
+    onRefresh: scheduleDashboardLiveRefresh,
     enabled: !!authUser && (isDeliveryVertical || isRestaurantVertical),
-    fallbackPollMs: 45_000,
+    fallbackPollMs: 90_000,
   });
 
   useEffect(() => {
-    const onCajaSync = () => refreshDashboardLive();
+    const onCajaSync = () => scheduleDashboardLiveRefresh();
     const onClientsSync = () => { void loadCrmClientsCount(); };
     window.addEventListener(TPV_SESSION_SYNC_EVENT, onCajaSync);
     window.addEventListener(CRM_CLIENTS_SYNC_EVENT, onClientsSync);
@@ -1044,7 +1084,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
       window.removeEventListener(TPV_SESSION_SYNC_EVENT, onCajaSync);
       window.removeEventListener(CRM_CLIENTS_SYNC_EVENT, onClientsSync);
     };
-  }, [refreshDashboardLive, loadCrmClientsCount]);
+  }, [scheduleDashboardLiveRefresh, loadCrmClientsCount]);
 
   const [verticalKpi, setVerticalKpi] = useState<VerticalKpiSnapshot | null>(null);
   const [verticalKpiLoading, setVerticalKpiLoading] = useState(false);

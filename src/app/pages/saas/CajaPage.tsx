@@ -679,7 +679,13 @@ export function CajaPage() {
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  /** Paginación por día: primera visita a un día → spinner de día (no pantalla completa). */
+  const [dayLoading, setDayLoading] = useState(false);
+  /** Mes (YYYY-MM) cargándose para el calendario. */
+  const [calendarLoadingYm, setCalendarLoadingYm] = useState<string | null>(null);
   const hasLoadedOnceRef = useRef(false);
+  const loadedDaysRef = useRef<Set<string>>(new Set());
+  const loadedMonthsRef = useRef<Set<string>>(new Set());
   const loadGenRef = useRef(0);
   const userCollapsedOpenRef = useRef(false);
 
@@ -724,23 +730,33 @@ export function CajaPage() {
     const forBusinessId = businessId;
     const forDate = selectedDate;
     const silent = options?.silent ?? hasLoadedOnceRef.current;
+    const firstTimeForDay = !loadedDaysRef.current.has(forDate);
     if (!silent) setLoading(true);
-    else setRefreshing(true);
+    else {
+      setRefreshing(true);
+      if (firstTimeForDay) setDayLoading(true);
+    }
     try {
-      // Solo el día seleccionado (+ abiertas/pendientes en servidor). No tirar de años.
+      // Paginación por día: SOLO el día seleccionado (dateFrom + dateTo). El servidor
+      // añade siempre abiertas/pendientes. Sin dateTo, retroceder ampliaba la ventana
+      // hasta hoy y el tope de docs dejaba fuera los días antiguos (no cargaba nada).
       const deepLink = typeof window !== 'undefined'
         ? (new URLSearchParams(window.location.search).get('validate')
           || new URLSearchParams(window.location.search).get('view'))
         : null;
-      let dateFrom = localDayBoundsForKey(forDate).from;
+      const bounds = localDayBoundsForKey(forDate);
+      let dateFrom = bounds.from;
+      let dateTo: string | undefined = bounds.to;
       if (deepLink) {
         const lookback = new Date();
         lookback.setDate(lookback.getDate() - 120);
         dateFrom = lookback.toISOString();
+        dateTo = undefined;
       }
       const { sessions: sessData, driverSessions: driverData } = await listCajaBootstrapRequest(forUserId, {
         businessId: forBusinessId,
         dateFrom,
+        ...(dateTo ? { dateTo } : {}),
       });
       // Respuesta vieja tras cambiar empresa/día: no tocar estado ni toast.
       if (gen !== loadGenRef.current) return;
@@ -754,9 +770,21 @@ export function CajaPage() {
         if (pdvIds.length === 0) return true;
         return tpvSessionBelongsToBusiness(s, forBusinessId, pdvIds);
       });
-      setSessions(unique);
+      // Caché por día: conservar días ya visitados; el día pedido lo manda el servidor
+      // (fuera copias viejas). Una "abierta" local que ya no venga es que se cerró.
+      setSessions((prev) => {
+        const fetchedIds = new Set(unique.map((s) => s._id));
+        const kept = prev.filter((s) => {
+          if (fetchedIds.has(s._id)) return false;
+          if (s.status === 'open') return false;
+          if (sessionOnDate(s, forDate)) return false;
+          return true;
+        });
+        return [...unique, ...kept];
+      });
       setDriverSessions(driverData);
       hasLoadedOnceRef.current = true;
+      loadedDaysRef.current.add(forDate);
     } catch (err) {
       if (gen !== loadGenRef.current) return;
       const aborted = err instanceof DOMException && err.name === 'AbortError';
@@ -765,14 +793,64 @@ export function CajaPage() {
       if (gen === loadGenRef.current) {
         setLoading(false);
         setRefreshing(false);
+        setDayLoading(false);
       }
     }
   }, [dataUserId, businessId, selectedDate]);
+
+  /**
+   * Calendario: precarga el mes completo (una petición, cacheada) y marca sus
+   * días como cargados → elegir cualquier día del mes es instantáneo.
+   */
+  const ensureMonthLoaded = useCallback(async (ym: string) => {
+    if (!dataUserId || !businessId) return;
+    if (!/^\d{4}-\d{2}$/.test(ym)) return;
+    if (loadedMonthsRef.current.has(ym)) return;
+    const forBusinessId = businessId;
+    setCalendarLoadingYm(ym);
+    try {
+      const { from, to } = monthBoundsIso(ym);
+      const { sessions: chunk } = await listCajaBootstrapRequest(dataUserId, {
+        businessId: forBusinessId,
+        dateFrom: from,
+        dateTo: to,
+      });
+      if (businessId !== forBusinessId) return;
+      const pdvIds = scopedPdvKeyRef.current
+        ? scopedPdvKeyRef.current.split('|').map((id) => id.trim()).filter(Boolean)
+        : [];
+      const scoped = chunk.filter((s) => {
+        if (pdvIds.length === 0) return true;
+        return tpvSessionBelongsToBusiness(s, forBusinessId, pdvIds);
+      });
+      setSessions((prev) => {
+        const byId = new Map(prev.map((s) => [s._id, s]));
+        for (const s of scoped) if (s._id) byId.set(s._id, s);
+        return Array.from(byId.values());
+      });
+      loadedMonthsRef.current.add(ym);
+      const [y, m] = ym.split('-').map(Number);
+      const lastDay = new Date(y, m, 0).getDate();
+      for (let d = 1; d <= lastDay; d++) {
+        loadedDaysRef.current.add(`${ym}-${String(d).padStart(2, '0')}`);
+      }
+    } catch {
+      /* red: se reintenta al reabrir el calendario */
+    } finally {
+      setCalendarLoadingYm((prev) => (prev === ym ? null : prev));
+    }
+  }, [dataUserId, businessId]);
+
+  const handleEnsureMonth = useCallback((ym: string) => {
+    void ensureMonthLoaded(ym);
+  }, [ensureMonthLoaded]);
 
   // Al cambiar de empresa, limpiar estado. No invalidar gen aquí:
   // eso dejaba loading=true si la petición en vuelo acababa como “stale”.
   useEffect(() => {
     hasLoadedOnceRef.current = false;
+    loadedDaysRef.current = new Set();
+    loadedMonthsRef.current = new Set();
     setSessions([]);
     setDriverSessions([]);
     setFilterPdv('');
@@ -1125,6 +1203,9 @@ export function CajaPage() {
         onSelectSession={handleToggleSession}
         onViewFullClosing={handleViewClosing}
         refreshing={refreshing}
+        dayLoading={dayLoading}
+        onEnsureMonth={handleEnsureMonth}
+        monthLoadingYm={calendarLoadingYm}
       />
       {viewingClosingSession && (
         <ClosingViewModal

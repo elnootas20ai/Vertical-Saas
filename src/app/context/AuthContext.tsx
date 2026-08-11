@@ -251,12 +251,42 @@ function getOrCreateAuthContext(): React.Context<AuthContextType | undefined> {
 
 const AuthContext = getOrCreateAuthContext();
 
+/** Último JSON de sesión que esta pestaña escribió o procesó (corta ecos entre pestañas). */
+let _lastKnownSessionJson: string | null = null;
+
 function persistSession(nextUser: User | null) {
   if (nextUser) {
-    localStorage.setItem(SESSION_USER_STORAGE_KEY, JSON.stringify(nextUser));
+    const serialized = JSON.stringify(nextUser);
+    _lastKnownSessionJson = serialized;
+    // No reescribir si no cambió nada: cada setItem con valor distinto dispara
+    // el evento `storage` en las demás pestañas y puede provocar un bucle de
+    // sincronización entre pestañas (visto: tormenta de /api/auth/me + brands).
+    try {
+      if (localStorage.getItem(SESSION_USER_STORAGE_KEY) === serialized) return;
+    } catch {
+      /* ignore */
+    }
+    localStorage.setItem(SESSION_USER_STORAGE_KEY, serialized);
     return;
   }
+  _lastKnownSessionJson = null;
   localStorage.removeItem(SESSION_USER_STORAGE_KEY);
+}
+
+/**
+ * Normalización única antes de guardar/emitir el usuario de sesión.
+ * Debe ser determinista (mismo input → mismo JSON): lo persistido dispara
+ * eventos `storage` en otras pestañas y cualquier campo volátil (p. ej. un
+ * timestamp del servidor) provocaba un bucle infinito de sincronización.
+ */
+function normalizeSessionUser(nextUser: User): User {
+  return {
+    ...nextUser,
+    // Completitud siempre desde personalData/employment (evita banner con flag viejo).
+    workerProfileCompletion: computeWorkerProfileCompletion(nextUser),
+    workerIdentityCompleted:
+      Boolean(nextUser.workerIdentityCompleted) || hasMinimumWorkerIdentity(nextUser),
+  };
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -278,13 +308,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // ignore
     }
-    // Completitud siempre desde personalData/employment (evita banner con flag viejo).
-    const normalized: User = {
-      ...nextUser,
-      workerProfileCompletion: computeWorkerProfileCompletion(nextUser),
-      workerIdentityCompleted:
-        Boolean(nextUser.workerIdentityCompleted) || hasMinimumWorkerIdentity(nextUser),
-    };
+    const normalized = normalizeSessionUser(nextUser);
     setUser(normalized);
     setIsAuthenticated(true);
     persistSession(normalized);
@@ -330,6 +354,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let parsedFromStorage: User | null = null;
     try {
       parsedFromStorage = JSON.parse(sessionUser) as User;
+      _lastKnownSessionJson = sessionUser;
       setUser(parsedFromStorage);
       setIsAuthenticated(true);
     } catch (error) {
@@ -422,24 +447,55 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const onStorage = (event: StorageEvent) => {
       if (event.key !== SESSION_USER_STORAGE_KEY) return;
       if (!event.newValue) {
+        _lastKnownSessionJson = null;
         stopAuthSessionKeepalive();
         setUser(null);
         setIsAuthenticated(false);
         clearAuthTokens();
         return;
       }
+      // La otra pestaña escribió lo mismo que ya conocemos: no reprocesar.
+      // Sin este corte, dos pestañas entraban en ping-pong infinito
+      // (storage → /me → persist → storage…), tumbando dashboard y API.
+      if (event.newValue === _lastKnownSessionJson) return;
       try {
         const parsed = JSON.parse(event.newValue) as User;
+        _lastKnownSessionJson = event.newValue;
         const prevId = String(user?.user_id || user?.id || '').trim();
         const nextId = String(parsed.user_id || parsed.id || '').trim();
         if (prevId && nextId && prevId !== nextId) {
           clearVertialClientCaches([SESSION_USER_STORAGE_KEY]);
         }
+        // Pintar ya lo de la otra pestaña. El /me NO usa setSessionUser:
+        // eso reescribía localStorage siempre y reabría el ping-pong.
+        // Solo persistimos si hay un cambio real (misma lógica que refreshCurrentUser).
         setUser(parsed);
         setIsAuthenticated(true);
         void fetchCurrentUserRequest()
           .then((res) => {
-            if (res.user) setSessionUser(res.user);
+            const next = res.user;
+            if (!next) return;
+            setUser((prev) => {
+              const prevSub = JSON.stringify(prev?.subscription ?? null);
+              const nextSub = JSON.stringify(next.subscription ?? null);
+              const prevSalesPoint = String(prev?.employment?.salesPointId || '').trim();
+              const nextSalesPoint = String(next.employment?.salesPointId || '').trim();
+              const prevLinked = String(prev?.linkedBusinessId || '').trim();
+              const nextLinked = String(next.linkedBusinessId || '').trim();
+              if (
+                prev?.user_id === next.user_id
+                && prev.emailVerified === next.emailVerified
+                && prev.updatedAt === next.updatedAt
+                && prevSub === nextSub
+                && prevSalesPoint === nextSalesPoint
+                && prevLinked === nextLinked
+              ) {
+                return prev;
+              }
+              const normalized = normalizeSessionUser(next);
+              persistSession(normalized);
+              return normalized;
+            });
           })
           .catch(() => undefined);
       } catch {
@@ -450,7 +506,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
-  }, [setSessionUser, user?.user_id, user?.id]);
+  }, [user?.user_id, user?.id]);
 
   const register = async (data: RegisterPayload): Promise<{
     success: boolean;
@@ -1169,8 +1225,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         ) {
           return prev;
         }
-        persistSession(next);
-        return next;
+        // Normalizado (determinista): persistir el user crudo del servidor
+        // metía campos volátiles en localStorage y despertaba a otras pestañas.
+        const normalized = normalizeSessionUser(next);
+        persistSession(normalized);
+        return normalized;
       });
       setSessionSyncedWithServer(true);
       setIsAuthenticated(true);

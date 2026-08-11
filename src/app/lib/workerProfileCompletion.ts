@@ -41,6 +41,7 @@ export const HR_OWNED_FIELD_DEFS = [
 type AccountLike = {
   personalData?: Partial<PersonalData> | null;
   employment?: Partial<EmploymentInfo> | null;
+  updatedAt?: string;
 };
 
 function getNestedValue(obj: AccountLike | null | undefined, path: string): unknown {
@@ -100,7 +101,11 @@ export function computeWorkerProfileCompletion(account: AccountLike): WorkerProf
     fullyCompleted: workerMissing.length === 0 && hrMissing.length === 0,
     workerMissing: [...workerMissing],
     hrMissing: [...hrMissing],
-    updatedAt: new Date().toISOString(),
+    // Determinista a propósito: un timestamp fresco aquí hacía que cada
+    // persistSession() escribiera un JSON distinto en localStorage y dos
+    // pestañas abiertas entraran en un ping-pong infinito de eventos
+    // `storage` + /api/auth/me (tormenta de peticiones, dashboard colgado).
+    updatedAt: String(account.updatedAt || ''),
   };
 }
 

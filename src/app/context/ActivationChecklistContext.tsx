@@ -288,6 +288,12 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
   const businessesCount = businesses.length;
   const businessesRef = useRef(businesses);
   businessesRef.current = businesses;
+  // Refs estables: el load() lee user/business actuales sin que un setUser
+  // (nueva referencia, mismos datos) relance marcas+catálogo en bucle.
+  const userRef = useRef(user);
+  userRef.current = user;
+  const currentBusinessRef = useRef(currentBusiness);
+  currentBusinessRef.current = currentBusiness;
   const [isLoadingSample, setIsLoadingSample] = useState(false);
   const [activationFlags, setActivationFlags] = useState<ActivationFlagsBundle | null>(null);
   const activationFlagsRef = useRef<ActivationFlagsBundle | null>(null);
@@ -365,15 +371,17 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
         ) {
           // Solo lectura: el checklist observa el estado, nunca crea/repara PDVs.
           const isRestaurant = isRestaurantBusinessType(businessType);
+          const authUser = userRef.current;
+          const biz = currentBusinessRef.current;
           const [storeState, brands, catalog, floorConfig, diningTables] = await Promise.all([
-            currentBusiness
+            biz
               ? (isRestaurant
-                  ? loadRestaurantStores(user, currentBusiness, businessesRef.current, {
+                  ? loadRestaurantStores(authUser, biz, businessesRef.current, {
                       includeInactivePdvs: true,
                       accountBusinessCount: businessesCount,
                       tpvBootstrap: false,
                     })
-                  : loadRetailStoresForBusiness(user, currentBusiness, businessesRef.current, {
+                  : loadRetailStoresForBusiness(authUser, biz, businessesRef.current, {
                       includeInactivePdvs: true,
                       accountBusinessCount: businessesCount,
                       tpvBootstrap: false,
@@ -431,10 +439,12 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
         }
 
         if (businessType === 'carDealership') {
+          const authUser = userRef.current;
+          const biz = currentBusinessRef.current;
           const [storeState, hasClient, vehiclesRes] = await Promise.all([
-            loadCompraventaStores(user, currentBusiness, { includeInactivePdvs: true }),
+            loadCompraventaStores(authUser, biz, { includeInactivePdvs: true }),
             peekHasClients(dataUserId, businessId),
-            listVehiclesRequest(dataUserId, resolveVehicleListBusinessId(currentBusiness)).catch(
+            listVehiclesRequest(dataUserId, resolveVehicleListBusinessId(biz)).catch(
               () => ({ vehicles: [] as Array<{ salePrice?: number }> }),
             ),
           ]);
@@ -671,8 +681,8 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
     bizTaxId,
     bizAddress,
     bizPhone,
-    user,
-    currentBusiness,
+    // NO depender de `user` / `currentBusiness` (objetos): cada setUser con
+    // nueva referencia relanzaba marcas+catálogo y tumbaba el dashboard (Pau).
     businessesCount,
   ]);
 

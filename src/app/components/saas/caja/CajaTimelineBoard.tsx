@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ArrowLeft,
+  CalendarDays,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -24,6 +25,7 @@ import {
   isTpvRegisterSessionFromPriorCalendarDay,
   localCalendarDayKey,
   sessionBelongsToCajaDay,
+  sessionWorkDayKey,
 } from '../../../lib/tpvCajaScope';
 import {
   buildCajaTimelineTracks,
@@ -286,6 +288,12 @@ export type CajaTimelineBoardProps = {
   onSelectSession: (id: string | null) => void;
   onViewFullClosing?: (session: TpvRegisterSession) => void;
   refreshing?: boolean;
+  /** Primera carga del día seleccionado (paginación por día): spinner en vez de "sin turnos". */
+  dayLoading?: boolean;
+  /** Precarga las cajas de un mes (YYYY-MM) para pintar el calendario. */
+  onEnsureMonth?: (ym: string) => void;
+  /** Mes (YYYY-MM) que se está cargando para el calendario. */
+  monthLoadingYm?: string | null;
   /** Extra actions next to Excel (restaurant: Sala / TPV) */
   headerExtra?: ReactNode;
   /** Etiqueta de PDV en UI (delivery: tienda; restaurant: local). */
@@ -297,6 +305,41 @@ function addDaysIso(iso: string, delta: number): string {
   d.setDate(d.getDate() + delta);
   return localCalendarDayKey(d);
 }
+
+// ─── Calendario de días ───────────────────────────────────────────────────────
+
+const WEEKDAY_HEADERS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+
+function addMonthsYm(ym: string, delta: number): string {
+  const d = new Date(`${ym}-01T12:00:00`);
+  d.setMonth(d.getMonth() + delta);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function monthLabelEs(ym: string): string {
+  const label = new Date(`${ym}-01T12:00:00`).toLocaleDateString('es-ES', {
+    month: 'long',
+    year: 'numeric',
+  });
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+/** Semanas del mes (lunes primero); null = hueco de otro mes. */
+function buildMonthGrid(ym: string): Array<Array<string | null>> {
+  const [y, m] = ym.split('-').map(Number);
+  if (!y || !m) return [];
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const lead = (new Date(y, m - 1, 1).getDay() + 6) % 7;
+  const cells: Array<string | null> = [];
+  for (let i = 0; i < lead; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(`${ym}-${String(d).padStart(2, '0')}`);
+  while (cells.length % 7 !== 0) cells.push(null);
+  const weeks: Array<Array<string | null>> = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+  return weeks;
+}
+
+type CalendarDayInfo = { turns: number; open: number; sales: number; badDiff: boolean };
 
 function formatDayShort(iso: string): string {
   const today = localCalendarDayKey();
@@ -326,6 +369,9 @@ export function CajaTimelineBoard({
   onSelectSession,
   onViewFullClosing,
   refreshing,
+  dayLoading,
+  onEnsureMonth,
+  monthLoadingYm,
   headerExtra,
   locationNoun = { singular: 'Tienda', plural: 'tiendas', filterAll: 'Todas las tiendas' },
 }: CajaTimelineBoardProps) {
@@ -335,7 +381,10 @@ export function CajaTimelineBoard({
   const locFilterAll = locationNoun.filterAll;
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [downloadOpen, setDownloadOpen] = useState(false);
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [calendarYm, setCalendarYm] = useState(() => localCalendarDayKey().slice(0, 7));
   const downloadRef = useRef<HTMLDivElement>(null);
+  const calendarRef = useRef<HTMLDivElement>(null);
   const detailRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -348,6 +397,41 @@ export function CajaTimelineBoard({
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   }, [downloadOpen]);
+
+  useEffect(() => {
+    if (!calendarOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (calendarRef.current && !calendarRef.current.contains(e.target as Node)) {
+        setCalendarOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [calendarOpen]);
+
+  // Con el calendario abierto, precargar el mes visible (colores + días al instante).
+  useEffect(() => {
+    if (!calendarOpen) return;
+    onEnsureMonth?.(calendarYm);
+  }, [calendarOpen, calendarYm, onEnsureMonth]);
+
+  /** Resumen por día del mes visible (turnos, ventas, descuadres, abiertas). */
+  const calendarDayInfo = useMemo(() => {
+    const map = new Map<string, CalendarDayInfo>();
+    if (!calendarOpen) return map;
+    for (const s of sessions) {
+      if (filterPdv && s.pointOfSaleId !== filterPdv) continue;
+      const key = sessionWorkDayKey(s);
+      if (!key || !key.startsWith(calendarYm)) continue;
+      const info = map.get(key) || { turns: 0, open: 0, sales: 0, badDiff: false };
+      info.turns += 1;
+      if (s.status === 'open') info.open += 1;
+      info.sales += buildTpvRegisterSummaryForDay(s, key).totalSales;
+      if (s.status === 'closed' && Math.abs(Number(s.difference) || 0) >= 0.5) info.badDiff = true;
+      map.set(key, info);
+    }
+    return map;
+  }, [calendarOpen, calendarYm, sessions, filterPdv]);
 
   useEffect(() => {
     const id = window.setInterval(() => setNowTick(Date.now()), 30_000);
@@ -418,9 +502,9 @@ export function CajaTimelineBoard({
   return (
     <div className="text-stone-900 dark:text-stone-100">
       <div className="mx-auto w-full max-w-[1100px] pb-12">
-        {/* Head — Volver a la izquierda (mismo patrón que TPV / resto de Vertial) */}
+        {/* Head — Volver SOLO a la izquierda (sin flechas de día al lado, que confunde) */}
         <div className="flex items-center justify-between flex-wrap gap-3.5 mb-1.5">
-          <div className="flex items-center gap-3 flex-wrap min-w-0">
+          <div className="flex items-center gap-2.5 min-w-0">
             <button
               type="button"
               onClick={() => onBack?.()}
@@ -429,51 +513,198 @@ export function CajaTimelineBoard({
             >
               <ArrowLeft className="w-4 h-4" />
             </button>
-            <div className="flex items-center gap-2 flex-wrap min-w-0">
-              <div className="flex items-center gap-1 rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-1.5 py-1">
+            <span className="text-[15px] font-bold text-stone-900 dark:text-stone-100">Caja</span>
+          </div>
+
+          {/* Selector de día — píldora centrada, separada del Volver */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div ref={calendarRef} className="relative">
+              <div className="flex items-center gap-0.5 rounded-2xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-1.5 py-1 shadow-sm">
                 <button
                   type="button"
                   onClick={() => onSelectedDateChange(addDaysIso(selectedDate, -1))}
                   aria-label="Día anterior"
-                  className="w-6 h-6 rounded-md inline-flex items-center justify-center text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800"
+                  title="Día anterior"
+                  className="w-9 h-9 rounded-xl inline-flex items-center justify-center text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800"
                 >
-                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <ChevronLeft className="w-4 h-4" />
                 </button>
-                <span className="px-1 text-[12.5px] font-semibold text-stone-900 dark:text-stone-100 whitespace-nowrap">
-                  {formatDayShort(selectedDate)}
-                  <span className="ml-1.5 font-normal text-stone-400 tabular-nums">
-                    {new Date(`${selectedDate}T12:00:00`).toLocaleDateString('es-ES')}
-                  </span>
-                </span>
+                {onEnsureMonth ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (calendarOpen) {
+                          setCalendarOpen(false);
+                          return;
+                        }
+                        setCalendarYm(selectedDate.slice(0, 7));
+                        setCalendarOpen(true);
+                      }}
+                      aria-label="Abrir calendario"
+                      aria-expanded={calendarOpen}
+                      title="Elegir día en el calendario"
+                      className={`h-9 px-3 rounded-xl inline-flex items-center gap-2 ${
+                        calendarOpen
+                          ? 'bg-blue-50 dark:bg-blue-950/40'
+                          : 'hover:bg-stone-50 dark:hover:bg-stone-800'
+                      }`}
+                    >
+                      <CalendarDays className="w-4 h-4 text-[var(--v-blue,#2563eb)]" />
+                      <span className="text-[13.5px] font-bold text-stone-900 dark:text-stone-100 whitespace-nowrap">
+                        {formatDayShort(selectedDate)}
+                      </span>
+                      <span className="text-[12px] text-stone-400 tabular-nums whitespace-nowrap">
+                        {new Date(`${selectedDate}T12:00:00`).toLocaleDateString('es-ES')}
+                      </span>
+                      <ChevronDown
+                        className={`w-3.5 h-3.5 text-stone-400 transition-transform ${calendarOpen ? 'rotate-180' : ''}`}
+                      />
+                    </button>
+                    {calendarOpen && (
+                      <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-[19.5rem] max-w-[calc(100vw-1.5rem)] bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 rounded-xl shadow-xl z-30 p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <button
+                            type="button"
+                            onClick={() => setCalendarYm(addMonthsYm(calendarYm, -1))}
+                            aria-label="Mes anterior"
+                            className="w-7 h-7 rounded-md inline-flex items-center justify-center text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800"
+                          >
+                            <ChevronLeft className="w-4 h-4" />
+                          </button>
+                          <span className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-stone-900 dark:text-stone-100">
+                            {monthLabelEs(calendarYm)}
+                            {monthLoadingYm === calendarYm && (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin text-stone-400" />
+                            )}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setCalendarYm(addMonthsYm(calendarYm, 1))}
+                            disabled={calendarYm >= todayStr.slice(0, 7)}
+                            aria-label="Mes siguiente"
+                            className="w-7 h-7 rounded-md inline-flex items-center justify-center text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800 disabled:opacity-30"
+                          >
+                            <ChevronRight className="w-4 h-4" />
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-7 gap-1 mb-1">
+                          {WEEKDAY_HEADERS.map((d, i) => (
+                            <span key={`${d}-${i}`} className="text-center text-[9.5px] font-bold uppercase text-stone-400">
+                              {d}
+                            </span>
+                          ))}
+                        </div>
+                        <div className="space-y-1">
+                          {buildMonthGrid(calendarYm).map((week, wi) => (
+                            <div key={wi} className="grid grid-cols-7 gap-1">
+                              {week.map((key, di) => {
+                                if (!key) return <span key={`empty-${di}`} />;
+                                const isFuture = key > todayStr;
+                                const isSelected = key === selectedDate;
+                                const isTodayCell = key === todayStr;
+                                const info = calendarDayInfo.get(key);
+                                const tone = isSelected
+                                  ? 'bg-[var(--v-blue,#2563eb)] text-white'
+                                  : isFuture
+                                    ? 'text-stone-300 dark:text-stone-600 cursor-default'
+                                    : info
+                                      ? info.badDiff
+                                        ? 'bg-red-50 text-red-800 hover:bg-red-100 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/60'
+                                        : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-950/60'
+                                      : 'text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800';
+                                return (
+                                  <button
+                                    key={key}
+                                    type="button"
+                                    disabled={isFuture}
+                                    onClick={() => {
+                                      onSelectedDateChange(key);
+                                      setCalendarOpen(false);
+                                    }}
+                                    title={
+                                      info
+                                        ? `${info.turns} turno${info.turns === 1 ? '' : 's'} · ${formatMoneyEs(info.sales)}${info.badDiff ? ' · con descuadre' : ''}${info.open > 0 ? ' · caja abierta' : ''}`
+                                        : isFuture
+                                          ? undefined
+                                          : 'Sin turnos'
+                                    }
+                                    className={`relative h-10 rounded-lg flex flex-col items-center justify-center leading-none ${tone} ${
+                                      isTodayCell && !isSelected ? 'ring-1 ring-[var(--v-blue,#2563eb)]' : ''
+                                    }`}
+                                  >
+                                    <span className="text-[12px] font-semibold tabular-nums">{Number(key.slice(8, 10))}</span>
+                                    {info && info.sales > 0 ? (
+                                      <span className={`mt-0.5 text-[8px] font-medium tabular-nums ${isSelected ? 'text-white/85' : 'opacity-75'}`}>
+                                        {Math.round(info.sales).toLocaleString('es-ES')}€
+                                      </span>
+                                    ) : null}
+                                    {info && info.open > 0 ? (
+                                      <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                    ) : null}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2.5 pt-2 border-t border-stone-100 dark:border-stone-800 text-[9.5px] text-stone-500">
+                          <span className="inline-flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-sm bg-emerald-100 border border-emerald-300" />
+                            Día cuadrado
+                          </span>
+                          <span className="inline-flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-sm bg-red-100 border border-red-300" />
+                            Con descuadre
+                          </span>
+                          <span className="inline-flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                            Caja abierta
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <span className="px-2 text-[13px] font-semibold text-stone-900 dark:text-stone-100 whitespace-nowrap">
+                      {formatDayShort(selectedDate)}
+                      <span className="ml-1.5 font-normal text-stone-400 tabular-nums">
+                        {new Date(`${selectedDate}T12:00:00`).toLocaleDateString('es-ES')}
+                      </span>
+                    </span>
+                    <input
+                      type="date"
+                      value={selectedDate}
+                      max={todayStr}
+                      onChange={(e) => e.target.value && onSelectedDateChange(e.target.value)}
+                      aria-label="Elegir fecha"
+                      className="text-xs px-1.5 py-0.5 rounded-md border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-600 dark:text-stone-300"
+                    />
+                  </>
+                )}
                 <button
                   type="button"
                   onClick={() => onSelectedDateChange(addDaysIso(selectedDate, 1))}
                   disabled={selectedDate >= todayStr}
                   aria-label="Día siguiente"
-                  className="w-6 h-6 rounded-md inline-flex items-center justify-center text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800 disabled:opacity-40"
+                  title="Día siguiente"
+                  className="w-9 h-9 rounded-xl inline-flex items-center justify-center text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800 disabled:opacity-40"
                 >
-                  <ChevronRight className="w-3.5 h-3.5" />
+                  <ChevronRight className="w-4 h-4" />
                 </button>
-                <input
-                  type="date"
-                  value={selectedDate}
-                  max={todayStr}
-                  onChange={(e) => e.target.value && onSelectedDateChange(e.target.value)}
-                  aria-label="Elegir fecha"
-                  className="ml-0.5 text-xs px-1.5 py-0.5 rounded-md border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-600 dark:text-stone-300"
-                />
               </div>
-              {!isToday ? (
-                <button
-                  type="button"
-                  onClick={() => onSelectedDateChange(todayStr)}
-                  className="text-[11px] font-bold text-[var(--v-blue,#2563eb)] hover:underline"
-                >
-                  Ir a hoy
-                </button>
-              ) : null}
-              {refreshing && <span className="text-[11px] text-stone-400">Actualizando…</span>}
             </div>
+            {!isToday ? (
+              <button
+                type="button"
+                onClick={() => onSelectedDateChange(todayStr)}
+                className="h-9 px-3 rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/40 text-[12px] font-bold text-[var(--v-blue,#2563eb)] dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950/60"
+              >
+                Ir a hoy
+              </button>
+            ) : null}
+            {refreshing && <span className="text-[11px] text-stone-400">Actualizando…</span>}
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             {headerExtra}
@@ -705,7 +936,14 @@ export function CajaTimelineBoard({
           </p>
 
           {tracks.length === 0 ? (
-            <p className="text-sm text-stone-400 text-center py-10">Ningún turno este día</p>
+            dayLoading ? (
+              <p className="flex items-center justify-center gap-2 text-sm text-stone-400 text-center py-10">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Cargando turnos del día…
+              </p>
+            ) : (
+              <p className="text-sm text-stone-400 text-center py-10">Ningún turno este día</p>
+            )
           ) : (
             <div className="overflow-x-auto -mx-0.5 px-0.5">
               <div className="min-w-[640px]">
@@ -830,7 +1068,14 @@ export function CajaTimelineBoard({
               {tableRows.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-3.5 py-8 text-center text-sm text-stone-400">
-                    Sin turnos
+                    {dayLoading ? (
+                      <span className="inline-flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Cargando turnos…
+                      </span>
+                    ) : (
+                      'Sin turnos'
+                    )}
                   </td>
                 </tr>
               ) : (

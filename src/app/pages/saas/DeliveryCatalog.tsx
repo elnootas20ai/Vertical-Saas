@@ -83,7 +83,7 @@ import {
   createPurchaseInvoiceRequest,
   updatePurchaseInvoiceRequest,
   deletePurchaseInvoiceRequest,
-  listDeliveryOrdersRequest,
+  filterDeliveryOrdersRequest,
   getDeliveryConfigRequest,
   updateDeliveryConfigRequest,
   type CatalogItem,
@@ -93,6 +93,7 @@ import {
   type PurchaseInvoice,
   type PurchaseInvoiceLine,
 } from '../../lib/deliveryApi';
+import { localCalendarDayKey, localDayBoundsForKey } from '../../lib/tpvCajaScope';
 import {
   Plus,
   Search,
@@ -3528,14 +3529,26 @@ export function CatalogPage() {
     if (!dataUserId) return;
     setOrdersLoading(true);
     try {
-      const orders = await listDeliveryOrdersRequest(dataUserId);
+      // Stats de ventas del catálogo: últimos ~60 días (no historial completo).
+      const today = localCalendarDayKey();
+      const from = (() => {
+        const d = new Date(`${today}T12:00:00`);
+        d.setDate(d.getDate() - 60);
+        return localDayBoundsForKey(localCalendarDayKey(d)).from;
+      })();
+      const { orders } = await filterDeliveryOrdersRequest(dataUserId, {
+        dateFrom: from,
+        dateTo: `${today}T23:59:59.999Z`,
+        limit: 1500,
+        ...(businessId ? { businessId } : {}),
+      });
       setDeliveryOrders(orders);
     } catch {
       setDeliveryOrders([]);
     } finally {
       setOrdersLoading(false);
     }
-  }, [dataUserId]);
+  }, [dataUserId, businessId]);
 
   useEffect(() => {
     if (activeTab !== 'catalog' || !dataUserId) return;
