@@ -31,6 +31,23 @@ describe('calcTpvExpectedCash', () => {
     };
     expect(calcTpvExpectedCash(session)).toBe(130);
   });
+
+  it('usa openingCashCount si initialCashAmount quedó en 0', () => {
+    const session = {
+      initialCashAmount: 0,
+      openingCashCount: { bills_50: 1, bills_20: 2, bills_10: 1 },
+      transactions: [],
+    };
+    expect(calcTpvExpectedCash(session)).toBe(100);
+  });
+
+  it('con fondo 100 permite margen de salida', () => {
+    const session = {
+      initialCashAmount: 100,
+      transactions: [{ type: 'cash_out', amount: 30, paymentMethod: 'efectivo' }],
+    };
+    expect(calcTpvExpectedCash(session)).toBe(70);
+  });
 });
 
 describe('calcTpvShiftCollectionsTotal', () => {

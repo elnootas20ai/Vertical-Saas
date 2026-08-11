@@ -1687,7 +1687,10 @@ function excelLikeAmountsFromClosedSession(
   brandLabels: Record<string, string> = {},
 ): ClosingExcelLikeAmounts {
   const amounts = sessionToUrielAmounts(session);
-  const expected = Number(session.expectedCash ?? calcTpvExpectedCash(session)) || 0;
+  const expectedStored = Number(session.expectedCash);
+  const expected = Number.isFinite(expectedStored)
+    ? expectedStored
+    : calcTpvExpectedCash(session);
   const counted = Number(session.finalCashAmount) || 0;
   const diff = Number.isFinite(Number(session.difference))
     ? Number(session.difference)
@@ -5144,9 +5147,16 @@ export function TpvRegisterGate({
     refreshSessions();
     const interval = window.setInterval(refreshSessions, 30000);
     window.addEventListener('focus', refreshSessions);
+    // Tablet/webview: al despertar la pantalla o volver a la app no siempre hay
+    // `focus`; sin esto la tablet sigue con la caja vieja aunque otra la cerrara.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshSessions();
+    };
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
       window.clearInterval(interval);
       window.removeEventListener('focus', refreshSessions);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, [dataUserId, pointsOfSaleScopeKey, scopeBusinessId]);
 
@@ -6565,6 +6575,8 @@ export function TpvRegisterGate({
   /** Home operativo bar/restaurante = Sala (no Caja). */
   const opsHomePath = isRestaurantVertical ? '/saas/sala' : '/saas/delivery-ops';
 
+  const requestCloseInflightRef = useRef(false);
+
   const handleRequestClose = useCallback(async () => {
     if (isRestaurantVertical && !restaurantTpvPermissions.canCloseRegister) {
       toast.error('Solo encargado o gerente puede cerrar la caja');
@@ -6575,7 +6587,47 @@ export function TpvRegisterGate({
       toast.info('No hay una caja abierta para cerrar');
       return;
     }
-    setClosingSession(session);
+    if (requestCloseInflightRef.current) return;
+    requestCloseInflightRef.current = true;
+
+    // Releer el estado real del servidor antes de abrir el cierre: otra tablet
+    // puede haber cerrado esta caja (o registrado ventas) y la copia local
+    // estar vieja. Sin red (offline-first) se sigue con la copia local.
+    let fresh: TpvRegisterSession = session;
+    try {
+      const uid = String(dataUserId || '').trim();
+      if (uid) {
+        const timeout = new Promise<null>((resolve) => {
+          window.setTimeout(() => resolve(null), 4000);
+        });
+        const refreshed = await Promise.race([
+          listTpvRegisterSessionsRequest(
+            uid,
+            tpvGateSessionsQueryOpts(scopeBusinessIdRef.current || undefined),
+          ),
+          timeout,
+        ]);
+        if (Array.isArray(refreshed)) {
+          const live = refreshed.find((s) => String(s._id) === String(session._id)) || null;
+          if (live) {
+            // Sincroniza la lista local con el servidor (cierre hecho en otra tablet).
+            setSessions((prev) => prev.map((s) => (s._id === live._id ? live : s)));
+            fresh = live;
+          }
+        }
+      }
+    } catch {
+      /* sin red: cerrar con la copia local */
+    } finally {
+      requestCloseInflightRef.current = false;
+    }
+
+    if (!isTpvRegisterSessionOpen(fresh)) {
+      toast.info('Esta caja ya se cerró desde otra tablet. Estado actualizado.');
+      return;
+    }
+
+    setClosingSession(fresh);
     if (isRestaurantVertical && dataUserId) {
       try {
         const check = await checkRestaurantRegisterClose(dataUserId);

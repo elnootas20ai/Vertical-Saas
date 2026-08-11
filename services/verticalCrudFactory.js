@@ -212,7 +212,6 @@ async function appendOneFotoAttachment(req, dbName, doc, dataUrl, index = 0) {
     );
   }
 
-  rev = savedAtt.rev || rev;
   const fresh = await getDocument(req, dbName, doc._id);
   if (!fresh) {
     throw new Error('La propiedad desapareció al guardar la foto');
@@ -220,14 +219,24 @@ async function appendOneFotoAttachment(req, dbName, doc, dataUrl, index = 0) {
   const prevFotos = Array.isArray(fresh.fotos) ? fresh.fotos : [];
   const attRef = `att:${name}`;
   const fotos = prevFotos.includes(attRef) ? prevFotos : [...prevFotos, attRef];
+  // Siempre stubs actuales de Couch: un PUT sin `_attachments` borra los binarios.
+  const attachments = (fresh._attachments && typeof fresh._attachments === 'object')
+    ? fresh._attachments
+    : undefined;
   const next = {
     ...fresh,
-    _rev: rev,
+    _rev: fresh._rev || savedAtt.rev || rev,
     fotos,
     updatedAt: new Date().toISOString(),
+    ...(attachments ? { _attachments: attachments } : {}),
   };
   const saved = await putDocument(req, dbName, doc._id, next);
-  return { ...next, _rev: saved.rev || next._rev, _attachedName: name };
+  const reloaded = await getDocument(req, dbName, doc._id);
+  return {
+    ...(reloaded || next),
+    _rev: (reloaded && reloaded._rev) || saved.rev || next._rev,
+    _attachedName: name,
+  };
 }
 
 /**
@@ -273,17 +282,30 @@ async function persistFotosField(req, dbName, entityKey, userId, doc, rawFotos) 
   if (!fresh) {
     return { ...current, fotos: kept };
   }
+  const attachments = (fresh._attachments && typeof fresh._attachments === 'object')
+    ? fresh._attachments
+    : undefined;
   const next = {
     ...fresh,
     fotos: kept,
     updatedAt: new Date().toISOString(),
+    ...(attachments ? { _attachments: attachments } : {}),
   };
   const saved = await putDocument(req, dbName, doc._id, next);
-  return { ...next, _rev: saved.rev || next._rev };
+  const reloaded = await getDocument(req, dbName, doc._id);
+  return { ...(reloaded || next), _rev: (reloaded && reloaded._rev) || saved.rev || next._rev };
 }
 
-function toClientFotoRefs(verticalName, entityKey, userId, docId, fotos) {
-  return (Array.isArray(fotos) ? fotos : []).map((f) => {
+function toClientFotoRefs(verticalName, entityKey, userId, docId, fotos, attachments) {
+  const list = Array.isArray(fotos) ? fotos : [];
+  const hasAttRefs = list.some((f) => {
+    const s = String(f || '');
+    return s.startsWith('att:') || s.includes('/foto/');
+  });
+  const attKeys = (attachments && typeof attachments === 'object')
+    ? new Set(Object.keys(attachments))
+    : (hasAttRefs ? new Set() : null);
+  return list.map((f) => {
     const s = String(f || '').trim();
     if (!s) return '';
     // Data URLs enormes en el listado tumban el navegador (pantalla en blanco).
@@ -296,6 +318,8 @@ function toClientFotoRefs(verticalName, entityKey, userId, docId, fotos) {
     }
     const name = attachmentNameFromFotoRef(s);
     if (!name) return s;
+    // No devolver URLs que van a 404 (refs huérfanas tras PUT sin stubs).
+    if (attKeys && !attKeys.has(name)) return '';
     return `/api/${verticalName}/${entityKey}/${encodeURIComponent(userId)}/${encodeURIComponent(docId)}/foto/${encodeURIComponent(name)}`;
   }).filter(Boolean);
 }
@@ -304,7 +328,14 @@ function sanitizeForClient(verticalName, entityKey, entityCfg, doc) {
   const out = sanitize(entityCfg, doc);
   if (!out) return null;
   if (entityCfg.fields.includes('fotos')) {
-    out.fotos = toClientFotoRefs(verticalName, entityKey, doc.user_id, doc._id, doc.fotos);
+    out.fotos = toClientFotoRefs(
+      verticalName,
+      entityKey,
+      doc.user_id,
+      doc._id,
+      doc.fotos,
+      doc._attachments,
+    );
   }
   return out;
 }
@@ -480,7 +511,16 @@ export function createVerticalRouter(config) {
             return res.status(404).json({ ok: false, error: 'Documento no encontrado' });
           }
           const name = decodeURIComponent(String(fotoName || '').trim());
+          const attachments = existing._attachments && typeof existing._attachments === 'object'
+            ? existing._attachments
+            : {};
+          if (!attachments[name]) {
+            return res.status(404).json({ ok: false, error: 'Foto no encontrada' });
+          }
           const { buffer, contentType } = await getDocumentAttachment(req, dbName, id, name);
+          if (!buffer?.length) {
+            return res.status(404).json({ ok: false, error: 'Foto vacía' });
+          }
           res.setHeader('Content-Type', contentType || 'image/jpeg');
           res.setHeader('Cache-Control', 'private, max-age=3600');
           return res.send(buffer);
@@ -560,6 +600,9 @@ export function createVerticalRouter(config) {
         } else if (rawFotos) {
           finalDoc = { ...finalDoc, fotos: slimData.fotos };
         }
+        // Releer: stubs de adjuntos reales (evita devolver URLs de fotos ya borradas).
+        const freshAfter = await getDocument(req, dbName, id);
+        if (freshAfter) finalDoc = freshAfter;
         const item = sanitizeForClient(config.name, entityKey, entityCfg, finalDoc);
         if (config.name === 'butcher-ops' && entityKey === 'catalog') {
           import('./butcherCatalogBridge.js')

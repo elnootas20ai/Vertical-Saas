@@ -7682,7 +7682,26 @@ export function buildTpvRegisterSessionDocument(userId, data = {}, existing = nu
     openedAt: existing?.openedAt || now,
     openedBy: String(data.openedBy || existing?.openedBy || ''),
     openingCashCount: data.openingCashCount || existing?.openingCashCount || {},
-    initialCashAmount: Number(data.initialCashAmount ?? existing?.initialCashAmount ?? 0),
+    // 0 explícito en un update NO debe pisar un fondo ya guardado (el `??` no protege el 0).
+    initialCashAmount: (() => {
+      const incoming = data.initialCashAmount;
+      const prev = existing?.initialCashAmount;
+      const prevN = Number(prev);
+      if (incoming == null || incoming === '') {
+        return Number.isFinite(prevN) ? prevN : 0;
+      }
+      const nextN = Number(incoming);
+      if (!Number.isFinite(nextN)) return Number.isFinite(prevN) ? prevN : 0;
+      if (
+        status === 'open'
+        && nextN === 0
+        && Number.isFinite(prevN)
+        && prevN > 0
+      ) {
+        return prevN;
+      }
+      return nextN;
+    })(),
 
     transactions: Array.isArray(data.transactions) ? data.transactions : (existing?.transactions || []),
     cashCounts: Array.isArray(data.cashCounts) ? data.cashCounts : (existing?.cashCounts || []),
@@ -7698,10 +7717,11 @@ export function buildTpvRegisterSessionDocument(userId, data = {}, existing = nu
       status === 'closed'
         ? Number(data.finalCashAmount ?? existing?.finalCashAmount ?? 0)
         : Number(data.finalCashAmount ?? 0),
+    // En abierta no persistir expectedCash=0 “fantasma”: se recalcula al cerrar.
     expectedCash:
       status === 'closed'
         ? Number(data.expectedCash ?? existing?.expectedCash ?? 0)
-        : Number(data.expectedCash ?? 0),
+        : Number(data.expectedCash ?? existing?.expectedCash ?? 0),
     difference:
       status === 'closed'
         ? Number(data.difference ?? existing?.difference ?? 0)
@@ -8000,6 +8020,32 @@ export function normalizeTpvPaymentMethod(raw) {
   return 'efectivo';
 }
 
+function sumTpvOpeningCashCount(counts) {
+  if (!counts || typeof counts !== 'object') return 0;
+  const values = {
+    bills_500: 500, bills_200: 200, bills_100: 100, bills_50: 50,
+    bills_20: 20, bills_10: 10, bills_5: 5,
+    coins_2: 2, coins_1: 1, coins_050: 0.5, coins_020: 0.2,
+    coins_010: 0.1, coins_005: 0.05, coins_002: 0.02, coins_001: 0.01,
+  };
+  let total = 0;
+  for (const [key, value] of Object.entries(values)) {
+    const qty = Number(counts[key] || 0);
+    if (!Number.isFinite(qty) || qty <= 0) continue;
+    total += qty * value;
+  }
+  return Math.round(total * 100) / 100;
+}
+
+function resolveTpvOpeningCashAmount(session) {
+  if (!session) return 0;
+  const declared = Number(session.initialCashAmount);
+  if (Number.isFinite(declared) && declared > 0) return Math.round(declared * 100) / 100;
+  const fromCount = sumTpvOpeningCashCount(session.openingCashCount);
+  if (fromCount > 0) return fromCount;
+  return Number.isFinite(declared) ? declared : 0;
+}
+
 /** Efectivo esperado en caja según transacciones registradas. */
 export function calcTpvRegisterExpectedCash(session) {
   if (!session) return 0;
@@ -8017,7 +8063,7 @@ export function calcTpvRegisterExpectedCash(session) {
   const cashOut = txs
     .filter((t) => t?.type === 'cash_out' || t?.type === 'expense')
     .reduce((s, t) => s + Number(t.amount || 0), 0);
-  return Number(session.initialCashAmount || 0) + cashSales - cashReturns + cashIn - cashOut;
+  return resolveTpvOpeningCashAmount(session) + cashSales - cashReturns + cashIn - cashOut;
 }
 
 /** Suma importes de ventas ya registradas en caja para un pedido (evita doble conteo). */

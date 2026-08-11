@@ -219,7 +219,7 @@ export function TpvCashOpsModal({
               <span className="tabular-nums font-black">{formatMoneyEs(drawerCash)}</span>
             </p>
             <p className="text-[10px] text-amber-800/90 dark:text-amber-200/80 mt-0.5">
-              No puedes sacar más de lo que hay.
+              Incluye el fondo de apertura. No puedes sacar más de lo que hay.
             </p>
           </div>
         ) : null}

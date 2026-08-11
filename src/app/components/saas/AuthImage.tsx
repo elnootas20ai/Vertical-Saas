@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { authFetch, getAuthHeaders } from '../../lib/authApi';
 import { getApiBase } from '../../lib/apiBase';
 
@@ -28,6 +28,17 @@ function isOversizedDataUrl(src: string): boolean {
   return src.startsWith('data:') && src.length > MAX_INLINE_DATA_URL_CHARS;
 }
 
+function looksLikeImageBlob(blob: Blob, contentTypeHeader: string | null): boolean {
+  const header = String(contentTypeHeader || blob.type || '').toLowerCase();
+  if (header.startsWith('image/')) return true;
+  // Algunos proxies omiten content-type; un JSON/HTML de error no es imagen.
+  if (header.includes('application/json') || header.includes('text/html') || header.includes('text/plain')) {
+    return false;
+  }
+  // Sin cabecera útil: aceptar si el cuerpo tiene tamaño razonable de imagen.
+  return blob.size > 32;
+}
+
 type AuthImageProps = {
   src: string;
   alt?: string;
@@ -44,10 +55,14 @@ export function AuthImage({ src, alt = '', className, loading = 'lazy' }: AuthIm
   const [display, setDisplay] = useState('');
   const [failed, setFailed] = useState(false);
   const [failLabel, setFailLabel] = useState('Sin foto');
+  const genRef = useRef(0);
+  const objectUrlRef = useRef('');
 
   useEffect(() => {
+    const gen = ++genRef.current;
     setFailed(false);
     setFailLabel('Sin foto');
+
     const absolute = resolveSrc(src);
     if (!absolute) {
       setDisplay('');
@@ -66,23 +81,34 @@ export function AuthImage({ src, alt = '', className, loading = 'lazy' }: AuthIm
       return;
     }
 
-    let cancelled = false;
-    let objectUrl = '';
     setDisplay('');
+    let cancelled = false;
+
     void authFetch(absolute, { headers: { ...getAuthHeaders() } })
       .then(async (res) => {
+        if (cancelled || gen !== genRef.current) return;
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const blob = await res.blob();
+        if (cancelled || gen !== genRef.current) return;
         if (!blob || blob.size === 0) throw new Error('vacío');
-        objectUrl = URL.createObjectURL(blob);
-        if (!cancelled) {
-          setDisplay(objectUrl);
-          setFailed(false);
+        if (!looksLikeImageBlob(blob, res.headers.get('content-type'))) {
+          throw new Error(`no-imagen (${res.headers.get('content-type') || blob.type || 'sin-tipo'})`);
         }
+        const objectUrl = URL.createObjectURL(blob);
+        if (cancelled || gen !== genRef.current) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+        if (objectUrlRef.current) {
+          URL.revokeObjectURL(objectUrlRef.current);
+        }
+        objectUrlRef.current = objectUrl;
+        setDisplay(objectUrl);
+        setFailed(false);
       })
       .catch((err) => {
         console.error('[AuthImage] no se pudo cargar', absolute, err);
-        if (!cancelled) {
+        if (!cancelled && gen === genRef.current) {
           setDisplay('');
           setFailed(true);
         }
@@ -90,7 +116,11 @@ export function AuthImage({ src, alt = '', className, loading = 'lazy' }: AuthIm
 
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      // No marcar failed aquí: el onError del <img> tras revoke era la causa de “Sin foto” en grid.
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = '';
+      }
     };
   }, [src]);
 
@@ -120,6 +150,8 @@ export function AuthImage({ src, alt = '', className, loading = 'lazy' }: AuthIm
       className={className}
       loading={loading}
       onError={() => {
+        // Ignorar errores de blobs ya revocados (Strict Mode / remount).
+        if (!objectUrlRef.current || display !== objectUrlRef.current) return;
         setDisplay('');
         setFailed(true);
       }}

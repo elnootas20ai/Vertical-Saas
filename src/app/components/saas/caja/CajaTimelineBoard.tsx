@@ -13,12 +13,12 @@ import {
   Table2,
   X,
 } from 'lucide-react';
-import type { PointOfSale, TpvRegisterSession } from '../../../lib/deliveryApi';
+import type { PointOfSale, TpvRegisterSession, TpvRegisterSummary } from '../../../lib/deliveryApi';
 import type {
   UrielCajaDownloadFormat,
   UrielCajaHistoryRange,
 } from '../../../lib/cajaUrielClosingsExcelExport';
-import { calcTpvExpectedCash } from '../../../lib/tpvCajaMath';
+import { calcTpvExpectedCash, sumCashReturns, sumCashStaffConsumption } from '../../../lib/tpvCajaMath';
 import {
   buildTpvRegisterSummaryForDay,
   isTpvRegisterSessionFromPriorCalendarDay,
@@ -49,6 +49,193 @@ function DayStat({ label, value, good }: { label: string; value: string; good?: 
       >
         {value}
       </p>
+    </div>
+  );
+}
+
+const METHOD_LABELS: Record<string, string> = {
+  efectivo: 'Efectivo',
+  tarjeta: 'Tarjeta',
+  bizum: 'Bizum',
+  online: 'Online',
+  otro: 'Otros',
+};
+
+const CHANNEL_LABELS: Record<string, string> = {
+  glovo: 'Glovo',
+  ubereats: 'Uber Eats',
+  uber: 'Uber Eats',
+  justeat: 'Just Eat',
+  flipdish: 'Flipdish',
+  app: 'App',
+  web: 'Web',
+  phone: 'Teléfono',
+  tpv: 'TPV',
+  local: 'Local',
+};
+
+function channelLabel(key: string): string {
+  const k = String(key || '').toLowerCase().trim();
+  return CHANNEL_LABELS[k] || (k ? k.charAt(0).toUpperCase() + k.slice(1) : 'Canal');
+}
+
+/** Fila etiqueta → importe del desglose. */
+function DetailRow({
+  label,
+  value,
+  tone,
+  strong,
+}: {
+  label: string;
+  value: string;
+  tone?: 'plus' | 'minus' | 'muted';
+  strong?: boolean;
+}) {
+  const valueTone =
+    tone === 'plus'
+      ? 'text-emerald-700 dark:text-emerald-400'
+      : tone === 'minus'
+        ? 'text-amber-800 dark:text-amber-300'
+        : 'text-stone-900 dark:text-stone-100';
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <span className={`text-[12px] ${strong ? 'font-semibold text-stone-700 dark:text-stone-200' : 'text-stone-500 dark:text-stone-400'}`}>
+        {label}
+      </span>
+      <span className={`text-[12.5px] font-semibold tabular-nums ${valueTone}`}>{value}</span>
+    </div>
+  );
+}
+
+function DetailCard({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50/70 dark:bg-stone-900/50 p-3 space-y-1.5">
+      <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400">{title}</p>
+      {children}
+    </div>
+  );
+}
+
+/** Desglose completo del turno (métodos, canales, productos y arqueo). */
+function CajaTurnBreakdown({
+  session,
+  summary,
+  expected,
+  kind,
+}: {
+  session: TpvRegisterSession;
+  summary: TpvRegisterSummary;
+  expected: number;
+  kind: CajaTimelineBarKind;
+}) {
+  const methods = Object.entries(summary.salesByMethod || {}).filter(([, v]) => (Number(v) || 0) > 0);
+
+  const channelSource =
+    session.aggregatorClosingTotals && Object.keys(session.aggregatorClosingTotals).length > 0
+      ? session.aggregatorClosingTotals
+      : summary.salesByChannel || {};
+  const channels = Object.entries(channelSource)
+    .map(([key, v]) => [key, Number(v) || 0] as const)
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1]);
+
+  const food = session.productClosingCounts;
+  const hasFood =
+    Boolean(food) && ((food?.pizza || 0) + (food?.burger || 0) + (food?.taco || 0)) > 0;
+
+  const cashReturns = sumCashReturns(session);
+  const cashStaff = sumCashStaffConsumption(session);
+  const isClosed = kind === 'closed';
+
+  return (
+    <div className="mb-4 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+      <DetailCard title="Ventas por método">
+        {methods.length === 0 ? (
+          <p className="text-[12px] text-stone-400">Sin ventas registradas</p>
+        ) : (
+          methods.map(([method, amount]) => (
+            <DetailRow
+              key={method}
+              label={METHOD_LABELS[method] || method}
+              value={formatMoneyEs(Number(amount) || 0)}
+            />
+          ))
+        )}
+        <div className="border-t border-stone-200 dark:border-stone-700 pt-1.5 space-y-1.5">
+          <DetailRow label="Total ventas" value={formatMoneyEs(summary.totalSales)} strong />
+          <DetailRow label="Operaciones" value={String(summary.totalTransactions || 0)} tone="muted" />
+          <DetailRow label="Ticket medio" value={formatMoneyEs(summary.averageTicket || 0)} tone="muted" />
+          {(summary.totalTips || 0) > 0 ? (
+            <DetailRow label="Propinas" value={formatMoneyEs(summary.totalTips)} tone="muted" />
+          ) : null}
+          {(summary.totalReturns || 0) > 0 ? (
+            <DetailRow label="Devoluciones" value={formatMoneyEs(summary.totalReturns)} tone="minus" />
+          ) : null}
+        </div>
+      </DetailCard>
+
+      {channels.length > 0 ? (
+        <DetailCard title="Canales e integradores">
+          {channels.map(([key, amount]) => (
+            <DetailRow key={key} label={channelLabel(key)} value={formatMoneyEs(amount)} />
+          ))}
+          {session.aggregatorClosingTotals && Object.keys(session.aggregatorClosingTotals).length > 0 ? (
+            <p className="text-[10px] text-stone-400 pt-0.5">Declarado en el cierre (Caja 2)</p>
+          ) : null}
+        </DetailCard>
+      ) : null}
+
+      {hasFood ? (
+        <DetailCard title="Conteo de productos">
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[13px] font-semibold tabular-nums text-stone-900 dark:text-stone-100">
+            <span>🍕 Pizzas: {food?.pizza ?? 0}</span>
+            <span>🍔 Burgers: {food?.burger ?? 0}</span>
+            <span>🌮 Tacos: {food?.taco ?? 0}</span>
+          </div>
+        </DetailCard>
+      ) : null}
+
+      <DetailCard title="Arqueo de efectivo">
+        <DetailRow label="Fondo de apertura" value={formatMoneyEs(session.initialCashAmount || 0)} />
+        <DetailRow label="+ Cobros en efectivo" value={formatMoneyEs(summary.salesByMethod?.efectivo || 0)} tone="plus" />
+        {cashStaff > 0 ? (
+          <DetailRow label="+ Consumo equipo (efectivo)" value={formatMoneyEs(cashStaff)} tone="plus" />
+        ) : null}
+        {(summary.totalCashIn || 0) > 0 ? (
+          <DetailRow label="+ Entradas de efectivo" value={formatMoneyEs(summary.totalCashIn)} tone="plus" />
+        ) : null}
+        {cashReturns > 0 ? (
+          <DetailRow label="− Devoluciones efectivo" value={formatMoneyEs(cashReturns)} tone="minus" />
+        ) : null}
+        {(summary.totalCashOut || 0) > 0 ? (
+          <DetailRow label="− Salidas de efectivo" value={formatMoneyEs(summary.totalCashOut)} tone="minus" />
+        ) : null}
+        <div className="border-t border-stone-200 dark:border-stone-700 pt-1.5 space-y-1.5">
+          <DetailRow label={isClosed ? 'Efectivo esperado' : 'En cajón ahora'} value={formatMoneyEs(expected)} strong />
+          {isClosed ? (
+            <>
+              <DetailRow label="Efectivo contado" value={formatMoneyEs(session.finalCashAmount || 0)} strong />
+              <DetailRow
+                label="Diferencia"
+                value={`${(Number(session.difference) || 0) >= 0 ? '+' : ''}${formatMoneyEs(session.difference || 0)}`}
+                tone={(Number(session.difference) || 0) === 0 ? 'muted' : (Number(session.difference) || 0) > 0 ? 'plus' : 'minus'}
+                strong
+              />
+            </>
+          ) : null}
+          {session.nextDayInitialCash != null ? (
+            <DetailRow label="Inicial para mañana" value={formatMoneyEs(session.nextDayInitialCash)} tone="muted" />
+          ) : null}
+        </div>
+      </DetailCard>
+
+      {session.closingNotes ? (
+        <DetailCard title="Notas del turno">
+          <p className="text-[12.5px] text-stone-700 dark:text-stone-300 whitespace-pre-wrap">
+            {session.closingNotes}
+          </p>
+        </DetailCard>
+      ) : null}
     </div>
   );
 }
@@ -794,6 +981,13 @@ export function CajaTimelineBoard({
                 Ver cierre completo
               </button>
             )}
+
+            <CajaTurnBreakdown
+              session={selected}
+              summary={selectedSummary}
+              expected={selectedExpected}
+              kind={selectedKind}
+            />
 
             <CajaCashMovementsList
               session={selected}

@@ -448,12 +448,38 @@ export function mergeTpvRegisterSessionsPreservingOpen(
   const nextList = Array.isArray(next) ? next : [];
   if (nextList.length === 0 && prevList.length > 0) return prevList;
 
+  const prevById = new Map(
+    prevList
+      .filter((s) => s && String(s._id || '').trim())
+      .map((s) => [String(s._id).trim(), s] as const),
+  );
   const nextById = new Map(
     nextList
       .filter((s) => s && String(s._id || '').trim())
       .map((s) => [String(s._id).trim(), s] as const),
   );
-  const merged = [...nextList];
+
+  const merged = nextList.map((session) => {
+    const id = String(session?._id || '').trim();
+    const prevSession = id ? prevById.get(id) : undefined;
+    if (
+      prevSession
+      && isTpvRegisterSessionOpenStatus(session)
+      && isTpvRegisterSessionOpenStatus(prevSession)
+      && Number(session.initialCashAmount || 0) <= 0
+      && Number(prevSession.initialCashAmount || 0) > 0
+    ) {
+      const nextHasOpeningCount = Object.values(session.openingCashCount || {}).some((n) => Number(n) > 0);
+      return {
+        ...session,
+        initialCashAmount: prevSession.initialCashAmount,
+        openingCashCount: nextHasOpeningCount
+          ? session.openingCashCount
+          : (prevSession.openingCashCount || session.openingCashCount),
+      };
+    }
+    return session;
+  });
 
   for (const prevSession of prevList) {
     if (!prevSession || !isTpvRegisterSessionOpenStatus(prevSession)) continue;
