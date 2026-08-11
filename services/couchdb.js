@@ -10669,7 +10669,7 @@ async function ensureCatalogBrandIndex(req, dbName) {
 }
 
 export async function listBrandsByBusiness(req, businessId) {
-  const bid = String(businessId || '').trim();
+  const bid = String(businessId || '').replace(/^business:/, '').trim();
   if (!bid) return [];
 
   const db = getCatalogDbName();
@@ -10696,7 +10696,13 @@ export async function listBrandsByBusiness(req, businessId) {
       // Fallback si _find falla (índice aún no listo, etc.).
       const docs = await getCatalogDatabaseDocumentsInflight(req);
       return docs
-        .filter((doc) => doc?.type === 'brand' && !doc?.deletedAt && doc?.business_id === bid)
+        .filter((doc) => {
+          if (!doc || doc.type !== 'brand' || doc.deletedAt) return false;
+          const docBid = String(doc.business_id || doc.businessId || '')
+            .replace(/^business:/, '')
+            .trim();
+          return docBid === bid;
+        })
         .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
     }
   })().finally(() => {

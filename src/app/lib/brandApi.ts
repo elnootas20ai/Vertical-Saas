@@ -11,6 +11,18 @@ function getCouchHeaders(): Record<string, string> {
   return headers;
 }
 
+function brandsApiErrorMessage(payload: { error?: unknown; message?: unknown }): string {
+  const err = payload?.error;
+  if (typeof err === 'string' && err.trim()) return err.trim();
+  if (err && typeof err === 'object') {
+    const obj = err as { message?: unknown; code?: unknown };
+    if (typeof obj.message === 'string' && obj.message.trim()) return obj.message.trim();
+    if (typeof obj.code === 'string' && obj.code.trim()) return obj.code.trim();
+  }
+  if (typeof payload?.message === 'string' && payload.message.trim()) return payload.message.trim();
+  return 'Error inesperado en brands API';
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await authFetch(`${API_BASE}${path}`, {
     ...init,
@@ -20,9 +32,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...(init?.headers || {}),
     },
   });
-  const payload = (await response.json().catch(() => ({}))) as T & { error?: string };
+  const payload = (await response.json().catch(() => ({}))) as T & {
+    error?: unknown;
+    message?: unknown;
+  };
   if (!response.ok) {
-    throw new Error(payload?.error || 'Error inesperado en brands API');
+    throw new Error(brandsApiErrorMessage(payload));
   }
   return payload;
 }

@@ -843,6 +843,7 @@ export function CompanyMarcaSettings() {
   const [brands, setBrands] = useState<Brand[]>([]);
   const [stores, setStores] = useState<WorkCenter[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [editingBrand, setEditingBrand] = useState<Brand | null>(null);
   const [search, setSearch] = useState('');
@@ -867,21 +868,43 @@ export function CompanyMarcaSettings() {
   const loadAll = useCallback(async () => {
     if (!businessId) {
       setBrands([]);
+      setLoadError(null);
       setLoading(false);
       return;
     }
     setLoading(true);
+    setLoadError(null);
     try {
-      const list = await Promise.race([
-        listBrandsRequest(businessId).catch(() => [] as Brand[]),
-        new Promise<Brand[]>((resolve) => {
-          window.setTimeout(() => resolve([]), 12_000);
-        }),
-      ]);
+      let list: Brand[] = [];
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          list = await listBrandsRequest(businessId);
+          lastError = undefined;
+          break;
+        } catch (err) {
+          lastError = err;
+          if (attempt === 0) {
+            await new Promise((r) => window.setTimeout(r, 400));
+          }
+        }
+      }
+      if (lastError) {
+        setBrands([]);
+        const msg =
+          lastError instanceof Error && lastError.message
+            ? lastError.message
+            : 'Error al cargar las marcas';
+        setLoadError(msg);
+        toast.error(msg);
+        return;
+      }
       setBrands(sortBrandsForDisplay(list));
-    } catch {
+    } catch (err) {
       setBrands([]);
-      toast.error('Error al cargar las marcas');
+      const msg = err instanceof Error && err.message ? err.message : 'Error al cargar las marcas';
+      setLoadError(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -1202,6 +1225,15 @@ export function CompanyMarcaSettings() {
         <div className="flex items-center justify-center py-16 text-gray-500 dark:text-gray-400">
           <div className="mr-3 h-6 w-6 animate-spin rounded-full border-2 border-gray-300 border-t-gray-900 dark:border-gray-600 dark:border-t-gray-100" />
           Cargando marcas…
+        </div>
+      ) : loadError ? (
+        <div className={settingsEmptyStateClass}>
+          <AlertTriangle className="mb-3 h-12 w-12 text-amber-400 dark:text-amber-500" />
+          <p className="font-semibold text-gray-700 dark:text-gray-300">No se pudieron cargar las marcas</p>
+          <p className="mt-1 text-sm">{loadError}</p>
+          <button type="button" onClick={() => void loadAll()} className={`${settingsPrimaryBtnClass} mt-4`}>
+            Reintentar
+          </button>
         </div>
       ) : filtered.length === 0 ? (
         <div className={settingsEmptyStateClass}>
