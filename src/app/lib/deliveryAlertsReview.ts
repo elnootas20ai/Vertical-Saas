@@ -19,6 +19,7 @@ export const DELIVERY_CEO_DEFAULT_ENABLED_RULE_IDS = [
   'delivery_cash_pending_close',
   'delivery_cash_discrepancy',
   'delivery_register_closed_discrepancy',
+  'delivery_register_next_day_initial_over',
   'delivery_delayed_order',
   'delivery_order_very_delayed',
   'delivery_unpaid_order',

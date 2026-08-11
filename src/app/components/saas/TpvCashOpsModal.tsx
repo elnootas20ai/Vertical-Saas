@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Loader2, X, ArrowDownCircle, ArrowUpCircle, RotateCcw, UserRound } from 'lucide-react';
+import { toast } from 'sonner';
 import { useModalClose } from '../../hooks/useModalClose';
 import type { TpvRegisterTransaction } from '../../lib/deliveryApi';
 import type { TpvClockedInWorker } from '../../lib/tpvClockedInWorkers';
@@ -8,10 +9,14 @@ import { parseDecimalPadValue } from '../../lib/decimalNumpadInput';
 import { ClockedInWorkerBubbles } from './ClockedInWorkerBubbles';
 import { VERTIAL_BTN_PRIMARY } from '../../lib/vertialUiTokens';
 import { normalizeClockinUserId } from '../../lib/clockinUserId';
+import { formatMoneyEs } from '../../lib/formatNumberEs';
 
 const TPV_MODAL_Z = 'z-[100]';
 
 type CashOpType = 'cash_in' | 'cash_out' | 'return';
+
+/** Orden UI: Salida · Entrada · Devolución */
+const OP_ORDER: CashOpType[] = ['cash_out', 'cash_in', 'return'];
 
 /** Atajos opcionales; el importe es libre (numpad / teclado). */
 const QUICK_AMOUNTS = [10, 20, 50, 100, 200] as const;
@@ -23,19 +28,22 @@ const CASH_OUT_REASONS = [
 
 type CashOutReasonId = (typeof CASH_OUT_REASONS)[number]['id'];
 
-const OP_CONFIG: Record<CashOpType, { label: string; icon: typeof ArrowUpCircle; color: string }> = {
-  cash_in: {
-    label: 'Entrada de efectivo',
-    icon: ArrowDownCircle,
-    color: 'text-emerald-600',
-  },
+const OP_CONFIG: Record<CashOpType, { label: string; short: string; icon: typeof ArrowUpCircle; color: string }> = {
   cash_out: {
     label: 'Salida de efectivo',
+    short: 'Salida',
     icon: ArrowUpCircle,
     color: 'text-amber-600',
   },
+  cash_in: {
+    label: 'Entrada de efectivo',
+    short: 'Entrada',
+    icon: ArrowDownCircle,
+    color: 'text-emerald-600',
+  },
   return: {
     label: 'Devolución',
+    short: 'Devolución',
     icon: RotateCcw,
     color: 'text-red-600',
   },
@@ -52,6 +60,8 @@ export function TpvCashOpsModal({
   registeredBy,
   workers = [],
   workersLoading = false,
+  /** Efectivo esperado en cajón ahora (no se puede sacar más). */
+  availableCash = 0,
 }: {
   onConfirm: (op: Omit<TpvRegisterTransaction, 'id' | 'date'>) => Promise<void>;
   onClose: () => void;
@@ -60,9 +70,10 @@ export function TpvCashOpsModal({
   /** Fichados en tienda — para «Pago trabajador». */
   workers?: TpvClockedInWorker[];
   workersLoading?: boolean;
+  availableCash?: number;
 }) {
   useModalClose(!loading, onClose);
-  const [opType, setOpType] = useState<CashOpType>('cash_in');
+  const [opType, setOpType] = useState<CashOpType>('cash_out');
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
   const [outReason, setOutReason] = useState<CashOutReasonId>('other');
@@ -72,6 +83,13 @@ export function TpvCashOpsModal({
   const parsed = parseDecimalPadValue(amount);
   const cashAmount = Number.isFinite(parsed) ? roundCashAmount(parsed) : Number.NaN;
   const isWorkerPay = opType === 'cash_out' && outReason === 'worker_pay';
+  const takesCashFromDrawer = opType === 'cash_out' || opType === 'return';
+  const drawerCash = Math.max(0, roundCashAmount(Number(availableCash) || 0));
+  const exceedsDrawer =
+    takesCashFromDrawer
+    && Number.isFinite(cashAmount)
+    && cashAmount > 0
+    && cashAmount - drawerCash > 0.009;
 
   const selectedWorker = useMemo(() => {
     if (!workerId) return null;
@@ -79,7 +97,7 @@ export function TpvCashOpsModal({
     return workers.find((w) => normalizeClockinUserId(w.id) === id) || null;
   }, [workerId, workers]);
 
-  const validAmount = Number.isFinite(cashAmount) && cashAmount > 0;
+  const validAmount = Number.isFinite(cashAmount) && cashAmount > 0 && !exceedsDrawer;
   const workerPayNameOk =
     Boolean(selectedWorker) || (workers.length === 0 && description.trim().length >= 2);
   const valid = isWorkerPay
@@ -108,6 +126,12 @@ export function TpvCashOpsModal({
 
   const handleSubmit = async () => {
     if (!valid || submitting) return;
+    if (exceedsDrawer) {
+      toast.error(
+        `No hay tanto en caja. Disponible: ${formatMoneyEs(drawerCash)}`,
+      );
+      return;
+    }
     setSubmitting(true);
     try {
       const note = description.trim();
@@ -162,10 +186,10 @@ export function TpvCashOpsModal({
         </button>
 
         <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-1">Movimiento de caja</h3>
-        <p className="text-sm text-gray-500 mb-4">Entrada, salida o devolución en efectivo</p>
+        <p className="text-sm text-gray-500 mb-4">Salida, entrada o devolución en efectivo</p>
 
         <div className="grid grid-cols-3 gap-2 mb-4">
-          {(Object.keys(OP_CONFIG) as CashOpType[]).map((key) => {
+          {OP_ORDER.map((key) => {
             const cfg = OP_CONFIG[key];
             const Icon = cfg.icon;
             const selected = opType === key;
@@ -182,11 +206,23 @@ export function TpvCashOpsModal({
                 }`}
               >
                 <Icon className={`w-5 h-5 ${cfg.color}`} />
-                {key === 'cash_in' ? 'Entrada' : key === 'cash_out' ? 'Salida' : 'Devolución'}
+                {cfg.short}
               </button>
             );
           })}
         </div>
+
+        {takesCashFromDrawer ? (
+          <div className="mb-3 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30 px-3 py-2">
+            <p className="text-[11px] font-semibold text-amber-900 dark:text-amber-100">
+              En caja ahora:{' '}
+              <span className="tabular-nums font-black">{formatMoneyEs(drawerCash)}</span>
+            </p>
+            <p className="text-[10px] text-amber-800/90 dark:text-amber-200/80 mt-0.5">
+              No puedes sacar más de lo que hay.
+            </p>
+          </div>
+        ) : null}
 
         {opType === 'cash_out' ? (
           <div className="mb-4">
@@ -257,13 +293,15 @@ export function TpvCashOpsModal({
         <div className="flex flex-wrap gap-2 mb-2">
           {QUICK_AMOUNTS.map((n) => {
             const selected = cashAmount === n;
+            const over = takesCashFromDrawer && n - drawerCash > 0.009;
             return (
               <button
                 key={n}
                 type="button"
-                disabled={busy}
+                disabled={busy || over}
                 onClick={() => setAmount(String(n))}
-                className={`min-h-11 min-w-[3.25rem] px-3 rounded-xl text-sm font-bold tabular-nums border transition-colors ${
+                title={over ? `Solo hay ${formatMoneyEs(drawerCash)} en caja` : undefined}
+                className={`min-h-11 min-w-[3.25rem] px-3 rounded-xl text-sm font-bold tabular-nums border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                   selected
                     ? 'border-blue-600 bg-blue-50 text-[var(--v-blue,#2563eb)] dark:bg-blue-950/40 dark:border-blue-500'
                     : 'border-stone-200 bg-white text-stone-700 hover:border-blue-300 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200'
@@ -280,8 +318,19 @@ export function TpvCashOpsModal({
           placeholder="0.00"
           disabled={busy}
           showNumpad
-          inputClassName="w-full mb-3 px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-lg font-semibold tabular-nums"
+          inputClassName={`w-full mb-1 px-3 py-2.5 rounded-xl border bg-white dark:bg-gray-800 text-lg font-semibold tabular-nums ${
+            exceedsDrawer
+              ? 'border-rose-400 dark:border-rose-600'
+              : 'border-gray-200 dark:border-gray-700'
+          }`}
         />
+        {exceedsDrawer ? (
+          <p className="mb-3 text-[11px] font-semibold text-rose-700 dark:text-rose-300">
+            Importe mayor que el efectivo en caja ({formatMoneyEs(drawerCash)}).
+          </p>
+        ) : (
+          <div className="mb-3" />
+        )}
 
         {!isWorkerPay ? (
           <>
@@ -322,7 +371,7 @@ export function TpvCashOpsModal({
           {isWorkerPay
             ? `Registrar pago${selectedWorker ? ` · ${selectedWorker.name}` : ''}`
             : 'Registrar movimiento'}
-          {validAmount ? ` · ${cashAmount.toFixed(2)}€` : ''}
+          {validAmount ? ` · ${formatMoneyEs(cashAmount)}` : ''}
         </button>
       </div>
     </div>

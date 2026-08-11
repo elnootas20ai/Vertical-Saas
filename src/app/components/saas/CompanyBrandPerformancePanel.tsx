@@ -2,11 +2,21 @@
  * Dashboard empresa delivery: marcas + €/uds/comida por periodo (día / mes / año)
  * con comparativa vs periodo anterior. Reglas de Facturación (sin hardcode).
  * Incluye todos los integradores (Glovo, Uber Eats, Just Eat, Flipdish, …).
+ *
+ * Fuentes: pedidos + cierres de caja (Caja 2). Si un día tiene declaración
+ * manual para un canal, el cierre pisa a los pedidos de ese canal ese día
+ * (mismo criterio anti doble conteo que el Resumen operativo).
  */
 import { useEffect, useMemo, useState } from 'react';
 import { Package, Radio } from 'lucide-react';
 import type { Brand } from '../../lib/brandApi';
-import type { DeliveryOrder } from '../../lib/deliveryApi';
+import type { DeliveryOrder, TpvRegisterSession } from '../../lib/deliveryApi';
+import {
+  buildClosingBrandOverlay,
+  isOrderReplacedByClosing,
+  mergeClosingIntoChannelRows,
+  type ClosingBrandOverlay,
+} from '../../lib/closingBrandOverlay';
 import { getBrandBillingConfigRequest } from '../../lib/brandBillingApi';
 import {
   brandsForBilling,
@@ -33,6 +43,7 @@ import {
   emptyFoodFamilyCounts,
   foodFamilyCountsFromOrders,
   foodFamilyCountsFromOrdersForBrand,
+  sumFoodFamilyCounts,
   type FoodFamilyCounts,
 } from '../../lib/shiftFoodFamilyCounts';
 
@@ -185,6 +196,19 @@ function buildIntegratorRows(
   return [...aggregators, ...others];
 }
 
+/** € declarados al cierre para UNA marca, por canal (vista de marca). */
+function closingChannelAmountsForBrand(
+  closing: ClosingBrandOverlay,
+  brandId: string,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [channel, byBrand] of Object.entries(closing.revenueByChannelByBrand)) {
+    const amt = Number(byBrand[brandId]) || 0;
+    if (amt > 0) out[channel] = amt;
+  }
+  return out;
+}
+
 function VsBadge({ pct }: { pct: number | null }) {
   if (pct == null) return null;
   const up = pct >= 0;
@@ -232,8 +256,7 @@ function addDaysToDayKey(dayKey: string, delta: number): string {
   return localCalendarDayKey(dt);
 }
 
-function orderInRange(order: DeliveryOrder, range: BrandPerfRange, todayKey: string): boolean {
-  const day = orderDayKey(order);
+function dayKeyInRange(day: string, range: BrandPerfRange, todayKey: string): boolean {
   if (!day) return false;
   if (range === 'day') return day === todayKey;
   if (range === 'month') {
@@ -244,8 +267,7 @@ function orderInRange(order: DeliveryOrder, range: BrandPerfRange, todayKey: str
 }
 
 /** Periodo anterior comparable: ayer / mismos días mes ant. / mismo YTD año ant. */
-function orderInPrevRange(order: DeliveryOrder, range: BrandPerfRange, todayKey: string): boolean {
-  const day = orderDayKey(order);
+function dayKeyInPrevRange(day: string, range: BrandPerfRange, todayKey: string): boolean {
   if (!day) return false;
   if (range === 'day') return day === addDaysToDayKey(todayKey, -1);
   if (range === 'month') {
@@ -255,6 +277,14 @@ function orderInPrevRange(order: DeliveryOrder, range: BrandPerfRange, todayKey:
   const prevYear = String(Number(todayKey.slice(0, 4)) - 1);
   const ytdEnd = `${prevYear}${todayKey.slice(4)}`;
   return day.slice(0, 4) === prevYear && day <= ytdEnd;
+}
+
+function orderInRange(order: DeliveryOrder, range: BrandPerfRange, todayKey: string): boolean {
+  return dayKeyInRange(orderDayKey(order), range, todayKey);
+}
+
+function orderInPrevRange(order: DeliveryOrder, range: BrandPerfRange, todayKey: string): boolean {
+  return dayKeyInPrevRange(orderDayKey(order), range, todayKey);
 }
 
 function orderEuro(order: DeliveryOrder): number {
@@ -280,6 +310,7 @@ function buildBrandRows(
   orders: DeliveryOrder[],
   brands: Brand[],
   rules: BrandBillingSplitRules,
+  closing?: ClosingBrandOverlay,
 ): CompanyBrandDayRow[] {
   const active = brandsForBilling(brands).filter((b) => isBrandActive(b));
   const byId = new Map(
@@ -313,6 +344,17 @@ function buildBrandRows(
     }
   }
 
+  // € declarados al cierre (Caja 2) por marca: ventas de apps que pueden no
+  // existir como pedidos. Los pedidos pisados ya vienen excluidos de `orders`.
+  if (closing) {
+    for (const [bid, amt] of Object.entries(closing.revenueByBrand)) {
+      const v = Number(amt) || 0;
+      if (v <= 0) continue;
+      revenue[bid] = (revenue[bid] || 0) + v;
+      total += v;
+    }
+  }
+
   total = Math.round(total * 100) / 100;
 
   const rows: CompanyBrandDayRow[] = [];
@@ -340,7 +382,7 @@ function buildBrandRows(
     if (r <= 0) continue;
     rows.push({
       brandId: id,
-      name: id.slice(0, 8),
+      name: closing?.brandLabels[id] || id.slice(0, 8),
       color: '#9CA3AF',
       lineLabel: null,
       revenue: r,
@@ -394,15 +436,10 @@ function FoodFamilyStrip({
     { key: 'burger', label: 'Burgers', n: food.burger, p: prev.burger },
     { key: 'taco', label: 'Tacos', n: food.taco, p: prev.taco },
   ];
-  const visible = items.filter((i) => i.n > 0 || i.p > 0);
-  if (visible.length === 0) {
-    return (
-      <p className="text-[10px] text-gray-400">Sin comida en el periodo</p>
-    );
-  }
+  // Siempre las 3 familias arriba de marcas (aunque vayan a 0).
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-      {visible.map((i) => (
+      {items.map((i) => (
         <span key={i.key} className="inline-flex items-center gap-1 text-[11px]">
           <span className="font-medium text-gray-500">{i.label}</span>
           <span className="font-bold tabular-nums text-gray-900 dark:text-gray-100">
@@ -482,6 +519,8 @@ type Props = {
   businessId: string;
   brands: Brand[];
   orders: DeliveryOrder[];
+  /** Cierres de caja: suma lo declarado en Caja 2 (marcas/apps) al panel. */
+  sessions?: TpvRegisterSession[];
   loading?: boolean;
   /** Móvil: sin tablas anchas de canales, toggles táctiles. */
   compact?: boolean;
@@ -491,6 +530,7 @@ export function CompanyBrandPerformancePanel({
   businessId,
   brands,
   orders,
+  sessions = [],
   loading = false,
   compact = false,
 }: Props) {
@@ -521,24 +561,46 @@ export function CompanyBrandPerformancePanel({
     [orders],
   );
 
+  // Declarado al cierre (Caja 2) en el rango: pisa a los pedidos de ese
+  // canal ese día, así que esos pedidos se excluyen (no doble conteo).
+  const closingNow = useMemo(
+    () => buildClosingBrandOverlay(sessions, (d) => dayKeyInRange(d, range, todayKey)),
+    [sessions, range, todayKey],
+  );
+
+  const closingPrev = useMemo(
+    () => buildClosingBrandOverlay(sessions, (d) => dayKeyInPrevRange(d, range, todayKey)),
+    [sessions, range, todayKey],
+  );
+
   const rangedOrders = useMemo(
-    () => activeOrders.filter((o) => orderInRange(o, range, todayKey)),
-    [activeOrders, range, todayKey],
+    () =>
+      activeOrders.filter(
+        (o) =>
+          orderInRange(o, range, todayKey)
+          && !isOrderReplacedByClosing(closingNow, orderDayKey(o), normalizeOrderChannel(o.channel)),
+      ),
+    [activeOrders, range, todayKey, closingNow],
   );
 
   const prevOrders = useMemo(
-    () => activeOrders.filter((o) => orderInPrevRange(o, range, todayKey)),
-    [activeOrders, range, todayKey],
+    () =>
+      activeOrders.filter(
+        (o) =>
+          orderInPrevRange(o, range, todayKey)
+          && !isOrderReplacedByClosing(closingPrev, orderDayKey(o), normalizeOrderChannel(o.channel)),
+      ),
+    [activeOrders, range, todayKey, closingPrev],
   );
 
   const rows = useMemo(
-    () => buildBrandRows(rangedOrders, brands, rules),
-    [rangedOrders, brands, rules],
+    () => buildBrandRows(rangedOrders, brands, rules, closingNow),
+    [rangedOrders, brands, rules, closingNow],
   );
 
   const prevRows = useMemo(
-    () => buildBrandRows(prevOrders, brands, rules),
-    [prevOrders, brands, rules],
+    () => buildBrandRows(prevOrders, brands, rules, closingPrev),
+    [prevOrders, brands, rules, closingPrev],
   );
 
   const prevById = useMemo(() => {
@@ -566,13 +628,14 @@ export function CompanyBrandPerformancePanel({
   );
   const revenueMom = monthOverMonthPct(totalRevenue, prevRevenue);
 
+  // Unidades = líneas de pedidos + unidades declaradas al cierre por app.
   const foodNow = useMemo(
-    () => foodFamilyCountsFromOrders(rangedOrders),
-    [rangedOrders],
+    () => sumFoodFamilyCounts([foodFamilyCountsFromOrders(rangedOrders), closingNow.food]),
+    [rangedOrders, closingNow],
   );
   const foodPrev = useMemo(
-    () => foodFamilyCountsFromOrders(prevOrders),
-    [prevOrders],
+    () => sumFoodFamilyCounts([foodFamilyCountsFromOrders(prevOrders), closingPrev.food]),
+    [prevOrders, closingPrev],
   );
 
   const selected = selectedId === 'all' ? null : rows.find((r) => r.brandId === selectedId) || null;
@@ -580,17 +643,29 @@ export function CompanyBrandPerformancePanel({
 
   const integratorRows = useMemo(() => {
     if (selectedId !== 'all') {
-      return buildIntegratorRows(rangedOrders, { brandId: selectedId, rules });
+      return mergeClosingIntoChannelRows(
+        buildIntegratorRows(rangedOrders, { brandId: selectedId, rules }),
+        closingChannelAmountsForBrand(closingNow, selectedId),
+      );
     }
-    return buildIntegratorRows(rangedOrders);
-  }, [rangedOrders, selectedId, rules]);
+    return mergeClosingIntoChannelRows(
+      buildIntegratorRows(rangedOrders),
+      closingNow.revenueByChannel,
+    );
+  }, [rangedOrders, selectedId, rules, closingNow]);
 
   const prevIntegratorRows = useMemo(() => {
     if (selectedId !== 'all') {
-      return buildIntegratorRows(prevOrders, { brandId: selectedId, rules });
+      return mergeClosingIntoChannelRows(
+        buildIntegratorRows(prevOrders, { brandId: selectedId, rules }),
+        closingChannelAmountsForBrand(closingPrev, selectedId),
+      );
     }
-    return buildIntegratorRows(prevOrders);
-  }, [prevOrders, selectedId, rules]);
+    return mergeClosingIntoChannelRows(
+      buildIntegratorRows(prevOrders),
+      closingPrev.revenueByChannel,
+    );
+  }, [prevOrders, selectedId, rules, closingPrev]);
 
   const prevIntegratorByKey = useMemo(() => {
     const m = new Map<string, IntegratorPerfRow>();

@@ -378,6 +378,14 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
           <span className="text-zinc-700 dark:text-zinc-300 font-medium">Efectivo contado</span>
           <span className="font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">{fmtMoney(session.finalCashAmount)}€</span>
         </div>
+        {session.nextDayInitialCash != null ? (
+          <div className="flex justify-between">
+            <span className="text-amber-800 dark:text-amber-200 font-medium">Inicial para mañana</span>
+            <span className="font-semibold tabular-nums text-amber-900 dark:text-amber-100">
+              {fmtMoney(session.nextDayInitialCash)}€
+            </span>
+          </div>
+        ) : null}
         <div
           className={`flex justify-between p-2 rounded-lg border ${
             session.difference === 0

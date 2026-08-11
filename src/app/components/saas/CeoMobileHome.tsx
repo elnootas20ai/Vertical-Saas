@@ -32,7 +32,6 @@ import {
   DeliveryMobileDashboardBlocks,
   DeliveryMobileHomeAlerts,
 } from '../../verticals/delivery';
-import { MobileLazySection } from './MobileLazySection';
 import { LiveBadge } from './LiveBadge';
 
 function formatClockIn(iso: string | null): string {
@@ -250,20 +249,10 @@ export function CeoMobileHome() {
 
         <>
             {isDelivery && businessId ? (
-              <MobileLazySection
-                rootMargin="40px 0px"
-                eagerFromMd={false}
-                placeholder={
-                  <div className={`${VERTIAL_SURFACE_STONE} px-4 py-4 text-center text-[11px] text-stone-400`}>
-                    Desliza para ver alertas…
-                  </div>
-                }
-              >
-                <DeliveryMobileHomeAlerts
-                  businessId={businessId}
-                  dataUserId={dataUserId}
-                />
-              </MobileLazySection>
+              <DeliveryMobileHomeAlerts
+                businessId={businessId}
+                dataUserId={dataUserId}
+              />
             ) : null}
 
             {isDelivery && (

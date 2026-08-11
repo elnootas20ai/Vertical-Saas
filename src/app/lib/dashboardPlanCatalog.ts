@@ -10,10 +10,7 @@ export type DashboardWidgetId =
   | 'operations'
   | 'quick_finance'
   | 'funnel'
-  | 'actividad'
-  | 'clockins'
-  | 'availability'
-  | 'team_rrhh';
+  | 'clockins';
 
 export interface DashboardWidgetPlanEntry {
   id: DashboardWidgetId;
@@ -26,20 +23,17 @@ export interface DashboardWidgetPlanEntry {
 /**
  * Plan Básico: operativa mínima (ventas, alertas, accesos).
  * Normal: finanzas, gráficas, CRM, equipo.
- * Pro: RRHH consolidado y bloques avanzados.
+ * Pro: bloques avanzados.
  */
 export const DASHBOARD_WIDGET_CATALOG: DashboardWidgetPlanEntry[] = [
   { id: 'kpis_main', label: 'KPIs principales', minPlan: 'basic', basicPreview: true },
   { id: 'quick_access', label: 'Accesos rápidos', minPlan: 'basic', basicPreview: true },
   { id: 'alertas', label: 'Alertas', minPlan: 'basic', basicPreview: true },
   { id: 'operations', label: 'Operativa del negocio', minPlan: 'basic', basicPreview: true },
-  { id: 'actividad', label: 'Actividad reciente', minPlan: 'normal' },
   { id: 'charts', label: 'Gráficas principales', minPlan: 'normal' },
   { id: 'quick_finance', label: 'Resumen financiero', minPlan: 'normal' },
   { id: 'funnel', label: 'Embudo CRM', minPlan: 'normal' },
   { id: 'clockins', label: 'Fichajes del equipo', minPlan: 'normal' },
-  { id: 'availability', label: 'Disponibilidad equipo', minPlan: 'normal' },
-  { id: 'team_rrhh', label: 'Equipo y RRHH', minPlan: 'pro' },
 ];
 
 export function isDashboardWidgetUnlocked(

@@ -151,6 +151,7 @@ export const CATEGORY_TO_SOURCE = {
   delivery_cash_discrepancy: 'delivery',
   delivery_register_closed_ok: 'delivery',
   delivery_register_closed_discrepancy: 'delivery',
+  delivery_register_next_day_initial_over: 'delivery',
   delivery_order_very_delayed: 'delivery',
   delivery_channel_silent: 'delivery',
   delivery_low_margin: 'delivery',

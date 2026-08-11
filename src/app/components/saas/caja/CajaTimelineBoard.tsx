@@ -97,8 +97,6 @@ export type CajaTimelineBoardProps = {
   onBack: () => void;
   selectedSessionId: string | null;
   onSelectSession: (id: string | null) => void;
-  onForceClose?: (session: TpvRegisterSession) => void;
-  forcingSessionId?: string | null;
   onViewFullClosing?: (session: TpvRegisterSession) => void;
   refreshing?: boolean;
   /** Extra actions next to Excel (restaurant: Sala / TPV) */
@@ -139,8 +137,6 @@ export function CajaTimelineBoard({
   onBack,
   selectedSessionId,
   onSelectSession,
-  onForceClose,
-  forcingSessionId,
   onViewFullClosing,
   refreshing,
   headerExtra,
@@ -151,9 +147,9 @@ export function CajaTimelineBoard({
   const locPlural = locationNoun.plural;
   const locFilterAll = locationNoun.filterAll;
   const [nowTick, setNowTick] = useState(() => Date.now());
-  const [confirmForce, setConfirmForce] = useState(false);
   const [downloadOpen, setDownloadOpen] = useState(false);
   const downloadRef = useRef<HTMLDivElement>(null);
+  const detailRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     if (!downloadOpen) return;
@@ -172,7 +168,11 @@ export function CajaTimelineBoard({
   }, []);
 
   useEffect(() => {
-    setConfirmForce(false);
+    if (!selectedSessionId) return;
+    const id = window.requestAnimationFrame(() => {
+      detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+    return () => window.cancelAnimationFrame(id);
   }, [selectedSessionId]);
 
   const now = useMemo(() => new Date(nowTick), [nowTick]);
@@ -215,7 +215,6 @@ export function CajaTimelineBoard({
 
   const selectedSummary = selected ? buildTpvRegisterSummaryForDay(selected, selectedDate) : null;
   const selectedExpected = selected ? calcTpvExpectedCash(selected) : 0;
-  const busyForce = forcingSessionId === selected?._id;
   const [excelDownloading, setExcelDownloading] = useState(false);
 
   const runExcelDownload = async (job: () => void | Promise<void>) => {
@@ -594,123 +593,6 @@ export function CajaTimelineBoard({
           )}
         </section>
 
-        {/* Detail */}
-        {selected && selectedKind && selectedSummary && (
-          <section className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 rounded-2xl px-4 sm:px-5 py-4 mb-6">
-            <div className="flex justify-between items-start flex-wrap gap-3 mb-3.5">
-              <div>
-                <div className="text-[15px] font-semibold">
-                  {selected.pointOfSaleName || locSingular}
-                  <span className="text-stone-400 font-normal">
-                    {' '}· {selectedKind === 'live' ? 'en curso' : selectedKind === 'warn' ? 'caja de otro día' : 'cerrada'}
-                  </span>
-                </div>
-                <div className="text-[12.5px] text-stone-500 tabular-nums mt-0.5">
-                  {selected.workerName} · {selected.terminalName} ·{' '}
-                  {selectedKind === 'closed'
-                    ? `${formatClock(selected.openedAt)} – ${formatClock(selected.closedAt)}`
-                    : `desde ${formatClock(selected.openedAt)}${
-                        selectedKind === 'warn'
-                          ? ` · ${new Date(selected.openedAt).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}`
-                          : ''
-                      }`}
-                </div>
-              </div>
-              <div className="flex items-start gap-3.5">
-                <div className="flex gap-6">
-                  <div className="text-right">
-                    <div className="tabular-nums text-base font-bold">{formatMoneyEs(selectedSummary.totalSales)}</div>
-                    <div className="text-[10.5px] text-stone-400 uppercase tracking-wide mt-0.5">Total</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="tabular-nums text-base font-bold">{formatMoneyEs(selectedExpected)}</div>
-                    <div className="text-[10.5px] text-stone-400 uppercase tracking-wide mt-0.5">Efectivo</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="tabular-nums text-base font-bold text-emerald-700 dark:text-emerald-400">
-                      {formatMoneyEs(selectedSummary.totalCashIn)}
-                    </div>
-                    <div className="text-[10.5px] text-stone-400 uppercase tracking-wide mt-0.5">Entradas</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="tabular-nums text-base font-bold text-amber-800 dark:text-amber-300">
-                      {formatMoneyEs(selectedSummary.totalCashOut)}
-                    </div>
-                    <div className="text-[10.5px] text-stone-400 uppercase tracking-wide mt-0.5">Salidas</div>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  aria-label="Cerrar detalle"
-                  onClick={() => onSelectSession(null)}
-                  className="p-0.5 rounded-md text-stone-400 hover:text-stone-900 hover:bg-stone-100 dark:hover:bg-stone-800"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            {selectedKind === 'warn' && onForceClose && (
-              <div
-                className={`flex flex-wrap items-center gap-2 text-xs rounded-lg px-3 py-2 mb-3 ${
-                  confirmForce
-                    ? 'bg-red-50 text-red-800 dark:bg-red-950/40 dark:text-red-300'
-                    : 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
-                }`}
-              >
-                <span className="flex-1 min-w-[200px]">
-                  Caja de otro día. Ciérrala y abre un turno de hoy en el TPV.
-                </span>
-                {!confirmForce ? (
-                  <button
-                    type="button"
-                    disabled={busyForce}
-                    onClick={() => setConfirmForce(true)}
-                    className="border border-amber-300 bg-white dark:bg-stone-900 text-amber-800 text-[11.5px] font-semibold px-2.5 py-1 rounded-md"
-                  >
-                    Forzar cierre
-                  </button>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      disabled={busyForce}
-                      onClick={() => onForceClose(selected)}
-                      className="border border-red-300 bg-white dark:bg-stone-900 text-red-800 text-[11.5px] font-semibold px-2.5 py-1 rounded-md disabled:opacity-60"
-                    >
-                      {busyForce ? 'Cerrando…' : 'Sí, forzar cierre'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setConfirmForce(false)}
-                      className="border border-stone-200 text-stone-500 text-[11.5px] font-medium px-2.5 py-1 rounded-md"
-                    >
-                      Cancelar
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-
-            {selected.status === 'closed' && onViewFullClosing && (
-              <button
-                type="button"
-                onClick={() => onViewFullClosing(selected)}
-                className="text-xs font-medium text-stone-500 underline mb-3 hover:text-stone-900"
-              >
-                Ver cierre completo
-              </button>
-            )}
-
-            <CajaCashMovementsList
-              session={selected}
-              dayKey={selectedDate}
-              compact
-              title="Entradas y salidas"
-            />
-          </section>
-        )}
-
         {/* Table */}
         <div className="flex justify-between items-center mb-2.5 flex-wrap gap-2">
           <h2 className="text-[13px] font-semibold m-0">Todos los turnos</h2>
@@ -834,6 +716,93 @@ export function CajaTimelineBoard({
             </tbody>
           </table>
         </div>
+
+        {/* Detalle debajo de la tabla: al click se ve al momento */}
+        {selected && selectedKind && selectedSummary && (
+          <section
+            ref={detailRef}
+            data-caja-turn={selected._id}
+            className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 rounded-2xl px-4 sm:px-5 py-4 mt-4"
+          >
+            <div className="flex justify-between items-start flex-wrap gap-3 mb-3.5">
+              <div>
+                <div className="text-[15px] font-semibold">
+                  {selected.pointOfSaleName || locSingular}
+                  <span className="text-stone-400 font-normal">
+                    {' '}· {selectedKind === 'live' ? 'en curso' : selectedKind === 'warn' ? 'caja de otro día' : 'cerrada'}
+                  </span>
+                </div>
+                <div className="text-[12.5px] text-stone-500 tabular-nums mt-0.5">
+                  {selected.workerName} · {selected.terminalName} ·{' '}
+                  {selectedKind === 'closed'
+                    ? `${formatClock(selected.openedAt)} – ${formatClock(selected.closedAt)}`
+                    : `desde ${formatClock(selected.openedAt)}${
+                        selectedKind === 'warn'
+                          ? ` · ${new Date(selected.openedAt).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}`
+                          : ''
+                      }`}
+                </div>
+              </div>
+              <div className="flex items-start gap-3.5">
+                <div className="flex gap-6">
+                  <div className="text-right">
+                    <div className="tabular-nums text-base font-bold">{formatMoneyEs(selectedSummary.totalSales)}</div>
+                    <div className="text-[10.5px] text-stone-400 uppercase tracking-wide mt-0.5">Total</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="tabular-nums text-base font-bold">{formatMoneyEs(selectedExpected)}</div>
+                    <div className="text-[10.5px] text-stone-400 uppercase tracking-wide mt-0.5">Efectivo</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="tabular-nums text-base font-bold text-emerald-700 dark:text-emerald-400">
+                      {formatMoneyEs(selectedSummary.totalCashIn)}
+                    </div>
+                    <div className="text-[10.5px] text-stone-400 uppercase tracking-wide mt-0.5">Entradas</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="tabular-nums text-base font-bold text-amber-800 dark:text-amber-300">
+                      {formatMoneyEs(selectedSummary.totalCashOut)}
+                    </div>
+                    <div className="text-[10.5px] text-stone-400 uppercase tracking-wide mt-0.5">Salidas</div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Cerrar detalle"
+                  onClick={() => onSelectSession(null)}
+                  className="p-0.5 rounded-md text-stone-400 hover:text-stone-900 hover:bg-stone-100 dark:hover:bg-stone-800"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {selectedKind === 'warn' && (
+              <div className="flex flex-wrap items-center gap-2 text-xs rounded-lg px-3 py-2 mb-3 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                <span className="flex-1 min-w-[200px]">
+                  Caja de otro día. Ciérrala y abre un turno de hoy en el TPV.
+                </span>
+              </div>
+            )}
+
+            {selected.status === 'closed' && onViewFullClosing && (
+              <button
+                type="button"
+                onClick={() => onViewFullClosing(selected)}
+                className="text-xs font-medium text-stone-500 underline mb-3 hover:text-stone-900"
+              >
+                Ver cierre completo
+              </button>
+            )}
+
+            <CajaCashMovementsList
+              session={selected}
+              dayKey={selectedDate}
+              compact
+              title="Entradas y salidas"
+            />
+          </section>
+        )}
       </div>
     </div>
   );

@@ -7710,6 +7710,14 @@ export function buildTpvRegisterSessionDocument(userId, data = {}, existing = nu
       status === 'closed'
         ? String(data.closingNotes ?? existing?.closingNotes ?? '')
         : String(data.closingNotes ?? ''),
+    nextDayInitialCash:
+      status === 'closed'
+        ? (data.nextDayInitialCash != null
+            ? Math.max(0, Number(data.nextDayInitialCash) || 0)
+            : (existing?.nextDayInitialCash != null
+                ? Math.max(0, Number(existing.nextDayInitialCash) || 0)
+                : undefined))
+        : undefined,
 
     closingValidatedBy:
       status === 'closed'
@@ -7835,6 +7843,10 @@ export function sanitizeTpvRegisterSession(doc, opts = {}) {
     expectedCash: Number(doc.expectedCash || 0),
     difference: Number(doc.difference || 0),
     closingNotes: doc.closingNotes || '',
+    nextDayInitialCash:
+      status === 'closed' && doc.nextDayInitialCash != null
+        ? Math.max(0, Number(doc.nextDayInitialCash) || 0)
+        : undefined,
 
     closingValidatedBy: doc.closingValidatedBy || '',
     closingValidatedAt: doc.closingValidatedAt || '',

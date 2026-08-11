@@ -10,7 +10,6 @@ import { resolveBusinessScopeId } from '../../lib/businessStoreScope';
 import { tpvSessionBelongsToBusiness } from '../../lib/tpvCajaScope';
 import {
   listCajaBootstrapRequest,
-  updateTpvRegisterSessionRequest,
   filterDeliveryOrdersRequest,
   pointOfSaleDisplayLabel,
   type TpvRegisterSession,
@@ -26,7 +25,7 @@ import {
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Filter, Calendar, Eye,
   MessageSquare, TrendingUp, TrendingDown, Hash,
   Truck, MapPin,
-  ArrowLeft, Plug, History, ShoppingBag, Radio, Lock,
+  ArrowLeft, Plug, History, ShoppingBag, Radio,
 } from 'lucide-react';
 import {
   buildDailyAggregatorRows,
@@ -224,16 +223,12 @@ function OpenRegisterHero({
   expandedSessionId,
   onToggleSession,
   onViewClosing,
-  onForceClose,
-  forcingSessionId,
 }: {
   sessions: TpvRegisterSession[];
   selectedDate: string;
   expandedSessionId: string | null;
   onToggleSession: (id: string) => void;
   onViewClosing: (session: TpvRegisterSession) => void;
-  onForceClose?: (session: TpvRegisterSession) => void;
-  forcingSessionId?: string | null;
 }) {
   if (sessions.length === 0) return null;
 
@@ -261,7 +256,6 @@ function OpenRegisterHero({
             day: 'numeric',
             month: 'short',
           });
-          const busy = forcingSessionId === session._id;
 
           return (
             <div key={session._id} data-caja-turn={session._id}>
@@ -292,25 +286,13 @@ function OpenRegisterHero({
                 </div>
                 {expanded ? <ChevronUp className="w-4 h-4 text-gray-400 shrink-0" /> : <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />}
               </button>
-              {(stale || expanded) && onForceClose && (
-                <div className="px-4 pb-3 flex flex-wrap items-center gap-2">
-                  {stale && (
+              {(stale || expanded) && (
+                <div className="px-4 pb-3">
+                  {stale ? (
                     <p className="w-full text-xs text-gray-600 dark:text-gray-400">
-                      Caja de otro día. Ciérrala y abre un turno de hoy en el TPV.
+                      Caja de otro día. Ciérrala en el TPV y abre un turno de hoy.
                     </p>
-                  )}
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onForceClose(session);
-                    }}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 text-xs font-medium hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-60"
-                  >
-                    <Lock className="w-3.5 h-3.5" />
-                    {busy ? 'Cerrando…' : 'Forzar cierre'}
-                  </button>
+                  ) : null}
                 </div>
               )}
               {expanded && (
@@ -696,9 +678,9 @@ export function CajaPage() {
   const [viewingClosingSession, setViewingClosingSession] = useState<TpvRegisterSession | null>(null);
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
-  const [forcingSessionId, setForcingSessionId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const hasLoadedOnceRef = useRef(false);
+  const loadGenRef = useRef(0);
   const userCollapsedOpenRef = useRef(false);
 
   const closingPlatforms = useMemo(() => getClosingAggregatorPlatforms(), []);
@@ -724,7 +706,11 @@ export function CajaPage() {
   }, [scopedPdvKey]);
 
   const loadData = useCallback(async (options?: { silent?: boolean }) => {
-    if (!dataUserId) return;
+    if (!dataUserId) {
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
     // Sin empresa activa no mezclar cajas de todos los negocios del dueño.
     if (!businessId) {
       setSessions([]);
@@ -733,6 +719,10 @@ export function CajaPage() {
       setRefreshing(false);
       return;
     }
+    const gen = ++loadGenRef.current;
+    const forUserId = dataUserId;
+    const forBusinessId = businessId;
+    const forDate = selectedDate;
     const silent = options?.silent ?? hasLoadedOnceRef.current;
     if (!silent) setLoading(true);
     else setRefreshing(true);
@@ -742,38 +732,45 @@ export function CajaPage() {
         ? (new URLSearchParams(window.location.search).get('validate')
           || new URLSearchParams(window.location.search).get('view'))
         : null;
-      let dateFrom = localDayBoundsForKey(selectedDate).from;
+      let dateFrom = localDayBoundsForKey(forDate).from;
       if (deepLink) {
         const lookback = new Date();
         lookback.setDate(lookback.getDate() - 120);
         dateFrom = lookback.toISOString();
       }
-      const { sessions: sessData, driverSessions: driverData } = await listCajaBootstrapRequest(dataUserId, {
-        businessId,
+      const { sessions: sessData, driverSessions: driverData } = await listCajaBootstrapRequest(forUserId, {
+        businessId: forBusinessId,
         dateFrom,
       });
+      // Respuesta vieja tras cambiar empresa/día: no tocar estado ni toast.
+      if (gen !== loadGenRef.current) return;
       // Filtrado PDV en cliente (scopedPdvKey no debe re-disparar este fetch).
       // Si el scope de tiendas aún no ha cargado, no descartar: el API ya filtró por empresa.
       const pdvIds = scopedPdvKeyRef.current
         ? scopedPdvKeyRef.current.split('|').map((id) => id.trim()).filter(Boolean)
         : [];
       const unique = Array.from(new Map(sessData.map((s) => [s._id, s])).values()).filter((s) => {
-        if (!businessId) return true;
+        if (!forBusinessId) return true;
         if (pdvIds.length === 0) return true;
-        return tpvSessionBelongsToBusiness(s, businessId, pdvIds);
+        return tpvSessionBelongsToBusiness(s, forBusinessId, pdvIds);
       });
       setSessions(unique);
       setDriverSessions(driverData);
       hasLoadedOnceRef.current = true;
-    } catch {
-      if (!silent) toast.error('Error al cargar datos de caja');
+    } catch (err) {
+      if (gen !== loadGenRef.current) return;
+      const aborted = err instanceof DOMException && err.name === 'AbortError';
+      if (!silent && !aborted) toast.error('Error al cargar datos de caja');
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (gen === loadGenRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [dataUserId, businessId, selectedDate]);
 
-  // Al cambiar de empresa, forzar recarga completa (mismo dueño ≠ mismos datos).
+  // Al cambiar de empresa, limpiar estado. No invalidar gen aquí:
+  // eso dejaba loading=true si la petición en vuelo acababa como “stale”.
   useEffect(() => {
     hasLoadedOnceRef.current = false;
     setSessions([]);
@@ -782,7 +779,7 @@ export function CajaPage() {
     setViewingClosingSession(null);
   }, [businessId]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => { void loadData(); }, [loadData]);
 
   // Cuando llegan los PDVs del scope, refiltrar sin volver a pedir bootstrap al servidor.
   useEffect(() => {
@@ -825,7 +822,7 @@ export function CajaPage() {
 
     if (validateParam) {
       if (session.status === 'open') {
-        toast.info('Esta caja sigue abierta. Puedes forzar el cierre desde Caja (botón Forzar cierre) o cerrarla en el TPV.');
+        toast.info('Esta caja sigue abierta. Ciérrala en el TPV para poder validar el cierre.');
       } else {
         setViewingClosingSession(session);
       }
@@ -935,36 +932,6 @@ export function CajaPage() {
       .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
   }, [orders, selectedDate]);
 
-  const handleForceCloseOpenSession = async (session: TpvRegisterSession) => {
-    if (!dataUserId || session.status !== 'open') return;
-    const day = new Date(session.openedAt).toLocaleDateString('es-ES', { day: 'numeric', month: 'long' });
-    const ok = window.confirm(
-      `¿Forzar cierre de la caja de ${session.pointOfSaleName || 'esta tienda'} (abierta el ${day})?\n\nLuego abre un turno nuevo en el TPV para ver solo los pedidos de hoy.`,
-    );
-    if (!ok) return;
-    setForcingSessionId(session._id);
-    try {
-      const expected = calcTpvExpectedCash(session);
-      const updated = await updateTpvRegisterSessionRequest(dataUserId, {
-        ...session,
-        status: 'closed',
-        closedAt: new Date().toISOString(),
-        closedBy: user?.name || user?.email || 'Gerente',
-        closingNotes: `Cierre forzado desde Caja (sesión abierta el ${String(session.openedAt || '').slice(0, 10)})`,
-        expectedCash: expected,
-        finalCashAmount: expected,
-        difference: 0,
-        closingValidationStatus: 'pending',
-      });
-      setSessions((prev) => prev.map((s) => (s._id === updated._id ? updated : s)));
-      toast.success('Caja cerrada. Abre un turno de hoy en el TPV.');
-    } catch {
-      toast.error('No se pudo forzar el cierre');
-    } finally {
-      setForcingSessionId(null);
-    }
-  };
-
   useEffect(() => {
     userCollapsedOpenRef.current = false;
     setExpandedSessionId(null);
@@ -972,25 +939,23 @@ export function CajaPage() {
 
   useEffect(() => {
     if (loading || userCollapsedOpenRef.current) return;
-    if (openOnSelectedDay.length >= 1) {
-      setExpandedSessionId((prev) => (
-        prev && openOnSelectedDay.some((s) => s._id === prev) ? prev : openOnSelectedDay[0]._id
-      ));
-    }
-  }, [loading, openOnSelectedDay]);
-
-  const handleToggleSession = useCallback((id: string) => {
+    if (openOnSelectedDay.length < 1) return;
     setExpandedSessionId((prev) => {
-      const next = prev === id ? null : id;
-      if (next === null && openOnSelectedDay.some((s) => s._id === id)) {
+      if (prev) {
+        // Mantener cualquier turno elegido (abierto o cerrado) mientras exista.
+        if (sessions.some((s) => s._id === prev)) return prev;
+      }
+      return openOnSelectedDay[0]._id;
+    });
+  }, [loading, openOnSelectedDay, sessions]);
+
+  const handleToggleSession = useCallback((id: string | null) => {
+    setExpandedSessionId((prev) => {
+      const next = id === null ? null : (prev === id ? null : id);
+      if (next === null && (id === null || openOnSelectedDay.some((s) => s._id === id))) {
         userCollapsedOpenRef.current = true;
       } else if (next !== null) {
         userCollapsedOpenRef.current = false;
-      }
-      if (next) {
-        requestAnimationFrame(() => {
-          document.querySelector(`[data-caja-turn="${next}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        });
       }
       return next;
     });
@@ -1157,9 +1122,7 @@ export function CajaPage() {
         onDownloadFormat={handleDownload}
         onBack={handleBack}
         selectedSessionId={expandedSessionId}
-        onSelectSession={setExpandedSessionId}
-        onForceClose={handleForceCloseOpenSession}
-        forcingSessionId={forcingSessionId}
+        onSelectSession={handleToggleSession}
         onViewFullClosing={handleViewClosing}
         refreshing={refreshing}
       />

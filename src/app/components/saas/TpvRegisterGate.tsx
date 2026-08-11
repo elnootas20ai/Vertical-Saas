@@ -33,7 +33,7 @@ import {
   isTpvRegisterSessionOpen,
 } from '../../lib/deliveryApi';
 import { calcTpvExpectedCash, buildTpvRegisterSummary, calcTpvShiftCollectionsTotal, countNetSaleOperations, sumCashReturns, sumCashStaffConsumption } from '../../lib/tpvCajaMath';
-import { formatMoneyAsYouType } from '../../lib/workCenterMoneyInput';
+import { formatMoneyAsYouType, moneyNumberToDisplay, scheduleMoneyInputCaretToEnd } from '../../lib/workCenterMoneyInput';
 import { formatMoneyEs, formatDecimalEs } from '../../lib/formatNumberEs';
 import { consumeSalaTpvLaunch } from '../../lib/salaTpvLaunch';
 import { RegisterShiftSalesBreakdown } from './RegisterShiftSalesBreakdown';
@@ -45,9 +45,11 @@ import {
   findReopenableClosedTpvSession,
   calendarDayMadrid,
   resolvePreviousCloseCashAmount,
+  previousCloseCashIsNextDayInitial,
   shouldKeepTpvSessionInClientList,
   tpvSessionBelongsToBusiness,
   tpvSessionMatchesStoreRef,
+  writeTpvOpenRegisterLatch,
 } from '../../lib/tpvCajaScope';
 import { fetchShiftOrdersForSession, prefetchShiftOrdersForSession } from '../../lib/registerShiftOrders';
 import {
@@ -289,16 +291,19 @@ function shouldKeepTpvSessionInList(
 
 // ─── Cash Count Grid ────────────────────────────────────────────────────────
 
-function CashCountGrid({ counts, onChange, compact = false }: {
+function CashCountGrid({ counts, onChange, compact = false, readOnly = false }: {
   counts: CashDenominationCount;
   onChange: (counts: CashDenominationCount) => void;
   compact?: boolean;
+  /** Bloqueado (p. ej. apertura con inicial dejado el día anterior). */
+  readOnly?: boolean;
 }) {
   const total = calcDenominationTotal(counts);
   const bills = DENOMINATIONS.filter(d => d.type === 'bill');
   const coins = DENOMINATIONS.filter(d => d.type === 'coin');
 
   const updateCount = (key: keyof CashDenominationCount, val: number) => {
+    if (readOnly) return;
     onChange({ ...counts, [key]: Math.max(0, val) });
   };
 
@@ -310,10 +315,30 @@ function CashCountGrid({ counts, onChange, compact = false }: {
         <span className={`text-right font-semibold ${compact ? 'w-11 text-xs' : 'w-14 text-sm'} ${d.type === 'bill' ? 'text-green-700 dark:text-green-400' : 'text-amber-700 dark:text-amber-400'}`}>{d.label}</span>
         <span className="text-gray-400 text-xs">×</span>
         <div className="flex items-center gap-1">
-          <button onClick={() => updateCount(d.key, qty - 1)} className={`rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 ${compact ? 'w-6 h-6 text-xs' : 'w-7 h-7 text-sm'}`}>-</button>
-          <input type="number" min="0" value={qty || ''} onChange={e => updateCount(d.key, parseInt(e.target.value) || 0)}
-            className={`text-center border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 dark:focus:border-gray-400 outline-none ${compact ? 'w-11 h-6 text-xs' : 'w-14 h-7 text-sm'}`} />
-          <button onClick={() => updateCount(d.key, qty + 1)} className={`rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 ${compact ? 'w-6 h-6 text-xs' : 'w-7 h-7 text-sm'}`}>+</button>
+          <button
+            type="button"
+            disabled={readOnly}
+            onClick={() => updateCount(d.key, qty - 1)}
+            className={`rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:pointer-events-none ${compact ? 'w-6 h-6 text-xs' : 'w-7 h-7 text-sm'}`}
+          >
+            -
+          </button>
+          <input
+            type="number"
+            min="0"
+            value={qty || ''}
+            readOnly={readOnly}
+            onChange={e => updateCount(d.key, parseInt(e.target.value) || 0)}
+            className={`text-center border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 dark:focus:border-gray-400 outline-none read-only:bg-gray-50 dark:read-only:bg-gray-900/60 ${compact ? 'w-11 h-6 text-xs' : 'w-14 h-7 text-sm'}`}
+          />
+          <button
+            type="button"
+            disabled={readOnly}
+            onClick={() => updateCount(d.key, qty + 1)}
+            className={`rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:pointer-events-none ${compact ? 'w-6 h-6 text-xs' : 'w-7 h-7 text-sm'}`}
+          >
+            +
+          </button>
         </div>
         <span className={`font-medium text-gray-600 dark:text-gray-400 text-right ${compact ? 'text-xs w-12' : 'text-sm w-16'}`}>{subtotal > 0 ? `${subtotal.toFixed(2)}€` : '—'}</span>
       </div>
@@ -530,6 +555,13 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
     return amount;
   }, [registerSessions, selectedPdv, restrictedToPdvId, selectedTerminal, isTabletMode, pointsOfSale]);
 
+  const previousCloseIsNextDayInitial = useMemo(() => {
+    const pdvId = selectedPdv?._id || restrictedToPdvId || '';
+    const terminalId = selectedTerminal?.id || (isTabletMode ? `tablet-${pdvId || 'default'}` : '');
+    const last = findLastClosedTpvSession(registerSessions, pdvId, terminalId, pointsOfSale);
+    return previousCloseCashIsNextDayInitial(last);
+  }, [registerSessions, selectedPdv, restrictedToPdvId, selectedTerminal, isTabletMode, pointsOfSale]);
+
   const previousCloseLabel = useMemo(() => {
     const pdvId = selectedPdv?._id || restrictedToPdvId || '';
     const terminalId = selectedTerminal?.id || (isTabletMode ? `tablet-${pdvId || 'default'}` : '');
@@ -614,9 +646,13 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
     </div>
   ) : null;
 
+  const [manualOpenSlot, setManualOpenSlot] = useState('');
+  const manualOpenInputRef = useRef<HTMLInputElement | null>(null);
+  const openingCashLocked = previousCloseCash != null;
   const didPrefillFromPreviousCloseRef = useRef(false);
   useEffect(() => {
     didPrefillFromPreviousCloseRef.current = false;
+    setManualOpenSlot('');
   }, [selectedPdvId, selectedTerminalId, previousCloseCash]);
 
   useEffect(() => {
@@ -625,6 +661,15 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
     didPrefillFromPreviousCloseRef.current = true;
     setCounts(buildDenominationFromAmount(previousCloseCash));
   }, [previousCloseCash]);
+
+  const handleManualOpenAmountChange = (raw: string) => {
+    if (openingCashLocked) return;
+    const formatted = formatMoneyAsYouType(raw, true);
+    setManualOpenSlot(formatted);
+    const parsed = parseAggregatorAmount(formatted);
+    setCounts(buildDenominationFromAmount(parsed != null && parsed >= 0 ? parsed : 0));
+    scheduleMoneyInputCaretToEnd(manualOpenInputRef.current);
+  };
 
   const effectiveTerminalName = selectedTerminal
     ? (selectedTerminal.code || selectedTerminal.name)
@@ -1056,29 +1101,42 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
                 </button>
               </div>
               <div className="flex items-center justify-between gap-2">
-                <label className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Conteo de efectivo *</label>
+                <label className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Fondo de apertura *
+                </label>
                 <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 tabular-nums">
                   {total.toFixed(2)}€
                 </span>
               </div>
-              {previousCloseCash != null && (
-                <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30 px-2.5 py-1.5">
-                  <p className="text-[11px] text-amber-900 dark:text-amber-100 min-w-0 flex-1">
-                    Cierre{previousCloseLabel ? ` ${previousCloseLabel}` : ''}:{' '}
-                    <strong className="tabular-nums">{previousCloseCash.toFixed(2)}€</strong>
+              {openingCashLocked ? (
+                <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30 px-3 py-3 space-y-1">
+                  <p className="text-[11px] font-bold text-amber-900 dark:text-amber-100">
+                    {previousCloseIsNextDayInitial ? 'Inicial dejado al cerrar' : 'Fondo del último cierre'}
+                    {previousCloseLabel ? ` · ${previousCloseLabel}` : ''}
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => setCounts(buildDenominationFromAmount(previousCloseCash))}
-                    className="shrink-0 px-2 py-1 rounded-md bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold"
-                  >
-                    Usar fondo
-                  </button>
+                  <p className="text-3xl font-black tabular-nums text-amber-950 dark:text-amber-50">
+                    {previousCloseCash!.toFixed(2)}€
+                  </p>
+                  <p className="text-[10px] text-amber-800/80 dark:text-amber-200/70">
+                    Se abre con este importe. Sin conteo de monedas.
+                  </p>
                 </div>
+              ) : (
+                <label className="block rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-2.5">
+                  <span className="text-[11px] font-bold text-stone-600 dark:text-stone-300">
+                    Efectivo en cajón (primer día)
+                  </span>
+                  <input
+                    ref={manualOpenInputRef}
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="0,00"
+                    value={manualOpenSlot}
+                    onChange={(e) => handleManualOpenAmountChange(e.target.value)}
+                    className="mt-1.5 w-full min-h-12 px-2 text-3xl font-black tabular-nums border border-stone-200 dark:border-stone-700 rounded-xl bg-stone-50 dark:bg-stone-950 text-stone-900 dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/25"
+                  />
+                </label>
               )}
-              <div className="flex-1 min-h-0">
-                <CashCountGrid counts={counts} onChange={setCounts} compact />
-              </div>
             </div>
           )}
 
@@ -1248,32 +1306,42 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
 
                 <div className="flex items-center justify-between gap-2 shrink-0">
                   <label className="text-[10px] font-bold text-stone-500 uppercase tracking-wider">
-                    Efectivo en cajón *
+                    Fondo de apertura *
                   </label>
                   <span className="text-[11px] font-bold text-stone-900 dark:text-stone-100 tabular-nums">
                     {total.toFixed(2)}€
                   </span>
                 </div>
 
-                {previousCloseCash != null ? (
-                  <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30 px-2.5 py-2 shrink-0">
-                    <p className="text-[11px] text-amber-900 dark:text-amber-100 min-w-0 flex-1">
-                      Último cierre{previousCloseLabel ? ` (${previousCloseLabel})` : ''}:{' '}
-                      <strong className="tabular-nums">{previousCloseCash.toFixed(2)}€</strong>
+                {openingCashLocked ? (
+                  <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30 px-3 py-3 shrink-0 space-y-1">
+                    <p className="text-[11px] font-bold text-amber-900 dark:text-amber-100">
+                      {previousCloseIsNextDayInitial ? 'Inicial dejado al cerrar' : 'Fondo del último cierre'}
+                      {previousCloseLabel ? ` · ${previousCloseLabel}` : ''}
                     </p>
-                    <button
-                      type="button"
-                      onClick={() => setCounts(buildDenominationFromAmount(previousCloseCash))}
-                      className="shrink-0 px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold"
-                    >
-                      Usar
-                    </button>
+                    <p className="text-3xl font-black tabular-nums text-amber-950 dark:text-amber-50">
+                      {previousCloseCash!.toFixed(2)}€
+                    </p>
+                    <p className="text-[10px] text-amber-800/80 dark:text-amber-200/70">
+                      Se abre con este importe. Sin conteo de monedas.
+                    </p>
                   </div>
-                ) : null}
-
-                <div className="flex-1 min-h-0 overflow-y-auto">
-                  <CashCountGrid counts={counts} onChange={setCounts} compact />
-                </div>
+                ) : (
+                  <label className="block rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-2.5 shrink-0">
+                    <span className="text-[11px] font-bold text-stone-600 dark:text-stone-300">
+                      Efectivo en cajón (primer día)
+                    </span>
+                    <input
+                      ref={manualOpenInputRef}
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="0,00"
+                      value={manualOpenSlot}
+                      onChange={(e) => handleManualOpenAmountChange(e.target.value)}
+                      className="mt-1.5 w-full min-h-12 px-2 text-3xl font-black tabular-nums border border-stone-200 dark:border-stone-700 rounded-xl bg-stone-50 dark:bg-stone-950 text-stone-900 dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/25"
+                    />
+                  </label>
+                )}
               </div>
             </>
           )}
@@ -1383,6 +1451,9 @@ type ClosingFormDraft = {
   counts: CashDenominationCount;
   notes: string;
   cashSlot: string;
+  /** Efectivo que queda en cajón para mañana. */
+  nextDayInitialSlot?: string;
+  nextDayInitialLocked?: boolean;
   manualFood: { pizza: string; burger: string; taco: string };
   appsManualDraft: ManualLinesByChannel;
   /** Solo true si el usuario editó a mano P/B/T (no por auto-guardado del sistema). */
@@ -1627,8 +1698,8 @@ function excelLikeAmountsFromClosedSession(
   const unpaidCard = Math.round(
     Object.values(session.aggregatorClosingCard || {}).reduce((s, n) => s + (Number(n) || 0), 0) * 100,
   ) / 100;
-  /** TOTAL del resumen = canales + no pagado apps (0 no cambia nada). */
-  const total = Math.round((amounts.total + unpaidCash + unpaidCard) * 100) / 100;
+  /** TOTAL del resumen = solo canales (TPV + hecho en apps). El no pagado va al cajón, no al total. */
+  const total = Math.round(amounts.total * 100) / 100;
   return {
     efectivo: amounts.efectivo,
     tpv: amounts.tpv,
@@ -1667,8 +1738,6 @@ function ClosingExcelLikeSummary({
     { label: 'UBER', hint: 'Uber Eats (hecho en apps)', value: amounts.uber },
     { label: 'JUST EAT', hint: 'Just Eat (hecho en apps)', value: amounts.justEat },
     { label: 'GLOVO', hint: 'Glovo (hecho en apps)', value: amounts.glovo },
-    { label: 'NO PAG. EFECTIVO', hint: 'Apps no pagado → cajón', value: amounts.unpaidCash },
-    { label: 'NO PAG. TARJETA', hint: 'Apps no pagado (tarjeta)', value: amounts.unpaidCard },
   ];
   const visibleMoney = moneyLines.filter(
     (l) => l.value > 0 || l.label === 'EFECTIVO' || l.label === 'TPV',
@@ -1719,7 +1788,7 @@ function ClosingExcelLikeSummary({
           <div>
             <p className={`font-black text-stone-900 dark:text-stone-50 ${compact ? 'text-sm' : 'text-base'}`}>TOTAL</p>
             {!compact ? (
-              <p className="text-[10px] text-stone-500">Canales + no pagado apps (si hay)</p>
+              <p className="text-[10px] text-stone-500">Suma de los canales de arriba</p>
             ) : null}
           </div>
           <span className={`font-black tabular-nums text-[#2563EB] shrink-0 ${compact ? 'text-lg' : 'text-2xl'}`}>
@@ -1730,9 +1799,14 @@ function ClosingExcelLikeSummary({
 
       {brandLines.length > 0 ? (
         <div className={`border-t border-stone-100 dark:border-stone-800 ${compact ? 'px-3 py-2' : 'px-3.5 py-2.5'}`}>
-          <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400 mb-1.5">
-            Marcas
+          <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400 mb-1">
+            Por marca
           </p>
+          {!compact ? (
+            <p className="text-[10px] text-stone-500 mb-1.5 leading-snug">
+              Tienda = pedidos TPV de esa marca · Apps = lo metido en Glovo/Uber/… por marca (paso de apps)
+            </p>
+          ) : null}
           <div className={compact ? 'space-y-1' : 'space-y-1.5'}>
             {brandLines.map((b) => (
               <div key={b.brandId} className="flex items-start justify-between gap-2">
@@ -1742,13 +1816,13 @@ function ClosingExcelLikeSummary({
                   </p>
                   {!compact ? (
                     <p className="text-[10px] text-stone-500 tabular-nums">
-                      Caja 1 {formatMoneyEs(b.caja1)}
+                      Tienda {formatMoneyEs(b.caja1)}
                       <span className="mx-1 text-stone-300">·</span>
-                      Caja 2 {formatMoneyEs(b.caja2)}
+                      Apps {formatMoneyEs(b.caja2)}
                     </p>
                   ) : (
                     <p className="text-[9px] text-stone-400 tabular-nums">
-                      1 {formatMoneyEs(b.caja1)} · 2 {formatMoneyEs(b.caja2)}
+                      T {formatMoneyEs(b.caja1)} · A {formatMoneyEs(b.caja2)}
                     </p>
                   )}
                 </div>
@@ -1815,6 +1889,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
       unpaidCardByBrandByChannel?: Record<string, Record<string, number>>;
       closingBrandLabels?: Record<string, string>;
     },
+    nextDayInitialCash?: number,
   ) => void;
   onCancel: () => void;
   restaurantWarnings?: string[];
@@ -1838,6 +1913,16 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   const [shiftOrdersLoading, setShiftOrdersLoading] = useState(true);
   const [cashSlot, setCashSlot] = useState(() => savedDraft?.cashSlot || '');
   const [cashSlotFocused, setCashSlotFocused] = useState(false);
+  const cashSlotInputRef = useRef<HTMLInputElement | null>(null);
+  const cashSlotCaretEndRef = useRef(false);
+  const nextDayInitialInputRef = useRef<HTMLInputElement | null>(null);
+  const nextDayInitialCaretEndRef = useRef(false);
+  const [nextDayInitialSlot, setNextDayInitialSlot] = useState(
+    () => savedDraft?.nextDayInitialSlot || '',
+  );
+  const [nextDayInitialLocked, setNextDayInitialLocked] = useState(
+    () => savedDraft?.nextDayInitialLocked === true,
+  );
   /**
    * P/B/T solo se restauran del borrador si el usuario los editó a mano.
    * Si no, empiezan vacíos y el sistema los rellena al cargar pedidos (nunca se congelan a media jornada).
@@ -1931,6 +2016,16 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   }, [closingMaxStep]);
   const countedTotal = calcDenominationTotal(counts);
   const expectedTpv = calcTpvExpectedCash(session);
+
+  const nextDayInitialParsed = useMemo(() => {
+    const parsed = parseAggregatorAmount(nextDayInitialSlot);
+    if (parsed == null || parsed < 0) return null;
+    return Math.round(parsed * 100) / 100;
+  }, [nextDayInitialSlot]);
+  /** Obligatorio: hay que indicar el fondo de mañana (0 vale si lo escriben). */
+  const nextDayInitialReady = nextDayInitialParsed != null;
+  const nextDayInitialAmount = nextDayInitialParsed ?? 0;
+
   const summary = buildTpvRegisterSummary(session);
   const cashReturnsTotal = sumCashReturns(session);
   const cashStaffConsumption = sumCashStaffConsumption(session);
@@ -1958,13 +2053,15 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     counts,
     notes,
     cashSlot,
+    nextDayInitialSlot,
+    nextDayInitialLocked,
     // Sin edición manual: no persistir P/B/T (evita reabrir el cierre con números viejos).
     manualFood: foodLockedByUser
       ? manualFood
       : { pizza: '', burger: '', taco: '' },
     appsManualDraft,
     foodLockedByUser,
-  }), [counts, notes, cashSlot, manualFood, appsManualDraft, foodLockedByUser]);
+  }), [counts, notes, cashSlot, nextDayInitialSlot, nextDayInitialLocked, manualFood, appsManualDraft, foodLockedByUser]);
 
   const persistDraft = useCallback(() => {
     if (!sessionId) return;
@@ -2018,19 +2115,10 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
       ?? finalAggregatorRows.reduce((s, r) => s + (Number(r.totalSales) || 0), 0)) * 100,
   ) / 100;
   const integratorsTotal = hechoAppsTotal;
-  /**
-   * Caja 1 (Vertial) = ventas TPV + no pagado apps (tarjeta y efectivo).
-   * Si no pagado = 0, el total no cambia.
-   */
-  const caja1Total = Math.round(
-    (tpvAllSales + aggregatorCashTotal + aggregatorCardTotal) * 100,
-  ) / 100;
   /** Esperado físico en cajón = efectivo TPV (fondo+cobros+entradas−salidas) + no pagado efectivo apps. */
   const dayDrawerExpected = expected;
-  /** Cobros tarjeta tienda + no pagado tarjeta apps (informativo; no es el cajón). */
-  const dayCardCollected = Math.round((tpvCardSales + aggregatorCardTotal) * 100) / 100;
-  /** Facturación día = Caja 1 Vertial + Caja 2 integraciones. */
-  const dayMoneyTotal = Math.round((caja1Total + integratorsTotal) * 100) / 100;
+  /** Cobros tarjeta tienda (informativo; no es el cajón). */
+  const dayCardCollected = tpvCardSales;
   /** Fila tipo resumen con los totales del cierre en vivo. */
   const excelDaySummaryBase = useMemo((): ClosingExcelLikeAmounts => {
     const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -2057,7 +2145,8 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
       uber,
       justEat,
       glovo,
-      total: r2(efectivo + tpv + x + app + uber + justEat + glovo + unpaidCash + unpaidCard),
+      // No pagado no entra en TOTAL: solo suma al esperado del cajón.
+      total: r2(efectivo + tpv + x + app + uber + justEat + glovo),
       pizza: closingFood.pizza,
       burger: closingFood.burger,
       taco: closingFood.taco,
@@ -2086,8 +2175,20 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   const cashSlotDisplay = cashSlotFocused
     ? cashSlot
     : countedTotal > 0
-      ? countedTotal.toFixed(2)
+      ? moneyNumberToDisplay(countedTotal, true)
       : cashSlot;
+
+  useLayoutEffect(() => {
+    if (!cashSlotCaretEndRef.current) return;
+    cashSlotCaretEndRef.current = false;
+    scheduleMoneyInputCaretToEnd(cashSlotInputRef.current);
+  }, [cashSlot]);
+
+  useLayoutEffect(() => {
+    if (!nextDayInitialCaretEndRef.current) return;
+    nextDayInitialCaretEndRef.current = false;
+    scheduleMoneyInputCaretToEnd(nextDayInitialInputRef.current);
+  }, [nextDayInitialSlot]);
 
   // Rellenar P/B/T del TPV cuando llegan los pedidos. No bloquear por borrador con "0"
   // (el auto-guardado lo escribía antes de cargar y dejaba el paso 1 vacío/a cero).
@@ -2105,6 +2206,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
 
   const handleCashSlotChange = useCallback((value: string) => {
     const formatted = formatMoneyAsYouType(value, true);
+    cashSlotCaretEndRef.current = true;
     setCashSlot(formatted);
     const parsed = parseAggregatorAmount(formatted);
     if (parsed == null) {
@@ -2112,6 +2214,12 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
       return;
     }
     setCounts(buildDenominationFromAmount(parsed));
+  }, []);
+
+  const handleNextDayInitialChange = useCallback((value: string) => {
+    nextDayInitialCaretEndRef.current = true;
+    setNextDayInitialLocked(true);
+    setNextDayInitialSlot(formatMoneyAsYouType(value, true));
   }, []);
 
   const handleFoodSlotChange = useCallback((key: keyof FoodFamilyCounts, value: string) => {
@@ -2551,186 +2659,10 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
           {/* Delivery paso final — Contar cajón + resumen limpio */}
           {isDeliveryCierreStep ? (
             <div className="flex-1 min-h-0 flex flex-col gap-3 overflow-y-auto overscroll-contain pb-1">
-              {/* Detalle Caja 1 / Caja 2 */}
-              <div className="shrink-0 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <div className="rounded-2xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-950 px-3 py-2.5 space-y-2">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <div>
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
-                        Caja 1
-                      </p>
-                      <p className="text-sm font-bold text-stone-900 dark:text-stone-100">
-                        Vertial (TPV)
-                      </p>
-                    </div>
-                    <p className="text-lg font-black tabular-nums text-stone-900 dark:text-stone-50">
-                      {formatMoneyEs(caja1Total)}
-                    </p>
-                  </div>
-                  <div className="space-y-1 text-[11px]">
-                    <div className={`flex justify-between gap-2 ${VERTIAL_CASH_TEXT}`}>
-                      <span className="inline-flex items-center gap-1 font-semibold">
-                        <Banknote className="w-3 h-3" /> Efectivo
-                      </span>
-                      <span className="font-black tabular-nums">
-                        {formatMoneyEs(summary.salesByMethod.efectivo)}
-                      </span>
-                    </div>
-                    <div className={`flex justify-between gap-2 ${VERTIAL_CARD_TEXT}`}>
-                      <span className="inline-flex items-center gap-1 font-semibold">
-                        <CreditCard className="w-3 h-3" /> Tarjeta
-                      </span>
-                      <span className="font-black tabular-nums">
-                        {formatMoneyEs(summary.salesByMethod.tarjeta)}
-                      </span>
-                    </div>
-                    {(summary.salesByMethod.bizum || 0) + (summary.salesByMethod.otro || 0) > 0 ? (
-                      <div className="flex justify-between gap-2 text-stone-500">
-                        <span>Bizum / otros</span>
-                        <span className="font-bold tabular-nums">
-                          {formatMoneyEs(
-                            (summary.salesByMethod.bizum || 0) + (summary.salesByMethod.otro || 0),
-                          )}
-                        </span>
-                      </div>
-                    ) : null}
-                    {aggregatorCashTotal > 0 ? (
-                      <div className={`flex justify-between gap-2 ${VERTIAL_CASH_TEXT}`}>
-                        <span className="font-semibold">No pagado efectivo → cajón</span>
-                        <span className="font-black tabular-nums">
-                          {formatMoneyEs(aggregatorCashTotal)}
-                        </span>
-                      </div>
-                    ) : null}
-                  </div>
-                  <div
-                    className={`rounded-xl border px-2.5 py-2 ${VERTIAL_CARD_BORDER} ${VERTIAL_CARD_BG}`}
-                  >
-                    <div className={`flex items-center justify-between gap-2 ${VERTIAL_CARD_TEXT}`}>
-                      <span className="inline-flex items-center gap-1.5 text-[11px] font-bold">
-                        <CreditCard className="w-3.5 h-3.5" />
-                        Tarjeta no pagado
-                      </span>
-                      <span className="text-base font-black tabular-nums">
-                        {formatMoneyEs(aggregatorCardTotal)}
-                      </span>
-                    </div>
-                    <p className="mt-0.5 text-[10px] text-stone-500 dark:text-stone-400">
-                      Apps · suma a Caja 1
-                    </p>
-                  </div>
-                  {brandBilling.rows.length > 0 ? (
-                    <div className="border-t border-stone-100 dark:border-stone-800 pt-1.5 space-y-1">
-                      {brandBilling.rows.map((row) => {
-                        const cash = Number(row.revenueEfectivo) || 0;
-                        const card = Number(row.revenueTarjeta) || 0;
-                        return (
-                          <div
-                            key={row.brandId}
-                            className="flex items-start justify-between gap-2 rounded-lg bg-stone-50 px-2 py-1.5 dark:bg-stone-900/70"
-                          >
-                            <div className="min-w-0">
-                              <p className="truncate text-[11px] font-bold text-stone-900 dark:text-stone-100">
-                                {row.name}
-                              </p>
-                              <p className="text-[10px] font-semibold tabular-nums leading-snug">
-                                <span className={VERTIAL_CASH_TEXT}>
-                                  Efectivo {formatMoneyEs(cash)}
-                                </span>
-                                <span className="mx-1 text-stone-300">·</span>
-                                <span className={VERTIAL_CARD_TEXT}>
-                                  Tarjeta {formatMoneyEs(card)}
-                                </span>
-                              </p>
-                            </div>
-                            <span className="shrink-0 text-xs font-black tabular-nums text-stone-900 dark:text-stone-50">
-                              {formatMoneyEs(row.revenue)}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                  <p className="text-[10px] text-stone-400 tabular-nums">
-                    Unidades {tpvClosingFood.pizza}P / {tpvClosingFood.burger}B / {tpvClosingFood.taco}T
-                    <span className="ml-1.5 font-semibold text-stone-500">
-                      · Total{' '}
-                      {tpvClosingFood.pizza + tpvClosingFood.burger + tpvClosingFood.taco}
-                    </span>
-                  </p>
-                </div>
-
-                <div className="rounded-2xl border border-blue-200 dark:border-blue-900/50 bg-blue-50/70 dark:bg-blue-950/30 px-3 py-2.5 space-y-2">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <div>
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-blue-600/80 dark:text-blue-300/80">
-                        Caja 2
-                      </p>
-                      <p className="text-sm font-bold text-blue-950 dark:text-blue-50">
-                        Integraciones (hecho en app)
-                      </p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-lg font-black tabular-nums text-blue-950 dark:text-blue-50 leading-none">
-                        {formatMoneyEs(integratorsTotal)}
-                      </p>
-                      <p className="mt-0.5 text-[10px] font-semibold tabular-nums text-blue-700/75 dark:text-blue-200/70">
-                        {appsFoodTotals.pizza}P / {appsFoodTotals.burger}B / {appsFoodTotals.taco}T
-                        <span className="ml-1 opacity-90">
-                          · Σ {appsFoodTotals.pizza + appsFoodTotals.burger + appsFoodTotals.taco}
-                        </span>
-                      </p>
-                    </div>
-                  </div>
-                  <div className="space-y-1 text-[11px]">
-                    {(appsSnapshot?.rows?.length
-                      ? appsSnapshot.rows
-                      : finalAggregatorRows
-                    ).map((r) => {
-                      const amt = Number(r.totalSales) || 0;
-                      if (amt <= 0) return null;
-                      return (
-                        <div
-                          key={r.platform.channel}
-                          className="flex justify-between gap-2 text-blue-900/80 dark:text-blue-100/80"
-                        >
-                          <span className="font-semibold truncate">{r.platform.label}</span>
-                          <span className="font-black tabular-nums shrink-0">
-                            {formatMoneyEs(amt)}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {appsBrandBilling.rows.length > 0 ? (
-                    <div className="border-t border-blue-200/60 dark:border-blue-900/40 pt-1.5 space-y-0.5">
-                      {appsBrandBilling.rows.map((row) => (
-                        <div
-                          key={row.brandId}
-                          className="flex justify-between gap-2 text-[10px] text-blue-900/70 dark:text-blue-100/70"
-                        >
-                          <span className="truncate font-medium">{row.name}</span>
-                          <span className="shrink-0 tabular-nums font-bold">
-                            {formatMoneyEs(row.revenue)}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                  <p className="text-[10px] text-blue-700/70 dark:text-blue-200/60 tabular-nums">
-                    Unidades {appsFoodTotals.pizza}P / {appsFoodTotals.burger}B / {appsFoodTotals.taco}T
-                    <span className="ml-1.5 font-semibold text-blue-800/80 dark:text-blue-100/80">
-                      · Total{' '}
-                      {appsFoodTotals.pizza + appsFoodTotals.burger + appsFoodTotals.taco}
-                    </span>
-                  </p>
-                </div>
-              </div>
-
               <div className="shrink-0">
                 <p className="text-sm font-bold text-stone-900 dark:text-stone-100">Contar el cajón</p>
                 <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5">
-                  Esperado = efectivo TPV + no pagado efectivo apps. La tarjeta no pagada suma a Caja 1, no al cajón.
+                  Esperado = efectivo TPV + no pagado efectivo apps. La tarjeta no pagada no va al cajón.
                 </p>
               </div>
 
@@ -2740,13 +2672,19 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                     <Banknote className="w-3.5 h-3.5" /> Efectivo contado
                   </span>
                   <input
+                    ref={cashSlotInputRef}
                     type="text"
                     inputMode="decimal"
                     placeholder="0,00"
                     value={cashSlotDisplay}
                     onFocus={() => {
                       setCashSlotFocused(true);
-                      setCashSlot(countedTotal > 0 ? countedTotal.toFixed(2) : cashSlot);
+                      if (countedTotal > 0) {
+                        setCashSlot(moneyNumberToDisplay(countedTotal, true));
+                      }
+                      window.requestAnimationFrame(() => {
+                        scheduleMoneyInputCaretToEnd(cashSlotInputRef.current);
+                      });
                     }}
                     onBlur={() => setCashSlotFocused(false)}
                     onChange={(e) => handleCashSlotChange(e.target.value)}
@@ -2756,7 +2694,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
 
                 <div className="space-y-1 text-[12px]">
                   <div className="flex justify-between gap-2 items-baseline text-stone-600 dark:text-stone-300">
-                    <span>Efectivo Caja 1 (TPV)</span>
+                    <span>Efectivo TPV</span>
                     <span className="font-bold tabular-nums">{formatMoneyEs(expectedTpv)}</span>
                   </div>
                   <div className="flex justify-between gap-2 items-baseline text-stone-600 dark:text-stone-300">
@@ -2784,7 +2722,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 ) : null}
               </div>
 
-              {/* Cómo se forma el efectivo TPV + movimientos (arriba, no escondido) */}
+              {/* Cómo se forma el efectivo TPV + movimientos */}
               <div className="shrink-0 rounded-2xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-950 px-3 py-2.5 space-y-1 text-xs">
                 <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400 mb-1">
                   Cómo sale el efectivo TPV
@@ -2800,22 +2738,22 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                   <span className="font-semibold tabular-nums">{formatMoneyEs(summary.salesByMethod.efectivo)}</span>
                 </div>
                 {cashStaffConsumption > 0 ? (
-                  <div className="flex justify-between gap-2 text-stone-600 dark:text-stone-300">
+                  <div className="flex justify-between gap-2 text-amber-700 dark:text-amber-300">
                     <span>+ Consumo equipo</span>
-                    <span className="font-semibold tabular-nums">{formatMoneyEs(cashStaffConsumption)}</span>
+                    <span className="font-bold tabular-nums">{formatMoneyEs(cashStaffConsumption)}</span>
                   </div>
                 ) : null}
-                <div className="flex justify-between gap-2 text-stone-600 dark:text-stone-300">
-                  <span>+ Entradas</span>
-                  <span className="font-semibold tabular-nums">{formatMoneyEs(summary.totalCashIn)}</span>
+                <div className="flex justify-between gap-2 text-emerald-700 dark:text-emerald-300">
+                  <span className="font-semibold">+ Entradas</span>
+                  <span className="font-black tabular-nums">{formatMoneyEs(summary.totalCashIn)}</span>
                 </div>
-                <div className="flex justify-between gap-2 text-stone-600 dark:text-stone-300">
-                  <span>− Devoluciones</span>
-                  <span className="font-semibold tabular-nums">{formatMoneyEs(cashReturnsTotal)}</span>
+                <div className="flex justify-between gap-2 text-orange-700 dark:text-orange-300">
+                  <span className="font-semibold">− Devoluciones</span>
+                  <span className="font-black tabular-nums">{formatMoneyEs(cashReturnsTotal)}</span>
                 </div>
-                <div className="flex justify-between gap-2 text-stone-600 dark:text-stone-300">
-                  <span>− Salidas</span>
-                  <span className="font-semibold tabular-nums">{formatMoneyEs(summary.totalCashOut)}</span>
+                <div className="flex justify-between gap-2 text-rose-700 dark:text-rose-300">
+                  <span className="font-semibold">− Salidas</span>
+                  <span className="font-black tabular-nums">{formatMoneyEs(summary.totalCashOut)}</span>
                 </div>
                 <div className="border-t border-stone-100 dark:border-stone-800 pt-1.5 flex justify-between gap-2 font-bold text-stone-900 dark:text-stone-100">
                   <span>= Efectivo TPV</span>
@@ -2967,14 +2905,21 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
               {/* Resumen final — misma fila que el Excel de Facturación */}
               <div className="shrink-0 space-y-2">
                 <ClosingExcelLikeSummary amounts={excelDaySummary} brandLabels={brandLabels} />
-                <p className="text-[11px] text-stone-500 px-0.5 tabular-nums">
-                  Comprobación: Caja 1 {formatMoneyEs(caja1Total)} + Caja 2 {formatMoneyEs(integratorsTotal)}
+                <p className="text-[11px] text-stone-500 px-0.5 leading-snug">
+                  Tienda (TPV) {formatMoneyEs(tpvAllSales)}
+                  {' + '}
+                  Apps {formatMoneyEs(integratorsTotal)}
                   {' = '}
-                  <strong className="text-stone-800 dark:text-stone-100">{formatMoneyEs(dayMoneyTotal)}</strong>
+                  <strong className="text-stone-800 dark:text-stone-100 tabular-nums">
+                    {formatMoneyEs(Math.round((tpvAllSales + integratorsTotal) * 100) / 100)}
+                  </strong>
+                  <span className="text-stone-400"> · igual que el TOTAL de arriba</span>
                   {dayCardCollected > 0 ? (
                     <>
                       {' · '}
-                      <span className={VERTIAL_CARD_TEXT}>Tarjeta cobrada {formatMoneyEs(dayCardCollected)}</span>
+                      <span className={VERTIAL_CARD_TEXT}>
+                        Tarjeta tienda {formatMoneyEs(tpvCardSales)}
+                      </span>
                     </>
                   ) : null}
                 </p>
@@ -3112,6 +3057,88 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                   ) : null}
                 </div>
               ) : null}
+
+              <div className={`shrink-0 rounded-2xl border p-3 space-y-2 ${
+                nextDayInitialReady
+                  ? 'border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/25'
+                  : 'border-rose-300 dark:border-rose-800 bg-rose-50/70 dark:bg-rose-950/25'
+              }`}>
+                <label className="block cursor-text">
+                  <span className={`text-[11px] font-bold flex items-center gap-1.5 ${
+                    nextDayInitialReady
+                      ? 'text-amber-900 dark:text-amber-100'
+                      : 'text-rose-900 dark:text-rose-100'
+                  }`}>
+                    <Banknote className="w-3.5 h-3.5" />
+                    Inicial para mañana *
+                  </span>
+                  <p className={`mt-0.5 text-[10px] leading-snug ${
+                    nextDayInitialReady
+                      ? 'text-amber-800/80 dark:text-amber-200/70'
+                      : 'text-rose-800/80 dark:text-rose-200/70'
+                  }`}>
+                    Obligatorio. Efectivo que dejas en el cajón; mañana se abre con este fondo.
+                  </p>
+                  <input
+                    ref={nextDayInitialInputRef}
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="Obligatorio · ej. 100,00"
+                    value={nextDayInitialSlot}
+                    onChange={(e) => handleNextDayInitialChange(e.target.value)}
+                    onFocus={() => {
+                      window.requestAnimationFrame(() => {
+                        scheduleMoneyInputCaretToEnd(nextDayInitialInputRef.current);
+                      });
+                    }}
+                    className={`mt-1.5 w-full min-h-12 px-3 py-2 text-2xl font-black tabular-nums tracking-tight border rounded-xl bg-white dark:bg-stone-950 focus:outline-none focus:ring-2 ${
+                      nextDayInitialReady
+                        ? 'border-amber-300 dark:border-amber-700 text-amber-950 dark:text-amber-50 focus:ring-amber-500/25 focus:border-amber-500'
+                        : 'border-rose-400 dark:border-rose-700 text-rose-950 dark:text-rose-50 focus:ring-rose-500/25 focus:border-rose-500'
+                    }`}
+                  />
+                </label>
+                {!nextDayInitialReady ? (
+                  <p className="text-[11px] font-semibold text-rose-800 dark:text-rose-200">
+                    Indica el fondo de mañana para poder cerrar.
+                  </p>
+                ) : null}
+                {nextDayInitialReady && countedTotal > 0 && Math.abs(nextDayInitialAmount - countedTotal) > 0.009 ? (
+                  nextDayInitialAmount > countedTotal ? (
+                    <div className="rounded-xl border-2 border-rose-400 dark:border-rose-700 bg-rose-50 dark:bg-rose-950/40 px-3 py-2.5 space-y-1">
+                      <p className="text-sm font-black text-rose-800 dark:text-rose-200">
+                        Inicial &gt; contado · hay que añadir dinero
+                      </p>
+                      <p className="text-xl sm:text-2xl font-black tabular-nums text-rose-600 dark:text-rose-400">
+                        +{formatMoneyEs(nextDayInitialAmount - countedTotal)}
+                      </p>
+                      <p className="text-[11px] text-rose-800/90 dark:text-rose-200/80 leading-snug">
+                        Contado {formatMoneyEs(countedTotal)} · dejas {formatMoneyEs(nextDayInitialAmount)}.
+                        Mete esa diferencia en el cajón. Se avisará al CEO.
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-base sm:text-lg font-black tabular-nums text-rose-700 dark:text-rose-300">
+                      Contado {formatMoneyEs(countedTotal)} · se retira{' '}
+                      <span className="text-xl sm:text-2xl text-rose-600 dark:text-rose-400">
+                        {formatMoneyEs(Math.max(0, countedTotal - nextDayInitialAmount))}
+                      </span>
+                    </p>
+                  )
+                ) : null}
+                {nextDayInitialReady && countedTotal > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNextDayInitialLocked(true);
+                      setNextDayInitialSlot(countedTotal.toFixed(2));
+                    }}
+                    className="text-[11px] font-bold text-amber-800 dark:text-amber-200 underline"
+                  >
+                    Usar el contado ({formatMoneyEs(countedTotal)})
+                  </button>
+                ) : null}
+              </div>
             </div>
           ) : null}
 
@@ -3145,6 +3172,68 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
               />
+              <div className={`rounded-xl border p-2.5 space-y-1.5 ${
+                nextDayInitialReady
+                  ? 'border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/25'
+                  : 'border-rose-300 dark:border-rose-800 bg-rose-50/70 dark:bg-rose-950/25'
+              }`}>
+                <label className="block cursor-text">
+                  <span className={`text-[11px] font-bold ${
+                    nextDayInitialReady
+                      ? 'text-amber-900 dark:text-amber-100'
+                      : 'text-rose-900 dark:text-rose-100'
+                  }`}>
+                    Inicial para mañana *
+                  </span>
+                  <p className={`text-[10px] ${
+                    nextDayInitialReady
+                      ? 'text-amber-800/80 dark:text-amber-200/70'
+                      : 'text-rose-800/80 dark:text-rose-200/70'
+                  }`}>
+                    Obligatorio. Fondo con el que se abrirá mañana.
+                  </p>
+                  <input
+                    ref={nextDayInitialInputRef}
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="Obligatorio · ej. 100,00"
+                    value={nextDayInitialSlot}
+                    onChange={(e) => handleNextDayInitialChange(e.target.value)}
+                    onFocus={() => {
+                      window.requestAnimationFrame(() => {
+                        scheduleMoneyInputCaretToEnd(nextDayInitialInputRef.current);
+                      });
+                    }}
+                    className={`mt-1 w-full min-h-11 px-2.5 py-1.5 text-xl font-black tabular-nums border rounded-xl bg-white dark:bg-stone-950 focus:outline-none focus:ring-2 ${
+                      nextDayInitialReady
+                        ? 'border-amber-300 dark:border-amber-700 text-amber-950 dark:text-amber-50 focus:ring-amber-500/25'
+                        : 'border-rose-400 dark:border-rose-700 text-rose-950 dark:text-rose-50 focus:ring-rose-500/25'
+                    }`}
+                  />
+                </label>
+                {!nextDayInitialReady ? (
+                  <p className="text-[11px] font-semibold text-rose-800 dark:text-rose-200">
+                    Indica el fondo de mañana para poder cerrar.
+                  </p>
+                ) : null}
+                {nextDayInitialReady && countedTotal > 0 && Math.abs(nextDayInitialAmount - countedTotal) > 0.009 ? (
+                  nextDayInitialAmount > countedTotal ? (
+                    <div className="rounded-xl border-2 border-rose-400 dark:border-rose-700 bg-rose-50 dark:bg-rose-950/40 px-3 py-2 space-y-0.5">
+                      <p className="text-xs font-black text-rose-800 dark:text-rose-200">
+                        Inicial &gt; contado · hay que añadir{' '}
+                        <span className="tabular-nums">+{formatMoneyEs(nextDayInitialAmount - countedTotal)}</span>
+                      </p>
+                      <p className="text-[10px] text-rose-800/90 dark:text-rose-200/80">
+                        Mete la diferencia en el cajón. Se avisará al CEO.
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-sm font-black tabular-nums text-rose-700 dark:text-rose-300">
+                      Se retira {formatMoneyEs(Math.max(0, countedTotal - nextDayInitialAmount))}
+                    </p>
+                  )
+                ) : null}
+              </div>
               <p className="text-[11px] text-stone-500">
                 Confirma el cierre. {!browserOnline ? 'Sin red: se subirá al recuperar conexión.' : ''}
               </p>
@@ -3181,16 +3270,24 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
             ) : (
               <button
                 type="button"
-                disabled={busy}
-                onClick={() => setConfirmCloseOpen(true)}
+                disabled={busy || !nextDayInitialReady}
+                onClick={() => {
+                  if (!nextDayInitialReady) {
+                    toast.error('Indica el inicial para mañana antes de cerrar');
+                    return;
+                  }
+                  setConfirmCloseOpen(true);
+                }}
                 className={`${VERTIAL_BTN_PRIMARY} !min-h-11 flex-1`}
               >
                 <Lock className="w-4 h-4" />
                 {busy
                   ? 'Cerrando…'
-                  : !browserOnline
-                    ? 'Confirmar (sin red)'
-                    : 'Confirmar'}
+                  : !nextDayInitialReady
+                    ? 'Falta inicial mañana'
+                    : !browserOnline
+                      ? 'Confirmar (sin red)'
+                      : 'Confirmar'}
               </button>
             )}
           </div>
@@ -3226,6 +3323,43 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                   </p>
                 </div>
               </div>
+              {nextDayInitialReady ? (
+                <div className="shrink-0 px-3 pt-3">
+                  <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30 px-3 py-2.5 space-y-1.5">
+                    <div className="flex justify-between gap-2 text-sm">
+                      <span className="font-semibold text-stone-600 dark:text-stone-300">Contado en cajón</span>
+                      <span className="font-black tabular-nums text-stone-900 dark:text-stone-50">
+                        {formatMoneyEs(countedTotal)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between gap-2 text-sm">
+                      <span className="font-semibold text-amber-900 dark:text-amber-100">Se deja (inicial mañana)</span>
+                      <span className="font-black tabular-nums text-amber-950 dark:text-amber-50 text-lg">
+                        {formatMoneyEs(nextDayInitialAmount)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between gap-2 items-baseline border-t border-amber-200/80 dark:border-amber-800/80 pt-1.5">
+                      <span className={`font-bold ${
+                        nextDayInitialAmount > countedTotal + 0.009
+                          ? 'text-rose-700 dark:text-rose-300'
+                          : 'text-rose-700 dark:text-rose-300'
+                      }`}>
+                        {nextDayInitialAmount > countedTotal + 0.009 ? 'Hay que añadir' : 'Se retira'}
+                      </span>
+                      <span className="font-black tabular-nums text-rose-600 dark:text-rose-400 text-xl sm:text-2xl">
+                        {nextDayInitialAmount > countedTotal + 0.009
+                          ? `+${formatMoneyEs(nextDayInitialAmount - countedTotal)}`
+                          : formatMoneyEs(Math.max(0, countedTotal - nextDayInitialAmount))}
+                      </span>
+                    </div>
+                    {nextDayInitialAmount > countedTotal + 0.009 ? (
+                      <p className="text-[11px] font-semibold text-rose-800 dark:text-rose-200">
+                        Aviso al CEO: inicial mañana mayor que el contado.
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
               <div className="flex-1 min-h-0 overflow-y-auto p-3">
                 {showDeliveryClosingSlots ? (
                   <ClosingExcelLikeSummary
@@ -3261,8 +3395,20 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 </button>
                 <button
                   type="button"
-                  disabled={busy}
+                  disabled={busy || !nextDayInitialReady}
                   onClick={() => {
+                    if (!nextDayInitialReady) {
+                      toast.error('Indica el inicial para mañana antes de cerrar');
+                      setConfirmCloseOpen(false);
+                      return;
+                    }
+                    if (nextDayInitialAmount > countedTotal + 0.009) {
+                      const add = Math.round((nextDayInitialAmount - countedTotal) * 100) / 100;
+                      toast.message(
+                        `Añade ${formatMoneyEs(add)} al cajón · aviso al CEO`,
+                        { duration: 5000 },
+                      );
+                    }
                     setConfirmCloseOpen(false);
                     const snapBrands = appsSnapshot?.brandTotalsByChannel || {};
                     const hasSnapBrands = Object.keys(snapBrands).some(
@@ -3306,7 +3452,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                       unpaidCashByBrandByChannel: appsSnapshot?.unpaidCashByBrandByChannel,
                       unpaidCardByBrandByChannel: appsSnapshot?.unpaidCardByBrandByChannel,
                       closingBrandLabels: labelMap,
-                    });
+                    }, nextDayInitialAmount);
                   }}
                   className={`${VERTIAL_BTN_PRIMARY} !min-h-11 flex-1 !bg-amber-600 hover:!bg-amber-700`}
                 >
@@ -5042,6 +5188,21 @@ export function TpvRegisterGate({
   const activeSessionIdRef = useRef<string | null>(null);
   activeSessionIdRef.current = isTpvRegisterSessionOpen(activeSession) ? activeSession?._id ?? null : null;
 
+  // Latch estable: el tablero / «Nuevo» no dependen solo del Context (puede parpadear).
+  useEffect(() => {
+    if (isTpvRegisterSessionOpen(activeSession)) {
+      writeTpvOpenRegisterLatch(activeSession);
+      return;
+    }
+    if (isTpvRegisterSessionOpen(stickyOpenSessionRef.current)) {
+      writeTpvOpenRegisterLatch(stickyOpenSessionRef.current);
+      return;
+    }
+    if (!sessions.some((s) => isTpvRegisterSessionOpen(s))) {
+      writeTpvOpenRegisterLatch(null);
+    }
+  }, [activeSession, sessions]);
+
   useEffect(() => {
     const onSessionSync = (event: Event) => {
       const session = (event as CustomEvent<TpvRegisterSession>).detail;
@@ -5710,6 +5871,7 @@ export function TpvRegisterGate({
       const storeId = String(reopened.pointOfSaleId || '').trim();
       // Enganchar ya: si no, el gate vuelve a «Abrir caja» aunque status=open.
       stickyOpenSessionRef.current = reopened;
+      writeTpvOpenRegisterLatch(reopened);
       if (storeId) {
         if (!isWorkerUser) {
           const bid = resolveBusinessScopeId(currentBusiness);
@@ -5754,6 +5916,8 @@ export function TpvRegisterGate({
         setManagerPdvPickId(storeId);
         skipManagerAutoPdvRef.current = false;
       }
+      stickyOpenSessionRef.current = existing;
+      writeTpvOpenRegisterLatch(existing);
       setSessions((prev) => {
         const exists = prev.some((s) => s._id === existing._id);
         if (exists) {
@@ -5786,7 +5950,20 @@ export function TpvRegisterGate({
         // Si falla la comprobación, el servidor vuelve a validar al crear la sesión.
       }
     }
-    const total = calcDenominationTotal(data.counts);
+    const lastClosed = findLastClosedTpvSession(
+      sessions,
+      pdvId,
+      data.terminalId,
+      pointsOfSale,
+    );
+    const forcedOpen = resolvePreviousCloseCashAmount(lastClosed);
+    // Con cierre previo: sí o sí se abre con ese fondo (inicial dejado o contado).
+    const total = forcedOpen != null
+      ? forcedOpen
+      : calcDenominationTotal(data.counts);
+    const openingCounts = forcedOpen != null
+      ? buildDenominationFromAmount(forcedOpen)
+      : data.counts;
     try {
       const writeBusinessId = resolveRetailOpsWriteBusinessId(
         scopeBusinessId || resolveBusinessScopeId(currentBusiness) || '',
@@ -5803,7 +5980,7 @@ export function TpvRegisterGate({
         datafonName: data.datafonName,
         printerName: data.printerName,
         openedBy: data.workerName,
-        openingCashCount: data.counts,
+        openingCashCount: openingCounts,
         initialCashAmount: total,
         status: 'open',
         transactions: [],
@@ -5812,6 +5989,8 @@ export function TpvRegisterGate({
         linkedOrderIds: [],
         salesByChannel: {},
       } as Partial<TpvRegisterSession>);
+      stickyOpenSessionRef.current = created;
+      writeTpvOpenRegisterLatch(created);
       setSessions(prev => [created, ...prev]);
       window.dispatchEvent(new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: created }));
       setPostCloseSession(null);
@@ -5907,6 +6086,7 @@ export function TpvRegisterGate({
       unpaidCardByBrandByChannel?: Record<string, Record<string, number>>;
       closingBrandLabels?: Record<string, string>;
     },
+    nextDayInitialCash?: number,
   ) => {
     const snapshotId = String(closingSession?._id || activeSession?._id || '').trim();
     const live = snapshotId
@@ -5920,6 +6100,10 @@ export function TpvRegisterGate({
       toast.info('Abre la caja antes de cerrarla');
       setShowClosing(false);
       setClosingSession(null);
+      return;
+    }
+    if (nextDayInitialCash == null || !Number.isFinite(Number(nextDayInitialCash)) || Number(nextDayInitialCash) < 0) {
+      toast.error('Indica el inicial para mañana antes de cerrar');
       return;
     }
     if (closingBusy) return;
@@ -5971,6 +6155,7 @@ export function TpvRegisterGate({
     };
     const expected = Math.round((expectedTpv + aggregatorCashSum) * 100) / 100;
     const diff = finalAmount - expected;
+    const leaveForTomorrow = Math.max(0, Math.round(Number(nextDayInitialCash) * 100) / 100);
     const saleOps = session.transactions.filter((t) => t.type === 'sale').length;
     const autoValidated = saleOps === 0 && Math.abs(diff) < 0.01 && aggregatorCashSum === 0;
     const closedPayload: Partial<TpvRegisterSession> = {
@@ -5983,6 +6168,7 @@ export function TpvRegisterGate({
       expectedCash: expected,
       difference: diff,
       closingNotes: notes,
+      nextDayInitialCash: leaveForTomorrow,
       summary,
       aggregatorClosingTotals,
       aggregatorClosingCash,
@@ -6007,6 +6193,7 @@ export function TpvRegisterGate({
     };
     const applyClosedLocally = (updated: TpvRegisterSession, opts?: { offline?: boolean }) => {
       stickyOpenSessionRef.current = null;
+      writeTpvOpenRegisterLatch(null);
       clearClosingFormDraft(String(updated._id || session._id || ''));
       setSessions((prev) => {
         const id = String(updated._id || '');
@@ -6119,6 +6306,18 @@ export function TpvRegisterGate({
       for (let attempt = 0; attempt < 5; attempt++) {
         const current = sessionsRef.current.find((s) => s._id === sessionId);
         if (!current || !isTpvRegisterSessionOpen(current)) return;
+
+        // Salida / devolución: no sacar más efectivo del que hay en caja.
+        if (fullTx.type === 'cash_out' || fullTx.type === 'return') {
+          const available = Math.round(calcTpvExpectedCash(current) * 100) / 100;
+          const ask = Math.round((Number(fullTx.amount) || 0) * 100) / 100;
+          if (ask > available + 0.009) {
+            toast.error(
+              `No hay tanto en caja. Disponible: ${formatMoneyEs(available)}`,
+            );
+            return;
+          }
+        }
 
         const updatedTxs = [...current.transactions, fullTx];
         const patch = applySessionTransactions(current, updatedTxs);
@@ -6886,7 +7085,7 @@ export function TpvRegisterGate({
   }
 
   return wrapShell(
-    <TpvRegisterBoardReadyContext.Provider value>
+    <TpvRegisterBoardReadyContext.Provider value={true}>
       <TpvStatusBarQuickActionsContext.Provider value={statusBarQuickActionsApi}>
       <div className={tpvFrameClass}>
         <RegisterStatusBar
@@ -6973,6 +7172,7 @@ export function TpvRegisterGate({
             registeredBy={activeSession.workerName}
             workers={clockedInWorkers}
             workersLoading={clockedInWorkersLoading}
+            availableCash={calcTpvExpectedCash(activeSession)}
             onClose={() => setShowCashOps(false)}
             onConfirm={async (tx) => { await addTransaction(tx); }}
           />

@@ -1,6 +1,6 @@
 /**
  * Bloques del dashboard empresa delivery para móvil / CeoMobileHome.
- * Ola rápida (KPIs) al entrar; detalle al deslizar + caché corta.
+ * KPIs rápidos + resumen operativo y marcas al entrar (sin gate de scroll).
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
@@ -32,7 +32,6 @@ import { localCalendarDayKey } from '../../lib/tpvCajaScope';
 import { VERTIAL_SURFACE_STONE } from '../../lib/vertialUiTokens';
 import { CompanyBrandPerformancePanel } from '../../components/saas/CompanyBrandPerformancePanel';
 import { PortfolioOpsPulse } from '../../components/saas/PortfolioOpsPulse';
-import { MobileLazySection } from '../../components/saas/MobileLazySection';
 import { useInViewOnce } from '../../hooks/useInViewOnce';
 import { WorkerPayMonthPanel } from './WorkerPayMonthPanel';
 import { buildWorkerPayMonthSummary, type WorkerPayMonthSummary } from './workerPayFromTpv';
@@ -318,7 +317,8 @@ export function DeliveryMobileDashboardBlocks({
   }, [dataUserId, businessId, orders.length, wantHeavy, cached]);
 
   useEffect(() => {
-    void load({ soft: Boolean(cached), forceHeavy: Boolean(cached?.orders?.length) });
+    // Siempre ola completa al entrar: resumen + marcas sin esperar scroll.
+    void load({ soft: Boolean(cached), forceHeavy: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reload on tenant / PDV set, not every render
   }, [dataUserId, businessId, pdvKey]);
 
@@ -433,15 +433,8 @@ export function DeliveryMobileDashboardBlocks({
       </section>
 
       <div ref={heavyGateRef} />
-      <MobileLazySection
-        rootMargin="80px 0px"
-        eagerFromMd={false}
-        placeholder={
-          <div className={`${VERTIAL_SURFACE_STONE} px-4 py-5 text-center text-[11px] text-stone-400`}>
-            Desliza para cargar marcas y detalle…
-          </div>
-        }
-      >
+      {/* Resumen + marcas al entrar (sin “desliza para cargar”) */}
+      <div className="space-y-3">
         {hasPulses ? (
           <PortfolioOpsPulse
             pulses7d={pulses7d}
@@ -463,41 +456,40 @@ export function DeliveryMobileDashboardBlocks({
               </button>
             }
           />
-        ) : refreshing || wantHeavy ? (
+        ) : loading || refreshing ? (
           <div className={`${VERTIAL_SURFACE_STONE} px-4 py-6 text-center text-xs text-stone-400`}>
             Cargando resumen por tienda…
           </div>
-        ) : null}
-
-        {heavyReady || brands.length > 0 ? (
-          <div className="mt-3 space-y-3">
-            <CompanyBrandPerformancePanel
-              businessId={businessId}
-              brands={brands}
-              orders={scopedOrders}
-              loading={loading && brands.length === 0}
-              compact
-            />
-            <WorkerPayMonthPanel
-              summary={workerPay}
-              loading={!workerPay && (loading || refreshing)}
-              compact
-            />
-            {heavyReady ? (
-              <DeliveryOpsInsightsPanel
-                orders={scopedOrders}
-                stores={scopedStores}
-                loading={loading && orders.length === 0}
-                compact
-                newClientsMonth={newClientsMonth}
-                newClientsPrevMonth={newClientsPrevMonth}
-                newClientsToday={newClientsToday}
-                newClientsYesterday={newClientsYesterday}
-              />
-            ) : null}
+        ) : (
+          <div className={`${VERTIAL_SURFACE_STONE} px-4 py-6 text-center text-xs text-stone-400`}>
+            Sin tiendas con PDV todavía
           </div>
-        ) : null}
-      </MobileLazySection>
+        )}
+
+        <CompanyBrandPerformancePanel
+          businessId={businessId}
+          brands={brands}
+          orders={scopedOrders}
+          sessions={tpvSessions}
+          loading={loading && brands.length === 0}
+          compact
+        />
+        <WorkerPayMonthPanel
+          summary={workerPay}
+          loading={!workerPay && (loading || refreshing)}
+          compact
+        />
+        <DeliveryOpsInsightsPanel
+          orders={scopedOrders}
+          stores={scopedStores}
+          loading={loading && orders.length === 0}
+          compact
+          newClientsMonth={newClientsMonth}
+          newClientsPrevMonth={newClientsPrevMonth}
+          newClientsToday={newClientsToday}
+          newClientsYesterday={newClientsYesterday}
+        />
+      </div>
     </div>
   );
 }

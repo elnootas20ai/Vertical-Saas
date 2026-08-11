@@ -174,6 +174,7 @@ import { notifyDeliveryOpsLive } from '../../lib/deliveryOpsLive';
 import {
   isDeliveryOrderEditableOnTpvBoard,
   seedTpvCartFromDeliveryOrder,
+  diffAddedDeliveryOrderItems,
 } from '../../lib/tpvEditDeliveryOrder';
 import { orderAlreadyCobrado } from '../../lib/tpvCajaScope';
 import { normalizeClockinUserId } from '../../lib/clockinUserId';
@@ -3008,6 +3009,37 @@ export function TpvRapidoOrderFlow({
         toast.success(`Pedido #${updated.orderNumber} actualizado`);
       }
 
+      // Comanda cocina solo de lo añadido (misma ruta de impresión que pedido nuevo).
+      const kitchenAdds = diffAddedDeliveryOrderItems(editingDeliveryOrder.items, items);
+      if (kitchenAdds.length > 0 && currentBusiness) {
+        const pdvName = String(
+          updated.salesPointName
+          || register?.session?.pointOfSaleName
+          || '',
+        ).trim();
+        const takerName = selectedOrderTaker?.name || user?.fullName || 'TPV';
+        const ticketBusiness = businessTicketInfoFrom(currentBusiness);
+        const orderNo = String(updated.orderNumber || '').trim();
+        const addNote = orderNo
+          ? `★ ADICIÓN al pedido #${orderNo}`
+          : '★ ADICIÓN al pedido';
+        const prevNotes = String(updated.notes || '').trim();
+        window.setTimeout(() => {
+          void printDeliveryTicket({
+            order: {
+              ...updated,
+              items: kitchenAdds,
+              notes: prevNotes ? `${addNote}\n${prevNotes}` : addNote,
+            },
+            business: ticketBusiness,
+            salesPointName: pdvName,
+            cashierName: takerName,
+            variant: 'kitchen',
+            accountEmail: user?.email,
+          });
+        }, 0);
+      }
+
       onEditingDeliveryOrderSaved?.(updated);
       goBack();
     } catch (err: unknown) {
@@ -3037,6 +3069,11 @@ export function TpvRapidoOrderFlow({
     goBack,
     showTpvError,
     pricedByLineId,
+    currentBusiness,
+    register?.session?.pointOfSaleName,
+    selectedOrderTaker?.name,
+    user?.fullName,
+    user?.email,
   ]);
 
   const accountDue = useMemo(

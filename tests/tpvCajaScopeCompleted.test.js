@@ -52,18 +52,45 @@ describe('isCompletedHistoryBoardOrder', () => {
 });
 
 describe('orderOnCompletedTpvHistoryBoard', () => {
-  it('mantiene entregados del mismo día aunque se crearan antes de reabrir caja', () => {
+  it('no reaparece el historial del turno anterior al reabrir caja el mismo día', () => {
     const session = {
       openedAt: '2026-06-16T20:00:00.000Z',
       closedAt: '',
       status: 'open',
     };
+    // Completado antes de reabrir → fuera del historial de esta caja.
     expect(orderOnCompletedTpvHistoryBoard(
-      { createdAt: '2026-06-16T15:00:00.000Z', status: 'entregado', deliveredAt: '2026-06-16T21:00:00.000Z' },
+      {
+        createdAt: '2026-06-16T15:00:00.000Z',
+        status: 'entregado',
+        deliveredAt: '2026-06-16T18:00:00.000Z',
+      },
+      session,
+    )).toBe(false);
+    expect(orderOnCompletedTpvHistoryBoard(
+      {
+        createdAt: '2026-06-16T15:00:00.000Z',
+        status: 'cancelled',
+        cancelledAt: '2026-06-16T17:30:00.000Z',
+      },
+      session,
+    )).toBe(false);
+    // Creado en el turno nuevo → sí.
+    expect(orderOnCompletedTpvHistoryBoard(
+      {
+        createdAt: '2026-06-16T20:30:00.000Z',
+        status: 'entregado',
+        deliveredAt: '2026-06-16T21:00:00.000Z',
+      },
       session,
     )).toBe(true);
+    // Creado antes de abrir pero cerrado en este turno (Glovo pendiente) → sí.
     expect(orderOnCompletedTpvHistoryBoard(
-      { createdAt: '2026-06-16T15:00:00.000Z', status: 'cancelled' },
+      {
+        createdAt: '2026-06-16T15:00:00.000Z',
+        status: 'entregado',
+        deliveredAt: '2026-06-16T21:00:00.000Z',
+      },
       session,
     )).toBe(true);
     expect(orderOnCompletedTpvHistoryBoard(

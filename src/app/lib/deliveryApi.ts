@@ -2143,6 +2143,12 @@ export interface TpvRegisterSession {
   openingCashCount: CashDenominationCount;
   initialCashAmount: number;
 
+  /**
+   * Efectivo que se deja en el cajón para el día siguiente (al cerrar).
+   * Al abrir mañana se sugiere como fondo inicial (prioridad sobre finalCashAmount).
+   */
+  nextDayInitialCash?: number;
+
   transactions: TpvRegisterTransaction[];
   cashCounts: TpvCashCount[];
 

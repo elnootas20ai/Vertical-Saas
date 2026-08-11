@@ -38,8 +38,10 @@ function isCashDiscrepancy(ruleKey: string): boolean {
   return (
     ruleKey === 'delivery_cash_discrepancy'
     || ruleKey === 'delivery_register_closed_discrepancy'
+    || ruleKey === 'delivery_register_next_day_initial_over'
     || ruleKey.includes('discrepancy')
     || ruleKey.includes('descuadre')
+    || ruleKey.includes('next_day_initial')
   );
 }
 

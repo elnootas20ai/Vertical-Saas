@@ -459,16 +459,29 @@ export function PortfolioOpsPulse({
         </div>
       </div>
 
-      {/* KPIs */}
-      <div
-        className={`grid gap-1.5 ${
-          compact ? 'grid-cols-3' : 'grid-cols-3 sm:grid-cols-3 lg:grid-cols-6'
-        }`}
-      >
+      {/* KPIs: ventas + P/B/T siempre (también compact/móvil) */}
+      <div className="grid grid-cols-3 gap-1.5 lg:grid-cols-8">
         <HeaderStat
           label="Ventas"
           value={fmtEuro(totals.revenuePeriod)}
           sub={<DeltaBadge pct={totals.revenueMomPct} />}
+          dense={compact}
+        />
+        <HeaderStat
+          label="Total caja"
+          value={fmtEuro(opsExcelChannelsTotal(groupChannels))}
+          sub={compact ? undefined : 'Cierre con todo'}
+          dense={compact}
+        />
+        <HeaderStat
+          label="Integraciones"
+          value={fmtEuro(
+            (Number(groupChannels.app) || 0)
+              + (Number(groupChannels.uber) || 0)
+              + (Number(groupChannels.justEat) || 0)
+              + (Number(groupChannels.glovo) || 0),
+          )}
+          sub={compact ? undefined : 'App · Uber · JE · Glovo'}
           dense={compact}
         />
         <HeaderStat
@@ -483,38 +496,28 @@ export function PortfolioOpsPulse({
           sub={compact ? undefined : rangeShort}
           dense={compact}
         />
-        {!compact ? (
-          <>
-            <HeaderStat
-              label="Pizzas"
-              value={formatNumberEs(totals.pizza, { maxFraction: 0 })}
-              sub={rangeShort}
-            />
-            <HeaderStat
-              label="Burgers"
-              value={formatNumberEs(totals.burger, { maxFraction: 0 })}
-              sub={rangeShort}
-            />
-            <HeaderStat
-              label="Tacos"
-              value={formatNumberEs(totals.taco, { maxFraction: 0 })}
-              sub={
-                totals.kebab > 0
-                  ? `Kebab ${formatNumberEs(totals.kebab, { maxFraction: 0 })}`
-                  : rangeShort
-              }
-            />
-          </>
-        ) : (
-          <div className="col-span-3 flex flex-wrap items-center gap-x-3 gap-y-0.5 px-0.5 pt-0.5">
-            <MixLine
-              pizza={totals.pizza}
-              burger={totals.burger}
-              taco={totals.taco}
-              kebab={totals.kebab}
-            />
-          </div>
-        )}
+        <HeaderStat
+          label="Pizzas"
+          value={formatNumberEs(totals.pizza, { maxFraction: 0 })}
+          sub={rangeShort}
+          dense={compact}
+        />
+        <HeaderStat
+          label="Burgers"
+          value={formatNumberEs(totals.burger, { maxFraction: 0 })}
+          sub={rangeShort}
+          dense={compact}
+        />
+        <HeaderStat
+          label="Tacos"
+          value={formatNumberEs(totals.taco, { maxFraction: 0 })}
+          sub={
+            totals.kebab > 0
+              ? `Kebab ${formatNumberEs(totals.kebab, { maxFraction: 0 })}`
+              : rangeShort
+          }
+          dense={compact}
+        />
       </div>
 
       {/* Canales */}
@@ -526,38 +529,37 @@ export function PortfolioOpsPulse({
           </p>
         </div>
         <ChannelMixStrip channels={groupChannels} />
-        {!compact ? (
-          <div className="mt-2.5 overflow-x-auto">
-            <table className="w-full min-w-[560px] text-[11px]">
-              <thead>
-                <tr className="text-[9px] uppercase tracking-wide text-gray-400">
-                  {EXCEL_COLS.map((c) => (
-                    <th key={c.key} className="pb-1 pr-2 text-right font-semibold">
-                      {c.label}
-                    </th>
-                  ))}
-                  <th className="pb-1 text-right font-semibold">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="border-t border-gray-200 dark:border-gray-700">
-                  {EXCEL_COLS.map((c) => (
-                    <td key={c.key} className="py-1.5 pr-2 text-right font-semibold tabular-nums">
-                      <MoneyCell n={Number(groupChannels[c.key]) || 0} />
-                    </td>
-                  ))}
-                  <td className="py-1.5 text-right font-extrabold tabular-nums">
-                    {fmtEuro(opsExcelChannelsTotal(groupChannels))}
+        <div className="mt-2.5 overflow-x-auto">
+          <table className="w-full min-w-[560px] text-[11px]">
+            <thead>
+              <tr className="text-[9px] uppercase tracking-wide text-gray-400">
+                {EXCEL_COLS.map((c) => (
+                  <th key={c.key} className="pb-1 pr-2 text-right font-semibold">
+                    {c.label}
+                  </th>
+                ))}
+                <th className="pb-1 text-right font-semibold">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="border-t border-gray-200 dark:border-gray-700">
+                {EXCEL_COLS.map((c) => (
+                  <td key={c.key} className="py-1.5 pr-2 text-right font-semibold tabular-nums">
+                    <MoneyCell n={Number(groupChannels[c.key]) || 0} />
                   </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        ) : null}
+                ))}
+                <td className="py-1.5 text-right font-extrabold tabular-nums">
+                  {fmtEuro(opsExcelChannelsTotal(groupChannels))}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      {/* Ranking: cards solo móvil; tabla completa en escritorio */}
-      <div className={`space-y-1.5 ${compact ? '' : 'lg:hidden'}`}>
+      {/* Cards móvil: solo si compact explícito. La foto/PC = tabla TIENDAS siempre. */}
+      {compact ? (
+      <div className="space-y-1.5">
         <div className="flex items-center justify-between gap-2">
           <p className="text-[9px] font-bold uppercase tracking-wide text-gray-400">Tiendas</p>
           <p className="text-[9px] font-semibold text-[var(--v-blue,#2563eb)]">
@@ -658,9 +660,10 @@ export function PortfolioOpsPulse({
           );
         })}
       </div>
+      ) : null}
 
       {!compact ? (
-        <div className="hidden rounded-xl border border-gray-100 dark:border-gray-700 lg:block">
+        <div className="rounded-xl border border-gray-100 dark:border-gray-700">
           <div className="flex items-center justify-between gap-2 border-b border-gray-100 bg-gray-50 px-3 py-1.5 dark:border-gray-700 dark:bg-gray-900/40">
             <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">Tiendas</p>
             <p className="text-[10px] font-semibold text-[var(--v-blue,#2563eb)]">

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   seedTpvCartFromDeliveryOrder,
   isDeliveryOrderEditableOnTpvBoard,
+  diffAddedDeliveryOrderItems,
 } from '../src/app/lib/tpvEditDeliveryOrder.ts';
 
 describe('tpvEditDeliveryOrder', () => {
@@ -32,6 +33,28 @@ describe('tpvEditDeliveryOrder', () => {
     expect(
       isDeliveryOrderEditableOnTpvBoard({ status: 'entregado', deliveryType: 'recogida' }),
     ).toBe(false);
+  });
+
+  it('diffAddedDeliveryOrderItems: nuevas líneas y subidas de cantidad', () => {
+    const prev = [
+      { id: 'a', name: 'Pizza', quantity: 1, unitPrice: 10, total: 10 },
+      { id: 'b', name: 'Cola', quantity: 2, unitPrice: 2, total: 4 },
+    ];
+    const next = [
+      { id: 'a', name: 'Pizza', quantity: 1, unitPrice: 10, total: 10 },
+      { id: 'b', name: 'Cola', quantity: 3, unitPrice: 2, total: 6 },
+      { id: 'c', name: 'Burger', quantity: 1, unitPrice: 8, total: 8 },
+    ];
+    const added = diffAddedDeliveryOrderItems(prev, next);
+    expect(added).toHaveLength(2);
+    expect(added.find((i) => i.id === 'b')).toMatchObject({ quantity: 1, total: 2 });
+    expect(added.find((i) => i.id === 'c')).toMatchObject({ name: 'Burger', quantity: 1 });
+  });
+
+  it('diffAddedDeliveryOrderItems: quitar no genera adición', () => {
+    const prev = [{ id: 'a', name: 'Pizza', quantity: 2, unitPrice: 10, total: 20 }];
+    const next = [{ id: 'a', name: 'Pizza', quantity: 1, unitPrice: 10, total: 10 }];
+    expect(diffAddedDeliveryOrderItems(prev, next)).toEqual([]);
   });
 
   it('siembra carrito desde líneas del pedido', () => {

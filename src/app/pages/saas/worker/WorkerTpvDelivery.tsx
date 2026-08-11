@@ -31,6 +31,7 @@ import { pickDefaultActivePdvId } from '../../../lib/deliveryOpsPdvSelection';
 import { useTpvOrderFlowChrome, useTpvSuppressBottomBar, useTpvOrderFlowLockControls } from '../../../context/TpvChromeContext';
 import {
   cancelledOrderHistoryLabel,
+  hasTpvOpenRegisterLatch,
   isCancelledDeliveryOrder,
   isDeliveredBoardOrder,
   isTpvMontajeBoardOrder,
@@ -1380,7 +1381,8 @@ export function WorkerTpvDelivery({
   }
   const register = registerCtx ?? registerStickyRef.current;
   const registerOpen = Boolean(register && isTpvRegisterSessionOpen(register.session));
-  const canUseOrderFlow = registerOpen || boardReady;
+  // boardReady + latch: el Context a veces parpadea aunque la caja siga abierta.
+  const canUseOrderFlow = registerOpen || boardReady || hasTpvOpenRegisterLatch();
   const historySectionRef = useRef<HTMLDivElement | null>(null);
 
   const isTabletSession = registerScope.isTabletSession;
@@ -2089,6 +2091,7 @@ export function WorkerTpvDelivery({
       const sticky = registerStickyRef.current;
       if (sticky && isTpvRegisterSessionOpen(sticky.session)) return;
       if (boardReady) return;
+      if (hasTpvOpenRegisterLatch()) return;
       releaseOrderFlowClickLock();
       setEditingOrder(null);
       setView('board');
@@ -2098,7 +2101,13 @@ export function WorkerTpvDelivery({
   }, [view, canUseOrderFlow, boardReady, releaseOrderFlowClickLock]);
 
   const startEditOrder = useCallback((order: DeliveryOrder) => {
-    if (!canUseOrderFlow) {
+    const sticky = registerStickyRef.current;
+    const ok =
+      canUseOrderFlow
+      || boardReady
+      || hasTpvOpenRegisterLatch()
+      || Boolean(sticky && isTpvRegisterSessionOpen(sticky.session));
+    if (!ok) {
       toast.error('Abre la caja de la tienda antes de editar un pedido');
       return;
     }
@@ -2110,10 +2119,16 @@ export function WorkerTpvDelivery({
     setSelectedOrder(null);
     setEditingOrder(order);
     setView('new-order');
-  }, [canUseOrderFlow, orderFlowLock]);
+  }, [canUseOrderFlow, boardReady, orderFlowLock]);
 
   const startNewOrder = useCallback(() => {
-    if (!canUseOrderFlow) {
+    const sticky = registerStickyRef.current;
+    const ok =
+      canUseOrderFlow
+      || boardReady
+      || hasTpvOpenRegisterLatch()
+      || Boolean(sticky && isTpvRegisterSessionOpen(sticky.session));
+    if (!ok) {
       toast.error('Abre la caja de la tienda antes de crear un pedido');
       return;
     }
@@ -2123,7 +2138,7 @@ export function WorkerTpvDelivery({
     }
     setEditingOrder(null);
     setView('new-order');
-  }, [canUseOrderFlow, orderFlowLock]);
+  }, [canUseOrderFlow, boardReady, orderFlowLock]);
 
   const exitTabletTpv = useCallback(() => {
     void leaveTpvTabletSession(logout);

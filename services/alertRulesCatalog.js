@@ -55,6 +55,7 @@ export const ALL_ALERT_RULE_DEFINITIONS = [
   r('delivery_cash_discrepancy', 'delivery', 'pdvs', 'Descuadre de caja', 'Diferencia al cerrar caja respecto al esperado', { ...pushEmail, urgency: 'critical' }),
   r('delivery_register_closed_ok', 'delivery', 'pdvs', 'Caja cerrada correctamente', 'Alerta positiva: cierre TPV sin descuadre', { channels: ['inApp'], urgency: 'low' }),
   r('delivery_register_closed_discrepancy', 'delivery', 'pdvs', 'Caja cerrada con descuadre', 'Alerta negativa: cierre TPV con diferencia de efectivo', { ...pushEmail, urgency: 'critical' }),
+  r('delivery_register_next_day_initial_over', 'delivery', 'pdvs', 'Inicial mañana > contado', 'Al cerrar dejaron más fondo para mañana del efectivo contado: hay que añadir dinero al cajón', { ...pushEmail, urgency: 'high' }),
   r('delivery_channel_silent', 'delivery', 'delivery', 'Canal sin actividad', 'Canal de pedidos (web, app, agregador) sin pedidos en X minutos', { urgency: 'medium' }),
   r('delivery_low_margin', 'delivery', 'delivery', 'Margen bajo en delivery', 'Margen estimado del día por debajo del umbral', { urgency: 'medium' }),
   r('delivery_failed_delivery', 'delivery', 'delivery', 'Entrega fallida', 'Pedido que falló o se canceló tras salir a reparto', { ...pushInApp, urgency: 'high' }),
@@ -259,6 +260,7 @@ export const DELIVERY_CEO_DEFAULT_ENABLED_RULE_IDS = [
   'delivery_cash_pending_close',
   'delivery_cash_discrepancy',
   'delivery_register_closed_discrepancy',
+  'delivery_register_next_day_initial_over',
   'delivery_delayed_order',
   'delivery_order_very_delayed',
   'delivery_unpaid_order',
@@ -276,6 +278,7 @@ export const MANAGER_FOCUS_ENABLED_RULE_IDS = [
   'delivery_cash_pending_close',
   'delivery_cash_discrepancy',
   'delivery_register_closed_discrepancy',
+  'delivery_register_next_day_initial_over',
 ];
 
 /** Reglas visibles en ajustes Delivery (mismo pack; el resto se oculta). */

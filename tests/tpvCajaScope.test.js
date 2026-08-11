@@ -443,4 +443,22 @@ describe('findLastClosedTpvSession', () => {
     expect(last?._id).toBe('c2');
     expect(resolvePreviousCloseCashAmount(last)).toBe(80);
   });
+
+  it('prefers nextDayInitialCash over finalCashAmount for next open', () => {
+    const last = {
+      ...closedTpv,
+      nextDayInitialCash: 120,
+      finalCashAmount: 500,
+    };
+    expect(resolvePreviousCloseCashAmount(last)).toBe(120);
+  });
+
+  it('allows nextDayInitialCash 0 (empty drawer left)', () => {
+    const last = {
+      ...closedTpv,
+      nextDayInitialCash: 0,
+      finalCashAmount: 500,
+    };
+    expect(resolvePreviousCloseCashAmount(last)).toBe(0);
+  });
 });

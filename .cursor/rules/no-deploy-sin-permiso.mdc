@@ -1,0 +1,41 @@
+---
+description: PROHIBIDO deploy sin permiso explícito de Uriel
+alwaysApply: true
+---
+
+# Deploy = NUNCA sin permiso
+
+## Prohibido
+
+El agente **NO puede** ejecutar, iniciar ni “terminar” ningún deploy sin un mensaje **aparte** de Uriel que diga claro una de estas frases (o equivalente inequívoco):
+
+- «haz deploy»
+- «deploy frontend»
+- «deploy backend»
+- «deploy:all»
+- «sí, haz deploy»
+- «confirmo deploy»
+
+Incluye: `npm run deploy:frontend`, `deploy:backend`, `deploy:all`, scripts `scripts/deploy-*.mjs`, scp/rsync a VPS, subir `dist/`, reiniciar servicios en prod “para publicar”.
+
+## No vale como permiso
+
+- «arréglalo»
+- «ya»
+- «de una puta vez»
+- «en producción»
+- «el dashboard está roto»
+- enfado, urgencia o asumir por el hilo
+- haber hablado de deploy en un mensaje anterior sin OK nuevo
+
+## Qué sí puede hacer sin deploy
+
+- Leer código, git log, diagnosticar
+- Proponer el fix en local
+- Decir: «Listo en local. Si quieres, dime **haz deploy**.»
+
+## Si duda
+
+**No deploy.** Preguntar.
+
+Complementa `produccion-esperar-confirmacion.mdc` y `produccion-no-eliminar-sin-permiso.mdc`. Esta regla es específica y más dura: **deploy solo con frase de permiso**.

@@ -14,8 +14,6 @@ import { useBusiness } from '../../context/BusinessContext';
 import { fetchDashboardData, type DashboardServerData, type DashboardAlert, type QuickFinance, type SalesClosureKpis } from '../../lib/dashboardApi';
 import { fetchActiveNow, fetchClockinStats, formatMinutes, type ActiveMember, type ClockinStatsSummary } from '../../lib/clockinsApi';
 import { fetchAlertsSummary, type AlertsSummary } from '../../lib/clockinAlertsApi';
-import { fetchTeamDashboardSnapshot, type TeamDashboardSnapshot } from '../../lib/teamDashboardApi';
-import { TeamRrhhDashboardWidget } from '../../components/saas/TeamRrhhDashboardWidget';
 import { AlertSummaryWidget } from '../../components/saas/AlertSummaryWidget';
 import {
   WorkerPayMonthPanel,
@@ -32,6 +30,7 @@ import {
   TPV_SESSION_SYNC_EVENT,
   type DeliveryOrder,
   type DeliveryOrderStatus,
+  type TpvRegisterSession,
 } from '../../lib/deliveryApi';
 import { useDeliveryOrdersLive } from '../../hooks/useDeliveryOrdersLive';
 import {
@@ -89,7 +88,7 @@ import {
 } from '../../lib/portfolioMetrics';
 import { PortfolioOpsPulse } from '../../components/saas/PortfolioOpsPulse';
 import { CompanyBrandPerformancePanel } from '../../components/saas/CompanyBrandPerformancePanel';
-import { localCalendarDayKey } from '../../lib/tpvCajaScope';
+import { localCalendarDayKey, localDayBoundsForKey } from '../../lib/tpvCajaScope';
 import {
   buildSoldProductDailySeries,
   resolveActiveSoldFamilies,
@@ -107,7 +106,7 @@ import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
 
 // ─── Widget personalización ────────────────────────────────────────────────────
 
-type WidgetId = 'kpis_main' | 'quick_access' | 'alertas' | 'charts' | 'operations' | 'quick_finance' | 'funnel' | 'actividad' | 'clockins' | 'availability' | 'team_rrhh';
+type WidgetId = 'kpis_main' | 'quick_access' | 'alertas' | 'charts' | 'operations' | 'quick_finance' | 'funnel' | 'clockins';
 
 interface WidgetConfig {
   id: WidgetId;
@@ -124,12 +123,11 @@ const DEFAULT_WIDGETS: WidgetConfig[] = [
   { id: 'quick_finance', label: 'Bloque financiero',      visible: true },
   { id: 'funnel',        label: 'Embudo de ventas CRM',   visible: true },
   { id: 'clockins',      label: 'Fichajes del equipo',    visible: true },
-  { id: 'availability',  label: 'Disponibilidad equipo',  visible: true },
-  { id: 'team_rrhh',     label: 'Equipo y RRHH',          visible: true },
-  { id: 'actividad',     label: 'Actividad reciente',     visible: true },
 ];
 
-const DASH_CONFIG_KEY = 'vertial_dashboard_config_v2';
+const REMOVED_WIDGET_IDS = new Set(['actividad', 'availability', 'team_rrhh']);
+
+const DASH_CONFIG_KEY = 'vertial_dashboard_config_v3';
 const DASH_RUNTIME_CACHE_KEY = 'vertial_dashboard_runtime_v1';
 const DASH_RUNTIME_TTL_MS = 90_000;
 
@@ -141,10 +139,12 @@ function loadWidgetConfig(scopeId?: string): WidgetConfig[] {
   try {
     const saved = localStorage.getItem(getDashboardConfigStorageKey(scopeId));
     if (!saved) return DEFAULT_WIDGETS;
-    const parsed = JSON.parse(saved) as WidgetConfig[];
-    const ids = parsed.map(w => w.id);
+    const parsed = (JSON.parse(saved) as WidgetConfig[]).filter(
+      (w) => w?.id && !REMOVED_WIDGET_IDS.has(w.id) && DEFAULT_WIDGETS.some((d) => d.id === w.id),
+    );
+    const ids = parsed.map((w) => w.id);
     const merged = [...parsed];
-    DEFAULT_WIDGETS.forEach(d => { if (!ids.includes(d.id)) merged.push(d); });
+    DEFAULT_WIDGETS.forEach((d) => { if (!ids.includes(d.id)) merged.push(d); });
     return merged;
   } catch { return DEFAULT_WIDGETS; }
 }
@@ -287,27 +287,6 @@ function formatEur(n: number) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M €`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k €`;
   return `${n.toLocaleString('es-ES', { maximumFractionDigits: 0 })} €`;
-}
-
-function formatTimeAgo(date: Date | string, lang = 'es'): string {
-  const now = new Date();
-  const past = new Date(date);
-  const diffMs = now.getTime() - past.getTime();
-  const diffMins  = Math.floor(diffMs / (1000 * 60));
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-  const diffDays  = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-  if (lang === 'en') {
-    if (diffMins < 60)  return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays === 1) return 'Yesterday';
-    if (diffDays < 7)   return `${diffDays} days ago`;
-  } else {
-    if (diffMins < 60)  return `Hace ${diffMins} min`;
-    if (diffHours < 24) return `Hace ${diffHours}h`;
-    if (diffDays === 1) return 'Ayer';
-    if (diffDays < 7)   return `Hace ${diffDays} días`;
-  }
-  return past.toLocaleDateString(lang === 'en' ? 'en-GB' : 'es-ES', { day: 'numeric', month: 'short' });
 }
 
 // ─── Gráfica de progreso ───────────────────────────────────────────────────
@@ -592,9 +571,14 @@ function DashboardPage() {
     );
   }
 
-  // App / iPhone: Home CEO compacto (PC sigue con el dashboard completo).
+  // App / iPhone: home compacto en verticales genéricos.
+  // Delivery (pizzería/burger/…): SIEMPRE el dashboard completo (pulse, marcas, KPIs, gráficas).
   if ((isMobile || isVertialNativeApp()) && !isPortfolioView) {
-    return <CeoMobileHome />;
+    const isDelivery =
+      vertical === 'delivery' || isDeliveryBusinessType(currentBusiness?.businessType);
+    if (!isDelivery) {
+      return <CeoMobileHome />;
+    }
   }
 
   /**
@@ -643,10 +627,6 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
 
   const { snapshot: ebitdaMonth, loading: ebitdaLoading } = useCoreEbitdaMonth(canViewEbitda);
   const financeUserId = resolveBusinessDataUserId(authUser, currentBusiness);
-  const teamMembers = useMemo(
-    () => (currentBusiness?.members || []).map((m) => ({ user_id: m.user_id, fullName: m.fullName })),
-    [currentBusiness?.members],
-  );
   const dashboardConfigScope = `${authUser?.user_id || 'anon'}:${businessId || 'default'}`;
   const runtimeCacheScope = dashboardConfigScope;
 
@@ -711,8 +691,6 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
   const [clockinsStatsSummary, setClockinsStatsSummary] = useState<ClockinStatsSummary | null>(null);
   const [clockinsAlertsSummary, setClockinsAlertsSummary] = useState<AlertsSummary | null>(null);
   const [clockinsLoading, setClockinsLoading] = useState(false);
-  const [teamSnapshot, setTeamSnapshot] = useState<TeamDashboardSnapshot | null>(null);
-  const [teamLoading, setTeamLoading] = useState(false);
   const [deliveryMetrics, setDeliveryMetrics] = useState<PortfolioMetrics | null>(null);
   const [deliveryScope, setDeliveryScope] = useState<{
     orders: DeliveryOrder[];
@@ -729,6 +707,8 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
     pulsesMonth: StoreOpsPulse[];
   } | null>(null);
   const [workerPayMonth, setWorkerPayMonth] = useState<WorkerPayMonthSummary | null>(null);
+  /** Cierres de caja cargados (para sumar Caja 2 al panel de Marcas). */
+  const [deliveryTpvSessions, setDeliveryTpvSessions] = useState<TpvRegisterSession[]>([]);
 
   const isDeliveryVertical = vertical === 'delivery' || isDeliveryBusinessType(currentBusiness?.businessType);
   const isCompraventaVertical = vertical === 'carDealership';
@@ -740,6 +720,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
       setDeliveryScope(null);
       setDeliveryOpsPulses(null);
       setWorkerPayMonth(null);
+      setDeliveryTpvSessions([]);
       return;
     }
     const dataUserId = resolveBusinessDataUserId(authUser, currentBusiness);
@@ -748,6 +729,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
       setDeliveryScope(null);
       setDeliveryOpsPulses({ pulses7d: [], pulsesMonth: [] });
       setWorkerPayMonth(null);
+      setDeliveryTpvSessions([]);
       return;
     }
     const scopeBusinessId = String(currentBusiness.business_id || currentBusiness.id || '')
@@ -893,6 +875,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
           staffConsumptionsResult.items || [],
         ),
       );
+      setDeliveryTpvSessions(tpvSessions || []);
 
       if (pulseStores.length === 0 && (orderResult.orders || []).length === 0) {
         setDeliveryMetrics(emptyPortfolioMetrics());
@@ -947,8 +930,10 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
       console.warn('[Dashboard] loadDeliveryDashboard', err);
       setDeliveryMetrics(emptyPortfolioMetrics());
       setDeliveryScope(null);
-      setDeliveryOpsPulses(null);
+      // Nunca ocultar el bloque «Resumen operativo»: con error se muestra vacío.
+      setDeliveryOpsPulses({ pulses7d: [], pulsesMonth: [] });
       setWorkerPayMonth(null);
+      setDeliveryTpvSessions([]);
     }
   }, [isDeliveryVertical, authUser, currentBusiness, businesses.length]);
 
@@ -1144,12 +1129,9 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
           setClockinsAlertsSummary(alertsSummary || null);
         })
         .catch(() => { /* noop */ });
-      fetchTeamDashboardSnapshot(businessId, teamMembers)
-        .then(setTeamSnapshot)
-        .catch(() => { /* noop */ });
     }, 45000);
     return () => window.clearInterval(intervalId);
-  }, [businessId, authUser?.user_id, teamMembers]);
+  }, [businessId, authUser?.user_id]);
 
   useEffect(() => {
     if (!businessId) return;
@@ -1178,29 +1160,6 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
   }, [businessId]);
 
   useEffect(() => {
-    if (!businessId) {
-      setTeamSnapshot(null);
-      return;
-    }
-    let cancelled = false;
-    setTeamLoading(true);
-    fetchTeamDashboardSnapshot(businessId, teamMembers)
-      .then((snapshot) => {
-        if (!cancelled) {
-          setTeamSnapshot(snapshot);
-          setTeamLoading(false);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setTeamSnapshot(null);
-          setTeamLoading(false);
-        }
-      });
-    return () => { cancelled = true; };
-  }, [businessId, teamMembers]);
-
-  useEffect(() => {
     try {
       sessionStorage.setItem(
         getDashboardRuntimeCacheKey(runtimeCacheScope),
@@ -1223,7 +1182,6 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
     if (!authUser?.user_id || serverLoading) return;
     setServerLoading(true);
     setClockinsLoading(true);
-    setTeamLoading(true);
     fetchDashboardData(authUser.user_id)
       .then((data) => { setServerData(data); setServerUpdatedAt(data.updatedAt); setServerLoading(false); })
       .catch(() => setServerLoading(false));
@@ -1248,20 +1206,10 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
           setClockinsAlertsSummary(null);
           setClockinsLoading(false);
         });
-      fetchTeamDashboardSnapshot(businessId, teamMembers)
-        .then((snapshot) => {
-          setTeamSnapshot(snapshot);
-          setTeamLoading(false);
-        })
-        .catch(() => {
-          setTeamSnapshot(null);
-          setTeamLoading(false);
-        });
     } else {
       setClockinsLoading(false);
-      setTeamLoading(false);
     }
-  }, [authUser?.user_id, businessId, teamMembers, serverLoading, isDeliveryVertical, loadDeliveryDashboard]);
+  }, [authUser?.user_id, businessId, serverLoading, isDeliveryVertical, loadDeliveryDashboard]);
 
   // ── KPI values (server → local fallback) ──
   const sk = serverData?.kpis;
@@ -1413,46 +1361,6 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
     );
   }, [isDeliveryVertical, scopedDeliveryOrders, soldProductFamilies, daysRange]);
 
-  // ── Recent activity ──
-  const recentActivity = useMemo(() => {
-    const items: { type: string; message: string; time: string; icon: React.ReactNode; ts: Date; dot: string }[] = [];
-    if (isDeliveryVertical && deliveryScope) {
-      scopedDeliveryOrders
-        .filter(isDeliveryOrderDelivered)
-        .sort((a, b) => getDeliveryOrderDeliveredAtIso(b).localeCompare(getDeliveryOrderDeliveredAtIso(a)))
-        .slice(0, 8)
-        .forEach((o) => {
-          const when = getDeliveryOrderDeliveredAtIso(o);
-          if (!when) return;
-          items.push({
-            type: 'delivery',
-            message: `Pedido ${String(o.orderNumber || o._id || '').slice(-8)} · ${formatEur(Number(o.totalAmount) || 0)}`,
-            time: formatTimeAgo(when, i18n.language),
-            icon: <Package className="w-3.5 h-3.5" />,
-            ts: new Date(when),
-            dot: 'bg-emerald-400',
-          });
-        });
-      return items;
-    }
-    vehicles.slice(-3).reverse().forEach(v => items.push({
-      type: 'vehicle', message: `Nuevo: ${v.brand} ${v.model} ${v.year}`,
-      time: formatTimeAgo(v.createdAt, i18n.language), icon: <Car className="w-3.5 h-3.5" />,
-      ts: new Date(v.createdAt), dot: 'bg-blue-400',
-    }));
-    soldThisMonth.slice(0, 2).forEach(v => items.push({
-      type: 'sale', message: `Venta: ${v.brand} ${v.model} · ${formatEur(v.salePrice || 0)}`,
-      time: formatTimeAgo(v.soldAt || v.createdAt, i18n.language), icon: <TrendingUp className="w-3.5 h-3.5" />,
-      ts: new Date(v.soldAt || v.createdAt), dot: 'bg-emerald-400',
-    }));
-    documents.slice(-2).reverse().forEach(d => items.push({
-      type: 'document', message: `Doc: ${d.name}`,
-      time: formatTimeAgo(d.createdAt, i18n.language), icon: <FileText className="w-3.5 h-3.5" />,
-      ts: new Date(d.createdAt), dot: 'bg-violet-400',
-    }));
-    return items.sort((a, b) => b.ts.getTime() - a.ts.getTime()).slice(0, 8);
-  }, [isDeliveryVertical, deliveryScope, scopedDeliveryOrders, vehicles, soldThisMonth, documents, i18n.language]);
-
   // ── Quick access items ──
   const quickAccessItems = useMemo(() => getQuickAccessItems(vertical), [vertical]);
 
@@ -1461,7 +1369,6 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
   const deliveryDataLoading = isDeliveryVertical && deliveryMetrics === null;
   const alertsLoading = serverLoading && !serverData;
   const chartsLoading = isDeliveryVertical ? deliveryDataLoading : baseDataLoading;
-  const activityLoading = isDeliveryVertical ? deliveryDataLoading : baseDataLoading;
 
   // ── Funnel totals ──
   const funnelTotal = funnelCounts['new'] || 0;
@@ -1575,6 +1482,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
             businessId={businessId}
             brands={deliveryBrands}
             orders={scopedDeliveryOrders}
+            sessions={deliveryTpvSessions}
             loading={deliveryDataLoading}
           />
         ) : null}
@@ -2286,105 +2194,6 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                     </button>
                   )}
                     </>
-                  )}
-                </div>
-              </div>
-            </DraggableWidget>
-          </div>
-        )}
-
-        {/* ═══ DISPONIBILIDAD EQUIPO ═══ */}
-        {isVisible('availability') && (
-          <div style={{ order: getWidgetOrder('availability') }}>
-            <DraggableWidget id="availability" {...dragProps}>
-              <div className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
-                  <div className="flex items-center gap-2">
-                    <CalendarRange className="w-4 h-4 text-orange-500" />
-                    <p className="text-sm font-bold text-gray-900 dark:text-gray-100">Disponibilidad hoy</p>
-                  </div>
-                  <button onClick={() => navigate('/saas/equipo/horarios-vacaciones')} className="flex items-center gap-1 text-xs font-medium text-orange-600 dark:text-orange-400 hover:underline">
-                    Ver horarios <ArrowRight className="w-3 h-3" />
-                  </button>
-                </div>
-                <div className="p-5">
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <div className="text-center p-3 rounded-xl bg-green-50 dark:bg-green-900/20">
-                      <p className="text-2xl font-bold text-green-700 dark:text-green-400">{teamSnapshot?.clockedInNow ?? clockinsActive.filter(a => a.status === 'active').length}</p>
-                      <p className="text-[10px] font-medium text-green-600 dark:text-green-400/70 uppercase">Trabajando</p>
-                    </div>
-                    <div className="text-center p-3 rounded-xl bg-blue-50 dark:bg-blue-900/20">
-                      <p className="text-2xl font-bold text-blue-700 dark:text-blue-400">{teamLoading ? '…' : teamSnapshot?.onVacationToday ?? 0}</p>
-                      <p className="text-[10px] font-medium text-blue-600 dark:text-blue-400/70 uppercase">Vacaciones</p>
-                    </div>
-                    <div className="text-center p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20">
-                      <p className="text-2xl font-bold text-amber-700 dark:text-amber-400">{teamLoading ? '…' : teamSnapshot?.onAbsenceToday ?? 0}</p>
-                      <p className="text-[10px] font-medium text-amber-600 dark:text-amber-400/70 uppercase">Ausencia</p>
-                    </div>
-                    <div className="text-center p-3 rounded-xl bg-slate-50 dark:bg-slate-800">
-                      <p className="text-2xl font-bold text-slate-700 dark:text-slate-300">{teamLoading ? '…' : teamSnapshot?.noShiftToday ?? 0}</p>
-                      <p className="text-[10px] font-medium text-slate-500 uppercase">Sin turno</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </DraggableWidget>
-          </div>
-        )}
-
-        {/* ═══ EQUIPO / RRHH ═══ */}
-        {isVisible('team_rrhh') && (
-          <div style={{ order: getWidgetOrder('team_rrhh') }}>
-            <DraggableWidget id="team_rrhh" {...dragProps}>
-              <TeamRrhhDashboardWidget
-                snapshot={teamSnapshot}
-                loading={teamLoading}
-                onOpenTeam={() => navigate('/saas/team')}
-                onOpenClockins={() => navigate('/saas/clockins')}
-                onOpenSchedules={() => navigate('/saas/equipo/horarios-vacaciones')}
-                onOpenRequests={() => navigate('/saas/equipo/solicitudes')}
-                onOpenPayroll={() => navigate('/saas/payroll?tab=nominas')}
-              />
-            </DraggableWidget>
-          </div>
-        )}
-
-        {/* ═══ ACTIVIDAD RECIENTE ═══ */}
-        {isVisible('actividad') && (
-          <div style={{ order: getWidgetOrder('actividad') }}>
-            <DraggableWidget id="actividad" {...dragProps}>
-              <div className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
-                  <div className="flex items-center gap-2">
-                    <Activity className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-                    <p className="text-sm font-bold text-gray-900 dark:text-gray-100">Actividad reciente</p>
-                  </div>
-                </div>
-                <div className="divide-y divide-gray-50 dark:divide-gray-800">
-                  {activityLoading ? (
-                    <div className="p-4 space-y-2 animate-pulse">
-                      {[...Array(4)].map((_, i) => (
-                        <div key={i} className="h-10 rounded-xl bg-gray-100 dark:bg-gray-700" />
-                      ))}
-                    </div>
-                  ) : recentActivity.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-10 px-5">
-                      <p className="text-sm font-semibold text-gray-400 dark:text-gray-500">Sin actividad reciente</p>
-                      <p className="text-xs text-gray-300 dark:text-gray-600 mt-0.5">Los cambios aparecerán aquí</p>
-                    </div>
-                  ) : (
-                    recentActivity.map((item, i) => (
-                      <div key={i} className="flex items-center gap-3 px-5 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
-                        <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${item.dot}`} />
-                        <div className="w-7 h-7 bg-gray-100 dark:bg-gray-700 rounded-xl flex items-center justify-center flex-shrink-0 text-gray-500 dark:text-gray-400">
-                          {item.icon}
-                        </div>
-                        <p className="flex-1 text-xs text-gray-700 dark:text-gray-300 min-w-0 truncate">{item.message}</p>
-                        <div className="flex items-center gap-1 text-[10px] text-gray-400 dark:text-gray-500 flex-shrink-0">
-                          <Clock className="w-3 h-3" /> {item.time}
-                        </div>
-                      </div>
-                    ))
                   )}
                 </div>
               </div>
