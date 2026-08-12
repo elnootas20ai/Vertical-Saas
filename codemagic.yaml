@@ -46,9 +46,20 @@ workflows:
         script: npm run build
       - name: Sincronizar Capacitor iOS (live URL tienda)
         script: |
+          set -e
           echo "CAPACITOR_SERVER_URL=$CAPACITOR_SERVER_URL"
+          # capacitor.config.ts necesita typescript en node_modules (devDependency).
+          if ! node -e "require('typescript')"; then
+            echo "ERROR: falta el paquete typescript. Añádelo con: npm i -D typescript"
+            exit 1
+          fi
           npx cap sync ios
           echo "=== capacitor.config.json (iOS) ==="
+          if [ ! -f ios/App/App/capacitor.config.json ]; then
+            echo "ERROR: cap sync no generó ios/App/App/capacitor.config.json"
+            ls -la ios/App/App/ || true
+            exit 1
+          fi
           cat ios/App/App/capacitor.config.json
       - name: Instalar pods
         script: |

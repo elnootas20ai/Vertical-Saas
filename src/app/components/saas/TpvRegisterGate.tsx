@@ -3402,10 +3402,13 @@ function ClockInModal({
   const [selectedOpenerId, setSelectedOpenerId] = useState('');
   const didAutoSelectOpenerRef = useRef(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!businessId) return;
-    setLoading(true);
-    setError('');
+    const silent = Boolean(opts?.silent);
+    if (!silent) {
+      setLoading(true);
+      setError('');
+    }
     try {
       const today = todayDateStr();
       const yesterday = dateDaysAgo(1);
@@ -3457,9 +3460,11 @@ function ClockInModal({
         setVacationBlockedById({});
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error al cargar fichajes');
+      if (!silent) {
+        setError(e instanceof Error ? e.message : 'Error al cargar fichajes');
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [businessId, ownerUserId, pdvId, workCenterId]);
 
@@ -5743,8 +5748,9 @@ export function TpvRegisterGate({
     return () => window.clearTimeout(timer);
   }, [loading]);
 
-  // No mostrar Abrir caja hasta confirmar que no hay sesión open (o timeout corto).
-  // Si sticky sigue abierta (pick/PDV parpadeando), no forzar «Recuperando caja…».
+  // Tras el primer load: hold corto por si llega una sesión open un tick tarde.
+  // NO rearmar el hold en cada refresh de `sessions` (poll 30s / SSE): eso
+  // intercambiaba OpeningScreen ↔ «Recuperando caja…» y parpadeaba sin parar.
   useEffect(() => {
     if (isTpvRegisterSessionOpen(activeSession)) {
       writeTpvOpenRegisterLatch(activeSession);
@@ -5760,14 +5766,11 @@ export function TpvRegisterGate({
       setOpeningRecoverHold(true);
       return;
     }
-    if (!sessions.some((s) => isTpvRegisterSessionOpen(s))) {
-      writeTpvOpenRegisterLatch(null);
-    }
-    // Hold mínimo: las sesiones ya están; no bloquear la UI medio segundo de más.
+    writeTpvOpenRegisterLatch(null);
     setOpeningRecoverHold(true);
     const timer = window.setTimeout(() => setOpeningRecoverHold(false), 80);
     return () => window.clearTimeout(timer);
-  }, [loading, activeSession?._id, activeSession?.status, sessions]);
+  }, [loading, activeSession?._id, activeSession?.status]);
 
   const attachOpenSession = useCallback((
     existing: TpvRegisterSession,
