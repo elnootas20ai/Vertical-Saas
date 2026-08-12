@@ -53,7 +53,37 @@ workflows:
             echo "ERROR: falta el paquete typescript. Añádelo con: npm i -D typescript"
             exit 1
           fi
-          npx cap sync ios
+          export COCOAPODS_DISABLE_STATS=true
+          # GitHub a veces da 503 al bajar IONGeolocationLib (Capacitor Geolocation).
+          ION_URL="https://github.com/ionic-team/ion-ios-geolocation/releases/download/2.1.0/IONGeolocationLib.zip"
+          for attempt in 1 2 3 4 5 6; do
+            echo "Pre-descarga IONGeolocationLib intento $attempt…"
+            if curl -fL --retry 4 --retry-all-errors --retry-delay 8 \
+              --connect-timeout 30 --max-time 180 \
+              -o "${TMPDIR:-/tmp}/IONGeolocationLib.zip" "$ION_URL"; then
+              ls -la "${TMPDIR:-/tmp}/IONGeolocationLib.zip"
+              break
+            fi
+            if [ "$attempt" -eq 6 ]; then
+              echo "WARNING: pre-descarga falló; pod install reintentará igual"
+            else
+              sleep $((attempt * 15))
+            fi
+          done
+          SYNC_OK=0
+          for attempt in 1 2 3 4 5 6; do
+            echo "cap sync ios intento $attempt…"
+            if npx cap sync ios; then
+              SYNC_OK=1
+              break
+            fi
+            echo "cap sync falló (suele ser CocoaPods/GitHub 503). Reintento en $((attempt * 20))s…"
+            sleep $((attempt * 20))
+          done
+          if [ "$SYNC_OK" -ne 1 ]; then
+            echo "ERROR: cap sync ios falló tras varios reintentos"
+            exit 1
+          fi
           echo "=== capacitor.config.json (iOS) ==="
           if [ ! -f ios/App/App/capacitor.config.json ]; then
             echo "ERROR: cap sync no generó ios/App/App/capacitor.config.json"
@@ -63,8 +93,18 @@ workflows:
           cat ios/App/App/capacitor.config.json
       - name: Instalar pods
         script: |
+          set -e
           cd ios/App
-          pod install
+          export COCOAPODS_DISABLE_STATS=true
+          for attempt in 1 2 3 4 5 6; do
+            echo "pod install intento $attempt…"
+            if pod install; then
+              exit 0
+            fi
+            echo "pod install falló (GitHub 503?). Reintento en $((attempt * 20))s…"
+            sleep $((attempt * 20))
+          done
+          exit 1
       - name: Versión de marketing + build incremental
         script: |
           set -e
