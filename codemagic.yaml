@@ -25,8 +25,6 @@ workflows:
       vars:
         # El WebView nativo no comparte origen con el backend: URL absoluta del API
         VITE_NATIVE_API_ORIGIN: "https://vertialapp.com"
-        # Tablets tienda: WebView carga prod; deploy web = update sin nuevo IPA
-        CAPACITOR_SERVER_URL: "https://vertialapp.com"
     scripts:
       - name: Instalar dependencias
         script: |
@@ -44,10 +42,9 @@ workflows:
           exit 1
       - name: Build web de producción
         script: npm run build
-      - name: Sincronizar Capacitor iOS (live URL tienda)
+      - name: Sincronizar Capacitor iOS (front embebido en dist/)
         script: |
           set -e
-          echo "CAPACITOR_SERVER_URL=$CAPACITOR_SERVER_URL"
           # capacitor.config.ts necesita typescript en node_modules (devDependency).
           if ! node -e "require('typescript')"; then
             echo "ERROR: falta el paquete typescript. Añádelo con: npm i -D typescript"
@@ -90,6 +87,12 @@ workflows:
             ls -la ios/App/App/ || true
             exit 1
           fi
+          # Sin server.url: el IPA lleva el front de este build (dist/), no vertialapp.com en vivo.
+          if grep -q '"url"' ios/App/App/capacitor.config.json; then
+            echo "ERROR: capacitor.config.json no debe tener server.url (front embebido)"
+            cat ios/App/App/capacitor.config.json
+            exit 1
+          fi
           cat ios/App/App/capacitor.config.json
       - name: Instalar pods
         script: |
@@ -109,8 +112,8 @@ workflows:
         script: |
           set -e
           cd ios/App
-          # Marketing: sube cuando hay cambio de producto tablet.
-          agvtool new-marketing-version 1.12
+          # Marketing: front embebido en IPA (misma cara que el build de este commit).
+          agvtool new-marketing-version 1.13
           # Build: mayor que el último en TestFlight (si no, Apple rechaza el upload).
           LATEST_TF=""
           LATEST_TF=$(app-store-connect get-latest-testflight-build-number com.vertial.app 2>/dev/null || true)
