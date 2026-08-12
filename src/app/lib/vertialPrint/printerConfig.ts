@@ -21,6 +21,10 @@ export const VERTIAL_PRINT_BRIDGE_URL = `http://127.0.0.1:${VERTIAL_PRINT_BRIDGE
 
 const LEGACY_STORAGE_KEY = 'vertial_printer_config_v1';
 const PDV_CACHE_PREFIX = 'vertial_printer_config_pdv_';
+/** Caché por tablet+PDV: no la pisa el sync del servidor ni otra tablet. */
+const PDV_DEVICE_CACHE_PREFIX = 'vertial_printer_config_pdv_dev_';
+/** Misma clave que tpvTabletSession — un id estable por dispositivo. */
+const PRINTER_DEVICE_ID_KEY = 'vertial_tpv_device_id';
 
 /** Default blanco inferior cliente/delivery (cm). Cocina = 6 fijo en encode. */
 export const DEFAULT_TICKET_BOTTOM_FEED_CM = 8;
@@ -70,6 +74,38 @@ export function pdvPrinterCacheKey(pdvId: string): string {
   return `${PDV_CACHE_PREFIX}${pdvId}`;
 }
 
+/** Id estable de esta tablet/navegador (compartido con código de tienda). */
+export function getPrinterDeviceId(): string {
+  try {
+    const existing = String(localStorage.getItem(PRINTER_DEVICE_ID_KEY) || '').trim();
+    if (existing.length >= 8) return existing;
+    const id =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `dev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    localStorage.setItem(PRINTER_DEVICE_ID_KEY, id);
+    return id;
+  } catch {
+    return `dev-fallback-${Date.now().toString(36)}`;
+  }
+}
+
+export function pdvDevicePrinterCacheKey(pdvId: string, deviceId?: string): string {
+  const id = String(deviceId || getPrinterDeviceId() || '').trim() || 'unknown';
+  return `${PDV_DEVICE_CACHE_PREFIX}${pdvId}__${id}`;
+}
+
+function parseCachedPrinterConfig(raw: string): VertialPrinterConfig {
+  const parsed = JSON.parse(raw) as Partial<VertialPrinterConfig>;
+  return {
+    ...DEFAULT_PRINTER_CONFIG,
+    ...parsed,
+    networkPort: Number(parsed.networkPort || DEFAULT_PRINTER_CONFIG.networkPort) || 9100,
+    paperWidthMm: parsed.paperWidthMm === 58 ? 58 : 80,
+    ticketBottomFeedCm: clampTicketBottomFeedCm(parsed.ticketBottomFeedCm),
+  };
+}
+
 export function loadLegacyPrinterConfig(): VertialPrinterConfig {
   try {
     const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
@@ -95,14 +131,7 @@ export function loadPdvPrinterCache(pdvId: string): VertialPrinterConfig | null 
   try {
     const raw = localStorage.getItem(pdvPrinterCacheKey(pdvId));
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<VertialPrinterConfig>;
-    return {
-      ...DEFAULT_PRINTER_CONFIG,
-      ...parsed,
-      networkPort: Number(parsed.networkPort || DEFAULT_PRINTER_CONFIG.networkPort) || 9100,
-      paperWidthMm: parsed.paperWidthMm === 58 ? 58 : 80,
-      ticketBottomFeedCm: clampTicketBottomFeedCm(parsed.ticketBottomFeedCm),
-    };
+    return parseCachedPrinterConfig(raw);
   } catch {
     return null;
   }
@@ -112,12 +141,29 @@ export function cachePdvPrinterConfig(pdvId: string, config: VertialPrinterConfi
   localStorage.setItem(pdvPrinterCacheKey(pdvId), JSON.stringify(config));
 }
 
+/** IP guardada en ESTA tablet para este PDV (no la pisa otra tablet ni el sync). */
+export function loadPdvDevicePrinterCache(pdvId: string): VertialPrinterConfig | null {
+  const id = String(pdvId || '').trim();
+  if (!id) return null;
+  try {
+    const raw = localStorage.getItem(pdvDevicePrinterCacheKey(id));
+    if (!raw) return null;
+    return parseCachedPrinterConfig(raw);
+  } catch {
+    return null;
+  }
+}
+
+export function cachePdvDevicePrinterConfig(pdvId: string, config: VertialPrinterConfig): void {
+  const id = String(pdvId || '').trim();
+  if (!id) return;
+  localStorage.setItem(pdvDevicePrinterCacheKey(id), JSON.stringify(config));
+}
+
 /**
- * Refresca la caché local por PDV con la impresora guardada en el servidor.
- * Así la app iOS/Android puede imprimir el ticket de un pedido aunque la
- * impresora se configurase desde otro dispositivo. Solo se cachea config de
- * red (IP): es la única que sirve para impresión directa desde el móvil.
- * No pisa una IP local válida con un PDV vacío del servidor.
+ * Refresca la caché compartida por PDV (espejo del servidor).
+ * NO toca la caché por dispositivo: en Tiana 2 tablets / 2 impresoras cada una
+ * conserva su IP aunque el servidor tenga solo la última guardada.
  */
 export function cacheServerPdvPrinterConfigs(
   pdvs: Array<{ _id: string; printerConfig?: Partial<VertialPrinterConfig> | null }>,

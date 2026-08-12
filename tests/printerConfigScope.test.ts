@@ -155,6 +155,37 @@ describe('cacheServerPdvPrinterConfigs + resolución por pdvId', () => {
     ]);
     expect(store.size).toBe(0);
   });
+
+  it('sync del servidor no pisa la IP guardada en esta tablet', async () => {
+    stubLocalStorage();
+    const {
+      cachePdvDevicePrinterConfig,
+      loadPdvDevicePrinterCache,
+      DEFAULT_PRINTER_CONFIG: DEF,
+    } = await import('../src/app/lib/vertialPrint/printerConfig');
+    cachePdvDevicePrinterConfig('pdv-tiana', {
+      ...DEF,
+      connectionType: 'network',
+      networkHost: '192.168.1.20',
+      networkPort: 9100,
+    });
+    cacheServerPdvPrinterConfigs([
+      { _id: 'pdv-tiana', printerConfig: { connectionType: 'network', networkHost: '192.168.1.99', networkPort: 9100 } },
+    ]);
+    expect(loadPdvDevicePrinterCache('pdv-tiana')?.networkHost).toBe('192.168.1.20');
+    setActivePrinterScope({
+      pdvId: 'pdv-tiana',
+      pdv: basePdv({
+        _id: 'pdv-tiana',
+        printerConfig: {
+          ...DEF,
+          connectionType: 'network',
+          networkHost: '192.168.1.99',
+        },
+      }),
+    });
+    expect(resolveEffectivePrinterConfig({ pdvId: 'pdv-tiana' }).networkHost).toBe('192.168.1.20');
+  });
 });
 
 describe('resolveEffectivePrinterConfig en app nativa', () => {
@@ -164,7 +195,36 @@ describe('resolveEffectivePrinterConfig en app nativa', () => {
     vi.doUnmock('../src/app/lib/vertialPrint/isNativeApp');
   });
 
-  it('prioriza la IP de la tienda sobre la del dispositivo (config admin → TPV)', async () => {
+  it('prioriza la IP de ESTA tablet sobre la de la tienda (2 impresoras en el mismo local)', async () => {
+    vi.resetModules();
+    vi.doMock('../src/app/lib/vertialPrint/isNativeApp', () => ({
+      isVertialNativeApp: () => true,
+    }));
+    stubLocalStorage();
+    const {
+      cachePdvDevicePrinterConfig,
+      DEFAULT_PRINTER_CONFIG: DEF,
+    } = await import('../src/app/lib/vertialPrint/printerConfig');
+    cachePdvDevicePrinterConfig('pdv-1', {
+      ...DEF,
+      connectionType: 'network',
+      networkHost: '192.168.1.20',
+    });
+    const { resolveEffectivePrinterConfig: resolveNative } = await import(
+      '../src/app/lib/vertialPrint/printerActiveScope'
+    );
+    const pdv = basePdv({
+      printerConfig: {
+        ...DEF,
+        connectionType: 'network',
+        networkHost: '192.168.1.99',
+      },
+    });
+    const cfg = resolveNative({ pdv });
+    expect(cfg.networkHost).toBe('192.168.1.20');
+  });
+
+  it('prioriza la IP de la tienda sobre la del dispositivo legacy (sin caché por tablet)', async () => {
     vi.resetModules();
     vi.doMock('../src/app/lib/vertialPrint/isNativeApp', () => ({
       isVertialNativeApp: () => true,

@@ -45,7 +45,9 @@ import {
   clampTicketBottomFeedCm,
   loadLegacyPrinterConfig,
   loadPdvPrinterCache,
+  loadPdvDevicePrinterCache,
   cachePdvPrinterConfig,
+  cachePdvDevicePrinterConfig,
   type VertialPrinterConfig,
 } from '../../lib/vertialPrint/printerConfig';
 import { normalizeVertialPrinterConfig } from '../../lib/vertialPrint/printerConfigNormalize';
@@ -103,8 +105,12 @@ function initialConfig(scope?: TpvPrinterScope): VertialPrinterConfig {
   const pdv = scope?.pdv;
   const pdvId = String(pdv?._id || scope?.pdvId || '').trim();
 
-  // Con tienda elegida: SOLO config de esa tienda (servidor → caché PDV). Nunca pedir prestada la IP de otra.
+  // Con tienda: primero ESTA tablet, luego servidor / espejo. No pedir prestada otra tienda.
   if (pdvId) {
+    const deviceCached = loadPdvDevicePrinterCache(pdvId);
+    if (deviceCached && isValidIpv4(String(deviceCached.networkHost || '').trim())) {
+      return normalizeVertialPrinterConfig({ ...deviceCached, connectionType: 'network' });
+    }
     const fromStore = pdv?.printerConfig
       ? normalizeVertialPrinterConfig({
           ...DEFAULT_PRINTER_CONFIG,
@@ -332,7 +338,10 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
       }
       try {
         savePrinterConfig(next, pdvId || undefined);
-        if (pdvId) cachePdvPrinterConfig(pdvId, next);
+        if (pdvId) {
+          cachePdvPrinterConfig(pdvId, next);
+          cachePdvDevicePrinterConfig(pdvId, next);
+        }
       } catch {
         toast.error('No se pudo guardar la impresora en este dispositivo. Inténtalo de nuevo.');
         return;
@@ -389,11 +398,11 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
       clearPrinterVerifiedHost();
       toast.success(
         syncedToStore
-          ? `Impresora guardada en «${storeLabel}»: ${host}:${safePort}`
+          ? `Impresora de esta tablet: ${host}:${safePort}`
           : `Impresora guardada en esta tablet: ${host}:${safePort}`,
         {
           description: syncedToStore
-            ? 'Queda en el TPV y también en Ajustes / Panel de esa misma tienda.'
+            ? `Queda en «${storeLabel}» para esta tablet. La otra tablet de la tienda mantiene la suya.`
             : 'Sirve en este dispositivo. Si quieres verla fuera, vuelve a pulsar Guardar con la tienda seleccionada.',
           duration: 7000,
         },

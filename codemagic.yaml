@@ -70,7 +70,7 @@ workflows:
           cd ios/App
           # App Store Connect: versión tablet tienda (live web + TPV).
           # Build number = Codemagic BUILD_NUMBER.
-          agvtool new-marketing-version 1.10
+          agvtool new-marketing-version 1.11
           agvtool new-version -all $BUILD_NUMBER
           echo "Marketing: $(agvtool what-marketing-version -terse1)  Build: $(agvtool what-version -terse)"
       - name: Diagnóstico firma (perfil vs entitlements)

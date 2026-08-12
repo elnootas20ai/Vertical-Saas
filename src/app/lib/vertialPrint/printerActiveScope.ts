@@ -3,8 +3,10 @@ import {
   DEFAULT_PRINTER_CONFIG,
   loadLegacyPrinterConfig,
   loadPdvPrinterCache,
+  loadPdvDevicePrinterCache,
   saveLegacyPrinterConfig,
   cachePdvPrinterConfig,
+  cachePdvDevicePrinterConfig,
   type VertialPrinterConfig,
 } from './printerConfig';
 import {
@@ -69,8 +71,9 @@ export function resolveEffectivePrinterConfig(options?: {
   const localFallback = scope.localFallback ?? loadLegacyPrinterConfig();
   const localCfg = normalizeVertialPrinterConfig(localFallback);
 
-  // Orden: terminal → tienda (servidor) → caché por PDV → dispositivo.
-  // Así la config del Panel admin / Ajustes por tienda llega al TPV de esa tienda.
+  // Orden: terminal → ESTA tablet (caché dispositivo) → tienda (servidor) →
+  // espejo servidor → dispositivo legacy.
+  // Así 2 tablets en Tiana pueden tener 2 IPs distintas sin pisarse.
   const terminal = terminalId
     ? pdv?.terminals?.find((t) => t.id === terminalId)
     : undefined;
@@ -79,6 +82,16 @@ export function resolveEffectivePrinterConfig(options?: {
     : null;
   if (terminalCfg && isVertialPrinterConfigConfigured(terminalCfg)) {
     return terminalCfg;
+  }
+
+  if (pdvId) {
+    const deviceCachedRaw = loadPdvDevicePrinterCache(pdvId);
+    if (deviceCachedRaw) {
+      const deviceCached = normalizeVertialPrinterConfig(deviceCachedRaw);
+      if (isVertialPrinterConfigConfigured(deviceCached)) {
+        return deviceCached;
+      }
+    }
   }
 
   const storeCfg = pdv?.printerConfig
@@ -148,5 +161,6 @@ export function savePrinterConfig(config: VertialPrinterConfig, pdvId?: string |
   const id = String(pdvId || activeScope.pdvId || activeScope.pdv?._id || '').trim();
   if (id) {
     cachePdvPrinterConfig(id, config);
+    cachePdvDevicePrinterConfig(id, config);
   }
 }

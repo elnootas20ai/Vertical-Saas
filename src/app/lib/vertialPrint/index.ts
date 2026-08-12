@@ -8,7 +8,9 @@ export {
   loadLegacyPrinterConfig,
   saveLegacyPrinterConfig,
   loadPdvPrinterCache,
+  loadPdvDevicePrinterCache,
   cachePdvPrinterConfig,
+  cachePdvDevicePrinterConfig,
 } from './printerConfig';
 export type { VertialPrinterConfig, VertialPrinterConnectionType } from './printerConfig';
 export {
