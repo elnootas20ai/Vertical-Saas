@@ -25,13 +25,19 @@ workflows:
       vars:
         # El WebView nativo no comparte origen con el backend: URL absoluta del API
         VITE_NATIVE_API_ORIGIN: "https://vertialapp.com"
+        # Tablets tienda: WebView carga prod; deploy web = update sin nuevo IPA
+        CAPACITOR_SERVER_URL: "https://vertialapp.com"
     scripts:
       - name: Instalar dependencias
         script: npm ci
       - name: Build web de producción
         script: npm run build
-      - name: Sincronizar Capacitor iOS
-        script: npx cap sync ios
+      - name: Sincronizar Capacitor iOS (live URL tienda)
+        script: |
+          echo "CAPACITOR_SERVER_URL=$CAPACITOR_SERVER_URL"
+          npx cap sync ios
+          echo "=== capacitor.config.json (iOS) ==="
+          cat ios/App/App/capacitor.config.json
       - name: Instalar pods
         script: |
           cd ios/App
@@ -39,9 +45,9 @@ workflows:
       - name: Versión de marketing + build incremental
         script: |
           cd ios/App
-          # App Store Connect: versión tablet (SIN cocina, cancel rápido/offline, salida caja…).
+          # App Store Connect: versión tablet tienda (live web + TPV).
           # Build number = Codemagic BUILD_NUMBER.
-          agvtool new-marketing-version 1.9
+          agvtool new-marketing-version 1.10
           agvtool new-version -all $BUILD_NUMBER
           echo "Marketing: $(agvtool what-marketing-version -terse1)  Build: $(agvtool what-version -terse)"
       - name: Diagnóstico firma (perfil vs entitlements)

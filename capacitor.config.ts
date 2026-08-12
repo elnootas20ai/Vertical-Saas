@@ -1,14 +1,27 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
+/**
+ * App nativa Vertial (iPad tienda / TestFlight).
+ *
+ * Por defecto embebe `dist/`.
+ * Codemagic tienda: CAPACITOR_SERVER_URL=https://vertialapp.com
+ * → el WebView carga la web en prod; un deploy web actualiza las tablets sin nuevo IPA.
+ */
+const liveServerUrl = String(process.env.CAPACITOR_SERVER_URL || '').trim();
+
 const config: CapacitorConfig = {
   appId: 'com.vertial.app',
   appName: 'Vertial',
   webDir: 'dist',
   server: {
     androidScheme: 'https',
-    // Uncomment for live reload during development (replace with your local IP):
-    // url: 'http://192.168.1.x:3005',
-    // cleartext: true,
+    ...(liveServerUrl
+      ? {
+          url: liveServerUrl,
+          cleartext: liveServerUrl.startsWith('http://'),
+          allowNavigation: ['vertialapp.com', '*.vertialapp.com'],
+        }
+      : {}),
   },
   plugins: {
     Camera: {
