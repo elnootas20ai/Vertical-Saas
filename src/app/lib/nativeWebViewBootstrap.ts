@@ -80,6 +80,48 @@ export async function clearStaleWebCachesInDev(): Promise<void> {
   }
 }
 
+const CHUNK_RELOAD_KEY = 'vertial:chunk-reload';
+
+function isStaleChunkError(message: string): boolean {
+  return /Loading chunk|ChunkLoadError|Failed to fetch dynamically|Importing a module script failed|error loading dynamically imported module/i.test(
+    message,
+  );
+}
+
+/** Un reload si un chunk hasheado ya no existe tras un deploy (evita pantalla blanca). */
+function armStaleChunkReload(): void {
+  if (typeof window === 'undefined') return;
+
+  const reloadOnce = (reason: string) => {
+    try {
+      if (sessionStorage.getItem(CHUNK_RELOAD_KEY) === '1') return;
+      sessionStorage.setItem(CHUNK_RELOAD_KEY, '1');
+    } catch {
+      /* private mode */
+    }
+    console.warn('[Vertial] chunk/SW desfasado → reload', reason);
+    window.location.reload();
+  };
+
+  window.addEventListener('error', (event) => {
+    const msg = [
+      event.message,
+      event.filename,
+      (event.error && (event.error as Error).message) || '',
+    ].join(' ');
+    if (isStaleChunkError(msg)) reloadOnce(msg);
+  });
+
+  window.addEventListener('unhandledrejection', (event) => {
+    const reason = event.reason;
+    const msg =
+      reason instanceof Error
+        ? `${reason.name} ${reason.message}`
+        : String(reason || '');
+    if (isStaleChunkError(msg)) reloadOnce(msg);
+  });
+}
+
 /**
  * Registra el service worker de la PWA solo en web producción: en la app nativa el bundle
  * ya viene dentro del binario y un SW cachearía una versión antigua.
@@ -88,9 +130,33 @@ export function registerPwaServiceWorker(): void {
   if (import.meta.env.DEV) return;
   if (Capacitor.isNativePlatform()) return;
   if (!('serviceWorker' in navigator)) return;
+
+  armStaleChunkReload();
+
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {
-      /* la PWA es opcional; la web funciona igual sin SW */
-    });
+    navigator.serviceWorker
+      .register('/sw.js', { scope: '/' })
+      .then((registration) => {
+        // Forzar búsqueda de SW nuevo en cada carga (no esperar 24h).
+        void registration.update();
+      })
+      .catch(() => {
+        /* la PWA es opcional; la web funciona igual sin SW */
+      });
+  });
+
+  // Nuevo SW (update) con skipWaiting + clients.claim → una recarga.
+  // No recargar en el primer install (controller era null).
+  let refreshing = false;
+  let hadController = Boolean(navigator.serviceWorker.controller);
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController) {
+      hadController = true;
+      return;
+    }
+    if (refreshing) return;
+    refreshing = true;
+    window.location.reload();
   });
 }
+

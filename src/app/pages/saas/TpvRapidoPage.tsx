@@ -93,7 +93,14 @@ import {
   tpvSectionProductCount,
   isTpvSellableCatalogItem,
 } from '../../lib/tpvCatalogNavigation';
-import { TpvRegisterGate, TpvRegisterProvider, useTpvRegisterIfOpen, type TpvRegisterContextType } from '../../components/saas/TpvRegisterGate';
+import {
+  TpvRegisterGate,
+  TpvRegisterProvider,
+  useTpvRegisterBoardReady,
+  useTpvRegisterIfOpen,
+  type TpvRegisterContextType,
+} from '../../components/saas/TpvRegisterGate';
+import { hasTpvOpenRegisterLatch } from '../../lib/tpvCajaScope';
 import { readTpvTabletBinding } from '../../lib/tpvTabletSession';
 import {
   resolveTpvRegisterScope,
@@ -174,7 +181,6 @@ import { notifyDeliveryOpsLive } from '../../lib/deliveryOpsLive';
 import {
   isDeliveryOrderEditableOnTpvBoard,
   seedTpvCartFromDeliveryOrder,
-  diffAddedDeliveryOrderItems,
 } from '../../lib/tpvEditDeliveryOrder';
 import { orderAlreadyCobrado } from '../../lib/tpvCajaScope';
 import { normalizeClockinUserId } from '../../lib/clockinUserId';
@@ -891,9 +897,26 @@ export function TpvRapidoOrderFlow({
   const orderFlowChrome = useTpvOrderFlowActive();
   const { user } = useAuth();
   const registerFromGate = useTpvRegisterIfOpen();
+  const boardReady = useTpvRegisterBoardReady();
   const register = registerOverride ?? registerFromGate;
-  const registerStickyRef = useRef(register);
-  if (register) registerStickyRef.current = register;
+  const registerStickyRef = useRef<TpvRegisterContextType | null>(
+    register && isTpvRegisterSessionOpen(register.session) ? register : null,
+  );
+  if (register && isTpvRegisterSessionOpen(register.session)) {
+    registerStickyRef.current = register;
+  } else if (
+    registerStickyRef.current
+    && !isTpvRegisterSessionOpen(registerStickyRef.current.session)
+  ) {
+    registerStickyRef.current = null;
+  }
+
+  const resolveOpenRegister = useCallback((): TpvRegisterContextType | null => {
+    if (register && isTpvRegisterSessionOpen(register.session)) return register;
+    const sticky = registerStickyRef.current;
+    if (sticky && isTpvRegisterSessionOpen(sticky.session)) return sticky;
+    return null;
+  }, [register]);
 
   const { addClient, clients, clientsTotalCount } = useApp();
   const { currentBusiness, businesses, businessesFetchSettled, switchBusiness } = useBusiness();
@@ -1512,18 +1535,20 @@ export function TpvRapidoOrderFlow({
   const editHydratedRef = useRef<string | null>(null);
 
   // Hidratar carrito al editar (domicilio o recogida; montaje o reparto).
-  // No esperar al catálogo: stubs desde líneas del pedido; al llegar la carta se rehidrata.
+  // Si ya hay ítems en memoria/caché, tratar como listo aunque haya revalidación en curso
+  // (evita stub→ready y el parpadeo del spinner en tablet).
   useEffect(() => {
     if (!editingDeliveryOrder || !isDeliveryOrderEditableOnTpvBoard(editingDeliveryOrder)) return;
     if (!userId) return;
     const orderId = String(editingDeliveryOrder._id || '').trim();
     if (!orderId) return;
 
-    const catalogReady = !loadingCatalog;
+    const catalogReady = !loadingCatalog || Object.keys(catalogById).length > 0;
     const hydrateKey = `${orderId}:${catalogReady ? 'ready' : 'stub'}`;
     if (editHydratedRef.current === hydrateKey) return;
-    // Si ya hidratamos con carta lista, no pisar con stubs.
+    // Si ya hidratamos con carta lista, no pisar con stubs ni resetear el picker.
     if (editHydratedRef.current === `${orderId}:ready`) return;
+    const firstHydrate = !editHydratedRef.current || !String(editHydratedRef.current).startsWith(`${orderId}:`);
     editHydratedRef.current = hydrateKey;
     // Sin toasts al entrar a editar (evita aviso amarillo fugaz arriba).
     toast.dismiss();
@@ -1547,7 +1572,10 @@ export function TpvRapidoOrderFlow({
     if (pay) setPaymentMethod(pay);
     setCurrentStep('products');
     setCompletedSteps(new Set(['client', 'delivery']));
-    setProductPickerReset((n) => n + 1);
+    // Solo resetear el picker en la 1.ª hidratación (no al pasar stub→ready).
+    if (firstHydrate) {
+      setProductPickerReset((n) => n + 1);
+    }
 
     const clientId = String(order.clientId || '').trim();
     if (clientId && !isTpvSyntheticClientId(clientId)) {
@@ -2636,7 +2664,8 @@ export function TpvRapidoOrderFlow({
         toast.error('Pon el nombre del cliente antes de cobrar (no vale «Buscar»)');
         return;
       }
-      if (!register || !isTpvRegisterSessionOpen(register.session)) {
+      const openRegister = resolveOpenRegister();
+      if (!openRegister) {
         toast.error('Abre la caja de la tienda para cobrar y enviar');
         return;
       }
@@ -2711,8 +2740,8 @@ export function TpvRapidoOrderFlow({
           (a) => a.id === selectedAddressId,
         );
 
-        const pdvId = String(register.session?.pointOfSaleId || '').trim();
-        const pdvName = String(register.session?.pointOfSaleName || '').trim();
+        const pdvId = String(openRegister.session?.pointOfSaleId || '').trim();
+        const pdvName = String(openRegister.session?.pointOfSaleName || '').trim();
         const takerId = effectiveOrderTakerId;
         const takerName = selectedOrderTaker?.name || user?.fullName || 'TPV';
 
@@ -2843,7 +2872,7 @@ export function TpvRapidoOrderFlow({
               for (const part of parts) {
                 const partAmount = Number(part.amount) || 0;
                 if (partAmount <= 0) continue;
-                await ensureLocalCajaSaleForOrder(registerFromGate, offlineOrder, {
+                await ensureLocalCajaSaleForOrder(openRegister, offlineOrder, {
                   paymentMethod: normalizeTpvPaymentMethod(part.method),
                   amount: partAmount,
                   registeredBy: takerName || 'TPV',
@@ -2851,7 +2880,7 @@ export function TpvRapidoOrderFlow({
                 });
               }
             } else {
-              await ensureLocalCajaSaleForOrder(registerFromGate, offlineOrder, {
+              await ensureLocalCajaSaleForOrder(openRegister, offlineOrder, {
                 paymentMethod: orderData.paymentMethod,
                 amount: payableTotal,
                 registeredBy: takerName || 'TPV',
@@ -2883,7 +2912,7 @@ export function TpvRapidoOrderFlow({
             || cajaStatus === 'already_registered'
             || cajaStatus === 'nothing_to_register';
           if (!serverCajaOk) {
-            await ensureLocalCajaSaleForOrder(registerFromGate, created, {
+            await ensureLocalCajaSaleForOrder(openRegister, created, {
               paymentMethod: created.paymentMethod,
               amount: Number(created.paidAmount || payableTotal),
               registeredBy: takerName || 'TPV',
@@ -2934,7 +2963,7 @@ export function TpvRapidoOrderFlow({
         setSubmitting(false);
       }
     },
-    [saleClient, deliveryType, cart, selectedAddressId, paymentMethod, pendingSplitParts, finalTotal, payableTotal, deliveryFeeAmount, orderNotes, userId, phonePrefix, register?.selectedOrderTakerId, selectedOrderTaker, appliedPromo, discountAmount, promoMode, clientPromoSelected, effectiveCalc, register?.session, user?.fullName, user?.user_id, user?.id, user?.email, tabletMode, tpvBrandIngredientSelection, tpvCategoryTemplates, storeIngredients, brands, restaurantTable, restaurantDiningOrder, onRestaurantDiningOrderUpdated, onRestaurantOrderComplete, currentBusiness, writeBusinessId, businessId, catalog, effectiveOrderTakerId, showTpvError, cashGiven, pricedByLineId],
+    [saleClient, deliveryType, cart, selectedAddressId, paymentMethod, pendingSplitParts, finalTotal, payableTotal, deliveryFeeAmount, orderNotes, userId, phonePrefix, register?.selectedOrderTakerId, selectedOrderTaker, appliedPromo, discountAmount, promoMode, clientPromoSelected, effectiveCalc, register?.session, resolveOpenRegister, user?.fullName, user?.user_id, user?.id, user?.email, tabletMode, tpvBrandIngredientSelection, tpvCategoryTemplates, storeIngredients, brands, restaurantTable, restaurantDiningOrder, onRestaurantDiningOrderUpdated, onRestaurantOrderComplete, currentBusiness, writeBusinessId, businessId, catalog, effectiveOrderTakerId, showTpvError, cashGiven, pricedByLineId],
   );
 
   const handleSaveEditedDeliveryOrder = useCallback(async () => {
@@ -3009,37 +3038,6 @@ export function TpvRapidoOrderFlow({
         toast.success(`Pedido #${updated.orderNumber} actualizado`);
       }
 
-      // Comanda cocina solo de lo añadido (misma ruta de impresión que pedido nuevo).
-      const kitchenAdds = diffAddedDeliveryOrderItems(editingDeliveryOrder.items, items);
-      if (kitchenAdds.length > 0 && currentBusiness) {
-        const pdvName = String(
-          updated.salesPointName
-          || register?.session?.pointOfSaleName
-          || '',
-        ).trim();
-        const takerName = selectedOrderTaker?.name || user?.fullName || 'TPV';
-        const ticketBusiness = businessTicketInfoFrom(currentBusiness);
-        const orderNo = String(updated.orderNumber || '').trim();
-        const addNote = orderNo
-          ? `★ ADICIÓN al pedido #${orderNo}`
-          : '★ ADICIÓN al pedido';
-        const prevNotes = String(updated.notes || '').trim();
-        window.setTimeout(() => {
-          void printDeliveryTicket({
-            order: {
-              ...updated,
-              items: kitchenAdds,
-              notes: prevNotes ? `${addNote}\n${prevNotes}` : addNote,
-            },
-            business: ticketBusiness,
-            salesPointName: pdvName,
-            cashierName: takerName,
-            variant: 'kitchen',
-            accountEmail: user?.email,
-          });
-        }, 0);
-      }
-
       onEditingDeliveryOrderSaved?.(updated);
       goBack();
     } catch (err: unknown) {
@@ -3069,11 +3067,6 @@ export function TpvRapidoOrderFlow({
     goBack,
     showTpvError,
     pricedByLineId,
-    currentBusiness,
-    register?.session?.pointOfSaleName,
-    selectedOrderTaker?.name,
-    user?.fullName,
-    user?.email,
   ]);
 
   const accountDue = useMemo(
@@ -4257,7 +4250,7 @@ export function TpvRapidoOrderFlow({
 
   // No exigir caja abierta solo por un parpadeo del contexto: si el gate la pierde
   // un instante, el flujo de pedido no debe saltar a «Abre la caja».
-  const registerStable = register || registerStickyRef.current;
+  const registerStable = resolveOpenRegister();
 
   const allowProductsWithoutRegister =
     (embeddedInRestaurantTpv
@@ -4266,8 +4259,15 @@ export function TpvRapidoOrderFlow({
       && !restaurantTable?.isCounter)
     // Editar pedido del tablero: no bloquear si el contexto de caja parpadea un frame.
     || isEditingDeliveryOrder
-    // Nuevo pedido desde tablero tablet: el sticky cubre el parpadeo.
-    || (tabletMode && Boolean(registerStickyRef.current));
+    // Nuevo pedido desde tablero: sticky / boardReady / latch cubren el parpadeo del Context.
+    || (
+      tabletMode
+      && (
+        Boolean(registerStable)
+        || boardReady
+        || hasTpvOpenRegisterLatch()
+      )
+    );
 
   if (needsOpenRegister && !registerStable && !allowProductsWithoutRegister) {
     return (
@@ -5267,7 +5267,7 @@ export function TpvRapidoOrderFlow({
               sections={catalogSections}
               selectedSectionId={selectedSectionId}
               onSelectedSectionChange={setSelectedSectionId}
-              loading={loadingCatalog}
+              loading={loadingCatalog && catalog.length === 0}
               catalog={catalog}
               brands={brands}
               catalogLayout={tpvCatalogLayout}

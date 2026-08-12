@@ -2991,14 +2991,18 @@ export async function listTpvRegisterSessions(req, res) {
       const workerSalesPoint = String(req.callerAccount?.employment?.salesPointId || '').trim();
       if (workerSalesPoint) {
         const pdvs = await listScopedPointsOfSaleForUser(req, userId);
-        const allowedPdvIds = new Set(
-          pdvs
-            .filter((p) => p._id === workerSalesPoint || p.workCenterId === workerSalesPoint)
-            .map((p) => p._id),
-        );
+        const allowedStoreIds = new Set([workerSalesPoint]);
+        for (const p of pdvs || []) {
+          const id = String(p?._id || '').trim();
+          const wc = String(p?.workCenterId || '').trim();
+          if (id === workerSalesPoint || wc === workerSalesPoint) {
+            if (id) allowedStoreIds.add(id);
+            if (wc) allowedStoreIds.add(wc);
+          }
+        }
         sessions = sessions.filter((s) => {
           const pid = String(s.pointOfSaleId || '').trim();
-          return !pid || allowedPdvIds.has(pid);
+          return !pid || allowedStoreIds.has(pid);
         });
       }
     }
@@ -3373,8 +3377,6 @@ export async function updateTpvRegisterSession(req, res) {
     const { userId, sessionId } = req.params;
     const { session } = req.body || {};
     if (!session || typeof session !== 'object') return badRequest(res, 'Faltan datos de la sesión');
-    const existing = await ensureTpvRegisterOwner(req, userId, sessionId);
-    if (!existing) return res.status(404).json({ ok: false, error: 'Sesión de caja TPV no encontrada' });
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     const db = getDeliveryDbName();
@@ -3382,23 +3384,44 @@ export async function updateTpvRegisterSession(req, res) {
       ? session.removedTransactionIds
       : [];
     const { removedTransactionIds: _dropRemoved, ...sessionWithoutRemovedFlag } = session;
-    const mergedTransactions = mergeTpvRegisterTransactions(
-      existing.transactions,
-      sessionWithoutRemovedFlag.transactions,
-      removedTransactionIds,
-    );
-    const linkedOrderIds = [...new Set([
-      ...(existing.linkedOrderIds || []),
-      ...(sessionWithoutRemovedFlag.linkedOrderIds || []),
-      ...mergedTransactions.map((t) => String(t.linkedDeliveryOrderId || t.orderId || '').trim()).filter(Boolean),
-    ])];
-    const doc = buildTpvRegisterSessionDocument(userId, {
-      ...existing,
-      ...sessionWithoutRemovedFlag,
-      transactions: mergedTransactions,
-      linkedOrderIds,
-    }, existing);
-    const saved = await putDocument(req, db, doc._id, doc);
+
+    const maxAttempts = 5;
+    let saved = null;
+    let doc = null;
+    let existing = null;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      existing = await ensureTpvRegisterOwner(req, userId, sessionId);
+      if (!existing) return res.status(404).json({ ok: false, error: 'Sesión de caja TPV no encontrada' });
+
+      const mergedTransactions = mergeTpvRegisterTransactions(
+        existing.transactions,
+        sessionWithoutRemovedFlag.transactions,
+        removedTransactionIds,
+      );
+      const linkedOrderIds = [...new Set([
+        ...(existing.linkedOrderIds || []),
+        ...(sessionWithoutRemovedFlag.linkedOrderIds || []),
+        ...mergedTransactions.map((t) => String(t.linkedDeliveryOrderId || t.orderId || '').trim()).filter(Boolean),
+      ])];
+      doc = buildTpvRegisterSessionDocument(userId, {
+        ...existing,
+        ...sessionWithoutRemovedFlag,
+        transactions: mergedTransactions,
+        linkedOrderIds,
+      }, existing);
+
+      try {
+        saved = await putDocument(req, db, doc._id, doc);
+        break;
+      } catch (err) {
+        const isConflict = /conflict|409/i.test(String(err?.message || ''));
+        if (!isConflict || attempt === maxAttempts - 1) {
+          throw err;
+        }
+      }
+    }
+
     const action = doc.status === 'closed'
       ? `Cerró caja TPV "${doc.terminalName}" — Diferencia: ${doc.difference.toFixed(2)}€`
       : `Actualizó caja TPV "${doc.terminalName}"`;
@@ -4372,6 +4395,31 @@ function isSameDay(dateStr, targetDate) {
 
 const OPS_ACTIVE_STATUSES = new Set(['nuevo', 'cocina', 'listo', 'en_reparto', 'incident']);
 
+/** Fases «en curso» del pipeline Ops (no facturación del día). */
+const OPS_LIVE_PIPELINE_STATUSES = new Set(['nuevo', 'cocina', 'listo', 'en_reparto', 'incident']);
+
+/**
+ * Pedido dentro de alguna caja TPV abierta (createdAt ≥ openedAt), misma regla que el tablero TPV.
+ * Sin caja abierta → no cuenta en Montaje/Cocina/Reparto del Ops.
+ */
+function orderInOpenTpvSessions(order, openSessions) {
+  if (!Array.isArray(openSessions) || openSessions.length === 0) return false;
+  const createdAt = String(order?.createdAt || '').trim();
+  if (!createdAt) return false;
+  const createdMs = new Date(createdAt).getTime();
+  if (!Number.isFinite(createdMs)) return false;
+  for (const session of openSessions) {
+    if (String(session?.status || '') !== 'open') continue;
+    const openedAt = String(session?.openedAt || '').trim();
+    if (!openedAt) continue;
+    const openedMs = new Date(openedAt).getTime();
+    if (!Number.isFinite(openedMs)) continue;
+    if (createdMs < openedMs) continue;
+    return true;
+  }
+  return false;
+}
+
 /** Pedido que aporta a facturación/ticket/marcas en el centro operativo (cobrado o entregado). */
 function orderCountsAsOpsRevenue(order) {
   if (!order) return false;
@@ -4704,6 +4752,9 @@ export async function getOpsCenter(req, res) {
       const day = orderCreatedDayKey(o);
       if (!day || day > targetDate) return false;
       if (day >= ordersFromDay) return true;
+      // Activos de días previos solo si hay caja abierta (turno que cruza medianoche).
+      // Con caja cerrada no deben inflar Montaje/Cocina del Ops.
+      if (openTpv.length === 0) return false;
       return OPS_ACTIVE_STATUSES.has(String(o.status || '').toLowerCase());
     });
 
@@ -4713,10 +4764,18 @@ export async function getOpsCenter(req, res) {
     const orders = dayOrders.map(sanitizeDeliveryOrder);
 
     const activeStatuses = ['nuevo', 'cocina', 'listo', 'en_reparto', 'incident'];
-    const activeOrders = orders.filter(o => activeStatuses.includes(o.status));
+    // Igual que TPV: backlog en curso solo del turno de caja abierta.
+    const activeOrders = orders.filter((o) =>
+      activeStatuses.includes(o.status) && orderInOpenTpvSessions(o, openTpv),
+    );
 
     const byStatus = { nuevo: 0, cocina: 0, listo: 0, en_reparto: 0, entregado: 0, cancelled: 0, incident: 0 };
-    for (const o of orders) { if (byStatus[o.status] !== undefined) byStatus[o.status]++; }
+    for (const o of orders) {
+      const st = o.status;
+      if (byStatus[st] === undefined) continue;
+      if (OPS_LIVE_PIPELINE_STATUSES.has(st) && !orderInOpenTpvSessions(o, openTpv)) continue;
+      byStatus[st]++;
+    }
 
     const delivered = orders.filter(o => o.status === 'entregado');
     const revenueOrders = orders.filter(orderCountsAsOpsRevenue);
@@ -4772,7 +4831,9 @@ export async function getOpsCenter(req, res) {
       targetDate,
     );
 
-    const inKitchen = orders.filter(o => o.status === 'cocina');
+    const inKitchen = orders.filter(
+      (o) => o.status === 'cocina' && orderInOpenTpvSessions(o, openTpv),
+    );
     const kitchenOldest = inKitchen.reduce((max, o) => Math.max(max, minutesSince(o.createdAt)), 0);
     const kitchenAvgWait = inKitchen.length > 0
       ? inKitchen.reduce((s, o) => s + minutesSince(o.createdAt), 0) / inKitchen.length : 0;
@@ -4780,7 +4841,11 @@ export async function getOpsCenter(req, res) {
     // "Pedidos en reparto" para el ops center: ahora vienen marcados con el
     // estado intermedio 'en_reparto'. Mantenemos la rama 'listo' con repartidor
     // por compatibilidad con pedidos anteriores al cambio.
-    const inDelivery = orders.filter(o => (o.status === 'en_reparto' || (o.status === 'listo' && !!o.assignedDriver)) && o.deliveryType === 'domicilio');
+    const inDelivery = orders.filter((o) =>
+      (o.status === 'en_reparto' || (o.status === 'listo' && !!o.assignedDriver))
+      && o.deliveryType === 'domicilio'
+      && orderInOpenTpvSessions(o, openTpv),
+    );
     const drivers = new Set(inDelivery.map(o => o.assignedDriver).filter(Boolean));
 
     const revenueByChannel = {};
@@ -4810,6 +4875,17 @@ export async function getOpsCenter(req, res) {
       return st !== 'cancelled' && st !== 'cancelado';
     });
     const foodFamilyCounts = buildFoodFamilyCountsFromOrders(foodCountable);
+
+    // Resumen ligero del día por pedido (monitor «por tienda»).
+    const dayOrdersBrief = foodCountable
+      .map((o) => ({
+        _id: o._id,
+        orderNumber: o.orderNumber || o._id,
+        totalAmount: Math.round((Number(o.totalAmount) || 0) * 100) / 100,
+        status: o.status || 'nuevo',
+        createdAt: o.createdAt || null,
+      }))
+      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 
     const pdvs = pointsOfSale;
 
@@ -4901,13 +4977,14 @@ export async function getOpsCenter(req, res) {
         ordersInDelivery: inDelivery.length,
         driversActive: drivers.size,
         avgDeliveryMinutes: Math.round(avgDeliveryTime * 10) / 10,
-        delayedCount: orders.filter(o => activeStatuses.includes(o.status) && minutesSince(o.createdAt) > delayThreshold).length,
+        delayedCount: activeOrders.filter(o => minutesSince(o.createdAt) > delayThreshold).length,
       },
       revenueByChannel,
       revenueByHour: Object.values(revenueByHour).sort((a, b) => a.hour.localeCompare(b.hour)),
       revenueByBrand: roundRevenueMap(revenueByBrand),
       revenueByCategory: roundRevenueMap(revenueByCategory),
       foodFamilyCounts,
+      dayOrdersBrief,
       brandLabels,
       pointsOfSale: pdvs.map(sanitizePointOfSale),
     });

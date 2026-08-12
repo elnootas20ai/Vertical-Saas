@@ -101,4 +101,42 @@ describe('deliveryOpsInsights', () => {
     expect(insights.prepBaselineMin).toBe(20);
     expect(insights.orderBaselineMin).toBe(30);
   });
+
+  it('rango semana compara vs 7 días anteriores', () => {
+    const today = '2026-08-04';
+    const mk = (day, salesPointId = 'pdv-a') => ({
+      status: 'entregado',
+      salesPointId,
+      salesPointName: 'Tienda A',
+      kitchenStartedAt: `${day}T12:00:00.000Z`,
+      kitchenCompletedAt: `${day}T12:15:00.000Z`,
+      assemblyStartedAt: `${day}T12:15:00.000Z`,
+      assemblyCompletedAt: `${day}T12:20:00.000Z`,
+      departedAt: `${day}T12:20:00.000Z`,
+      deliveredAt: `${day}T12:35:00.000Z`,
+      createdAt: `${day}T11:55:00.000Z`,
+      customerName: 'A',
+      customerPhone: '612345678',
+      clientId: 'c1',
+      items: [{ name: 'Margarita', category: 'Pizzas', quantity: 1 }],
+    });
+
+    const insights = buildDeliveryOpsInsights(
+      [
+        mk('2026-08-04'), // semana actual
+        mk('2026-08-01'), // semana actual
+        mk('2026-07-28'), // semana anterior (hoy-7)
+        mk('2026-07-25'), // semana anterior
+        mk('2026-07-20'), // fuera
+      ],
+      'week',
+      today,
+      [{ id: 'pdv-a', name: 'Tienda A' }],
+    );
+
+    expect(insights.range).toBe('week');
+    expect(insights.vsLabel).toBe('vs sem. ant.');
+    expect(insights.overall.deliveredCount).toBe(2);
+    expect(insights.overall.deliveredPrevCount).toBe(2);
+  });
 });

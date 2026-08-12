@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef, type MouseEvent } fr
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
+import { MobileLazySection } from '../../components/saas/MobileLazySection';
 import { useIsMobile } from '../../components/ui/use-mobile';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
@@ -33,8 +34,6 @@ import {
   getOrderPhaseStartIso,
   minutesSinceIso,
 } from '../../lib/deliveryOpsLiveTimes';
-import { useActivationFocus } from '../../hooks/useActivationFocus';
-import { scrollToActivationField } from '../../components/saas/ActivationGuideUi';
 import { usePointOfSaleAccess } from '../../hooks/usePointOfSaleAccess';
 import { writeBillingSelection } from '../../lib/billingSelection';
 import { formatAddonPriceShort } from '../../lib/planAddonCatalog';
@@ -60,14 +59,11 @@ import {
   Activity, ChefHat, Package, Truck, CheckCircle2, Clock, AlertTriangle,
   ShoppingBag, Wallet, AlertCircle, Receipt, Euro,
   Timer, Users, Bell,
-  Filter, X, Armchair, Boxes, BookOpen, Hash,
+  Filter, X, Armchair, Boxes, Hash,
   Store,
   Plus,
   RefreshCw,
-  Zap,
-  ClipboardCheck,
   Banknote,
-  Globe,
 } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/popover';
 
@@ -420,6 +416,7 @@ function OpsPdvLiveColumn({
   const label = pointOfSaleDisplayLabel(pdv);
   const loading = !data;
   const hasFood = food.pizza + food.burger + food.taco > 0;
+  const dayOrders = Array.isArray(data?.dayOrdersBrief) ? data.dayOrdersBrief : [];
 
   return (
     <div className="relative rounded-2xl border border-gray-200/90 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm hover:shadow-md hover:border-teal-300/70 dark:hover:border-teal-700/60 transition-all overflow-hidden flex flex-col min-h-0">
@@ -520,6 +517,46 @@ function OpsPdvLiveColumn({
                 Sin comida ni marcas aún hoy
               </p>
             ) : null}
+
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-950/40 px-2.5 py-2">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1.5">
+                Pedidos del día
+              </p>
+              {dayOrders.length === 0 ? (
+                <p className="text-[11px] text-center text-gray-400 dark:text-gray-500 py-1">
+                  Sin pedidos hoy
+                </p>
+              ) : (
+                <ul className="max-h-40 overflow-y-auto overscroll-contain space-y-1 pr-0.5">
+                  {dayOrders.map((o, idx) => {
+                    const st = STATUS_CFG[o.status];
+                    return (
+                      <li
+                        key={o._id || `${o.orderNumber}-${idx}`}
+                        className="flex items-center justify-between gap-2 rounded-lg bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 px-2 py-1.5"
+                      >
+                        <div className="min-w-0 flex items-center gap-1.5">
+                          <span className="text-[10px] font-bold tabular-nums text-gray-400 shrink-0">
+                            {idx + 1}.
+                          </span>
+                          <span className="text-xs font-semibold text-gray-900 dark:text-gray-100 truncate">
+                            {o.orderNumber}
+                          </span>
+                          {st ? (
+                            <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${st.bg} ${st.text} shrink-0`}>
+                              {st.label}
+                            </span>
+                          ) : null}
+                        </div>
+                        <span className="text-xs font-black tabular-nums text-emerald-700 dark:text-emerald-400 shrink-0">
+                          {eur(Number(o.totalAmount) || 0)} €
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
           </>
         )}
       </div>
@@ -682,6 +719,76 @@ function mergeLiveBrandLabels(rows: OpsCenterData[]): Record<string, string> {
     }
   }
   return out;
+}
+
+/** Agrega filas ya llegadas en «En directo · todas» (progresivo PDV a PDV). */
+function buildLiveMergedOpsData(
+  byPdv: Record<string, OpsCenterData>,
+  opsPdvs: PointOfSale[],
+  opts?: { includeActiveOrders?: boolean },
+): OpsCenterData | null {
+  const rows = opsPdvs.map((p) => byPdv[p._id]).filter(Boolean) as OpsCenterData[];
+  if (!rows.length) return null;
+  const first = rows[0];
+  const mergedAlerts = rows.flatMap((r) => r.alerts || []);
+  const seen = new Set<string>();
+  const alerts = mergedAlerts.filter((a) => {
+    const id = String(a.id || `${a.type}:${a.sessionId || a.orderId || ''}`);
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+  const includeOrders = opts?.includeActiveOrders !== false;
+  return {
+    ...first,
+    alerts,
+    kpis: aggregateLiveOpsKpis(rows) || first.kpis,
+    foodFamilyCounts: aggregateLiveFoodFamilyCounts(rows),
+    revenueByBrand: aggregateLiveRevenueByBrand(rows),
+    brandLabels: mergeLiveBrandLabels(rows),
+    pointsOfSale: opsPdvs,
+    // En actualizaciones intermedias no concatenar todos los pedidos (congela el hilo).
+    activeOrders: includeOrders ? rows.flatMap((r) => r.activeOrders || []) : [],
+  };
+}
+
+function yieldOpsPaint(ms = 0): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      window.setTimeout(resolve, Math.max(0, ms));
+    });
+  });
+}
+
+function OpsStageSkeleton({
+  kind,
+}: {
+  kind: 'metrics' | 'widgets' | 'live';
+}) {
+  if (kind === 'metrics') {
+    return (
+      <div className="space-y-2 animate-pulse" aria-label="Cargando métricas">
+        <div className="h-24 rounded-2xl bg-gray-100 dark:bg-gray-800" />
+        <div className="h-14 rounded-xl bg-gray-100 dark:bg-gray-800" />
+      </div>
+    );
+  }
+  if (kind === 'live') {
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 animate-pulse" aria-label="Cargando tiendas">
+        {[0, 1].map((i) => (
+          <div key={i} className="h-40 rounded-2xl bg-gray-100 dark:bg-gray-800" />
+        ))}
+      </div>
+    );
+  }
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 animate-pulse" aria-label="Cargando detalle">
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="h-36 rounded-2xl bg-gray-100 dark:bg-gray-800" />
+      ))}
+    </div>
+  );
 }
 
 /* ── Status Pipeline ─────────────────────────────────────────────────────── */
@@ -1049,64 +1156,6 @@ function CashStatusBanner({
       >
         <X className="h-4 w-4" />
       </button>
-    </div>
-  );
-}
-
-function cajaAlertBadge(cashStatus: OpsCenterData['cashStatus'] | undefined): number {
-  if (!cashStatus) return 0;
-  return (cashStatus.pendingClose || 0) + (cashStatus.pendingValidation || 0);
-}
-
-/* ── Quick Access ─────────────────────────────────────────────────────────── */
-
-function QuickAccess({ cfg, kpis, cashPend, incidents, onNavigate, activationFocus }: {
-  cfg: DeliveryConfig | null; kpis: OpsCenterData['kpis'] | null; cashPend: number; incidents: number;
-  onNavigate: (path: string) => void;
-  activationFocus?: string | null;
-}) {
-  type QItem = { l: string; i: typeof Activity; r: string; b: number | null; bc?: string; v: boolean; highlight?: boolean };
-  const items: QItem[] = [
-    { l: 'TPV rápido', i: Zap, r: '/saas/vertical/delivery/tpv', b: null, v: true },
-    { l: 'Caja', i: Banknote, r: '/saas/vertical/delivery/caja', b: cashPend > 0 ? cashPend : null, bc: 'bg-red-500', v: true, highlight: cashPend > 0 },
-    { l: 'Cocina', i: ChefHat, r: '/saas/delivery-kitchen', b: kpis?.byStatus.cocina ?? null, v: cfg?.hasKitchen !== false },
-    { l: 'Montaje', i: ClipboardCheck, r: '/saas/delivery-montaje', b: kpis?.byStatus.listo ?? null, v: cfg?.hasAssemblyStation !== false },
-    { l: 'Reparto', i: Truck, r: '/saas/delivery-reparto', b: null, v: (cfg?.hasOwnDelivery || cfg?.hasPlatformDelivery) === true },
-    { l: 'Catálogo', i: BookOpen, r: '/saas/catalog', b: null, v: true },
-    { l: 'Pedidos web', i: Package, r: '/saas/web-orders', b: null, v: true },
-    { l: 'Web config', i: Globe, r: '/saas/web-config', b: null, v: true },
-  ];
-  return (
-    <div className="flex gap-2.5 sm:gap-3 overflow-x-auto pb-1.5 pt-1 scrollbar-thin overflow-y-visible -mx-0.5">
-      {items.filter(x => x.v).map(x => {
-        const activationKey = x.l === 'TPV rápido' ? 'open-tpv' : undefined;
-        const highlighted = activationKey && activationFocus === activationKey;
-        return (
-        <button
-          key={x.l}
-          type="button"
-          data-activation-field={activationKey}
-          onClick={() => onNavigate(x.r)}
-          className={`flex flex-col items-center justify-center gap-2 px-3 py-3.5 rounded-xl border-2 bg-white dark:bg-gray-800 hover:border-amber-400/80 dark:hover:border-amber-600/50 hover:bg-amber-50/40 dark:hover:bg-amber-950/20 hover:shadow-md active:scale-[0.98] transition-all min-w-[88px] sm:min-w-[102px] shrink-0 relative overflow-visible shadow-sm ${
-            highlighted || (x.highlight && x.b)
-              ? 'activation-field-highlight border-amber-500 dark:border-amber-500 ring-2 ring-amber-300/50'
-              : highlighted
-              ? 'activation-field-highlight border-amber-500 dark:border-amber-500'
-              : 'border-gray-200 dark:border-gray-600'
-          }`}
-        >
-          <x.i className="w-7 h-7 sm:w-8 sm:h-8 text-gray-700 dark:text-gray-200" strokeWidth={2} />
-          <span className="text-[11px] sm:text-xs font-bold text-gray-700 dark:text-gray-200 leading-tight text-center max-w-[5.5rem]">{x.l}</span>
-          {x.b != null && x.b > 0 && (
-            <span
-              className={`absolute -top-1 -right-1 min-h-[1.35rem] min-w-[1.35rem] px-1.5 py-0.5 flex items-center justify-center ${x.bc || 'bg-gray-900 dark:bg-gray-100'} text-white dark:text-gray-900 rounded-full text-[11px] sm:text-xs font-bold leading-none shadow-md border-[3px] border-white dark:border-gray-900`}
-            >
-              {x.b > 99 ? '99+' : x.b}
-            </span>
-          )}
-        </button>
-        );
-      })}
     </div>
   );
 }
@@ -1627,8 +1676,14 @@ export function DeliveryOpsCenter() {
   const [data, setData] = useState<OpsCenterData | null>(null);
   const [liveByPdv, setLiveByPdv] = useState<Record<string, OpsCenterData>>({});
   const [loading, setLoading] = useState(true);
+  /** 0 shell · 1 alertas/pipeline · 2 métricas · 3 widgets/detalle */
+  const [uiStage, setUiStage] = useState(0);
   const [clockSummary, setClockSummary] = useState<DailySummary | null>(null);
-  const { focus: activationFocus, clearFocus: clearActivationFocus } = useActivationFocus();
+  const liveAccumRef = useRef<Record<string, OpsCenterData>>({});
+  const hasOpsDataRef = useRef(false);
+  const opsUiViewKeyRef = useRef('');
+  const opsPdvsRef = useRef<PointOfSale[]>([]);
+  const liveMergeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (typeof window === 'undefined' || window.location.hash !== '#cocina') return;
@@ -1640,13 +1695,6 @@ export function DeliveryOpsCenter() {
     return () => window.clearTimeout(t);
   }, [data, searchParams]);
 
-  useEffect(() => {
-    if (activationFocus !== 'open-tpv') return;
-    window.setTimeout(() => {
-      scrollToActivationField('open-tpv', { focusInput: false });
-    }, 500);
-    clearActivationFocus();
-  }, [activationFocus, clearActivationFocus]);
   const [filters, setFilters] = useState<OpsCenterFilters>(() => ({ date: localDateInputValue() }));
   const [opsViewMode, setOpsViewMode] = useState<DeliveryOpsViewMode>('single');
   const syncedTodayRef = useRef(false);
@@ -1682,6 +1730,12 @@ export function DeliveryOpsCenter() {
     if (scopePdvs.length > 0) return scopePdvs;
     return (data?.pointsOfSale ?? []).filter((p) => p.active !== false);
   }, [activeStoreScope.pointsOfSale, activeStoreScope.allPointsOfSale, data?.pointsOfSale]);
+
+  const opsPdvIdsKey = useMemo(
+    () => opsPdvs.map((p) => String(p._id || '').trim()).filter(Boolean).join('|'),
+    [opsPdvs],
+  );
+  opsPdvsRef.current = opsPdvs;
 
   /** En móvil no multi-fetch «todas las tiendas» (N× ops-center = timeout). */
   const isLiveAll = !isMobile && opsViewMode === 'live_all' && opsPdvs.length > 1;
@@ -1785,6 +1839,9 @@ export function DeliveryOpsCenter() {
     restoredOpsPdvSelectionRef.current = false;
     persistBootRef.current = false;
     prevPersistedSalesPointRef.current = undefined;
+    hasOpsDataRef.current = false;
+    liveAccumRef.current = {};
+    setUiStage(0);
   }, [dataUserId, currentBusiness?.business_id, currentBusiness?.id]);
 
   /** Persistir tienda elegida para que el TPV rápido abra esa caja sin paso intermedio.
@@ -1908,6 +1965,16 @@ export function DeliveryOpsCenter() {
     const bypassCache = Boolean(opts?.bypassCache);
     if (bypassCache) invalidateOpsCenterCache(authUserId);
     const seq = ++loadSeqRef.current;
+    const hadData = hasOpsDataRef.current;
+    if (!hadData) setLoading(true);
+
+    const clearLiveMergeTimer = () => {
+      if (liveMergeTimerRef.current) {
+        clearTimeout(liveMergeTimerRef.current);
+        liveMergeTimerRef.current = null;
+      }
+    };
+
     try {
       const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '').trim();
       const baseFilters = {
@@ -1915,56 +1982,64 @@ export function DeliveryOpsCenter() {
         date: filters.date || localDateInputValue(),
         ...(businessId ? { businessId } : {}),
       };
+      const pdvsNow = opsPdvsRef.current;
 
-      if (isLiveAll && opsPdvs.length > 1) {
-        const results = await Promise.all(
-          opsPdvs.map(async (pdv) => {
-            try {
-              const row = await getOpsCenterRequest(
-                authUserId,
-                {
-                  ...baseFilters,
-                  salesPointId: pdv._id,
-                },
-                { bypassCache },
-              );
-              return [pdv._id, row] as const;
-            } catch (e) {
-              console.error('ops-center live pdv error', pdv._id, e);
-              return null;
-            }
-          }),
-        );
+      if (isLiveAll && pdvsNow.length > 1) {
+        // «Todas»: 1 tienda detrás de otra + merge de KPIs coalescido.
+        // Promise.all + setData por cada PDV congelaba el hilo (N re-renders gigantes).
+        clearLiveMergeTimer();
+        liveAccumRef.current = {};
+        if (!hadData) {
+          setLiveByPdv({});
+        }
+
+        const flushMergedKpis = (final = false) => {
+          if (seq !== loadSeqRef.current) return;
+          const snapshot = liveAccumRef.current;
+          const merged = buildLiveMergedOpsData(snapshot, pdvsNow, {
+            includeActiveOrders: final,
+          });
+          if (!merged) return;
+          hasOpsDataRef.current = true;
+          setData(merged);
+          setLoading(false);
+          setLastUp(new Date());
+        };
+
+        const scheduleMergedKpis = () => {
+          if (liveMergeTimerRef.current) return;
+          liveMergeTimerRef.current = setTimeout(() => {
+            liveMergeTimerRef.current = null;
+            flushMergedKpis(false);
+          }, 280);
+        };
+
+        for (const pdv of pdvsNow) {
+          if (seq !== loadSeqRef.current) return;
+          try {
+            const row = await getOpsCenterRequest(
+              authUserId,
+              {
+                ...baseFilters,
+                salesPointId: pdv._id,
+              },
+              { bypassCache },
+            );
+            if (seq !== loadSeqRef.current) return;
+            liveAccumRef.current = { ...liveAccumRef.current, [pdv._id]: row };
+            setLiveByPdv((prev) => ({ ...prev, [pdv._id]: row }));
+            scheduleMergedKpis();
+            // Ceder el hilo para que la UI no se congele entre tiendas.
+            await yieldOpsPaint(16);
+          } catch (e) {
+            console.error('ops-center live pdv error', pdv._id, e);
+          }
+        }
+
         if (seq !== loadSeqRef.current) return;
-        const next: Record<string, OpsCenterData> = {};
-        for (const item of results) {
-          if (item) next[item[0]] = item[1];
-        }
-        setLiveByPdv(next);
-        const rows = Object.values(next);
-        const first = rows[0] || null;
-        if (first) {
-          const mergedAlerts = rows.flatMap((r) => r.alerts || []);
-          const seen = new Set<string>();
-          const alerts = mergedAlerts.filter((a) => {
-            const id = String(a.id || `${a.type}:${a.sessionId || a.orderId || ''}`);
-            if (!id || seen.has(id)) return false;
-            seen.add(id);
-            return true;
-          });
-          const aggKpis = aggregateLiveOpsKpis(rows);
-          setData({
-            ...first,
-            alerts,
-            kpis: aggKpis || first.kpis,
-            foodFamilyCounts: aggregateLiveFoodFamilyCounts(rows),
-            revenueByBrand: aggregateLiveRevenueByBrand(rows),
-            brandLabels: mergeLiveBrandLabels(rows),
-            pointsOfSale: opsPdvs,
-            activeOrders: rows.flatMap((r) => r.activeOrders || []),
-          });
-        }
-        setLastUp(new Date());
+        clearLiveMergeTimer();
+        setLiveByPdv({ ...liveAccumRef.current });
+        flushMergedKpis(true);
       } else {
         const effectiveFilters = {
           ...baseFilters,
@@ -1973,13 +2048,18 @@ export function DeliveryOpsCenter() {
         const r = await getOpsCenterRequest(authUserId, effectiveFilters, { bypassCache });
         if (seq !== loadSeqRef.current) return;
         setLiveByPdv({});
+        liveAccumRef.current = {};
+        hasOpsDataRef.current = true;
         setData(r);
         setLastUp(new Date());
       }
     } catch (e) {
       if (seq === loadSeqRef.current) console.error('ops-center error', e);
     } finally {
-      if (seq === loadSeqRef.current) setLoading(false);
+      if (seq === loadSeqRef.current) {
+        clearLiveMergeTimer();
+        setLoading(false);
+      }
     }
   }, [
     authUserId,
@@ -1989,16 +2069,54 @@ export function DeliveryOpsCenter() {
     opsPdvFilterReady,
     resolvedOpsPdvId,
     isLiveAll,
-    opsPdvs,
+    opsPdvIdsKey,
   ]);
 
   useEffect(() => { void load(); }, [load]);
 
+  /** Montaje progresivo visible: alertas → métricas → detalle (solo al abrir / cambiar vista). */
+  const opsUiViewKey = `${isLiveAll ? 'all' : (resolvedOpsPdvId || 'none')}|${filters.date || ''}`;
+  const hasOpsUiData = Boolean(data);
+
+  useEffect(() => {
+    if (!hasOpsUiData) {
+      setUiStage(0);
+      opsUiViewKeyRef.current = '';
+      return;
+    }
+    const viewChanged = opsUiViewKeyRef.current !== opsUiViewKey;
+    opsUiViewKeyRef.current = opsUiViewKey;
+
+    // Soft refresh (SSE / poll) de la misma vista: no parpadear.
+    if (!viewChanged) {
+      setUiStage(3);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      setUiStage(0);
+      await yieldOpsPaint(40);
+      if (cancelled) return;
+      setUiStage(1);
+      await yieldOpsPaint(150);
+      if (cancelled) return;
+      setUiStage(2);
+      await yieldOpsPaint(170);
+      if (cancelled) return;
+      setUiStage(3);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [hasOpsUiData, opsUiViewKey]);
+
   useEffect(() => {
     const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '').trim();
     const date = filters.date || localDateInputValue();
-    if (!businessId) {
-      setClockSummary(null);
+    // Reloj / fichajes: solo cuando ya hay ops y el bloque de métricas está listo.
+    if (!businessId || !data || uiStage < 2) {
+      if (!data) setClockSummary(null);
       return;
     }
     let cancelled = false;
@@ -2012,7 +2130,7 @@ export function DeliveryOpsCenter() {
     return () => {
       cancelled = true;
     };
-  }, [currentBusiness?.business_id, currentBusiness?.id, filters.date, lastUp]);
+  }, [currentBusiness?.business_id, currentBusiness?.id, filters.date, lastUp, data, uiStage]);
 
   useEffect(() => {
     const onLocalLive = () => {
@@ -2065,7 +2183,8 @@ export function DeliveryOpsCenter() {
     delivery_payment_registered: () => { void load({ bypassCache: true }); },
     connected: () => setSseOk(true),
     disconnected: () => setSseOk(false),
-    reconnecting: () => setSseOk(false),
+    // No bajar a poll 30s en un corte breve: useSSE ya reintenta.
+    reconnecting: () => {},
   }), [load]);
 
   useSSE({
@@ -2144,15 +2263,6 @@ export function DeliveryOpsCenter() {
     ? `${effectiveOpsPdvLabel} · ${subtitle}`
     : subtitle;
 
-  const liveAggCashPend = useMemo(() => {
-    if (!isLiveAll) return cajaAlertBadge(data?.cashStatus);
-    let n = 0;
-    for (const row of Object.values(liveByPdv)) {
-      n += cajaAlertBadge(row.cashStatus);
-    }
-    return n;
-  }, [isLiveAll, liveByPdv, data?.cashStatus]);
-
   const opsStoreHoursWorkCenter = useMemo(() => {
     if (isLiveAll) return null;
     const pdvId = String(filters.salesPointId || '').trim();
@@ -2222,53 +2332,38 @@ export function DeliveryOpsCenter() {
               hideLiveAll={isMobile}
             />
 
-            {data?.alerts && data.alerts.length > 0 && (
-              <Alerts
-                alerts={data.alerts}
-                nowMs={nowMs}
-                opsDate={data?.date || filters.date || localDateInputValue()}
-                activeOrders={active}
-                cashStatus={data?.cashStatus}
-                cfg={cfg}
-              />
-            )}
-
-            {!isLiveAll && !opsAlertsCoverCash(data?.alerts ?? []) && (
+            {uiStage >= 1 && !isLiveAll && !opsAlertsCoverCash(data?.alerts ?? []) && (
               <CashStatusBanner cashStatus={data?.cashStatus} onNavigate={quickNav} />
             )}
 
             {/* En «todas»: el pipeline por fase vive en cada columna (evita duplicar). */}
-            {!isLiveAll && data?.kpis && (
+            {uiStage >= 1 && !isLiveAll && data?.kpis && (
               <Pipeline byStatus={data.kpis.byStatus} active={statusFilter} onFilter={setStatusFilter} />
             )}
 
-            <QuickAccess
-              cfg={cfg}
-              kpis={data?.kpis || null}
-              cashPend={liveAggCashPend}
-              incidents={data?.kpis?.byStatus?.incident || 0}
-              onNavigate={quickNav}
-              activationFocus={activationFocus}
-            />
+            {uiStage >= 2 ? (
+              <Metrics
+                kpis={data?.kpis || null}
+                clockSummary={clockSummary}
+                title={isLiveAll ? 'Métricas operativas · todas' : 'Métricas operativas'}
+                hint={isLiveAll ? `${opsPdvs.length} tiendas · en vivo` : null}
+              />
+            ) : data ? (
+              <OpsStageSkeleton kind="metrics" />
+            ) : null}
 
-            <Metrics
-              kpis={data?.kpis || null}
-              clockSummary={clockSummary}
-              title={isLiveAll ? 'Métricas operativas · todas' : 'Métricas operativas'}
-              hint={isLiveAll ? `${opsPdvs.length} tiendas · en vivo` : null}
-            />
-
-            {data && (
+            {uiStage >= 2 && data ? (
               <OpsFoodAndBrandsStrip
                 food={foodCountsOf(data)}
                 brands={brandRowsOf(data, isLiveAll ? 8 : 6)}
                 title={isLiveAll ? 'Comida y marcas · todas' : 'Comida y marcas'}
               />
-            )}
+            ) : null}
 
-            {loading && !data && opsPdvFilterReady ? (
-              <div className="flex items-center justify-center py-20">
+            {loading && !data && opsPdvFilterReady && !isLiveAll ? (
+              <div className="flex flex-col items-center justify-center gap-2 py-12">
                 <div className="animate-spin w-8 h-8 border-2 border-gray-300 border-t-gray-900 dark:border-gray-600 dark:border-t-gray-100 rounded-full" />
+                <p className="text-[11px] font-medium text-gray-400">Cargando operativa…</p>
               </div>
             ) : !opsPdvFilterReady && opsPdvs.length > 1 ? (
               <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-6 text-center text-sm text-amber-900 dark:text-amber-100">
@@ -2277,12 +2372,17 @@ export function DeliveryOpsCenter() {
                   En <strong>Centros de trabajo</strong>, pulsa tu tienda para cargar la operativa de delivery.
                 </p>
               </div>
-            ) : isLiveAll ? (
+            ) : isLiveAll && uiStage >= 2 ? (
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2 px-0.5">
                   <h3 className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
                     <Store className="w-3.5 h-3.5" />
                     Por tienda
+                    {Object.keys(liveByPdv).length < opsPdvs.length ? (
+                      <span className="normal-case font-medium text-[10px] text-amber-600 dark:text-amber-400">
+                        · {Object.keys(liveByPdv).length}/{opsPdvs.length}
+                      </span>
+                    ) : null}
                   </h3>
                   <span className="text-[10px] text-gray-400 dark:text-gray-500">
                     Totales arriba · detalle aquí
@@ -2299,7 +2399,9 @@ export function DeliveryOpsCenter() {
                   ))}
                 </div>
               </div>
-            ) : (
+            ) : isLiveAll && (loading || data) ? (
+              <OpsStageSkeleton kind="live" />
+            ) : uiStage >= 3 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 {cfg?.hasKitchen !== false && (
                   <KitchenW
@@ -2329,9 +2431,20 @@ export function DeliveryOpsCenter() {
                   <TablesW cfg={cfg} orders={active} />
                 )}
               </div>
-            )}
+            ) : data ? (
+              <OpsStageSkeleton kind="widgets" />
+            ) : null}
 
-            {!isLiveAll && (
+            {uiStage >= 3 && !isLiveAll ? (
+            <MobileLazySection
+              rootMargin="100px 0px"
+              eagerFromMd={false}
+              placeholder={
+                <div className="rounded-xl border border-dashed border-gray-200 dark:border-gray-700 px-3 py-4 text-center text-[11px] text-gray-400">
+                  Desliza para cargar canales y facturación…
+                </div>
+              }
+            >
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
               {data?.revenueByChannel && Object.keys(data.revenueByChannel).length > 0 && (
                 <ChannelsW data={data.revenueByChannel} />
@@ -2353,7 +2466,8 @@ export function DeliveryOpsCenter() {
                 />
               )}
             </div>
-            )}
+            </MobileLazySection>
+            ) : null}
           </div>
       </div>
       </div>

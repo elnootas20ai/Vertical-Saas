@@ -14,7 +14,16 @@ cleanupOutdatedCaches();
 self.skipWaiting();
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    (async () => {
+      await self.clients.claim();
+      // Aviso a pestañas abiertas: el shell puede quedar con refs a chunks viejos.
+      const clients = await self.clients.matchAll({ type: 'window' });
+      for (const client of clients) {
+        client.postMessage({ type: 'vertial:sw-activated' });
+      }
+    })(),
+  );
 });
 
 // ─── Caché de fuentes Google ────────────────────────────────────────────────

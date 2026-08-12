@@ -13,6 +13,7 @@ import {
   resolveActiveTpvRegisterSession,
   findLastClosedTpvSession,
   resolvePreviousCloseCashAmount,
+  previousCloseCashIsNextDayInitial,
   sessionActiveOnCalendarDay,
   sessionBelongsToCajaDay,
   sessionWorkDayKey,
@@ -270,6 +271,13 @@ describe('orderInRegisterSession', () => {
     expect(orderInRegisterSession({ createdAt: '2026-06-17T12:00:00.000Z' }, session)).toBe(true);
     expect(orderInRegisterSession({ createdAt: '2026-06-16T10:00:00.000Z' }, session)).toBe(false);
   });
+
+  it('fechas inválidas no meten el pedido en el turno', () => {
+    expect(orderInRegisterSession(
+      { createdAt: 'no-es-fecha' },
+      { openedAt: '2026-06-16T20:00:00.000Z', status: 'open' },
+    )).toBe(false);
+  });
 });
 
 describe('orderLoadBoundsForOpenSession', () => {
@@ -289,11 +297,16 @@ describe('orderOnOpenTpvOpsBoard', () => {
     status: 'open',
   };
 
-  it('keeps open reparto orders created before openedAt but same local day', () => {
-    // 15:00Z same calendar day in most EU timezones as 20:00Z open
+  it('no reaparece montaje/reparto del turno anterior al reabrir (createdAt < openedAt)', () => {
     expect(
       orderOnOpenTpvOpsBoard(
         { createdAt: '2026-06-16T15:00:00.000Z', status: 'en_reparto' },
+        session,
+      ),
+    ).toBe(false);
+    expect(
+      orderOnOpenTpvOpsBoard(
+        { createdAt: '2026-06-16T20:30:00.000Z', status: 'listo' },
         session,
       ),
     ).toBe(true);
@@ -447,18 +460,20 @@ describe('findLastClosedTpvSession', () => {
   it('prefers nextDayInitialCash over finalCashAmount for next open', () => {
     const last = {
       ...closedTpv,
+      finalCashAmount: 200,
       nextDayInitialCash: 120,
-      finalCashAmount: 500,
     };
     expect(resolvePreviousCloseCashAmount(last)).toBe(120);
+    expect(previousCloseCashIsNextDayInitial(last)).toBe(true);
   });
 
   it('allows nextDayInitialCash 0 (empty drawer left)', () => {
     const last = {
       ...closedTpv,
+      finalCashAmount: 200,
       nextDayInitialCash: 0,
-      finalCashAmount: 500,
     };
     expect(resolvePreviousCloseCashAmount(last)).toBe(0);
+    expect(previousCloseCashIsNextDayInitial(last)).toBe(true);
   });
 });

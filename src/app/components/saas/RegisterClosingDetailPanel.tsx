@@ -380,8 +380,8 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
         </div>
         {session.nextDayInitialCash != null ? (
           <div className="flex justify-between">
-            <span className="text-amber-800 dark:text-amber-200 font-medium">Inicial para mañana</span>
-            <span className="font-semibold tabular-nums text-amber-900 dark:text-amber-100">
+            <span className="text-emerald-700 dark:text-emerald-300 font-medium">Fondo que queda en caja</span>
+            <span className="font-semibold tabular-nums text-emerald-800 dark:text-emerald-200">
               {fmtMoney(session.nextDayInitialCash)}€
             </span>
           </div>

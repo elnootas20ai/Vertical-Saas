@@ -30,6 +30,11 @@ function buildSseUrl(token: string | null, businessId?: string | null): string {
   return `${base}/api/sse${qs ? `?${qs}` : ''}`;
 }
 
+function emitHandler(name: string, handlers: SSEEventMap, payload: unknown) {
+  const fn = handlers[name];
+  if (typeof fn === 'function') fn(payload);
+}
+
 /**
  * Hook para conectarse al endpoint SSE del backend.
  * Se reconecta automáticamente con backoff exponencial.
@@ -39,6 +44,7 @@ export function useSSE({ userId, token, businessId, handlers, enabled = true }: 
   const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectDelay = useRef(RECONNECT_INITIAL_MS);
   const handlersRef = useRef(handlers);
+  const intentionalCloseRef = useRef(false);
   const [resolvedToken, setResolvedToken] = useState<string | null>(token ?? null);
 
   useEffect(() => {
@@ -64,6 +70,7 @@ export function useSSE({ userId, token, businessId, handlers, enabled = true }: 
   }, [userId, token, enabled]);
 
   const disconnect = useCallback(() => {
+    intentionalCloseRef.current = true;
     if (reconnectTimeout.current) {
       clearTimeout(reconnectTimeout.current);
       reconnectTimeout.current = null;
@@ -77,6 +84,7 @@ export function useSSE({ userId, token, businessId, handlers, enabled = true }: 
   const connect = useCallback(async () => {
     if (!userId || !enabled) return;
     disconnect();
+    intentionalCloseRef.current = false;
 
     let activeToken = token || resolvedToken;
     if (!activeToken) {
@@ -91,13 +99,31 @@ export function useSSE({ userId, token, businessId, handlers, enabled = true }: 
     const es = new EventSource(url, { withCredentials: true });
     esRef.current = es;
 
-    es.addEventListener('connected', () => {
+    const markConnected = (payload: unknown) => {
       reconnectDelay.current = RECONNECT_INITIAL_MS;
+      emitHandler('connected', handlersRef.current, payload);
+    };
+
+    // onopen: algunos proxies no reenvían bien el event: connected del server.
+    es.onopen = () => {
+      markConnected({ source: 'open', ts: Date.now() });
+    };
+
+    es.addEventListener('connected', (e: Event) => {
+      const msg = e as MessageEvent;
+      try {
+        markConnected(JSON.parse(String(msg.data || '{}')));
+      } catch {
+        markConnected({ source: 'connected', raw: msg.data });
+      }
     });
 
     // Siempre leer handlersRef.current: si capturamos `handler` al conectar,
     // el chat se queda con selectedChannelId=null y deja de anexar mensajes.
     for (const eventName of Object.keys(handlersRef.current)) {
+      if (eventName === 'connected' || eventName === 'disconnected' || eventName === 'reconnecting') {
+        continue; // ya gestionados arriba / en onerror
+      }
       es.addEventListener(eventName, (e: MessageEvent) => {
         const current = handlersRef.current[eventName];
         if (!current) return;
@@ -111,19 +137,19 @@ export function useSSE({ userId, token, businessId, handlers, enabled = true }: 
     }
 
     es.onerror = () => {
-      const disconnectedHandler = handlersRef.current.disconnected;
-      if (typeof disconnectedHandler === 'function') {
-        disconnectedHandler({ reason: 'error' });
-      }
-      const reconnectingHandler = handlersRef.current.reconnecting;
-      if (typeof reconnectingHandler === 'function') {
-        reconnectingHandler({ retryInMs: reconnectDelay.current });
-      }
+      if (intentionalCloseRef.current) return;
+      // No marcar "desconectado" al primer corte: solo reconectando.
+      // Si marcamos offline aquí, el OP cae a poll 30s aunque el SSE vuelva en 1s.
+      emitHandler('reconnecting', handlersRef.current, { retryInMs: reconnectDelay.current });
       es.close();
-      esRef.current = null;
+      if (esRef.current === es) esRef.current = null;
 
       reconnectTimeout.current = setTimeout(() => {
         reconnectDelay.current = Math.min(reconnectDelay.current * 2, RECONNECT_MAX_MS);
+        // Tras varios fallos, avisar desconexión real (antes del siguiente intento).
+        if (reconnectDelay.current >= 12_000) {
+          emitHandler('disconnected', handlersRef.current, { reason: 'error' });
+        }
         void connect();
       }, reconnectDelay.current);
     };

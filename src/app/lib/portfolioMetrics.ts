@@ -846,10 +846,16 @@ export function computeCompanyBillingBreakdown(
         cell.revenueMonth += amount;
         if (isRevenueOnDay(order, todayKey)) cell.revenueToday += amount;
 
-        if (!storeBrandMatrix.get(storeId)!.has(bid)) {
-          storeBrandMatrix.get(storeId)!.set(bid, { revenueMonth: 0, deliveredMonth: 0 });
+        // pdvToWc puede resolver un WC fuera de storeRows → hay que crear la fila.
+        let sbMap = storeBrandMatrix.get(storeId);
+        if (!sbMap) {
+          sbMap = new Map();
+          storeBrandMatrix.set(storeId, sbMap);
         }
-        const sb = storeBrandMatrix.get(storeId)!.get(bid)!;
+        if (!sbMap.has(bid)) {
+          sbMap.set(bid, { revenueMonth: 0, deliveredMonth: 0 });
+        }
+        const sb = sbMap.get(bid)!;
         sb.revenueMonth += amount;
       }
     }

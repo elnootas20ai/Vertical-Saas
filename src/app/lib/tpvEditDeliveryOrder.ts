@@ -99,46 +99,6 @@ export function seedTpvCartFromDeliveryOrder(
 }
 
 /**
- * Líneas nuevas o con más unidades respecto al pedido original.
- * Sirve para comanda de cocina al editar (solo lo añadido, no el pedido entero).
- */
-export function diffAddedDeliveryOrderItems(
-  previous: DeliveryOrderItem[] | null | undefined,
-  next: DeliveryOrderItem[] | null | undefined,
-): DeliveryOrderItem[] {
-  const prevList = Array.isArray(previous) ? previous : [];
-  const nextList = Array.isArray(next) ? next : [];
-  const prevById = new Map<string, DeliveryOrderItem>();
-  for (const item of prevList) {
-    const id = String(item?.id || '').trim();
-    if (id) prevById.set(id, item);
-  }
-
-  const added: DeliveryOrderItem[] = [];
-  for (const item of nextList) {
-    if (!item) continue;
-    const id = String(item.id || '').trim();
-    const qty = Math.max(0, Number(item.quantity) || 0);
-    if (qty <= 0) continue;
-    const old = id ? prevById.get(id) : undefined;
-    if (!old) {
-      added.push(item);
-      continue;
-    }
-    const oldQty = Math.max(0, Number(old.quantity) || 0);
-    const delta = qty - oldQty;
-    if (delta <= 0) continue;
-    const unit = Number(item.unitPrice) || 0;
-    added.push({
-      ...item,
-      quantity: delta,
-      total: Math.round(unit * delta * 100) / 100,
-    });
-  }
-  return added;
-}
-
-/**
  * Editable desde el tablero TPV:
  * - Domicilio: montaje o reparto
  * - Recogida local: montaje (hasta Entregar)

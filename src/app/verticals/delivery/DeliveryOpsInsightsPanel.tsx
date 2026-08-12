@@ -28,9 +28,17 @@ type Props = {
   compact?: boolean;
   newClientsMonth?: number | null;
   newClientsPrevMonth?: number | null;
+  newClientsWeek?: number | null;
+  newClientsPrevWeek?: number | null;
   newClientsToday?: number | null;
   newClientsYesterday?: number | null;
 };
+
+const RANGE_OPTIONS: Array<{ key: OpsInsightRange; label: string }> = [
+  { key: 'day', label: 'Día' },
+  { key: 'week', label: 'Semana' },
+  { key: 'month', label: 'Mes' },
+];
 
 function VsBadge({ pct, invert = false }: { pct: number | null; invert?: boolean }) {
   if (pct == null) return null;
@@ -324,6 +332,8 @@ export function DeliveryOpsInsightsPanel({
   compact = false,
   newClientsMonth = null,
   newClientsPrevMonth = null,
+  newClientsWeek = null,
+  newClientsPrevWeek = null,
   newClientsToday = null,
   newClientsYesterday = null,
 }: Props) {
@@ -336,15 +346,24 @@ export function DeliveryOpsInsightsPanel({
   );
 
   const newClients =
-    range === 'day' ? (newClientsToday ?? null) : (newClientsMonth ?? null);
+    range === 'day'
+      ? (newClientsToday ?? null)
+      : range === 'week'
+        ? (newClientsWeek ?? null)
+        : (newClientsMonth ?? null);
   const newClientsPrev =
-    range === 'day' ? (newClientsYesterday ?? null) : (newClientsPrevMonth ?? null);
+    range === 'day'
+      ? (newClientsYesterday ?? null)
+      : range === 'week'
+        ? (newClientsPrevWeek ?? null)
+        : (newClientsPrevMonth ?? null);
   const newClientsPct =
     newClients != null && newClientsPrev != null
       ? monthOverMonthPct(newClients, newClientsPrev)
       : null;
 
-  const rangeLabel = range === 'day' ? 'Día' : 'Mes';
+  const rangeLabel =
+    RANGE_OPTIONS.find((o) => o.key === range)?.label || 'Mes';
 
   return (
     <section className="rounded-xl border border-gray-200 bg-white p-2.5 shadow-sm dark:border-gray-700 dark:bg-gray-900 sm:p-3">
@@ -361,7 +380,7 @@ export function DeliveryOpsInsightsPanel({
         </div>
         <div className="flex items-center gap-1.5">
           <div className="flex rounded-lg border border-gray-200 bg-gray-50 p-0.5 dark:border-gray-600 dark:bg-gray-900/50">
-            {(['day', 'month'] as const).map((key) => (
+            {RANGE_OPTIONS.map(({ key, label }) => (
               <button
                 key={key}
                 type="button"
@@ -374,7 +393,7 @@ export function DeliveryOpsInsightsPanel({
                     : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
                 }`}
               >
-                {key === 'day' ? 'Día' : 'Mes'}
+                {label}
               </button>
             ))}
           </div>

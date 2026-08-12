@@ -13,7 +13,7 @@ import {
 import { foodFamilyCountsFromOrders } from '../../lib/shiftFoodFamilyCounts';
 import { localCalendarDayKey } from '../../lib/tpvCajaScope';
 
-export type OpsInsightRange = 'day' | 'month';
+export type OpsInsightRange = 'day' | 'week' | 'month';
 
 /** Base cocina/prep por pedido (min). Varios se solapan. */
 export const PREP_BASELINE_MIN = 20;
@@ -57,6 +57,11 @@ function orderInRange(order: DeliveryOrder, range: OpsInsightRange, todayKey: st
   const day = orderDayKey(order);
   if (!day) return false;
   if (range === 'day') return day === todayKey;
+  if (range === 'week') {
+    // Últimos 7 días inclusive (hoy-6 … hoy).
+    const weekStart = addDaysToDayKey(todayKey, -6);
+    return Boolean(weekStart) && day >= weekStart && day <= todayKey;
+  }
   // Mes en curso a la fecha (1..hoy), no el mes civil completo futuro.
   const monthStart = `${todayKey.slice(0, 7)}-01`;
   return day >= monthStart && day <= todayKey;
@@ -66,6 +71,12 @@ function orderInPrevRange(order: DeliveryOrder, range: OpsInsightRange, todayKey
   const day = orderDayKey(order);
   if (!day) return false;
   if (range === 'day') return day === addDaysToDayKey(todayKey, -1);
+  if (range === 'week') {
+    // Semana anterior: hoy-13 … hoy-7.
+    const prevEnd = addDaysToDayKey(todayKey, -7);
+    const prevStart = addDaysToDayKey(todayKey, -13);
+    return Boolean(prevStart && prevEnd) && day >= prevStart && day <= prevEnd;
+  }
   return listPrevMonthToDateDayKeys(todayKey).includes(day);
 }
 
@@ -441,7 +452,12 @@ export function buildDeliveryOpsInsights(
   return {
     range,
     todayKey,
-    vsLabel: range === 'day' ? 'vs ayer' : 'vs mismos días mes ant.',
+    vsLabel:
+      range === 'day'
+        ? 'vs ayer'
+        : range === 'week'
+          ? 'vs sem. ant.'
+          : 'vs mismos días mes ant.',
     deliveredCount: curDelivered.length,
     deliveredPrevCount: prevDelivered.length,
     prepBaselineMin: PREP_BASELINE_MIN,

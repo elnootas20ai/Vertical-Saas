@@ -328,7 +328,7 @@ export function RestaurantDashboard({ onSelectGeneral }: VerticalDashboardProps)
       'sala:comanda_status_changed': scheduleReload,
       connected: () => setSseOk(true),
       disconnected: () => setSseOk(false),
-      reconnecting: () => setSseOk(false),
+      reconnecting: () => {},
     }),
     [scheduleReload],
   );

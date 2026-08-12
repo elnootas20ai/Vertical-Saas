@@ -130,7 +130,10 @@ export function useTpvCatalog(
       };
     }
 
-    if (cached) {
+    // Revalidación en segundo plano: NO poner loading=true si ya hay carta en caché
+    // (en tablet el «+» / editar pedido parpadeaba el spinner encima de productos).
+    const showSpinner = !cached || cached.items.length === 0;
+    if (showSpinner) {
       setLoadingCatalog(true);
     }
 

@@ -33,7 +33,7 @@ import {
   isTpvRegisterSessionOpen,
 } from '../../lib/deliveryApi';
 import { calcTpvExpectedCash, buildTpvRegisterSummary, calcTpvShiftCollectionsTotal, countNetSaleOperations, sumCashReturns, sumCashStaffConsumption } from '../../lib/tpvCajaMath';
-import { formatMoneyAsYouType, moneyNumberToDisplay, scheduleMoneyInputCaretToEnd } from '../../lib/workCenterMoneyInput';
+import { formatMoneyAsYouType } from '../../lib/workCenterMoneyInput';
 import { formatMoneyEs, formatDecimalEs } from '../../lib/formatNumberEs';
 import { consumeSalaTpvLaunch } from '../../lib/salaTpvLaunch';
 import { RegisterShiftSalesBreakdown } from './RegisterShiftSalesBreakdown';
@@ -42,8 +42,7 @@ import {
   pickNewestOpenRegisterSessionForStore,
   resolveActiveTpvRegisterSession,
   findLastClosedTpvSession,
-  findReopenableClosedTpvSession,
-  calendarDayMadrid,
+  isTpvRegisterSessionStaleOpen,
   resolvePreviousCloseCashAmount,
   previousCloseCashIsNextDayInitial,
   shouldKeepTpvSessionInClientList,
@@ -67,7 +66,7 @@ import {
   type FoodFamilyCounts,
 } from '../../lib/shiftFoodFamilyCounts';
 import { AggregatorClosingEditor, type AggregatorClosingSnapshot, type ManualLinesByChannel } from './AggregatorClosingEditor';
-import { DeliveryFoodUnitIcon } from './delivery/DeliveryFoodUnitIcon';
+import { DeliveryFoodUnitIcon, DeliveryFoodUnitLabel } from './delivery/DeliveryFoodUnitIcon';
 import { AggregatorCashSummary } from './AggregatorCashSummary';
 import { sessionToUrielAmounts } from '../../lib/cajaUrielClosingsExcelExport';
 import { ShiftBrandBillingSummary } from './ShiftBrandBillingSummary';
@@ -291,19 +290,16 @@ function shouldKeepTpvSessionInList(
 
 // ─── Cash Count Grid ────────────────────────────────────────────────────────
 
-function CashCountGrid({ counts, onChange, compact = false, readOnly = false }: {
+function CashCountGrid({ counts, onChange, compact = false }: {
   counts: CashDenominationCount;
   onChange: (counts: CashDenominationCount) => void;
   compact?: boolean;
-  /** Bloqueado (p. ej. apertura con inicial dejado el día anterior). */
-  readOnly?: boolean;
 }) {
   const total = calcDenominationTotal(counts);
   const bills = DENOMINATIONS.filter(d => d.type === 'bill');
   const coins = DENOMINATIONS.filter(d => d.type === 'coin');
 
   const updateCount = (key: keyof CashDenominationCount, val: number) => {
-    if (readOnly) return;
     onChange({ ...counts, [key]: Math.max(0, val) });
   };
 
@@ -315,30 +311,10 @@ function CashCountGrid({ counts, onChange, compact = false, readOnly = false }: 
         <span className={`text-right font-semibold ${compact ? 'w-11 text-xs' : 'w-14 text-sm'} ${d.type === 'bill' ? 'text-green-700 dark:text-green-400' : 'text-amber-700 dark:text-amber-400'}`}>{d.label}</span>
         <span className="text-gray-400 text-xs">×</span>
         <div className="flex items-center gap-1">
-          <button
-            type="button"
-            disabled={readOnly}
-            onClick={() => updateCount(d.key, qty - 1)}
-            className={`rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:pointer-events-none ${compact ? 'w-6 h-6 text-xs' : 'w-7 h-7 text-sm'}`}
-          >
-            -
-          </button>
-          <input
-            type="number"
-            min="0"
-            value={qty || ''}
-            readOnly={readOnly}
-            onChange={e => updateCount(d.key, parseInt(e.target.value) || 0)}
-            className={`text-center border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 dark:focus:border-gray-400 outline-none read-only:bg-gray-50 dark:read-only:bg-gray-900/60 ${compact ? 'w-11 h-6 text-xs' : 'w-14 h-7 text-sm'}`}
-          />
-          <button
-            type="button"
-            disabled={readOnly}
-            onClick={() => updateCount(d.key, qty + 1)}
-            className={`rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:pointer-events-none ${compact ? 'w-6 h-6 text-xs' : 'w-7 h-7 text-sm'}`}
-          >
-            +
-          </button>
+          <button onClick={() => updateCount(d.key, qty - 1)} className={`rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 ${compact ? 'w-6 h-6 text-xs' : 'w-7 h-7 text-sm'}`}>-</button>
+          <input type="number" min="0" value={qty || ''} onChange={e => updateCount(d.key, parseInt(e.target.value) || 0)}
+            className={`text-center border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 dark:focus:border-gray-400 outline-none ${compact ? 'w-11 h-6 text-xs' : 'w-14 h-7 text-sm'}`} />
+          <button onClick={() => updateCount(d.key, qty + 1)} className={`rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 ${compact ? 'w-6 h-6 text-xs' : 'w-7 h-7 text-sm'}`}>+</button>
         </div>
         <span className={`font-medium text-gray-600 dark:text-gray-400 text-right ${compact ? 'text-xs w-12' : 'text-sm w-16'}`}>{subtotal > 0 ? `${subtotal.toFixed(2)}€` : '—'}</span>
       </div>
@@ -454,13 +430,13 @@ interface OpeningData {
   counts: CashDenominationCount;
 }
 
-function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLoading, pointsOfSale, workCenters, workerOptions, registerSessions, restrictedToPdvId, onClearStorePick, isManagerView = false, isTabletMode = false, tabletStoreLabel, onOpeningPdvChange, restaurantOpening = false, clockInBusinessId = '', clockInOwnerUserId = '', onClockInChanged }: {
+function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading, openingBusy = false, pointsOfSale, workCenters, workerOptions, registerSessions, restrictedToPdvId, onClearStorePick, isManagerView = false, isTabletMode = false, tabletStoreLabel, onOpeningPdvChange, restaurantOpening = false, clockInBusinessId = '', clockInOwnerUserId = '', onClockInChanged, resumeAfterClose = null }: {
   onOpen: (data: OpeningData) => void;
-  /** Reabrir turno cerrado hoy/ayer por error (conserva ventas). */
-  onReopenClosed?: (session: TpvRegisterSession) => void | Promise<void>;
-  /** Ver el cierre sin reabrir la caja. */
-  onViewClosed?: (session: TpvRegisterSession) => void;
+  /** Entrar en una caja ya abierta (aviso proactivo; no al martillar Abrir). */
+  onContinueExistingOpen?: (session: TpvRegisterSession) => void;
   loading: boolean;
+  /** Crear sesión en curso: desactiva Abrir y muestra feedback. */
+  openingBusy?: boolean;
   pointsOfSale: PointOfSale[];
   workCenters: WorkCenter[];
   workerOptions: { id: string; name: string }[];
@@ -482,6 +458,8 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
   clockInBusinessId?: string;
   clockInOwnerUserId?: string;
   onClockInChanged?: () => void;
+  /** Tras «Abrir otra caja»: ir a contar fondo con el mismo trabajador si se puede. */
+  resumeAfterClose?: { workerId?: string; preferCashStep?: boolean } | null;
 }) {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
@@ -490,14 +468,22 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
     () => resolveBusinessDataUserId(user, currentBusiness),
     [user, currentBusiness],
   );
-  const [workerName, setWorkerName] = useState('');
   const [selectedPdvId, setSelectedPdvId] = useState('');
   const [selectedTerminalId, setSelectedTerminalId] = useState('');
   const [counts, setCounts] = useState<CashDenominationCount>(() => emptyCashDenominationCount());
-  const [selectedWorkerId, setSelectedWorkerId] = useState<string>(() => (
-    !isTabletMode && workerOptions.length === 1 ? workerOptions[0].id : ''
+  const resumeWorkerId = String(resumeAfterClose?.workerId || '').trim();
+  const [selectedWorkerId, setSelectedWorkerId] = useState<string>(() => {
+    if (resumeWorkerId) {
+      const match = workerOptions.find((w) => clockinIdsMatch(w.id, resumeWorkerId));
+      if (match) return match.id;
+    }
+    return !isTabletMode && workerOptions.length === 1 ? workerOptions[0].id : '';
+  });
+  const [tabletStep, setTabletStep] = useState<1 | 2>(() => (
+    resumeAfterClose?.preferCashStep && (resumeWorkerId || (!isTabletMode && workerOptions.length === 1))
+      ? 2
+      : 1
   ));
-  const [tabletStep, setTabletStep] = useState<1 | 2>(1);
   const [vacationBlockedById, setVacationBlockedById] = useState<Record<string, string>>({});
   const salaLaunchRef = useRef<string | null>(consumeSalaTpvLaunch());
   const lastRestrictedPdvRef = useRef('');
@@ -543,134 +529,106 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
   const availableTerminals = selectedPdv?.terminals.filter((t) => t.active !== false) || [];
   const selectedTerminal = availableTerminals.find(t => t.id === selectedTerminalId);
 
-  const previousCloseCash = useMemo(() => {
+  const previousCloseHint = useMemo(() => {
     const pdvId = selectedPdv?._id || restrictedToPdvId || '';
     const terminalId = selectedTerminal?.id || (isTabletMode ? `tablet-${pdvId || 'default'}` : '');
     const last = findLastClosedTpvSession(registerSessions, pdvId, terminalId, pointsOfSale);
-    const fromFinal = resolvePreviousCloseCashAmount(last);
-    if (fromFinal != null) return fromFinal;
-    if (!last) return null;
-    const amount = calcDenominationTotal(last.closingCashCount || {});
-    if (!Number.isFinite(amount) || amount < 0) return null;
-    return amount;
-  }, [registerSessions, selectedPdv, restrictedToPdvId, selectedTerminal, isTabletMode, pointsOfSale]);
-
-  const previousCloseIsNextDayInitial = useMemo(() => {
-    const pdvId = selectedPdv?._id || restrictedToPdvId || '';
-    const terminalId = selectedTerminal?.id || (isTabletMode ? `tablet-${pdvId || 'default'}` : '');
-    const last = findLastClosedTpvSession(registerSessions, pdvId, terminalId, pointsOfSale);
-    return previousCloseCashIsNextDayInitial(last);
-  }, [registerSessions, selectedPdv, restrictedToPdvId, selectedTerminal, isTabletMode, pointsOfSale]);
-
-  const previousCloseLabel = useMemo(() => {
-    const pdvId = selectedPdv?._id || restrictedToPdvId || '';
-    const terminalId = selectedTerminal?.id || (isTabletMode ? `tablet-${pdvId || 'default'}` : '');
-    const last = findLastClosedTpvSession(registerSessions, pdvId, terminalId, pointsOfSale);
-    if (!last?.closedAt) return '';
-    try {
-      return new Date(last.closedAt).toLocaleDateString('es-ES', {
-        weekday: 'short',
-        day: 'numeric',
-        month: 'short',
-      });
-    } catch {
-      return '';
+    if (!last) return null as null | { amount: number; isNextDayInitial: boolean; label: string };
+    let amount = resolvePreviousCloseCashAmount(last);
+    if (amount == null) {
+      const fromCount = calcDenominationTotal(last.closingCashCount || {});
+      amount = Number.isFinite(fromCount) && fromCount >= 0 ? fromCount : null;
     }
+    if (amount == null) return null;
+    let label = '';
+    if (last.closedAt) {
+      try {
+        label = new Date(last.closedAt).toLocaleDateString('es-ES', {
+          weekday: 'short',
+          day: 'numeric',
+          month: 'short',
+        });
+      } catch {
+        label = '';
+      }
+    }
+    return {
+      amount,
+      isNextDayInitial: previousCloseCashIsNextDayInitial(last),
+      label,
+    };
   }, [registerSessions, selectedPdv, restrictedToPdvId, selectedTerminal, isTabletMode, pointsOfSale]);
 
-  const reopenableSession = useMemo(() => {
-    if (!onReopenClosed) return null;
+  const previousCloseCash = previousCloseHint?.amount ?? null;
+  const previousCloseIsNextDayInitial = previousCloseHint?.isNextDayInitial === true;
+  const previousCloseLabel = previousCloseHint?.label || '';
+  /** Solo si el cierre dejó fondo explícito. Si no hay / no se detecta → conteo libre y se puede abrir. */
+  const openingCashLocked = previousCloseIsNextDayInitial && previousCloseCash != null;
+
+  /** Aviso ANTES de Abrir: otra tablet/PC ya tiene caja abierta en esta tienda. */
+  const existingOpenForStore = useMemo(() => {
     const pdvId = selectedPdv?._id || restrictedToPdvId || '';
-    const terminalId = selectedTerminal?.id || (isTabletMode ? `tablet-${pdvId || 'default'}` : '');
-    return findReopenableClosedTpvSession(registerSessions, pdvId, terminalId, pointsOfSale);
-  }, [
-    onReopenClosed,
-    registerSessions,
-    selectedPdv,
-    restrictedToPdvId,
-    selectedTerminal,
-    isTabletMode,
-    pointsOfSale,
-  ]);
+    if (!pdvId) return null;
+    const open = pickNewestOpenRegisterSessionForStore(registerSessions, pdvId, pointsOfSale);
+    if (!open || isTpvRegisterSessionStaleOpen(open)) return null;
+    return open;
+  }, [registerSessions, selectedPdv, restrictedToPdvId, pointsOfSale]);
 
-  const reopenableDayLabel = useMemo(() => {
-    if (!reopenableSession) return '';
-    const closedDay = calendarDayMadrid(reopenableSession.closedAt || reopenableSession.openedAt);
-    const today = calendarDayMadrid(new Date());
-    if (closedDay && closedDay === today) return 'hoy';
-    return 'ayer';
-  }, [reopenableSession]);
-
-  const [reopening, setReopening] = useState(false);
-  const handleReopenClick = async () => {
-    if (!reopenableSession || !onReopenClosed || reopening || parentLoading) return;
-    setReopening(true);
-    try {
-      await onReopenClosed(reopenableSession);
-    } finally {
-      setReopening(false);
-    }
-  };
-
-  const reopenableBanner = reopenableSession ? (
-    <div className="rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50/90 dark:bg-stone-900/50 px-2.5 py-1.5 flex flex-wrap items-center gap-2">
-      <p className="text-[11px] font-semibold text-stone-700 dark:text-stone-200 min-w-0 flex-1 truncate">
-        Caja de {reopenableDayLabel} cerrada
-        {reopenableSession.pointOfSaleName ? (
-          <span className="font-normal text-stone-500"> · {reopenableSession.pointOfSaleName}</span>
-        ) : null}
-      </p>
-      <div className="flex items-center gap-1.5 shrink-0">
-        <button
-          type="button"
-          onClick={() => onViewClosed?.(reopenableSession)}
-          disabled={!onViewClosed || parentLoading}
-          className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[#2563EB] hover:bg-blue-700 disabled:opacity-60 text-white text-[11px] font-semibold"
-        >
-          <Eye className="w-3 h-3" />
-          Ver
-        </button>
-        {onReopenClosed ? (
-          <button
-            type="button"
-            onClick={() => void handleReopenClick()}
-            disabled={reopening || parentLoading}
-            className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-100 text-[11px] font-semibold disabled:opacity-60"
-            title="Solo si la cerraste por error"
-          >
-            {reopening ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
-            Reabrir
-          </button>
-        ) : null}
+  const openingAlertBanner = existingOpenForStore ? (
+    <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/90 dark:bg-blue-950/40 px-3 py-2.5 flex flex-wrap items-center gap-2">
+      <div className="min-w-0 flex-1">
+        <p className="text-[11px] font-bold text-blue-950 dark:text-blue-50">
+          Ya hay caja abierta en esta tienda
+        </p>
+        <p className="text-[10px] text-blue-800/90 dark:text-blue-200/80 truncate">
+          {existingOpenForStore.workerName || 'Equipo'}
+          {existingOpenForStore.terminalName ? ` · ${existingOpenForStore.terminalName}` : ''}
+          {' · no abras otra'}
+        </p>
       </div>
+      <button
+        type="button"
+        onClick={() => onContinueExistingOpen?.(existingOpenForStore)}
+        disabled={parentLoading || openingBusy || !onContinueExistingOpen}
+        className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#2563EB] hover:bg-blue-700 disabled:opacity-60 text-white text-xs font-bold"
+      >
+        <Unlock className="w-3.5 h-3.5" />
+        Entrar
+      </button>
     </div>
   ) : null;
 
-  const [manualOpenSlot, setManualOpenSlot] = useState('');
-  const manualOpenInputRef = useRef<HTMLInputElement | null>(null);
-  const openingCashLocked = previousCloseCash != null;
   const didPrefillFromPreviousCloseRef = useRef(false);
   useEffect(() => {
     didPrefillFromPreviousCloseRef.current = false;
-    setManualOpenSlot('');
   }, [selectedPdvId, selectedTerminalId, previousCloseCash]);
 
   useEffect(() => {
     if (previousCloseCash == null) return;
+    if (openingCashLocked) {
+      setCounts(buildDenominationFromAmount(previousCloseCash));
+      return;
+    }
     if (didPrefillFromPreviousCloseRef.current) return;
     didPrefillFromPreviousCloseRef.current = true;
     setCounts(buildDenominationFromAmount(previousCloseCash));
-  }, [previousCloseCash]);
+  }, [previousCloseCash, selectedPdvId, selectedTerminalId, openingCashLocked]);
 
-  const handleManualOpenAmountChange = (raw: string) => {
-    if (openingCashLocked) return;
-    const formatted = formatMoneyAsYouType(raw, true);
-    setManualOpenSlot(formatted);
-    const parsed = parseAggregatorAmount(formatted);
-    setCounts(buildDenominationFromAmount(parsed != null && parsed >= 0 ? parsed : 0));
-    scheduleMoneyInputCaretToEnd(manualOpenInputRef.current);
-  };
+  // Tras «Abrir otra»: si el trabajador llega tarde al listado, engancharlo y saltar a contar.
+  useEffect(() => {
+    if (!resumeWorkerId || selectedWorkerId) return;
+    const match = workerOptions.find((w) => clockinIdsMatch(w.id, resumeWorkerId));
+    if (match) setSelectedWorkerId(match.id);
+  }, [resumeWorkerId, workerOptions, selectedWorkerId]);
 
+  useEffect(() => {
+    if (!resumeAfterClose?.preferCashStep) return;
+    if (!selectedWorkerId) return;
+    if (!isTabletMode) return;
+    setTabletStep(2);
+  }, [resumeAfterClose?.preferCashStep, selectedWorkerId, isTabletMode]);
+
+  const openActionBusy = parentLoading || openingBusy;
   const effectiveTerminalName = selectedTerminal
     ? (selectedTerminal.code || selectedTerminal.name)
     : (isTabletMode ? 'Tablet' : '');
@@ -692,6 +650,7 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
   const selectedWorkerVacationMsg = selectedWorkerId
     ? vacationBlockedById[selectedWorkerId] || vacationBlockedById[String(selectedWorkerId).trim()]
     : '';
+  // Abrir NUNCA exige fondo dejado: si no se detecta, se abre con el conteo (0 € vale).
   const canOpen = hasWorkers
     && Boolean(effectiveWorkerName())
     && hasResolvedPdv
@@ -861,6 +820,11 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
   };
 
   const handleSubmit = () => {
+    if (openActionBusy) return;
+    if (existingOpenForStore) {
+      toast.info('Ya hay caja abierta. Usa Entrar arriba.', { id: 'tpv-use-enter-banner', duration: 2500 });
+      return;
+    }
     const wName = effectiveWorkerName();
     const pdvId = selectedPdv?._id || restrictedToPdvId || '';
     const syntheticTerminalId = allowSyntheticTerminal
@@ -868,6 +832,10 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
       : '';
     if (selectedWorkerId && vacationBlockedById[selectedWorkerId]) {
       toast.error(vacationBlockedById[selectedWorkerId]);
+      return;
+    }
+    if (!canOpen || !wName || !pdvId) {
+      toast.error(openBlockedReason || 'Completa tienda y trabajador para abrir');
       return;
     }
     onOpen({
@@ -1008,9 +976,9 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
           </button>
         </div>
 
-        {!isTabletMode && reopenableBanner ? (
+        {openingAlertBanner ? (
           <div className="shrink-0 px-3 py-2 border-b border-stone-200 dark:border-stone-800">
-            {reopenableBanner}
+            {openingAlertBanner}
           </div>
         ) : null}
 
@@ -1019,8 +987,8 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
           <div className="shrink-0 px-3 sm:px-4 py-2 border-b border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-950/60">
             <p className="text-[11px] font-medium text-stone-600 dark:text-stone-300">
               {tabletStep === 1
-                ? 'Elige quién abre con Abrir (fichar es opcional)'
-                : 'Cuenta el dinero del cajón (0 € si está vacío)'}
+                ? 'Elige quién abre (fichar es opcional) y pulsa Siguiente'
+                : 'Cuenta el dinero del cajón (0 € si está vacío) y abre'}
             </p>
           </div>
         ) : null}
@@ -1032,7 +1000,6 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
         >
           {isTabletMode && tabletStep === 1 && (
             <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-3 flex flex-col">
-              {reopenableBanner}
               {displayStoreName && (
                 <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 px-3 py-2.5 shrink-0">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">Tienda</p>
@@ -1071,8 +1038,8 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
                 </div>
               ) : selectedWorkerId ? (
                 <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium shrink-0">
-                  Abre la caja: <strong>{effectiveWorkerName()}</strong>
-                  {' · '}pulsa «Abrir caja» abajo
+                  Listo: <strong>{effectiveWorkerName()}</strong>
+                  {' · '}pulsa «Siguiente — Contar»
                 </p>
               ) : (
                 <p className="text-xs text-violet-700 dark:text-violet-300 font-medium shrink-0">
@@ -1084,7 +1051,6 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
 
           {isTabletMode && tabletStep === 2 && (
             <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 flex flex-col gap-2.5">
-              {reopenableBanner}
               <div className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2">
                 <div className="min-w-0">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
@@ -1102,7 +1068,7 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
               </div>
               <div className="flex items-center justify-between gap-2">
                 <label className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Fondo de apertura *
+                  {openingCashLocked ? 'Fondo de apertura *' : 'Conteo de efectivo *'}
                 </label>
                 <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 tabular-nums">
                   {total.toFixed(2)}€
@@ -1111,31 +1077,40 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
               {openingCashLocked ? (
                 <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30 px-3 py-3 space-y-1">
                   <p className="text-[11px] font-bold text-amber-900 dark:text-amber-100">
-                    {previousCloseIsNextDayInitial ? 'Inicial dejado al cerrar' : 'Fondo del último cierre'}
-                    {previousCloseLabel ? ` · ${previousCloseLabel}` : ''}
+                    Fondo dejado{previousCloseLabel ? ` · ${previousCloseLabel}` : ''}
                   </p>
                   <p className="text-3xl font-black tabular-nums text-amber-950 dark:text-amber-50">
                     {previousCloseCash!.toFixed(2)}€
                   </p>
                   <p className="text-[10px] text-amber-800/80 dark:text-amber-200/70">
-                    Se abre con este importe. Sin conteo de monedas.
+                    Se abre con este importe.
                   </p>
                 </div>
               ) : (
-                <label className="block rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-2.5">
-                  <span className="text-[11px] font-bold text-stone-600 dark:text-stone-300">
-                    Efectivo en cajón (primer día)
-                  </span>
-                  <input
-                    ref={manualOpenInputRef}
-                    type="text"
-                    inputMode="decimal"
-                    placeholder="0,00"
-                    value={manualOpenSlot}
-                    onChange={(e) => handleManualOpenAmountChange(e.target.value)}
-                    className="mt-1.5 w-full min-h-12 px-2 text-3xl font-black tabular-nums border border-stone-200 dark:border-stone-700 rounded-xl bg-stone-50 dark:bg-stone-950 text-stone-900 dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/25"
-                  />
-                </label>
+                <>
+                  {previousCloseCash != null ? (
+                    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30 px-2.5 py-1.5">
+                      <p className="text-[11px] text-amber-900 dark:text-amber-100 min-w-0 flex-1">
+                        Cierre{previousCloseLabel ? ` ${previousCloseLabel}` : ''}:{' '}
+                        <strong className="tabular-nums">{previousCloseCash.toFixed(2)}€</strong>
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setCounts(buildDenominationFromAmount(previousCloseCash))}
+                        className="shrink-0 px-2 py-1 rounded-md bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold"
+                      >
+                        Usar fondo
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-stone-500">
+                      Sin fondo dejado detectado. Cuenta el cajón (0 € si está vacío) y abre.
+                    </p>
+                  )}
+                  <div className="flex-1 min-h-0">
+                    <CashCountGrid counts={counts} onChange={setCounts} compact />
+                  </div>
+                </>
               )}
             </div>
           )}
@@ -1306,7 +1281,7 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
 
                 <div className="flex items-center justify-between gap-2 shrink-0">
                   <label className="text-[10px] font-bold text-stone-500 uppercase tracking-wider">
-                    Fondo de apertura *
+                    {openingCashLocked ? 'Fondo de apertura *' : 'Efectivo en cajón *'}
                   </label>
                   <span className="text-[11px] font-bold text-stone-900 dark:text-stone-100 tabular-nums">
                     {total.toFixed(2)}€
@@ -1316,31 +1291,40 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
                 {openingCashLocked ? (
                   <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30 px-3 py-3 shrink-0 space-y-1">
                     <p className="text-[11px] font-bold text-amber-900 dark:text-amber-100">
-                      {previousCloseIsNextDayInitial ? 'Inicial dejado al cerrar' : 'Fondo del último cierre'}
-                      {previousCloseLabel ? ` · ${previousCloseLabel}` : ''}
+                      Fondo dejado{previousCloseLabel ? ` · ${previousCloseLabel}` : ''}
                     </p>
                     <p className="text-3xl font-black tabular-nums text-amber-950 dark:text-amber-50">
                       {previousCloseCash!.toFixed(2)}€
                     </p>
                     <p className="text-[10px] text-amber-800/80 dark:text-amber-200/70">
-                      Se abre con este importe. Sin conteo de monedas.
+                      Se abre con este importe.
                     </p>
                   </div>
                 ) : (
-                  <label className="block rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-2.5 shrink-0">
-                    <span className="text-[11px] font-bold text-stone-600 dark:text-stone-300">
-                      Efectivo en cajón (primer día)
-                    </span>
-                    <input
-                      ref={manualOpenInputRef}
-                      type="text"
-                      inputMode="decimal"
-                      placeholder="0,00"
-                      value={manualOpenSlot}
-                      onChange={(e) => handleManualOpenAmountChange(e.target.value)}
-                      className="mt-1.5 w-full min-h-12 px-2 text-3xl font-black tabular-nums border border-stone-200 dark:border-stone-700 rounded-xl bg-stone-50 dark:bg-stone-950 text-stone-900 dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/25"
-                    />
-                  </label>
+                  <>
+                    {previousCloseCash != null ? (
+                      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30 px-2.5 py-2 shrink-0">
+                        <p className="text-[11px] text-amber-900 dark:text-amber-100 min-w-0 flex-1">
+                          Último cierre{previousCloseLabel ? ` (${previousCloseLabel})` : ''}:{' '}
+                          <strong className="tabular-nums">{previousCloseCash.toFixed(2)}€</strong>
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setCounts(buildDenominationFromAmount(previousCloseCash))}
+                          className="shrink-0 px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold"
+                        >
+                          Usar
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-stone-500 shrink-0">
+                        Sin fondo dejado detectado. Cuenta el cajón (0 € si está vacío) y abre.
+                      </p>
+                    )}
+                    <div className="flex-1 min-h-0 overflow-y-auto">
+                      <CashCountGrid counts={counts} onChange={setCounts} compact />
+                    </div>
+                  </>
                 )}
               </div>
             </>
@@ -1393,15 +1377,19 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
                 <button
                   type="button"
                   onClick={handleSubmit}
-                  disabled={!canOpen || parentLoading || !cashCountReady}
+                  disabled={!canOpen || openActionBusy || !cashCountReady || Boolean(existingOpenForStore)}
                   className={`flex-1 py-2 rounded-lg font-semibold text-xs transition-all flex items-center justify-center gap-1.5 ${
-                    canOpen && cashCountReady
+                    canOpen && cashCountReady && !openActionBusy && !existingOpenForStore
                       ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
                       : 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
                   }`}
                 >
-                  <Unlock className="w-3.5 h-3.5" />
-                  Abrir caja — {total.toFixed(2)}€
+                  {openingBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Unlock className="w-3.5 h-3.5" />}
+                  {openingBusy
+                    ? 'Abriendo…'
+                    : existingOpenForStore
+                      ? 'Usa Entrar arriba'
+                      : `Abrir caja — ${total.toFixed(2)}€`}
                 </button>
               )}
             </>
@@ -1415,17 +1403,27 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
             Volver
           </button>
           <div className="flex-1 flex flex-col gap-1 min-w-0">
-            {!canOpen && openBlockedReason ? (
+            {!canOpen && !existingOpenForStore && openBlockedReason ? (
               <p className="text-[11px] text-amber-700 dark:text-amber-300 font-medium truncate px-0.5">
                 {openBlockedReason}
               </p>
             ) : null}
             <button
+              type="button"
               onClick={handleSubmit}
-              disabled={!canOpen || parentLoading}
-              className={`w-full py-2.5 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-1.5 ${canOpen ? 'bg-[#2563EB] hover:bg-blue-700 text-white' : 'bg-stone-200 dark:bg-stone-700 text-stone-400 cursor-not-allowed'}`}
+              disabled={!canOpen || openActionBusy || Boolean(existingOpenForStore)}
+              className={`w-full py-2.5 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-1.5 ${
+                canOpen && !openActionBusy && !existingOpenForStore
+                  ? 'bg-[#2563EB] hover:bg-blue-700 text-white'
+                  : 'bg-stone-200 dark:bg-stone-700 text-stone-400 cursor-not-allowed'
+              }`}
             >
-              <Unlock className="w-4 h-4" /> Abrir caja — {total.toFixed(2)}€
+              {openingBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Unlock className="w-4 h-4" />}
+              {openingBusy
+                ? 'Abriendo…'
+                : existingOpenForStore
+                  ? 'Usa Entrar arriba'
+                  : `Abrir caja — ${total.toFixed(2)}€`}
             </button>
           </div>
             </>
@@ -1451,9 +1449,8 @@ type ClosingFormDraft = {
   counts: CashDenominationCount;
   notes: string;
   cashSlot: string;
-  /** Efectivo que queda en cajón para mañana. */
+  /** Efectivo que queda en cajón como fondo. */
   nextDayInitialSlot?: string;
-  nextDayInitialLocked?: boolean;
   manualFood: { pizza: string; burger: string; taco: string };
   appsManualDraft: ManualLinesByChannel;
   /** Solo true si el usuario editó a mano P/B/T (no por auto-guardado del sistema). */
@@ -1687,10 +1684,7 @@ function excelLikeAmountsFromClosedSession(
   brandLabels: Record<string, string> = {},
 ): ClosingExcelLikeAmounts {
   const amounts = sessionToUrielAmounts(session);
-  const expectedStored = Number(session.expectedCash);
-  const expected = Number.isFinite(expectedStored)
-    ? expectedStored
-    : calcTpvExpectedCash(session);
+  const expected = Number(session.expectedCash ?? calcTpvExpectedCash(session)) || 0;
   const counted = Number(session.finalCashAmount) || 0;
   const diff = Number.isFinite(Number(session.difference))
     ? Number(session.difference)
@@ -1701,8 +1695,8 @@ function excelLikeAmountsFromClosedSession(
   const unpaidCard = Math.round(
     Object.values(session.aggregatorClosingCard || {}).reduce((s, n) => s + (Number(n) || 0), 0) * 100,
   ) / 100;
-  /** TOTAL del resumen = solo canales (TPV + hecho en apps). El no pagado va al cajón, no al total. */
-  const total = Math.round(amounts.total * 100) / 100;
+  /** TOTAL = canales (TPV + apps). No pagado es desglose del cajón, ya va en Glovo/Uber/… */
+  const total = amounts.total;
   return {
     efectivo: amounts.efectivo,
     tpv: amounts.tpv,
@@ -1733,6 +1727,8 @@ function ClosingExcelLikeSummary({
   brandLabels?: Record<string, string>;
   compact?: boolean;
 }) {
+  // NO PAG. efectivo/tarjeta: no se listan (confunden). Ya van dentro de App/Uber/JE/Glovo
+  // y del TOTAL; no suman otra vez.
   const moneyLines: Array<{ label: string; hint: string; value: number; emphasize?: boolean }> = [
     { label: 'EFECTIVO', hint: 'Cobros en efectivo de la tienda (TPV)', value: amounts.efectivo },
     { label: 'TPV', hint: 'Tarjeta cobrada en tienda', value: amounts.tpv },
@@ -1745,6 +1741,8 @@ function ClosingExcelLikeSummary({
   const visibleMoney = moneyLines.filter(
     (l) => l.value > 0 || l.label === 'EFECTIVO' || l.label === 'TPV',
   );
+  const unpaidIncludedHint =
+    (Number(amounts.unpaidCash) || 0) > 0 || (Number(amounts.unpaidCard) || 0) > 0;
   const brandLines = (amounts.brands || []).map((b) => {
     const resolved = displayBrandName(b.brandId, brandLabels);
     const name =
@@ -1766,7 +1764,7 @@ function ClosingExcelLikeSummary({
         </p>
         {!compact ? (
           <p className="text-[11px] text-stone-500 mt-0.5 leading-snug">
-            Canales, marcas (Caja 1 + Caja 2) y unidades del día
+            Canales, marcas (Vertial + Integraciones) y unidades del día
           </p>
         ) : null}
       </div>
@@ -1791,7 +1789,11 @@ function ClosingExcelLikeSummary({
           <div>
             <p className={`font-black text-stone-900 dark:text-stone-50 ${compact ? 'text-sm' : 'text-base'}`}>TOTAL</p>
             {!compact ? (
-              <p className="text-[10px] text-stone-500">Suma de los canales de arriba</p>
+              <p className="text-[10px] text-stone-500">
+                {unpaidIncludedHint
+                  ? 'Suma de canales · no pag. apps ya va dentro (no suma aparte)'
+                  : 'Suma de canales'}
+              </p>
             ) : null}
           </div>
           <span className={`font-black tabular-nums text-[#2563EB] shrink-0 ${compact ? 'text-lg' : 'text-2xl'}`}>
@@ -1802,14 +1804,9 @@ function ClosingExcelLikeSummary({
 
       {brandLines.length > 0 ? (
         <div className={`border-t border-stone-100 dark:border-stone-800 ${compact ? 'px-3 py-2' : 'px-3.5 py-2.5'}`}>
-          <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400 mb-1">
-            Por marca
+          <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400 mb-1.5">
+            Marcas
           </p>
-          {!compact ? (
-            <p className="text-[10px] text-stone-500 mb-1.5 leading-snug">
-              Tienda = pedidos TPV de esa marca · Apps = lo metido en Glovo/Uber/… por marca (paso de apps)
-            </p>
-          ) : null}
           <div className={compact ? 'space-y-1' : 'space-y-1.5'}>
             {brandLines.map((b) => (
               <div key={b.brandId} className="flex items-start justify-between gap-2">
@@ -1819,13 +1816,13 @@ function ClosingExcelLikeSummary({
                   </p>
                   {!compact ? (
                     <p className="text-[10px] text-stone-500 tabular-nums">
-                      Tienda {formatMoneyEs(b.caja1)}
+                      Vertial {formatMoneyEs(b.caja1)}
                       <span className="mx-1 text-stone-300">·</span>
-                      Apps {formatMoneyEs(b.caja2)}
+                      Integraciones {formatMoneyEs(b.caja2)}
                     </p>
                   ) : (
                     <p className="text-[9px] text-stone-400 tabular-nums">
-                      T {formatMoneyEs(b.caja1)} · A {formatMoneyEs(b.caja2)}
+                      Vertial {formatMoneyEs(b.caja1)} · Integraciones {formatMoneyEs(b.caja2)}
                     </p>
                   )}
                 </div>
@@ -1916,15 +1913,8 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   const [shiftOrdersLoading, setShiftOrdersLoading] = useState(true);
   const [cashSlot, setCashSlot] = useState(() => savedDraft?.cashSlot || '');
   const [cashSlotFocused, setCashSlotFocused] = useState(false);
-  const cashSlotInputRef = useRef<HTMLInputElement | null>(null);
-  const cashSlotCaretEndRef = useRef(false);
-  const nextDayInitialInputRef = useRef<HTMLInputElement | null>(null);
-  const nextDayInitialCaretEndRef = useRef(false);
   const [nextDayInitialSlot, setNextDayInitialSlot] = useState(
     () => savedDraft?.nextDayInitialSlot || '',
-  );
-  const [nextDayInitialLocked, setNextDayInitialLocked] = useState(
-    () => savedDraft?.nextDayInitialLocked === true,
   );
   /**
    * P/B/T solo se restauran del borrador si el usuario los editó a mano.
@@ -1969,7 +1959,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
       return label;
     };
     return [
-      'Caja 1',
+      'Vertial',
       ...appClosingPlatforms.map((p) => shortApp(p.channel, p.label)),
       'Cierre',
     ];
@@ -2019,16 +2009,6 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   }, [closingMaxStep]);
   const countedTotal = calcDenominationTotal(counts);
   const expectedTpv = calcTpvExpectedCash(session);
-
-  const nextDayInitialParsed = useMemo(() => {
-    const parsed = parseAggregatorAmount(nextDayInitialSlot);
-    if (parsed == null || parsed < 0) return null;
-    return Math.round(parsed * 100) / 100;
-  }, [nextDayInitialSlot]);
-  /** Obligatorio: hay que indicar el fondo de mañana (0 vale si lo escriben). */
-  const nextDayInitialReady = nextDayInitialParsed != null;
-  const nextDayInitialAmount = nextDayInitialParsed ?? 0;
-
   const summary = buildTpvRegisterSummary(session);
   const cashReturnsTotal = sumCashReturns(session);
   const cashStaffConsumption = sumCashStaffConsumption(session);
@@ -2057,14 +2037,13 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     notes,
     cashSlot,
     nextDayInitialSlot,
-    nextDayInitialLocked,
     // Sin edición manual: no persistir P/B/T (evita reabrir el cierre con números viejos).
     manualFood: foodLockedByUser
       ? manualFood
       : { pizza: '', burger: '', taco: '' },
     appsManualDraft,
     foodLockedByUser,
-  }), [counts, notes, cashSlot, nextDayInitialSlot, nextDayInitialLocked, manualFood, appsManualDraft, foodLockedByUser]);
+  }), [counts, notes, cashSlot, nextDayInitialSlot, manualFood, appsManualDraft, foodLockedByUser]);
 
   const persistDraft = useCallback(() => {
     if (!sessionId) return;
@@ -2118,10 +2097,18 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
       ?? finalAggregatorRows.reduce((s, r) => s + (Number(r.totalSales) || 0), 0)) * 100,
   ) / 100;
   const integratorsTotal = hechoAppsTotal;
+  /**
+   * Caja 1 (Vertial) = solo ventas del TPV.
+   * El «no pagado» apps se muestra aparte (cajón / info) y NO suma aquí:
+   * ese dinero ya va en los totales Glovo/Uber/Just/Flip de Caja 2.
+   */
+  const caja1Total = tpvAllSales;
   /** Esperado físico en cajón = efectivo TPV (fondo+cobros+entradas−salidas) + no pagado efectivo apps. */
   const dayDrawerExpected = expected;
-  /** Cobros tarjeta tienda (informativo; no es el cajón). */
+  /** Cobros tarjeta tienda (informativo). La tarjeta no pagada apps no infla Caja 1. */
   const dayCardCollected = tpvCardSales;
+  /** Facturación día = Caja 1 Vertial + Caja 2 integraciones (sin doble contar no pagado). */
+  const dayMoneyTotal = Math.round((caja1Total + integratorsTotal) * 100) / 100;
   /** Fila tipo resumen con los totales del cierre en vivo. */
   const excelDaySummaryBase = useMemo((): ClosingExcelLikeAmounts => {
     const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -2148,7 +2135,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
       uber,
       justEat,
       glovo,
-      // No pagado no entra en TOTAL: solo suma al esperado del cajón.
+      // No sumar unpaid: ya está en app/uber/justEat/glovo.
       total: r2(efectivo + tpv + x + app + uber + justEat + glovo),
       pizza: closingFood.pizza,
       burger: closingFood.burger,
@@ -2178,20 +2165,8 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   const cashSlotDisplay = cashSlotFocused
     ? cashSlot
     : countedTotal > 0
-      ? moneyNumberToDisplay(countedTotal, true)
+      ? countedTotal.toFixed(2)
       : cashSlot;
-
-  useLayoutEffect(() => {
-    if (!cashSlotCaretEndRef.current) return;
-    cashSlotCaretEndRef.current = false;
-    scheduleMoneyInputCaretToEnd(cashSlotInputRef.current);
-  }, [cashSlot]);
-
-  useLayoutEffect(() => {
-    if (!nextDayInitialCaretEndRef.current) return;
-    nextDayInitialCaretEndRef.current = false;
-    scheduleMoneyInputCaretToEnd(nextDayInitialInputRef.current);
-  }, [nextDayInitialSlot]);
 
   // Rellenar P/B/T del TPV cuando llegan los pedidos. No bloquear por borrador con "0"
   // (el auto-guardado lo escribía antes de cargar y dejaba el paso 1 vacío/a cero).
@@ -2209,7 +2184,6 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
 
   const handleCashSlotChange = useCallback((value: string) => {
     const formatted = formatMoneyAsYouType(value, true);
-    cashSlotCaretEndRef.current = true;
     setCashSlot(formatted);
     const parsed = parseAggregatorAmount(formatted);
     if (parsed == null) {
@@ -2219,9 +2193,15 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     setCounts(buildDenominationFromAmount(parsed));
   }, []);
 
+  const nextDayInitialParsed = useMemo(() => {
+    const parsed = parseAggregatorAmount(nextDayInitialSlot);
+    if (parsed == null || parsed < 0) return null;
+    return Math.round(parsed * 100) / 100;
+  }, [nextDayInitialSlot]);
+  const nextDayInitialReady = nextDayInitialParsed != null;
+  const nextDayInitialAmount = nextDayInitialParsed ?? 0;
+
   const handleNextDayInitialChange = useCallback((value: string) => {
-    nextDayInitialCaretEndRef.current = true;
-    setNextDayInitialLocked(true);
     setNextDayInitialSlot(formatMoneyAsYouType(value, true));
   }, []);
 
@@ -2497,8 +2477,8 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
           {showDeliveryClosingSlots && closingStep === 1 ? (
             <div className="flex-1 min-h-0 flex flex-col gap-3 overflow-y-auto overscroll-contain pb-1">
               <div className="shrink-0">
-                <p className="text-sm font-bold text-stone-900 dark:text-stone-100">
-                  Caja 1 · Tienda
+                <p className="text-sm font-bold text-emerald-700 dark:text-emerald-300">
+                  Vertial · Tienda
                 </p>
                 <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5">
                   Lo cobrado en el TPV del local (efectivo y tarjeta). Contar el cajón es al final.
@@ -2536,8 +2516,11 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                       Cargando ventas…
                     </span>
                   ) : (
-                    <span className="text-[10px] font-semibold tabular-nums text-stone-400">
-                      Sistema {tpvSystemFood.pizza}P / {tpvSystemFood.burger}B / {tpvSystemFood.taco}T
+                    <span className="inline-flex flex-wrap items-center justify-end gap-x-2 gap-y-0.5 text-[10px] font-semibold tabular-nums text-stone-400">
+                      <span>Sistema</span>
+                      <DeliveryFoodUnitLabel unit="pizza" count={tpvSystemFood.pizza} size="xs" />
+                      <DeliveryFoodUnitLabel unit="burger" count={tpvSystemFood.burger} size="xs" />
+                      <DeliveryFoodUnitLabel unit="taco" count={tpvSystemFood.taco} size="xs" />
                     </span>
                   )}
                 </div>
@@ -2576,7 +2559,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                   total={brandBilling.total}
                   loading={shiftOrdersLoading}
                   dense
-                  title="Caja 1 · por marca"
+                  title="Vertial · por marca"
                 />
               </div>
             </div>
@@ -2662,10 +2645,186 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
           {/* Delivery paso final — Contar cajón + resumen limpio */}
           {isDeliveryCierreStep ? (
             <div className="flex-1 min-h-0 flex flex-col gap-3 overflow-y-auto overscroll-contain pb-1">
+              {/* Detalle Caja 1 / Caja 2 */}
+              <div className="shrink-0 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="rounded-2xl border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/50 dark:bg-emerald-950/20 px-3 py-2.5 space-y-2">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                        Vertial
+                      </p>
+                      <p className="text-sm font-bold text-stone-900 dark:text-stone-100">
+                        Tienda (TPV)
+                      </p>
+                    </div>
+                    <p className="text-lg font-black tabular-nums text-stone-900 dark:text-stone-50">
+                      {formatMoneyEs(caja1Total)}
+                    </p>
+                  </div>
+                  <div className="space-y-1 text-[11px]">
+                    <div className={`flex justify-between gap-2 ${VERTIAL_CASH_TEXT}`}>
+                      <span className="inline-flex items-center gap-1 font-semibold">
+                        <Banknote className="w-3 h-3" /> Efectivo
+                      </span>
+                      <span className="font-black tabular-nums">
+                        {formatMoneyEs(summary.salesByMethod.efectivo)}
+                      </span>
+                    </div>
+                    <div className={`flex justify-between gap-2 ${VERTIAL_CARD_TEXT}`}>
+                      <span className="inline-flex items-center gap-1 font-semibold">
+                        <CreditCard className="w-3 h-3" /> Tarjeta
+                      </span>
+                      <span className="font-black tabular-nums">
+                        {formatMoneyEs(summary.salesByMethod.tarjeta)}
+                      </span>
+                    </div>
+                    {(summary.salesByMethod.bizum || 0) + (summary.salesByMethod.otro || 0) > 0 ? (
+                      <div className="flex justify-between gap-2 text-stone-500">
+                        <span>Bizum / otros</span>
+                        <span className="font-bold tabular-nums">
+                          {formatMoneyEs(
+                            (summary.salesByMethod.bizum || 0) + (summary.salesByMethod.otro || 0),
+                          )}
+                        </span>
+                      </div>
+                    ) : null}
+                    {aggregatorCashTotal > 0 ? (
+                      <div className={`flex justify-between gap-2 ${VERTIAL_CASH_TEXT}`}>
+                        <span className="font-semibold">No pagado efectivo → cajón</span>
+                        <span className="font-black tabular-nums">
+                          {formatMoneyEs(aggregatorCashTotal)}
+                        </span>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div
+                    className={`rounded-xl border px-2.5 py-2 ${VERTIAL_CARD_BORDER} ${VERTIAL_CARD_BG}`}
+                  >
+                    <div className={`flex items-center justify-between gap-2 ${VERTIAL_CARD_TEXT}`}>
+                      <span className="inline-flex items-center gap-1.5 text-[11px] font-bold">
+                        <CreditCard className="w-3.5 h-3.5" />
+                        Tarjeta no pagado
+                      </span>
+                      <span className="text-base font-black tabular-nums">
+                        {formatMoneyEs(aggregatorCardTotal)}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[10px] text-stone-500 dark:text-stone-400">
+                      Apps · no suma al total (ya en integradores)
+                    </p>
+                  </div>
+                  {brandBilling.rows.length > 0 ? (
+                    <div className="border-t border-stone-100 dark:border-stone-800 pt-1.5 space-y-1">
+                      {brandBilling.rows.map((row) => {
+                        const cash = Number(row.revenueEfectivo) || 0;
+                        const card = Number(row.revenueTarjeta) || 0;
+                        return (
+                          <div
+                            key={row.brandId}
+                            className="flex items-start justify-between gap-2 rounded-lg bg-stone-50 px-2 py-1.5 dark:bg-stone-900/70"
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate text-[11px] font-bold text-stone-900 dark:text-stone-100">
+                                {row.name}
+                              </p>
+                              <p className="text-[10px] font-semibold tabular-nums leading-snug">
+                                <span className={VERTIAL_CASH_TEXT}>
+                                  Efectivo {formatMoneyEs(cash)}
+                                </span>
+                                <span className="mx-1 text-stone-300">·</span>
+                                <span className={VERTIAL_CARD_TEXT}>
+                                  Tarjeta {formatMoneyEs(card)}
+                                </span>
+                              </p>
+                            </div>
+                            <span className="shrink-0 text-xs font-black tabular-nums text-stone-900 dark:text-stone-50">
+                              {formatMoneyEs(row.revenue)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[10px] text-stone-500">
+                    <DeliveryFoodUnitLabel unit="pizza" count={tpvClosingFood.pizza} size="xs" />
+                    <DeliveryFoodUnitLabel unit="burger" count={tpvClosingFood.burger} size="xs" />
+                    <DeliveryFoodUnitLabel unit="taco" count={tpvClosingFood.taco} size="xs" />
+                    <span className="font-semibold text-stone-500 tabular-nums">
+                      ·{' '}
+                      {tpvClosingFood.pizza + tpvClosingFood.burger + tpvClosingFood.taco}{' '}
+                      uds
+                    </span>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-blue-200 dark:border-blue-900/50 bg-blue-50/70 dark:bg-blue-950/30 px-3 py-2.5 space-y-2">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-blue-600/80 dark:text-blue-300/80">
+                        Integraciones
+                      </p>
+                      <p className="text-sm font-bold text-blue-950 dark:text-blue-50">
+                        Hecho en app
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-lg font-black tabular-nums text-blue-950 dark:text-blue-50 leading-none">
+                        {formatMoneyEs(integratorsTotal)}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="space-y-1 text-[11px]">
+                    {(appsSnapshot?.rows?.length
+                      ? appsSnapshot.rows
+                      : finalAggregatorRows
+                    ).map((r) => {
+                      const amt = Number(r.totalSales) || 0;
+                      if (amt <= 0) return null;
+                      return (
+                        <div
+                          key={r.platform.channel}
+                          className="flex justify-between gap-2 text-blue-900/80 dark:text-blue-100/80"
+                        >
+                          <span className="font-semibold truncate">{r.platform.label}</span>
+                          <span className="font-black tabular-nums shrink-0">
+                            {formatMoneyEs(amt)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {appsBrandBilling.rows.length > 0 ? (
+                    <div className="border-t border-blue-200/60 dark:border-blue-900/40 pt-1.5 space-y-0.5">
+                      {appsBrandBilling.rows.map((row) => (
+                        <div
+                          key={row.brandId}
+                          className="flex justify-between gap-2 text-[10px] text-blue-900/70 dark:text-blue-100/70"
+                        >
+                          <span className="truncate font-medium">{row.name}</span>
+                          <span className="shrink-0 tabular-nums font-bold">
+                            {formatMoneyEs(row.revenue)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[10px] text-blue-700/70 dark:text-blue-200/60">
+                    <DeliveryFoodUnitLabel unit="pizza" count={appsFoodTotals.pizza} size="xs" muted />
+                    <DeliveryFoodUnitLabel unit="burger" count={appsFoodTotals.burger} size="xs" muted />
+                    <DeliveryFoodUnitLabel unit="taco" count={appsFoodTotals.taco} size="xs" muted />
+                    <span className="ml-0.5 font-semibold text-blue-800/80 dark:text-blue-100/80 tabular-nums">
+                      ·{' '}
+                      {appsFoodTotals.pizza + appsFoodTotals.burger + appsFoodTotals.taco}{' '}
+                      uds
+                    </span>
+                  </div>
+                </div>
+              </div>
+
               <div className="shrink-0">
                 <p className="text-sm font-bold text-stone-900 dark:text-stone-100">Contar el cajón</p>
                 <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5">
-                  Esperado = efectivo TPV + no pagado efectivo apps. La tarjeta no pagada no va al cajón.
+                  Esperado cajón = efectivo TPV + no pagado efectivo apps. El no pagado no infla el total de Vertial (ya va en Glovo/Uber/…).
                 </p>
               </div>
 
@@ -2675,19 +2834,13 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                     <Banknote className="w-3.5 h-3.5" /> Efectivo contado
                   </span>
                   <input
-                    ref={cashSlotInputRef}
                     type="text"
                     inputMode="decimal"
                     placeholder="0,00"
                     value={cashSlotDisplay}
                     onFocus={() => {
                       setCashSlotFocused(true);
-                      if (countedTotal > 0) {
-                        setCashSlot(moneyNumberToDisplay(countedTotal, true));
-                      }
-                      window.requestAnimationFrame(() => {
-                        scheduleMoneyInputCaretToEnd(cashSlotInputRef.current);
-                      });
+                      setCashSlot(countedTotal > 0 ? countedTotal.toFixed(2) : cashSlot);
                     }}
                     onBlur={() => setCashSlotFocused(false)}
                     onChange={(e) => handleCashSlotChange(e.target.value)}
@@ -2697,7 +2850,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
 
                 <div className="space-y-1 text-[12px]">
                   <div className="flex justify-between gap-2 items-baseline text-stone-600 dark:text-stone-300">
-                    <span>Efectivo TPV</span>
+                    <span>Efectivo Vertial (TPV)</span>
                     <span className="font-bold tabular-nums">{formatMoneyEs(expectedTpv)}</span>
                   </div>
                   <div className="flex justify-between gap-2 items-baseline text-stone-600 dark:text-stone-300">
@@ -2725,7 +2878,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 ) : null}
               </div>
 
-              {/* Cómo se forma el efectivo TPV + movimientos */}
+              {/* Cómo se forma el efectivo TPV + movimientos (arriba, no escondido) */}
               <div className="shrink-0 rounded-2xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-950 px-3 py-2.5 space-y-1 text-xs">
                 <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400 mb-1">
                   Cómo sale el efectivo TPV
@@ -2741,22 +2894,22 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                   <span className="font-semibold tabular-nums">{formatMoneyEs(summary.salesByMethod.efectivo)}</span>
                 </div>
                 {cashStaffConsumption > 0 ? (
-                  <div className="flex justify-between gap-2 text-amber-700 dark:text-amber-300">
+                  <div className="flex justify-between gap-2 text-stone-600 dark:text-stone-300">
                     <span>+ Consumo equipo</span>
-                    <span className="font-bold tabular-nums">{formatMoneyEs(cashStaffConsumption)}</span>
+                    <span className="font-semibold tabular-nums">{formatMoneyEs(cashStaffConsumption)}</span>
                   </div>
                 ) : null}
-                <div className="flex justify-between gap-2 text-emerald-700 dark:text-emerald-300">
-                  <span className="font-semibold">+ Entradas</span>
-                  <span className="font-black tabular-nums">{formatMoneyEs(summary.totalCashIn)}</span>
+                <div className="flex justify-between gap-2 text-stone-600 dark:text-stone-300">
+                  <span>+ Entradas</span>
+                  <span className="font-semibold tabular-nums">{formatMoneyEs(summary.totalCashIn)}</span>
                 </div>
-                <div className="flex justify-between gap-2 text-orange-700 dark:text-orange-300">
-                  <span className="font-semibold">− Devoluciones</span>
-                  <span className="font-black tabular-nums">{formatMoneyEs(cashReturnsTotal)}</span>
+                <div className="flex justify-between gap-2 text-stone-600 dark:text-stone-300">
+                  <span>− Devoluciones</span>
+                  <span className="font-semibold tabular-nums">{formatMoneyEs(cashReturnsTotal)}</span>
                 </div>
-                <div className="flex justify-between gap-2 text-rose-700 dark:text-rose-300">
-                  <span className="font-semibold">− Salidas</span>
-                  <span className="font-black tabular-nums">{formatMoneyEs(summary.totalCashOut)}</span>
+                <div className="flex justify-between gap-2 text-stone-600 dark:text-stone-300">
+                  <span>− Salidas</span>
+                  <span className="font-semibold tabular-nums">{formatMoneyEs(summary.totalCashOut)}</span>
                 </div>
                 <div className="border-t border-stone-100 dark:border-stone-800 pt-1.5 flex justify-between gap-2 font-bold text-stone-900 dark:text-stone-100">
                   <span>= Efectivo TPV</span>
@@ -2863,16 +3016,23 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                     <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
                       Unidades del día · todo lo hecho
                     </p>
-                    <p className="text-[10px] text-stone-500 mt-0.5 tabular-nums leading-snug">
-                      Caja 1 {tpvClosingFood.pizza}P/{tpvClosingFood.burger}B/{tpvClosingFood.taco}T
-                      {' + '}
-                      Caja 2 {appsFoodTotals.pizza}P/{appsFoodTotals.burger}B/{appsFoodTotals.taco}T
-                      {' = total abajo'}
-                    </p>
+                    <div className="text-[10px] text-stone-500 mt-0.5 leading-snug space-y-0.5">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                        <span className="font-semibold text-emerald-600 dark:text-emerald-400">Vertial</span>
+                        <DeliveryFoodUnitLabel unit="pizza" count={tpvClosingFood.pizza} size="xs" />
+                        <DeliveryFoodUnitLabel unit="burger" count={tpvClosingFood.burger} size="xs" />
+                        <DeliveryFoodUnitLabel unit="taco" count={tpvClosingFood.taco} size="xs" />
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                        <span className="font-semibold text-blue-600 dark:text-blue-400">Integraciones</span>
+                        <DeliveryFoodUnitLabel unit="pizza" count={appsFoodTotals.pizza} size="xs" />
+                        <DeliveryFoodUnitLabel unit="burger" count={appsFoodTotals.burger} size="xs" />
+                        <DeliveryFoodUnitLabel unit="taco" count={appsFoodTotals.taco} size="xs" />
+                      </div>
+                    </div>
                   </div>
                   <p className="shrink-0 text-[11px] font-black tabular-nums text-stone-700 dark:text-stone-200">
-                    Σ{' '}
-                    {closingFood.pizza + closingFood.burger + closingFood.taco}
+                    {closingFood.pizza + closingFood.burger + closingFood.taco} uds
                   </p>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
@@ -2885,12 +3045,10 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                       key={u.key}
                       className="rounded-xl bg-white dark:bg-stone-950 border border-stone-200 dark:border-stone-700 px-2 py-2 text-center"
                     >
-                      <p className="text-[10px] font-semibold text-stone-500 inline-flex items-center justify-center gap-1 w-full">
-                        <DeliveryFoodUnitIcon unit={u.key} className="w-3.5 h-3.5" muted />
-                        {u.label}
-                      </p>
-                      <p className="mt-0.5 text-2xl font-black tabular-nums text-stone-900 dark:text-stone-50 leading-none">
+                      <p className="text-[10px] font-semibold text-stone-500">{u.label}</p>
+                      <p className="mt-0.5 inline-flex items-center justify-center gap-1.5 text-2xl font-black tabular-nums text-stone-900 dark:text-stone-50 leading-none">
                         {closingFood[u.key]}
+                        <DeliveryFoodUnitIcon unit={u.key} className="w-5 h-5" />
                       </p>
                     </div>
                   ))}
@@ -2908,21 +3066,14 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
               {/* Resumen final — misma fila que el Excel de Facturación */}
               <div className="shrink-0 space-y-2">
                 <ClosingExcelLikeSummary amounts={excelDaySummary} brandLabels={brandLabels} />
-                <p className="text-[11px] text-stone-500 px-0.5 leading-snug">
-                  Tienda (TPV) {formatMoneyEs(tpvAllSales)}
-                  {' + '}
-                  Apps {formatMoneyEs(integratorsTotal)}
+                <p className="text-[11px] text-stone-500 px-0.5 tabular-nums">
+                  Comprobación: Vertial {formatMoneyEs(caja1Total)} + Integraciones {formatMoneyEs(integratorsTotal)}
                   {' = '}
-                  <strong className="text-stone-800 dark:text-stone-100 tabular-nums">
-                    {formatMoneyEs(Math.round((tpvAllSales + integratorsTotal) * 100) / 100)}
-                  </strong>
-                  <span className="text-stone-400"> · igual que el TOTAL de arriba</span>
+                  <strong className="text-stone-800 dark:text-stone-100">{formatMoneyEs(dayMoneyTotal)}</strong>
                   {dayCardCollected > 0 ? (
                     <>
                       {' · '}
-                      <span className={VERTIAL_CARD_TEXT}>
-                        Tarjeta tienda {formatMoneyEs(tpvCardSales)}
-                      </span>
+                      <span className={VERTIAL_CARD_TEXT}>Tarjeta cobrada {formatMoneyEs(dayCardCollected)}</span>
                     </>
                   ) : null}
                 </p>
@@ -3061,82 +3212,57 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 </div>
               ) : null}
 
-              <div className={`shrink-0 rounded-2xl border p-3 space-y-2 ${
+              <div className={`shrink-0 rounded-2xl border px-3 py-3 space-y-2 ${
                 nextDayInitialReady
-                  ? 'border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/25'
-                  : 'border-rose-300 dark:border-rose-800 bg-rose-50/70 dark:bg-rose-950/25'
+                  ? 'border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/60 dark:bg-emerald-950/20'
+                  : 'border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-950'
               }`}>
                 <label className="block cursor-text">
-                  <span className={`text-[11px] font-bold flex items-center gap-1.5 ${
-                    nextDayInitialReady
-                      ? 'text-amber-900 dark:text-amber-100'
-                      : 'text-rose-900 dark:text-rose-100'
-                  }`}>
-                    <Banknote className="w-3.5 h-3.5" />
-                    Inicial para mañana *
+                  <span className="text-[11px] font-bold flex items-center gap-1.5 text-stone-800 dark:text-stone-100">
+                    <Banknote className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                    Fondo que queda en caja *
                   </span>
-                  <p className={`mt-0.5 text-[10px] leading-snug ${
-                    nextDayInitialReady
-                      ? 'text-amber-800/80 dark:text-amber-200/70'
-                      : 'text-rose-800/80 dark:text-rose-200/70'
-                  }`}>
-                    Obligatorio. Efectivo que dejas en el cajón; mañana se abre con este fondo.
+                  <p className="mt-0.5 text-[10px] text-stone-500 dark:text-stone-400 leading-snug">
+                    ¿Cuánto efectivo dejas en el cajón? Ese importe será el fondo al abrir.
                   </p>
                   <input
-                    ref={nextDayInitialInputRef}
                     type="text"
                     inputMode="decimal"
-                    placeholder="Obligatorio · ej. 100,00"
+                    placeholder="Ej. 100,00"
                     value={nextDayInitialSlot}
                     onChange={(e) => handleNextDayInitialChange(e.target.value)}
-                    onFocus={() => {
-                      window.requestAnimationFrame(() => {
-                        scheduleMoneyInputCaretToEnd(nextDayInitialInputRef.current);
-                      });
-                    }}
-                    className={`mt-1.5 w-full min-h-12 px-3 py-2 text-2xl font-black tabular-nums tracking-tight border rounded-xl bg-white dark:bg-stone-950 focus:outline-none focus:ring-2 ${
+                    className={`mt-1.5 w-full min-h-14 px-3 py-2 text-3xl font-black tabular-nums tracking-tight border rounded-xl bg-white dark:bg-stone-950 focus:outline-none focus:ring-2 ${
                       nextDayInitialReady
-                        ? 'border-amber-300 dark:border-amber-700 text-amber-950 dark:text-amber-50 focus:ring-amber-500/25 focus:border-amber-500'
-                        : 'border-rose-400 dark:border-rose-700 text-rose-950 dark:text-rose-50 focus:ring-rose-500/25 focus:border-rose-500'
+                        ? 'border-emerald-300 dark:border-emerald-700 text-emerald-950 dark:text-emerald-50 focus:ring-emerald-500/25 focus:border-emerald-500'
+                        : 'border-stone-300 dark:border-stone-600 text-stone-900 dark:text-stone-100 focus:ring-blue-500/25 focus:border-blue-500'
                     }`}
                   />
                 </label>
-                {!nextDayInitialReady ? (
-                  <p className="text-[11px] font-semibold text-rose-800 dark:text-rose-200">
-                    Indica el fondo de mañana para poder cerrar.
+                {nextDayInitialReady ? (
+                  <p className="text-sm font-black tabular-nums text-stone-800 dark:text-stone-100">
+                    Quedan {formatMoneyEs(nextDayInitialAmount)}
+                    {countedTotal > 0 && Math.abs(nextDayInitialAmount - countedTotal) > 0.009 ? (
+                      nextDayInitialAmount > countedTotal ? (
+                        <span className="ml-1.5 font-semibold text-amber-800 dark:text-amber-200">
+                          · falta meter {formatMoneyEs(nextDayInitialAmount - countedTotal)}
+                        </span>
+                      ) : (
+                        <span className="ml-1.5 font-semibold text-rose-600 dark:text-rose-400">
+                          · se retira {formatMoneyEs(countedTotal - nextDayInitialAmount)}
+                        </span>
+                      )
+                    ) : null}
                   </p>
-                ) : null}
-                {nextDayInitialReady && countedTotal > 0 && Math.abs(nextDayInitialAmount - countedTotal) > 0.009 ? (
-                  nextDayInitialAmount > countedTotal ? (
-                    <div className="rounded-xl border-2 border-rose-400 dark:border-rose-700 bg-rose-50 dark:bg-rose-950/40 px-3 py-2.5 space-y-1">
-                      <p className="text-sm font-black text-rose-800 dark:text-rose-200">
-                        Inicial &gt; contado · hay que añadir dinero
-                      </p>
-                      <p className="text-xl sm:text-2xl font-black tabular-nums text-rose-600 dark:text-rose-400">
-                        +{formatMoneyEs(nextDayInitialAmount - countedTotal)}
-                      </p>
-                      <p className="text-[11px] text-rose-800/90 dark:text-rose-200/80 leading-snug">
-                        Contado {formatMoneyEs(countedTotal)} · dejas {formatMoneyEs(nextDayInitialAmount)}.
-                        Mete esa diferencia en el cajón. Se avisará al CEO.
-                      </p>
-                    </div>
-                  ) : (
-                    <p className="text-base sm:text-lg font-black tabular-nums text-rose-700 dark:text-rose-300">
-                      Contado {formatMoneyEs(countedTotal)} · se retira{' '}
-                      <span className="text-xl sm:text-2xl text-rose-600 dark:text-rose-400">
-                        {formatMoneyEs(Math.max(0, countedTotal - nextDayInitialAmount))}
-                      </span>
-                    </p>
-                  )
-                ) : null}
-                {nextDayInitialReady && countedTotal > 0 ? (
+                ) : (
+                  <p className="text-[11px] font-semibold text-stone-500">
+                    Indica el importe para poder cerrar.
+                  </p>
+                )}
+                {countedTotal > 0 ? (
                   <button
                     type="button"
-                    onClick={() => {
-                      setNextDayInitialLocked(true);
-                      setNextDayInitialSlot(countedTotal.toFixed(2));
-                    }}
-                    className="text-[11px] font-bold text-amber-800 dark:text-amber-200 underline"
+                    onClick={() => setNextDayInitialSlot(countedTotal.toFixed(2))}
+                    className="text-[11px] font-bold text-[#2563EB] underline"
                   >
                     Usar el contado ({formatMoneyEs(countedTotal)})
                   </button>
@@ -3168,6 +3294,37 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                   </div>
                 </div>
               </div>
+              <div className={`rounded-xl border p-2.5 space-y-1.5 ${
+                nextDayInitialReady
+                  ? 'border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/60 dark:bg-emerald-950/20'
+                  : 'border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-950'
+              }`}>
+                <label className="block cursor-text">
+                  <span className="text-[11px] font-bold text-stone-800 dark:text-stone-100">
+                    Fondo que queda en caja *
+                  </span>
+                  <p className="text-[10px] text-stone-500">
+                    Efectivo que dejas; se usará como fondo al abrir.
+                  </p>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="Ej. 100,00"
+                    value={nextDayInitialSlot}
+                    onChange={(e) => handleNextDayInitialChange(e.target.value)}
+                    className={`mt-1 w-full min-h-12 px-2.5 py-1.5 text-2xl font-black tabular-nums border rounded-xl bg-white dark:bg-stone-950 focus:outline-none focus:ring-2 ${
+                      nextDayInitialReady
+                        ? 'border-emerald-300 dark:border-emerald-700 focus:ring-emerald-500/25'
+                        : 'border-stone-300 dark:border-stone-600 focus:ring-blue-500/25'
+                    }`}
+                  />
+                </label>
+                {nextDayInitialReady ? (
+                  <p className="text-sm font-black tabular-nums">
+                    Quedan {formatMoneyEs(nextDayInitialAmount)}
+                  </p>
+                ) : null}
+              </div>
               <input
                 type="text"
                 className="w-full min-h-9 px-2.5 py-1.5 border border-stone-200 dark:border-stone-700 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 text-xs"
@@ -3175,68 +3332,6 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
               />
-              <div className={`rounded-xl border p-2.5 space-y-1.5 ${
-                nextDayInitialReady
-                  ? 'border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/25'
-                  : 'border-rose-300 dark:border-rose-800 bg-rose-50/70 dark:bg-rose-950/25'
-              }`}>
-                <label className="block cursor-text">
-                  <span className={`text-[11px] font-bold ${
-                    nextDayInitialReady
-                      ? 'text-amber-900 dark:text-amber-100'
-                      : 'text-rose-900 dark:text-rose-100'
-                  }`}>
-                    Inicial para mañana *
-                  </span>
-                  <p className={`text-[10px] ${
-                    nextDayInitialReady
-                      ? 'text-amber-800/80 dark:text-amber-200/70'
-                      : 'text-rose-800/80 dark:text-rose-200/70'
-                  }`}>
-                    Obligatorio. Fondo con el que se abrirá mañana.
-                  </p>
-                  <input
-                    ref={nextDayInitialInputRef}
-                    type="text"
-                    inputMode="decimal"
-                    placeholder="Obligatorio · ej. 100,00"
-                    value={nextDayInitialSlot}
-                    onChange={(e) => handleNextDayInitialChange(e.target.value)}
-                    onFocus={() => {
-                      window.requestAnimationFrame(() => {
-                        scheduleMoneyInputCaretToEnd(nextDayInitialInputRef.current);
-                      });
-                    }}
-                    className={`mt-1 w-full min-h-11 px-2.5 py-1.5 text-xl font-black tabular-nums border rounded-xl bg-white dark:bg-stone-950 focus:outline-none focus:ring-2 ${
-                      nextDayInitialReady
-                        ? 'border-amber-300 dark:border-amber-700 text-amber-950 dark:text-amber-50 focus:ring-amber-500/25'
-                        : 'border-rose-400 dark:border-rose-700 text-rose-950 dark:text-rose-50 focus:ring-rose-500/25'
-                    }`}
-                  />
-                </label>
-                {!nextDayInitialReady ? (
-                  <p className="text-[11px] font-semibold text-rose-800 dark:text-rose-200">
-                    Indica el fondo de mañana para poder cerrar.
-                  </p>
-                ) : null}
-                {nextDayInitialReady && countedTotal > 0 && Math.abs(nextDayInitialAmount - countedTotal) > 0.009 ? (
-                  nextDayInitialAmount > countedTotal ? (
-                    <div className="rounded-xl border-2 border-rose-400 dark:border-rose-700 bg-rose-50 dark:bg-rose-950/40 px-3 py-2 space-y-0.5">
-                      <p className="text-xs font-black text-rose-800 dark:text-rose-200">
-                        Inicial &gt; contado · hay que añadir{' '}
-                        <span className="tabular-nums">+{formatMoneyEs(nextDayInitialAmount - countedTotal)}</span>
-                      </p>
-                      <p className="text-[10px] text-rose-800/90 dark:text-rose-200/80">
-                        Mete la diferencia en el cajón. Se avisará al CEO.
-                      </p>
-                    </div>
-                  ) : (
-                    <p className="text-sm font-black tabular-nums text-rose-700 dark:text-rose-300">
-                      Se retira {formatMoneyEs(Math.max(0, countedTotal - nextDayInitialAmount))}
-                    </p>
-                  )
-                ) : null}
-              </div>
               <p className="text-[11px] text-stone-500">
                 Confirma el cierre. {!browserOnline ? 'Sin red: se subirá al recuperar conexión.' : ''}
               </p>
@@ -3276,7 +3371,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 disabled={busy || !nextDayInitialReady}
                 onClick={() => {
                   if (!nextDayInitialReady) {
-                    toast.error('Indica el inicial para mañana antes de cerrar');
+                    toast.error('Indica el fondo que queda en caja antes de cerrar');
                     return;
                   }
                   setConfirmCloseOpen(true);
@@ -3287,7 +3382,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 {busy
                   ? 'Cerrando…'
                   : !nextDayInitialReady
-                    ? 'Falta inicial mañana'
+                    ? 'Falta fondo en caja'
                     : !browserOnline
                       ? 'Confirmar (sin red)'
                       : 'Confirmar'}
@@ -3326,66 +3421,39 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                   </p>
                 </div>
               </div>
-              {nextDayInitialReady ? (
-                <div className="shrink-0 px-3 pt-3">
-                  <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30 px-3 py-2.5 space-y-1.5">
-                    <div className="flex justify-between gap-2 text-sm">
-                      <span className="font-semibold text-stone-600 dark:text-stone-300">Contado en cajón</span>
-                      <span className="font-black tabular-nums text-stone-900 dark:text-stone-50">
-                        {formatMoneyEs(countedTotal)}
-                      </span>
+              <div className="flex-1 min-h-0 overflow-y-auto p-3">
+                <div className="space-y-2">
+                  {showDeliveryClosingSlots ? (
+                    <ClosingExcelLikeSummary
+                      amounts={excelDaySummary}
+                      brandLabels={brandLabels}
+                      compact
+                    />
+                  ) : (
+                    <div className="rounded-xl border border-stone-200 dark:border-stone-700 px-3 py-2.5 space-y-1 text-sm">
+                      <div className="flex justify-between gap-2">
+                        <span className="text-stone-500">Esperado</span>
+                        <span className="font-bold tabular-nums">{formatMoneyEs(expected)}</span>
+                      </div>
+                      <div className="flex justify-between gap-2">
+                        <span className="text-stone-500">Contado</span>
+                        <span className="font-bold tabular-nums">{formatMoneyEs(countedTotal)}</span>
+                      </div>
+                      <div className="flex justify-between gap-2 font-bold">
+                        <span>{diff === 0 ? 'Cuadra' : diff > 0 ? 'Sobra' : 'Falta'}</span>
+                        <span className="tabular-nums">{diff >= 0 ? '+' : ''}{formatMoneyEs(diff)}</span>
+                      </div>
                     </div>
-                    <div className="flex justify-between gap-2 text-sm">
-                      <span className="font-semibold text-amber-900 dark:text-amber-100">Se deja (inicial mañana)</span>
-                      <span className="font-black tabular-nums text-amber-950 dark:text-amber-50 text-lg">
-                        {formatMoneyEs(nextDayInitialAmount)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between gap-2 items-baseline border-t border-amber-200/80 dark:border-amber-800/80 pt-1.5">
-                      <span className={`font-bold ${
-                        nextDayInitialAmount > countedTotal + 0.009
-                          ? 'text-rose-700 dark:text-rose-300'
-                          : 'text-rose-700 dark:text-rose-300'
-                      }`}>
-                        {nextDayInitialAmount > countedTotal + 0.009 ? 'Hay que añadir' : 'Se retira'}
-                      </span>
-                      <span className="font-black tabular-nums text-rose-600 dark:text-rose-400 text-xl sm:text-2xl">
-                        {nextDayInitialAmount > countedTotal + 0.009
-                          ? `+${formatMoneyEs(nextDayInitialAmount - countedTotal)}`
-                          : formatMoneyEs(Math.max(0, countedTotal - nextDayInitialAmount))}
-                      </span>
-                    </div>
-                    {nextDayInitialAmount > countedTotal + 0.009 ? (
-                      <p className="text-[11px] font-semibold text-rose-800 dark:text-rose-200">
-                        Aviso al CEO: inicial mañana mayor que el contado.
-                      </p>
-                    ) : null}
+                  )}
+                  <div className="rounded-xl border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/70 dark:bg-emerald-950/25 px-3 py-2.5 flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-semibold text-emerald-900 dark:text-emerald-100">
+                      Fondo que queda en caja
+                    </span>
+                    <span className="text-lg font-black tabular-nums text-emerald-950 dark:text-emerald-50">
+                      {formatMoneyEs(nextDayInitialAmount)}
+                    </span>
                   </div>
                 </div>
-              ) : null}
-              <div className="flex-1 min-h-0 overflow-y-auto p-3">
-                {showDeliveryClosingSlots ? (
-                  <ClosingExcelLikeSummary
-                    amounts={excelDaySummary}
-                    brandLabels={brandLabels}
-                    compact
-                  />
-                ) : (
-                  <div className="rounded-xl border border-stone-200 dark:border-stone-700 px-3 py-2.5 space-y-1 text-sm">
-                    <div className="flex justify-between gap-2">
-                      <span className="text-stone-500">Esperado</span>
-                      <span className="font-bold tabular-nums">{formatMoneyEs(expected)}</span>
-                    </div>
-                    <div className="flex justify-between gap-2">
-                      <span className="text-stone-500">Contado</span>
-                      <span className="font-bold tabular-nums">{formatMoneyEs(countedTotal)}</span>
-                    </div>
-                    <div className="flex justify-between gap-2 font-bold">
-                      <span>{diff === 0 ? 'Cuadra' : diff > 0 ? 'Sobra' : 'Falta'}</span>
-                      <span className="tabular-nums">{diff >= 0 ? '+' : ''}{formatMoneyEs(diff)}</span>
-                    </div>
-                  </div>
-                )}
               </div>
               <div className="shrink-0 p-3 border-t border-stone-200 dark:border-stone-700 flex flex-col sm:flex-row gap-2">
                 <button
@@ -3398,20 +3466,8 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 </button>
                 <button
                   type="button"
-                  disabled={busy || !nextDayInitialReady}
+                  disabled={busy}
                   onClick={() => {
-                    if (!nextDayInitialReady) {
-                      toast.error('Indica el inicial para mañana antes de cerrar');
-                      setConfirmCloseOpen(false);
-                      return;
-                    }
-                    if (nextDayInitialAmount > countedTotal + 0.009) {
-                      const add = Math.round((nextDayInitialAmount - countedTotal) * 100) / 100;
-                      toast.message(
-                        `Añade ${formatMoneyEs(add)} al cajón · aviso al CEO`,
-                        { duration: 5000 },
-                      );
-                    }
                     setConfirmCloseOpen(false);
                     const snapBrands = appsSnapshot?.brandTotalsByChannel || {};
                     const hasSnapBrands = Object.keys(snapBrands).some(
@@ -3445,17 +3501,24 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                       if (!n || looksLikeBrandTechnicalId(n)) continue;
                       for (const id of brandIdAliases(row.brandId)) labelMap[id] = n;
                     }
-                    onClose(counts, notes, finalAggregatorRows, {
-                      pizza: closingFood.pizza,
-                      burger: closingFood.burger,
-                      taco: closingFood.taco,
-                      byChannel: closingFoodByChannel,
-                    }, {
-                      brandTotalsByChannel: fallbackBrandTotals,
-                      unpaidCashByBrandByChannel: appsSnapshot?.unpaidCashByBrandByChannel,
-                      unpaidCardByBrandByChannel: appsSnapshot?.unpaidCardByBrandByChannel,
-                      closingBrandLabels: labelMap,
-                    }, nextDayInitialAmount);
+                    onClose(
+                      counts,
+                      notes,
+                      finalAggregatorRows,
+                      {
+                        pizza: closingFood.pizza,
+                        burger: closingFood.burger,
+                        taco: closingFood.taco,
+                        byChannel: closingFoodByChannel,
+                      },
+                      {
+                        brandTotalsByChannel: fallbackBrandTotals,
+                        unpaidCashByBrandByChannel: appsSnapshot?.unpaidCashByBrandByChannel,
+                        unpaidCardByBrandByChannel: appsSnapshot?.unpaidCardByBrandByChannel,
+                        closingBrandLabels: labelMap,
+                      },
+                      nextDayInitialAmount,
+                    );
                   }}
                   className={`${VERTIAL_BTN_PRIMARY} !min-h-11 flex-1 !bg-amber-600 hover:!bg-amber-700`}
                 >
@@ -4910,6 +4973,7 @@ export function TpvRegisterGate({
    * llega un tick tarde (reentrada al TPV) antes de mostrar OpeningScreen.
    */
   const [openingRecoverHold, setOpeningRecoverHold] = useState(true);
+  const [openingBusy, setOpeningBusy] = useState(false);
   const [loadTimedOut, setLoadTimedOut] = useState(false);
   const [showClosing, setShowClosing] = useState(false);
   /** Snapshot de la caja a cerrar: el modal no debe desaparecer si activeSession parpadea. */
@@ -4943,6 +5007,12 @@ export function TpvRegisterGate({
   const [postCloseShowDetail, setPostCloseShowDetail] = useState(false);
   /** Nombres de marca para el resumen «Caja cerrada» (no mostrar brand-uuid). */
   const [postCloseBrandLabels, setPostCloseBrandLabels] = useState<Record<string, string>>({});
+  /** Tras cerrar → «Abrir otra»: ir a contar fondo (mismo trabajador si se puede). */
+  const [openingResume, setOpeningResume] = useState<{
+    workerId?: string;
+    preferCashStep?: boolean;
+    key: number;
+  } | null>(null);
   const [managerPdvPickId, setManagerPdvPickId] = useState<string | null>(null);
   const [clockedInWorkers, setClockedInWorkers] = useState<TpvClockedInWorker[]>([]);
   const [clockedInWorkersLoading, setClockedInWorkersLoading] = useState(false);
@@ -5147,16 +5217,14 @@ export function TpvRegisterGate({
     refreshSessions();
     const interval = window.setInterval(refreshSessions, 30000);
     window.addEventListener('focus', refreshSessions);
-    // Tablet/webview: al despertar la pantalla o volver a la app no siempre hay
-    // `focus`; sin esto la tablet sigue con la caja vieja aunque otra la cerrara.
-    const onVisible = () => {
+    const onVisibility = () => {
       if (document.visibilityState === 'visible') refreshSessions();
     };
-    document.addEventListener('visibilitychange', onVisible);
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
       window.clearInterval(interval);
       window.removeEventListener('focus', refreshSessions);
-      document.removeEventListener('visibilitychange', onVisible);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [dataUserId, pointsOfSaleScopeKey, scopeBusinessId]);
 
@@ -5197,21 +5265,6 @@ export function TpvRegisterGate({
 
   const activeSessionIdRef = useRef<string | null>(null);
   activeSessionIdRef.current = isTpvRegisterSessionOpen(activeSession) ? activeSession?._id ?? null : null;
-
-  // Latch estable: el tablero / «Nuevo» no dependen solo del Context (puede parpadear).
-  useEffect(() => {
-    if (isTpvRegisterSessionOpen(activeSession)) {
-      writeTpvOpenRegisterLatch(activeSession);
-      return;
-    }
-    if (isTpvRegisterSessionOpen(stickyOpenSessionRef.current)) {
-      writeTpvOpenRegisterLatch(stickyOpenSessionRef.current);
-      return;
-    }
-    if (!sessions.some((s) => isTpvRegisterSessionOpen(s))) {
-      writeTpvOpenRegisterLatch(null);
-    }
-  }, [activeSession, sessions]);
 
   useEffect(() => {
     const onSessionSync = (event: Event) => {
@@ -5838,10 +5891,12 @@ export function TpvRegisterGate({
   // Si sticky sigue abierta (pick/PDV parpadeando), no forzar «Recuperando caja…».
   useEffect(() => {
     if (isTpvRegisterSessionOpen(activeSession)) {
+      writeTpvOpenRegisterLatch(activeSession);
       setOpeningRecoverHold(false);
       return;
     }
     if (isTpvRegisterSessionOpen(stickyOpenSessionRef.current)) {
+      writeTpvOpenRegisterLatch(stickyOpenSessionRef.current);
       setOpeningRecoverHold(false);
       return;
     }
@@ -5849,28 +5904,83 @@ export function TpvRegisterGate({
       setOpeningRecoverHold(true);
       return;
     }
+    if (!sessions.some((s) => isTpvRegisterSessionOpen(s))) {
+      writeTpvOpenRegisterLatch(null);
+    }
     // Hold mínimo: las sesiones ya están; no bloquear la UI medio segundo de más.
     setOpeningRecoverHold(true);
     const timer = window.setTimeout(() => setOpeningRecoverHold(false), 80);
     return () => window.clearTimeout(timer);
-  }, [loading, activeSession?._id, activeSession?.status]);
+  }, [loading, activeSession?._id, activeSession?.status, sessions]);
 
-  const handleViewClosed = useCallback((closedSession: TpvRegisterSession) => {
-    setPostCloseSession(closedSession);
+  const attachOpenSession = useCallback((
+    existing: TpvRegisterSession,
+    opts?: { preferredStoreId?: string; toastMessage?: string | null },
+  ) => {
+    if (!existing?._id) return false;
+    if (isTpvRegisterSessionStaleOpen(existing)) {
+      toast.error(
+        'Hay una caja antigua abierta (más de 18 h). Ciérrala en Caja antes de seguir.',
+        { id: 'tpv-stale-open', duration: 5000 },
+      );
+      return false;
+    }
+    const storeId = String(opts?.preferredStoreId || existing.pointOfSaleId || '').trim();
+    stickyOpenSessionRef.current = existing;
+    writeTpvOpenRegisterLatch(existing);
+    if (!isWorkerUser && storeId) {
+      const bid = resolveBusinessScopeId(currentBusiness);
+      if (bid && dataUserId) writeDeliveryOpsSelectedPdvId(bid, dataUserId, storeId);
+      setManagerPdvPickId(storeId);
+      skipManagerAutoPdvRef.current = false;
+    }
+    setPostCloseSession(null);
+    setPostCloseAggregatorRows([]);
     setPostCloseShowDetail(false);
-    setPostCloseAggregatorRows(
-      aggregatorRowsFromClosingTotals(
-        getClosingAggregatorPlatforms(),
-        closedSession.aggregatorClosingTotals || closedSession.summary?.salesByChannel,
-        closedSession.aggregatorClosingCash,
-        closedSession.aggregatorClosingCard,
-      ),
-    );
-  }, []);
+    setOpeningResume(null);
+    setSessions((prev) => {
+      const exists = prev.some((s) => s._id === existing._id);
+      if (exists) return prev.map((s) => (s._id === existing._id ? existing : s));
+      return [existing, ...prev];
+    });
+    window.dispatchEvent(new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: existing }));
+    if (opts?.toastMessage !== null) {
+      toast.info(opts?.toastMessage || 'Entrando en la caja ya abierta', {
+        id: 'tpv-continue-register',
+        duration: 2500,
+      });
+    }
+    return true;
+  }, [currentBusiness, dataUserId, isWorkerUser]);
+
+  const handleContinueExistingOpen = useCallback((existing: TpvRegisterSession) => {
+    attachOpenSession(existing);
+  }, [attachOpenSession]);
+
+  const startOpenAnotherAfterClose = useCallback((closed: TpvRegisterSession | null) => {
+    const storeId = String(closed?.pointOfSaleId || '').trim();
+    if (!isWorkerUser && storeId) {
+      const bid = resolveBusinessScopeId(currentBusiness);
+      if (bid && dataUserId) writeDeliveryOpsSelectedPdvId(bid, dataUserId, storeId);
+      setManagerPdvPickId(storeId);
+      skipManagerAutoPdvRef.current = false;
+    }
+    setOpeningResume({
+      workerId: String(closed?.workerId || '').trim() || undefined,
+      preferCashStep: true,
+      key: Date.now(),
+    });
+    setPostCloseSession(null);
+    setPostCloseAggregatorRows([]);
+    setPostCloseShowDetail(false);
+  }, [currentBusiness, dataUserId, isWorkerUser]);
 
   const handleReopenClosed = async (closedSession: TpvRegisterSession) => {
     if (!dataUserId || !closedSession?._id) return;
-    if (openingInFlightRef.current) return;
+    if (openingInFlightRef.current) {
+      toast.info('Reabriendo…', { id: 'tpv-reopening-busy', duration: 1500 });
+      return;
+    }
     openingInFlightRef.current = true;
     try {
       const reopened = await reopenTpvRegisterSessionRequest(
@@ -5878,27 +5988,7 @@ export function TpvRegisterGate({
         closedSession._id,
         'Cierre accidental',
       );
-      const storeId = String(reopened.pointOfSaleId || '').trim();
-      // Enganchar ya: si no, el gate vuelve a «Abrir caja» aunque status=open.
-      stickyOpenSessionRef.current = reopened;
-      writeTpvOpenRegisterLatch(reopened);
-      if (storeId) {
-        if (!isWorkerUser) {
-          const bid = resolveBusinessScopeId(currentBusiness);
-          if (bid && dataUserId) writeDeliveryOpsSelectedPdvId(bid, dataUserId, storeId);
-          setManagerPdvPickId(storeId);
-          skipManagerAutoPdvRef.current = false;
-        }
-      }
-      setSessions((prev) => {
-        const exists = prev.some((s) => s._id === reopened._id);
-        if (exists) return prev.map((s) => (s._id === reopened._id ? reopened : s));
-        return [reopened, ...prev];
-      });
-      setPostCloseSession(null);
-      setPostCloseAggregatorRows([]);
-      setPostCloseShowDetail(false);
-      window.dispatchEvent(new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: reopened }));
+      if (!attachOpenSession(reopened, { toastMessage: null })) return;
       toast.success(
         `Caja reabierta: ${reopened.pointOfSaleName || 'tienda'}${reopened.terminalName ? ` / ${reopened.terminalName}` : ''}`,
       );
@@ -5911,40 +6001,25 @@ export function TpvRegisterGate({
 
   const handleOpen = async (data: OpeningData) => {
     if (!dataUserId) return;
-    if (openingInFlightRef.current) return;
+    if (openingInFlightRef.current) {
+      toast.info('Abriendo caja…', { id: 'tpv-opening-busy', duration: 1500 });
+      return;
+    }
     openingInFlightRef.current = true;
+    setOpeningBusy(true);
+
+    const releaseOpenLock = () => {
+      openingInFlightRef.current = false;
+      setOpeningBusy(false);
+    };
+
     try {
     const pdvId = String(data.pointOfSaleId || '').trim();
 
-    const attachExistingOpen = (existing: TpvRegisterSession) => {
-      const storeId = String(data.pointOfSaleId || existing.pointOfSaleId || '').trim();
-      if (!isWorkerUser && storeId) {
-        const bid = resolveBusinessScopeId(currentBusiness);
-        if (bid && dataUserId) {
-          writeDeliveryOpsSelectedPdvId(bid, dataUserId, storeId);
-        }
-        setManagerPdvPickId(storeId);
-        skipManagerAutoPdvRef.current = false;
-      }
-      stickyOpenSessionRef.current = existing;
-      writeTpvOpenRegisterLatch(existing);
-      setSessions((prev) => {
-        const exists = prev.some((s) => s._id === existing._id);
-        if (exists) {
-          return prev.map((s) => (s._id === existing._id ? existing : s));
-        }
-        return [existing, ...prev];
-      });
-      setPostCloseSession(null);
-      window.dispatchEvent(new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: existing }));
-      // Un solo aviso (id fijo = sonner no apila cientos).
-      toast.info('Entrando en la caja ya abierta', { id: 'tpv-continue-register', duration: 2500 });
-    };
-
     const localOpen = pickNewestOpenRegisterSessionForStore(sessions, pdvId, pointsOfSale);
-    // Salir del TPV no cierra: si hay caja abierta en esta tienda, siempre reenganchar.
+    // Seguro: si otra tablet abrió mientras, entrar (el aviso proactivo ya lo cubre en UI).
     if (localOpen) {
-      attachExistingOpen(localOpen);
+      attachOpenSession(localOpen, { preferredStoreId: pdvId });
       return;
     }
     const openerId = normalizeClockinUserId(data.workerId);
@@ -5960,20 +6035,7 @@ export function TpvRegisterGate({
         // Si falla la comprobación, el servidor vuelve a validar al crear la sesión.
       }
     }
-    const lastClosed = findLastClosedTpvSession(
-      sessions,
-      pdvId,
-      data.terminalId,
-      pointsOfSale,
-    );
-    const forcedOpen = resolvePreviousCloseCashAmount(lastClosed);
-    // Con cierre previo: sí o sí se abre con ese fondo (inicial dejado o contado).
-    const total = forcedOpen != null
-      ? forcedOpen
-      : calcDenominationTotal(data.counts);
-    const openingCounts = forcedOpen != null
-      ? buildDenominationFromAmount(forcedOpen)
-      : data.counts;
+    const total = calcDenominationTotal(data.counts);
     try {
       const writeBusinessId = resolveRetailOpsWriteBusinessId(
         scopeBusinessId || resolveBusinessScopeId(currentBusiness) || '',
@@ -5990,7 +6052,7 @@ export function TpvRegisterGate({
         datafonName: data.datafonName,
         printerName: data.printerName,
         openedBy: data.workerName,
-        openingCashCount: openingCounts,
+        openingCashCount: data.counts,
         initialCashAmount: total,
         status: 'open',
         transactions: [],
@@ -5999,51 +6061,60 @@ export function TpvRegisterGate({
         linkedOrderIds: [],
         salesByChannel: {},
       } as Partial<TpvRegisterSession>);
+      // Enganchar YA (pick + sticky) antes del fichaje: si no, el botón se queda
+      // bloqueado en silencio y hay que pulsar Abrir varias veces.
       stickyOpenSessionRef.current = created;
       writeTpvOpenRegisterLatch(created);
-      setSessions(prev => [created, ...prev]);
-      window.dispatchEvent(new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: created }));
-      setPostCloseSession(null);
       if (!isWorkerUser) {
         const bid = resolveBusinessScopeId(currentBusiness);
         if (bid && dataUserId && data.pointOfSaleId) {
           writeDeliveryOpsSelectedPdvId(bid, dataUserId, data.pointOfSaleId);
-          setManagerPdvPickId(data.pointOfSaleId);
         }
+        if (data.pointOfSaleId) setManagerPdvPickId(data.pointOfSaleId);
         skipManagerAutoPdvRef.current = false;
       }
+      setPostCloseSession(null);
+      setOpeningResume(null);
+      setSessions(prev => [created, ...prev]);
+      window.dispatchEvent(new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: created }));
       toast.success(`Caja abierta: ${data.pointOfSaleName ? `${data.pointOfSaleName} / ` : ''}${data.terminalName} — ${total.toFixed(2)}€`);
+
       const bid = resolveBusinessScopeId(currentBusiness);
       const pdvDoc = pointsOfSale.find((p) => p._id === pdvId);
       const wcId = String(pdvDoc?.workCenterId || tabletBinding?.workCenterId || '').trim();
-      if (bid && openerId && pdvId) {
-        try {
-          const geo = await requestClockinGeo();
-          await clockIn(bid, openerId, data.workerName, {
-            device_type: isTabletSession ? 'tablet' : 'web',
-            sales_point_id: pdvId,
-            sales_point_name: data.pointOfSaleName || pdvDoc?.name || '',
-            work_center_id: wcId || undefined,
-            store_team_clockin: true,
-            geo,
-          });
-          setSelectedOrderTakerId(openerId);
-          void refreshClockedInWorkers({ silent: true });
-        } catch {
-          // La caja ya abrió; sin fichaje el TPV se bloquea — abrir modal y avisar.
-          toast.warning('Caja abierta. Ficha al equipo para poder vender.', {
-            id: 'tpv-clockin-needed',
-            duration: 7000,
-          });
-          setShowClockIn(true);
-        }
-      } else if (isTpvRegisterSessionOpen(created)) {
-        toast.warning('Caja abierta. Ficha al equipo para poder vender.', {
-          id: 'tpv-clockin-needed',
-          duration: 7000,
+      // Fichaje en paralelo: no alarga el candado de «Abrir» si la geo/red va lenta.
+      const clockInPromise = (bid && openerId && pdvId)
+        ? (async () => {
+          try {
+            const geo = await requestClockinGeo();
+            await clockIn(bid, openerId, data.workerName, {
+              device_type: isTabletSession ? 'tablet' : 'web',
+              sales_point_id: pdvId,
+              sales_point_name: data.pointOfSaleName || pdvDoc?.name || '',
+              work_center_id: wcId || undefined,
+              store_team_clockin: true,
+              geo,
+            });
+            setSelectedOrderTakerId(openerId);
+            void refreshClockedInWorkers({ silent: true });
+          } catch {
+            toast.warning('Caja abierta. Ficha al equipo para poder vender.', {
+              id: 'tpv-clockin-needed',
+              duration: 7000,
+            });
+            setShowClockIn(true);
+          }
+        })()
+        : Promise.resolve().then(() => {
+          if (isTpvRegisterSessionOpen(created)) {
+            toast.warning('Caja abierta. Ficha al equipo para poder vender.', {
+              id: 'tpv-clockin-needed',
+              duration: 7000,
+            });
+            setShowClockIn(true);
+          }
         });
-        setShowClockIn(true);
-      }
+      void clockInPromise;
       // Aviso para el campanario de notificaciones. Útil para auditoría y para que
       // un encargado vea aperturas desde el móvil. Si la llamada al backend falla
       // simplemente se ignora: el toast ya confirmó visualmente la apertura.
@@ -6068,20 +6139,33 @@ export function TpvRegisterGate({
         )
         || null;
       if (conflictExisting) {
-        // Ya hay caja abierta → entrar en esa (nunca abrir otra hasta cerrar).
-        attachExistingOpen(conflictExisting);
+        attachOpenSession(conflictExisting, { preferredStoreId: pdvId });
         return;
       }
       const msg = extractErrorMessage(err);
       if (/ya hay una caja abierta/i.test(msg)) {
-        // Sin existingSession en payload: no spamear toast; el usuario puede reintentar.
+        try {
+          const fresh = await listTpvRegisterSessionsRequest(
+            dataUserId,
+            tpvGateSessionsQueryOpts(scopeBusinessIdRef.current || undefined),
+          );
+          const merged = mergeTpvRegisterSessionsPreservingOpen(sessions, fresh);
+          setSessions(merged);
+          const again = pickNewestOpenRegisterSessionForStore(merged, pdvId, pointsOfSale);
+          if (again) {
+            attachOpenSession(again, { preferredStoreId: pdvId });
+            return;
+          }
+        } catch {
+          /* ignore */
+        }
         toast.info('Ya hay una caja abierta en esta tienda', { id: 'tpv-continue-register', duration: 2500 });
         return;
       }
       toast.error(toUserFacingMessage(err, 'No se pudo abrir la caja'));
     }
     } finally {
-      openingInFlightRef.current = false;
+      releaseOpenLock();
     }
   };
 
@@ -6112,12 +6196,13 @@ export function TpvRegisterGate({
       setClosingSession(null);
       return;
     }
+    if (closingBusy) return;
     if (nextDayInitialCash == null || !Number.isFinite(Number(nextDayInitialCash)) || Number(nextDayInitialCash) < 0) {
-      toast.error('Indica el inicial para mañana antes de cerrar');
+      toast.error('Indica el fondo que queda en caja antes de cerrar');
       return;
     }
-    if (closingBusy) return;
     setClosingBusy(true);
+    const leaveForTomorrow = Math.max(0, Math.round(Number(nextDayInitialCash) * 100) / 100);
     const finalAmount = calcDenominationTotal(counts);
     const expectedTpv = calcTpvExpectedCash(session);
     const summary = buildTpvRegisterSummary(session);
@@ -6165,7 +6250,6 @@ export function TpvRegisterGate({
     };
     const expected = Math.round((expectedTpv + aggregatorCashSum) * 100) / 100;
     const diff = finalAmount - expected;
-    const leaveForTomorrow = Math.max(0, Math.round(Number(nextDayInitialCash) * 100) / 100);
     const saleOps = session.transactions.filter((t) => t.type === 'sale').length;
     const autoValidated = saleOps === 0 && Math.abs(diff) < 0.01 && aggregatorCashSum === 0;
     const closedPayload: Partial<TpvRegisterSession> = {
@@ -6316,18 +6400,6 @@ export function TpvRegisterGate({
       for (let attempt = 0; attempt < 5; attempt++) {
         const current = sessionsRef.current.find((s) => s._id === sessionId);
         if (!current || !isTpvRegisterSessionOpen(current)) return;
-
-        // Salida / devolución: no sacar más efectivo del que hay en caja.
-        if (fullTx.type === 'cash_out' || fullTx.type === 'return') {
-          const available = Math.round(calcTpvExpectedCash(current) * 100) / 100;
-          const ask = Math.round((Number(fullTx.amount) || 0) * 100) / 100;
-          if (ask > available + 0.009) {
-            toast.error(
-              `No hay tanto en caja. Disponible: ${formatMoneyEs(available)}`,
-            );
-            return;
-          }
-        }
 
         const updatedTxs = [...current.transactions, fullTx];
         const patch = applySessionTransactions(current, updatedTxs);
@@ -6575,8 +6647,6 @@ export function TpvRegisterGate({
   /** Home operativo bar/restaurante = Sala (no Caja). */
   const opsHomePath = isRestaurantVertical ? '/saas/sala' : '/saas/delivery-ops';
 
-  const requestCloseInflightRef = useRef(false);
-
   const handleRequestClose = useCallback(async () => {
     if (isRestaurantVertical && !restaurantTpvPermissions.canCloseRegister) {
       toast.error('Solo encargado o gerente puede cerrar la caja');
@@ -6587,47 +6657,7 @@ export function TpvRegisterGate({
       toast.info('No hay una caja abierta para cerrar');
       return;
     }
-    if (requestCloseInflightRef.current) return;
-    requestCloseInflightRef.current = true;
-
-    // Releer el estado real del servidor antes de abrir el cierre: otra tablet
-    // puede haber cerrado esta caja (o registrado ventas) y la copia local
-    // estar vieja. Sin red (offline-first) se sigue con la copia local.
-    let fresh: TpvRegisterSession = session;
-    try {
-      const uid = String(dataUserId || '').trim();
-      if (uid) {
-        const timeout = new Promise<null>((resolve) => {
-          window.setTimeout(() => resolve(null), 4000);
-        });
-        const refreshed = await Promise.race([
-          listTpvRegisterSessionsRequest(
-            uid,
-            tpvGateSessionsQueryOpts(scopeBusinessIdRef.current || undefined),
-          ),
-          timeout,
-        ]);
-        if (Array.isArray(refreshed)) {
-          const live = refreshed.find((s) => String(s._id) === String(session._id)) || null;
-          if (live) {
-            // Sincroniza la lista local con el servidor (cierre hecho en otra tablet).
-            setSessions((prev) => prev.map((s) => (s._id === live._id ? live : s)));
-            fresh = live;
-          }
-        }
-      }
-    } catch {
-      /* sin red: cerrar con la copia local */
-    } finally {
-      requestCloseInflightRef.current = false;
-    }
-
-    if (!isTpvRegisterSessionOpen(fresh)) {
-      toast.info('Esta caja ya se cerró desde otra tablet. Estado actualizado.');
-      return;
-    }
-
-    setClosingSession(fresh);
+    setClosingSession(session);
     if (isRestaurantVertical && dataUserId) {
       try {
         const check = await checkRestaurantRegisterClose(dataUserId);
@@ -6693,6 +6723,7 @@ export function TpvRegisterGate({
     setPostCloseSession(null);
     setPostCloseAggregatorRows([]);
     setPostCloseShowDetail(false);
+    setOpeningResume(null);
     // Tablet / código de tienda: siempre vuelve al código (nunca al SaaS del CEO).
     if (isTabletSession) {
       void leaveTpvTabletSession(logout);
@@ -6709,16 +6740,24 @@ export function TpvRegisterGate({
   const requestClockIn = useCallback(() => setShowClockIn(true), []);
 
   const registerContextValue = useMemo((): TpvRegisterContextType | null => {
-    if (!isTpvRegisterSessionOpen(activeSession)) return null;
+    // Si activeSession parpadea un frame, mantener el contexto con sticky (pedido / «+»).
+    const session =
+      (isTpvRegisterSessionOpen(activeSession) ? activeSession : null)
+      || (
+        isTpvRegisterSessionOpen(stickyOpenSessionRef.current)
+          ? stickyOpenSessionRef.current
+          : null
+      );
+    if (!session) return null;
     return {
-      session: activeSession,
+      session,
       addTransaction,
       performCashCount,
       addIncident,
       requestClose: () => void handleRequestClose(),
       requestCashCount: () => setShowCashCount(true),
       requestIncident: () => setShowIncident(true),
-      expectedCash: calcTpvExpectedCash(activeSession),
+      expectedCash: calcTpvExpectedCash(session),
       clockedInWorkers: activeStaff,
       clockedInWorkersLoading,
       selectedOrderTakerId,
@@ -7000,12 +7039,8 @@ export function TpvRegisterGate({
             <div className="flex flex-col sm:flex-row gap-3">
               <button
                 type="button"
-                onClick={() => {
-                  setPostCloseSession(null);
-                  setPostCloseAggregatorRows([]);
-                  setPostCloseShowDetail(false);
-                }}
-                className="flex-1 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                onClick={() => startOpenAnotherAfterClose(postCloseSession)}
+                className="flex-1 py-3 rounded-xl border-2 border-[#2563EB] bg-blue-50 dark:bg-blue-950/30 text-[#2563EB] dark:text-blue-200 font-semibold hover:bg-blue-100 dark:hover:bg-blue-950/50 transition-colors"
               >
                 Abrir otra caja
               </button>
@@ -7100,10 +7135,11 @@ export function TpvRegisterGate({
 
     const openingScreen = (
       <OpeningScreen
+        key={openingResume ? `resume-${openingResume.key}` : 'opening'}
         onOpen={handleOpen}
-        onReopenClosed={handleReopenClosed}
-        onViewClosed={handleViewClosed}
+        onContinueExistingOpen={handleContinueExistingOpen}
         loading={loading}
+        openingBusy={openingBusy}
         pointsOfSale={pointsOfSale}
         workCenters={workCenters}
         workerOptions={openingWorkerOptions}
@@ -7116,6 +7152,7 @@ export function TpvRegisterGate({
         onOpeningPdvChange={handleOpeningPdvChange}
         clockInBusinessId={businessId || ''}
         clockInOwnerUserId={dataUserId || ''}
+        resumeAfterClose={openingResume}
         onClockInChanged={() => {
           void refreshClockedInWorkers({ silent: true });
         }}
@@ -7137,7 +7174,7 @@ export function TpvRegisterGate({
   }
 
   return wrapShell(
-    <TpvRegisterBoardReadyContext.Provider value={true}>
+    <TpvRegisterBoardReadyContext.Provider value>
       <TpvStatusBarQuickActionsContext.Provider value={statusBarQuickActionsApi}>
       <div className={tpvFrameClass}>
         <RegisterStatusBar
@@ -7224,7 +7261,6 @@ export function TpvRegisterGate({
             registeredBy={activeSession.workerName}
             workers={clockedInWorkers}
             workersLoading={clockedInWorkersLoading}
-            availableCash={calcTpvExpectedCash(activeSession)}
             onClose={() => setShowCashOps(false)}
             onConfirm={async (tx) => { await addTransaction(tx); }}
           />

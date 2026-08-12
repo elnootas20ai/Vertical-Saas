@@ -79,6 +79,38 @@ describe('computeCompanyBillingBreakdown — reglas Facturación', () => {
     expect(billing.brands.find((b) => b.brandId === 'bb')?.revenueMonth).toBe(18);
     expect(billing.unbrandedRevenueMonth).toBe(0);
   });
+
+  it('no rompe si pdvToWc apunta a un WC fuera de storeRows', () => {
+    const orders = [
+      paidOrder({
+        salesPointId: 'pdv-orphan',
+        totalAmount: 12,
+        paidAmount: 12,
+        items: [{ brandIds: ['modo'], quantity: 1, total: 12 }],
+      }),
+    ];
+    expect(() =>
+      computeCompanyBillingBreakdown(
+        orders,
+        ['modo'],
+        [{ id: 'wc-listed', pdvId: 'pdv-listed' }],
+        ['pdv-orphan'],
+        'pdv-orphan',
+        new Map([['pdv-orphan', 'wc-orphan']]),
+        '2026-07-15',
+      ),
+    ).not.toThrow();
+    const billing = computeCompanyBillingBreakdown(
+      orders,
+      ['modo'],
+      [{ id: 'wc-listed', pdvId: 'pdv-listed' }],
+      ['pdv-orphan'],
+      'pdv-orphan',
+      new Map([['pdv-orphan', 'wc-orphan']]),
+      '2026-07-15',
+    );
+    expect(billing.brands.find((b) => b.brandId === 'modo')?.revenueMonth).toBe(12);
+  });
 });
 
 describe('buildShiftBrandRevenue', () => {

@@ -42,11 +42,10 @@ export function isCompletedHistoryBoardOrder(
   return String(order.status || '').toLowerCase() === 'devuelto';
 }
 
-/** Momento en que el pedido pasó a historial (entregado / eliminado). */
+/** Momento real de cierre del pedido (entregado / eliminado). Sin updatedAt: si no, al tocar el doc vuelve al historial. */
 export function orderHistoryCompletionMs(order: {
   deliveredAt?: string;
   cancelledAt?: string;
-  updatedAt?: string;
   stageHistory?: DeliveryOrder['stageHistory'];
 }): number | null {
   const candidates = [
@@ -61,7 +60,6 @@ export function orderHistoryCompletionMs(order: {
       break;
     }
   }
-  candidates.push(String(order.updatedAt || '').trim());
   let best: number | null = null;
   for (const raw of candidates) {
     if (!raw) continue;
@@ -73,10 +71,9 @@ export function orderHistoryCompletionMs(order: {
 }
 
 /**
- * Pedido cerrado en el historial del tablero de ESTA caja abierta.
- * Tras cerrar y reabrir, no reaparecen los completados del turno anterior.
- * Sí entran los creados en este turno, o los que se cierran después de abrir
- * (p. ej. Glovo de antes de abrir que se entrega en el turno nuevo).
+ * Historial del tablero de ESTA caja abierta.
+ * Tras cerrar y abrir otra: no reaparecen completados del turno anterior.
+ * Sí entran creados en este turno, o cerrados después de openedAt (Glovo pendiente).
  */
 export function orderOnCompletedTpvHistoryBoard(
   order: {
@@ -85,7 +82,6 @@ export function orderOnCompletedTpvHistoryBoard(
     paymentStatus?: string | null;
     deliveredAt?: string;
     cancelledAt?: string;
-    updatedAt?: string;
     stageHistory?: DeliveryOrder['stageHistory'];
   },
   session: Pick<TpvRegisterSession, 'openedAt' | 'closedAt' | 'status'> | null | undefined,
@@ -100,9 +96,7 @@ export function orderOnCompletedTpvHistoryBoard(
   if (Number.isNaN(createdMs) || Number.isNaN(openedMs)) return false;
   const openDayStart = new Date(localDayBoundsForKey(localCalendarDayKey(new Date(openedAt))).from).getTime();
   if (Number.isNaN(openDayStart) || createdMs < openDayStart) return false;
-  // Del turno actual por creación.
   if (orderInRegisterSession(order, session)) return true;
-  // Cerrado durante este turno (aunque se creara antes de openedAt).
   const doneMs = orderHistoryCompletionMs(order);
   return doneMs != null && doneMs >= openedMs;
 }
@@ -242,7 +236,7 @@ export function orderInRegisterSession(
   if (!openedAt) return false;
   const createdMs = new Date(createdAt).getTime();
   const openedMs = new Date(openedAt).getTime();
-  if (Number.isNaN(createdMs) || Number.isNaN(openedMs)) return true;
+  if (Number.isNaN(createdMs) || Number.isNaN(openedMs)) return false;
   if (createdMs < openedMs) return false;
   if (session?.status === 'closed') {
     const closedAt = String(session.closedAt || '').trim();
@@ -262,9 +256,8 @@ export function isOpenOperationalDeliveryStatus(status?: string | null): boolean
 }
 
 /**
- * Tablero TPV (montaje/reparto): pedidos abiertos del día de la caja,
- * aunque se crearan antes de `openedAt` (p. ej. tras re-login o nueva caja el mismo día).
- * La caja/ventas siguen usando `orderInRegisterSession`.
+ * Tablero TPV (montaje/reparto): solo pedidos de ESTA caja (createdAt ≥ openedAt).
+ * Así, al cerrar y abrir otra, no reaparecen montajes/listos del turno anterior.
  */
 export function orderOnOpenTpvOpsBoard(
   order: { createdAt?: string; status?: string | null },
@@ -272,14 +265,7 @@ export function orderOnOpenTpvOpsBoard(
 ): boolean {
   if (!session || String(session.status || '') !== 'open') return false;
   if (!isOpenOperationalDeliveryStatus(order.status)) return false;
-  const createdAt = String(order.createdAt || '').trim();
-  const openedAt = String(session.openedAt || '').trim();
-  if (!createdAt || !openedAt) return false;
-  const createdMs = new Date(createdAt).getTime();
-  if (Number.isNaN(createdMs)) return false;
-  const openDayStart = new Date(localDayBoundsForKey(localCalendarDayKey(new Date(openedAt))).from).getTime();
-  if (Number.isNaN(openDayStart) || createdMs < openDayStart) return false;
-  return true;
+  return orderInRegisterSession(order, session);
 }
 
 /** Montaje en tablero TPV (listo sin montaje cerrado sigue aquí). Recogida no pasa a reparto. */
@@ -448,38 +434,12 @@ export function mergeTpvRegisterSessionsPreservingOpen(
   const nextList = Array.isArray(next) ? next : [];
   if (nextList.length === 0 && prevList.length > 0) return prevList;
 
-  const prevById = new Map(
-    prevList
-      .filter((s) => s && String(s._id || '').trim())
-      .map((s) => [String(s._id).trim(), s] as const),
-  );
   const nextById = new Map(
     nextList
       .filter((s) => s && String(s._id || '').trim())
       .map((s) => [String(s._id).trim(), s] as const),
   );
-
-  const merged = nextList.map((session) => {
-    const id = String(session?._id || '').trim();
-    const prevSession = id ? prevById.get(id) : undefined;
-    if (
-      prevSession
-      && isTpvRegisterSessionOpenStatus(session)
-      && isTpvRegisterSessionOpenStatus(prevSession)
-      && Number(session.initialCashAmount || 0) <= 0
-      && Number(prevSession.initialCashAmount || 0) > 0
-    ) {
-      const nextHasOpeningCount = Object.values(session.openingCashCount || {}).some((n) => Number(n) > 0);
-      return {
-        ...session,
-        initialCashAmount: prevSession.initialCashAmount,
-        openingCashCount: nextHasOpeningCount
-          ? session.openingCashCount
-          : (prevSession.openingCashCount || session.openingCashCount),
-      };
-    }
-    return session;
-  });
+  const merged = [...nextList];
 
   for (const prevSession of prevList) {
     if (!prevSession || !isTpvRegisterSessionOpenStatus(prevSession)) continue;
@@ -489,6 +449,10 @@ export function mergeTpvRegisterSessionsPreservingOpen(
     merged.push(prevSession);
   }
   return merged;
+}
+
+function isTpvRegisterSessionOpenStatus(session: Pick<TpvRegisterSession, 'status'> | null | undefined): boolean {
+  return Boolean(session && String(session.status || '').toLowerCase() === 'open');
 }
 
 /** Latch de caja abierta: sobrevive parpadeos del Context React (HMR / refresh). */
@@ -513,10 +477,6 @@ export function hasTpvOpenRegisterLatch(): boolean {
   } catch {
     return false;
   }
-}
-
-function isTpvRegisterSessionOpenStatus(session: Pick<TpvRegisterSession, 'status'> | null | undefined): boolean {
-  return Boolean(session && String(session.status || '').toLowerCase() === 'open');
 }
 
 /** PDV id o workCenterId de la sesión ↔ tienda elegida (tablet/CEO). */
@@ -782,10 +742,9 @@ export function findReopenableClosedTpvSession(
   return last;
 }
 
-/** Efectivo contado / dejado al cerrar (para sugerir fondo del día siguiente). */
+/** Efectivo sugerido al abrir: prioridad al fondo dejado al cerrar. */
 export function resolvePreviousCloseCashAmount(session: TpvRegisterSession | null | undefined): number | null {
   if (!session || String(session.status || '') !== 'closed') return null;
-  // Prioridad: lo que dejaron explícitamente para mañana.
   if (session.nextDayInitialCash != null) {
     const leave = Number(session.nextDayInitialCash);
     if (Number.isFinite(leave) && leave >= 0) {
@@ -799,7 +758,7 @@ export function resolvePreviousCloseCashAmount(session: TpvRegisterSession | nul
   return null;
 }
 
-/** true si el fondo sugerido viene del «inicial de mañana», no del contado total. */
+/** true si el fondo sugerido viene del importe dejado al cerrar (no del contado total). */
 export function previousCloseCashIsNextDayInitial(
   session: TpvRegisterSession | null | undefined,
 ): boolean {

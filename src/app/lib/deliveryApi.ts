@@ -2143,12 +2143,6 @@ export interface TpvRegisterSession {
   openingCashCount: CashDenominationCount;
   initialCashAmount: number;
 
-  /**
-   * Efectivo que se deja en el cajón para el día siguiente (al cerrar).
-   * Al abrir mañana se sugiere como fondo inicial (prioridad sobre finalCashAmount).
-   */
-  nextDayInitialCash?: number;
-
   transactions: TpvRegisterTransaction[];
   cashCounts: TpvCashCount[];
 
@@ -2159,6 +2153,8 @@ export interface TpvRegisterSession {
   expectedCash: number;
   difference: number;
   closingNotes: string;
+  /** Efectivo que queda en el cajón al cerrar (fondo de la siguiente apertura). */
+  nextDayInitialCash?: number;
 
   closingValidatedBy?: string;
   closingValidatedAt?: string;
@@ -2602,6 +2598,14 @@ export interface OpsCenterData {
   revenueByCategory: Record<string, number>;
   /** Unidades de carta del día/sesión (no cancelados). */
   foodFamilyCounts?: { pizza: number; burger: number; taco: number };
+  /** Pedidos del día (no cancelados), resumen para listado por tienda. */
+  dayOrdersBrief?: Array<{
+    _id: string;
+    orderNumber: string;
+    totalAmount: number;
+    status: string;
+    createdAt?: string | null;
+  }>;
   /** id marca → nombre visible */
   brandLabels: Record<string, string>;
   pointsOfSale: PointOfSale[];

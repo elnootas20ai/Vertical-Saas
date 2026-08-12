@@ -531,7 +531,6 @@ export function RestaurantCajaPage() {
   const [viewingClosingSession, setViewingClosingSession] = useState<TpvRegisterSession | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const hasLoadedOnceRef = useRef(false);
-  const loadGenRef = useRef(0);
   const userCollapsedOpenRef = useRef(false);
 
   const pointsOfSale = activeStoreScope.allPointsOfSale.length > 0
@@ -553,13 +552,8 @@ export function RestaurantCajaPage() {
   const loadData = useCallback(async (options?: { silent?: boolean }) => {
     if (!dataUserId) {
       setLoading(false);
-      setRefreshing(false);
       return;
     }
-    const gen = ++loadGenRef.current;
-    const forUserId = dataUserId;
-    const forBusinessId = businessId;
-    const forDate = selectedDate;
     const silent = options?.silent ?? hasLoadedOnceRef.current;
     if (!silent) setLoading(true);
     else setRefreshing(true);
@@ -568,37 +562,25 @@ export function RestaurantCajaPage() {
         ? (new URLSearchParams(window.location.search).get('validate')
           || new URLSearchParams(window.location.search).get('view'))
         : null;
-      let dateFrom = localDayBoundsForKey(forDate).from;
+      let dateFrom = localDayBoundsForKey(selectedDate).from;
       if (deepLink) {
         const lookback = new Date();
         lookback.setDate(lookback.getDate() - 120);
         dateFrom = lookback.toISOString();
       }
-      const sessData = await listRestaurantRegisterSessions(forUserId, { businessId: forBusinessId, dateFrom });
-      if (gen !== loadGenRef.current) return;
+      const sessData = await listRestaurantRegisterSessions(dataUserId, { businessId, dateFrom });
       const unique = Array.from(new Map(sessData.map((s) => [s._id, s])).values());
       setSessions(unique);
       hasLoadedOnceRef.current = true;
-    } catch (err) {
-      if (gen !== loadGenRef.current) return;
-      const aborted = err instanceof DOMException && err.name === 'AbortError';
-      if (!silent && !aborted) toast.error('Error al cargar datos de caja');
+    } catch {
+      if (!silent) toast.error('Error al cargar datos de caja');
     } finally {
-      if (gen === loadGenRef.current) {
-        setLoading(false);
-        setRefreshing(false);
-      }
+      setLoading(false);
+      setRefreshing(false);
     }
   }, [dataUserId, businessId, selectedDate]);
 
-  useEffect(() => {
-    hasLoadedOnceRef.current = false;
-    setSessions([]);
-    setFilterPdv('');
-    setViewingClosingSession(null);
-  }, [businessId]);
-
-  useEffect(() => { void loadData(); }, [loadData]);
+  useEffect(() => { loadData(); }, [loadData]);
 
   const validateParam = searchParams.get('validate');
   const viewParam = searchParams.get('view');
@@ -712,26 +694,12 @@ export function RestaurantCajaPage() {
 
   useEffect(() => {
     if (loading || userCollapsedOpenRef.current) return;
-    if (openOnSelectedDay.length < 1) return;
-    setExpandedSessionId((prev) => {
-      if (prev) {
-        if (scopedSessions.some((s) => s._id === prev)) return prev;
-      }
-      return openOnSelectedDay[0]._id;
-    });
-  }, [loading, openOnSelectedDay, scopedSessions]);
-
-  const handleToggleSession = useCallback((id: string | null) => {
-    setExpandedSessionId((prev) => {
-      const next = id === null ? null : (prev === id ? null : id);
-      if (next === null && (id === null || openOnSelectedDay.some((s) => s._id === id))) {
-        userCollapsedOpenRef.current = true;
-      } else if (next !== null) {
-        userCollapsedOpenRef.current = false;
-      }
-      return next;
-    });
-  }, [openOnSelectedDay]);
+    if (openOnSelectedDay.length >= 1) {
+      setExpandedSessionId((prev) => (
+        prev && openOnSelectedDay.some((s) => s._id === prev) ? prev : openOnSelectedDay[0]._id
+      ));
+    }
+  }, [loading, openOnSelectedDay]);
 
   const excelClosedCount = scopedSessions.filter((s) => String(s.status || '').toLowerCase() !== 'open').length;
 
@@ -862,7 +830,7 @@ export function RestaurantCajaPage() {
           navigate(resolveCajaPageExitPath(), { replace: true });
         }}
         selectedSessionId={expandedSessionId}
-        onSelectSession={handleToggleSession}
+        onSelectSession={setExpandedSessionId}
         onViewFullClosing={handleViewClosing}
         refreshing={refreshing}
         locationNoun={{ singular: 'Local', plural: 'locales', filterAll: 'Todos los locales' }}

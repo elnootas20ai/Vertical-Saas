@@ -51,27 +51,6 @@ export function formatMoneyAsYouType(raw: string, allowDecimals: boolean): strin
   return n.toLocaleString('es-ES', { maximumFractionDigits: 0, useGrouping: true });
 }
 
-/**
- * Tras reformatear un input controlado, React deja el caret al inicio.
- * Llamar tras onChange (y/o en useLayoutEffect) para escribir al final.
- */
-export function scheduleMoneyInputCaretToEnd(el: HTMLInputElement | null | undefined): void {
-  if (!el || typeof window === 'undefined') return;
-  const place = () => {
-    try {
-      const len = el.value.length;
-      el.setSelectionRange(len, len);
-    } catch {
-      /* ignore */
-    }
-  };
-  place();
-  window.requestAnimationFrame(() => {
-    place();
-    window.requestAnimationFrame(place);
-  });
-}
-
 /** Convierte texto con miles (.) y decimales (,) a número. Cadena vacía → NaN. */
 export function parseSpanishMoneyInput(raw: string): number {
   const s = raw.replace(/\s/g, '').trim();

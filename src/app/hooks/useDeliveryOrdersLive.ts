@@ -47,7 +47,8 @@ export function useDeliveryOrdersLive({
       tpv_session_updated: () => onRefresh(),
       connected: () => setSseOk(true),
       disconnected: () => setSseOk(false),
-      reconnecting: () => setSseOk(false),
+      // Cortes breves: mantener live; solo `disconnected` activa poll de respaldo.
+      reconnecting: () => {},
     }),
     [onRefresh],
   );

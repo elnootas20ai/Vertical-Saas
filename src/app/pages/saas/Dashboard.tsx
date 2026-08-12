@@ -12,9 +12,6 @@ import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { fetchDashboardData, type DashboardServerData, type DashboardAlert, type QuickFinance, type SalesClosureKpis } from '../../lib/dashboardApi';
-import { fetchActiveNow, fetchClockinStats, formatMinutes, type ActiveMember, type ClockinStatsSummary } from '../../lib/clockinsApi';
-import { fetchAlertsSummary, type AlertsSummary } from '../../lib/clockinAlertsApi';
-import { AlertSummaryWidget } from '../../components/saas/AlertSummaryWidget';
 import {
   WorkerPayMonthPanel,
   buildWorkerPayMonthSummary,
@@ -57,6 +54,7 @@ import {
   LayoutGrid, LayoutDashboard, Scale, UtensilsCrossed, ListChecks, Banknote,
 } from 'lucide-react';
 import { DashboardFinanceWidget } from '../../components/saas/finance/DashboardFinanceWidget';
+import { DashboardLazyPanel } from '../../components/saas/DashboardLazyPanel';
 import { LiveBadge } from '../../components/saas/LiveBadge';
 import { GeneralDashboard } from '../../components/saas/GeneralDashboard';
 import { useDashboardView } from '../../context/DashboardViewContext';
@@ -104,9 +102,36 @@ import { Link } from 'react-router-dom';
 import { VertialBillingUpgradeLink } from '../../components/saas/VertialBillingUpgradeLink';
 import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
 
+/** Evita «Cargando…» eterno si una request de ola cuelga en producción. */
+const DELIVERY_DASHBOARD_WAVE_TIMEOUT_MS = 14_000;
+
+function withTimeoutFallback<T>(promise: Promise<T>, fallback: T, timeoutMs = DELIVERY_DASHBOARD_WAVE_TIMEOUT_MS): Promise<T> {
+  return new Promise<T>((resolve) => {
+    let settled = false;
+    const timer = globalThis.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(fallback);
+    }, timeoutMs);
+    promise
+      .then((value) => {
+        if (settled) return;
+        settled = true;
+        globalThis.clearTimeout(timer);
+        resolve(value);
+      })
+      .catch(() => {
+        if (settled) return;
+        settled = true;
+        globalThis.clearTimeout(timer);
+        resolve(fallback);
+      });
+  });
+}
+
 // ─── Widget personalización ────────────────────────────────────────────────────
 
-type WidgetId = 'kpis_main' | 'quick_access' | 'alertas' | 'charts' | 'operations' | 'quick_finance' | 'funnel' | 'clockins';
+type WidgetId = 'quick_access' | 'charts' | 'operations' | 'quick_finance' | 'funnel';
 
 interface WidgetConfig {
   id: WidgetId;
@@ -115,19 +140,24 @@ interface WidgetConfig {
 }
 
 const DEFAULT_WIDGETS: WidgetConfig[] = [
-  { id: 'kpis_main',     label: 'KPIs principales',       visible: true },
-  { id: 'alertas',       label: 'Alertas',                visible: true },
   { id: 'quick_access',  label: 'Accesos rápidos',        visible: true },
   { id: 'charts',        label: 'Gráficas principales',   visible: true },
   { id: 'operations',    label: 'Operativa del negocio',  visible: true },
   { id: 'quick_finance', label: 'Bloque financiero',      visible: true },
   { id: 'funnel',        label: 'Embudo de ventas CRM',   visible: true },
-  { id: 'clockins',      label: 'Fichajes del equipo',    visible: true },
 ];
 
-const REMOVED_WIDGET_IDS = new Set(['actividad', 'availability', 'team_rrhh']);
+/** Widgets retirados del dashboard (también se filtran de configs guardadas en localStorage). */
+const REMOVED_WIDGET_IDS = new Set([
+  'actividad',
+  'availability',
+  'team_rrhh',
+  'kpis_main',
+  'alertas',
+  'clockins',
+]);
 
-const DASH_CONFIG_KEY = 'vertial_dashboard_config_v3';
+const DASH_CONFIG_KEY = 'vertial_dashboard_config_v4';
 const DASH_RUNTIME_CACHE_KEY = 'vertial_dashboard_runtime_v1';
 const DASH_RUNTIME_TTL_MS = 90_000;
 
@@ -295,101 +325,6 @@ interface DailyPoint {
   day: string;
   label: string;
   value: number;
-}
-
-function MiniBarChart({ data, color }: { data: DailyPoint[]; color: string }) {
-  if (!data.length) return null;
-  const colorMap: Record<string, string> = {
-    blue: '#3b82f6', emerald: '#10b981', amber: '#f59e0b', red: '#ef4444',
-    violet: '#8b5cf6', gray: '#6b7280', cyan: '#06b6d4',
-  };
-  const fillColor = colorMap[color] ?? colorMap.blue;
-  const lastIdx = data.length - 1;
-
-  return (
-    <div className="h-full w-full min-h-[3.5rem]">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} margin={{ top: 2, right: 1, left: 1, bottom: 1 }} barCategoryGap="25%">
-          <Tooltip
-            cursor={{ fill: 'rgba(0,0,0,0.06)', radius: 3 }}
-            content={({ active, payload }) => {
-              if (!active || !payload?.length) return null;
-              const pt = payload[0].payload as DailyPoint;
-              return (
-                <div className="bg-gray-900 text-white text-[10px] font-semibold px-2 py-1 rounded-lg shadow-lg whitespace-nowrap">
-                  <span className="opacity-60 mr-1">{pt.label}</span>
-                  {pt.value}
-                </div>
-              );
-            }}
-          />
-          <Bar dataKey="value" radius={[2, 2, 0, 0]} isAnimationActive animationDuration={500} maxBarSize={12}>
-            {data.map((_, idx) => (
-              <Cell key={idx} fill={fillColor} fillOpacity={idx === lastIdx ? 1 : 0.25 + (idx / lastIdx) * 0.55} />
-            ))}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
-
-// ─── KPI Card ──────────────────────────────────────────────────────────────────
-
-function KPICard({
-  title, value, sub, icon, iconBg, iconColor, trend, onClick, loading, miniChart, detail,
-}: {
-  title: string;
-  value: string;
-  sub: string;
-  icon: React.ReactNode;
-  iconBg: string;
-  iconColor: string;
-  trend?: { value: string; up: boolean | null };
-  onClick?: () => void;
-  loading?: boolean;
-  miniChart?: React.ReactNode;
-  /** Sustituye el valor grande (p. ej. desglose por marca). */
-  detail?: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className="w-full text-left bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-4 sm:p-5 hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-sm transition-all group"
-    >
-      <div className="flex items-stretch gap-3">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between mb-2">
-            <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">{title}</p>
-            <div className={`w-8 h-8 ${iconBg} rounded-xl flex items-center justify-center flex-shrink-0`}>
-              <span className={iconColor}>{icon}</span>
-            </div>
-          </div>
-          {loading ? (
-            <div className="h-8 w-20 bg-gray-100 dark:bg-gray-700 animate-pulse rounded-lg mb-1" />
-          ) : detail ? (
-            <div className="mb-0.5 min-h-[2rem]">{detail}</div>
-          ) : (
-            <p className="text-2xl sm:text-3xl font-black text-gray-900 dark:text-gray-100 mb-0.5 leading-none">{value}</p>
-          )}
-          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-            {!loading && !detail && trend && (
-              <span className={`flex items-center gap-0.5 text-[11px] font-bold ${
-                trend.up === true ? 'text-emerald-600' : trend.up === false ? 'text-red-500' : 'text-gray-400'
-              }`}>
-                {trend.up === true ? <ArrowUpRight className="w-3 h-3" /> : trend.up === false ? <ArrowDownRight className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
-                {trend.value}
-              </span>
-            )}
-            <span className="text-[11px] text-gray-400 dark:text-gray-500">{loading ? '…' : sub}</span>
-          </div>
-        </div>
-        {!loading && miniChart && (
-          <div className="w-20 flex-shrink-0 flex items-end">{miniChart}</div>
-        )}
-      </div>
-    </button>
-  );
 }
 
 // ─── Alert styles ────────────────────────────────────────────────────────────
@@ -687,10 +622,6 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
   const [serverData, setServerData] = useState<DashboardServerData | null>(null);
   const [serverLoading, setServerLoading] = useState(false);
   const [serverUpdatedAt, setServerUpdatedAt] = useState<string | null>(null);
-  const [clockinsActive, setClockinsActive] = useState<ActiveMember[]>([]);
-  const [clockinsStatsSummary, setClockinsStatsSummary] = useState<ClockinStatsSummary | null>(null);
-  const [clockinsAlertsSummary, setClockinsAlertsSummary] = useState<AlertsSummary | null>(null);
-  const [clockinsLoading, setClockinsLoading] = useState(false);
   const [deliveryMetrics, setDeliveryMetrics] = useState<PortfolioMetrics | null>(null);
   const [deliveryScope, setDeliveryScope] = useState<{
     orders: DeliveryOrder[];
@@ -709,6 +640,13 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
   const [workerPayMonth, setWorkerPayMonth] = useState<WorkerPayMonthSummary | null>(null);
   /** Cierres de caja cargados (para sumar Caja 2 al panel de Marcas). */
   const [deliveryTpvSessions, setDeliveryTpvSessions] = useState<TpvRegisterSession[]>([]);
+  /** Montaje 1 a 1: 0=nada · 1=pulso · 2=marcas · 3=pagos · 4=tiempos. */
+  const [deliveryPanelStage, setDeliveryPanelStage] = useState(0);
+  /** True cuando la ventana completa de pedidos (MoM / YoY) ya llegó. */
+  const [deliveryHeavyReady, setDeliveryHeavyReady] = useState(false);
+  const [deliveryWaveBusy, setDeliveryWaveBusy] = useState(false);
+  const deliveryLoadGenRef = useRef(0);
+  const deliveryScopeBizRef = useRef('');
 
   const isDeliveryVertical = vertical === 'delivery' || isDeliveryBusinessType(currentBusiness?.businessType);
   const isCompraventaVertical = vertical === 'carDealership';
@@ -721,6 +659,10 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
       setDeliveryOpsPulses(null);
       setWorkerPayMonth(null);
       setDeliveryTpvSessions([]);
+      setDeliveryPanelStage(0);
+      setDeliveryHeavyReady(false);
+      setDeliveryWaveBusy(false);
+      deliveryScopeBizRef.current = '';
       return;
     }
     const dataUserId = resolveBusinessDataUserId(authUser, currentBusiness);
@@ -730,11 +672,25 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
       setDeliveryOpsPulses({ pulses7d: [], pulsesMonth: [] });
       setWorkerPayMonth(null);
       setDeliveryTpvSessions([]);
+      setDeliveryPanelStage(4);
+      setDeliveryHeavyReady(true);
+      setDeliveryWaveBusy(false);
       return;
     }
     const scopeBusinessId = String(currentBusiness.business_id || currentBusiness.id || '')
       .replace(/^business:/, '')
       .trim();
+    if (deliveryScopeBizRef.current !== scopeBusinessId) {
+      deliveryScopeBizRef.current = scopeBusinessId;
+      setDeliveryMetrics(null);
+      setDeliveryScope(null);
+      setDeliveryOpsPulses(null);
+      setWorkerPayMonth(null);
+      setDeliveryTpvSessions([]);
+      setDeliveryPanelStage(0);
+      setDeliveryHeavyReady(false);
+    }
+
     const businessName = String(currentBusiness.name || 'Empresa');
     const todayKey = localCalendarDayKey();
     const monthKey = todayKey.slice(0, 7);
@@ -752,70 +708,42 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
     const prevYearKey = String(Number(yearKey) - 1);
     const prevYtdFrom = localDayBoundsForKey(`${prevYearKey}-01-01`).from;
     const prevYtdTo = `${prevYearKey}${todayKey.slice(4)}T23:59:59.999Z`;
-    try {
-      const [
-        { pointsOfSale, workCenters },
-        orderResult,
-        prevYearOrderResult,
-        tpvSessions,
-        ordersCountResult,
-        staffConsumptionsResult,
-      ] = await Promise.all([
-        loadDeliveryStores(authUser, currentBusiness, {
-          accountBusinessCount: businesses.length || 1,
-        }).catch(() => ({
-          dataUserId: '',
-          workCenters: [],
-          pointsOfSale: [],
-        })),
-        filterDeliveryOrdersRequest(dataUserId, {
-          dateFrom: orderFetchFrom,
-          dateTo: monthEnd,
-          limit: 2500,
-          ...(scopeBusinessId ? { businessId: scopeBusinessId } : {}),
-        }).catch(() => ({ orders: [], total: 0 })),
-        // Solo YTD año anterior para “vs año ant.” en panel marcas (ligero).
-        filterDeliveryOrdersRequest(dataUserId, {
-          dateFrom: prevYtdFrom,
-          dateTo: prevYtdTo,
-          limit: 1500,
-          ...(scopeBusinessId ? { businessId: scopeBusinessId } : {}),
-        }).catch(() => ({ orders: [], total: 0 })),
-        listTpvRegisterSessionsRequest(dataUserId, {
-          ...(scopeBusinessId ? { businessId: scopeBusinessId } : {}),
-          // Misma ventana útil que el resumen (mes + MoM): sin dateFrom el listado
-          // puede truncar y los integradores de Caja 2 no entran en CANALES.
-          dateFrom: localDayBoundsForKey(
-            (() => {
-              const d = new Date(`${todayKey}T12:00:00`);
-              d.setDate(d.getDate() - 45);
-              return localCalendarDayKey(d);
-            })(),
-          ).from,
-        }).catch(() => []),
-        // Total real de la empresa (sin recortar por fechas del dashboard)
-        filterDeliveryOrdersRequest(dataUserId, {
-          limit: 1,
-          ...(scopeBusinessId ? { businessId: scopeBusinessId } : {}),
-        }).catch(() => ({ orders: [], total: 0 })),
-        listStaffConsumptionsRequest(dataUserId, { month: monthKey }).catch(() => ({
-          items: [],
-          summary: { count: 0, total: 0, cashNowTotal: 0, payrollTotal: 0 },
-        })),
-      ]);
-      const mergedOrdersById = new Map<string, DeliveryOrder>();
-      for (const o of [...(orderResult.orders || []), ...(prevYearOrderResult.orders || [])]) {
-        const id = String(o?._id || '').trim();
-        if (id) mergedOrdersById.set(id, o);
-      }
-      const orderResultMerged = {
-        orders: Array.from(mergedOrdersById.values()),
-        total: ordersCountResult.total || mergedOrdersById.size,
-      };
+    const wave0From = (() => {
+      const d = new Date(`${todayKey}T12:00:00`);
+      d.setDate(d.getDate() - 14);
+      const fast14 = localDayBoundsForKey(localCalendarDayKey(d)).from;
+      const monthFrom = localDayBoundsForKey(`${monthKey}-01`).from;
+      return fast14 < monthFrom ? fast14 : monthFrom;
+    })();
+    const sessionsFrom = localDayBoundsForKey(
+      (() => {
+        const d = new Date(`${todayKey}T12:00:00`);
+        d.setDate(d.getDate() - 45);
+        return localCalendarDayKey(d);
+      })(),
+    ).from;
+    const bizFilter = scopeBusinessId ? { businessId: scopeBusinessId } : {};
+    const gen = ++deliveryLoadGenRef.current;
+    const stillCurrent = () => gen === deliveryLoadGenRef.current;
+    const yieldPaint = () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          window.setTimeout(resolve, 0);
+        });
+      });
+
+    type StoreRow = { _id: string; name?: string; workCenterId?: string; active?: boolean; createdAt?: string; deletedAt?: string; centerType?: string };
+    const applyDeliveryPayload = (
+      pointsOfSale: StoreRow[],
+      workCenters: StoreRow[],
+      orders: DeliveryOrder[],
+      tpvSessions: TpvRegisterSession[],
+      ordersTotal: number,
+    ) => {
       const activePdvIds = pointsOfSale.filter((p) => p.active !== false).map((p) => p._id);
       const orderPdvIds = [
         ...new Set(
-          (orderResultMerged.orders || [])
+          (orders || [])
             .map((o) => String(o.salesPointId || '').trim())
             .filter(Boolean),
         ),
@@ -837,8 +765,6 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
         if (wcId) pdvByWorkCenterId.set(wcId, String(p._id));
       }
 
-      // Fuentes del resumen: PDVs cargados + pedidos + cierres de caja.
-      // Así la lista no se vacía si falla el enlace WC↔PDV o el filtro de scope.
       const pulseStores: Array<{ id: string; name: string; workCenterId: string }> = [];
       const pulseStoreMap = new Map<string, { id: string; name: string; workCenterId: string }>();
       const addPulseStore = (idRaw: string, nameRaw?: string, wcRaw?: string) => {
@@ -867,7 +793,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
 
       const buildPulses = (dayKeys: string[]): StoreOpsPulse[] =>
         pulseStores.map((store) =>
-          buildStoreOpsPulse(orderResultMerged.orders || [], {
+          buildStoreOpsPulse(orders || [], {
             storeId: store.workCenterId || store.id,
             storeName: store.name,
             businessId: scopeBusinessId,
@@ -894,24 +820,17 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
         .map((s) => ({ id: s.id, name: s.name }))
         .filter((s) => s.id);
 
-      setWorkerPayMonth(
-        buildWorkerPayMonthSummary(
-          tpvSessions || [],
-          monthKey,
-          staffConsumptionsResult.items || [],
-        ),
-      );
       setDeliveryTpvSessions(tpvSessions || []);
 
-      if (pulseStores.length === 0 && (orderResultMerged.orders || []).length === 0) {
+      if (pulseStores.length === 0 && (orders || []).length === 0) {
         setDeliveryMetrics(emptyPortfolioMetrics());
         setDeliveryOpsPulses({ pulses7d: [], pulsesMonth: [] });
         setDeliveryScope({
-          orders: orderResultMerged.orders,
+          orders: orders || [],
           pdvIds,
           primaryPdvId: null,
           wcScopeIds: [...wcScope],
-          ordersTotal: Number(ordersCountResult.total || orderResultMerged.total || 0),
+          ordersTotal: Number(ordersTotal || 0),
           stores: deliveryStores,
         });
         return;
@@ -922,44 +841,180 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
       const baseMetrics =
         scopePdvIds.length === 0
           ? emptyPortfolioMetrics()
-          : computePortfolioMetrics(
-              orderResultMerged.orders,
-              scopePdvIds,
-              primaryPdv,
-              todayKey,
-              wcScope,
-            );
+          : computePortfolioMetrics(orders, scopePdvIds, primaryPdv, todayKey, wcScope);
       setDeliveryMetrics(applyTpvCashMetrics(baseMetrics, tpvSessions || [], scopePdvIds, todayKey));
       setDeliveryOpsPulses({
         pulses7d: buildPulses(keys7d),
         pulsesMonth: buildPulses(keysMonth),
       });
       const scopedForTotal = filterOrdersToPortfolioScope(
-        orderResultMerged.orders || [],
+        orders || [],
         scopePdvIds,
         primaryPdv,
         wcScope,
       );
       setDeliveryScope({
-        orders: orderResultMerged.orders,
+        orders: orders || [],
         pdvIds: scopePdvIds,
         primaryPdvId: primaryPdv,
         wcScopeIds: [...wcScope],
-        ordersTotal: Math.max(
-          Number(ordersCountResult.total || 0),
-          Number(orderResultMerged.total || 0),
-          scopedForTotal.length,
-        ),
+        ordersTotal: Math.max(Number(ordersTotal || 0), scopedForTotal.length),
         stores: deliveryStores,
       });
+    };
+
+    setDeliveryWaveBusy(true);
+    setDeliveryHeavyReady(false);
+    let paintedPulse = false;
+    try {
+      const emptyStores = {
+        dataUserId: '',
+        workCenters: [] as StoreRow[],
+        pointsOfSale: [] as StoreRow[],
+      };
+      const emptyOrders = { orders: [] as DeliveryOrder[], total: 0 };
+
+      // Ola 0 — rápida: tiendas + mes/14d + cajas → pintar Resumen operativo ya.
+      // Timeout: en prod una request colgada no puede dejar «Cargando…» eterno.
+      const [
+        { pointsOfSale, workCenters },
+        fastOrderResult,
+        tpvSessions,
+        ordersCountResult,
+      ] = await withTimeoutFallback(
+        Promise.all([
+          withTimeoutFallback(
+            loadDeliveryStores(authUser, currentBusiness, {
+              accountBusinessCount: businesses.length || 1,
+            }),
+            emptyStores,
+          ),
+          withTimeoutFallback(
+            filterDeliveryOrdersRequest(dataUserId, {
+              dateFrom: wave0From,
+              dateTo: monthEnd,
+              limit: 800,
+              ...bizFilter,
+            }),
+            emptyOrders,
+          ),
+          withTimeoutFallback(
+            listTpvRegisterSessionsRequest(dataUserId, {
+              ...bizFilter,
+              dateFrom: sessionsFrom,
+            }),
+            [] as TpvRegisterSession[],
+          ),
+          withTimeoutFallback(
+            filterDeliveryOrdersRequest(dataUserId, {
+              limit: 1,
+              ...bizFilter,
+            }),
+            emptyOrders,
+          ),
+        ]),
+        [emptyStores, emptyOrders, [] as TpvRegisterSession[], emptyOrders] as const,
+      );
+      if (!stillCurrent()) return;
+
+      const wave0Orders = Array.isArray(fastOrderResult.orders) ? fastOrderResult.orders : [];
+      const sessions = Array.isArray(tpvSessions) ? tpvSessions : [];
+      const ordersTotal = Number(ordersCountResult.total || wave0Orders.length || 0);
+      applyDeliveryPayload(pointsOfSale, workCenters, wave0Orders, sessions, ordersTotal);
+      paintedPulse = true;
+      setDeliveryPanelStage((s) => Math.max(s, 1));
+      await yieldPaint();
+      if (!stillCurrent()) return;
+      setDeliveryPanelStage((s) => Math.max(s, 2));
+
+      // Ola 1 — ventana completa + YoY (marcas / insights MoM).
+      const [fullOrderResult, prevYearOrderResult] = await withTimeoutFallback(
+        Promise.all([
+          withTimeoutFallback(
+            filterDeliveryOrdersRequest(dataUserId, {
+              dateFrom: orderFetchFrom,
+              dateTo: monthEnd,
+              limit: 2500,
+              ...bizFilter,
+            }),
+            { orders: wave0Orders, total: wave0Orders.length },
+          ),
+          withTimeoutFallback(
+            filterDeliveryOrdersRequest(dataUserId, {
+              dateFrom: prevYtdFrom,
+              dateTo: prevYtdTo,
+              limit: 1500,
+              ...bizFilter,
+            }),
+            emptyOrders,
+          ),
+        ]),
+        [
+          { orders: wave0Orders, total: wave0Orders.length },
+          emptyOrders,
+        ] as const,
+      );
+      if (!stillCurrent()) return;
+
+      const mergedOrdersById = new Map<string, DeliveryOrder>();
+      for (const o of [...(fullOrderResult.orders || []), ...(prevYearOrderResult.orders || [])]) {
+        const id = String(o?._id || '').trim();
+        if (id) mergedOrdersById.set(id, o);
+      }
+      // Conserva pedidos ola 0 por si el full vino truncado/vacío.
+      for (const o of wave0Orders) {
+        const id = String(o?._id || '').trim();
+        if (id && !mergedOrdersById.has(id)) mergedOrdersById.set(id, o);
+      }
+      const heavyOrders = Array.from(mergedOrdersById.values());
+      applyDeliveryPayload(
+        pointsOfSale,
+        workCenters,
+        heavyOrders,
+        sessions,
+        Math.max(ordersTotal, Number(fullOrderResult.total || 0), heavyOrders.length),
+      );
+      setDeliveryHeavyReady(true);
+      setDeliveryPanelStage((s) => Math.max(s, 3));
+      await yieldPaint();
+      if (!stillCurrent()) return;
+
+      // Ola 2 — pagos trabajadores (no bloquea el resto).
+      const staffConsumptionsResult = await withTimeoutFallback(
+        listStaffConsumptionsRequest(dataUserId, {
+          month: monthKey,
+        }),
+        {
+          items: [],
+          summary: { count: 0, total: 0, cashNowTotal: 0, payrollTotal: 0 },
+        },
+      );
+      if (!stillCurrent()) return;
+      setWorkerPayMonth(
+        buildWorkerPayMonthSummary(sessions, monthKey, staffConsumptionsResult.items || []),
+      );
+      setDeliveryPanelStage(4);
     } catch (err) {
+      if (!stillCurrent()) return;
       console.warn('[Dashboard] loadDeliveryDashboard', err);
-      setDeliveryMetrics(emptyPortfolioMetrics());
-      setDeliveryScope(null);
-      // Nunca ocultar el bloque «Resumen operativo»: con error se muestra vacío.
-      setDeliveryOpsPulses({ pulses7d: [], pulsesMonth: [] });
+      if (!paintedPulse) {
+        setDeliveryMetrics(emptyPortfolioMetrics());
+        setDeliveryScope(null);
+        // Nunca ocultar el bloque «Resumen operativo»: con error se muestra vacío.
+        setDeliveryOpsPulses({ pulses7d: [], pulsesMonth: [] });
+        setDeliveryTpvSessions([]);
+      }
       setWorkerPayMonth(null);
-      setDeliveryTpvSessions([]);
+      setDeliveryHeavyReady(true);
+      setDeliveryPanelStage(4);
+    } finally {
+      if (!stillCurrent()) return;
+      setDeliveryWaveBusy(false);
+      // Cinturón: si algo falló a medias, no dejar stage 0 / metrics null / marcas eternas.
+      setDeliveryPanelStage((s) => (s < 1 ? 1 : s));
+      setDeliveryMetrics((prev) => prev ?? emptyPortfolioMetrics());
+      setDeliveryOpsPulses((prev) => prev ?? { pulses7d: [], pulsesMonth: [] });
+      setDeliveryHeavyReady(true);
     }
   }, [isDeliveryVertical, authUser, currentBusiness, businesses.length]);
 
@@ -970,6 +1025,8 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
   const [crmClientsCount, setCrmClientsCount] = useState<number | null>(null);
   const [crmNewClientsMonth, setCrmNewClientsMonth] = useState<number | null>(null);
   const [crmNewClientsPrevMonth, setCrmNewClientsPrevMonth] = useState<number | null>(null);
+  const [crmNewClientsWeek, setCrmNewClientsWeek] = useState<number | null>(null);
+  const [crmNewClientsPrevWeek, setCrmNewClientsPrevWeek] = useState<number | null>(null);
   const [crmNewClientsToday, setCrmNewClientsToday] = useState<number | null>(null);
   const [crmNewClientsYesterday, setCrmNewClientsYesterday] = useState<number | null>(null);
   const [deliveryBrands, setDeliveryBrands] = useState<Brand[]>([]);
@@ -995,6 +1052,8 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
       setCrmClientsCount(null);
       setCrmNewClientsMonth(null);
       setCrmNewClientsPrevMonth(null);
+      setCrmNewClientsWeek(null);
+      setCrmNewClientsPrevWeek(null);
       setCrmNewClientsToday(null);
       setCrmNewClientsYesterday(null);
       return;
@@ -1005,6 +1064,13 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
       const yesterdayKey = localCalendarDayKey(yesterday);
+      const weekKeys = new Set(listTrailingDayKeys(todayKey, 7));
+      const prevWeekEnd = (() => {
+        const d = new Date();
+        d.setDate(d.getDate() - 7);
+        return localCalendarDayKey(d);
+      })();
+      const prevWeekKeys = new Set(listTrailingDayKeys(prevWeekEnd, 7));
       // Capado: no bajar los ~6k de Pau (saturaba API y dejaba el TPV ciego).
       const { totalClients, sample } = await fetchClientAcquisitionSample(financeUserId, {
         monthKey,
@@ -1013,6 +1079,8 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
       const metrics = computePortfolioClientMetrics(sample, monthKey);
       let newToday = 0;
       let newYesterday = 0;
+      let newWeek = 0;
+      let newPrevWeek = 0;
       for (const client of sample) {
         if (!countsTowardNewClientMetrics(client)) continue;
         const raw = client.createdAt;
@@ -1021,24 +1089,32 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
         const day = localCalendarDayKey(new Date(iso));
         if (day === todayKey) newToday += 1;
         else if (day === yesterdayKey) newYesterday += 1;
+        if (weekKeys.has(day)) newWeek += 1;
+        if (prevWeekKeys.has(day)) newPrevWeek += 1;
       }
       setCrmClientsCount(totalClients || sample.length);
       setCrmNewClientsMonth(metrics.newClientsMonth);
       setCrmNewClientsPrevMonth(metrics.newClientsPrevMonth);
+      setCrmNewClientsWeek(newWeek);
+      setCrmNewClientsPrevWeek(newPrevWeek);
       setCrmNewClientsToday(newToday);
       setCrmNewClientsYesterday(newYesterday);
     } catch {
       setCrmClientsCount(null);
       setCrmNewClientsMonth(null);
       setCrmNewClientsPrevMonth(null);
+      setCrmNewClientsWeek(null);
+      setCrmNewClientsPrevWeek(null);
       setCrmNewClientsToday(null);
       setCrmNewClientsYesterday(null);
     }
   }, [financeUserId, businessId, isDeliveryVertical, isRestaurantVertical]);
 
   useEffect(() => {
+    // Delivery: CRM después del primer paint del resumen (no pelear con ola 0).
+    if (isDeliveryVertical && deliveryPanelStage < 1) return;
     void loadCrmClientsCount();
-  }, [loadCrmClientsCount]);
+  }, [loadCrmClientsCount, isDeliveryVertical, deliveryPanelStage]);
 
   const refreshDashboardLive = useCallback(() => {
     void loadDeliveryDashboard();
@@ -1116,16 +1192,10 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
         at: number;
         serverData: DashboardServerData | null;
         serverUpdatedAt: string | null;
-        clockinsActive: ActiveMember[];
-        clockinsStatsSummary: ClockinStatsSummary | null;
-        clockinsAlertsSummary: AlertsSummary | null;
       };
       if (!cached?.at || Date.now() - cached.at > DASH_RUNTIME_TTL_MS) return;
       setServerData(cached.serverData || null);
       setServerUpdatedAt(cached.serverUpdatedAt || null);
-      setClockinsActive(Array.isArray(cached.clockinsActive) ? cached.clockinsActive : []);
-      setClockinsStatsSummary(cached.clockinsStatsSummary || null);
-      setClockinsAlertsSummary(cached.clockinsAlertsSummary || null);
     } catch {
       // noop
     }
@@ -1158,46 +1228,9 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
           setServerUpdatedAt(data.updatedAt);
         })
         .catch(() => { /* noop */ });
-      Promise.all([
-        fetchActiveNow(businessId),
-        fetchClockinStats(businessId),
-        fetchAlertsSummary(businessId),
-      ])
-        .then(([active, stats, alertsSummary]) => {
-          setClockinsActive(Array.isArray(active) ? active : []);
-          setClockinsStatsSummary(stats?.summary || null);
-          setClockinsAlertsSummary(alertsSummary || null);
-        })
-        .catch(() => { /* noop */ });
     }, 45000);
     return () => window.clearInterval(intervalId);
   }, [businessId, authUser?.user_id]);
-
-  useEffect(() => {
-    if (!businessId) return;
-    let cancelled = false;
-    setClockinsLoading(true);
-    Promise.all([
-      fetchActiveNow(businessId),
-      fetchClockinStats(businessId),
-      fetchAlertsSummary(businessId),
-    ])
-      .then(([active, stats, alertsSummary]) => {
-        if (cancelled) return;
-        setClockinsActive(Array.isArray(active) ? active : []);
-        setClockinsStatsSummary(stats?.summary || null);
-        setClockinsAlertsSummary(alertsSummary || null);
-        setClockinsLoading(false);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setClockinsActive([]);
-        setClockinsStatsSummary(null);
-        setClockinsAlertsSummary(null);
-        setClockinsLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [businessId]);
 
   useEffect(() => {
     try {
@@ -1207,47 +1240,22 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
           at: Date.now(),
           serverData,
           serverUpdatedAt,
-          clockinsActive,
-          clockinsStatsSummary,
-          clockinsAlertsSummary,
         }),
       );
     } catch {
       // noop
     }
-  }, [runtimeCacheScope, serverData, serverUpdatedAt, clockinsActive, clockinsStatsSummary, clockinsAlertsSummary]);
+  }, [runtimeCacheScope, serverData, serverUpdatedAt]);
 
   // ── Refresh handler ──
   const handleRefresh = useCallback(() => {
     if (!authUser?.user_id || serverLoading) return;
     setServerLoading(true);
-    setClockinsLoading(true);
     fetchDashboardData(authUser.user_id)
       .then((data) => { setServerData(data); setServerUpdatedAt(data.updatedAt); setServerLoading(false); })
       .catch(() => setServerLoading(false));
     if (isDeliveryVertical) {
       void loadDeliveryDashboard();
-    }
-    if (businessId) {
-      Promise.all([
-        fetchActiveNow(businessId),
-        fetchClockinStats(businessId),
-        fetchAlertsSummary(businessId),
-      ])
-        .then(([active, stats, alertsSummary]) => {
-          setClockinsActive(Array.isArray(active) ? active : []);
-          setClockinsStatsSummary(stats?.summary || null);
-          setClockinsAlertsSummary(alertsSummary || null);
-          setClockinsLoading(false);
-        })
-        .catch(() => {
-          setClockinsActive([]);
-          setClockinsStatsSummary(null);
-          setClockinsAlertsSummary(null);
-          setClockinsLoading(false);
-        });
-    } else {
-      setClockinsLoading(false);
     }
   }, [authUser?.user_id, businessId, serverLoading, isDeliveryVertical, loadDeliveryDashboard]);
 
@@ -1404,9 +1412,20 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
   // ── Quick access items ──
   const quickAccessItems = useMemo(() => getQuickAccessItems(vertical), [vertical]);
 
-  // ── Loading state progresivo ──
+  // ── Loading state progresivo (por ola / panel) ──
+  // Con ola 0 pintada (metrics !== null) no bloqueamos marcas/insights en skeleton eterno:
+  // muestran datos parciales y el refresh sigue mientras waveBusy.
   const baseDataLoading = isLoadingVehicles || isLoadingClients;
   const deliveryDataLoading = isDeliveryVertical && deliveryMetrics === null;
+  const deliveryBrandsLoading =
+    isDeliveryVertical && deliveryDataLoading && deliveryPanelStage < 1;
+  const deliveryWorkerLoading =
+    isDeliveryVertical
+    && deliveryPanelStage < 3
+    && deliveryWaveBusy
+    && !workerPayMonth;
+  const deliveryInsightsLoading =
+    isDeliveryVertical && deliveryDataLoading && deliveryPanelStage < 1;
   const alertsLoading = serverLoading && !serverData;
   const chartsLoading = isDeliveryVertical ? deliveryDataLoading : baseDataLoading;
 
@@ -1494,8 +1513,19 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
           </div>
         )}
 
-        {/* Resumen operativo por tienda (solo empresa delivery) */}
-        {isDeliveryVertical && deliveryOpsPulses && (
+        {/* Resumen operativo por tienda (solo empresa delivery) — ola 1 */}
+        {isDeliveryVertical && deliveryPanelStage < 1 ? (
+          <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800 sm:rounded-2xl sm:p-5">
+            <div className="mb-3 h-3.5 w-44 animate-pulse rounded bg-gray-100 dark:bg-gray-700" />
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {[0, 1, 2, 3].map((i) => (
+                <div key={i} className="h-16 animate-pulse rounded-xl bg-gray-50 dark:bg-gray-900/50" />
+              ))}
+            </div>
+            <p className="mt-3 text-[11px] text-gray-400">Cargando resumen operativo…</p>
+          </section>
+        ) : null}
+        {isDeliveryVertical && deliveryPanelStage >= 1 && deliveryOpsPulses && (
           <PortfolioOpsPulse
             pulses7d={deliveryOpsPulses.pulses7d}
             pulsesMonth={deliveryOpsPulses.pulsesMonth}
@@ -1507,299 +1537,56 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
               <button
                 type="button"
                 onClick={() => void loadDeliveryDashboard()}
-                disabled={deliveryDataLoading}
+                disabled={deliveryWaveBusy || deliveryDataLoading}
                 className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors disabled:opacity-40"
                 title="Actualizar resumen operativo"
               >
-                <RefreshCw className={`w-3.5 h-3.5 ${deliveryDataLoading ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`w-3.5 h-3.5 ${deliveryWaveBusy || deliveryDataLoading ? 'animate-spin' : ''}`} />
               </button>
             }
           />
         )}
 
-        {isDeliveryVertical && businessId ? (
+        {isDeliveryVertical && businessId && deliveryPanelStage >= 2 ? (
           <CompanyBrandPerformancePanel
             businessId={businessId}
             brands={deliveryBrands}
             orders={scopedDeliveryOrders}
             sessions={deliveryTpvSessions}
-            loading={deliveryDataLoading}
+            loading={deliveryBrandsLoading}
           />
         ) : null}
 
-        {isDeliveryVertical ? (
+        {isDeliveryVertical && deliveryPanelStage >= 3 ? (
           <WorkerPayMonthPanel
             summary={workerPayMonth}
-            loading={deliveryDataLoading && !workerPayMonth}
+            loading={deliveryWorkerLoading}
           />
         ) : null}
 
-        {isDeliveryVertical ? (
-          <DeliveryOpsInsightsPanel
-            orders={scopedDeliveryOrders}
-            stores={deliveryScope?.stores || []}
-            loading={deliveryDataLoading}
-            newClientsMonth={crmNewClientsMonth}
-            newClientsPrevMonth={crmNewClientsPrevMonth}
-            newClientsToday={crmNewClientsToday}
-            newClientsYesterday={crmNewClientsYesterday}
-          />
+        {isDeliveryVertical && deliveryPanelStage >= 4 ? (
+          <DashboardLazyPanel
+            title="Tiempos de entrega"
+            hint="Por tienda · abrir para cargar"
+            icon={<Timer className="w-4 h-4" />}
+            storageKey={`dash_lazy_ops_insights:${dashboardConfigScope}`}
+          >
+            <DeliveryOpsInsightsPanel
+              orders={scopedDeliveryOrders}
+              stores={deliveryScope?.stores || []}
+              loading={deliveryInsightsLoading}
+              newClientsMonth={crmNewClientsMonth}
+              newClientsPrevMonth={crmNewClientsPrevMonth}
+              newClientsWeek={crmNewClientsWeek}
+              newClientsPrevWeek={crmNewClientsPrevWeek}
+              newClientsToday={crmNewClientsToday}
+              newClientsYesterday={crmNewClientsYesterday}
+            />
+          </DashboardLazyPanel>
         ) : null}
-
-        {/* ═══ KPIs PRINCIPALES — 8 tarjetas ═══ */}
-        {isVisible('kpis_main') && (
-          <div style={{ order: getWidgetOrder('kpis_main') }}>
-            <DraggableWidget id="kpis_main" {...dragProps}>
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                <KPICard
-                  title="Ventas hoy"
-                  value={salesToday > 0 ? formatEur(salesToday) : '—'}
-                  sub={isDeliveryVertical && deliveryMetrics
-                    ? `${deliveryMetrics.deliveredToday} entrega${deliveryMetrics.deliveredToday !== 1 ? 's' : ''} hoy`
-                    : (salesTodayCount > 0 ? `${salesTodayCount} operación${salesTodayCount > 1 ? 'es' : ''}` : 'Sin ventas hoy')}
-                  icon={<DollarSign className="w-4 h-4" />}
-                  iconBg="bg-emerald-100 dark:bg-emerald-900/40"
-                  iconColor="text-emerald-600"
-                  trend={salesTodayCount > 0 ? { value: `+${salesTodayCount}`, up: true } : undefined}
-                  onClick={() => navigate(isCompraventaVertical ? '/saas/vertical/compraventa/ventas' : '/saas/sales')}
-                  loading={isDeliveryVertical ? deliveryDataLoading : serverLoading}
-                />
-                {(isDeliveryVertical || isRestaurantVertical) && (
-                  <KPICard
-                    title="Alertas ops"
-                    value={String(openIncidents)}
-                    sub={
-                      openIncidents > 0
-                        ? `${deliveryAlertsCritical} crítica${deliveryAlertsCritical === 1 ? '' : 's'}`
-                        : 'Sin alertas'
-                    }
-                    icon={<ShieldAlert className="w-4 h-4" />}
-                    iconBg={openIncidents > 0 ? 'bg-red-100 dark:bg-red-900/40' : 'bg-emerald-100 dark:bg-emerald-900/40'}
-                    iconColor={openIncidents > 0 ? 'text-red-600' : 'text-emerald-600'}
-                    trend={openIncidents > 0 ? { value: `${openIncidents} abierta${openIncidents > 1 ? 's' : ''}`, up: false } : undefined}
-                    onClick={() => navigate(isDeliveryVertical ? '/saas/delivery-ops' : RESTAURANT_CAJA_PATH)}
-                    loading={serverLoading}
-                  />
-                )}
-                <KPICard
-                  title="Ventas mes"
-                  value={salesMonth > 0 ? formatEur(salesMonth) : '—'}
-                  sub={isDeliveryVertical && deliveryMetrics
-                    ? `${deliveryMetrics.deliveredMonth} entregas este mes`
-                    : `${sk?.soldThisMonthCount ?? soldThisMonth.length} ventas este mes`}
-                  icon={<TrendingUp className="w-4 h-4" />}
-                  iconBg="bg-blue-100 dark:bg-blue-900/40"
-                  iconColor="text-blue-600"
-                  trend={salesMonth > 0 ? { value: formatEur(salesMonth), up: true } : undefined}
-                  onClick={() => navigate('/saas/sales-metrics')}
-                  loading={isDeliveryVertical ? deliveryDataLoading : serverLoading}
-                  miniChart={<MiniBarChart data={dailySalesData} color="blue" />}
-                />
-                {isDeliveryVertical ? (
-                  <KPICard
-                    title="Pedidos totales"
-                    value={
-                      deliveryScope != null
-                        ? String(deliveryScope.ordersTotal)
-                        : '—'
-                    }
-                    sub={
-                      deliveryMetrics
-                        ? `${deliveryMetrics.ordersMonth} este mes · ${deliveryMetrics.ordersToday} hoy`
-                        : 'Pedidos de la empresa'
-                    }
-                    icon={<Hash className="w-4 h-4" />}
-                    iconBg="bg-violet-100 dark:bg-violet-900/40"
-                    iconColor="text-violet-600"
-                    trend={
-                      deliveryMetrics && deliveryMetrics.ordersToday > 0
-                        ? { value: `+${deliveryMetrics.ordersToday} hoy`, up: true }
-                        : undefined
-                    }
-                    onClick={() => navigate('/saas/delivery-ops')}
-                    loading={deliveryDataLoading}
-                  />
-                ) : (
-                  <KPICard
-                    title="Gastos mes"
-                    value={expensesMonth > 0 ? formatEur(expensesMonth) : '—'}
-                    sub="Pagos registrados"
-                    icon={<CreditCard className="w-4 h-4" />}
-                    iconBg="bg-red-100 dark:bg-red-900/40"
-                    iconColor="text-red-600"
-                    trend={expensesMonth > 0 ? { value: formatEur(expensesMonth), up: false } : undefined}
-                    onClick={() => navigate('/saas/income-expenses')}
-                    loading={serverLoading}
-                  />
-                )}
-                <KPICard
-                  title={canViewEbitda ? 'EBITDA mes' : 'Beneficio est.'}
-                  value={
-                    canViewEbitda && ebitdaMonth
-                      ? formatEur(ebitdaMonth.ebitda)
-                      : (salesMonth > 0 ? formatEur(estimatedProfit) : '—')
-                  }
-                  sub={
-                    canViewEbitda && ebitdaMonth
-                      ? coreEbitdaSubtitle(ebitdaMonth, currentBusiness?.name)
-                      : isBasicPlan
-                        ? 'Sube a Normal para EBITDA'
-                        : (quickFinance ? `Margen ${quickFinance.marginPct}%` : 'Empresa activa')
-                  }
-                  icon={<PieChart className="w-4 h-4" />}
-                  iconBg={(canViewEbitda && ebitdaMonth ? ebitdaMonth.ebitda : estimatedProfit) >= 0 ? 'bg-emerald-100 dark:bg-emerald-900/40' : 'bg-red-100 dark:bg-red-900/40'}
-                  iconColor={(canViewEbitda && ebitdaMonth ? ebitdaMonth.ebitda : estimatedProfit) >= 0 ? 'text-emerald-600' : 'text-red-600'}
-                  trend={
-                    canViewEbitda && ebitdaMonth
-                      ? (ebitdaMonth.quality === 'income_only'
-                        ? { value: 'Sin gastos', up: null }
-                        : ebitdaMonth.quality === 'empty'
-                          ? undefined
-                          : { value: `${ebitdaMonth.ebitdaMargin.toFixed(1)}%`, up: ebitdaMonth.ebitda > 0 ? true : ebitdaMonth.ebitda < 0 ? false : null })
-                      : (salesMonth > 0 ? { value: `${quickFinance?.marginPct ?? 0}%`, up: estimatedProfit > 0 ? true : estimatedProfit < 0 ? false : null } : undefined)
-                  }
-                  onClick={() => {
-                    if (canViewEbitda) {
-                      navigate('/saas/ebitda');
-                      return;
-                    }
-                    if (!isIosCustomerAccessOnlyApp()) {
-                      navigate('/saas/billing');
-                    }
-                  }}
-                  loading={canViewEbitda ? ebitdaLoading : serverLoading}
-                />
-                <KPICard
-                  title="Caja actual"
-                  value={formatEur(cashBalance)}
-                  sub={
-                    isDeliveryVertical
-                      ? (deliveryMetrics && deliveryMetrics.openCashRegisters > 0
-                        ? `${deliveryMetrics.openCashRegisters} caja${deliveryMetrics.openCashRegisters !== 1 ? 's' : ''} abierta${deliveryMetrics.openCashRegisters !== 1 ? 's' : ''}`
-                        : (cashBalance > 0 ? 'Cobros de pedidos' : 'Sin cobros aún'))
-                      : (cashBalance >= 0 ? 'Balance positivo' : 'Balance negativo')
-                  }
-                  icon={<Wallet className="w-4 h-4" />}
-                  iconBg={cashBalance >= 0 ? 'bg-cyan-100 dark:bg-cyan-900/40' : 'bg-red-100 dark:bg-red-900/40'}
-                  iconColor={cashBalance >= 0 ? 'text-cyan-600' : 'text-red-600'}
-                  trend={cashBalance !== 0 ? { value: formatEur(Math.abs(cashBalance)), up: cashBalance >= 0 ? true : false } : undefined}
-                  onClick={() => navigate(isDeliveryVertical ? DELIVERY_CAJA_PATH : '/saas/finance')}
-                  loading={isDeliveryVertical ? deliveryDataLoading : serverLoading}
-                />
-                <KPICard
-                  title={isDeliveryVertical ? 'Pedidos activos' : 'Stock crítico'}
-                  value={isDeliveryVertical ? String(pendingDeliveriesKpi) : String(criticalStock)}
-                  sub={
-                    isDeliveryVertical
-                      ? (pendingDeliveriesKpi > 0 ? 'En cocina / reparto' : 'Sin pedidos en curso')
-                      : (criticalStock > 0 ? 'Productos bajo mínimo' : 'Todo en orden')
-                  }
-                  icon={isDeliveryVertical ? <Truck className="w-4 h-4" /> : <Boxes className="w-4 h-4" />}
-                  iconBg={
-                    isDeliveryVertical
-                      ? (pendingDeliveriesKpi > 0 ? 'bg-cyan-100 dark:bg-cyan-900/40' : 'bg-gray-100 dark:bg-gray-700')
-                      : (criticalStock > 0 ? 'bg-amber-100 dark:bg-amber-900/40' : 'bg-gray-100 dark:bg-gray-700')
-                  }
-                  iconColor={
-                    isDeliveryVertical
-                      ? (pendingDeliveriesKpi > 0 ? 'text-cyan-600' : 'text-gray-400')
-                      : (criticalStock > 0 ? 'text-amber-600' : 'text-gray-400')
-                  }
-                  trend={
-                    isDeliveryVertical
-                      ? (pendingDeliveriesKpi > 0 ? { value: `${pendingDeliveriesKpi} en curso`, up: true } : undefined)
-                      : (criticalStock > 0 ? { value: `${criticalStock} alertas`, up: false } : undefined)
-                  }
-                  onClick={() => navigate(
-                    isDeliveryVertical
-                      ? '/saas/delivery-ops'
-                      : isRestaurantVertical
-                        ? '/saas/restaurant-ops'
-                        : '/saas/catalog',
-                  )}
-                  loading={isDeliveryVertical ? deliveryDataLoading : serverLoading}
-                />
-                {isDeliveryVertical ? (
-                  <KPICard
-                    title="Por marca · hoy"
-                    value={
-                      brandHeroToday.length === 0
-                        ? '—'
-                        : String(brandHeroToday.reduce((s, b) => s + b.count, 0))
-                    }
-                    sub={
-                      brandHeroToday.length === 0
-                        ? 'Configura marcas en Ajustes'
-                        : brandHeroToday.length === 1
-                          ? `${brandHeroToday[0].familyLabel} de ${brandHeroToday[0].brandName}`
-                          : `${brandHeroToday.length} marcas`
-                    }
-                    icon={<Package className="w-4 h-4" />}
-                    iconBg="bg-amber-100 dark:bg-amber-900/40"
-                    iconColor="text-amber-700"
-                    detail={
-                      brandHeroToday.length > 0 ? (
-                        <div className="space-y-1">
-                          {brandHeroToday.slice(0, 3).map((row) => (
-                            <div
-                              key={row.brandId}
-                              className="flex items-baseline justify-between gap-2 text-sm leading-tight"
-                            >
-                              <span className="truncate text-gray-600 dark:text-gray-300 font-medium">
-                                {row.brandName}
-                              </span>
-                              <span className="shrink-0 font-black text-gray-900 dark:text-gray-100 tabular-nums">
-                                {row.count}{' '}
-                                <span className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">
-                                  {row.familyLabel.toLowerCase()}
-                                </span>
-                              </span>
-                            </div>
-                          ))}
-                          {brandHeroToday.length > 3 && (
-                            <p className="text-[10px] text-gray-400">+{brandHeroToday.length - 3} más</p>
-                          )}
-                        </div>
-                      ) : undefined
-                    }
-                    onClick={() => navigate('/saas/sales-metrics')}
-                    loading={deliveryDataLoading}
-                  />
-                ) : (
-                  <>
-                    <KPICard
-                      title="Equipo activo"
-                      value={activeWorkers > 0 ? String(activeWorkers) : totalClockinsToday > 0 ? String(totalClockinsToday) : '—'}
-                      sub={totalClockinsToday > 0 ? `${totalClockinsToday} fichaje${totalClockinsToday > 1 ? 's' : ''} hoy` : 'Sin fichajes hoy'}
-                      icon={<UserCheck className="w-4 h-4" />}
-                      iconBg="bg-violet-100 dark:bg-violet-900/40"
-                      iconColor="text-violet-600"
-                      trend={activeWorkers > 0 ? { value: `${activeWorkers} ahora`, up: true } : undefined}
-                      onClick={() => navigate('/saas/clockins')}
-                      loading={serverLoading}
-                    />
-                    {!isRestaurantVertical && (
-                      <KPICard
-                        title="Incidencias"
-                        value={String(openIncidents)}
-                        sub={openIncidents > 0 ? 'Abiertas ahora' : 'Sin incidencias'}
-                        icon={<ShieldAlert className="w-4 h-4" />}
-                        iconBg={openIncidents > 0 ? 'bg-red-100 dark:bg-red-900/40' : 'bg-emerald-100 dark:bg-emerald-900/40'}
-                        iconColor={openIncidents > 0 ? 'text-red-600' : 'text-emerald-600'}
-                        trend={openIncidents > 0 ? { value: `${openIncidents} abierta${openIncidents > 1 ? 's' : ''}`, up: false } : undefined}
-                        onClick={() => navigate('/saas/workshop')}
-                        loading={serverLoading}
-                      />
-                    )}
-                  </>
-                )}
-              </div>
-            </DraggableWidget>
-          </div>
-        )}
 
         {isRestaurantVertical ? (
-          <div style={{ order: getWidgetOrder('kpis_main') + 0.5 }}>
+          <div style={{ order: getWidgetOrder('quick_access') - 0.5 }}>
             <RestaurantLiveDashboardPanelFromContext />
           </div>
         ) : null}
@@ -1824,419 +1611,369 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
           </div>
         )}
 
-        {/* ═══ CENTRO DE ALERTAS ═══ */}
-        {isVisible('alertas') && (
-          <div style={{ order: getWidgetOrder('alertas') }}>
-            <DraggableWidget id="alertas" {...dragProps}>
-              <AlertSummaryWidget embedded />
-            </DraggableWidget>
-          </div>
-        )}
-
-        {/* ═══ GRÁFICAS PRINCIPALES ═══ */}
+        {/* ═══ GRÁFICAS PRINCIPALES (colapsadas: recharts solo al abrir) ═══ */}
         {isVisible('charts') && (
           <div style={{ order: getWidgetOrder('charts') }}>
             <DraggableWidget id="charts" {...dragProps}>
-              {chartsLoading ? (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 animate-pulse">
-                  {[...Array(2)].map((_, i) => (
-                    <div key={i} className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
-                      <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-800">
-                        <div className="h-4 w-40 bg-gray-100 dark:bg-gray-700 rounded" />
-                      </div>
-                      <div className="p-4 h-48">
-                        <div className="w-full h-full rounded-xl bg-gray-100 dark:bg-gray-700" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {/* Ventas 14 días */}
-                <div className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
-                  <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center gap-2">
-                      <BarChart3 className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
-                        {isDeliveryVertical ? 'Entregas (14 días)' : 'Ventas (14 días)'}
-                      </p>
-                    </div>
-                    <PeriodBadge period="14d" variant="minimal" className="text-[9px] opacity-50" />
-                  </div>
-                  <div className="p-4 h-48">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={dailySalesData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
-                        <defs>
-                          <linearGradient id="salesGrad" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(0,0,0,0.06)" />
-                        <XAxis dataKey="label" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
-                        <YAxis hide />
-                        <Tooltip
-                          content={({ active, payload }) => {
-                            if (!active || !payload?.length) return null;
-                            const pt = payload[0].payload as DailyPoint;
-                            return (
-                              <div className="bg-gray-900 text-white text-[10px] font-semibold px-2.5 py-1.5 rounded-lg shadow-lg">
-                                <span className="opacity-60 mr-1">{pt.label}</span>
-                                {formatEur(pt.value)}
-                              </div>
-                            );
-                          }}
-                        />
-                        <Area type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={2} fill="url(#salesGrad)" />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-
-                {/* Pedidos / leads 14 días */}
-                <div className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
-                  <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center gap-2">
-                      <Users className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
-                        {isDeliveryVertical ? 'Pedidos nuevos (14 días)' : 'Nuevos leads (14 días)'}
-                      </p>
-                    </div>
-                    <PeriodBadge period="14d" variant="minimal" className="text-[9px] opacity-50" />
-                  </div>
-                  <div className="p-4 h-48">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={dailyLeadsData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
-                        <defs>
-                          <linearGradient id="leadsGrad" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3} />
-                            <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(0,0,0,0.06)" />
-                        <XAxis dataKey="label" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
-                        <YAxis hide />
-                        <Tooltip
-                          content={({ active, payload }) => {
-                            if (!active || !payload?.length) return null;
-                            const pt = payload[0].payload as DailyPoint;
-                            return (
-                              <div className="bg-gray-900 text-white text-[10px] font-semibold px-2.5 py-1.5 rounded-lg shadow-lg">
-                                <span className="opacity-60 mr-1">{pt.label}</span>
-                                {pt.value} {isDeliveryVertical ? 'pedidos' : 'leads'}
-                              </div>
-                            );
-                          }}
-                        />
-                        <Area type="monotone" dataKey="value" stroke="#8b5cf6" strokeWidth={2} fill="url(#leadsGrad)" />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-
-                {/* Productos vendidos por tipo (marcas de la empresa) */}
-                {isDeliveryVertical && soldProductFamilies.length > 0 && (
-                  <div className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden lg:col-span-2">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-5 py-4 border-b border-gray-100 dark:border-gray-800">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <Package className="w-4 h-4 text-gray-500 dark:text-gray-400 shrink-0" />
-                        <div className="min-w-0">
-                          <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
-                            Productos vendidos (14 días)
-                          </p>
-                          <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
-                            Según tipos de marca de la empresa (pizza, kebab, burger…)
-                          </p>
+              <DashboardLazyPanel
+                title="Gráficas principales"
+                hint="Entregas, pedidos y productos · abrir para cargar"
+                icon={<BarChart3 className="w-4 h-4" />}
+                storageKey={`dash_lazy_charts:${dashboardConfigScope}`}
+              >
+                {chartsLoading ? (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 animate-pulse">
+                    {[...Array(2)].map((_, i) => (
+                      <div key={i} className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
+                        <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+                          <div className="h-4 w-40 bg-gray-100 dark:bg-gray-700 rounded" />
+                        </div>
+                        <div className="p-4 h-48">
+                          <div className="w-full h-full rounded-xl bg-gray-100 dark:bg-gray-700" />
                         </div>
                       </div>
-                      <PeriodBadge period="14d" variant="minimal" className="text-[9px] opacity-50 self-start sm:self-auto" />
-                    </div>
-                    {soldProductToday && (
-                      <div className="flex flex-wrap gap-2 px-5 pt-3">
-                        {soldProductFamilies.map((fam) => {
-                          const n = Number(soldProductToday[fam.id] || 0);
-                          return (
-                            <span
-                              key={fam.id}
-                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40"
-                            >
-                              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: fam.color }} />
-                              {fam.label} hoy: {n}
-                            </span>
-                          );
-                        })}
+                    ))}
+                  </div>
+                ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {/* Ventas 14 días */}
+                  <div className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
+                    <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+                      <div className="flex items-center gap-2">
+                        <BarChart3 className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                        <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
+                          {isDeliveryVertical ? 'Entregas (14 días)' : 'Ventas (14 días)'}
+                        </p>
                       </div>
-                    )}
-                    <div className="p-4 h-56">
+                      <PeriodBadge period="14d" variant="minimal" className="text-[9px] opacity-50" />
+                    </div>
+                    <div className="p-4 h-48">
                       <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={soldProductDailyData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                        <AreaChart data={dailySalesData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
+                          <defs>
+                            <linearGradient id="salesGrad" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                              <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                            </linearGradient>
+                          </defs>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(0,0,0,0.06)" />
                           <XAxis dataKey="label" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
-                          <YAxis allowDecimals={false} tick={{ fontSize: 10 }} width={28} tickLine={false} axisLine={false} />
+                          <YAxis hide />
                           <Tooltip
-                            content={({ active, payload, label }) => {
+                            content={({ active, payload }) => {
                               if (!active || !payload?.length) return null;
+                              const pt = payload[0].payload as DailyPoint;
                               return (
-                                <div className="bg-gray-900 text-white text-[10px] font-semibold px-2.5 py-1.5 rounded-lg shadow-lg space-y-0.5">
-                                  <p className="opacity-60 mb-1">{label}</p>
-                                  {payload.map((p) => (
-                                    <p key={String(p.dataKey)}>
-                                      <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ backgroundColor: String(p.color || '#fff') }} />
-                                      {soldProductFamilies.find((f) => f.id === p.dataKey)?.label || String(p.dataKey)}: {Number(p.value || 0)}
-                                    </p>
-                                  ))}
+                                <div className="bg-gray-900 text-white text-[10px] font-semibold px-2.5 py-1.5 rounded-lg shadow-lg">
+                                  <span className="opacity-60 mr-1">{pt.label}</span>
+                                  {formatEur(pt.value)}
                                 </div>
                               );
                             }}
                           />
-                          {soldProductFamilies.map((fam) => (
-                            <Bar
-                              key={fam.id}
-                              dataKey={fam.id}
-                              name={fam.label}
-                              fill={fam.color}
-                              radius={[3, 3, 0, 0]}
-                              maxBarSize={18}
-                            />
-                          ))}
-                        </BarChart>
+                          <Area type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={2} fill="url(#salesGrad)" />
+                        </AreaChart>
                       </ResponsiveContainer>
                     </div>
                   </div>
+
+                  {/* Pedidos / leads 14 días */}
+                  <div className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
+                    <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+                      <div className="flex items-center gap-2">
+                        <Users className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                        <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
+                          {isDeliveryVertical ? 'Pedidos nuevos (14 días)' : 'Nuevos leads (14 días)'}
+                        </p>
+                      </div>
+                      <PeriodBadge period="14d" variant="minimal" className="text-[9px] opacity-50" />
+                    </div>
+                    <div className="p-4 h-48">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={dailyLeadsData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
+                          <defs>
+                            <linearGradient id="leadsGrad" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3} />
+                              <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(0,0,0,0.06)" />
+                          <XAxis dataKey="label" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
+                          <YAxis hide />
+                          <Tooltip
+                            content={({ active, payload }) => {
+                              if (!active || !payload?.length) return null;
+                              const pt = payload[0].payload as DailyPoint;
+                              return (
+                                <div className="bg-gray-900 text-white text-[10px] font-semibold px-2.5 py-1.5 rounded-lg shadow-lg">
+                                  <span className="opacity-60 mr-1">{pt.label}</span>
+                                  {pt.value} {isDeliveryVertical ? 'pedidos' : 'leads'}
+                                </div>
+                              );
+                            }}
+                          />
+                          <Area type="monotone" dataKey="value" stroke="#8b5cf6" strokeWidth={2} fill="url(#leadsGrad)" />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  {/* Productos vendidos por tipo (marcas de la empresa) */}
+                  {isDeliveryVertical && soldProductFamilies.length > 0 && (
+                    <div className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden lg:col-span-2">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Package className="w-4 h-4 text-gray-500 dark:text-gray-400 shrink-0" />
+                          <div className="min-w-0">
+                            <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
+                              Productos vendidos (14 días)
+                            </p>
+                            <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
+                              Según tipos de marca de la empresa (pizza, kebab, burger…)
+                            </p>
+                          </div>
+                        </div>
+                        <PeriodBadge period="14d" variant="minimal" className="text-[9px] opacity-50 self-start sm:self-auto" />
+                      </div>
+                      {soldProductToday && (
+                        <div className="flex flex-wrap gap-2 px-5 pt-3">
+                          {soldProductFamilies.map((fam) => {
+                            const n = Number(soldProductToday[fam.id] || 0);
+                            return (
+                              <span
+                                key={fam.id}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40"
+                              >
+                                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: fam.color }} />
+                                {fam.label} hoy: {n}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                      <div className="p-4 h-56">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={soldProductDailyData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(0,0,0,0.06)" />
+                            <XAxis dataKey="label" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
+                            <YAxis allowDecimals={false} tick={{ fontSize: 10 }} width={28} tickLine={false} axisLine={false} />
+                            <Tooltip
+                              content={({ active, payload, label }) => {
+                                if (!active || !payload?.length) return null;
+                                return (
+                                  <div className="bg-gray-900 text-white text-[10px] font-semibold px-2.5 py-1.5 rounded-lg shadow-lg space-y-0.5">
+                                    <p className="opacity-60 mb-1">{label}</p>
+                                    {payload.map((p) => (
+                                      <p key={String(p.dataKey)}>
+                                        <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ backgroundColor: String(p.color || '#fff') }} />
+                                        {soldProductFamilies.find((f) => f.id === p.dataKey)?.label || String(p.dataKey)}: {Number(p.value || 0)}
+                                      </p>
+                                    ))}
+                                  </div>
+                                );
+                              }}
+                            />
+                            {soldProductFamilies.map((fam) => (
+                              <Bar
+                                key={fam.id}
+                                dataKey={fam.id}
+                                name={fam.label}
+                                fill={fam.color}
+                                radius={[3, 3, 0, 0]}
+                                maxBarSize={18}
+                              />
+                            ))}
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  )}
+                </div>
                 )}
-              </div>
-              )}
+              </DashboardLazyPanel>
             </DraggableWidget>
           </div>
         )}
 
-        {/* ═══ BLOQUE OPERATIVA SEGÚN VERTICAL ═══ */}
+        {/* ═══ BLOQUE OPERATIVA (colapsado) ═══ */}
         {isVisible('operations') && (
           <div style={{ order: getWidgetOrder('operations') }}>
             <DraggableWidget id="operations" {...dragProps}>
-              <div className={`grid grid-cols-2 gap-3 ${serverData?.salesClosure ? 'lg:grid-cols-5' : 'lg:grid-cols-4'}`}>
-                <OperativeBlock
-                  vertical={vertical}
-                  stockCount={stockCount}
-                  oportunidades={oportunidades}
-                  newClientsMonth={crmNewClientsMonth}
-                  openIncidents={openIncidents}
-                  cobrosCount={cobrosCount}
-                  activeWorkers={activeWorkers}
-                  pendingDeliveries={pendingDeliveriesKpi}
-                  loading={serverLoading || verticalKpiLoading}
-                  salesClosure={serverData?.salesClosure}
-                  verticalKpi={verticalKpi}
-                />
-              </div>
+              <DashboardLazyPanel
+                title="Operativa del negocio"
+                hint="Pedidos, clientes, equipo · abrir para ver"
+                icon={<Activity className="w-4 h-4" />}
+                storageKey={`dash_lazy_ops:${dashboardConfigScope}`}
+              >
+                <div className={`grid grid-cols-2 gap-3 ${serverData?.salesClosure ? 'lg:grid-cols-5' : 'lg:grid-cols-4'}`}>
+                  <OperativeBlock
+                    vertical={vertical}
+                    stockCount={stockCount}
+                    oportunidades={oportunidades}
+                    newClientsMonth={crmNewClientsMonth}
+                    openIncidents={openIncidents}
+                    cobrosCount={cobrosCount}
+                    activeWorkers={activeWorkers}
+                    pendingDeliveries={pendingDeliveriesKpi}
+                    loading={serverLoading || verticalKpiLoading}
+                    salesClosure={serverData?.salesClosure}
+                    verticalKpi={verticalKpi}
+                  />
+                </div>
+              </DashboardLazyPanel>
             </DraggableWidget>
           </div>
         )}
 
-        {/* ═══ BLOQUE FINANCIERO RÁPIDO ═══ */}
+        {/* ═══ BLOQUE FINANCIERO RÁPIDO (colapsado) ═══ */}
         {isVisible('quick_finance') && quickFinance && (
           <div style={{ order: getWidgetOrder('quick_finance') }}>
             <DraggableWidget id="quick_finance" {...dragProps}>
-              <div className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
-                  <div className="flex items-center gap-2">
-                    <Euro className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-                    <p className="text-sm font-bold text-gray-900 dark:text-gray-100">Resumen financiero</p>
-                    <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded-full">
-                      Este mes
-                    </span>
-                  </div>
-                  <button onClick={() => navigate('/saas/finance')}
-                    className="flex items-center gap-1 text-xs font-semibold text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors">
-                    Ver finanzas <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-                <div className="p-5">
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                    <FinanceStat label="Ingresos" value={formatEur(quickFinance.incomeMonth)} color="text-emerald-600" bg="bg-emerald-50 dark:bg-emerald-950/30" icon={<ArrowUpRight className="w-4 h-4" />} />
-                    <FinanceStat label="Gastos" value={formatEur(quickFinance.expensesMonth)} color="text-red-600" bg="bg-red-50 dark:bg-red-950/30" icon={<ArrowDownRight className="w-4 h-4" />} />
-                    <FinanceStat label="Beneficio" value={formatEur(quickFinance.estimatedProfit)} color={quickFinance.estimatedProfit >= 0 ? 'text-emerald-600' : 'text-red-600'} bg={quickFinance.estimatedProfit >= 0 ? 'bg-emerald-50 dark:bg-emerald-950/30' : 'bg-red-50 dark:bg-red-950/30'} icon={<TrendingUp className="w-4 h-4" />} />
-                    <FinanceStat label="Pendiente cobro" value={formatEur(quickFinance.pendingAmount)} color="text-amber-600" bg="bg-amber-50 dark:bg-amber-950/30" icon={<Clock className="w-4 h-4" />} sub={`${quickFinance.pendingInvoices} facturas`} />
-                  </div>
-
-                  {/* Progress bar de margen */}
-                  <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Margen operativo</span>
-                      <span className={`text-sm font-black ${quickFinance.marginPct >= 10 ? 'text-emerald-600' : quickFinance.marginPct >= 0 ? 'text-amber-600' : 'text-red-600'}`}>
-                        {quickFinance.marginPct}%
+              <DashboardLazyPanel
+                title="Resumen financiero"
+                hint="Ingresos, gastos y margen · abrir para ver"
+                icon={<Euro className="w-4 h-4" />}
+                storageKey={`dash_lazy_qfin:${dashboardConfigScope}`}
+              >
+                <div className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
+                  <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+                    <div className="flex items-center gap-2">
+                      <Euro className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">Resumen financiero</p>
+                      <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded-full">
+                        Este mes
                       </span>
                     </div>
-                    <div className="h-2.5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all duration-700 ${
-                          quickFinance.marginPct >= 20 ? 'bg-emerald-500' :
-                          quickFinance.marginPct >= 10 ? 'bg-emerald-400' :
-                          quickFinance.marginPct >= 0 ? 'bg-amber-400' : 'bg-red-500'
-                        }`}
-                        style={{ width: `${Math.max(Math.min(Math.abs(quickFinance.marginPct), 100), 2)}%` }}
-                      />
+                    <button onClick={() => navigate('/saas/finance')}
+                      className="flex items-center gap-1 text-xs font-semibold text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors">
+                      Ver finanzas <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div className="p-5">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                      <FinanceStat label="Ingresos" value={formatEur(quickFinance.incomeMonth)} color="text-emerald-600" bg="bg-emerald-50 dark:bg-emerald-950/30" icon={<ArrowUpRight className="w-4 h-4" />} />
+                      <FinanceStat label="Gastos" value={formatEur(quickFinance.expensesMonth)} color="text-red-600" bg="bg-red-50 dark:bg-red-950/30" icon={<ArrowDownRight className="w-4 h-4" />} />
+                      <FinanceStat label="Beneficio" value={formatEur(quickFinance.estimatedProfit)} color={quickFinance.estimatedProfit >= 0 ? 'text-emerald-600' : 'text-red-600'} bg={quickFinance.estimatedProfit >= 0 ? 'bg-emerald-50 dark:bg-emerald-950/30' : 'bg-red-50 dark:bg-red-950/30'} icon={<TrendingUp className="w-4 h-4" />} />
+                      <FinanceStat label="Pendiente cobro" value={formatEur(quickFinance.pendingAmount)} color="text-amber-600" bg="bg-amber-50 dark:bg-amber-950/30" icon={<Clock className="w-4 h-4" />} sub={`${quickFinance.pendingInvoices} facturas`} />
+                    </div>
+
+                    <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Margen operativo</span>
+                        <span className={`text-sm font-black ${quickFinance.marginPct >= 10 ? 'text-emerald-600' : quickFinance.marginPct >= 0 ? 'text-amber-600' : 'text-red-600'}`}>
+                          {quickFinance.marginPct}%
+                        </span>
+                      </div>
+                      <div className="h-2.5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-700 ${
+                            quickFinance.marginPct >= 20 ? 'bg-emerald-500' :
+                            quickFinance.marginPct >= 10 ? 'bg-emerald-400' :
+                            quickFinance.marginPct >= 0 ? 'bg-amber-400' : 'bg-red-500'
+                          }`}
+                          style={{ width: `${Math.max(Math.min(Math.abs(quickFinance.marginPct), 100), 2)}%` }}
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
+              </DashboardLazyPanel>
             </DraggableWidget>
           </div>
         )}
 
         {financeUserId && canViewFinanceWidget && (
           <div style={{ order: getWidgetOrder('quick_finance') + 1 }}>
-            <DashboardFinanceWidget userId={financeUserId} />
+            <DashboardLazyPanel
+              title="Finanzas"
+              hint="Saldo, ingresos y movimientos · abrir para cargar"
+              icon={<Wallet className="w-4 h-4" />}
+              storageKey={`dash_lazy_fin:${dashboardConfigScope}`}
+            >
+              <DashboardFinanceWidget userId={financeUserId} />
+            </DashboardLazyPanel>
           </div>
         )}
 
-        {/* ═══ EMBUDO DE VENTAS CRM ═══ */}
+        {/* ═══ EMBUDO DE VENTAS CRM (colapsado) ═══ */}
         {isVisible('funnel') && vertical !== 'delivery' && DELIVERY_CRM_UI_ENABLED && (
           <div style={{ order: getWidgetOrder('funnel') }}>
             <DraggableWidget id="funnel" {...dragProps}>
-              <div className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
-                  <div className="flex items-center gap-2">
-                    <TrendingUp className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-                    <p className="text-sm font-bold text-gray-900 dark:text-gray-100">Embudo de ventas CRM</p>
-                    <span className="text-[10px] font-bold px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full">
-                      {overallConversion}% conversión
-                    </span>
-                  </div>
-                  <button onClick={() => navigate(clientsRouteForVertical(vertical))}
-                    className="flex items-center gap-1 text-xs font-semibold text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors">
-                    Ver CRM <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                {funnelTotal === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-10 px-5">
-                    <div className="w-10 h-10 bg-blue-50 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center mb-3">
-                      <Users className="w-5 h-5 text-blue-400" />
+              <DashboardLazyPanel
+                title="Embudo de ventas CRM"
+                hint={`${overallConversion}% conversión · abrir para ver`}
+                icon={<TrendingUp className="w-4 h-4" />}
+                storageKey={`dash_lazy_funnel:${dashboardConfigScope}`}
+              >
+                <div className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
+                  <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+                    <div className="flex items-center gap-2">
+                      <TrendingUp className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">Embudo de ventas CRM</p>
+                      <span className="text-[10px] font-bold px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full">
+                        {overallConversion}% conversión
+                      </span>
                     </div>
-                    <p className="text-sm font-semibold text-gray-400 dark:text-gray-500">Sin leads aún</p>
-                    <p className="text-xs text-gray-300 dark:text-gray-600 mt-0.5">Los leads aparecerán aquí</p>
                     <button onClick={() => navigate(clientsRouteForVertical(vertical))}
-                      className="mt-4 px-4 py-2 bg-gray-900 dark:bg-white hover:bg-black dark:hover:bg-gray-100 text-white dark:text-gray-900 rounded-xl text-xs font-semibold transition-colors">
-                      Ir al CRM
+                      className="flex items-center gap-1 text-xs font-semibold text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors">
+                      Ver CRM <ArrowRight className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                ) : (
-                  <div className="p-5 space-y-2.5">
-                    {FUNNEL_STAGE_KEYS.map((stage, i) => {
-                      const count = funnelCounts[stage.key] || 0;
-                      const pctOfTotal = funnelTotal > 0 ? Math.round((count / funnelTotal) * 100) : 0;
-                      return (
-                        <div key={stage.key} className="flex items-center gap-3">
-                          <div className="w-24 flex-shrink-0">
-                            <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 truncate">{stage.label}</p>
-                          </div>
-                          <div className="flex-1 relative">
-                            <div className="h-7 bg-gray-100 dark:bg-gray-700 rounded-lg overflow-hidden">
-                              <div className={`h-full ${stage.color} rounded-lg transition-all duration-500`}
-                                style={{ width: `${Math.max(pctOfTotal, 2)}%` }} />
-                            </div>
-                          </div>
-                          <div className={`flex-shrink-0 w-10 h-7 ${stage.light} rounded-lg flex items-center justify-center`}>
-                            <span className={`text-xs font-black ${stage.text}`}>{count}</span>
-                          </div>
-                          <div className="flex-shrink-0 w-10 text-right">
-                            <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">{pctOfTotal}%</span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                    <div className="pt-2 mt-1 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between">
-                      <div className="flex items-center gap-4">
-                        <div className="flex items-center gap-1.5">
-                          <div className="w-2 h-2 rounded-full bg-red-400" />
-                          <span className="text-xs text-gray-500 dark:text-gray-400">Perdidos: <span className="font-bold text-red-500">{lostCount}</span></span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <div className="w-2 h-2 rounded-full bg-emerald-400" />
-                          <span className="text-xs text-gray-500 dark:text-gray-400">Ganados: <span className="font-bold text-emerald-600">{wonCount}</span></span>
-                        </div>
-                      </div>
-                      <span className="text-xs text-gray-400 dark:text-gray-500">{funnelTotal} leads totales</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </DraggableWidget>
-          </div>
-        )}
 
-        {/* ═══ FICHAJES DEL EQUIPO ═══ */}
-        {isVisible('clockins') && (
-          <div style={{ order: getWidgetOrder('clockins') }}>
-            <DraggableWidget id="clockins" {...dragProps}>
-              <div className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
-                  <div className="flex items-center gap-2">
-                    <Clock className="w-4 h-4 text-blue-500" />
-                    <p className="text-sm font-bold text-gray-900 dark:text-gray-100">Fichajes hoy</p>
-                    {clockinsAlertsSummary && clockinsAlertsSummary.total > 0 && (
-                      <span className="inline-flex items-center justify-center w-5 h-5 text-[10px] font-bold rounded-full bg-red-500 text-white">{clockinsAlertsSummary.total}</span>
-                    )}
-                  </div>
-                  <button onClick={() => navigate('/saas/clockins')} className="flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline">
-                    Ver fichajes <ArrowRight className="w-3 h-3" />
-                  </button>
-                </div>
-                <div className="p-5 space-y-4">
-                  {clockinsLoading ? (
-                    <div className="space-y-3 animate-pulse">
-                      <div className="grid grid-cols-3 gap-3">
-                        {[...Array(3)].map((_, i) => <div key={i} className="h-16 rounded-xl bg-gray-100 dark:bg-gray-700" />)}
+                  {funnelTotal === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-10 px-5">
+                      <div className="w-10 h-10 bg-blue-50 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center mb-3">
+                        <Users className="w-5 h-5 text-blue-400" />
                       </div>
-                      <div className="h-10 rounded-xl bg-gray-100 dark:bg-gray-700" />
+                      <p className="text-sm font-semibold text-gray-400 dark:text-gray-500">Sin leads aún</p>
+                      <p className="text-xs text-gray-300 dark:text-gray-600 mt-0.5">Los leads aparecerán aquí</p>
+                      <button onClick={() => navigate(clientsRouteForVertical(vertical))}
+                        className="mt-4 px-4 py-2 bg-gray-900 dark:bg-white hover:bg-black dark:hover:bg-gray-100 text-white dark:text-gray-900 rounded-xl text-xs font-semibold transition-colors">
+                        Ir al CRM
+                      </button>
                     </div>
                   ) : (
-                    <>
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="text-center p-3 rounded-xl bg-green-50 dark:bg-green-900/20">
-                      <p className="text-2xl font-bold text-green-700 dark:text-green-400">{clockinsActive.filter(a => a.status === 'active').length}</p>
-                      <p className="text-[10px] font-medium text-green-600 dark:text-green-400/70 uppercase">Trabajando</p>
-                    </div>
-                    <div className="text-center p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20">
-                      <p className="text-2xl font-bold text-amber-700 dark:text-amber-400">{clockinsActive.filter(a => a.status === 'break').length}</p>
-                      <p className="text-[10px] font-medium text-amber-600 dark:text-amber-400/70 uppercase">Descanso</p>
-                    </div>
-                    <div className="text-center p-3 rounded-xl bg-slate-50 dark:bg-slate-800">
-                      <p className="text-2xl font-bold text-slate-700 dark:text-slate-300">{clockinsStatsSummary ? formatMinutes(clockinsStatsSummary.totalMinutes) : '—'}</p>
-                      <p className="text-[10px] font-medium text-slate-500 uppercase">Total semana</p>
-                    </div>
-                  </div>
-                  {clockinsActive.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {clockinsActive.slice(0, 8).map((a) => (
-                        <div key={a.member_id} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
-                          a.status === 'active' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
-                        }`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${a.status === 'active' ? 'bg-green-500 animate-pulse' : 'bg-amber-500'}`} />
-                          {a.member_name.split(' ')[0]}
+                    <div className="p-5 space-y-2.5">
+                      {FUNNEL_STAGE_KEYS.map((stage) => {
+                        const count = funnelCounts[stage.key] || 0;
+                        const pctOfTotal = funnelTotal > 0 ? Math.round((count / funnelTotal) * 100) : 0;
+                        return (
+                          <div key={stage.key} className="flex items-center gap-3">
+                            <div className="w-24 flex-shrink-0">
+                              <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 truncate">{stage.label}</p>
+                            </div>
+                            <div className="flex-1 relative">
+                              <div className="h-7 bg-gray-100 dark:bg-gray-700 rounded-lg overflow-hidden">
+                                <div className={`h-full ${stage.color} rounded-lg transition-all duration-500`}
+                                  style={{ width: `${Math.max(pctOfTotal, 2)}%` }} />
+                              </div>
+                            </div>
+                            <div className={`flex-shrink-0 w-10 h-7 ${stage.light} rounded-lg flex items-center justify-center`}>
+                              <span className={`text-xs font-black ${stage.text}`}>{count}</span>
+                            </div>
+                            <div className="flex-shrink-0 w-10 text-right">
+                              <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">{pctOfTotal}%</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      <div className="pt-2 mt-1 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-2 h-2 rounded-full bg-red-400" />
+                            <span className="text-xs text-gray-500 dark:text-gray-400">Perdidos: <span className="font-bold text-red-500">{lostCount}</span></span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-2 h-2 rounded-full bg-emerald-400" />
+                            <span className="text-xs text-gray-500 dark:text-gray-400">Ganados: <span className="font-bold text-emerald-600">{wonCount}</span></span>
+                          </div>
                         </div>
-                      ))}
-                      {clockinsActive.length > 8 && (
-                        <span className="flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-500">+{clockinsActive.length - 8}</span>
-                      )}
-                    </div>
-                  )}
-                  {clockinsAlertsSummary && clockinsAlertsSummary.total > 0 && (
-                    <button onClick={() => navigate('/saas/clockins')} className="w-full flex items-center justify-between p-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors">
-                      <div className="flex items-center gap-2">
-                        <AlertTriangle className="w-4 h-4 text-red-500" />
-                        <span className="text-xs font-medium text-red-700 dark:text-red-400">
-                          {clockinsAlertsSummary.total} {clockinsAlertsSummary.total === 1 ? 'alerta' : 'alertas'}
-                        </span>
+                        <span className="text-xs text-gray-400 dark:text-gray-500">{funnelTotal} leads totales</span>
                       </div>
-                      <ArrowRight className="w-3.5 h-3.5 text-red-400" />
-                    </button>
-                  )}
-                    </>
+                    </div>
                   )}
                 </div>
-              </div>
+              </DashboardLazyPanel>
             </DraggableWidget>
           </div>
         )}

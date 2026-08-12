@@ -32,7 +32,7 @@ import { isBrandActive } from '../../lib/brandUtils';
 import { deliveryBrandLineKindLabel } from '../../lib/deliveryBrandLineKinds';
 import { AGGREGATOR_PLATFORMS } from '../../lib/deliveryIntegrationsUi';
 import { formatMoneyEs, formatNumberEs } from '../../lib/formatNumberEs';
-import { localCalendarDayKey } from '../../lib/tpvCajaScope';
+import { isRefundedDeliveryOrder, localCalendarDayKey } from '../../lib/tpvCajaScope';
 import {
   getDeliveryOrderDeliveredAtIso,
   isDeliveryOrderDelivered,
@@ -557,7 +557,14 @@ export function CompanyBrandPerformancePanel({
   }, [businessId]);
 
   const activeOrders = useMemo(
-    () => orders.filter((o) => !/cancel/.test(String(o.status || '').toLowerCase())),
+    () =>
+      orders.filter((o) => {
+        const st = String(o.status || '').toLowerCase();
+        if (/cancel/.test(st)) return false;
+        // Devueltos no entran en Marcas (ni € ni uds).
+        if (isRefundedDeliveryOrder(o)) return false;
+        return true;
+      }),
     [orders],
   );
 

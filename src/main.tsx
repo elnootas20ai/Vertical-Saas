@@ -49,6 +49,12 @@ async function boot() {
   const rootEl = document.getElementById("root");
   if (!rootEl) return;
   try {
+    // Tras un reload por chunk viejo, limpiar el flag para no bloquear futuros deploys.
+    try {
+      sessionStorage.removeItem("vertial:chunk-reload");
+    } catch {
+      /* ignore */
+    }
     createRoot(rootEl).render(<App />);
   } catch (error) {
     showBootstrapError(error);

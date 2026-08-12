@@ -1,9 +1,4 @@
-import type {
-  CashDenominationCount,
-  TpvPaymentMethod,
-  TpvRegisterSession,
-  TpvRegisterSummary,
-} from './deliveryApi';
+import type { TpvPaymentMethod, TpvRegisterSession, TpvRegisterSummary } from './deliveryApi';
 
 /** Canonical TPV payment method (legacy orders may store `otros`). */
 export function normalizeTpvPaymentMethod(raw: string | null | undefined): TpvPaymentMethod {
@@ -15,56 +10,6 @@ export function normalizeTpvPaymentMethod(raw: string | null | undefined): TpvPa
 
 function isCashPaymentMethod(raw: string | null | undefined): boolean {
   return normalizeTpvPaymentMethod(raw) === 'efectivo';
-}
-
-/** Valores EUR por clave de arqueo (mismo set que el gate TPV). */
-const DENOMINATION_VALUES: Record<keyof CashDenominationCount, number> = {
-  bills_500: 500,
-  bills_200: 200,
-  bills_100: 100,
-  bills_50: 50,
-  bills_20: 20,
-  bills_10: 10,
-  bills_5: 5,
-  coins_2: 2,
-  coins_1: 1,
-  coins_050: 0.5,
-  coins_020: 0.2,
-  coins_010: 0.1,
-  coins_005: 0.05,
-  coins_002: 0.02,
-  coins_001: 0.01,
-};
-
-/** Suma billetes/monedas del conteo de apertura (o cierre). */
-export function sumCashDenominationCount(counts: CashDenominationCount | null | undefined): number {
-  if (!counts || typeof counts !== 'object') return 0;
-  let total = 0;
-  for (const [key, value] of Object.entries(DENOMINATION_VALUES)) {
-    const qty = Number((counts as Record<string, unknown>)[key] || 0);
-    if (!Number.isFinite(qty) || qty <= 0) continue;
-    total += qty * value;
-  }
-  return Math.round(total * 100) / 100;
-}
-
-/**
- * Fondo de apertura efectivo.
- * Si `initialCashAmount` quedó en 0 por un update malo pero el conteo de billetes sigue,
- * usamos el conteo (evita bloquear salidas con caja abierta a 100 €).
- */
-export function resolveTpvOpeningCashAmount(
-  session: Pick<TpvRegisterSession, 'initialCashAmount' | 'openingCashCount'> | null | undefined,
-): number {
-  if (!session) return 0;
-  const declared = Number(session.initialCashAmount);
-  if (Number.isFinite(declared) && declared > 0) {
-    return Math.round(declared * 100) / 100;
-  }
-  const fromCount = sumCashDenominationCount(session.openingCashCount);
-  if (fromCount > 0) return fromCount;
-  if (Number.isFinite(declared) && declared === 0) return 0;
-  return 0;
 }
 
 export function sumCashStaffConsumption(session: Pick<TpvRegisterSession, 'transactions'>): number {
@@ -88,7 +33,7 @@ function sumAmount(txs: TpvRegisterSession['transactions'], predicate: (tx: NonN
     .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
 }
 
-/** Efectivo esperado en caja (fondo apertura + ventas − devoluciones + entradas − salidas). */
+/** Efectivo esperado en caja (ventas, devoluciones, consumos equipo en efectivo, entradas/salidas). */
 export function calcTpvExpectedCash(session: TpvRegisterSession): number {
   const txs = session.transactions || [];
   const cashSales = sumAmount(
@@ -98,8 +43,7 @@ export function calcTpvExpectedCash(session: TpvRegisterSession): number {
   const cashReturns = sumCashReturns(session);
   const cashIn = sumAmount(txs, (t) => t.type === 'cash_in');
   const cashOut = sumAmount(txs, (t) => t.type === 'cash_out' || t.type === 'expense');
-  const opening = resolveTpvOpeningCashAmount(session);
-  return opening + cashSales - cashReturns + cashIn - cashOut;
+  return Number(session.initialCashAmount || 0) + cashSales - cashReturns + cashIn - cashOut;
 }
 
 export function buildTpvRegisterSummary(session: TpvRegisterSession): TpvRegisterSummary {

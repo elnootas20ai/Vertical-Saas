@@ -1,4 +1,5 @@
 import { createBrowserRouter, Navigate, Outlet, useParams } from 'react-router-dom';
+import { lazy, Suspense } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { useAuth } from './context/AuthContext';
@@ -125,7 +126,6 @@ import { DeliveryKitchen } from './pages/saas/DeliveryKitchen';
 import { VerticalCatalogEntry, VerticalArticlesRedirect } from './pages/saas/VerticalCatalogEntry';
 import InventoryPage from './pages/saas/InventoryPage';
 import { DealershipWorkers } from './pages/saas/DealershipWorkers';
-import { DeliveryOpsCenter } from './pages/saas/DeliveryOpsCenter';
 import { TpvRapidoPage } from './pages/saas/TpvRapidoPage';
 import { TpvQuickBridgePage } from './pages/saas/TpvQuickBridgePage';
 import { TpvRouteShell } from './components/saas/TpvRouteShell';
@@ -431,6 +431,28 @@ function SaasIndexRedirect() {
   return <Navigate to="/saas/dashboard" replace />;
 }
 
+/** Centro Operativo delivery: chunk solo al abrir la ruta (no en el bundle inicial). */
+const DeliveryOpsCenterLazy = lazy(() =>
+  import('./pages/saas/DeliveryOpsCenter').then((m) => ({ default: m.DeliveryOpsCenter })),
+);
+
+function DeliveryOpsCenterRoute() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-[40vh] items-center justify-center px-4">
+          <div className="flex flex-col items-center gap-3">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-gray-300 border-t-[var(--v-blue,#2563eb)] dark:border-gray-600 dark:border-t-blue-400" />
+            <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Cargando operativa…</p>
+          </div>
+        </div>
+      }
+    >
+      <DeliveryOpsCenterLazy />
+    </Suspense>
+  );
+}
+
 export const router = createBrowserRouter([
   {
     path: '/',
@@ -679,7 +701,7 @@ export const router = createBrowserRouter([
           { path: 'client-billing', element: <RequireBusinessOwner><ClientBillingPage /></RequireBusinessOwner> },
           { path: 'costing', element: <Navigate to="/saas/catalog?tab=escandallo" replace /> },
           { path: 'delivery', element: <RequireBusinessOwner><RequireDeliveryVertical><RedirectLegacyDelivery /></RequireDeliveryVertical></RequireBusinessOwner> },
-          { path: 'delivery-ops', element: <RequireBusinessOwner><RequireDeliveryVertical><DeliveryOpsCenter /></RequireDeliveryVertical></RequireBusinessOwner> },
+          { path: 'delivery-ops', element: <RequireBusinessOwner><RequireDeliveryVertical><DeliveryOpsCenterRoute /></RequireDeliveryVertical></RequireBusinessOwner> },
           { path: 'vertical/delivery/pedidos', element: <RequireDeliveryVertical><Navigate to="/saas/delivery-ops" replace /></RequireDeliveryVertical> },
           { path: 'vertical/delivery', element: <RequireDeliveryVertical><Navigate to="/saas/delivery-ops" replace /></RequireDeliveryVertical> },
           { path: 'delivery-reparto', element: <RequireDeliveryVertical><RequireWorkerPermission permission="delivery"><DeliveryReparto /></RequireWorkerPermission></RequireDeliveryVertical> },

@@ -98,45 +98,6 @@ export async function notifyTpvRegisterClosed({ req, dataUserId, actorUserId, se
     const worker = String(session.workerName || 'Equipo').trim();
     const diff = Math.round((Number(session.difference) || 0) * 100) / 100;
     const hasDiscrepancy = Math.abs(diff) >= 0.01;
-    const counted = Math.round((Number(session.finalCashAmount) || 0) * 100) / 100;
-    const leaveForTomorrow = session.nextDayInitialCash != null
-      ? Math.round((Number(session.nextDayInitialCash) || 0) * 100) / 100
-      : null;
-    const needsAddCash = leaveForTomorrow != null && leaveForTomorrow - counted > 0.009;
-    const addCash = needsAddCash
-      ? Math.round((leaveForTomorrow - counted) * 100) / 100
-      : 0;
-
-    // Inicial mañana > contado: hay que meter dinero. Solo CEO (owner).
-    if (needsAddCash) {
-      await emitGlobalAlert({
-        businessId,
-        userId: business?.owner_user_id || dataUserId,
-        source: 'delivery',
-        ruleId: 'delivery_register_next_day_initial_over',
-        category: 'delivery_register_next_day_initial_over',
-        priority: 'high',
-        level: 'warning',
-        title: `Inicial mañana > contado · +${addCash.toFixed(2)}€`,
-        message: `${worker} cerró ${store} dejando ${leaveForTomorrow.toFixed(2)}€ para mañana con solo ${counted.toFixed(2)}€ contados. Hay que añadir ${addCash.toFixed(2)}€ al cajón.`,
-        entityId: session._id,
-        entityType: 'tpv_register_session',
-        route: DELIVERY_CAJA_ROUTE,
-        metadata: {
-          finalCashAmount: counted,
-          nextDayInitialCash: leaveForTomorrow,
-          addCashAmount: addCash,
-          pointOfSaleId: session.pointOfSaleId,
-          pointOfSaleName: session.pointOfSaleName,
-          terminalName: session.terminalName,
-          workerName: session.workerName,
-          actorUserId,
-          closedAt: session.closedAt,
-        },
-        dedupKey: `tpv-close-initial-over-${session._id}`,
-        force: true,
-      });
-    }
 
     if (!hasDiscrepancy) {
       const recipients = resolveTpvCloseNotificationRecipients(business, actorUserId);

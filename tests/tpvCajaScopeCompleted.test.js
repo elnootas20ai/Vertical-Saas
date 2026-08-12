@@ -58,7 +58,6 @@ describe('orderOnCompletedTpvHistoryBoard', () => {
       closedAt: '',
       status: 'open',
     };
-    // Completado antes de reabrir → fuera del historial de esta caja.
     expect(orderOnCompletedTpvHistoryBoard(
       {
         createdAt: '2026-06-16T15:00:00.000Z',
@@ -75,7 +74,6 @@ describe('orderOnCompletedTpvHistoryBoard', () => {
       },
       session,
     )).toBe(false);
-    // Creado en el turno nuevo → sí.
     expect(orderOnCompletedTpvHistoryBoard(
       {
         createdAt: '2026-06-16T20:30:00.000Z',
@@ -84,7 +82,7 @@ describe('orderOnCompletedTpvHistoryBoard', () => {
       },
       session,
     )).toBe(true);
-    // Creado antes de abrir pero cerrado en este turno (Glovo pendiente) → sí.
+    // Creado antes, entregado en este turno → sí (Glovo).
     expect(orderOnCompletedTpvHistoryBoard(
       {
         createdAt: '2026-06-16T15:00:00.000Z',

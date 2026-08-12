@@ -132,14 +132,18 @@ export function errorHandler(err, req, res, _next) {
 
   // Cualquier otro error
   const statusCode = typeof err?.status === 'number' ? err.status : 500;
-  const message = err?.message || 'Error interno del servidor';
+  const technicalMessage = err?.message || 'Error interno del servidor';
+  // Producción: mensaje usable en tienda (el detalle técnico no ayuda al camarero).
+  const publicMessage = process.env.NODE_ENV === 'production'
+    ? 'No se pudo completar. Espera un momento e inténtalo de nuevo.'
+    : technicalMessage;
 
   return res.status(statusCode).json({
     ok: false,
     success: false,
     error: {
       code: ErrorCode.INTERNAL_ERROR,
-      message: process.env.NODE_ENV === 'production' ? 'Error interno del servidor' : message,
+      message: publicMessage,
       details: process.env.NODE_ENV === 'production' ? {} : { stack: err?.stack },
     },
   });

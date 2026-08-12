@@ -72,6 +72,8 @@ async function syncRegisterSession(
           expectedCash: localSession.expectedCash ?? remote.expectedCash,
           difference: localSession.difference ?? remote.difference,
           closingNotes: localSession.closingNotes ?? remote.closingNotes,
+          nextDayInitialCash:
+            localSession.nextDayInitialCash ?? remote.nextDayInitialCash,
           closingValidationStatus:
             localSession.closingValidationStatus || remote.closingValidationStatus,
           aggregatorClosingTotals:

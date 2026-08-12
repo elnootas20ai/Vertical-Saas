@@ -3183,10 +3183,14 @@ app.use(express.static(distPath, {
 
 // Servir SPA (React Router) en recargas/direct links como /mecanico.
 // Se excluyen rutas API y archivos estáticos con extensión.
+// OJO: sendFile NO pasa por setHeaders de express.static → hay que marcar no-cache
+// aquí también; si no, el shell SPA queda cacheable y tras deploy pide chunks muertos.
 app.get(/.*/, (req, res, next) => {
   const reqPath = String(req.path || '');
   if (reqPath.startsWith('/api/')) return next();
   if (path.extname(reqPath)) return next();
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
   return res.sendFile(path.join(distPath, 'index.html'));
 });
 

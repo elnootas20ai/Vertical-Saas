@@ -25,10 +25,15 @@ import {
 import { normalizeStaffConsumptionConfig } from '../../../lib/staffConsumptionUtils';
 import { resolvePdvIdFromStoreRef, filterOrdersForActivePdv } from '../../../lib/pdvScope';
 import { leaveTpvTabletSession, readTpvTabletBinding } from '../../../lib/tpvTabletSession';
-import { useTpvRegisterBoardReady, useTpvRegisterIfOpen, useTpvStatusBarQuickActions, type TpvRegisterContextType } from '../../../components/saas/TpvRegisterGate';
+import {
+  useTpvRegisterBoardReady,
+  useTpvRegisterIfOpen,
+  useTpvStatusBarQuickActions,
+  type TpvRegisterContextType,
+} from '../../../components/saas/TpvRegisterGate';
 import { getWorkerInitials } from '../../../lib/tpvClockedInWorkers';
 import { pickDefaultActivePdvId } from '../../../lib/deliveryOpsPdvSelection';
-import { useTpvOrderFlowChrome, useTpvSuppressBottomBar, useTpvOrderFlowLockControls } from '../../../context/TpvChromeContext';
+import { useTpvOrderFlowChrome, useTpvSuppressBottomBar } from '../../../context/TpvChromeContext';
 import {
   cancelledOrderHistoryLabel,
   hasTpvOpenRegisterLatch,
@@ -45,7 +50,6 @@ import {
 } from '../../../lib/tpvCajaScope';
 import { isDeliveryOrderEditableOnTpvBoard } from '../../../lib/tpvEditDeliveryOrder';
 import { foldTpvSearchText } from '../../../lib/tpvCatalogNavigation';
-import { resolveTpvCustomerDisplayName } from '../../../lib/tpvCustomerDisplayName';
 import {
   formatElapsedMinutes,
   getTpvPhaseTimer,
@@ -480,7 +484,7 @@ function OrderCard({
             }`}
             title={order.orderNumber ? `#${order.orderNumber}` : undefined}
           >
-            {resolveTpvCustomerDisplayName(order.customerName, 'Sin nombre')}
+            {order.customerName?.trim() || 'Sin nombre'}
           </p>
           {itemPreview ? (
             <p className={`text-gray-600 dark:text-gray-300 truncate font-semibold ${compact ? 'text-xs mt-0.5' : 'text-[13px] mt-0.5'}`}>
@@ -1123,14 +1127,14 @@ function OrderDetail({
 
         <div className={`flex-1 min-h-0 flex flex-col overflow-hidden ${compact ? 'gap-2 px-3 py-2' : 'gap-3 px-4 py-3'}`}>
           <div className={`shrink-0 flex items-start ${compact ? 'gap-1.5' : 'gap-3'}`}>
-            {(order.customerName || order.customerPhone || order.customerAddress) && (
+            {order.customerName && (
               <div className={`flex flex-1 min-w-0 items-start bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 ${compact ? 'gap-1.5 p-2' : 'gap-2.5 p-3 rounded-xl'}`}>
                 <span className={`flex items-center justify-center rounded-md bg-cyan-50 dark:bg-cyan-950/40 shrink-0 ${compact ? 'h-7 w-7' : 'h-9 w-9 rounded-lg'}`}>
                   <User className={`text-cyan-600 dark:text-cyan-400 ${compact ? 'w-3.5 h-3.5' : 'w-5 h-5'}`} />
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className={`font-bold text-gray-900 dark:text-gray-100 truncate leading-snug ${compact ? 'text-base' : 'text-lg'}`}>
-                    {resolveTpvCustomerDisplayName(order.customerName, 'Sin nombre')}
+                    {order.customerName}
                   </p>
                   {order.customerPhone && (
                     <p className={`text-gray-600 dark:text-gray-400 truncate ${compact ? 'text-[10px] mt-0.5' : 'text-xs mt-0.5'}`}>{order.customerPhone}</p>
@@ -1372,16 +1376,19 @@ export function WorkerTpvDelivery({
   const registerCtx = useTpvRegisterIfOpen();
   const boardReady = useTpvRegisterBoardReady();
   const setStatusBarQuickActions = useTpvStatusBarQuickActions();
-  const orderFlowLock = useTpvOrderFlowLockControls();
   const registerStickyRef = useRef<TpvRegisterContextType | null>(null);
-  const orderFlowClickLockRef = useRef(false);
-  // No perder la sesión si el contexto parpadea al abrir «+» / Nuevo.
+  // No perder la sesión si el Context parpadea al pulsar «+» / HMR del gate.
   if (registerCtx && isTpvRegisterSessionOpen(registerCtx.session)) {
     registerStickyRef.current = registerCtx;
+  } else if (
+    registerStickyRef.current
+    && !isTpvRegisterSessionOpen(registerStickyRef.current.session)
+  ) {
+    registerStickyRef.current = null;
   }
   const register = registerCtx ?? registerStickyRef.current;
   const registerOpen = Boolean(register && isTpvRegisterSessionOpen(register.session));
-  // boardReady + latch: el Context a veces parpadea aunque la caja siga abierta.
+  // Si el tablero está montado o hay latch, la caja está operativa aunque el Context parpadee.
   const canUseOrderFlow = registerOpen || boardReady || hasTpvOpenRegisterLatch();
   const historySectionRef = useRef<HTMLDivElement | null>(null);
 
@@ -2069,21 +2076,14 @@ export function WorkerTpvDelivery({
     [userId],
   );
 
-  const releaseOrderFlowClickLock = useCallback(() => {
-    if (!orderFlowClickLockRef.current) return;
-    orderFlowClickLockRef.current = false;
-    orderFlowLock.release();
-  }, [orderFlowLock]);
-
   const backToBoard = useCallback(() => {
-    releaseOrderFlowClickLock();
     setEditingOrder(null);
     setView('board');
     void loadOrders({ silent: true });
-  }, [loadOrders, releaseOrderFlowClickLock]);
+  }, [loadOrders]);
 
   // Sin caja operativa no tiene sentido el flujo de pedido (evita pantalla «Abre la caja» sin salida).
-  // Grace 600ms + sticky: no expulsar por un frame sin contexto si el tablero sigue montado.
+  // Grace + sticky: no expulsar por un frame sin contexto si el tablero sigue montado.
   useEffect(() => {
     if (view !== 'new-order' && view !== 'staff-consumption') return;
     if (canUseOrderFlow) return;
@@ -2092,13 +2092,11 @@ export function WorkerTpvDelivery({
       if (sticky && isTpvRegisterSessionOpen(sticky.session)) return;
       if (boardReady) return;
       if (hasTpvOpenRegisterLatch()) return;
-      releaseOrderFlowClickLock();
       setEditingOrder(null);
       setView('board');
-      toast.message('La caja se desconectó un momento. Vuelve a entrar al pedido desde el tablero.');
     }, 600);
     return () => window.clearTimeout(t);
-  }, [view, canUseOrderFlow, boardReady, releaseOrderFlowClickLock]);
+  }, [view, canUseOrderFlow, boardReady]);
 
   const startEditOrder = useCallback((order: DeliveryOrder) => {
     const sticky = registerStickyRef.current;
@@ -2111,15 +2109,10 @@ export function WorkerTpvDelivery({
       toast.error('Abre la caja de la tienda antes de editar un pedido');
       return;
     }
-    // Lock YA (antes del paint): evita que el gate pinte OpeningScreen / blanco al entrar.
-    if (!orderFlowClickLockRef.current) {
-      orderFlowLock.acquire();
-      orderFlowClickLockRef.current = true;
-    }
     setSelectedOrder(null);
     setEditingOrder(order);
     setView('new-order');
-  }, [canUseOrderFlow, boardReady, orderFlowLock]);
+  }, [canUseOrderFlow, boardReady]);
 
   const startNewOrder = useCallback(() => {
     const sticky = registerStickyRef.current;
@@ -2132,13 +2125,9 @@ export function WorkerTpvDelivery({
       toast.error('Abre la caja de la tienda antes de crear un pedido');
       return;
     }
-    if (!orderFlowClickLockRef.current) {
-      orderFlowLock.acquire();
-      orderFlowClickLockRef.current = true;
-    }
     setEditingOrder(null);
     setView('new-order');
-  }, [canUseOrderFlow, boardReady, orderFlowLock]);
+  }, [canUseOrderFlow, boardReady]);
 
   const exitTabletTpv = useCallback(() => {
     void leaveTpvTabletSession(logout);
@@ -2221,7 +2210,7 @@ export function WorkerTpvDelivery({
 
   useEffect(() => {
     if (!setStatusBarQuickActions) return;
-    if (view !== 'board' || !registerOpen) {
+    if (view !== 'board' || !canUseOrderFlow) {
       setStatusBarQuickActions(null);
       return;
     }
@@ -2285,7 +2274,7 @@ export function WorkerTpvDelivery({
   }, [
     setStatusBarQuickActions,
     view,
-    registerOpen,
+    canUseOrderFlow,
     staffConsumptionEnabled,
     soundEnabled,
     refreshing,
@@ -2309,7 +2298,15 @@ export function WorkerTpvDelivery({
   }
 
   if (view === 'staff-consumption') {
-    if (!registerOpen || !register) {
+    const registerForStaff =
+      (register && isTpvRegisterSessionOpen(register.session) ? register : null)
+      ?? (
+        registerStickyRef.current
+        && isTpvRegisterSessionOpen(registerStickyRef.current.session)
+          ? registerStickyRef.current
+          : null
+      );
+    if (!canUseOrderFlow || !registerForStaff) {
       return (
         <div className="flex flex-col items-center justify-center gap-4 p-8 min-h-[40vh] text-center">
           <p className="text-sm text-gray-600 dark:text-gray-400">
@@ -2329,7 +2326,7 @@ export function WorkerTpvDelivery({
       <WorkerTpvStaffConsumption
         userId={userId}
         onBack={backToBoard}
-        register={register}
+        register={registerForStaff}
         salesPointId={scopedPdvId}
         salesPointName={scopedPdvName}
       />
@@ -2337,14 +2334,21 @@ export function WorkerTpvDelivery({
   }
 
   if (view === 'new-order') {
+    const registerForFlow =
+      (register && isTpvRegisterSessionOpen(register.session) ? register : null)
+      ?? (
+        registerStickyRef.current
+        && isTpvRegisterSessionOpen(registerStickyRef.current.session)
+          ? registerStickyRef.current
+          : null
+      );
     return (
       <TpvRapidoOrderFlow
         tabletMode
         onBack={backToBoard}
         editingDeliveryOrder={editingOrder}
-        registerOverride={register ?? undefined}
+        registerOverride={registerForFlow ?? undefined}
         onEditingDeliveryOrderSaved={() => {
-          releaseOrderFlowClickLock();
           setEditingOrder(null);
           setView('board');
           void loadOrders({ silent: true });
@@ -2676,7 +2680,7 @@ export function WorkerTpvDelivery({
                           deleted ? 'text-gray-500 line-through' : 'text-gray-900 dark:text-gray-100'
                         } ${isTabletUi ? 'text-lg' : 'text-base'}`}
                       >
-                        {resolveTpvCustomerDisplayName(order.customerName, 'Sin nombre')}
+                        {(order.customerName || 'Cliente').trim()}
                       </p>
                       {order.customerAddress?.trim() ? (
                         <p className={`text-gray-500 truncate leading-snug ${isTabletUi ? 'text-xs mt-0.5' : 'text-[11px] mt-0.5'}`}>

@@ -44,7 +44,7 @@ export const DELIVERY_HOME_ALERT_BLOCKS: DeliveryHomeAlertBlock[] = [
     id: 'descuadre',
     label: 'Descuadre',
     short: 'Caja',
-    ruleIds: ['delivery_cash_discrepancy', 'delivery_register_closed_discrepancy', 'delivery_register_next_day_initial_over'],
+    ruleIds: ['delivery_cash_discrepancy', 'delivery_register_closed_discrepancy'],
   },
   {
     id: 'retrasos',

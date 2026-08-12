@@ -89,15 +89,16 @@ export function DeliveryFoodUnitIcon({
 }) {
   const { Icon, tone, emoji, badge } = deliveryFoodUnitMeta(unit);
   if (variant === 'emoji') {
-    const size =
-      className.includes('w-5') || className.includes('h-5')
+    const compact = className.includes('w-3') || className.includes('h-3');
+    const size = compact
+      ? 'text-[13px]'
+      : className.includes('w-5') || className.includes('h-5')
         ? 'text-base'
-        : className.includes('w-3') || className.includes('h-3')
-          ? 'text-sm'
-          : 'text-[15px]';
+        : 'text-[15px]';
+    const box = compact ? 'h-5 w-5' : 'h-7 w-7';
     return (
       <span
-        className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border text-center leading-none ${size} ${
+        className={`inline-flex ${box} shrink-0 items-center justify-center rounded-md border text-center leading-none ${size} ${
           muted ? 'border-white/20 bg-white/10' : badge
         }`}
         aria-hidden
@@ -123,22 +124,18 @@ export function DeliveryFoodUnitLabel({
   size?: 'xs' | 'sm' | 'md';
   muted?: boolean;
 }) {
-  const { label, labelShort } = deliveryFoodUnitMeta(unit);
+  const { label } = deliveryFoodUnitMeta(unit);
   const iconClass = size === 'md' ? 'w-5 h-5' : size === 'xs' ? 'w-3.5 h-3.5' : 'w-4 h-4';
   const textSize = size === 'md' ? 'text-sm' : size === 'xs' ? 'text-[10px]' : 'text-[11px]';
   const hasCount = showCount && count !== undefined && count !== null && count !== '';
   return (
-    <span className={`inline-flex items-center gap-1.5 font-bold ${textSize}`}>
+    <span
+      className={`inline-flex items-center gap-1 font-bold ${textSize}`}
+      aria-label={hasCount ? `${count} ${label}` : label}
+    >
+      {hasCount ? <span className="tabular-nums">{count}</span> : null}
       <DeliveryFoodUnitIcon unit={unit} className={iconClass} muted={muted} />
-      <span>
-        {hasCount ? (
-          <>
-            {labelShort} <span className="tabular-nums">{count}</span>
-          </>
-        ) : (
-          label
-        )}
-      </span>
+      {!hasCount ? <span>{label}</span> : null}
     </span>
   );
 }

@@ -6,10 +6,23 @@ import {
   sortClockinsByClockIn,
   todayDateStr,
 } from './clockinHistoryUtils';
+import { toUserFacingMessage } from './userFacingError';
 const env = typeof import.meta !== 'undefined' ? (import.meta as any).env || {} : {};
 
 const DB = (env.VITE_COUCHDB_DB || 'vertial') + '-clockins';
 const REQ_TIMEOUT_MS = 20_000;
+
+function clockinRequestErrorMessage(data: { error?: unknown; message?: unknown }, fallback: string): string {
+  const err = data?.error;
+  let raw = '';
+  if (typeof err === 'string' && err.trim()) raw = err.trim();
+  else if (err && typeof err === 'object') {
+    const msg = (err as { message?: unknown }).message;
+    if (typeof msg === 'string' && msg.trim()) raw = msg.trim();
+  }
+  if (!raw && typeof data?.message === 'string' && data.message.trim()) raw = data.message.trim();
+  return toUserFacingMessage(raw || fallback, fallback);
+}
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const controller = new AbortController();
@@ -24,8 +37,8 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
       },
       signal: controller.signal,
     });
-    const data = (await res.json().catch(() => ({}))) as T & { error?: string };
-    if (!res.ok) throw new Error(data?.error || 'Error en fichajes');
+    const data = (await res.json().catch(() => ({}))) as T & { error?: unknown; message?: unknown };
+    if (!res.ok) throw new Error(clockinRequestErrorMessage(data, 'No se pudo completar el fichaje'));
     return data;
   } catch (e: unknown) {
     if (e instanceof Error && e.name === 'AbortError') {

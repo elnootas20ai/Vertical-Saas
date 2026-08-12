@@ -91,7 +91,9 @@ export default defineConfig(({ mode }) => {
       injectRegister: false,
 
       injectManifest: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+        // No precachear HTML: un index.html viejo en el SW apunta a chunks ya borrados
+        // tras deploy (rsync --delete) y deja la app en blanco hasta hard refresh.
+        globPatterns: ['**/*.{js,css,ico,png,svg,woff,woff2}'],
         // Main bundle SaaS suele superar 15–20 MB; sin esto el PWA build falla en deploy.
         maximumFileSizeToCacheInBytes: 30 * 1024 * 1024,
       },
