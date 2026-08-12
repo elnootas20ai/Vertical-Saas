@@ -29,7 +29,19 @@ workflows:
         CAPACITOR_SERVER_URL: "https://vertialapp.com"
     scripts:
       - name: Instalar dependencias
-        script: npm ci
+        script: |
+          set -e
+          # sharp/@capacitor/assets son optional: si GitHub libvips da 503, npm ci no tumba el IPA.
+          # Iconos iOS ya van en el repo; no regeneramos assets en CI.
+          for attempt in 1 2 3; do
+            echo "npm ci intento $attempt…"
+            if npm ci --no-audit --no-fund; then
+              exit 0
+            fi
+            echo "npm ci falló (intento $attempt). Reintento en 20s…"
+            sleep 20
+          done
+          exit 1
       - name: Build web de producción
         script: npm run build
       - name: Sincronizar Capacitor iOS (live URL tienda)

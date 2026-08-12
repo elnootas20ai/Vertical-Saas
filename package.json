@@ -164,18 +164,20 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^8.4.1",
     "@tailwindcss/vite": "4.1.12",
     "@vitejs/plugin-react": "^4.7.0",
     "cross-env": "^10.1.0",
     "jsdom": "^26.1.0",
     "playwright": "^1.51.0",
-    "sharp": "^0.35.2",
     "tailwindcss": "4.1.12",
     "vite": "6.3.5",
     "vite-plugin-pwa": "^1.2.0",
     "vitest": "^3.2.4"
+  },
+  "optionalDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "sharp": "^0.35.2"
   },
   "peerDependencies": {
     "react": "^18.3.1",
