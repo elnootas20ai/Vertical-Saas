@@ -1,6 +1,8 @@
 import type { PointOfSale } from './deliveryApi';
 import { isRestaurantBusinessType } from './deliveryOpsTypes';
 import { AUTH_PATHS } from './authEntryPaths';
+import { clearAuthTokens, logoutRequest } from './authApi';
+import { clearVertialClientCaches, SESSION_USER_STORAGE_KEY } from './clientSessionStorage';
 
 /** Vertical fijado por el código tablet TPV según el negocio vinculado. */
 export type TpvTabletVertical = 'delivery' | 'restaurant';
@@ -199,18 +201,22 @@ export function exitTpvTabletSessionPath(): string {
 }
 
 export type LeaveTpvTabletSessionOptions = {
-  /**
-   * Admin/CEO: no cierra sesión y va a esta ruta (p. ej. ops).
-   * Si no se pasa, logout + login trabajador.
-   */
+  /** @deprecated No usar: con código TPV no se vuelve a la cuenta CEO. */
   keepAuthAndGoTo?: string;
+  /**
+   * Navigate de React Router (recomendado).
+   * Evita `location.replace` → `#root` vacío → pantalla en blanco.
+   */
+  navigate?: (to: string, opts?: { replace?: boolean }) => void | Promise<unknown>;
 };
 
 /**
  * Salir del TPV tablet (modo código de tienda):
- * quita el vínculo, cierra sesión y va a **iniciar sesión trabajador**.
- * Evita el bounce login-empresa → código (SaasRoot pintaba /auth/login).
- * Usa location.replace antes del logout para no quedar pillado en SaaS.
+ * 1) SPA → pantalla de código (sin remount / blanco)
+ * 2) luego limpia vínculo + sesión
+ *
+ * Importante: no borrar el binding ANTES de navegar. Si no,
+ * RequireTpvTabletEntry pinta `null` (pantalla en blanco) un instante.
  */
 export async function leaveTpvTabletSession(
   logout: () => Promise<void>,
@@ -218,33 +224,97 @@ export async function leaveTpvTabletSession(
 ): Promise<void> {
   const binding = readTpvTabletBinding();
   const code = String(binding?.terminalCode || '').trim().toUpperCase();
-  clearTpvTabletBinding();
+  void opts?.keepAuthAndGoTo;
 
-  if (opts?.keepAuthAndGoTo) {
-    if (typeof window !== 'undefined') {
-      window.location.replace(String(opts.keepAuthAndGoTo).trim() || TPV_TABLET_EXIT_PATH);
-    }
-    return;
-  }
-
-  if (code) rememberTpvTabletReturnCode(code);
-
-  // Volver al código de tienda (no login empresa). Así reabrir TPV no se pierde
-  // en /auth/login ni en worker-login sin campo de código.
   const dest = code
     ? `${TPV_TABLET_LOGIN_PATH}?code=${encodeURIComponent(code)}`
     : TPV_TABLET_LOGIN_PATH;
 
-  // Importante: replace ANTES de await logout. Si logout pone isAuthenticated=false
-  // estando aún en /saas, SaasRoot pinta /auth/login y se queda pillado un momento.
-  if (typeof window !== 'undefined') {
-    window.location.replace(dest);
+  if (code) rememberTpvTabletReturnCode(code);
+
+  if (typeof window === 'undefined') {
+    clearTpvTabletBinding();
+    try {
+      await logout();
+    } catch {
+      // ignore
+    }
+    return;
   }
+
+  const paintCodePlaceholder = () => {
+    const root = document.getElementById('root');
+    if (!root) return;
+    root.innerHTML = `
+      <div style="min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:24px;font-family:system-ui,sans-serif;background:#f8fafc">
+        <p style="margin:0;font-size:15px;font-weight:600;color:#475569">Código de tienda…</p>
+      </div>
+    `;
+  };
+
+  const clearSessionQuietly = async () => {
+    clearTpvTabletBinding();
+    try {
+      clearVertialClientCaches();
+      try {
+        localStorage.removeItem(SESSION_USER_STORAGE_KEY);
+      } catch {
+        // ignore
+      }
+      clearAuthTokens();
+      void logoutRequest().catch(() => {});
+    } catch {
+      // ignore
+    }
+    // clearVertialClientCaches puede borrar sessionStorage: reponer código.
+    if (code) rememberTpvTabletReturnCode(code);
+    try {
+      await logout();
+    } catch {
+      // ignore
+    }
+  };
+
+  // 1) Navegar a la pantalla de código SIN recargar y SIN borrar binding aún.
+  const waitUntilOnCodeScreen = () =>
+    new Promise<void>((resolve) => {
+      const started = Date.now();
+      const tick = () => {
+        const path = String(window.location.pathname || '');
+        if (path.startsWith(TPV_TABLET_LOGIN_PATH) || Date.now() - started > 2500) {
+          resolve();
+          return;
+        }
+        window.requestAnimationFrame(tick);
+      };
+      window.requestAnimationFrame(tick);
+    });
+
+  let spaOk = false;
   try {
-    await logout();
+    if (opts?.navigate) {
+      await Promise.resolve(opts.navigate(dest, { replace: true }));
+      await waitUntilOnCodeScreen();
+      spaOk = String(window.location.pathname || '').startsWith(TPV_TABLET_LOGIN_PATH);
+    } else {
+      const { router } = await import('../routes');
+      await router.navigate(dest, { replace: true });
+      await waitUntilOnCodeScreen();
+      spaOk = String(window.location.pathname || '').startsWith(TPV_TABLET_LOGIN_PATH);
+    }
   } catch {
-    // Ya vamos a la pantalla de código tablet.
+    spaOk = false;
   }
+
+  if (!spaOk) {
+    paintCodePlaceholder();
+    await clearSessionQuietly();
+    window.location.replace(dest);
+    return;
+  }
+
+  // 2) Ya en /auth/tpv-tablet: quitar vínculo y cerrar sesión.
+  await clearSessionQuietly();
 }
 
 export function isTpvTabletBound(): boolean {

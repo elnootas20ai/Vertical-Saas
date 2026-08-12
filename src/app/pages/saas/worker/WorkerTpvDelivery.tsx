@@ -1388,8 +1388,15 @@ export function WorkerTpvDelivery({
   }
   const register = registerCtx ?? registerStickyRef.current;
   const registerOpen = Boolean(register && isTpvRegisterSessionOpen(register.session));
-  // Si el tablero está montado o hay latch, la caja está operativa aunque el Context parpadee.
-  const canUseOrderFlow = registerOpen || boardReady || hasTpvOpenRegisterLatch();
+  // No usar boardReady solo: el Worker ya monta con tablero. Latch sin sesión real
+  // dejaba entrar al pedido y fallaba al cobrar.
+  const canUseOrderFlow =
+    registerOpen
+    || Boolean(
+      registerStickyRef.current
+      && isTpvRegisterSessionOpen(registerStickyRef.current.session),
+    )
+    || (boardReady && hasTpvOpenRegisterLatch());
   const historySectionRef = useRef<HTMLDivElement | null>(null);
 
   const isTabletSession = registerScope.isTabletSession;
@@ -1408,7 +1415,7 @@ export function WorkerTpvDelivery({
   );
 
   useTpvOrderFlowChrome(view === 'new-order');
-  useTpvSuppressBottomBar(view !== 'board');
+  useTpvSuppressBottomBar(view !== 'board', 'worker-delivery-view');
 
   // Mientras se ve el tablero, calienta la caché de clientes para que la 1.ª búsqueda no espere Couch.
   useEffect(() => {
@@ -2101,10 +2108,9 @@ export function WorkerTpvDelivery({
   const startEditOrder = useCallback((order: DeliveryOrder) => {
     const sticky = registerStickyRef.current;
     const ok =
-      canUseOrderFlow
-      || boardReady
-      || hasTpvOpenRegisterLatch()
-      || Boolean(sticky && isTpvRegisterSessionOpen(sticky.session));
+      registerOpen
+      || Boolean(sticky && isTpvRegisterSessionOpen(sticky.session))
+      || (boardReady && hasTpvOpenRegisterLatch());
     if (!ok) {
       toast.error('Abre la caja de la tienda antes de editar un pedido');
       return;
@@ -2112,26 +2118,25 @@ export function WorkerTpvDelivery({
     setSelectedOrder(null);
     setEditingOrder(order);
     setView('new-order');
-  }, [canUseOrderFlow, boardReady]);
+  }, [registerOpen, boardReady]);
 
   const startNewOrder = useCallback(() => {
     const sticky = registerStickyRef.current;
     const ok =
-      canUseOrderFlow
-      || boardReady
-      || hasTpvOpenRegisterLatch()
-      || Boolean(sticky && isTpvRegisterSessionOpen(sticky.session));
+      registerOpen
+      || Boolean(sticky && isTpvRegisterSessionOpen(sticky.session))
+      || (boardReady && hasTpvOpenRegisterLatch());
     if (!ok) {
       toast.error('Abre la caja de la tienda antes de crear un pedido');
       return;
     }
     setEditingOrder(null);
     setView('new-order');
-  }, [canUseOrderFlow, boardReady]);
+  }, [registerOpen, boardReady]);
 
   const exitTabletTpv = useCallback(() => {
-    void leaveTpvTabletSession(logout);
-  }, [logout]);
+    void leaveTpvTabletSession(logout, { navigate });
+  }, [logout, navigate]);
 
   const openOrderHistory = useCallback(() => {
     setShowDelivered(true);
@@ -2262,8 +2267,8 @@ export function WorkerTpvDelivery({
       ...(tabletBinding && !ceoMode
         ? [{
             id: 'exit',
-            label: 'Cambiar trabajador',
-            title: 'Volver a la pantalla de código de tienda',
+            label: 'Salir a Vertial',
+            title: 'Salir a Vertial (pantalla de código)',
             icon: <Tablet />,
             onClick: exitTabletTpv,
           }]
@@ -2342,12 +2347,28 @@ export function WorkerTpvDelivery({
           ? registerStickyRef.current
           : null
       );
+    // Sin sesión real no montar el cobro: el latch dejaba pasar y el toast salía al enviar.
+    if (!registerForFlow) {
+      return (
+        <div className="flex h-full min-h-0 flex-col items-center justify-center gap-3 p-6 text-center">
+          <div className="animate-spin w-8 h-8 border-2 border-gray-300 border-t-gray-900 rounded-full" />
+          <p className="text-sm text-gray-600 dark:text-gray-400">Recuperando caja abierta…</p>
+          <button
+            type="button"
+            onClick={backToBoard}
+            className="mt-1 text-sm font-semibold text-[#2563EB] hover:underline"
+          >
+            Volver al tablero
+          </button>
+        </div>
+      );
+    }
     return (
       <TpvRapidoOrderFlow
         tabletMode
         onBack={backToBoard}
         editingDeliveryOrder={editingOrder}
-        registerOverride={registerForFlow ?? undefined}
+        registerOverride={registerForFlow}
         onEditingDeliveryOrderSaved={() => {
           setEditingOrder(null);
           setView('board');
@@ -2440,9 +2461,9 @@ export function WorkerTpvDelivery({
                   </button>
                 )}
                 {tabletBinding && !ceoMode && (
-                  <button type="button" onClick={exitTabletTpv} className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200" title="Salir e iniciar sesión de trabajador">
+                  <button type="button" onClick={exitTabletTpv} className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200" title="Salir a Vertial">
                     <DoorOpen className="w-4 h-4" />
-                    Cambiar trabajador
+                    Salir a Vertial
                   </button>
                 )}
                 <button

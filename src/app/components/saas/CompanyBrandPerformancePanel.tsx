@@ -1,14 +1,16 @@
 /**
- * Dashboard empresa delivery: marcas + €/uds/comida por periodo (día / mes / año)
+ * Dashboard empresa delivery: marcas + €/uds/comida por periodo (día / mes / 2 meses)
  * con comparativa vs periodo anterior. Reglas de Facturación (sin hardcode).
  * Incluye todos los integradores (Glovo, Uber Eats, Just Eat, Flipdish, …).
  *
  * Fuentes: pedidos + cierres de caja (Caja 2). Si un día tiene declaración
  * manual para un canal, el cierre pisa a los pedidos de ese canal ese día
  * (mismo criterio anti doble conteo que el Resumen operativo).
+ *
+ * Filtro opcional por tienda (misma lista que el Resumen operativo de arriba).
  */
 import { useEffect, useMemo, useState } from 'react';
-import { Package, Radio } from 'lucide-react';
+import { MapPin, Package, Radio } from 'lucide-react';
 import type { Brand } from '../../lib/brandApi';
 import type { DeliveryOrder, TpvRegisterSession } from '../../lib/deliveryApi';
 import {
@@ -38,6 +40,7 @@ import {
   isDeliveryOrderDelivered,
   listPrevMonthToDateDayKeys,
   monthOverMonthPct,
+  orderBelongsToPdvScope,
 } from '../../lib/portfolioMetrics';
 import {
   emptyFoodFamilyCounts,
@@ -226,7 +229,7 @@ function VsBadge({ pct }: { pct: number | null }) {
   );
 }
 
-export type BrandPerfRange = 'day' | 'month' | 'year';
+export type BrandPerfRange = 'day' | 'month' | '2m';
 
 function foldDay(iso: string | undefined): string {
   if (!iso) return '';
@@ -256,6 +259,21 @@ function addDaysToDayKey(dayKey: string, delta: number): string {
   return localCalendarDayKey(dt);
 }
 
+/** Desplaza un dayKey N meses de calendario (día acotado al mes destino). */
+function shiftMonthDayKey(dayKey: string, deltaMonths: number): string {
+  const [y, m, d] = dayKey.split('-').map(Number);
+  if (!y || !m || !d) return '';
+  const dt = new Date(y, m - 1 + deltaMonths, 1);
+  const last = new Date(dt.getFullYear(), dt.getMonth() + 1, 0).getDate();
+  dt.setDate(Math.min(d, last));
+  return localCalendarDayKey(dt);
+}
+
+/** Inicio de «2 meses»: día 1 del mes anterior → hoy. */
+function twoMonthRangeStart(todayKey: string): string {
+  return shiftMonthDayKey(`${todayKey.slice(0, 7)}-01`, -1);
+}
+
 function dayKeyInRange(day: string, range: BrandPerfRange, todayKey: string): boolean {
   if (!day) return false;
   if (range === 'day') return day === todayKey;
@@ -263,10 +281,12 @@ function dayKeyInRange(day: string, range: BrandPerfRange, todayKey: string): bo
     const monthStart = `${todayKey.slice(0, 7)}-01`;
     return day >= monthStart && day <= todayKey;
   }
-  return day.slice(0, 4) === todayKey.slice(0, 4);
+  // 2 meses: desde el 1 del mes anterior hasta hoy
+  const start = twoMonthRangeStart(todayKey);
+  return day >= start && day <= todayKey;
 }
 
-/** Periodo anterior comparable: ayer / mismos días mes ant. / mismo YTD año ant. */
+/** Periodo anterior comparable: ayer / mismos días mes ant. / mismos ~2 meses anteriores. */
 function dayKeyInPrevRange(day: string, range: BrandPerfRange, todayKey: string): boolean {
   if (!day) return false;
   if (range === 'day') return day === addDaysToDayKey(todayKey, -1);
@@ -274,9 +294,11 @@ function dayKeyInPrevRange(day: string, range: BrandPerfRange, todayKey: string)
     const prevKeys = listPrevMonthToDateDayKeys(todayKey);
     return prevKeys.includes(day);
   }
-  const prevYear = String(Number(todayKey.slice(0, 4)) - 1);
-  const ytdEnd = `${prevYear}${todayKey.slice(4)}`;
-  return day.slice(0, 4) === prevYear && day <= ytdEnd;
+  // Misma ventana desplazada 2 meses atrás (ej. 1 jul–12 ago → 1 may–12 jun)
+  const start = twoMonthRangeStart(todayKey);
+  const prevStart = shiftMonthDayKey(start, -2);
+  const prevEnd = shiftMonthDayKey(todayKey, -2);
+  return day >= prevStart && day <= prevEnd;
 }
 
 function orderInRange(order: DeliveryOrder, range: BrandPerfRange, todayKey: string): boolean {
@@ -399,19 +421,19 @@ function buildBrandRows(
 const RANGE_LABEL: Record<BrandPerfRange, string> = {
   day: 'Día',
   month: 'Mes',
-  year: 'Año',
+  '2m': '2 meses',
 };
 
 const RANGE_SHARE_LABEL: Record<BrandPerfRange, string> = {
   day: '% del día',
   month: '% del mes',
-  year: '% del año',
+  '2m': '% de 2 meses',
 };
 
 const RANGE_VS_LABEL: Record<BrandPerfRange, string> = {
   day: 'vs ayer',
   month: 'vs mismos días mes ant.',
-  year: 'vs año ant.',
+  '2m': 'vs 2 meses ant.',
 };
 
 function foodLine(food: FoodFamilyCounts): string {
@@ -521,16 +543,33 @@ type Props = {
   orders: DeliveryOrder[];
   /** Cierres de caja: suma lo declarado en Caja 2 (marcas/apps) al panel. */
   sessions?: TpvRegisterSession[];
+  /** Tiendas / PDV para filtrar (Total + una tienda), como el resumen de arriba. */
+  stores?: BrandPerfStore[];
   loading?: boolean;
   /** Móvil: sin tablas anchas de canales, toggles táctiles. */
   compact?: boolean;
 };
+
+export type BrandPerfStore = {
+  id: string;
+  name: string;
+  workCenterId?: string;
+};
+
+function shortStoreChipLabel(name: string): string {
+  const raw = String(name || '').trim();
+  if (!raw) return 'Tienda';
+  const parts = raw.split(/[·•|]/).map((p) => p.trim()).filter(Boolean);
+  const last = parts[parts.length - 1] || raw;
+  return last.length > 18 ? `${last.slice(0, 16)}…` : last;
+}
 
 export function CompanyBrandPerformancePanel({
   businessId,
   brands,
   orders,
   sessions = [],
+  stores = [],
   loading = false,
   compact = false,
 }: Props) {
@@ -538,6 +577,7 @@ export function CompanyBrandPerformancePanel({
     splitRulesFromBillingConfig(null),
   );
   const [selectedId, setSelectedId] = useState<string>('all');
+  const [selectedStoreId, setSelectedStoreId] = useState<string>('all');
   const [range, setRange] = useState<BrandPerfRange>('month');
   const todayKey = localCalendarDayKey();
 
@@ -556,6 +596,35 @@ export function CompanyBrandPerformancePanel({
     };
   }, [businessId]);
 
+  const storeList = useMemo(() => {
+    const seen = new Set<string>();
+    const out: BrandPerfStore[] = [];
+    for (const s of stores || []) {
+      const id = String(s?.id || '').trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      out.push({
+        id,
+        name: String(s.name || id).trim() || id,
+        workCenterId: String(s.workCenterId || '').trim() || undefined,
+      });
+    }
+    out.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+    return out;
+  }, [stores]);
+
+  useEffect(() => {
+    if (selectedStoreId === 'all') return;
+    if (!storeList.some((s) => s.id === selectedStoreId)) {
+      setSelectedStoreId('all');
+    }
+  }, [storeList, selectedStoreId]);
+
+  const selectedStore = useMemo(
+    () => (selectedStoreId === 'all' ? null : storeList.find((s) => s.id === selectedStoreId) || null),
+    [selectedStoreId, storeList],
+  );
+
   const activeOrders = useMemo(
     () =>
       orders.filter((o) => {
@@ -568,36 +637,54 @@ export function CompanyBrandPerformancePanel({
     [orders],
   );
 
+  const scopedOrders = useMemo(() => {
+    if (!selectedStore) return activeOrders;
+    const pdvSet = new Set(
+      [selectedStore.id, selectedStore.workCenterId].map((x) => String(x || '').trim()).filter(Boolean),
+    );
+    return activeOrders.filter((o) =>
+      orderBelongsToPdvScope(o, pdvSet, selectedStore.id, selectedStore.workCenterId || null),
+    );
+  }, [activeOrders, selectedStore]);
+
+  const scopedSessions = useMemo(() => {
+    if (!selectedStore) return sessions;
+    const aliases = new Set(
+      [selectedStore.id, selectedStore.workCenterId].map((x) => String(x || '').trim()).filter(Boolean),
+    );
+    return sessions.filter((s) => aliases.has(String(s.pointOfSaleId || '').trim()));
+  }, [sessions, selectedStore]);
+
   // Declarado al cierre (Caja 2) en el rango: pisa a los pedidos de ese
   // canal ese día, así que esos pedidos se excluyen (no doble conteo).
   const closingNow = useMemo(
-    () => buildClosingBrandOverlay(sessions, (d) => dayKeyInRange(d, range, todayKey)),
-    [sessions, range, todayKey],
+    () => buildClosingBrandOverlay(scopedSessions, (d) => dayKeyInRange(d, range, todayKey)),
+    [scopedSessions, range, todayKey],
   );
 
   const closingPrev = useMemo(
-    () => buildClosingBrandOverlay(sessions, (d) => dayKeyInPrevRange(d, range, todayKey)),
-    [sessions, range, todayKey],
+    () => buildClosingBrandOverlay(scopedSessions, (d) => dayKeyInPrevRange(d, range, todayKey)),
+    [scopedSessions, range, todayKey],
   );
 
   const rangedOrders = useMemo(
     () =>
-      activeOrders.filter(
+      scopedOrders.filter(
         (o) =>
           orderInRange(o, range, todayKey)
           && !isOrderReplacedByClosing(closingNow, orderDayKey(o), normalizeOrderChannel(o.channel)),
       ),
-    [activeOrders, range, todayKey, closingNow],
+    [scopedOrders, range, todayKey, closingNow],
   );
 
   const prevOrders = useMemo(
     () =>
-      activeOrders.filter(
+      scopedOrders.filter(
         (o) =>
           orderInPrevRange(o, range, todayKey)
           && !isOrderReplacedByClosing(closingPrev, orderDayKey(o), normalizeOrderChannel(o.channel)),
       ),
-    [activeOrders, range, todayKey, closingPrev],
+    [scopedOrders, range, todayKey, closingPrev],
   );
 
   const rows = useMemo(
@@ -687,7 +774,7 @@ export function CompanyBrandPerformancePanel({
       ? 'Sin ventas de marca hoy'
       : range === 'month'
         ? 'Sin ventas de marca este mes'
-        : 'Sin ventas de marca este año';
+        : 'Sin ventas de marca en 2 meses';
 
   const vsLabel = RANGE_VS_LABEL[range];
   const selectedFood = selected?.food || emptyFoodFamilyCounts();
@@ -700,14 +787,13 @@ export function CompanyBrandPerformancePanel({
           <Package className="h-3.5 w-3.5 shrink-0 text-[var(--v-blue,#2563eb)]" />
           <p className="truncate text-xs font-bold text-gray-900 dark:text-gray-100">
             Marcas · {RANGE_LABEL[range].toLowerCase()}
+            {selectedStore ? ` · ${shortStoreChipLabel(selectedStore.name)}` : ''}
           </p>
           <span className="hidden text-[10px] text-gray-400 sm:inline">{vsLabel}</span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex rounded-lg border border-gray-200 bg-gray-50 p-0.5 dark:border-gray-600 dark:bg-gray-900/50">
-            {(['day', 'month', 'year'] as const)
-              .filter((key) => !compact || key !== 'year')
-              .map((key) => (
+            {(['day', 'month', '2m'] as const).map((key) => (
               <button
                 key={key}
                 type="button"
@@ -733,10 +819,43 @@ export function CompanyBrandPerformancePanel({
         </div>
       </div>
 
-      {!loading ? (
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
-          <span className="text-[9px] font-bold uppercase tracking-wide text-gray-400">Uds</span>
-          <FoodFamilyStrip food={foodNow} prev={foodPrev} vsLabel={vsLabel} />
+      {storeList.length > 1 ? (
+        <div className="mt-1.5 flex gap-1 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <button
+            type="button"
+            onClick={() => setSelectedStoreId('all')}
+            className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition-colors ${
+              compact ? 'min-h-9 px-2.5' : ''
+            } ${
+              selectedStoreId === 'all'
+                ? 'bg-[var(--v-blue,#2563eb)] text-white'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300'
+            }`}
+          >
+            <MapPin className="h-3 w-3 opacity-80" />
+            Todas tiendas
+          </button>
+          {storeList.map((s) => {
+            const on = selectedStoreId === s.id;
+            return (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => setSelectedStoreId(s.id)}
+                title={s.name}
+                className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition-colors ${
+                  compact ? 'min-h-9 px-2.5' : ''
+                } ${
+                  on
+                    ? 'bg-[var(--v-blue,#2563eb)] text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300'
+                }`}
+              >
+                <MapPin className="h-3 w-3 opacity-70" />
+                {shortStoreChipLabel(s.name)}
+              </button>
+            );
+          })}
         </div>
       ) : null}
 
@@ -752,7 +871,7 @@ export function CompanyBrandPerformancePanel({
               : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300'
           }`}
         >
-          Todas
+          Todas marcas
         </button>
         {selectable.map((b) => {
           const id = String(b._id || b.id || '');
@@ -775,6 +894,13 @@ export function CompanyBrandPerformancePanel({
           );
         })}
       </div>
+
+      {!loading ? (
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <span className="text-[9px] font-bold uppercase tracking-wide text-gray-400">Uds</span>
+          <FoodFamilyStrip food={foodNow} prev={foodPrev} vsLabel={vsLabel} />
+        </div>
+      ) : null}
 
       {loading ? (
         <div

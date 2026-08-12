@@ -475,6 +475,8 @@ export function DeliveryMobileDashboardBlocks({
               businessId={businessId}
               brands={brands}
               orders={scopedOrders}
+              sessions={tpvSessions}
+              stores={scopedStores}
               loading={loading && brands.length === 0}
               compact
             />

@@ -194,6 +194,89 @@ export function CajaTimelineBoard({
     });
   }, [daySessions]);
 
+  /** Una tarjeta por tienda: resumen arriba, turnos debajo. */
+  const storeSections = useMemo(() => {
+    type Section = {
+      key: string;
+      title: string;
+      sessions: TpvRegisterSession[];
+      sales: number;
+      expectedCash: number;
+      difference: number | null;
+      openCount: number;
+      closedCount: number;
+    };
+
+    const summarize = (rows: TpvRegisterSession[], title: string, key: string): Section => {
+      let sales = 0;
+      let expectedCash = 0;
+      let difference = 0;
+      let hasClosedDiff = false;
+      let openCount = 0;
+      let closedCount = 0;
+      for (const s of rows) {
+        const summary = buildTpvRegisterSummaryForDay(s, selectedDate);
+        sales += Number(summary.totalSales) || 0;
+        expectedCash += calcTpvExpectedCash(s);
+        if (s.status === 'open') openCount += 1;
+        else {
+          closedCount += 1;
+          if (typeof s.difference === 'number' && Number.isFinite(s.difference)) {
+            difference += s.difference;
+            hasClosedDiff = true;
+          }
+        }
+      }
+      return {
+        key,
+        title,
+        sessions: rows,
+        sales,
+        expectedCash,
+        difference: hasClosedDiff ? difference : null,
+        openCount,
+        closedCount,
+      };
+    };
+
+    if (tableRows.length === 0) return [] as Section[];
+
+    const byPdv = new Map<string, TpvRegisterSession[]>();
+    for (const s of tableRows) {
+      const id = String(s.pointOfSaleId || s.pointOfSaleName || '_sin').trim() || '_sin';
+      const list = byPdv.get(id) || [];
+      list.push(s);
+      byPdv.set(id, list);
+    }
+    const sections: Section[] = [];
+    for (const [id, rows] of byPdv) {
+      const pdv = pointsOfSale.find((p) => p._id === id);
+      const title = pdv
+        ? pointOfSaleDisplayLabel(pdv)
+        : (rows[0]?.pointOfSaleName || locSingular);
+      sections.push(summarize(rows, title, `pdv:${id}`));
+    }
+    sections.sort((a, b) => {
+      if (a.openCount > 0 && b.openCount === 0) return -1;
+      if (b.openCount > 0 && a.openCount === 0) return 1;
+      return a.title.localeCompare(b.title, 'es');
+    });
+    return sections;
+  }, [tableRows, pointsOfSale, selectedDate, locSingular]);
+
+  const [expandedStores, setExpandedStores] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    setExpandedStores({});
+  }, [selectedDate, filterPdv]);
+
+  const isStoreExpanded = (section: { key: string; openCount: number }) => {
+    if (Object.prototype.hasOwnProperty.call(expandedStores, section.key)) {
+      return Boolean(expandedStores[section.key]);
+    }
+    return storeSections.length === 1 || section.openCount > 0;
+  };
+
   const [excelDownloading, setExcelDownloading] = useState(false);
 
   const runExcelDownload = async (job: () => void | Promise<void>) => {
@@ -638,132 +721,194 @@ export function CajaTimelineBoard({
           )}
         </section>
 
-        {/* Tabla de turnos (sin panel de detalle intermedio) */}
-        <div className="flex justify-between items-center mb-2.5 flex-wrap gap-2">
+        {/* Resumen por tienda → turnos */}
+        <div className="mb-2.5">
           <h2 className="text-[13px] font-semibold m-0">
-            {filterPdv ? `Turnos · ${pointOfSaleDisplayLabel(pointsOfSale.find((p) => p._id === filterPdv) || ({ _id: filterPdv, name: locSingular } as PointOfSale))}` : 'Todos los turnos'}
+            {filterPdv
+              ? `Caja · ${pointOfSaleDisplayLabel(pointsOfSale.find((p) => p._id === filterPdv) || ({ _id: filterPdv, name: locSingular } as PointOfSale))}`
+              : `Resumen por ${locSingular.toLowerCase()}`}
           </h2>
+          <p className="m-0 mt-0.5 text-[11px] text-stone-500 dark:text-stone-400">
+            Primero el total del día. Abre cada {locSingular.toLowerCase()} para ver los turnos.
+          </p>
         </div>
 
-        <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 rounded-2xl overflow-hidden overflow-x-auto">
-          <table className="w-full border-collapse min-w-[720px]">
-            <thead>
-              <tr>
-                {['Estado', locSingular, 'Empleado', 'Horario', 'Total', 'Efectivo', 'Diferencia', ''].map((h, i) => (
-                  <th
-                    key={`${h}-${i}`}
-                    className={`text-left text-[10.5px] uppercase tracking-wide text-stone-400 font-semibold px-3.5 py-2.5 border-b border-stone-200 dark:border-stone-700 bg-stone-100 dark:bg-stone-800/80 ${
-                      i >= 4 && i <= 6 ? 'text-right' : ''
-                    }`}
+        {storeSections.length === 0 ? (
+          <div className="rounded-2xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-4 py-10 text-center text-sm text-stone-400">
+            Sin turnos{filterPdv ? ` en esta ${locSingular.toLowerCase()}` : ''}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {storeSections.map((section) => {
+              const open = isStoreExpanded(section);
+              return (
+                <section
+                  key={section.key}
+                  className="rounded-2xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 overflow-hidden"
+                >
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpandedStores((prev) => ({
+                        ...prev,
+                        [section.key]: !isStoreExpanded(section),
+                      }))
+                    }
+                    className="w-full text-left px-4 py-3.5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between hover:bg-stone-50/80 dark:hover:bg-stone-800/40 transition-colors"
                   >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {tableRows.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="px-3.5 py-8 text-center text-sm text-stone-400">
-                    Sin turnos{filterPdv ? ` en esta ${locSingular.toLowerCase()}` : ''}
-                  </td>
-                </tr>
-              ) : (
-                tableRows.map((s) => {
-                  const kind: CajaTimelineBarKind =
-                    s.status === 'open' && isTpvRegisterSessionFromPriorCalendarDay(s, now)
-                      ? 'warn'
-                      : s.status === 'open'
-                        ? 'live'
-                        : 'closed';
-                  const tag = statusTag(kind);
-                  const summary = buildTpvRegisterSummaryForDay(s, selectedDate);
-                  const expected = calcTpvExpectedCash(s);
-                  const active = selectedSessionId === s._id;
-                  const busyRow = forcingSessionId === s._id;
-                  const timeLabel =
-                    kind === 'closed'
-                      ? `${formatClock(s.openedAt)} – ${formatClock(s.closedAt)}`
-                      : kind === 'warn'
-                        ? `desde ${formatClock(s.openedAt)} · ${new Date(s.openedAt).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}`
-                        : `desde ${formatClock(s.openedAt)}`;
+                    <div className="min-w-0 flex items-start gap-2.5">
+                      <span className="mt-0.5 text-stone-400 shrink-0">
+                        {open ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-[15px] font-bold text-stone-900 dark:text-stone-50 truncate leading-tight">
+                          {section.title}
+                        </p>
+                        <p className="mt-0.5 text-[11px] font-medium text-stone-500 tabular-nums">
+                          {section.sessions.length} turno{section.sessions.length === 1 ? '' : 's'}
+                          {section.openCount > 0
+                            ? ` · ${section.openCount} en curso`
+                            : section.closedCount > 0
+                              ? ' · todo cerrado'
+                              : ''}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 w-full sm:w-auto sm:min-w-[280px] pl-7 sm:pl-0">
+                      <div className="rounded-xl bg-stone-50 dark:bg-stone-800/60 border border-stone-100 dark:border-stone-700 px-2.5 py-1.5">
+                        <p className="text-[9px] font-bold uppercase tracking-wide text-stone-400">Total</p>
+                        <p className="text-sm font-black tabular-nums text-stone-900 dark:text-stone-50 leading-tight">
+                          {formatMoneyEs(section.sales)}
+                        </p>
+                      </div>
+                      <div className="rounded-xl bg-stone-50 dark:bg-stone-800/60 border border-stone-100 dark:border-stone-700 px-2.5 py-1.5">
+                        <p className="text-[9px] font-bold uppercase tracking-wide text-stone-400">Efectivo</p>
+                        <p className="text-sm font-black tabular-nums text-stone-900 dark:text-stone-50 leading-tight">
+                          {formatMoneyEs(section.expectedCash)}
+                        </p>
+                      </div>
+                      <div className="rounded-xl bg-stone-50 dark:bg-stone-800/60 border border-stone-100 dark:border-stone-700 px-2.5 py-1.5">
+                        <p className="text-[9px] font-bold uppercase tracking-wide text-stone-400">Dif.</p>
+                        <p
+                          className={`text-sm font-black tabular-nums leading-tight ${
+                            section.difference == null
+                              ? 'text-stone-400'
+                              : section.difference >= 0
+                                ? 'text-emerald-700 dark:text-emerald-400'
+                                : 'text-red-600 dark:text-red-400'
+                          }`}
+                        >
+                          {section.difference == null
+                            ? '—'
+                            : `${section.difference >= 0 ? '+' : ''}${formatMoneyEs(section.difference)}`}
+                        </p>
+                      </div>
+                    </div>
+                  </button>
 
-                  return (
-                    <tr
-                      key={s._id}
-                      tabIndex={0}
-                      onClick={() => {
-                        onSelectSession(active ? null : s._id);
-                        if (kind === 'closed' && onViewFullClosing) {
-                          onViewFullClosing(s);
-                        }
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          onSelectSession(active ? null : s._id);
-                          if (kind === 'closed' && onViewFullClosing) onViewFullClosing(s);
-                        }
-                      }}
-                      className={`cursor-pointer ${
-                        active
-                          ? 'bg-blue-50/70 dark:bg-blue-950/30 [&>td:first-child]:shadow-[inset_2px_0_0_#2563eb]'
-                          : 'hover:bg-stone-50 dark:hover:bg-stone-800/60'
-                      }`}
-                    >
-                      <td className="px-3.5 py-2.5 text-[13px] border-b border-stone-100 dark:border-stone-800">
-                        <span className={`text-[10.5px] font-semibold px-2 py-0.5 rounded-full inline-block ${tag.className}`}>
-                          {tag.text}
-                        </span>
-                      </td>
-                      <td className="px-3.5 py-2.5 text-[13px] border-b border-stone-100 dark:border-stone-800">
-                        {s.pointOfSaleName || locSingular}
-                      </td>
-                      <td className="px-3.5 py-2.5 text-[13px] border-b border-stone-100 dark:border-stone-800">
-                        <div className="font-medium">{s.workerName}</div>
-                        <div className="text-[11px] text-stone-400">{s.terminalName}</div>
-                      </td>
-                      <td className="px-3.5 py-2.5 text-[13px] border-b border-stone-100 dark:border-stone-800 tabular-nums">
-                        {timeLabel}
-                      </td>
-                      <td className="px-3.5 py-2.5 text-[13px] border-b border-stone-100 dark:border-stone-800 text-right tabular-nums">
-                        {formatMoneyEs(summary.totalSales)}
-                      </td>
-                      <td className="px-3.5 py-2.5 text-[13px] border-b border-stone-100 dark:border-stone-800 text-right tabular-nums">
-                        {formatMoneyEs(expected)}
-                      </td>
-                      <td className="px-3.5 py-2.5 text-[13px] border-b border-stone-100 dark:border-stone-800 text-right tabular-nums">
-                        {s.status === 'closed' ? (
-                          <span className={s.difference >= 0 ? 'text-emerald-700' : 'text-red-600'}>
-                            {s.difference >= 0 ? '+' : ''}{formatMoneyEs(s.difference)}
-                          </span>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
-                      <td className="px-3.5 py-2.5 text-[13px] border-b border-stone-100 dark:border-stone-800 text-right">
-                        {kind === 'warn' && onForceClose ? (
-                          <button
-                            type="button"
-                            disabled={busyRow}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onForceClose(s);
+                  {open ? (
+                    <div className="border-t border-stone-100 dark:border-stone-800 divide-y divide-stone-100 dark:divide-stone-800">
+                      {section.sessions.map((s) => {
+                        const kind: CajaTimelineBarKind =
+                          s.status === 'open' && isTpvRegisterSessionFromPriorCalendarDay(s, now)
+                            ? 'warn'
+                            : s.status === 'open'
+                              ? 'live'
+                              : 'closed';
+                        const tag = statusTag(kind);
+                        const summary = buildTpvRegisterSummaryForDay(s, selectedDate);
+                        const expected = calcTpvExpectedCash(s);
+                        const active = selectedSessionId === s._id;
+                        const busyRow = forcingSessionId === s._id;
+                        const timeLabel =
+                          kind === 'closed'
+                            ? `${formatClock(s.openedAt)} – ${formatClock(s.closedAt)}`
+                            : kind === 'warn'
+                              ? `desde ${formatClock(s.openedAt)} · ${new Date(s.openedAt).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}`
+                              : `desde ${formatClock(s.openedAt)}`;
+
+                        return (
+                          <div
+                            key={s._id}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => {
+                              onSelectSession(active ? null : s._id);
+                              if (kind === 'closed' && onViewFullClosing) onViewFullClosing(s);
                             }}
-                            className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-[10.5px] font-bold text-amber-800 hover:bg-amber-100 disabled:opacity-50 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                onSelectSession(active ? null : s._id);
+                                if (kind === 'closed' && onViewFullClosing) onViewFullClosing(s);
+                              }
+                            }}
+                            className={`px-4 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between cursor-pointer transition-colors ${
+                              active
+                                ? 'bg-blue-50/70 dark:bg-blue-950/30'
+                                : 'hover:bg-stone-50 dark:hover:bg-stone-800/50'
+                            }`}
                           >
-                            {busyRow ? '…' : 'Forzar cierre'}
-                          </button>
-                        ) : kind === 'closed' && onViewFullClosing ? (
-                          <span className="text-[10.5px] font-semibold text-[var(--v-blue,#2563eb)]">Ver cierre</span>
-                        ) : null}
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+                            <div className="min-w-0 flex items-start gap-2.5">
+                              <span className={`mt-0.5 text-[10.5px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${tag.className}`}>
+                                {tag.text}
+                              </span>
+                              <div className="min-w-0">
+                                <p className="text-[13px] font-semibold text-stone-900 dark:text-stone-100 truncate">
+                                  {s.workerName || 'Sin empleado'}
+                                </p>
+                                <p className="text-[11px] text-stone-500 tabular-nums">
+                                  {timeLabel}
+                                  {s.terminalName ? ` · ${s.terminalName}` : ''}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pl-[4.25rem] sm:pl-0 text-[12px] tabular-nums">
+                              <span className="text-stone-500">
+                                Total{' '}
+                                <span className="font-bold text-stone-900 dark:text-stone-100">
+                                  {formatMoneyEs(summary.totalSales)}
+                                </span>
+                              </span>
+                              <span className="text-stone-500">
+                                Ef.{' '}
+                                <span className="font-bold text-stone-900 dark:text-stone-100">
+                                  {formatMoneyEs(expected)}
+                                </span>
+                              </span>
+                              {s.status === 'closed' ? (
+                                <span className={s.difference >= 0 ? 'text-emerald-700 font-bold' : 'text-red-600 font-bold'}>
+                                  {s.difference >= 0 ? '+' : ''}
+                                  {formatMoneyEs(s.difference)}
+                                </span>
+                              ) : null}
+                              {kind === 'warn' && onForceClose ? (
+                                <button
+                                  type="button"
+                                  disabled={busyRow}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onForceClose(s);
+                                  }}
+                                  className="rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-bold text-amber-800 hover:bg-amber-100 disabled:opacity-50 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
+                                >
+                                  {busyRow ? '…' : 'Forzar cierre'}
+                                </button>
+                              ) : kind === 'closed' && onViewFullClosing ? (
+                                <span className="text-[11px] font-semibold text-[var(--v-blue,#2563eb)]">
+                                  Ver cierre
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </section>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

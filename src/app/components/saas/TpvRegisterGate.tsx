@@ -140,7 +140,7 @@ import { pickPreferredMemberClockin, todayDateStr, dateDaysAgo } from '../../lib
 import { deriveEffectiveClockinStatus, isClockinPresent } from '../../lib/clockinStatus';
 import { normalizeClockinUserId } from '../../lib/clockinUserId';
 import { ClockedInWorkerBubbles } from './ClockedInWorkerBubbles';
-import { useTpvOrderFlowActive } from '../../context/TpvChromeContext';
+import { useTpvOrderFlowActive, useTpvSuppressBottomBar } from '../../context/TpvChromeContext';
 import { TpvCashOpsModal } from './TpvCashOpsModal';
 import { TpvCashMovementVoidModal } from './TpvCashMovementVoidModal';
 import type { TpvPrinterScope } from './TpvPrinterSetupPanel';
@@ -430,7 +430,7 @@ interface OpeningData {
   counts: CashDenominationCount;
 }
 
-function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading, openingBusy = false, pointsOfSale, workCenters, workerOptions, registerSessions, restrictedToPdvId, onClearStorePick, isManagerView = false, isTabletMode = false, tabletStoreLabel, onOpeningPdvChange, restaurantOpening = false, clockInBusinessId = '', clockInOwnerUserId = '', onClockInChanged, resumeAfterClose = null }: {
+function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading, openingBusy = false, pointsOfSale, workCenters, workerOptions, registerSessions, restrictedToPdvId, onClearStorePick, isManagerView = false, tabletStoreLabel, onOpeningPdvChange, restaurantOpening = false, clockInBusinessId = '', clockInOwnerUserId = '', onClockInChanged, resumeAfterClose = null }: {
   onOpen: (data: OpeningData) => void;
   /** Entrar en una caja ya abierta (aviso proactivo; no al martillar Abrir). */
   onContinueExistingOpen?: (session: TpvRegisterSession) => void;
@@ -447,8 +447,6 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
   onClearStorePick?: () => void;
   /** true = encargado/gerente elige tienda; false = trabajador con tienda ya asignada. */
   isManagerView?: boolean;
-  /** Tablet TPV: tienda fijada en activación; solo contar efectivo y abrir. */
-  isTabletMode?: boolean;
   tabletStoreLabel?: string;
   /** Sincroniza la tienda elegida en apertura para fichaje antes de abrir caja. */
   onOpeningPdvChange?: (pdvId: string) => void;
@@ -458,8 +456,8 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
   clockInBusinessId?: string;
   clockInOwnerUserId?: string;
   onClockInChanged?: () => void;
-  /** Tras «Abrir otra caja»: ir a contar fondo con el mismo trabajador si se puede. */
-  resumeAfterClose?: { workerId?: string; preferCashStep?: boolean } | null;
+  /** Tras «Abrir otra caja»: preseleccionar trabajador si se puede. */
+  resumeAfterClose?: { workerId?: string } | null;
 }) {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
@@ -477,23 +475,14 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
       const match = workerOptions.find((w) => clockinIdsMatch(w.id, resumeWorkerId));
       if (match) return match.id;
     }
-    return !isTabletMode && workerOptions.length === 1 ? workerOptions[0].id : '';
+    return workerOptions.length === 1 ? workerOptions[0].id : '';
   });
-  const [tabletStep, setTabletStep] = useState<1 | 2>(() => (
-    resumeAfterClose?.preferCashStep && (resumeWorkerId || (!isTabletMode && workerOptions.length === 1))
-      ? 2
-      : 1
-  ));
   const [vacationBlockedById, setVacationBlockedById] = useState<Record<string, string>>({});
   const salaLaunchRef = useRef<string | null>(consumeSalaTpvLaunch());
   const lastRestrictedPdvRef = useRef('');
   const onOpeningPdvChangeRef = useRef(onOpeningPdvChange);
   onOpeningPdvChangeRef.current = onOpeningPdvChange;
   const total = calcDenominationTotal(counts);
-  /** 0 € de fondo inicial es válido; en tablet basta con llegar al paso 2. */
-  const cashCountReady = isTabletMode ? tabletStep === 2 : true;
-  const hasNonZeroCount = total > 0;
-
   const storeRows = useMemo(
     () => buildDeliverySidebarStoreRows(workCenters, pointsOfSale).filter((r) => !r.inactive),
     [workCenters, pointsOfSale],
@@ -522,7 +511,7 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
   const hasStores = allActivePdvs.length > 0 || storeRows.some((r) => r.needsPdv);
   const pointOfSaleAccess = usePointOfSaleAccess(Math.max(allActivePdvs.length, storeRows.length));
   const selectedPdv = pointsOfSale.find(p => p._id === selectedPdvId)
-    || (isTabletMode && restrictedToPdvId
+    || (restrictedToPdvId
       ? pointsOfSale.find((p) => p._id === restrictedToPdvId)
       : undefined);
   // Misma regla que sala/ensurePdvHasDefaultTerminal: active undefined = activo.
@@ -531,7 +520,8 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
 
   const previousCloseHint = useMemo(() => {
     const pdvId = selectedPdv?._id || restrictedToPdvId || '';
-    const terminalId = selectedTerminal?.id || (isTabletMode ? `tablet-${pdvId || 'default'}` : '');
+    const tabletBound = Boolean(readTpvTabletBinding());
+    const terminalId = selectedTerminal?.id || (tabletBound ? `tablet-${pdvId || 'default'}` : '');
     const last = findLastClosedTpvSession(registerSessions, pdvId, terminalId, pointsOfSale);
     if (!last) return null as null | { amount: number; isNextDayInitial: boolean; label: string };
     let amount = resolvePreviousCloseCashAmount(last);
@@ -557,7 +547,7 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
       isNextDayInitial: previousCloseCashIsNextDayInitial(last),
       label,
     };
-  }, [registerSessions, selectedPdv, restrictedToPdvId, selectedTerminal, isTabletMode, pointsOfSale]);
+  }, [registerSessions, selectedPdv, restrictedToPdvId, selectedTerminal, pointsOfSale]);
 
   const previousCloseCash = previousCloseHint?.amount ?? null;
   const previousCloseIsNextDayInitial = previousCloseHint?.isNextDayInitial === true;
@@ -614,24 +604,18 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
     setCounts(buildDenominationFromAmount(previousCloseCash));
   }, [previousCloseCash, selectedPdvId, selectedTerminalId, openingCashLocked]);
 
-  // Tras «Abrir otra»: si el trabajador llega tarde al listado, engancharlo y saltar a contar.
+  // Tras «Abrir otra»: si el trabajador llega tarde al listado, engancharlo.
   useEffect(() => {
     if (!resumeWorkerId || selectedWorkerId) return;
     const match = workerOptions.find((w) => clockinIdsMatch(w.id, resumeWorkerId));
     if (match) setSelectedWorkerId(match.id);
   }, [resumeWorkerId, workerOptions, selectedWorkerId]);
 
-  useEffect(() => {
-    if (!resumeAfterClose?.preferCashStep) return;
-    if (!selectedWorkerId) return;
-    if (!isTabletMode) return;
-    setTabletStep(2);
-  }, [resumeAfterClose?.preferCashStep, selectedWorkerId, isTabletMode]);
-
-  const openActionBusy = parentLoading || openingBusy;
+  const openActionBusy = openingBusy;
+  const tabletBoundOpening = Boolean(readTpvTabletBinding());
   const effectiveTerminalName = selectedTerminal
     ? (selectedTerminal.code || selectedTerminal.name)
-    : (isTabletMode ? 'Tablet' : '');
+    : (tabletBoundOpening ? 'Tablet' : 'Terminal principal');
   const effectiveDatafon = selectedTerminal?.datafonName || '';
   const effectivePrinter = selectedTerminal?.printerName || '';
 
@@ -643,10 +627,10 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
   }, [workerOptions, selectedWorkerId]);
 
   const hasWorkers = workerOptions.length > 0;
-  const hasResolvedPdv = Boolean(selectedPdv) || (isTabletMode && Boolean(restrictedToPdvId));
+  const hasResolvedPdv = Boolean(selectedPdv) || Boolean(restrictedToPdvId);
   // Tablet, bar/restaurante y CEO web (delivery): sin terminal activo se usa uno sintético al abrir.
   // ActiveStoreScope no asegura terminales; sin esto el CEO delivery queda semanas sin poder abrir caja.
-  const allowSyntheticTerminal = isTabletMode || restaurantOpening || isManagerView;
+  const allowSyntheticTerminal = tabletBoundOpening || restaurantOpening || isManagerView;
   const selectedWorkerVacationMsg = selectedWorkerId
     ? vacationBlockedById[selectedWorkerId] || vacationBlockedById[String(selectedWorkerId).trim()]
     : '';
@@ -711,8 +695,6 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
         return;
       }
     }
-    // Tablet: no autoelegir del listado Equipo (lo hace ClockInModal / Abrir).
-    // Sí autoelegir si solo hay una persona (desktop y tablet).
     if (selectedWorkerId) return;
     if (workerOptions.length === 1) {
       const only = workerOptions[0];
@@ -721,22 +703,21 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
       }
       return;
     }
-    if (isTabletMode) return;
     const cached = (() => {
       try { return localStorage.getItem('vertial.tpvRapido.cashierName') || ''; } catch { return ''; }
     })().trim().toLowerCase();
     if (!cached) return;
     const match = workerOptions.find((w) => w.name.trim().toLowerCase() === cached);
     if (match) setSelectedWorkerId(match.id);
-  }, [workerOptionsKey, isTabletMode, selectedWorkerId, workerOptions, vacationBlockedById]);
+  }, [workerOptionsKey, selectedWorkerId, workerOptions, vacationBlockedById]);
 
   useEffect(() => {
     if (!restrictedToPdvId) return;
     const pdvChanged = lastRestrictedPdvRef.current !== restrictedToPdvId;
     lastRestrictedPdvRef.current = restrictedToPdvId;
     setSelectedPdvId(restrictedToPdvId);
-    if (pdvChanged && !isTabletMode) setSelectedTerminalId('');
-  }, [restrictedToPdvId, isTabletMode]);
+    if (pdvChanged) setSelectedTerminalId('');
+  }, [restrictedToPdvId]);
 
   // Autoseleccionar el único PDV activo cuando solo hay uno (cuentas nuevas).
   useEffect(() => {
@@ -768,9 +749,9 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
     }
   }, [selectedPdv, availableTerminals]);
 
-  // Tablet: terminal fijo al activar (código sala SALA-* o primer terminal del PDV).
+  // Código tablet: terminal fijo (SALA-* o primer terminal del PDV).
   useEffect(() => {
-    if (!isTabletMode || !selectedPdv || selectedTerminalId) return;
+    if (!tabletBoundOpening || !selectedPdv || selectedTerminalId) return;
 
     const binding = readTpvTabletBinding();
     const salaTerminalId = String(binding?.salaTerminalId || '').trim();
@@ -785,7 +766,7 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
     if (availableTerminals.length > 0) {
       setSelectedTerminalId(availableTerminals[0].id);
     }
-  }, [isTabletMode, selectedPdv, selectedTerminalId, availableTerminals]);
+  }, [tabletBoundOpening, selectedPdv, selectedTerminalId, availableTerminals]);
 
   const handleSelectStoreRow = async (row: DeliverySidebarStoreRow) => {
     if (row.pdvId && !row.needsPdv) {
@@ -820,7 +801,12 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
   };
 
   const handleSubmit = () => {
-    if (openActionBusy) return;
+    // Solo openingBusy bloquea. parentLoading (refresco de sesiones) tragaba el
+    // primer click de «Abrir caja» en silencio y había que pulsar dos veces.
+    if (openingBusy) {
+      toast.info('Abriendo caja…', { id: 'tpv-opening-busy', duration: 1500 });
+      return;
+    }
     if (existingOpenForStore) {
       toast.info('Ya hay caja abierta. Usa Entrar arriba.', { id: 'tpv-use-enter-banner', duration: 2500 });
       return;
@@ -828,7 +814,7 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
     const wName = effectiveWorkerName();
     const pdvId = selectedPdv?._id || restrictedToPdvId || '';
     const syntheticTerminalId = allowSyntheticTerminal
-      ? `${isTabletMode ? 'tablet' : 'tpv'}-${pdvId || 'default'}`
+      ? `${tabletBoundOpening ? 'tablet' : 'tpv'}-${pdvId || 'default'}`
       : '';
     if (selectedWorkerId && vacationBlockedById[selectedWorkerId]) {
       toast.error(vacationBlockedById[selectedWorkerId]);
@@ -844,7 +830,7 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
       pointOfSaleId: pdvId,
       pointOfSaleName: selectedPdv ? pointOfSaleDisplayLabel(selectedPdv) : (tabletStoreLabel || ''),
       terminalId: selectedTerminal?.id || syntheticTerminalId,
-      terminalName: effectiveTerminalName || (isTabletMode ? 'Tablet' : 'Terminal principal'),
+      terminalName: effectiveTerminalName || (tabletBoundOpening ? 'Tablet' : 'Terminal principal'),
       datafonName: effectiveDatafon,
       printerName: effectivePrinter,
       counts,
@@ -854,8 +840,8 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
   const inputCls = 'w-full px-2.5 py-2 border border-gray-200 dark:border-gray-700 rounded-lg focus:border-gray-900 dark:focus:border-gray-400 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm';
 
   const goBack = () => {
-    if (isTabletMode) {
-      void leaveTpvTabletSession(logout);
+    if (tabletBoundOpening) {
+      void leaveTpvTabletSession(logout, { navigate });
       return;
     }
     try {
@@ -920,8 +906,7 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
   const displayStoreName = selectedPdv
     ? pointOfSaleDisplayLabel(selectedPdv)
     : tabletStoreLabel || '';
-  /** Tienda ya fijada (restaurant / trabajador / tablet): UI más simple. */
-  const storeAlreadyFixed = Boolean(restrictedToPdvId || restaurantOpening || isTabletMode);
+  const storeAlreadyFixed = Boolean(restrictedToPdvId || restaurantOpening || tabletBoundOpening);
   const terminalLabel = selectedTerminal
     ? (selectedTerminal.code || selectedTerminal.name)
     : '';
@@ -940,7 +925,7 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
 
   return (
     <div className="h-full min-h-0 bg-stone-50 dark:bg-stone-950 flex items-stretch sm:items-center justify-center p-2 sm:p-3 overflow-hidden">
-      <div className={`bg-white dark:bg-stone-900 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-lg w-full ${isTabletMode ? 'max-w-xl' : 'max-w-4xl'} h-full sm:h-auto sm:max-h-[min(88svh,680px)] min-h-0 flex flex-col overflow-hidden`}>
+      <div className="bg-white dark:bg-stone-900 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-lg w-full max-w-4xl h-full sm:h-auto sm:max-h-[min(88svh,680px)] min-h-0 flex flex-col overflow-hidden">
         {/* Header — una sola línea clara */}
         <div className="shrink-0 border-b border-stone-200 dark:border-stone-800 flex items-center gap-2.5 px-3 sm:px-4 py-2.5">
           <div className="bg-emerald-100 dark:bg-emerald-900/30 rounded-xl flex items-center justify-center shrink-0 w-9 h-9">
@@ -951,20 +936,14 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
               {displayStoreName || 'Apertura de caja'}
             </h1>
             <p className="text-[11px] text-stone-500 dark:text-stone-400 truncate">
-              {isTabletMode
-                ? tabletStep === 1
-                  ? '1 · Quién abre (fichar opcional)'
-                  : '2 · Cuenta el efectivo e abre'
-                : storeAlreadyFixed
-                  ? `Apertura${terminalLabel ? ` · ${terminalLabel}` : ''}`
-                  : 'Elige tienda, quién abre y cuenta el efectivo'}
+              {storeAlreadyFixed
+                ? `Apertura${terminalLabel ? ` · ${terminalLabel}` : ''}`
+                : 'Elige tienda, quién abre y cuenta el efectivo'}
             </p>
           </div>
-          {cashCountReady ? (
-            <span className="hidden sm:inline-flex px-2.5 py-1 rounded-lg bg-stone-100 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-800 dark:text-stone-100 text-[11px] font-bold tabular-nums">
-              {total.toFixed(2)}€
-            </span>
-          ) : null}
+          <span className="hidden sm:inline-flex px-2.5 py-1 rounded-lg bg-stone-100 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-800 dark:text-stone-100 text-[11px] font-bold tabular-nums">
+            {total.toFixed(2)}€
+          </span>
           <button
             type="button"
             onClick={goBack}
@@ -982,142 +961,11 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
           </div>
         ) : null}
 
-        {/* Pasos solo en tablet (flujo 1→2) */}
-        {isTabletMode ? (
-          <div className="shrink-0 px-3 sm:px-4 py-2 border-b border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-950/60">
-            <p className="text-[11px] font-medium text-stone-600 dark:text-stone-300">
-              {tabletStep === 1
-                ? 'Elige quién abre (fichar es opcional) y pulsa Siguiente'
-                : 'Cuenta el dinero del cajón (0 € si está vacío) y abre'}
-            </p>
-          </div>
-        ) : null}
-
-        {/* Body: 2 columnas desde md (~768px), no lg — en ~900px antes se apilaba todo */}
         <div
           ref={bodyScrollRef}
-          className={`flex-1 min-h-0 ${isTabletMode ? 'flex flex-col overflow-y-auto' : 'grid grid-cols-1 md:grid-cols-2 md:grid-rows-1 gap-0 overflow-y-auto md:overflow-hidden'} relative`}
+          className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-2 md:grid-rows-1 gap-0 overflow-y-auto md:overflow-hidden relative"
         >
-          {isTabletMode && tabletStep === 1 && (
-            <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-3 flex flex-col">
-              {displayStoreName && (
-                <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 px-3 py-2.5 shrink-0">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">Tienda</p>
-                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-                    <Store className="w-4 h-4 text-emerald-600 shrink-0" />
-                    {displayStoreName}
-                  </p>
-                </div>
-              )}
-              {clockInBusinessId && hasResolvedPdv ? (
-                <div className="flex-1 min-h-[240px] flex flex-col min-w-0">
-                  <ClockInModal
-                    embedded
-                    storeLabel={displayStoreName || 'Tienda'}
-                    businessId={clockInBusinessId}
-                    ownerUserId={clockInOwnerUserId}
-                    pdvId={String(selectedPdv?._id || restrictedToPdvId || '')}
-                    workCenterId={String(selectedPdv?.workCenterId || '')}
-                    onCancel={() => undefined}
-                    onChanged={onClockInChanged}
-                    onMemberClockedIn={(memberId) => {
-                      setSelectedWorkerId(memberId);
-                    }}
-                  />
-                </div>
-              ) : (
-                <div className="rounded-2xl border-2 border-dashed border-violet-300 dark:border-violet-700 bg-violet-50/60 dark:bg-violet-950/30 px-4 py-6 text-center space-y-2">
-                  <LogIn className="w-5 h-5 text-violet-600 mx-auto" />
-                  <p className="text-sm font-bold text-violet-900 dark:text-violet-100">Fichaje del equipo</p>
-                  <p className="text-xs text-violet-800/80 dark:text-violet-200/80">Cargando tienda para fichar…</p>
-                </div>
-              )}
-              {!hasWorkers ? (
-                <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3 text-sm text-amber-800 dark:text-amber-200">
-                  No hay miembros en el equipo. Añade trabajadores en <span className="font-bold">Equipo</span>.
-                </div>
-              ) : selectedWorkerId ? (
-                <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium shrink-0">
-                  Listo: <strong>{effectiveWorkerName()}</strong>
-                  {' · '}pulsa «Siguiente — Contar»
-                </p>
-              ) : (
-                <p className="text-xs text-violet-700 dark:text-violet-300 font-medium shrink-0">
-                  Pulsa <strong>Abrir</strong> en tu nombre (fichar es opcional)
-                </p>
-              )}
-            </div>
-          )}
-
-          {isTabletMode && tabletStep === 2 && (
-            <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 flex flex-col gap-2.5">
-              <div className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2">
-                <div className="min-w-0">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                    Fichaje · abre la caja
-                  </p>
-                  <p className="font-semibold text-gray-900 dark:text-gray-100 truncate">{effectiveWorkerName()}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setTabletStep(1)}
-                  className="text-xs font-semibold text-emerald-600 hover:underline shrink-0"
-                >
-                  Cambiar
-                </button>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <label className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  {openingCashLocked ? 'Fondo de apertura *' : 'Conteo de efectivo *'}
-                </label>
-                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 tabular-nums">
-                  {total.toFixed(2)}€
-                </span>
-              </div>
-              {openingCashLocked ? (
-                <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30 px-3 py-3 space-y-1">
-                  <p className="text-[11px] font-bold text-amber-900 dark:text-amber-100">
-                    Fondo dejado{previousCloseLabel ? ` · ${previousCloseLabel}` : ''}
-                  </p>
-                  <p className="text-3xl font-black tabular-nums text-amber-950 dark:text-amber-50">
-                    {previousCloseCash!.toFixed(2)}€
-                  </p>
-                  <p className="text-[10px] text-amber-800/80 dark:text-amber-200/70">
-                    Se abre con este importe.
-                  </p>
-                </div>
-              ) : (
-                <>
-                  {previousCloseCash != null ? (
-                    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30 px-2.5 py-1.5">
-                      <p className="text-[11px] text-amber-900 dark:text-amber-100 min-w-0 flex-1">
-                        Cierre{previousCloseLabel ? ` ${previousCloseLabel}` : ''}:{' '}
-                        <strong className="tabular-nums">{previousCloseCash.toFixed(2)}€</strong>
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => setCounts(buildDenominationFromAmount(previousCloseCash))}
-                        className="shrink-0 px-2 py-1 rounded-md bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold"
-                      >
-                        Usar fondo
-                      </button>
-                    </div>
-                  ) : (
-                    <p className="text-[11px] text-stone-500">
-                      Sin fondo dejado detectado. Cuenta el cajón (0 € si está vacío) y abre.
-                    </p>
-                  )}
-                  <div className="flex-1 min-h-0">
-                    <CashCountGrid counts={counts} onChange={setCounts} compact />
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* Desktop: columna fichaje | columna efectivo */}
-          {!isTabletMode && (
-            <>
+          {/* Columna fichaje | columna efectivo */}
               {/* Franja terminal (sin comer espacio del fichaje) */}
               {selectedPdv && availableTerminals.length > 1 ? (
                 <div
@@ -1327,74 +1175,10 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
                   </>
                 )}
               </div>
-            </>
-          )}
-
-          {isTabletMode && parentLoading && !selectedPdv && (
-            <div className="px-5 py-4 text-sm text-stone-500 text-center">
-              Cargando tu tienda…
-            </div>
-          )}
         </div>
 
         {/* Footer */}
         <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 flex gap-2 bg-white dark:bg-gray-800 px-3 sm:px-4 py-2">
-          {isTabletMode ? (
-            <>
-              <button
-                type="button"
-                onClick={() => {
-                  if (tabletStep === 2) {
-                    setTabletStep(1);
-                    return;
-                  }
-                  // Antes llamaba a goBack() (= logout + salir de tablet) con etiqueta
-                  // «Cambiar trabajador». Solo quita la selección; salir = X del header.
-                  setSelectedWorkerId('');
-                }}
-                className="px-3 py-2 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg font-semibold text-xs hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-              >
-                {tabletStep === 2 ? 'Anterior' : 'Cambiar'}
-              </button>
-              {tabletStep === 1 ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!effectiveWorkerName()) return;
-                    setTabletStep(2);
-                  }}
-                  disabled={!effectiveWorkerName() || parentLoading}
-                  className={`flex-1 py-2 rounded-lg font-semibold text-xs transition-all flex items-center justify-center gap-1.5 ${
-                    effectiveWorkerName()
-                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                      : 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
-                  }`}
-                >
-                  Siguiente — Contar
-                  <ChevronDown className="w-3.5 h-3.5" />
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleSubmit}
-                  disabled={!canOpen || openActionBusy || !cashCountReady || Boolean(existingOpenForStore)}
-                  className={`flex-1 py-2 rounded-lg font-semibold text-xs transition-all flex items-center justify-center gap-1.5 ${
-                    canOpen && cashCountReady && !openActionBusy && !existingOpenForStore
-                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                      : 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
-                  }`}
-                >
-                  {openingBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Unlock className="w-3.5 h-3.5" />}
-                  {openingBusy
-                    ? 'Abriendo…'
-                    : existingOpenForStore
-                      ? 'Usa Entrar arriba'
-                      : `Abrir caja — ${total.toFixed(2)}€`}
-                </button>
-              )}
-            </>
-          ) : (
-            <>
           <button
             type="button"
             onClick={goBack}
@@ -1426,8 +1210,6 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
                   : `Abrir caja — ${total.toFixed(2)}€`}
             </button>
           </div>
-            </>
-          )}
         </div>
       </div>
     </div>
@@ -1976,6 +1758,9 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   const isDeliveryCierreStep =
     showDeliveryClosingSlots && closingStep === closingMaxStep;
   const bodyScrollRef = useRef<HTMLDivElement | null>(null);
+  const nextDayInitialInputRef = useRef<HTMLInputElement | null>(null);
+  /** Resalta «Fondo que queda» si intentan avanzar/confirmar sin rellenarlo. */
+  const [nextDayFondoHighlight, setNextDayFondoHighlight] = useState(false);
   const [browserOnline, setBrowserOnline] = useState(() => isBrowserOnline());
   const [brandLabels, setBrandLabels] = useState<Record<string, string>>({});
   /** Catálogo de marcas (para hojas de Facturación / 2ª caja). */
@@ -2004,8 +1789,19 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     if (el) el.scrollTop = 0;
   }, [closingStep]);
 
+  const focusNextDayFondo = useCallback(() => {
+    setNextDayFondoHighlight(true);
+    window.requestAnimationFrame(() => {
+      const el = nextDayInitialInputRef.current;
+      if (!el) return;
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.focus();
+    });
+  }, []);
+
   const goClosingStep = useCallback((next: number) => {
-    setClosingStep(Math.min(closingMaxStep, Math.max(1, next)));
+    const clamped = Math.min(closingMaxStep, Math.max(1, next));
+    setClosingStep(clamped);
   }, [closingMaxStep]);
   const countedTotal = calcDenominationTotal(counts);
   const expectedTpv = calcTpvExpectedCash(session);
@@ -2201,9 +1997,25 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   const nextDayInitialReady = nextDayInitialParsed != null;
   const nextDayInitialAmount = nextDayInitialParsed ?? 0;
 
+  useEffect(() => {
+    if (nextDayInitialReady) setNextDayFondoHighlight(false);
+  }, [nextDayInitialReady]);
+
   const handleNextDayInitialChange = useCallback((value: string) => {
     setNextDayInitialSlot(formatMoneyAsYouType(value, true));
   }, []);
+
+  const nextDayFondoCardClass = nextDayInitialReady
+    ? 'border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/60 dark:bg-emerald-950/20'
+    : nextDayFondoHighlight
+      ? 'border-amber-400 dark:border-amber-500 bg-amber-50 dark:bg-amber-950/40 ring-2 ring-amber-400/60 dark:ring-amber-500/50'
+      : 'border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-950';
+
+  const nextDayFondoInputClass = nextDayInitialReady
+    ? 'border-emerald-300 dark:border-emerald-700 text-emerald-950 dark:text-emerald-50 focus:ring-emerald-500/25 focus:border-emerald-500'
+    : nextDayFondoHighlight
+      ? 'border-amber-500 dark:border-amber-400 text-amber-950 dark:text-amber-50 focus:ring-amber-500/40 focus:border-amber-500'
+      : 'border-stone-300 dark:border-stone-600 text-stone-900 dark:text-stone-100 focus:ring-blue-500/25 focus:border-blue-500';
 
   const handleFoodSlotChange = useCallback((key: keyof FoodFamilyCounts, value: string) => {
     const cleaned = value.replace(/[^\d]/g, '');
@@ -3212,30 +3024,31 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 </div>
               ) : null}
 
-              <div className={`shrink-0 rounded-2xl border px-3 py-3 space-y-2 ${
-                nextDayInitialReady
-                  ? 'border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/60 dark:bg-emerald-950/20'
-                  : 'border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-950'
-              }`}>
+              <div className={`shrink-0 rounded-2xl border px-3 py-3 space-y-2 ${nextDayFondoCardClass}`}>
                 <label className="block cursor-text">
-                  <span className="text-[11px] font-bold flex items-center gap-1.5 text-stone-800 dark:text-stone-100">
-                    <Banknote className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                  <span className={`text-[11px] font-bold flex items-center gap-1.5 ${
+                    nextDayFondoHighlight && !nextDayInitialReady
+                      ? 'text-amber-900 dark:text-amber-100'
+                      : 'text-stone-800 dark:text-stone-100'
+                  }`}>
+                    <Banknote className={`w-3.5 h-3.5 ${
+                      nextDayFondoHighlight && !nextDayInitialReady
+                        ? 'text-amber-600 dark:text-amber-400'
+                        : 'text-emerald-600 dark:text-emerald-400'
+                    }`} />
                     Fondo que queda en caja *
                   </span>
                   <p className="mt-0.5 text-[10px] text-stone-500 dark:text-stone-400 leading-snug">
                     ¿Cuánto efectivo dejas en el cajón? Ese importe será el fondo al abrir.
                   </p>
                   <input
+                    ref={nextDayInitialInputRef}
                     type="text"
                     inputMode="decimal"
                     placeholder="Ej. 100,00"
                     value={nextDayInitialSlot}
                     onChange={(e) => handleNextDayInitialChange(e.target.value)}
-                    className={`mt-1.5 w-full min-h-14 px-3 py-2 text-3xl font-black tabular-nums tracking-tight border rounded-xl bg-white dark:bg-stone-950 focus:outline-none focus:ring-2 ${
-                      nextDayInitialReady
-                        ? 'border-emerald-300 dark:border-emerald-700 text-emerald-950 dark:text-emerald-50 focus:ring-emerald-500/25 focus:border-emerald-500'
-                        : 'border-stone-300 dark:border-stone-600 text-stone-900 dark:text-stone-100 focus:ring-blue-500/25 focus:border-blue-500'
-                    }`}
+                    className={`mt-1.5 w-full min-h-14 px-3 py-2 text-3xl font-black tabular-nums tracking-tight border rounded-xl bg-white dark:bg-stone-950 focus:outline-none focus:ring-2 ${nextDayFondoInputClass}`}
                   />
                 </label>
                 {nextDayInitialReady ? (
@@ -3254,8 +3067,14 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                     ) : null}
                   </p>
                 ) : (
-                  <p className="text-[11px] font-semibold text-stone-500">
-                    Indica el importe para poder cerrar.
+                  <p className={`text-[11px] font-semibold ${
+                    nextDayFondoHighlight
+                      ? 'text-amber-800 dark:text-amber-200'
+                      : 'text-stone-500'
+                  }`}>
+                    {nextDayFondoHighlight
+                      ? 'Obligatorio: indica el fondo que queda en caja.'
+                      : 'Indica el importe para poder cerrar.'}
                   </p>
                 )}
                 {countedTotal > 0 ? (
@@ -3294,34 +3113,35 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                   </div>
                 </div>
               </div>
-              <div className={`rounded-xl border p-2.5 space-y-1.5 ${
-                nextDayInitialReady
-                  ? 'border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/60 dark:bg-emerald-950/20'
-                  : 'border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-950'
-              }`}>
+              <div className={`rounded-xl border p-2.5 space-y-1.5 ${nextDayFondoCardClass}`}>
                 <label className="block cursor-text">
-                  <span className="text-[11px] font-bold text-stone-800 dark:text-stone-100">
+                  <span className={`text-[11px] font-bold ${
+                    nextDayFondoHighlight && !nextDayInitialReady
+                      ? 'text-amber-900 dark:text-amber-100'
+                      : 'text-stone-800 dark:text-stone-100'
+                  }`}>
                     Fondo que queda en caja *
                   </span>
                   <p className="text-[10px] text-stone-500">
                     Efectivo que dejas; se usará como fondo al abrir.
                   </p>
                   <input
+                    ref={nextDayInitialInputRef}
                     type="text"
                     inputMode="decimal"
                     placeholder="Ej. 100,00"
                     value={nextDayInitialSlot}
                     onChange={(e) => handleNextDayInitialChange(e.target.value)}
-                    className={`mt-1 w-full min-h-12 px-2.5 py-1.5 text-2xl font-black tabular-nums border rounded-xl bg-white dark:bg-stone-950 focus:outline-none focus:ring-2 ${
-                      nextDayInitialReady
-                        ? 'border-emerald-300 dark:border-emerald-700 focus:ring-emerald-500/25'
-                        : 'border-stone-300 dark:border-stone-600 focus:ring-blue-500/25'
-                    }`}
+                    className={`mt-1 w-full min-h-12 px-2.5 py-1.5 text-2xl font-black tabular-nums border rounded-xl bg-white dark:bg-stone-950 focus:outline-none focus:ring-2 ${nextDayFondoInputClass}`}
                   />
                 </label>
                 {nextDayInitialReady ? (
                   <p className="text-sm font-black tabular-nums">
                     Quedan {formatMoneyEs(nextDayInitialAmount)}
+                  </p>
+                ) : nextDayFondoHighlight ? (
+                  <p className="text-[11px] font-semibold text-amber-800 dark:text-amber-200">
+                    Obligatorio: indica el fondo que queda en caja.
                   </p>
                 ) : null}
               </div>
@@ -3368,15 +3188,20 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
             ) : (
               <button
                 type="button"
-                disabled={busy || !nextDayInitialReady}
+                disabled={busy}
                 onClick={() => {
                   if (!nextDayInitialReady) {
                     toast.error('Indica el fondo que queda en caja antes de cerrar');
+                    focusNextDayFondo();
                     return;
                   }
                   setConfirmCloseOpen(true);
                 }}
-                className={`${VERTIAL_BTN_PRIMARY} !min-h-11 flex-1`}
+                className={`${VERTIAL_BTN_PRIMARY} !min-h-11 flex-1 ${
+                  !nextDayInitialReady && !busy
+                    ? '!bg-amber-600 hover:!bg-amber-700'
+                    : ''
+                }`}
               >
                 <Lock className="w-4 h-4" />
                 {busy
@@ -3742,11 +3567,21 @@ function ClockInModal({
       toast.error(vacationMsg, { id: 'tpv-clockin-vacation' });
       return;
     }
+    if (actingId) {
+      toast.info('Fichando…', { id: 'tpv-clockin-busy', duration: 1200 });
+      return;
+    }
     setActingId(member.user_id);
     setActionMsg(null);
     let already = false;
     try {
-      const geo = await requestClockinGeo();
+      // GPS opcional y con tope corto: si esperamos 12s el 1er click parece muerto.
+      const geo = await Promise.race([
+        requestClockinGeo(),
+        new Promise<undefined>((resolve) => {
+          window.setTimeout(() => resolve(undefined), 600);
+        }),
+      ]);
       const rec = await clockIn(businessId, mid, member.fullName || member.email || 'Trabajador', {
         device_type: 'tablet',
         sales_point_id: pdvId || undefined,
@@ -5010,7 +4845,6 @@ export function TpvRegisterGate({
   /** Tras cerrar → «Abrir otra»: ir a contar fondo (mismo trabajador si se puede). */
   const [openingResume, setOpeningResume] = useState<{
     workerId?: string;
-    preferCashStep?: boolean;
     key: number;
   } | null>(null);
   const [managerPdvPickId, setManagerPdvPickId] = useState<string | null>(null);
@@ -5231,16 +5065,16 @@ export function TpvRegisterGate({
   /** Última caja abierta conocida: no perder el tablero si el pick de tienda parpadea. */
   const stickyOpenSessionRef = useRef<TpvRegisterSession | null>(null);
 
+  const holdStickyWhileOpen = Boolean(
+    isTabletSession || isWorkerUser || orderFlowActive,
+  );
+
   const activeSession = useMemo(() => {
     const pickId = isTabletSession
       ? tabletRestrictedPdvId
       : isWorkerUser
         ? workerAssignedPdvId
         : managerPdvPickId;
-
-    const holdStickyWhileOpen = Boolean(
-      isTabletSession || isWorkerUser || orderFlowActive,
-    );
 
     const { session, nextSticky } = resolveActiveTpvRegisterSession({
       sessions,
@@ -5260,8 +5094,30 @@ export function TpvRegisterGate({
     workerAssignedPdvId,
     managerPdvPickId,
     pointsOfSale,
-    orderFlowActive,
+    holdStickyWhileOpen,
   ]);
+
+  /**
+   * Sesión operativa del tablero: si el pick del CEO parpadea, activeSession puede
+   * ser null un frame aunque sticky siga open. Sin esto → OpeningScreen a mitad
+   * de pedido y el cobro cree que no hay caja.
+   */
+  const boardSession = useMemo(() => {
+    if (isTpvRegisterSessionOpen(activeSession)) return activeSession;
+    if (
+      holdStickyWhileOpen
+      && isTpvRegisterSessionOpen(stickyOpenSessionRef.current)
+    ) {
+      return stickyOpenSessionRef.current;
+    }
+    return null;
+  }, [activeSession, holdStickyWhileOpen]);
+
+  // Código / apertura: no mostrar Stock·Salir encima de Abrir caja (antes parpadeaban).
+  useTpvSuppressBottomBar(
+    !isTpvRegisterSessionOpen(boardSession),
+    'gate-register',
+  );
 
   const activeSessionIdRef = useRef<string | null>(null);
   activeSessionIdRef.current = isTpvRegisterSessionOpen(activeSession) ? activeSession?._id ?? null : null;
@@ -5928,6 +5784,15 @@ export function TpvRegisterGate({
     const storeId = String(opts?.preferredStoreId || existing.pointOfSaleId || '').trim();
     stickyOpenSessionRef.current = existing;
     writeTpvOpenRegisterLatch(existing);
+    {
+      const oid = normalizeClockinUserId(existing.workerId);
+      const oname = String(existing.workerName || '').trim();
+      if (oid && oname) {
+        setClockedInWorkers([{ id: oid, name: oname, status: 'active' }]);
+        setSelectedOrderTakerId(oid);
+        setClockedInWorkersLoading(false);
+      }
+    }
     if (!isWorkerUser && storeId) {
       const bid = resolveBusinessScopeId(currentBusiness);
       if (bid && dataUserId) writeDeliveryOpsSelectedPdvId(bid, dataUserId, storeId);
@@ -5967,7 +5832,6 @@ export function TpvRegisterGate({
     }
     setOpeningResume({
       workerId: String(closed?.workerId || '').trim() || undefined,
-      preferCashStep: true,
       key: Date.now(),
     });
     setPostCloseSession(null);
@@ -6083,6 +5947,12 @@ export function TpvRegisterGate({
       const pdvDoc = pointsOfSale.find((p) => p._id === pdvId);
       const wcId = String(pdvDoc?.workCenterId || tabletBinding?.workCenterId || '').trim();
       // Fichaje en paralelo: no alarga el candado de «Abrir» si la geo/red va lenta.
+      // No abrir el modal antiguo de fichaje solo: toast + barra de caja bastan.
+      if (openerId && data.workerName) {
+        setClockedInWorkers([{ id: openerId, name: data.workerName, status: 'active' }]);
+        setSelectedOrderTakerId(openerId);
+        setClockedInWorkersLoading(false);
+      }
       const clockInPromise = (bid && openerId && pdvId)
         ? (async () => {
           try {
@@ -6098,22 +5968,13 @@ export function TpvRegisterGate({
             setSelectedOrderTakerId(openerId);
             void refreshClockedInWorkers({ silent: true });
           } catch {
-            toast.warning('Caja abierta. Ficha al equipo para poder vender.', {
+            toast.warning('Caja abierta. Ficha al equipo desde el menú de caja si hace falta.', {
               id: 'tpv-clockin-needed',
-              duration: 7000,
+              duration: 5000,
             });
-            setShowClockIn(true);
           }
         })()
-        : Promise.resolve().then(() => {
-          if (isTpvRegisterSessionOpen(created)) {
-            toast.warning('Caja abierta. Ficha al equipo para poder vender.', {
-              id: 'tpv-clockin-needed',
-              duration: 7000,
-            });
-            setShowClockIn(true);
-          }
-        });
+        : Promise.resolve();
       void clockInPromise;
       // Aviso para el campanario de notificaciones. Útil para auditoría y para que
       // un encargado vea aperturas desde el móvil. Si la llamada al backend falla
@@ -6634,11 +6495,28 @@ export function TpvRegisterGate({
       clockedInWorkers: activeStaff,
       selectedOrderTakerId,
       currentUserId,
-      isWorkerUser,
+      // Código tablet: quien abre es el elegido en apertura, no la cuenta del dispositivo.
+      isWorkerUser: isWorkerUser && !isTabletSession,
       vacationBlockedIds,
     }),
-    [clockedInWorkersLoading, activeStaff, selectedOrderTakerId, currentUserId, isWorkerUser, vacationBlockedIds],
+    [clockedInWorkersLoading, activeStaff, selectedOrderTakerId, currentUserId, isWorkerUser, isTabletSession, vacationBlockedIds],
   );
+
+  /** Evita el flash de «Fichaje requerido / Comprobando…» (~1s) al abrir o recuperar caja. */
+  const [clockInGateSettled, setClockInGateSettled] = useState(false);
+  useEffect(() => {
+    if (clockInGate.allowed || clockInGate.reason === 'loading') {
+      setClockInGateSettled(false);
+      return;
+    }
+    const t = window.setTimeout(() => setClockInGateSettled(true), 500);
+    return () => window.clearTimeout(t);
+  }, [clockInGate.allowed, clockInGate.reason]);
+  const showClockInGateOverlay =
+    clockInGateSettled
+    && !clockInGate.allowed
+    && clockInGate.reason !== 'loading'
+    && !showClockIn;
 
   const isRestaurantVertical = isRestaurantBusinessType(
     scopeBusiness?.businessType || currentBusiness?.businessType,
@@ -6693,13 +6571,13 @@ export function TpvRegisterGate({
     if (!isTabletSession || showClosing) return;
     window.history.pushState({ tpvTabletSession: true }, '');
     const onPopState = () => {
-      void leaveTpvTabletSession(logout);
+      void leaveTpvTabletSession(logout, { navigate });
     };
     window.addEventListener('popstate', onPopState);
     return () => {
       window.removeEventListener('popstate', onPopState);
     };
-  }, [isTabletSession, showClosing, logout]);
+  }, [isTabletSession, showClosing, logout, navigate]);
 
   /** Evita que el botón/gesto Atrás de la tablet cierre el modal y salte al dashboard CEO. */
   useEffect(() => {
@@ -6720,15 +6598,15 @@ export function TpvRegisterGate({
   }, [showClosing]);
 
   const leavePostCloseScreen = useCallback(() => {
+    // Tablet / código de tienda: saltar YA al código (no vaciar UI antes → flash blanco).
+    if (isTabletSession) {
+      void leaveTpvTabletSession(logout, { navigate });
+      return;
+    }
     setPostCloseSession(null);
     setPostCloseAggregatorRows([]);
     setPostCloseShowDetail(false);
     setOpeningResume(null);
-    // Tablet / código de tienda: siempre vuelve al código (nunca al SaaS del CEO).
-    if (isTabletSession) {
-      void leaveTpvTabletSession(logout);
-      return;
-    }
     // CEO / gerente web: salir del TPV a la operativa SaaS.
     if (!isWorkerUser) {
       navigate(opsHomePath, { replace: true });
@@ -6742,7 +6620,8 @@ export function TpvRegisterGate({
   const registerContextValue = useMemo((): TpvRegisterContextType | null => {
     // Si activeSession parpadea un frame, mantener el contexto con sticky (pedido / «+»).
     const session =
-      (isTpvRegisterSessionOpen(activeSession) ? activeSession : null)
+      (isTpvRegisterSessionOpen(boardSession) ? boardSession : null)
+      || (isTpvRegisterSessionOpen(activeSession) ? activeSession : null)
       || (
         isTpvRegisterSessionOpen(stickyOpenSessionRef.current)
           ? stickyOpenSessionRef.current
@@ -6766,6 +6645,7 @@ export function TpvRegisterGate({
       requestClockIn,
     };
   }, [
+    boardSession,
     activeSession,
     addTransaction,
     performCashCount,
@@ -6869,7 +6749,7 @@ export function TpvRegisterGate({
 
   if (
     (loading || openingRecoverHold)
-    && !isTpvRegisterSessionOpen(activeSession)
+    && !isTpvRegisterSessionOpen(boardSession)
     && !isTpvRegisterSessionOpen(stickyOpenSessionRef.current)
   ) {
     return wrapShell(
@@ -6908,7 +6788,7 @@ export function TpvRegisterGate({
     );
   }
 
-  if (postCloseSession && !isTpvRegisterSessionOpen(activeSession)) {
+  if (postCloseSession && !isTpvRegisterSessionOpen(boardSession)) {
     const excelClosed = excelLikeAmountsFromClosedSession(postCloseSession, {
       ...postCloseBrandLabels,
       ...(postCloseSession.closingBrandLabels || {}),
@@ -7050,7 +6930,7 @@ export function TpvRegisterGate({
                   onClick={leavePostCloseScreen}
                   className="flex-1 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
                 >
-                  {isTabletSession ? 'Cambiar trabajador' : 'Volver'}
+                  {isTabletSession ? 'Salir a Vertial' : 'Volver'}
                 </button>
               ) : (
                 <button
@@ -7058,7 +6938,7 @@ export function TpvRegisterGate({
                   onClick={leavePostCloseScreen}
                   className="flex-1 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
                 >
-                  Salir del TPV
+                  Salir a Vertial
                 </button>
               )}
             </div>
@@ -7068,7 +6948,7 @@ export function TpvRegisterGate({
     );
   }
 
-  if (!isTpvRegisterSessionOpen(activeSession)) {
+  if (!isTpvRegisterSessionOpen(boardSession)) {
     if (isWorkerUser && !isTabletSession && !loading && !resolveEffectiveSalesPointRef({
       employmentSalesPointId: user?.employment?.salesPointId,
       workCenters,
@@ -7133,6 +7013,10 @@ export function TpvRegisterGate({
     const openingRestrictedPdvId = tabletRestrictedPdvId
       || (isWorkerUser ? workerAssignedPdvId : managerPdvPickId);
 
+    // Entrada por código TPV: misma UI de apertura que tienda/CEO, pero sin
+    // poderes de gerente (cambiar tienda / volver a cuenta).
+    const tabletEntryLocked = Boolean(isTabletSession || tabletBinding);
+
     const openingScreen = (
       <OpeningScreen
         key={openingResume ? `resume-${openingResume.key}` : 'opening'}
@@ -7144,8 +7028,7 @@ export function TpvRegisterGate({
         workCenters={workCenters}
         workerOptions={openingWorkerOptions}
         registerSessions={sessions}
-        isManagerView={!isWorkerUser && !isTabletSession}
-        isTabletMode={isTabletSession}
+        isManagerView={!isWorkerUser && !tabletEntryLocked}
         tabletStoreLabel={tabletBinding?.pdvName}
         restrictedToPdvId={openingRestrictedPdvId}
         restaurantOpening={isRestaurantVerticalChrome}
@@ -7157,7 +7040,7 @@ export function TpvRegisterGate({
           void refreshClockedInWorkers({ silent: true });
         }}
         onClearStorePick={
-          !isWorkerUser && !isTabletSession
+          !isWorkerUser && !tabletEntryLocked
             ? () => {
                 const bid = resolveBusinessScopeId(currentBusiness);
                 if (bid && dataUserId) writeDeliveryOpsSelectedPdvId(bid, dataUserId, null);
@@ -7173,12 +7056,15 @@ export function TpvRegisterGate({
     return wrapShell(openingScreen);
   }
 
+  // Tras el guard, boardSession es la caja open (active o sticky).
+  const openBoardSession = boardSession!;
+
   return wrapShell(
     <TpvRegisterBoardReadyContext.Provider value>
       <TpvStatusBarQuickActionsContext.Provider value={statusBarQuickActionsApi}>
       <div className={tpvFrameClass}>
         <RegisterStatusBar
-          session={activeSession}
+          session={openBoardSession}
           onRequestClockIn={() => setShowClockIn(true)}
           onRequestClose={() => void handleRequestClose()}
           onRequestCashCount={() => setShowCashCount(true)}
@@ -7197,10 +7083,10 @@ export function TpvRegisterGate({
         />
         {!isRestaurantVerticalChrome && (
           <RegisterCashOpsStrip
-            session={activeSession}
+            session={openBoardSession}
             compact={compactRegisterChrome}
             onRemove={(txId) => {
-              const tx = (activeSession.transactions || []).find((t) => t.id === txId);
+              const tx = (openBoardSession.transactions || []).find((t) => t.id === txId);
               if (!tx || !isTpvCashMovementTx(tx.type)) {
                 toast.error('Solo se pueden eliminar entradas, salidas o devoluciones');
                 return;
@@ -7211,15 +7097,9 @@ export function TpvRegisterGate({
           />
         )}
         <div className="flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden relative">
-          {!clockInGate.allowed && !showClockIn && (
+          {!showClockInGateOverlay ? null : (
             <div className="absolute inset-0 z-30 flex items-center justify-center bg-gray-950/55 backdrop-blur-[2px] p-4">
-              {clockInGate.reason === 'loading' ? (
-                <div className="max-w-sm w-full rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-xl p-6 text-center space-y-3">
-                  <div className="animate-spin w-8 h-8 border-2 border-gray-300 border-t-violet-600 rounded-full mx-auto" />
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Comprobando fichajes…</p>
-                </div>
-              ) : (
-                <div className="max-w-sm w-full rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-xl p-6 text-center space-y-4">
+              <div className="max-w-sm w-full rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-xl p-6 text-center space-y-4">
                   <div className="w-12 h-12 rounded-xl bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center mx-auto">
                     <LogIn className="w-6 h-6 text-violet-600 dark:text-violet-400" />
                   </div>
@@ -7228,7 +7108,7 @@ export function TpvRegisterGate({
                       {clockInGate.reason === 'vacation_blocked' ? 'No disponible' : 'Fichaje requerido'}
                     </h2>
                     <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                      {tpvClockInBlockMessage(clockInGate.reason, isWorkerUser)}
+                      {tpvClockInBlockMessage(clockInGate.reason, isWorkerUser && !isTabletSession)}
                     </p>
                     {clockInStoreScope?.storeLabel && (
                       <p className="text-xs text-gray-400 mt-2">
@@ -7243,8 +7123,7 @@ export function TpvRegisterGate({
                   >
                     Fichar equipo en este local
                   </button>
-                </div>
-              )}
+              </div>
             </div>
           )}
           {children}
@@ -7252,13 +7131,13 @@ export function TpvRegisterGate({
       </div>
       {showCashCount && (
         <TpvGatePortal>
-          <CashCountModal session={activeSession} onConfirm={(d, n) => performCashCount(activeSession.workerName, d, n)} onCancel={() => setShowCashCount(false)} />
+          <CashCountModal session={openBoardSession} onConfirm={(d, n) => performCashCount(openBoardSession.workerName, d, n)} onCancel={() => setShowCashCount(false)} />
         </TpvGatePortal>
       )}
       {showCashOps && (
         <TpvGatePortal>
           <TpvCashOpsModal
-            registeredBy={activeSession.workerName}
+            registeredBy={openBoardSession.workerName}
             workers={clockedInWorkers}
             workersLoading={clockedInWorkersLoading}
             onClose={() => setShowCashOps(false)}
@@ -7289,7 +7168,7 @@ export function TpvRegisterGate({
       )}
       {showIncident && (
         <TpvGatePortal>
-          <IncidentModal session={activeSession} onConfirm={addIncident} onCancel={() => setShowIncident(false)} />
+          <IncidentModal session={openBoardSession} onConfirm={addIncident} onCancel={() => setShowIncident(false)} />
         </TpvGatePortal>
       )}
       {showPrinterSetup && (

@@ -742,18 +742,25 @@ async function request<T>(
 
   if (!response.ok || payload.ok === false) {
     const fromPayload = extractApiErrorMessage(payload as Record<string, unknown>);
-    if (fromPayload) {
-      throw new Error(fromPayload);
-    }
-    const statusBit = `${response.status} ${response.statusText || ''}`.trim();
-    const bodyBit = rawText && typeof payload.error !== 'string'
-      ? rawText.replace(/\s+/g, ' ').trim().slice(0, 200)
-      : '';
-    throw new Error(
-      bodyBit
-        ? `${statusBit}: ${bodyBit}`
-        : 'No se pudo completar la solicitud. Inténtalo de nuevo.',
-    );
+    const payloadRec = payload as Record<string, unknown>;
+    const nestedErr = payloadRec.error && typeof payloadRec.error === 'object'
+      ? (payloadRec.error as Record<string, unknown>)
+      : null;
+    const code = String(payloadRec.code || nestedErr?.code || '').trim();
+    const message = fromPayload
+      || (() => {
+        const statusBit = `${response.status} ${response.statusText || ''}`.trim();
+        const bodyBit = rawText && typeof payload.error !== 'string'
+          ? rawText.replace(/\s+/g, ' ').trim().slice(0, 200)
+          : '';
+        return bodyBit
+          ? `${statusBit}: ${bodyBit}`
+          : 'No se pudo completar la solicitud. Inténtalo de nuevo.';
+      })();
+    const err = new Error(message) as Error & { code?: string; status?: number };
+    if (code) err.code = code;
+    err.status = response.status;
+    throw err;
   }
 
   return payload as ApiEnvelope<T>;

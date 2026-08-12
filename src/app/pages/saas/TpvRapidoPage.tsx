@@ -2666,7 +2666,11 @@ export function TpvRapidoOrderFlow({
       }
       const openRegister = resolveOpenRegister();
       if (!openRegister) {
-        toast.error('Abre la caja de la tienda para cobrar y enviar');
+        if (boardReady || hasTpvOpenRegisterLatch()) {
+          toast.error('Recuperando la caja… espera un segundo y vuelve a cobrar');
+        } else {
+          toast.error('Abre la caja de la tienda para cobrar y enviar');
+        }
         return;
       }
 
@@ -2963,7 +2967,7 @@ export function TpvRapidoOrderFlow({
         setSubmitting(false);
       }
     },
-    [saleClient, deliveryType, cart, selectedAddressId, paymentMethod, pendingSplitParts, finalTotal, payableTotal, deliveryFeeAmount, orderNotes, userId, phonePrefix, register?.selectedOrderTakerId, selectedOrderTaker, appliedPromo, discountAmount, promoMode, clientPromoSelected, effectiveCalc, register?.session, resolveOpenRegister, user?.fullName, user?.user_id, user?.id, user?.email, tabletMode, tpvBrandIngredientSelection, tpvCategoryTemplates, storeIngredients, brands, restaurantTable, restaurantDiningOrder, onRestaurantDiningOrderUpdated, onRestaurantOrderComplete, currentBusiness, writeBusinessId, businessId, catalog, effectiveOrderTakerId, showTpvError, cashGiven, pricedByLineId],
+    [saleClient, deliveryType, cart, selectedAddressId, paymentMethod, pendingSplitParts, finalTotal, payableTotal, deliveryFeeAmount, orderNotes, userId, phonePrefix, register?.selectedOrderTakerId, selectedOrderTaker, appliedPromo, discountAmount, promoMode, clientPromoSelected, effectiveCalc, register?.session, resolveOpenRegister, boardReady, user?.fullName, user?.user_id, user?.id, user?.email, tabletMode, tpvBrandIngredientSelection, tpvCategoryTemplates, storeIngredients, brands, restaurantTable, restaurantDiningOrder, onRestaurantDiningOrderUpdated, onRestaurantOrderComplete, currentBusiness, writeBusinessId, businessId, catalog, effectiveOrderTakerId, showTpvError, cashGiven, pricedByLineId],
   );
 
   const handleSaveEditedDeliveryOrder = useCallback(async () => {
@@ -4259,17 +4263,32 @@ export function TpvRapidoOrderFlow({
       && !restaurantTable?.isCounter)
     // Editar pedido del tablero: no bloquear si el contexto de caja parpadea un frame.
     || isEditingDeliveryOrder
-    // Nuevo pedido desde tablero: sticky / boardReady / latch cubren el parpadeo del Context.
+    // Nuevo pedido: sticky cubre el parpadeo. Latch/boardReady solos no bastan para cobrar.
     || (
       tabletMode
-      && (
-        Boolean(registerStable)
-        || boardReady
-        || hasTpvOpenRegisterLatch()
-      )
+      && Boolean(registerStable)
     );
 
   if (needsOpenRegister && !registerStable && !allowProductsWithoutRegister) {
+    if (tabletMode && (boardReady || hasTpvOpenRegisterLatch())) {
+      return (
+        <div className="min-h-[50vh] flex flex-col items-center justify-center gap-4 p-6 text-center">
+          <div className="animate-spin w-8 h-8 border-2 border-gray-300 border-t-gray-900 rounded-full" />
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Recuperando la caja abierta…
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              void handleGoBack();
+            }}
+            className="text-sm font-semibold text-[#2563EB] hover:underline"
+          >
+            Volver
+          </button>
+        </div>
+      );
+    }
     return (
       <div className="min-h-[50vh] flex flex-col items-center justify-center gap-4 p-6 text-center">
         <p className="text-sm text-gray-600 dark:text-gray-400">

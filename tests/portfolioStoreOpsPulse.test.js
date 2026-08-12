@@ -303,4 +303,61 @@ describe('buildStoreOpsPulse', () => {
     expect(todayRow?.channels.glovo).toBe(120.5);
     expect(todayRow?.revenue).toBe(285.5);
   });
+
+  it('uses closing productClosingCounts for pizza/burger/taco (Excel / integrators)', () => {
+    const today = '2026-07-28';
+    const dayKeys = listTrailingDayKeys(today, 7);
+    const orders = [
+      order({
+        id: 'local',
+        pdv: 'pdv-tiana',
+        paidAt: '2026-07-28T12:00:00',
+        total: 30,
+        items: [{ name: 'Margarita', category: 'Pizzas', qty: 1 }],
+      }),
+    ];
+    const sessions = [
+      {
+        _id: 'sess-1',
+        pointOfSaleId: 'pdv-tiana',
+        status: 'closed',
+        openedAt: '2026-07-28T09:00:00',
+        closedAt: '2026-07-28T23:00:00',
+        aggregatorClosingTotals: {
+          glovo: 100,
+          ubereats: 50,
+          justeat: 0,
+          flipdish: 0,
+        },
+        // Top-level = TPV + apps (como guarda el cierre / Excel Uriel)
+        productClosingCounts: {
+          pizza: 25,
+          burger: 4,
+          taco: 2,
+          byChannel: {
+            glovo: { pizza: 10, burger: 2, taco: 1 },
+            ubereats: { pizza: 5, burger: 2, taco: 1 },
+          },
+        },
+      },
+    ];
+    const pulse = buildStoreOpsPulse(orders, {
+      storeId: 'wc-tiana',
+      storeName: 'Tiana',
+      businessId: 'biz-1',
+      businessName: 'Modomio',
+      pdvId: 'pdv-tiana',
+      workCenterId: 'wc-tiana',
+      todayKey: today,
+      dayKeys,
+      sessions,
+    });
+    const todayRow = pulse.days.find((d) => d.dayKey === today);
+    expect(todayRow?.pizza).toBe(25);
+    expect(todayRow?.burger).toBe(4);
+    expect(todayRow?.taco).toBe(2);
+    expect(pulse.pizza).toBe(25);
+    expect(pulse.burger).toBe(4);
+    expect(pulse.taco).toBe(2);
+  });
 });

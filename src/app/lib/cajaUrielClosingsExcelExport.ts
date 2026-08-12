@@ -1,5 +1,6 @@
 /**
- * Core — Excel de cierre de caja (layout Uriel), hojas según Facturación marcas.
+ * Core — Excel de cierre de caja (plantilla facturación), hojas según Facturación marcas.
+ * El nombre del archivo y los títulos llevan el de la empresa (no “Uriel”).
  *
  * Orden del libro (mega Excel básico, sin pedidos línea a línea):
  *   1) Hojas marca (plantilla cliente), día a día del alcance · todas las tiendas
@@ -518,6 +519,15 @@ function cellBlankZero(n: number): number | '' {
   return v === 0 ? '' : v;
 }
 
+/** Prefijo de título con el nombre de la empresa (visible en la 1ª celda de cada hoja). */
+function withCompanyTitle(companyName: string | null | undefined, rest: string): string {
+  const company = String(companyName || '').trim();
+  const body = String(rest || '').trim();
+  if (!company) return body;
+  if (!body) return company;
+  return `${company} · ${body}`;
+}
+
 function unitValue(row: UrielCajaDayAmounts, key: string): number {
   if (key === 'pizza') return row.totalPizza;
   if (key === 'burger') return row.totalBurger;
@@ -573,7 +583,7 @@ export function buildUrielCajaBillingSheetAoa(
   monthSheet: UrielCajaMonthSheet,
   billingSheet: BrandBillingSheet,
   allSheets: BrandBillingSheet[],
-  opts?: { scopeLabel?: string },
+  opts?: { scopeLabel?: string; companyName?: string },
 ): unknown[][] {
   const allRows = monthSheet.rows.map((row) => {
     const split = splitUrielAmountsByBillingSheet(row, billingSheet, allSheets);
@@ -598,9 +608,12 @@ export function buildUrielCajaBillingSheetAoa(
   );
 
   const scope = String(opts?.scopeLabel || '').trim();
-  const title = scope
-    ? `INGRESOS ${billingSheet.label} · ${monthSheet.monthLabel} · ${scope}`
-    : `INGRESOS ${billingSheet.label} · ${monthSheet.monthLabel}`;
+  const title = withCompanyTitle(
+    opts?.companyName,
+    scope
+      ? `INGRESOS ${billingSheet.label} · ${monthSheet.monthLabel} · ${scope}`
+      : `INGRESOS ${billingSheet.label} · ${monthSheet.monthLabel}`,
+  );
 
   const aoa: unknown[][] = [
     [title],
@@ -711,6 +724,7 @@ function storeDayHasActivity(row: UrielCajaDayAmounts): boolean {
 export function buildUrielCajaStoreSheetAoa(
   monthSheet: UrielCajaMonthSheet,
   storeLabel: string,
+  opts?: { companyName?: string },
 ): unknown[][] {
   const rows = monthSheet.rows.filter(storeDayHasActivity);
   const monthEfectivo = sumMoneyField(monthSheet.rows, 'efectivo');
@@ -727,7 +741,7 @@ export function buildUrielCajaStoreSheetAoa(
   const label = String(storeLabel || 'TIENDA').trim() || 'TIENDA';
 
   const aoa: unknown[][] = [
-    [`INGRESOS · ${label} · ${monthSheet.monthLabel}`],
+    [withCompanyTitle(opts?.companyName, `INGRESOS · ${label} · ${monthSheet.monthLabel}`)],
     [],
     [...URIEL_CAJA_STORE_HEADERS],
   ];
@@ -915,7 +929,7 @@ export function buildUrielCajaBillingHistorySheetAoa(
   rowsIn: UrielCajaHistoryDayRow[],
   billingSheet: BrandBillingSheet,
   allSheets: BrandBillingSheet[],
-  opts?: { scopeLabel?: string; titleSuffix?: string },
+  opts?: { scopeLabel?: string; titleSuffix?: string; companyName?: string },
 ): unknown[][] {
   const allRows = rowsIn.map((row) => {
     const split = splitUrielAmountsByBillingSheet(row, billingSheet, allSheets);
@@ -939,9 +953,12 @@ export function buildUrielCajaBillingHistorySheetAoa(
   );
   const scope = String(opts?.scopeLabel || '').trim();
   const suffix = String(opts?.titleSuffix || 'HISTORIAL').trim();
-  const title = scope
-    ? `INGRESOS ${billingSheet.label} · ${suffix} · ${scope}`
-    : `INGRESOS ${billingSheet.label} · ${suffix}`;
+  const title = withCompanyTitle(
+    opts?.companyName,
+    scope
+      ? `INGRESOS ${billingSheet.label} · ${suffix} · ${scope}`
+      : `INGRESOS ${billingSheet.label} · ${suffix}`,
+  );
 
   const aoa: unknown[][] = [[title], [], [...headers]];
   for (const row of rows) {
@@ -970,7 +987,7 @@ export function buildUrielCajaBillingHistorySheetAoa(
 export function buildUrielCajaStoreHistorySheetAoa(
   rowsIn: UrielCajaHistoryDayRow[],
   storeLabel: string,
-  opts?: { titleSuffix?: string },
+  opts?: { titleSuffix?: string; companyName?: string },
 ): unknown[][] {
   const rows = rowsIn.filter(storeDayHasActivity);
   const monthEfectivo = sumMoneyField(rowsIn, 'efectivo');
@@ -988,7 +1005,7 @@ export function buildUrielCajaStoreHistorySheetAoa(
   const suffix = String(opts?.titleSuffix || 'HISTORIAL').trim();
 
   const aoa: unknown[][] = [
-    [`INGRESOS · ${label} · ${suffix}`],
+    [withCompanyTitle(opts?.companyName, `INGRESOS · ${label} · ${suffix}`)],
     [],
     [...URIEL_CAJA_HISTORY_STORE_HEADERS],
   ];
@@ -1021,7 +1038,7 @@ export function buildUrielCajaStoreHistorySheetAoa(
 /** RESUMEN del alcance: una fila por mes (MES = «JULIO 2026»). */
 export function buildUrielCajaResumenHistorySheetAoa(
   sessions: TpvRegisterSession[],
-  opts: { yearMonths: string[]; pointOfSaleId?: string },
+  opts: { yearMonths: string[]; pointOfSaleId?: string; companyName?: string },
 ): unknown[][] {
   const yearMonths = [...(opts.yearMonths || [])].sort((a, b) => a.localeCompare(b));
   type MonthAgg = {
@@ -1073,7 +1090,7 @@ export function buildUrielCajaResumenHistorySheetAoa(
     round2(months.reduce((s, m) => s + (Number(m[field]) || 0), 0));
 
   const aoa: unknown[][] = [
-    ['RESUMEN · HISTORIAL · TODAS LAS TIENDAS'],
+    [withCompanyTitle(opts.companyName, 'RESUMEN · HISTORIAL · TODAS LAS TIENDAS')],
     ['Totales por mes. Detalle día a día en las hojas de marca y tienda.'],
     [],
     [...URIEL_CAJA_RESUMEN_HEADERS],
@@ -1123,6 +1140,7 @@ export function buildUrielCajaComparativaYearSheetAoa(
     pointOfSaleId?: string;
     year: number;
     billingSheets?: BrandBillingSheet[] | null;
+    companyName?: string;
   },
 ): unknown[][] {
   const sheets = resolveBillingSheetsForExcel(opts.billingSheets);
@@ -1195,7 +1213,7 @@ export function buildUrielCajaComparativaYearSheetAoa(
     ? ''
     : ' · TODAS LAS TIENDAS';
   const aoa: unknown[][] = [
-    [`COMPARATIVA · ${year}${scopeTitle}`],
+    [withCompanyTitle(opts.companyName, `COMPARATIVA · ${year}${scopeTitle}`)],
     ['Resumen por meses (más rápido). El detalle día a día está en las otras hojas.'],
     [],
     headers,
@@ -1247,7 +1265,7 @@ export function buildUrielCajaSheetAoa(
 }
 
 function sanitizeFilePart(raw: string): string {
-  const s = String(raw || '')
+  return String(raw || '')
     .trim()
     .normalize('NFD')
     .replace(/\p{M}/gu, '')
@@ -1255,7 +1273,6 @@ function sanitizeFilePart(raw: string): string {
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')
     .slice(0, 48);
-  return s || 'pdv';
 }
 
 function sanitizeExcelSheetName(raw: string, used: Set<string>): string {
@@ -1280,7 +1297,7 @@ export type DownloadUrielCajaExcelOptions = {
   pointOfSaleName?: string;
   /** Nombres de tienda para las hojas detalle. */
   pointsOfSale?: Array<{ id: string; name?: string; workCenterId?: string }>;
-  /** Nombre de la empresa que descarga → nombre del archivo .xlsx */
+  /** Nombre de la empresa → archivo .xlsx y títulos de cada hoja (no “Uriel”). */
   businessName?: string;
   yearMonth?: string;
   /** Alcance: all (defecto) | year | month. */
@@ -1485,8 +1502,104 @@ function listStoreSheetsForHistory(
   return ordered.map((id) => ({ id, name: nameById.get(id) || id }));
 }
 
+function foldExcelLabel(raw: string): string {
+  return String(raw || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+}
+
 /**
- * Mega Excel básico (sin descargar).
+ * Código corto de marca para el título de hoja (plantilla cliente):
+ * MODOMIO → MM · BLACK BURGER → BB.
+ */
+export function brandExcelSheetCode(label: string): string {
+  const raw = String(label || '').trim();
+  const fold = foldExcelLabel(raw);
+  if (/^mm\b/.test(fold) || fold.includes('modomio')) return 'MM';
+  if (/^bb\b/.test(fold) || fold.includes('black') || fold.includes('burger')) return 'BB';
+  const words = raw.split(/\s+/).filter(Boolean);
+  if (words.length >= 2) {
+    return words.map((w) => w.charAt(0).toUpperCase()).join('').slice(0, 4);
+  }
+  return raw.slice(0, 2).toUpperCase() || 'XX';
+}
+
+/**
+ * Agrupa PDVs de la misma plaza (Tiana, Badalona…) para un Excel por plaza.
+ */
+export function storeExcelGroupKey(storeName: string): string {
+  const n = foldExcelLabel(storeName);
+  if (/tiana/.test(n)) return 'tiana';
+  if (/badalona|\bbdn\b/.test(n)) return 'badalona';
+  const cleaned = n
+    .replace(/modomio|black\s*burger|vb\d+.*/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .find((t) => t.length >= 3);
+  return cleaned || n.slice(0, 12) || 'tienda';
+}
+
+/**
+ * Título real del Excel por marca×tienda (definición cliente):
+ * MM TIANA · BB TIANA · MM BADALONA · BB BDN.
+ */
+export function brandStoreExcelSheetTitle(brandLabel: string, storeGroupKey: string): string {
+  const brand = brandExcelSheetCode(brandLabel);
+  const key = String(storeGroupKey || '').trim().toLowerCase();
+  if (key === 'tiana') return `${brand} TIANA`;
+  if (key === 'badalona') {
+    // Misma plantilla que el hub Google Sheets del cliente.
+    return brand === 'BB' ? 'BB BDN' : `${brand} BADALONA`;
+  }
+  return `${brand} ${key.toUpperCase().slice(0, 12)}`;
+}
+
+type ExcelStoreGroup = {
+  key: string;
+  /** PDVs que suman en ese Excel (p. ej. varios Badalona). */
+  pdvIds: string[];
+  sampleName: string;
+};
+
+function groupStoresForBrandExcels(
+  stores: Array<{ id: string; name: string }>,
+): ExcelStoreGroup[] {
+  const byKey = new Map<string, ExcelStoreGroup>();
+  const order: string[] = [];
+  for (const store of stores) {
+    const key = storeExcelGroupKey(store.name);
+    let g = byKey.get(key);
+    if (!g) {
+      g = { key, pdvIds: [], sampleName: store.name };
+      byKey.set(key, g);
+      order.push(key);
+    }
+    if (!g.pdvIds.includes(store.id)) g.pdvIds.push(store.id);
+  }
+  // Tiana → Badalona → resto (orden del hub EXCEL 1…4).
+  order.sort((a, b) => {
+    const rank = (k: string) => (k === 'tiana' ? 0 : k === 'badalona' ? 1 : 2);
+    const d = rank(a) - rank(b);
+    return d !== 0 ? d : a.localeCompare(b, 'es');
+  });
+  return order.map((k) => byKey.get(k)!).filter(Boolean);
+}
+
+function sessionsForPdvIds(
+  sessions: TpvRegisterSession[],
+  pdvIds: string[],
+): TpvRegisterSession[] {
+  const set = new Set(pdvIds.map((id) => String(id || '').trim()).filter(Boolean));
+  if (set.size === 0) return [];
+  return sessions.filter((s) => set.has(String(s.pointOfSaleId || '').trim()));
+}
+
+/**
+ * Mega Excel: una hoja por Excel del hub cliente (marca × tienda).
+ * Definición: MM TIANA · BB TIANA · MM BADALONA · BB BDN (+ RESUMEN / COMPARATIVA).
  * historyRange all (defecto) | year | month.
  */
 export function buildUrielCajaClosingsWorkbook(
@@ -1519,6 +1632,7 @@ export function buildUrielCajaClosingsWorkbook(
     : scopedSessions;
 
   const billingSheets = resolveBillingSheetsForExcel(opts.billingSheets);
+  const companyName = String(opts.businessName || '').trim() || undefined;
   const workbook = XLSX.utils.book_new();
   const usedNames = new Set<string>();
   const sheetNames: string[] = [];
@@ -1532,87 +1646,71 @@ export function buildUrielCajaClosingsWorkbook(
       ? `AÑO ${yearMonth.slice(0, 4)}`
       : 'HISTORIAL';
 
-  let rows = 0;
+  const storeList = useFechaColumns
+    ? listStoreSheetsForHistory(merged, yearMonths, opts)
+    : listStoreSheetsForMonth(merged, yearMonth, opts);
+  const storeGroups = groupStoresForBrandExcels(storeList);
 
-  if (useFechaColumns) {
-    const companyRows = buildUrielCajaHistoryDayRows(merged, { yearMonths });
-    rows = companyRows.filter(storeDayHasActivity).length;
+  let rows = 0;
+  const companyWide = useFechaColumns
+    ? buildUrielCajaHistoryDayRows(merged, { yearMonths })
+    : buildUrielCajaMonthSheet(merged, { yearMonth });
+  if (!companyWide) {
+    throw new Error('Mes inválido para el Excel de cierre');
+  }
+  rows = useFechaColumns
+    ? (companyWide as ReturnType<typeof buildUrielCajaHistoryDayRows>).filter(storeDayHasActivity).length
+    : (companyWide as UrielCajaMonthSheet).rows.filter(storeDayHasActivity).length;
+
+  // Orden hub: por plaza (Tiana → Badalona) y dentro por marca (MM → BB).
+  // Siempre las 4 hojas de definición (aunque un mes vaya a 0).
+  for (const store of storeGroups) {
+    const storeSessions = sessionsForPdvIds(merged, store.pdvIds);
+
     for (const billing of billingSheets) {
-      const aoa = buildUrielCajaBillingHistorySheetAoa(companyRows, billing, billingSheets, {
-        scopeLabel: 'TODAS LAS TIENDAS',
-        titleSuffix,
-      });
-      appendSheetFromAoa(
-        workbook,
-        usedNames,
-        sheetNames,
-        billing.label,
-        aoa,
-        [
-          ...URIEL_CAJA_HISTORY_MONEY_HEADERS,
-          ...billing.unitColumns.map((c) => c.header),
-        ],
-      );
-    }
-    const stores = listStoreSheetsForHistory(merged, yearMonths, opts);
-    for (const store of stores) {
-      const storeRows = buildUrielCajaHistoryDayRows(merged, {
-        pointOfSaleId: store.id,
-        yearMonths,
-      });
-      if (!storeRows.some(storeDayHasActivity)) continue;
-      const aoa = buildUrielCajaStoreHistorySheetAoa(storeRows, store.name, { titleSuffix });
-      appendSheetFromAoa(
-        workbook,
-        usedNames,
-        sheetNames,
-        store.name,
-        aoa,
-        [...URIEL_CAJA_HISTORY_STORE_HEADERS],
-      );
-    }
-  } else {
-    const companyMonthSheet = buildUrielCajaMonthSheet(merged, { yearMonth });
-    if (!companyMonthSheet) {
-      throw new Error('Mes inválido para el Excel de cierre');
-    }
-    rows = companyMonthSheet.rows.filter(storeDayHasActivity).length;
-    for (const billing of billingSheets) {
-      const aoa = buildUrielCajaBillingSheetAoa(companyMonthSheet, billing, billingSheets, {
-        scopeLabel: 'TODAS LAS TIENDAS',
-      });
-      appendSheetFromAoa(
-        workbook,
-        usedNames,
-        sheetNames,
-        billing.label,
-        aoa,
-        [
-          ...URIEL_CAJA_MONEY_HEADERS,
-          ...billing.unitColumns.map((c) => c.header),
-        ],
-      );
-    }
-    const stores = listStoreSheetsForMonth(merged, yearMonth, opts);
-    for (const store of stores) {
-      const storeMonth = buildUrielCajaMonthSheet(merged, {
-        pointOfSaleId: store.id,
-        yearMonth,
-      });
-      if (!storeMonth || !storeMonth.rows.some(storeDayHasActivity)) continue;
-      const aoa = buildUrielCajaStoreSheetAoa(storeMonth, store.name);
-      appendSheetFromAoa(
-        workbook,
-        usedNames,
-        sheetNames,
-        store.name,
-        aoa,
-        [...URIEL_CAJA_STORE_HEADERS],
-      );
+      const sheetTitle = brandStoreExcelSheetTitle(billing.label, store.key);
+      if (useFechaColumns) {
+        const storeRows = buildUrielCajaHistoryDayRows(storeSessions, { yearMonths });
+        const aoa = buildUrielCajaBillingHistorySheetAoa(storeRows, billing, billingSheets, {
+          scopeLabel: sheetTitle,
+          titleSuffix,
+          companyName,
+        });
+        appendSheetFromAoa(
+          workbook,
+          usedNames,
+          sheetNames,
+          sheetTitle,
+          aoa,
+          [
+            ...URIEL_CAJA_HISTORY_MONEY_HEADERS,
+            ...billing.unitColumns.map((c) => c.header),
+          ],
+        );
+      } else {
+        const storeMonth = buildUrielCajaMonthSheet(storeSessions, { yearMonth })
+          || buildUrielCajaMonthSheet([], { yearMonth });
+        if (!storeMonth) continue;
+        const aoa = buildUrielCajaBillingSheetAoa(storeMonth, billing, billingSheets, {
+          scopeLabel: sheetTitle,
+          companyName,
+        });
+        appendSheetFromAoa(
+          workbook,
+          usedNames,
+          sheetNames,
+          sheetTitle,
+          aoa,
+          [
+            ...URIEL_CAJA_MONEY_HEADERS,
+            ...billing.unitColumns.map((c) => c.header),
+          ],
+        );
+      }
     }
   }
 
-  const resumenAoa = buildUrielCajaResumenHistorySheetAoa(merged, { yearMonths });
+  const resumenAoa = buildUrielCajaResumenHistorySheetAoa(merged, { yearMonths, companyName });
   appendSheetFromAoa(
     workbook,
     usedNames,
@@ -1629,6 +1727,7 @@ export function buildUrielCajaClosingsWorkbook(
     const comparativaAoa = buildUrielCajaComparativaYearSheetAoa(merged, {
       year,
       billingSheets,
+      companyName,
     });
     const comparativaHeaders = (comparativaAoa.find((r) => r[0] === 'MES') || []) as string[];
     const sheetLabel = years.length > 1 ? `COMPARATIVA ${year}` : 'COMPARATIVA';
@@ -1647,7 +1746,8 @@ export function buildUrielCajaClosingsWorkbook(
     : historyRange === 'year'
       ? `ano-${yearMonth.slice(0, 4)}`
       : yearMonth;
-  const companySlug = sanitizeFilePart(String(opts.businessName || '').trim());
+  // Solo slug de empresa si hay nombre real (evitar “pdv-facturacion-…” / “uriel-…”).
+  const companySlug = companyName ? sanitizeFilePart(companyName) : '';
   const defaultBase = companySlug
     ? `${companySlug}-facturacion-${rangeSlug}`
     : `facturacion-caja-${rangeSlug}`;

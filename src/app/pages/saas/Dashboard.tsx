@@ -630,8 +630,8 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
     wcScopeIds: string[];
     /** Total de pedidos de la empresa (meta del filtro API). */
     ordersTotal: number;
-    /** Tiendas / PDV delivery para desglose de tiempos. */
-    stores: Array<{ id: string; name: string }>;
+    /** Tiendas / PDV delivery para desglose de tiempos y filtro de Marcas. */
+    stores: Array<{ id: string; name: string; workCenterId?: string }>;
   } | null>(null);
   const [deliveryOpsPulses, setDeliveryOpsPulses] = useState<{
     pulses7d: StoreOpsPulse[];
@@ -817,7 +817,11 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                 workCenterId: String(p.workCenterId || ''),
               }))
       )
-        .map((s) => ({ id: s.id, name: s.name }))
+        .map((s) => ({
+          id: s.id,
+          name: s.name,
+          workCenterId: String((s as { workCenterId?: string }).workCenterId || '').trim() || undefined,
+        }))
         .filter((s) => s.id);
 
       setDeliveryTpvSessions(tpvSessions || []);
@@ -1553,6 +1557,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
             brands={deliveryBrands}
             orders={scopedDeliveryOrders}
             sessions={deliveryTpvSessions}
+            stores={deliveryScope?.stores || []}
             loading={deliveryBrandsLoading}
           />
         ) : null}

@@ -568,14 +568,13 @@ function SaasContent() {
 
 
 
-  if (chromeLessSaas) {
-
+  if (chromeLessSaas || tpvTabletLocked || tpvTabletSaasSession) {
+    // Código TPV: sin sidebar / cuenta CEO. Solo el TPV de tienda.
     return (
       <>
         <Outlet />
       </>
     );
-
   }
 
 

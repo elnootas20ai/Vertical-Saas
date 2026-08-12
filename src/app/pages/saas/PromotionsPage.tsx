@@ -47,6 +47,9 @@ import {
   resolvePromoDiscountTarget,
 } from '../../lib/promoCodes';
 import { listPromotionsRequest, syncPromotionsRequest } from '../../lib/promotionsApi';
+import { listCatalogItemsRequest, type CatalogItem } from '../../lib/deliveryApi';
+import { isTpvWarehouseOnlyCatalogItem } from '../../lib/tpvWarehouseCatalog';
+import { VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -423,6 +426,10 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<'info' | 'analytics'>('info');
   const [assignClientId, setAssignClientId] = useState<string>('');
+  const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogPickerOpen, setCatalogPickerOpen] = useState(false);
+  const [catalogSearch, setCatalogSearch] = useState('');
 
   useEffect(() => {
     const userId = user?.user_id;
@@ -502,6 +509,7 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
     targetAudience: 'all' as Promotion['targetAudience'],
     weekdays: [] as PromoWeekday[],
     productNamesText: '',
+    productIds: [] as string[],
     fixedUnitPrice: 11,
     applyAuto: true,
     discountTarget: 'order' as PromoDiscountTarget,
@@ -513,10 +521,12 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
       name: '', description: '', type: 'percentage', discountValue: 10, code: '',
       startDate: defaultStartDate(), endDate: defaultEndDate(), permanent: false,
       maxUses: '', targetAudience: 'all',
-      weekdays: [], productNamesText: '', fixedUnitPrice: 11, applyAuto: true,
+      weekdays: [], productNamesText: '', productIds: [], fixedUnitPrice: 11, applyAuto: true,
       discountTarget: 'order', extrasMode: 'on_top',
     });
     setEditingId(null);
+    setCatalogPickerOpen(false);
+    setCatalogSearch('');
   }
 
   function parseProductNames(text: string): string[] {
@@ -524,6 +534,80 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
       .split(/[,;\n]+/)
       .map((s) => s.trim())
       .filter(Boolean);
+  }
+
+  function foldName(s: string): string {
+    return String(s || '')
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '');
+  }
+
+  const selectedProductNames = useMemo(
+    () => parseProductNames(form.productNamesText),
+    [form.productNamesText],
+  );
+
+  const catalogForPicker = useMemo(() => {
+    const q = foldName(catalogSearch);
+    return catalogItems
+      .filter((item) => {
+        if (item.active === false || item.available === false) return false;
+        if (isTpvWarehouseOnlyCatalogItem(item)) return false;
+        const name = String(item.name || '').trim();
+        if (!name) return false;
+        if (!q) return true;
+        return foldName(name).includes(q) || foldName(item.category || '').includes(q);
+      })
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+  }, [catalogItems, catalogSearch]);
+
+  useEffect(() => {
+    if (activeView !== 'create' || form.type !== 'fixed_unit_price') return;
+    const userId = user?.user_id;
+    if (!userId) return;
+    let cancelled = false;
+    setCatalogLoading(true);
+    void listCatalogItemsRequest(userId, 'catalog')
+      .then((items) => {
+        if (!cancelled) setCatalogItems(Array.isArray(items) ? items : []);
+      })
+      .catch(() => {
+        if (!cancelled) setCatalogItems([]);
+      })
+      .finally(() => {
+        if (!cancelled) setCatalogLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeView, form.type, user?.user_id]);
+
+  function toggleCatalogProduct(item: CatalogItem) {
+    const name = String(item.name || '').trim();
+    if (!name) return;
+    const id = String(item.id || item._id || '').trim();
+    setForm((f) => {
+      const names = parseProductNames(f.productNamesText);
+      const selected = names.some((n) => foldName(n) === foldName(name));
+      const nextNames = selected
+        ? names.filter((n) => foldName(n) !== foldName(name))
+        : [...names, name];
+      const prevIds = Array.isArray(f.productIds) ? f.productIds : [];
+      const nextIds = !id
+        ? prevIds
+        : selected
+          ? prevIds.filter((x) => x !== id)
+          : prevIds.includes(id)
+            ? prevIds
+            : [...prevIds, id];
+      return {
+        ...f,
+        productNamesText: nextNames.join(', '),
+        productIds: nextIds,
+      };
+    });
   }
 
   function showToast(msg: string, type: 'success' | 'error' = 'success') {
@@ -606,6 +690,7 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
         ordersUsed: 0,
         weekdays: form.weekdays.length > 0 ? [...form.weekdays] : undefined,
         productNameIncludes: productNames,
+        productIds: form.type === 'fixed_unit_price' ? [...(form.productIds || [])] : undefined,
         fixedUnitPrice: fixedPrice,
         applyMode: form.type === 'fixed_unit_price'
           ? (form.applyAuto ? 'auto' : 'manual_code')
@@ -668,6 +753,7 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
                 targetAudience: form.targetAudience,
                 weekdays: form.weekdays.length > 0 ? [...form.weekdays] : undefined,
                 productNameIncludes: productNames,
+                productIds: form.type === 'fixed_unit_price' ? [...(form.productIds || [])] : undefined,
                 fixedUnitPrice: form.type === 'fixed_unit_price' ? Number(form.fixedUnitPrice) : undefined,
                 applyMode: form.type === 'fixed_unit_price'
                   ? (form.applyAuto ? 'auto' : 'manual_code')
@@ -702,6 +788,7 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
       targetAudience: promo.targetAudience,
       weekdays: promo.weekdays || [],
       productNamesText: (promo.productNameIncludes || []).join(', '),
+      productIds: [...(promo.productIds || [])],
       fixedUnitPrice: promo.fixedUnitPrice ?? promo.discountValue ?? 11,
       applyAuto: (promo.applyMode || 'auto') !== 'manual_code',
       discountTarget: resolvePromoDiscountTarget(promo),
@@ -1135,9 +1222,19 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
                       </div>
                     </div>
                     <div className="md:col-span-2">
-                      <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-                        Productos (nombres, separados por coma) *
-                      </label>
+                      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400">
+                          Productos (nombres, separados por coma) *
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setCatalogPickerOpen((v) => !v)}
+                          className={`${VERTIAL_BTN_SECONDARY} !min-h-9 !px-3 !py-1.5 !text-xs`}
+                        >
+                          <Package className="w-3.5 h-3.5" />
+                          {catalogPickerOpen ? 'Cerrar catálogo' : 'Del catálogo'}
+                        </button>
+                      </div>
                       <textarea
                         value={form.productNamesText}
                         onChange={(e) => setForm((f) => ({ ...f, productNamesText: e.target.value }))}
@@ -1146,8 +1243,53 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
                         placeholder="Prosciutto, Bacon, Calzone apertas, Margarita, Roquefort"
                       />
                       <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                        El TPV busca estos textos dentro del nombre del producto (sin importar mayúsculas).
+                        El TPV busca estos textos dentro del nombre del producto (sin importar mayúsculas). También puedes elegirlos del catálogo.
                       </p>
+                      {catalogPickerOpen ? (
+                        <div className="mt-2 rounded-xl border border-slate-200 dark:border-gray-700 bg-slate-50/80 dark:bg-gray-950/50 p-3 space-y-2">
+                          <div className="relative">
+                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                            <input
+                              value={catalogSearch}
+                              onChange={(e) => setCatalogSearch(e.target.value)}
+                              placeholder="Buscar producto o categoría…"
+                              className="w-full text-sm border border-slate-200 dark:border-gray-700 dark:bg-gray-900 rounded-lg pl-8 pr-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400"
+                            />
+                          </div>
+                          {catalogLoading ? (
+                            <p className="text-xs text-slate-500 py-3 text-center">Cargando catálogo…</p>
+                          ) : catalogForPicker.length === 0 ? (
+                            <p className="text-xs text-slate-500 py-3 text-center">
+                              No hay productos{catalogSearch.trim() ? ' con ese filtro' : ' en el catálogo'}.
+                            </p>
+                          ) : (
+                            <div className="max-h-52 overflow-y-auto overscroll-contain flex flex-wrap gap-1.5">
+                              {catalogForPicker.map((item) => {
+                                const name = String(item.name || '').trim();
+                                const selected = selectedProductNames.some(
+                                  (n) => foldName(n) === foldName(name),
+                                );
+                                return (
+                                  <button
+                                    key={item._id || item.id || name}
+                                    type="button"
+                                    onClick={() => toggleCatalogProduct(item)}
+                                    className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                                      selected
+                                        ? 'border-blue-500 bg-blue-50 text-blue-800 dark:border-blue-500 dark:bg-blue-950/40 dark:text-blue-200'
+                                        : 'border-slate-200 bg-white text-slate-700 hover:border-blue-300 dark:border-gray-700 dark:bg-gray-900 dark:text-slate-200'
+                                    }`}
+                                    title={item.category ? `${name} · ${item.category}` : name}
+                                  >
+                                    {selected ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : null}
+                                    <span className="truncate max-w-[12rem]">{name}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      ) : null}
                     </div>
                     <div className="md:col-span-2">
                       <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-2">

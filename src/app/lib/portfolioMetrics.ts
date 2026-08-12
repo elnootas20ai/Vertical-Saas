@@ -1263,6 +1263,40 @@ function foodCountsForDay(orders: DeliveryOrder[], dayKey: string): {
   };
 }
 
+/**
+ * Unidades del día para el resumen por tienda (día a día).
+ * Con cierre de caja: mismas cifras que el Excel Uriel / Caja 2
+ * (`productClosingCounts` = TPV + Glovo/Uber/Just/App).
+ * Sin cierre: pedidos Vertial.
+ */
+function foodCountsForOpsDay(
+  orders: DeliveryOrder[],
+  dayKey: string,
+  sessions: TpvRegisterSession[] | undefined,
+  pdvId: string,
+  workCenterId?: string | null,
+): {
+  pizza: number;
+  burger: number;
+  taco: number;
+  kebab: number;
+} {
+  const fromOrders = foodCountsForDay(orders, dayKey);
+  if (!sessions?.length || !pdvId) return fromOrders;
+
+  const pdvIds = [pdvId, String(workCenterId || '').trim()].filter(Boolean);
+  const fromClosings = sumProductClosingCountsForDay(sessions, dayKey, pdvIds);
+  if (!fromClosings) return fromOrders;
+
+  return {
+    pizza: fromClosings.pizza,
+    burger: fromClosings.burger,
+    taco: fromClosings.taco,
+    // El cierre no guarda kebab; se mantiene desde pedidos.
+    kebab: fromOrders.kebab,
+  };
+}
+
 function sumDayFood(days: StoreOpsDay[]): Pick<StoreOpsPulse, 'pizza' | 'burger' | 'taco' | 'kebab'> {
   return days.reduce(
     (acc, d) => ({
@@ -1337,7 +1371,7 @@ export function buildStoreOpsPulse(
   const scoped = orders.filter((o) => orderBelongsToPdvScope(o, pdvSet, pdvId, workCenterId));
 
   const days: StoreOpsDay[] = dayKeys.map((dayKey, index) => {
-    const food = foodCountsForDay(scoped, dayKey);
+    const food = foodCountsForOpsDay(scoped, dayKey, sessions, pdvId, workCenterId);
     const revenueOrders = scoped.filter((o) => isRevenueOnDay(o, dayKey));
     const orderRevenue =
       Math.round(revenueOrders.reduce((s, o) => s + deliveryOrderRevenueAmount(o), 0) * 100) / 100;

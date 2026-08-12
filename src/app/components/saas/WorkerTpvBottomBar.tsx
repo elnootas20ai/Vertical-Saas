@@ -29,7 +29,7 @@ export function WorkerTpvBottomBar({
 
   /** Código de tienda: siempre pantalla de código (nunca ops CEO). */
   const handleExitTablet = () => {
-    void leaveTpvTabletSession(logout);
+    void leaveTpvTabletSession(logout, { navigate });
   };
 
   const handleExitCeo = () => {
@@ -57,10 +57,10 @@ export function WorkerTpvBottomBar({
           type="button"
           onClick={tabletBound ? handleExitTablet : handleExitCeo}
           className={`${btnBase} border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800`}
-          title={tabletBound ? 'Salir e iniciar sesión de trabajador' : 'Salir del TPV al SaaS'}
+          title="Salir a Vertial"
         >
           <LogOut className={compact ? 'w-4 h-4' : 'w-5 h-5'} />
-          {tabletBound ? 'Cambiar trabajador' : 'Salir del TPV'}
+          Salir a Vertial
         </button>
       )}
       {showStock && (

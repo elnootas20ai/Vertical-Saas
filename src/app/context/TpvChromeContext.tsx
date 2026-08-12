@@ -2,7 +2,6 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -12,6 +11,8 @@ import {
 
 type TpvChromeContextValue = {
   setSuppressBottomBar: (suppress: boolean) => void;
+  /** Varios motivos a la vez (apertura + pedido): no pelearse al desmontar un hijo. */
+  setSuppressBottomBarReason: (reason: string, suppress: boolean) => void;
   orderFlowActive: boolean;
   setOrderFlowActive: (active: boolean) => void;
   /** Contador: varios hijos (tablero + OrderFlow) pueden pedir el lock a la vez. */
@@ -27,29 +28,50 @@ export function TpvChromeScope({
   bottomBar,
   /** Si true, la barra inferior va dentro del viewport (100svh) y no empuja el scroll de la página. */
   insetBottomBar = false,
+  /**
+   * Si hay barra y aún no hay caja abierta, ocultarla por defecto (evita Stock/Salir
+   * parpadeando encima de «Abrir caja» al entrar con código).
+   */
+  hideBottomBarUntilShown = Boolean(bottomBar),
 }: {
   children: ReactNode;
   bottomBar?: ReactNode | null;
   insetBottomBar?: boolean;
+  hideBottomBarUntilShown?: boolean;
 }) {
-  const [suppressBottomBar, setSuppressBottomBarState] = useState(false);
+  const [suppressBottomBar, setSuppressBottomBarState] = useState(hideBottomBarUntilShown);
   const [orderFlowActive, setOrderFlowActiveState] = useState(false);
   const orderFlowLockCountRef = useRef(0);
-  const setSuppressBottomBar = useCallback((suppress: boolean) => {
-    setSuppressBottomBarState(suppress);
+  const suppressReasonsRef = useRef<Set<string>>(
+    new Set(hideBottomBarUntilShown ? ['scope-default'] : []),
+  );
+  const syncSuppressBottomBar = useCallback(() => {
+    const locked = orderFlowLockCountRef.current > 0;
+    setSuppressBottomBarState(locked || suppressReasonsRef.current.size > 0);
   }, []);
+  const setSuppressBottomBarReason = useCallback((reason: string, suppress: boolean) => {
+    const key = String(reason || '').trim() || 'default';
+    if (suppress) suppressReasonsRef.current.add(key);
+    else suppressReasonsRef.current.delete(key);
+    // Al mostrar barra por primera vez, soltar el default del scope.
+    if (!suppress) suppressReasonsRef.current.delete('scope-default');
+    syncSuppressBottomBar();
+  }, [syncSuppressBottomBar]);
+  const setSuppressBottomBar = useCallback((suppress: boolean) => {
+    setSuppressBottomBarReason('legacy', suppress);
+  }, [setSuppressBottomBarReason]);
   const setOrderFlowActive = useCallback((active: boolean) => {
     setOrderFlowActiveState(active);
   }, []);
   const syncOrderFlowLock = useCallback(() => {
     const active = orderFlowLockCountRef.current > 0;
     setOrderFlowActiveState(active);
-    setSuppressBottomBarState(active);
+    syncSuppressBottomBar();
     try {
       if (active) sessionStorage.setItem('vertial.tpv.orderFlowLock', '1');
       else sessionStorage.removeItem('vertial.tpv.orderFlowLock');
     } catch { /* ignore */ }
-  }, []);
+  }, [syncSuppressBottomBar]);
   const acquireOrderFlowLock = useCallback(() => {
     orderFlowLockCountRef.current += 1;
     syncOrderFlowLock();
@@ -61,12 +83,13 @@ export function TpvChromeScope({
   const value = useMemo(
     () => ({
       setSuppressBottomBar,
+      setSuppressBottomBarReason,
       orderFlowActive,
       setOrderFlowActive,
       acquireOrderFlowLock,
       releaseOrderFlowLock,
     }),
-    [setSuppressBottomBar, orderFlowActive, setOrderFlowActive, acquireOrderFlowLock, releaseOrderFlowLock],
+    [setSuppressBottomBar, setSuppressBottomBarReason, orderFlowActive, setOrderFlowActive, acquireOrderFlowLock, releaseOrderFlowLock],
   );
 
   return (
@@ -87,13 +110,15 @@ export function TpvChromeScope({
 }
 
 /** Oculta la barra inferior del shell mientras una subvista a pantalla completa está activa. */
-export function useTpvSuppressBottomBar(active: boolean) {
+export function useTpvSuppressBottomBar(active: boolean, reason = 'view') {
   const ctx = useContext(TpvChromeContext);
-  useEffect(() => {
+  const reasonId = reason;
+  // useLayoutEffect: no pintar Stock/Salir un frame encima de Abrir caja.
+  useLayoutEffect(() => {
     if (!ctx) return;
-    ctx.setSuppressBottomBar(active);
-    return () => ctx.setSuppressBottomBar(false);
-  }, [active, ctx]);
+    ctx.setSuppressBottomBarReason(reasonId, active);
+    return () => ctx.setSuppressBottomBarReason(reasonId, false);
+  }, [active, ctx, reasonId]);
 }
 
 /** Modo pedido activo: barra de caja mínima, más espacio al catálogo y sin barra inferior duplicada. */

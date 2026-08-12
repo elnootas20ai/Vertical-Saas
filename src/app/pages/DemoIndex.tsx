@@ -1,11 +1,20 @@
 import { useNavigate } from 'react-router';
 import { WEB__Button } from '../components/design-system/WEB__Button';
-import { CreditCard, Key, Zap, Home, LayoutGrid, RefreshCw, MapPin } from 'lucide-react';
+import { CreditCard, Key, Zap, Home, LayoutGrid, RefreshCw, MapPin, Presentation } from 'lucide-react';
 
 export function DemoIndex() {
   const navigate = useNavigate();
 
   const demos = [
+    {
+      id: 'presentacion',
+      title: 'Presentación Vertial',
+      description: 'Para explicar qué es Vertial en 2 minutos (lenguaje simple)',
+      icon: <Presentation className="w-8 h-8" />,
+      color: 'from-teal-500 to-blue-600',
+      path: '/presentacion',
+      badge: 'NUEVO'
+    },
     {
       id: 'locations',
       title: 'Módulo Ubicaciones',
@@ -13,7 +22,7 @@ export function DemoIndex() {
       icon: <MapPin className="w-8 h-8" />,
       color: 'from-amber-500 to-orange-500',
       path: '/locations-demo',
-      badge: 'NUEVO'
+      badge: null
     },
     {
       id: 'operations',

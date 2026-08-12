@@ -165,7 +165,7 @@ export function TpvCashOpsModal({
         <p className="text-sm text-gray-500 mb-4">Entrada, salida o devolución en efectivo</p>
 
         <div className="grid grid-cols-3 gap-2 mb-4">
-          {(Object.keys(OP_CONFIG) as CashOpType[]).map((key) => {
+          {(['cash_out', 'cash_in', 'return'] as const).map((key) => {
             const cfg = OP_CONFIG[key];
             const Icon = cfg.icon;
             const selected = opType === key;

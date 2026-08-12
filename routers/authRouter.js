@@ -63,7 +63,7 @@ import {
   revokeWorkerInviteLink,
 } from '../controllers/workerInviteLinkController.js';
 import { requireAuth, requireAuthAndEmailVerified, requireAuthForProfileUpdate, optionalAuth } from '../middleware/auth.js';
-import { authSessionLimiter, emailVerificationLimiter, loginCodeLimiter, loginLimiter, oauthLoginLimiter, registerLimiter, recoverLimiter, teamLoginLimiter, tpvTabletAuthLimiter } from '../middleware/rateLimiter.js';
+import { authSessionLimiter, emailVerificationLimiter, loginCodeLimiter, loginLimiter, oauthLoginLimiter, registerLimiterForAccountType, recoverLimiter, teamLoginLimiter, tpvTabletAuthLimiter, workerJoinPreviewLimiter } from '../middleware/rateLimiter.js';
 import {
   validate,
   validateParams,
@@ -97,7 +97,7 @@ import {
 const authRouter = Router();
 
 // Rutas públicas con rate limiting y validación de input
-authRouter.post('/register', registerLimiter, validate(registerSchema), register);
+authRouter.post('/register', registerLimiterForAccountType, validate(registerSchema), register);
 authRouter.post('/login', loginLimiter, validate(loginSchema), login);
 authRouter.post('/google-login', oauthLoginLimiter, validate(googleLoginSchema), googleLogin);
 authRouter.post('/apple-login', oauthLoginLimiter, validate(appleLoginSchema), appleLogin);
@@ -112,7 +112,7 @@ authRouter.post('/resend-verification', emailVerificationLimiter, validate(recov
 // A-04: Aceptación de invitación de miembro
 authRouter.post('/accept-invite', recoverLimiter, validate(acceptInviteSchema), acceptInvite);
 // Core: preview público de enlace/QR de invitación por tienda
-authRouter.get('/join/preview', recoverLimiter, previewWorkerInviteLink);
+authRouter.get('/join/preview', workerJoinPreviewLimiter, previewWorkerInviteLink);
 authRouter.post('/join', requireAuth, validate(redeemWorkerInviteLinkSchema), redeemWorkerInviteLink);
 // Team login: miembros entran con código de empresa + usuario + contraseña
 authRouter.post('/team-login', teamLoginLimiter, validate(teamLoginSchema), teamLogin);

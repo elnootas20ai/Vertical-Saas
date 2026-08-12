@@ -279,7 +279,7 @@ describe('buildUrielCajaMonthSheet', () => {
     expect(yearTotal).toEqual(['TOTAL AÑO', 120, 12, 30, 2, 1, 150]);
   });
 
-  it('libro: marcas (todas tiendas) → tiendas → COMPARATIVA', () => {
+  it('libro: MM/BB × tienda (hub EXCEL 1…4) → RESUMEN → COMPARATIVA', () => {
     const sessions = [
       closedSession({
         _id: 'tiana',
@@ -315,20 +315,21 @@ describe('buildUrielCajaMonthSheet', () => {
       ],
     });
     expect(built.historyRange).toBe('all');
-    expect(built.sheetNames[0]).toBe('MODOMIO');
-    expect(built.sheetNames[1]).toBe('BLACK BURGER');
-    expect(built.sheetNames).toContain('Tiana');
-    expect(built.sheetNames).toContain('Badalona');
+    expect(built.sheetNames.slice(0, 4)).toEqual([
+      'MM TIANA',
+      'BB TIANA',
+      'MM BADALONA',
+      'BB BDN',
+    ]);
     expect(built.sheetNames).toContain('RESUMEN');
     expect(built.sheetNames[built.sheetNames.length - 1]).toBe('COMPARATIVA');
     expect(built.rows).toBe(1);
 
-    const modoTitle = String(built.workbook.Sheets.MODOMIO?.A1?.v || '');
-    expect(modoTitle).toContain('MODOMIO');
+    const modoTitle = String(built.workbook.Sheets['MM TIANA']?.A1?.v || '');
+    expect(modoTitle).toContain('MM TIANA');
     expect(modoTitle).toContain('HISTORIAL');
-    expect(modoTitle).toContain('TODAS LAS TIENDAS');
-    const storeTitle = String(built.workbook.Sheets.Tiana?.A1?.v || '');
-    expect(storeTitle).toContain('Tiana');
+    const bbBdnTitle = String(built.workbook.Sheets['BB BDN']?.A1?.v || '');
+    expect(bbBdnTitle).toContain('BB BDN');
     const resumenTitle = String(built.workbook.Sheets.RESUMEN?.A1?.v || '');
     expect(resumenTitle).toContain('RESUMEN');
     expect(resumenTitle).toContain('HISTORIAL');
@@ -367,12 +368,12 @@ describe('buildUrielCajaMonthSheet', () => {
       yearMonth: '2026-07',
       pointsOfSale: [{ id: 'pdv-tiana', name: 'Tiana' }],
     });
-    expect(built.sheetNames).toContain('Tiana');
+    expect(built.sheetNames).toContain('MM TIANA');
     expect(built.sheetNames).not.toContain('Otra Empresa');
-    const modoTitle = String(built.workbook.Sheets.MODOMIO?.A1?.v || '');
-    expect(modoTitle).toContain('TODAS LAS TIENDAS');
+    const modoTitle = String(built.workbook.Sheets['MM TIANA']?.A1?.v || '');
+    expect(modoTitle).toContain('MM TIANA');
     // Marca solo suma la tienda de esta empresa (70), no 999
-    const totalCell = built.workbook.Sheets.MODOMIO?.I4?.v;
+    const totalCell = built.workbook.Sheets['MM TIANA']?.I4?.v;
     expect(Number(totalCell)).toBe(70);
   });
 
@@ -396,7 +397,8 @@ describe('buildUrielCajaMonthSheet', () => {
     expect(built.yearMonth).toBe('2026-07');
     expect(built.historyRange).toBe('all');
     expect(built.rows).toBeGreaterThan(0);
-    const title = String(built.workbook.Sheets.MODOMIO?.A1?.v || '');
+    const firstBrandSheet = built.sheetNames.find((n) => n.startsWith('MM ')) || built.sheetNames[0];
+    const title = String(built.workbook.Sheets[firstBrandSheet]?.A1?.v || '');
     expect(title).toContain('HISTORIAL');
   });
 
@@ -418,8 +420,36 @@ describe('buildUrielCajaMonthSheet', () => {
       pointsOfSale: [{ id: 'pdv-a', name: 'Tienda A' }],
     });
     expect(built.historyRange).toBe('month');
-    const headerRow = built.workbook.Sheets.MODOMIO?.A3?.v;
+    const headerRow = built.workbook.Sheets['MM TIENDA']?.A3?.v
+      || built.workbook.Sheets[built.sheetNames[0]]?.A3?.v;
     expect(headerRow).toBe('DIA');
+  });
+
+  it('nombre de archivo y títulos usan la empresa (no Uriel)', () => {
+    const sessions = [
+      closedSession({
+        openedAt: '2026-07-01T10:00:00',
+        summary: {
+          salesByMethod: { efectivo: 40, tarjeta: 0, bizum: 0, online: 0, otro: 0 },
+          salesByChannel: {},
+          totalSales: 40,
+        },
+        productClosingCounts: { pizza: 4, burger: 0, taco: 0 },
+      }),
+    ];
+    const built = buildUrielCajaClosingsWorkbook(sessions, {
+      yearMonth: '2026-07',
+      historyRange: 'month',
+      businessName: 'Royo del Amor',
+      pointsOfSale: [{ id: 'pdv-a', name: 'Tiana' }],
+    });
+    expect(built.baseName).toBe('Royo-del-Amor-facturacion-2026-07');
+    expect(built.baseName.toLowerCase()).not.toContain('uriel');
+    const modoTitle = String(built.workbook.Sheets['MM TIANA']?.A1?.v || '');
+    expect(modoTitle).toContain('Royo del Amor');
+    expect(modoTitle).toContain('MM TIANA');
+    const resumenTitle = String(built.workbook.Sheets.RESUMEN?.A1?.v || '');
+    expect(resumenTitle).toContain('Royo del Amor');
   });
 
   it('acepta sesión con workCenterId y la agrupa en el PDV', () => {
@@ -440,8 +470,8 @@ describe('buildUrielCajaMonthSheet', () => {
       yearMonth: '2026-07',
       pointsOfSale: [{ id: 'pdv-tiana', name: 'Tiana', workCenterId: 'wc-tiana' }],
     });
-    expect(built.sheetNames).toContain('Tiana');
+    expect(built.sheetNames).toContain('MM TIANA');
     expect(built.rows).toBe(1);
-    expect(Number(built.workbook.Sheets.MODOMIO?.I4?.v)).toBe(25);
+    expect(Number(built.workbook.Sheets['MM TIANA']?.I4?.v)).toBe(25);
   });
 });

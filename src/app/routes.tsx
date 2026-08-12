@@ -87,6 +87,7 @@ import { ProjectSummary } from './pages/ProjectSummary';
 import { AccessFlowDemo } from './pages/AccessFlowDemo';
 import { SubscriptionDemo } from './pages/SubscriptionDemo';
 import { DemoIndex } from './pages/DemoIndex';
+import { VertialPitchDeck } from './pages/VertialPitchDeck';
 import { SaasNavigationDemo } from './pages/SaasNavigationDemo';
 import { SaasFlowMap } from './pages/SaasFlowMap';
 import { SaasQACheck } from './pages/SaasQACheck';
@@ -465,6 +466,10 @@ export const router = createBrowserRouter([
       {
         path: 'demos',
         Component: DemoIndex,
+      },
+      {
+        path: 'presentacion',
+        Component: VertialPitchDeck,
       },
       {
         path: 'project-summary',

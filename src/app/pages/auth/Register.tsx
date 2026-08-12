@@ -35,11 +35,12 @@ function destinationAfterSignup(opts: {
   isUserAccount: boolean;
   joinToken?: string;
 }) {
-  if (opts.emailVerified === false) {
-    return '/auth/verify-email-pending';
-  }
+  // QR / enlace: entrar al equipo ya; la verificación de email puede seguir pendiente.
   if (opts.joinToken) {
     return `/auth/join?token=${encodeURIComponent(opts.joinToken)}`;
+  }
+  if (opts.emailVerified === false) {
+    return '/auth/verify-email-pending';
   }
   return opts.redirectTo ?? (opts.isUserAccount ? '/saas/user-dashboard' : '/auth/onboarding/business-type');
 }

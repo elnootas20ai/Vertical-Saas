@@ -5,7 +5,9 @@
  *
  *   1. Auth (por IP):
  *      Login          → 40 intentos fallidos / 15 min (LOGIN_RATE_LIMIT_MAX)
- *      Registro       → 5 cuentas   / 1 h
+ *      Registro empresa → 5 cuentas / 1 h
+ *      Registro trabajador (QR) → 40 / 1 h (WORKER_REGISTER_RATE_LIMIT_MAX)
+ *      Preview join QR → 80 / 1 h (WORKER_JOIN_PREVIEW_RATE_LIMIT_MAX)
  *      Recuperación   → 20 solicitudes / 1 h por email+IP (RECOVER_RATE_LIMIT_MAX)
  *
  *   2. Burst por usuario autenticado (I-06):
@@ -209,7 +211,58 @@ export const registerLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: getClientIp,
+  skip: skipRateLimitInDev,
   message: { ok: false, success: false, error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Demasiados registros desde esta IP. Inténtalo en una hora.' } },
+});
+
+/**
+ * Alta de trabajador (accountType=user) — cupo alto para onboarding por QR en Wi‑Fi de tienda (~20 personas).
+ * No aplica a altas de empresa (siguen en registerLimiter: 5/h).
+ */
+export const workerInviteRegisterLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: Math.max(25, parseInt(process.env.WORKER_REGISTER_RATE_LIMIT_MAX || '40', 10)),
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: getClientIp,
+  skip: skipRateLimitInDev,
+  message: {
+    ok: false,
+    success: false,
+    error: {
+      code: 'RATE_LIMIT_EXCEEDED',
+      message: 'Demasiadas altas de trabajador desde esta red. Espera unos minutos e inténtalo de nuevo.',
+    },
+  },
+});
+
+/** Elige cupo de registro: trabajador (QR) vs empresa. */
+export function registerLimiterForAccountType(req, res, next) {
+  if (String(req.body?.accountType || '').trim() === 'user') {
+    return workerInviteRegisterLimiter(req, res, next);
+  }
+  return registerLimiter(req, res, next);
+}
+
+/**
+ * Preview del QR/enlace de unión — no compartir cupo con recuperación de contraseña.
+ * ~80/h/IP: 20 móviles escaneando + reintentos en la misma Wi‑Fi.
+ */
+export const workerJoinPreviewLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: Math.max(40, parseInt(process.env.WORKER_JOIN_PREVIEW_RATE_LIMIT_MAX || '80', 10)),
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: getClientIp,
+  skip: skipRateLimitInDev,
+  message: {
+    ok: false,
+    success: false,
+    error: {
+      code: 'RATE_LIMIT_EXCEEDED',
+      message: 'Demasiadas lecturas del enlace. Espera un momento e inténtalo de nuevo.',
+    },
+  },
 });
 
 export const recoverLimiter = rateLimit({
@@ -222,6 +275,7 @@ export const recoverLimiter = rateLimit({
     const ip = getClientIp(req);
     return email ? `recover:${ip}:${email}` : `recover-ip:${ip}`;
   },
+  skip: skipRateLimitInDev,
   message: {
     ok: false,
     success: false,

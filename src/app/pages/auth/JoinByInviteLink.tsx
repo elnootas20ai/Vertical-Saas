@@ -59,14 +59,26 @@ export function JoinByInviteLink() {
     if (!token) return;
     setJoinError('');
     setJoining(true);
+    const maxAttempts = 5;
     try {
-      const result = await joinByInviteLink(token);
-      if (result.success) {
-        setSuccess(true);
-        setRedirectTo(result.redirectTo || '/saas/worker/tasks');
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        const result = await joinByInviteLink(token);
+        if (result.success) {
+          setSuccess(true);
+          setRedirectTo(result.redirectTo || '/saas/worker/tasks');
+          return;
+        }
+        const code = String(result.code || '');
+        const busy =
+          code === 'JOIN_BUSY'
+          || /conflict|409|muchas personas|a la vez/i.test(String(result.error || ''));
+        if (busy && attempt < maxAttempts - 1) {
+          await new Promise((r) => window.setTimeout(r, 400 * (attempt + 1) + Math.random() * 200));
+          continue;
+        }
+        setJoinError(result.error || 'No se pudo unir al equipo');
         return;
       }
-      setJoinError(result.error || 'No se pudo unir al equipo');
     } finally {
       setJoining(false);
     }

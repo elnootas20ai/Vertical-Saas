@@ -503,7 +503,10 @@ export async function putDocument(req, dbName, docId, document) {
   const payload = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(payload?.reason || payload?.error || `No se pudo guardar ${docId}`);
+    const err = new Error(payload?.reason || payload?.error || `No se pudo guardar ${docId}`);
+    err.statusCode = response.status;
+    err.couchError = payload?.error || '';
+    throw err;
   }
 
   cacheService.invalidateDb(dbName);
@@ -12499,6 +12502,48 @@ export async function saveWorkerInviteLink(req, doc) {
   return { ...doc, _rev: result.rev };
 }
 
+/** Ptr O(1) tokenHash → link_id (evita _all_docs en cada escaneo QR). */
+export function workerInviteTokenPtrId(tokenHash) {
+  const hash = String(tokenHash || '').trim();
+  if (!hash) return '';
+  return `worker_invite_token:${hash}`;
+}
+
+export async function upsertWorkerInviteTokenPointer(req, tokenHash, linkId) {
+  const hash = String(tokenHash || '').trim();
+  const lid = String(linkId || '').trim();
+  const ptrId = workerInviteTokenPtrId(hash);
+  if (!ptrId || !lid) return null;
+  await ensureDatabase(req, WORKER_INVITE_LINKS_DB);
+  const existing = await getDocument(req, WORKER_INVITE_LINKS_DB, ptrId);
+  const now = new Date().toISOString();
+  try {
+    await putDocument(req, WORKER_INVITE_LINKS_DB, ptrId, {
+      _id: ptrId,
+      ...(existing?._rev ? { _rev: existing._rev } : {}),
+      type: 'worker_invite_token_ptr',
+      tokenHash: hash,
+      link_id: lid,
+      updatedAt: now,
+      createdAt: existing?.createdAt || now,
+    });
+  } catch (err) {
+    // Conflicto: releer y reintentar una vez
+    if (Number(err?.statusCode) !== 409 && !/conflict/i.test(String(err?.message || ''))) throw err;
+    const again = await getDocument(req, WORKER_INVITE_LINKS_DB, ptrId);
+    await putDocument(req, WORKER_INVITE_LINKS_DB, ptrId, {
+      _id: ptrId,
+      ...(again?._rev ? { _rev: again._rev } : {}),
+      type: 'worker_invite_token_ptr',
+      tokenHash: hash,
+      link_id: lid,
+      updatedAt: now,
+      createdAt: again?.createdAt || now,
+    });
+  }
+  return ptrId;
+}
+
 export async function findWorkerInviteLinkById(req, linkId) {
   if (!linkId) return null;
   await ensureDatabase(req, WORKER_INVITE_LINKS_DB);
@@ -12510,8 +12555,28 @@ export async function findWorkerInviteLinkByToken(req, rawToken) {
   if (!token) return null;
   const hashed = hashToken(token);
   await ensureDatabase(req, WORKER_INVITE_LINKS_DB);
+
+  // Camino rápido: puntero por hash (enlaces nuevos / sanados).
+  const ptr = await getDocument(req, WORKER_INVITE_LINKS_DB, workerInviteTokenPtrId(hashed));
+  if (ptr?.link_id) {
+    const byId = await findWorkerInviteLinkById(req, ptr.link_id);
+    if (byId?.type === 'worker_invite_link' && !byId.deletedAt && byId.tokenHash === hashed) {
+      return byId;
+    }
+  }
+
+  // Fallback: enlaces antiguos sin ptr.
   const docs = await getAllDocuments(req, WORKER_INVITE_LINKS_DB);
-  return docs.find((d) => d?.type === 'worker_invite_link' && !d?.deletedAt && d?.tokenHash === hashed) || null;
+  const found =
+    docs.find((d) => d?.type === 'worker_invite_link' && !d?.deletedAt && d?.tokenHash === hashed) || null;
+  if (found?.link_id) {
+    try {
+      await upsertWorkerInviteTokenPointer(req, hashed, found.link_id);
+    } catch {
+      /* best-effort */
+    }
+  }
+  return found;
 }
 
 export async function listWorkerInviteLinksByBusiness(req, businessId, { includeInactive = false } = {}) {

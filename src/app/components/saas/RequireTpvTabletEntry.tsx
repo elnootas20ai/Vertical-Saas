@@ -58,7 +58,19 @@ export function RequireTpvTabletEntry({
     }
   }, [isInitializing, user, needsTablet, navigate]);
 
-  if (isInitializing) return null;
-  if (needsTablet) return null;
+  if (isInitializing) {
+    return (
+      <div className="min-h-[40vh] flex items-center justify-center bg-slate-50 dark:bg-slate-950">
+        <p className="text-sm font-medium text-slate-500">Preparando TPV…</p>
+      </div>
+    );
+  }
+  if (needsTablet) {
+    return (
+      <div className="min-h-[40vh] flex items-center justify-center bg-slate-50 dark:bg-slate-950">
+        <p className="text-sm font-medium text-slate-500">Código de tienda…</p>
+      </div>
+    );
+  }
   return <>{children}</>;
 }

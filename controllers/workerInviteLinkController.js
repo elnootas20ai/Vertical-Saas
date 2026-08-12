@@ -22,7 +22,9 @@ import {
   saveAccount,
   saveBusiness,
   saveWorkerInviteLink,
+  upsertWorkerInviteTokenPointer,
 } from '../services/couchdb.js';
+import { isCouchConflictError, withCouchConflictRetry } from '../services/couchConflictRetry.js';
 import {
   applyInviteScheduleTemplate,
   getShiftTemplateMeta,
@@ -186,6 +188,11 @@ export async function createWorkerInviteLink(req, res) {
     });
 
     const saved = await saveWorkerInviteLink(req, doc);
+    try {
+      await upsertWorkerInviteTokenPointer(req, saved.tokenHash, saved.link_id);
+    } catch (ptrErr) {
+      console.error('[AUTH] QR invite token ptr:', ptrErr?.message);
+    }
 
     await logAccountActivity(req, {
       actorUserId,
@@ -329,28 +336,129 @@ export async function redeemWorkerInviteLink(req, res) {
       });
     }
 
-    const doc = await findWorkerInviteLinkByToken(req, token);
-    if (!doc) {
-      return res.status(404).json({ ok: false, code: 'JOIN_NOT_FOUND', error: 'Enlace no válido o revocado.' });
-    }
-    if (!isWorkerInviteLinkRedeemable(doc)) {
-      return res.status(410).json({
-        ok: false,
-        code: 'JOIN_INACTIVE',
-        error: 'Este enlace ya no está activo.',
-      });
+    const acceptDay = (() => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    })();
+
+    /** @type {{ alreadyMember: boolean, business: any, doc: any, newMember?: any } | null} */
+    let joinState = null;
+
+    try {
+      joinState = await withCouchConflictRetry(async () => {
+        const doc = await findWorkerInviteLinkByToken(req, token);
+        if (!doc) {
+          const err = new Error('Enlace no válido o revocado.');
+          err.statusCode = 404;
+          err.code = 'JOIN_NOT_FOUND';
+          throw err;
+        }
+        if (!isWorkerInviteLinkRedeemable(doc)) {
+          const err = new Error('Este enlace ya no está activo.');
+          err.statusCode = 410;
+          err.code = 'JOIN_INACTIVE';
+          throw err;
+        }
+
+        const business = await findBusinessById(req, doc.business_id);
+        if (!business) {
+          const err = new Error('La empresa ya no existe.');
+          err.statusCode = 404;
+          throw err;
+        }
+
+        const members = Array.isArray(business.members) ? business.members : [];
+        const isOwner = business.owner_user_id === account.user_id;
+        const isAlreadyMember = members.some((m) => m.user_id === account.user_id);
+        if (isOwner || isAlreadyMember) {
+          return { alreadyMember: true, business, doc };
+        }
+
+        try {
+          const allBusinesses = await listAllBusinesses(req);
+          const ownsOther = allBusinesses.find(
+            (b) => b.owner_user_id === account.user_id && b.business_id !== business.business_id,
+          );
+          if (ownsOther) {
+            const err = new Error(
+              `Administras otra empresa (${ownsOther.name || 'sin nombre'}). No puedes unirte a un segundo equipo.`,
+            );
+            err.statusCode = 409;
+            err.code = 'OWNER_OF_OTHER_BUSINESS';
+            throw err;
+          }
+        } catch (lookupErr) {
+          if (lookupErr?.code === 'OWNER_OF_OTHER_BUSINESS') throw lookupErr;
+          console.error('[AUTH] QR join owns-other check:', lookupErr?.message);
+        }
+
+        const seatCheck = await evaluateWorkerSeatCapacity(req, business, { seatsNeeded: 1 });
+        if (!seatCheck.ok) {
+          const err = new Error(seatCheck.error || 'No hay plazas de trabajador disponibles.');
+          err.statusCode = 403;
+          err.code = seatCheck.code || 'WORKER_SEAT_LIMIT';
+          err.workerSeats = {
+            used: seatCheck.used,
+            limit: seatCheck.limit,
+            remaining: seatCheck.remaining,
+          };
+          throw err;
+        }
+
+        const now = new Date().toISOString();
+        const inviteEmployment = doc.employment || {};
+        const salesPointId = String(inviteEmployment.salesPointId || doc.workCenterId || '').trim();
+        const role = doc.role || 'Usuario';
+        const permissions = normalizePermissionMatrix(doc.permissions, role);
+        const resolvedFullName = String(account.fullName || '').trim();
+
+        const newMember = {
+          user_id: account.user_id,
+          fullName: resolvedFullName,
+          email: account.email,
+          role,
+          permissions,
+          joinedAt: now,
+          employment: {
+            salesPointId: salesPointId || undefined,
+            position: inviteEmployment.position || role,
+            contractType: inviteEmployment.contractType || undefined,
+            workday: inviteEmployment.workday || 'completa',
+            startDate: acceptDay,
+            ...(inviteEmployment.hoursPerWeek != null ? { hoursPerWeek: inviteEmployment.hoursPerWeek } : {}),
+          },
+        };
+
+        await saveBusiness(req, {
+          ...business,
+          members: [...members, newMember],
+          updatedAt: now,
+        });
+
+        return { alreadyMember: false, business, doc, newMember, now, salesPointId, role, permissions, inviteEmployment, resolvedFullName };
+      }, { maxAttempts: 8, baseDelayMs: 55 });
+    } catch (err) {
+      const status = Number(err?.statusCode || 0);
+      if (status === 404 || status === 403 || status === 410 || status === 409) {
+        const body = {
+          ok: false,
+          code: err.code,
+          error: err.message || 'No se pudo unir al equipo',
+        };
+        if (err.workerSeats) body.workerSeats = err.workerSeats;
+        return res.status(status).json(body);
+      }
+      if (isCouchConflictError(err)) {
+        return res.status(503).json({
+          ok: false,
+          code: 'JOIN_BUSY',
+          error: 'Muchas personas entrando a la vez. Espera un segundo y pulsa de nuevo.',
+        });
+      }
+      throw err;
     }
 
-    const business = await findBusinessById(req, doc.business_id);
-    if (!business) {
-      return res.status(404).json({ ok: false, error: 'La empresa ya no existe.' });
-    }
-
-    const members = Array.isArray(business.members) ? business.members : [];
-    const isOwner = business.owner_user_id === account.user_id;
-    const isAlreadyMember = members.some((m) => m.user_id === account.user_id);
-
-    if (isOwner || isAlreadyMember) {
+    if (joinState.alreadyMember) {
       const fresh = (await findAccountByUserId(req, account.user_id)) || account;
       return res.json({
         ok: true,
@@ -360,70 +468,17 @@ export async function redeemWorkerInviteLink(req, res) {
       });
     }
 
-    try {
-      const allBusinesses = await listAllBusinesses(req);
-      const ownsOther = allBusinesses.find(
-        (b) => b.owner_user_id === account.user_id && b.business_id !== business.business_id,
-      );
-      if (ownsOther) {
-        return res.status(409).json({
-          ok: false,
-          code: 'OWNER_OF_OTHER_BUSINESS',
-          error: `Administras otra empresa (${ownsOther.name || 'sin nombre'}). No puedes unirte a un segundo equipo.`,
-        });
-      }
-    } catch (lookupErr) {
-      console.error('[AUTH] QR join owns-other check:', lookupErr?.message);
-    }
-
-    const seatCheck = await evaluateWorkerSeatCapacity(req, business, { seatsNeeded: 1 });
-    if (!seatCheck.ok) {
-      return res.status(403).json({
-        ok: false,
-        code: seatCheck.code || 'WORKER_SEAT_LIMIT',
-        error: seatCheck.error || 'No hay plazas de trabajador disponibles.',
-        workerSeats: {
-          used: seatCheck.used,
-          limit: seatCheck.limit,
-          remaining: seatCheck.remaining,
-        },
-      });
-    }
-
-    const now = new Date().toISOString();
-    const acceptDay = (() => {
-      const d = new Date();
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    })();
-
-    const inviteEmployment = doc.employment || {};
-    const salesPointId = String(inviteEmployment.salesPointId || doc.workCenterId || '').trim();
-    const role = doc.role || 'Usuario';
-    const permissions = normalizePermissionMatrix(doc.permissions, role);
-    const resolvedFullName = String(account.fullName || '').trim();
-
-    const newMember = {
-      user_id: account.user_id,
-      fullName: resolvedFullName,
-      email: account.email,
+    const {
+      business,
+      doc,
+      newMember,
+      now,
+      salesPointId,
       role,
       permissions,
-      joinedAt: now,
-      employment: {
-        salesPointId: salesPointId || undefined,
-        position: inviteEmployment.position || role,
-        contractType: inviteEmployment.contractType || undefined,
-        workday: inviteEmployment.workday || 'completa',
-        startDate: acceptDay,
-        ...(inviteEmployment.hoursPerWeek != null ? { hoursPerWeek: inviteEmployment.hoursPerWeek } : {}),
-      },
-    };
-
-    await saveBusiness(req, {
-      ...business,
-      members: [...members, newMember],
-      updatedAt: now,
-    });
+      inviteEmployment,
+      resolvedFullName,
+    } = joinState;
 
     const mergedEmployment = mergeEmploymentInfo(account.employment, {
       ...inviteEmployment,
@@ -456,17 +511,26 @@ export async function redeemWorkerInviteLink(req, res) {
       updatedAt: now,
     });
 
-    let useCount = Number(doc.useCount || 0) + 1;
-    let linkStatus = doc.status;
-    if (doc.maxUses != null && useCount >= Number(doc.maxUses)) {
-      linkStatus = 'exhausted';
+    // useCount con reintento: no debe tumbar el join si ya eres miembro.
+    try {
+      await withCouchConflictRetry(async () => {
+        const freshLink = (await findWorkerInviteLinkById(req, doc.link_id)) || doc;
+        if (!freshLink || freshLink.deletedAt) return;
+        const useCount = Number(freshLink.useCount || 0) + 1;
+        let linkStatus = freshLink.status;
+        if (freshLink.maxUses != null && useCount >= Number(freshLink.maxUses)) {
+          linkStatus = 'exhausted';
+        }
+        await saveWorkerInviteLink(req, {
+          ...freshLink,
+          useCount,
+          status: linkStatus,
+          updatedAt: new Date().toISOString(),
+        });
+      }, { maxAttempts: 6, baseDelayMs: 40 });
+    } catch (countErr) {
+      console.error('[AUTH] QR join useCount:', countErr?.message);
     }
-    await saveWorkerInviteLink(req, {
-      ...doc,
-      useCount,
-      status: linkStatus,
-      updatedAt: now,
-    });
 
     if (doc.scheduleTemplateId) {
       let workCenterName = doc.workCenterName || '';
@@ -555,6 +619,13 @@ export async function redeemWorkerInviteLink(req, res) {
       redirectTo: resolveRedirectAfterInvitationAccept(updatedAccount),
     });
   } catch (error) {
+    if (isCouchConflictError(error)) {
+      return res.status(503).json({
+        ok: false,
+        code: 'JOIN_BUSY',
+        error: 'Muchas personas entrando a la vez. Espera un segundo y pulsa de nuevo.',
+      });
+    }
     return res.status(500).json({
       ok: false,
       error: error instanceof Error ? error.message : 'Error al unirse al equipo',
