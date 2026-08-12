@@ -104,12 +104,27 @@ function initialConfig(scope?: TpvPrinterScope): VertialPrinterConfig {
   const local = loadLegacyPrinterConfig();
   const pdv = scope?.pdv;
   const pdvId = String(pdv?._id || scope?.pdvId || '').trim();
+  const localHost = String(local.networkHost || '').trim();
 
-  // Con tienda: primero ESTA tablet, luego servidor / espejo. No pedir prestada otra tienda.
+  // Con tienda: ESTA tablet primero (caché + legacy). La IP de tienda no pisa la 2ª impresora.
   if (pdvId) {
     const deviceCached = loadPdvDevicePrinterCache(pdvId);
     if (deviceCached && isValidIpv4(String(deviceCached.networkHost || '').trim())) {
       return normalizeVertialPrinterConfig({ ...deviceCached, connectionType: 'network' });
+    }
+    if (isValidIpv4(localHost)) {
+      const fromLocal = normalizeVertialPrinterConfig({
+        ...local,
+        connectionType: 'network',
+        networkHost: localHost,
+        networkPort: Number(local.networkPort || 9100) || 9100,
+      });
+      try {
+        cachePdvDevicePrinterConfig(pdvId, fromLocal);
+      } catch {
+        /* ignore */
+      }
+      return fromLocal;
     }
     const fromStore = pdv?.printerConfig
       ? normalizeVertialPrinterConfig({
@@ -143,7 +158,6 @@ function initialConfig(scope?: TpvPrinterScope): VertialPrinterConfig {
     : local;
   const normalized = normalizeVertialPrinterConfig({ ...raw, connectionType: 'network' });
   const host = String(normalized.networkHost || '').trim();
-  const localHost = String(local.networkHost || '').trim();
   if (!isValidIpv4(host) && isValidIpv4(localHost)) {
     return normalizeVertialPrinterConfig({
       ...local,

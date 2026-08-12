@@ -13,6 +13,7 @@ import {
   isVertialPrinterConfigConfigured,
   normalizeVertialPrinterConfig,
 } from './printerConfigNormalize';
+import { isValidIpv4 } from './printerSetupStatus';
 
 export interface ActivePrinterScope {
   pdvId?: string;
@@ -71,9 +72,10 @@ export function resolveEffectivePrinterConfig(options?: {
   const localFallback = scope.localFallback ?? loadLegacyPrinterConfig();
   const localCfg = normalizeVertialPrinterConfig(localFallback);
 
-  // Orden: terminal → ESTA tablet (caché dispositivo) → tienda (servidor) →
-  // espejo servidor → dispositivo legacy.
-  // Así 2 tablets en Tiana pueden tener 2 IPs distintas sin pisarse.
+  // Orden (como cuando “funcionaba” con 2 tablets en el mismo local):
+  // terminal → caché de ESTA tablet → IP local de ESTA tablet (legacy) →
+  // tienda (servidor) → espejo servidor.
+  // La IP de tienda NO debe pisar la de la segunda tablet.
   const terminal = terminalId
     ? pdv?.terminals?.find((t) => t.id === terminalId)
     : undefined;
@@ -84,6 +86,9 @@ export function resolveEffectivePrinterConfig(options?: {
     return terminalCfg;
   }
 
+  const canUseDeviceFallback =
+    !explicitPdvId || !activePdvId || explicitPdvId === activePdvId;
+
   if (pdvId) {
     const deviceCachedRaw = loadPdvDevicePrinterCache(pdvId);
     if (deviceCachedRaw) {
@@ -92,6 +97,22 @@ export function resolveEffectivePrinterConfig(options?: {
         return deviceCached;
       }
     }
+  }
+
+  // Legacy de ESTA tablet con IP WiFi real (antes de la IP de tienda).
+  // No usar connectionType=browser vacío: eso “pisaba” la caché de tienda en tests/web.
+  const localHost = String(localCfg.networkHost || '').trim();
+  const localNetworkOk =
+    localCfg.connectionType === 'network' && isValidIpv4(localHost);
+  if (canUseDeviceFallback && localNetworkOk) {
+    if (pdvId) {
+      try {
+        cachePdvDevicePrinterConfig(pdvId, localCfg);
+      } catch {
+        /* ignore */
+      }
+    }
+    return localCfg;
   }
 
   const storeCfg = pdv?.printerConfig
@@ -109,15 +130,6 @@ export function resolveEffectivePrinterConfig(options?: {
         return cached;
       }
     }
-  }
-
-  // Sin config de tienda: IP de este dispositivo (tablet) como respaldo.
-  // Si piden otra tienda distinta a la activa, no prestar la IP del dispositivo
-  // (pedidos de la 2ª tienda no deben salir en la impresora de la 1ª).
-  const canUseDeviceFallback =
-    !explicitPdvId || !activePdvId || explicitPdvId === activePdvId;
-  if (canUseDeviceFallback && isVertialPrinterConfigConfigured(localCfg)) {
-    return localCfg;
   }
 
   return normalizeVertialPrinterConfig(localFallback || DEFAULT_PRINTER_CONFIG);
