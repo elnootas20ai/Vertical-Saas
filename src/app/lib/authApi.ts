@@ -387,8 +387,17 @@ let _onUnauthorized: (() => void) | null = null;
 const TOKEN_STORAGE_KEY = 'vertial_access_token';
 const REFRESH_STORAGE_KEY = 'vertial_refresh_token';
 
-let _inMemoryToken: string | null = localStorage.getItem(TOKEN_STORAGE_KEY);
-let _inMemoryRefreshToken: string | null = localStorage.getItem(REFRESH_STORAGE_KEY);
+function readBrowserStorage(key: string): string | null {
+  try {
+    if (typeof localStorage === 'undefined') return null;
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+let _inMemoryToken: string | null = readBrowserStorage(TOKEN_STORAGE_KEY);
+let _inMemoryRefreshToken: string | null = readBrowserStorage(REFRESH_STORAGE_KEY);
 
 export function cacheAccessToken(token: string | null) {
   _inMemoryToken = token;
