@@ -34,7 +34,6 @@ import {
 import { printTestTicket } from '../../lib/vertialPrint/printDeliveryTicket';
 import {
   resolveEffectivePrinterConfig,
-  savePrinterConfig,
   setActivePrinterScope,
 } from '../../lib/vertialPrint/printerActiveScope';
 import {
@@ -44,6 +43,7 @@ import {
   MIN_TICKET_BOTTOM_FEED_CM,
   clampTicketBottomFeedCm,
   loadLegacyPrinterConfig,
+  saveLegacyPrinterConfig,
   loadPdvPrinterCache,
   loadPdvDevicePrinterCache,
   cachePdvPrinterConfig,
@@ -337,26 +337,25 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
         });
       }
       try {
-        savePrinterConfig(next, pdvId || undefined);
-        if (pdvId) {
-          cachePdvPrinterConfig(pdvId, next);
-          cachePdvDevicePrinterConfig(pdvId, next);
-        }
+        // Siempre en ESTA tablet. No tocar la IP de tienda si ya hay otra distinta
+        // (la impresora que ya funciona en la otra tablet).
+        saveLegacyPrinterConfig(next);
+        if (pdvId) cachePdvDevicePrinterConfig(pdvId, next);
       } catch {
         toast.error('No se pudo guardar la impresora en este dispositivo. Inténtalo de nuevo.');
         return;
       }
 
       const legacyHost = String(loadLegacyPrinterConfig().networkHost || '').trim();
-      const cacheHost = pdvId
-        ? String(loadPdvPrinterCache(pdvId)?.networkHost || '').trim()
+      const deviceHost = pdvId
+        ? String(loadPdvDevicePrinterCache(pdvId)?.networkHost || '').trim()
         : '';
-      if (legacyHost !== host && cacheHost !== host) {
+      if (legacyHost !== host && deviceHost !== host) {
         toast.error('IP o puerto no quedaron guardados. Inténtalo de nuevo.');
         return;
       }
 
-      // 2) Misma tienda en servidor (Ajustes / Panel / otras tablets)
+      // 2) Servidor solo si la tienda no tiene IP o es la misma (no pisar la otra impresora).
       let syncedToStore = false;
       if (scope?.userId && pdvId) {
         try {
@@ -371,12 +370,21 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
           if (!pdvDoc) {
             throw new Error('No se encontró la tienda para guardar la impresora');
           }
-          const saved = await savePrinterConfigToPdv(scope.userId, pdvDoc, next, 'store', undefined, {
-            suppressLogout: true,
-          });
-          syncActiveScope(next, saved);
-          scope.onPdvUpdated?.(saved);
-          syncedToStore = true;
+          const storeHost = String(pdvDoc.printerConfig?.networkHost || '').trim();
+          const storeEmpty = !isValidIpv4(storeHost);
+          const sameAsStore = storeHost === host;
+          if (storeEmpty || sameAsStore) {
+            const saved = await savePrinterConfigToPdv(scope.userId, pdvDoc, next, 'store', undefined, {
+              suppressLogout: true,
+            });
+            cachePdvPrinterConfig(pdvId, next);
+            syncActiveScope(next, saved);
+            scope.onPdvUpdated?.(saved);
+            syncedToStore = true;
+          } else {
+            // Hay otra IP de tienda: no la tocamos. Esta tablet usa solo su caché local.
+            syncActiveScope(next, pdvDoc);
+          }
         } catch (error) {
           const message = toUserFacingMessage(error, 'sin conexión con la tienda');
           toast.warning(`Guardada en esta tablet, pero no llegó a la tienda: ${message}`, {
@@ -399,11 +407,11 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
       toast.success(
         syncedToStore
           ? `Impresora de esta tablet: ${host}:${safePort}`
-          : `Impresora guardada en esta tablet: ${host}:${safePort}`,
+          : `Impresora solo en esta tablet: ${host}:${safePort}`,
         {
           description: syncedToStore
-            ? `Queda en «${storeLabel}» para esta tablet. La otra tablet de la tienda mantiene la suya.`
-            : 'Sirve en este dispositivo. Si quieres verla fuera, vuelve a pulsar Guardar con la tienda seleccionada.',
+            ? `Queda en «${storeLabel}» para esta tablet.`
+            : 'No tocamos la IP de la otra impresora de la tienda. Cada tablet usa la suya.',
           duration: 7000,
         },
       );
