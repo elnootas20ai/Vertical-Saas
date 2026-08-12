@@ -67,12 +67,23 @@ workflows:
           pod install
       - name: Versión de marketing + build incremental
         script: |
+          set -e
           cd ios/App
-          # App Store Connect: versión tablet tienda (live web + TPV).
-          # Build number = Codemagic BUILD_NUMBER.
-          agvtool new-marketing-version 1.11
-          agvtool new-version -all $BUILD_NUMBER
-          echo "Marketing: $(agvtool what-marketing-version -terse1)  Build: $(agvtool what-version -terse)"
+          # Marketing: sube cuando hay cambio de producto tablet.
+          agvtool new-marketing-version 1.12
+          # Build: mayor que el último en TestFlight (si no, Apple rechaza el upload).
+          LATEST_TF=""
+          LATEST_TF=$(app-store-connect get-latest-testflight-build-number com.vertial.app 2>/dev/null || true)
+          CM_BUILD="${BUILD_NUMBER:-1}"
+          NEXT="$CM_BUILD"
+          if [ -n "$LATEST_TF" ] && [ "$LATEST_TF" -eq "$LATEST_TF" ] 2>/dev/null; then
+            CAND=$((LATEST_TF + 1))
+            if [ "$CAND" -gt "$NEXT" ]; then
+              NEXT="$CAND"
+            fi
+          fi
+          agvtool new-version -all "$NEXT"
+          echo "Marketing: $(agvtool what-marketing-version -terse1)  Build: $(agvtool what-version -terse) (TF last=$LATEST_TF CM=$CM_BUILD)"
       - name: Diagnóstico firma (perfil vs entitlements)
         script: |
           set -e
@@ -115,3 +126,5 @@ workflows:
       app_store_connect:
         auth: integration
         submit_to_testflight: true
+        # Si hay un build viejo en review de TestFlight, no bloquear el nuevo.
+        expire_build_submitted_for_review: true
