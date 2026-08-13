@@ -1,0 +1,30 @@
+---
+description: PROHIBIDO inventar arquitectura o “mejoras” no pedidas; haz solo lo pedido
+alwaysApply: true
+---
+
+# No inventar — solo lo pedido
+
+Uriel manda. El agente **no** inventa soluciones, atajos ni arquitectura “por si acaso”.
+
+## Obligatorio
+
+1. Haz **solo** lo que Uriel pidió en el mensaje (o el bug concreto).
+2. Si el arreglo mínimo basta → ese. Nada extra.
+3. Si hace falta un cambio de modelo (cómo carga la app, live URL, nuevo flujo, flag raro) → **preguntar antes**. No meterlo.
+4. Prefiere lo que **ya funcionaba** en el repo a un invento nuevo.
+
+## Prohibido (ejemplos reales)
+
+- App TestFlight / Capacitor: **no** poner `server.url` / `CAPACITOR_SERVER_URL` a vertialapp.com. La tablet es **app nativa** con front **embebido** en `dist/`. Actualizar UI = IPA/APK nuevo. No convertir la app en navegador de la web.
+- “Para no tener que rebuild…” / “así se actualiza solo…” sin que Uriel lo pida.
+- Refactors, configs, flags o pipelines “de paso” no pedidos.
+- Reabrir o reintroducir algo que Uriel ya rechazó.
+
+## Si dudas
+
+Pregunta en una frase. **No** commits ni configs inventadas mientras tanto.
+
+## Al terminar
+
+Di qué tocaste y **nada más**. Si se te ocurrió un extra: no lo implementes; como mucho menciónalo en una línea y espera OK.

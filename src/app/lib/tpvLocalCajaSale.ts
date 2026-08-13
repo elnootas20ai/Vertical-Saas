@@ -11,6 +11,13 @@ type RegisterLike = {
   addTransaction: (tx: Omit<TpvRegisterTransaction, 'id' | 'date'>) => Promise<void>;
 } | null | undefined;
 
+/** Tx de pago dividido: no aplicar dedupe idéntico en addTransaction. */
+const allowMultipleSaleTxs = new WeakSet<object>();
+
+export function isAllowMultipleSaleTx(tx: object): boolean {
+  return allowMultipleSaleTxs.has(tx);
+}
+
 export function sessionSaleAmountForOrder(
   session: TpvRegisterSession | null | undefined,
   orderId: string,
@@ -32,6 +39,31 @@ export function sessionHasSaleForOrder(
   orderId: string,
 ): boolean {
   return sessionSaleAmountForOrder(session, orderId) > 0.001;
+}
+
+/**
+ * Misma venta ya en caja (mismo pedido + método + importe).
+ * Evita el doble conteo airbag/servidor o reintento 409.
+ */
+export function sessionHasIdenticalSaleForOrder(
+  session: TpvRegisterSession | null | undefined,
+  orderId: string,
+  paymentMethod: string | null | undefined,
+  amount: number,
+): boolean {
+  const oid = String(orderId || '').trim();
+  if (!oid || !session) return false;
+  const pm = normalizeTpvPaymentMethod(paymentMethod);
+  const amt = Math.round(Number(amount || 0) * 100) / 100;
+  if (!(amt > 0)) return false;
+  return (session.transactions || []).some((t) => {
+    if (t?.type !== 'sale') return false;
+    const tid = String(t.orderId || '').trim();
+    const linked = String(t.linkedDeliveryOrderId || '').trim();
+    if (tid !== oid && linked !== oid) return false;
+    if (normalizeTpvPaymentMethod(t.paymentMethod) !== pm) return false;
+    return Math.abs(Math.round(Number(t.amount || 0) * 100) / 100 - amt) < 0.015;
+  });
 }
 
 export function buildTpvSaleTxFromOrder(
@@ -95,15 +127,26 @@ export async function ensureLocalCajaSaleForOrder(
       : resolveDeliveryOrderChargeTotal(order as DeliveryOrder);
   if (!(target > 0)) return false;
   // Idempotente: solo registra lo que falte (evita doble cobro airbag + servidor).
+  if (
+    !opts?.allowMultiple
+    && sessionHasIdenticalSaleForOrder(
+      register.session,
+      orderId,
+      opts?.paymentMethod || order.paymentMethod,
+      target,
+    )
+  ) {
+    return true;
+  }
   const already = sessionSaleAmountForOrder(register.session, orderId);
   const amount = opts?.allowMultiple
     ? target
     : Math.round((target - already) * 100) / 100;
   if (!(amount > 0.001)) return true;
   try {
-    await register.addTransaction(
-      buildTpvSaleTxFromOrder(order, { ...opts, amount }),
-    );
+    const body = buildTpvSaleTxFromOrder(order, { ...opts, amount });
+    if (opts?.allowMultiple) allowMultipleSaleTxs.add(body);
+    await register.addTransaction(body);
     return true;
   } catch {
     return false;

@@ -152,6 +152,7 @@ const TpvPrinterSetupModal = lazy(() =>
   import('./TpvPrinterSetupModal').then((m) => ({ default: m.TpvPrinterSetupModal })),
 );
 import { enqueueTpvOfflineItem, isBrowserOnline } from '../../lib/tpvTabletOffline';
+import { sessionHasIdenticalSaleForOrder, isAllowMultipleSaleTx } from '../../lib/tpvLocalCajaSale';
 import {
   clockIn,
   clockOut,
@@ -3468,11 +3469,19 @@ function ClockInModal({
     }
   }, [businessId, ownerUserId, pdvId, workCenterId]);
 
+  const clockinScopeKey = `${businessId}|${ownerUserId}|${pdvId}|${workCenterId}`;
+  const clockinScopeKeyRef = useRef('');
+
   useEffect(() => {
-    didAutoSelectOpenerRef.current = false;
-    setSelectedOpenerId('');
-    void load();
-  }, [load]);
+    const scopeChanged = clockinScopeKeyRef.current !== clockinScopeKey;
+    clockinScopeKeyRef.current = clockinScopeKey;
+    if (scopeChanged) {
+      didAutoSelectOpenerRef.current = false;
+      setSelectedOpenerId('');
+    }
+    // Misma tienda: no spinner ni reset (evita pantallazos si el PDV se rehidrata).
+    void load({ silent: !scopeChanged });
+  }, [clockinScopeKey, load]);
 
   const todayRecords = useMemo(() => {
     const today = todayDateStr();
@@ -4813,6 +4822,12 @@ export function TpvRegisterGate({
    * llega un tick tarde (reentrada al TPV) antes de mostrar OpeningScreen.
    */
   const [openingRecoverHold, setOpeningRecoverHold] = useState(true);
+  /**
+   * Tras pintar Abrir caja una vez, no volver a «Recuperando caja…» por poll/SSE/pick.
+   * Sin esto: pantallazos OpeningScreen ↔ Recuperando en bucle.
+   */
+  const [openingScreenUnlocked, setOpeningScreenUnlocked] = useState(false);
+  const openingScreenUnlockedRef = useRef(false);
   const [openingBusy, setOpeningBusy] = useState(false);
   const [loadTimedOut, setLoadTimedOut] = useState(false);
   const [showClosing, setShowClosing] = useState(false);
@@ -5749,26 +5764,46 @@ export function TpvRegisterGate({
   }, [loading]);
 
   // Tras el primer load: hold corto por si llega una sesión open un tick tarde.
-  // NO rearmar el hold en cada refresh de `sessions` (poll 30s / SSE): eso
-  // intercambiaba OpeningScreen ↔ «Recuperando caja…» y parpadeaba sin parar.
+  // NO rearmar el hold tras haber mostrado Abrir caja (poll 30s / SSE / pick):
+  // eso intercambiaba OpeningScreen ↔ «Recuperando caja…» sin parar.
+  useEffect(() => {
+    openingScreenUnlockedRef.current = false;
+    setOpeningScreenUnlocked(false);
+    setOpeningRecoverHold(true);
+  }, [scopeBusinessId, dataUserId]);
+
   useEffect(() => {
     if (isTpvRegisterSessionOpen(activeSession)) {
       writeTpvOpenRegisterLatch(activeSession);
       setOpeningRecoverHold(false);
-      return;
-    }
-    if (isTpvRegisterSessionOpen(stickyOpenSessionRef.current)) {
-      writeTpvOpenRegisterLatch(stickyOpenSessionRef.current);
-      setOpeningRecoverHold(false);
+      // Caja operativa en esta tienda: al cerrar sí se permite un hold breve.
+      openingScreenUnlockedRef.current = false;
+      setOpeningScreenUnlocked(false);
       return;
     }
     if (loading) {
-      setOpeningRecoverHold(true);
+      if (!openingScreenUnlockedRef.current) {
+        setOpeningRecoverHold(true);
+      }
       return;
     }
-    writeTpvOpenRegisterLatch(null);
+    // Sin caja en el pick actual → Abrir caja. Mantener latch si sticky sigue open
+    // (otra tienda / ghost), pero NO quedarse en «Recuperando caja…».
+    if (isTpvRegisterSessionOpen(stickyOpenSessionRef.current)) {
+      writeTpvOpenRegisterLatch(stickyOpenSessionRef.current);
+    } else {
+      writeTpvOpenRegisterLatch(null);
+    }
+    if (openingScreenUnlockedRef.current) {
+      setOpeningRecoverHold(false);
+      return;
+    }
     setOpeningRecoverHold(true);
-    const timer = window.setTimeout(() => setOpeningRecoverHold(false), 80);
+    const timer = window.setTimeout(() => {
+      setOpeningRecoverHold(false);
+      openingScreenUnlockedRef.current = true;
+      setOpeningScreenUnlocked(true);
+    }, 80);
     return () => window.clearTimeout(timer);
   }, [loading, activeSession?._id, activeSession?.status]);
 
@@ -6261,18 +6296,45 @@ export function TpvRegisterGate({
         date: new Date().toISOString(),
       };
 
+      const writeSessionsLocal = (nextSession: TpvRegisterSession) => {
+        sessionsRef.current = sessionsRef.current.map((s) =>
+          s._id === nextSession._id ? nextSession : s,
+        );
+        setSessions((prev) => prev.map((s) => (s._id === nextSession._id ? nextSession : s)));
+      };
+
       for (let attempt = 0; attempt < 5; attempt++) {
         const current = sessionsRef.current.find((s) => s._id === sessionId);
         if (!current || !isTpvRegisterSessionOpen(current)) return;
 
-        const updatedTxs = [...current.transactions, fullTx];
+        // Mismo pedido+método+importe ya en caja → no volver a sumar (race airbag/409).
+        // Pagos divididos (allowMultiple) no pasan por este corte.
+        if (
+          fullTx.type === 'sale'
+          && !isAllowMultipleSaleTx(tx)
+        ) {
+          const oid = String(fullTx.orderId || fullTx.linkedDeliveryOrderId || '').trim();
+          if (
+            oid
+            && sessionHasIdenticalSaleForOrder(
+              current,
+              oid,
+              fullTx.paymentMethod,
+              Number(fullTx.amount || 0),
+            )
+          ) {
+            return;
+          }
+        }
+
+        const updatedTxs = [...(current.transactions || []), fullTx];
         const patch = applySessionTransactions(current, updatedTxs);
         const nextSession = { ...current, ...patch };
 
         // Airbag: sin red o Couch caído → caja local siempre; sync después.
         if (!isBrowserOnline()) {
           enqueueTpvOfflineItem('register_tx', { userId: uid, session: nextSession, tx: fullTx });
-          setSessions((prev) => prev.map((s) => (s._id === sessionId ? nextSession : s)));
+          writeSessionsLocal(nextSession);
           if (isTpvCashMovementTx(fullTx.type)) {
             const label = TPV_CASH_TX_LABELS[fullTx.type] || 'Movimiento';
             toast.info(`${label} en modo local. Efectivo esperado: ${calcTpvExpectedCash(nextSession).toFixed(2)}€`);
@@ -6283,7 +6345,7 @@ export function TpvRegisterGate({
 
         try {
           const updated = await updateTpvRegisterSessionRequest(uid, nextSession);
-          setSessions((prev) => prev.map((s) => (s._id === updated._id ? updated : s)));
+          writeSessionsLocal(updated);
           if (isTpvCashMovementTx(fullTx.type)) {
             const label = TPV_CASH_TX_LABELS[fullTx.type] || 'Movimiento';
             toast.success(`${label} de ${fullTx.amount.toFixed(2)}€ registrada. Efectivo esperado: ${calcTpvExpectedCash(updated).toFixed(2)}€`);
@@ -6297,14 +6359,14 @@ export function TpvRegisterGate({
                 uid,
                 tpvGateSessionsQueryOpts(scopeBusinessIdRef.current || undefined),
               );
-              setSessions((prev) =>
-                mergeTpvRegisterSessionsPreservingOpen(
-                  prev,
-                  refreshed.filter((s) =>
-                    shouldKeepTpvSessionInList(s, pointsOfSale, scopeBusinessIdRef.current),
-                  ),
+              const nextList = mergeTpvRegisterSessionsPreservingOpen(
+                sessionsRef.current,
+                refreshed.filter((s) =>
+                  shouldKeepTpvSessionInList(s, pointsOfSale, scopeBusinessIdRef.current),
                 ),
               );
+              sessionsRef.current = nextList;
+              setSessions(nextList);
             } catch {
               /* reintento con copia local */
             }
@@ -6312,7 +6374,7 @@ export function TpvRegisterGate({
           }
           // Couch/API caído con “online”: no romper TPV — queda en local y cola.
           enqueueTpvOfflineItem('register_tx', { userId: uid, session: nextSession, tx: fullTx });
-          setSessions((prev) => prev.map((s) => (s._id === sessionId ? nextSession : s)));
+          writeSessionsLocal(nextSession);
           if (isTpvCashMovementTx(fullTx.type)) {
             toast.info(
               `Servidor no disponible — movimiento en local. Efectivo esperado: ${calcTpvExpectedCash(nextSession).toFixed(2)}€`,
@@ -6325,7 +6387,7 @@ export function TpvRegisterGate({
 
     txQueueRef.current = txQueueRef.current.then(run, run);
     await txQueueRef.current;
-  }, [applySessionTransactions]);
+  }, [applySessionTransactions, pointsOfSale]);
 
   const removeCashMovement = useCallback(async (txId: string, voidReason: string) => {
     const reason = String(voidReason || '').trim();
@@ -6751,7 +6813,8 @@ export function TpvRegisterGate({
   }
 
   if (
-    (loading || openingRecoverHold)
+    !openingScreenUnlocked
+    && (loading || openingRecoverHold)
     && !isTpvRegisterSessionOpen(boardSession)
     && !isTpvRegisterSessionOpen(stickyOpenSessionRef.current)
   ) {
@@ -6772,6 +6835,8 @@ export function TpvRegisterGate({
                   setLoadTimedOut(false);
                   setLoading(true);
                   setOpeningRecoverHold(true);
+                  openingScreenUnlockedRef.current = false;
+                  setOpeningScreenUnlocked(false);
                   void loadData();
                 }}
                 className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white"

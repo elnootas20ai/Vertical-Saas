@@ -33,7 +33,7 @@ import {
 } from '../../../components/saas/TpvRegisterGate';
 import { getWorkerInitials } from '../../../lib/tpvClockedInWorkers';
 import { pickDefaultActivePdvId } from '../../../lib/deliveryOpsPdvSelection';
-import { useTpvOrderFlowChrome, useTpvSuppressBottomBar } from '../../../context/TpvChromeContext';
+import { useTpvOrderFlowChrome, useTpvSuppressBottomBar, useTpvOrderFlowLockControls } from '../../../context/TpvChromeContext';
 import {
   cancelledOrderHistoryLabel,
   hasTpvOpenRegisterLatch,
@@ -1356,6 +1356,9 @@ export function WorkerTpvDelivery({
   const [deliveryCompleteOrder, setDeliveryCompleteOrder] = useState<DeliveryOrder | null>(null);
   const [paymentPromptPurpose, setPaymentPromptPurpose] = useState<'entregar' | 'reparto' | 'pagado'>('entregar');
   const [markingPaidId, setMarkingPaidId] = useState<string | null>(null);
+  const markingPaidIdRef = useRef<string | null>(null);
+  /** Evita doble toque en el modal de cobro (antes de que React pinte loading). */
+  const paymentConfirmLockRef = useRef<string | null>(null);
   const [deleteOrder, setDeleteOrder] = useState<DeliveryOrder | null>(null);
   const [staffConsumptionEnabled, setStaffConsumptionEnabled] = useState(true);
 
@@ -1376,7 +1379,9 @@ export function WorkerTpvDelivery({
   const registerCtx = useTpvRegisterIfOpen();
   const boardReady = useTpvRegisterBoardReady();
   const setStatusBarQuickActions = useTpvStatusBarQuickActions();
+  const orderFlowLock = useTpvOrderFlowLockControls();
   const registerStickyRef = useRef<TpvRegisterContextType | null>(null);
+  const orderFlowClickLockRef = useRef(false);
   // No perder la sesión si el Context parpadea al pulsar «+» / HMR del gate.
   if (registerCtx && isTpvRegisterSessionOpen(registerCtx.session)) {
     registerStickyRef.current = registerCtx;
@@ -1735,7 +1740,17 @@ export function WorkerTpvDelivery({
 
       if (!payload) return;
 
-      // Airbag caja: cobro → sesión local sí o sí (antes del servidor).
+      // UI al instante: tablero/modal no esperan a caja ni al servidor.
+      setOrders((prev) => prev.map((o) => (o._id === payload!._id ? payload! : o)));
+      setDeliveryCompleteOrder(null);
+      if (next === 'entregado') {
+        setShowDelivered(true);
+        setSelectedOrder(null);
+      } else if (selectedOrder?._id === payload._id) {
+        setSelectedOrder(payload);
+      }
+
+      // Airbag caja tras pintar (no bloquea el avance visual).
       if (next === 'entregado' && extras.paymentCollected && extras.paidAmount) {
         await ensureLocalCajaSaleForOrder(register, payload, {
           paymentMethod: resolvedPayment,
@@ -1746,25 +1761,7 @@ export function WorkerTpvDelivery({
 
       if (!isBrowserOnline()) {
         enqueueTpvOfflineItem('order_update', { userId, order: payload });
-        setOrders((prev) => prev.map((o) => (o._id === payload!._id ? payload! : o)));
-        setDeliveryCompleteOrder(null);
-        if (next === 'entregado') {
-          setShowDelivered(true);
-          setSelectedOrder(null);
-        } else if (selectedOrder?._id === payload._id) {
-          setSelectedOrder(payload);
-        }
         return;
-      }
-
-      // UI al instante (montaje→reparto no espera al servidor); si falla, se revierte.
-      setOrders((prev) => prev.map((o) => (o._id === payload!._id ? payload! : o)));
-      setDeliveryCompleteOrder(null);
-      if (next === 'entregado') {
-        setShowDelivered(true);
-        setSelectedOrder(null);
-      } else if (selectedOrder?._id === payload._id) {
-        setSelectedOrder(payload);
       }
 
       const submitUpdate = async (body: DeliveryOrder): Promise<DeliveryOrder> => {
@@ -1820,6 +1817,7 @@ export function WorkerTpvDelivery({
       }
     } finally {
       endAdvancing(order._id);
+      if (paymentConfirmLockRef.current === order._id) paymentConfirmLockRef.current = null;
     }
   }, [
     userId,
@@ -1848,6 +1846,8 @@ export function WorkerTpvDelivery({
         setDeliveryCompleteOrder(null);
         return;
       }
+      if (markingPaidIdRef.current === order._id) return;
+      markingPaidIdRef.current = order._id;
       setMarkingPaidId(order._id);
       const now = new Date().toISOString();
       const amount = resolveDeliveryOrderChargeTotal(order);
@@ -1864,6 +1864,11 @@ export function WorkerTpvDelivery({
           ? { amountReceived: cash.amountReceived, changeGiven: cash.changeGiven }
           : {}),
       };
+      // UI al instante: modal/tablero no esperan a red.
+      setOrders((prev) => prev.map((o) => (o._id === localPaid._id ? localPaid : o)));
+      setSelectedOrder((prev) => (prev?._id === localPaid._id ? localPaid : prev));
+      setDeliveryCompleteOrder(null);
+      toast.success(`Pedido #${order.orderNumber} pagado · ${PAYMENT_LABELS[method]}`);
       try {
         await ensureLocalCajaSaleForOrder(register, localPaid, {
           paymentMethod: method,
@@ -1873,10 +1878,6 @@ export function WorkerTpvDelivery({
 
         if (!isBrowserOnline()) {
           enqueueTpvOfflineItem('order_update', { userId, order: localPaid });
-          setOrders((prev) => prev.map((o) => (o._id === localPaid._id ? localPaid : o)));
-          setSelectedOrder((prev) => (prev?._id === localPaid._id ? localPaid : prev));
-          setDeliveryCompleteOrder(null);
-          toast.success(`Pedido #${order.orderNumber} pagado · ${PAYMENT_LABELS[method]}`);
           return;
         }
 
@@ -1906,16 +1907,12 @@ export function WorkerTpvDelivery({
         };
         setOrders((prev) => prev.map((o) => (o._id === merged._id ? merged : o)));
         setSelectedOrder((prev) => (prev?._id === merged._id ? merged : prev));
-        setDeliveryCompleteOrder(null);
-        toast.success(`Pedido #${order.orderNumber} pagado · ${PAYMENT_LABELS[method]}`);
-      } catch (err) {
+      } catch {
         enqueueTpvOfflineItem('order_update', { userId, order: localPaid });
-        setOrders((prev) => prev.map((o) => (o._id === localPaid._id ? localPaid : o)));
-        setSelectedOrder((prev) => (prev?._id === localPaid._id ? localPaid : prev));
-        setDeliveryCompleteOrder(null);
-        toast.success(`Pedido #${order.orderNumber} pagado · ${PAYMENT_LABELS[method]}`);
       } finally {
+        markingPaidIdRef.current = null;
         setMarkingPaidId(null);
+        if (paymentConfirmLockRef.current === order._id) paymentConfirmLockRef.current = null;
       }
     },
     [userId, user?.user_id, user?.id, user?.fullName, register],
@@ -1933,8 +1930,14 @@ export function WorkerTpvDelivery({
       cash?: { amountReceived: number; changeGiven: number },
     ) => {
       if (!deliveryCompleteOrder) return;
-      const fresh = orders.find((o) => o._id === deliveryCompleteOrder._id) || deliveryCompleteOrder;
-      if (paymentPromptPurpose === 'pagado') {
+      const orderId = deliveryCompleteOrder._id;
+      if (paymentConfirmLockRef.current === orderId) return;
+      paymentConfirmLockRef.current = orderId;
+      const fresh = orders.find((o) => o._id === orderId) || deliveryCompleteOrder;
+      const purpose = paymentPromptPurpose;
+      // Cierra el modal al momento (evita sensación de “cargando” y segundo click).
+      setDeliveryCompleteOrder(null);
+      if (purpose === 'pagado') {
         // Recogida: «Pagar» = entregar → debe bajar al Historial (no quedarse en Montaje).
         if (
           fresh.deliveryType === 'recogida'
@@ -2083,11 +2086,18 @@ export function WorkerTpvDelivery({
     [userId],
   );
 
+  const releaseOrderFlowClickLock = useCallback(() => {
+    if (!orderFlowClickLockRef.current) return;
+    orderFlowClickLockRef.current = false;
+    orderFlowLock.release();
+  }, [orderFlowLock]);
+
   const backToBoard = useCallback(() => {
+    releaseOrderFlowClickLock();
     setEditingOrder(null);
     setView('board');
     void loadOrders({ silent: true });
-  }, [loadOrders]);
+  }, [loadOrders, releaseOrderFlowClickLock]);
 
   // Sin caja operativa no tiene sentido el flujo de pedido (evita pantalla «Abre la caja» sin salida).
   // Grace + sticky: no expulsar por un frame sin contexto si el tablero sigue montado.
@@ -2099,11 +2109,12 @@ export function WorkerTpvDelivery({
       if (sticky && isTpvRegisterSessionOpen(sticky.session)) return;
       if (boardReady) return;
       if (hasTpvOpenRegisterLatch()) return;
+      releaseOrderFlowClickLock();
       setEditingOrder(null);
       setView('board');
     }, 600);
     return () => window.clearTimeout(t);
-  }, [view, canUseOrderFlow, boardReady]);
+  }, [view, canUseOrderFlow, boardReady, releaseOrderFlowClickLock]);
 
   const startEditOrder = useCallback((order: DeliveryOrder) => {
     const sticky = registerStickyRef.current;
@@ -2115,10 +2126,15 @@ export function WorkerTpvDelivery({
       toast.error('Abre la caja de la tienda antes de editar un pedido');
       return;
     }
+    // Lock YA (antes del paint): evita OpeningScreen / blanco al entrar a editar.
+    if (!orderFlowClickLockRef.current) {
+      orderFlowLock.acquire();
+      orderFlowClickLockRef.current = true;
+    }
     setSelectedOrder(null);
     setEditingOrder(order);
     setView('new-order');
-  }, [registerOpen, boardReady]);
+  }, [registerOpen, boardReady, orderFlowLock]);
 
   const startNewOrder = useCallback(() => {
     const sticky = registerStickyRef.current;
@@ -2130,9 +2146,13 @@ export function WorkerTpvDelivery({
       toast.error('Abre la caja de la tienda antes de crear un pedido');
       return;
     }
+    if (!orderFlowClickLockRef.current) {
+      orderFlowLock.acquire();
+      orderFlowClickLockRef.current = true;
+    }
     setEditingOrder(null);
     setView('new-order');
-  }, [registerOpen, boardReady]);
+  }, [registerOpen, boardReady, orderFlowLock]);
 
   const exitTabletTpv = useCallback(() => {
     void leaveTpvTabletSession(logout, { navigate });
@@ -2370,6 +2390,7 @@ export function WorkerTpvDelivery({
         editingDeliveryOrder={editingOrder}
         registerOverride={registerForFlow}
         onEditingDeliveryOrderSaved={() => {
+          releaseOrderFlowClickLock();
           setEditingOrder(null);
           setView('board');
           void loadOrders({ silent: true });

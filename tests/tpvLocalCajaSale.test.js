@@ -2,19 +2,21 @@ import { describe, expect, it } from 'vitest';
 import {
   buildTpvSaleTxFromOrder,
   mergeTpvRegisterTransactions,
+  sessionHasIdenticalSaleForOrder,
   sessionHasSaleForOrder,
   sessionSaleAmountForOrder,
 } from '../src/app/lib/tpvLocalCajaSale.ts';
 
 describe('tpvLocalCajaSale', () => {
-  it('detecta venta ya en sesión por orderId', () => {
+  it('detecta venta idéntica (pedido+método+importe)', () => {
     const session = {
       transactions: [
-        { id: 'tx1', type: 'sale', orderId: 'dord-a', amount: 15, date: '2026-01-01' },
+        { id: 'tx1', type: 'sale', orderId: 'dord-a', paymentMethod: 'tarjeta', amount: 46.8, date: '2026-01-01' },
       ],
     };
-    expect(sessionHasSaleForOrder(session, 'dord-a')).toBe(true);
-    expect(sessionHasSaleForOrder(session, 'dord-b')).toBe(false);
+    expect(sessionHasIdenticalSaleForOrder(session, 'dord-a', 'tarjeta', 46.8)).toBe(true);
+    expect(sessionHasIdenticalSaleForOrder(session, 'dord-a', 'efectivo', 46.8)).toBe(false);
+    expect(sessionHasIdenticalSaleForOrder(session, 'dord-a', 'tarjeta', 20)).toBe(false);
   });
 
   it('suma ventas del pedido (orderId o linked) para no doblar airbag', () => {

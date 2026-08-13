@@ -1101,10 +1101,19 @@ export function TpvRapidoOrderFlow({
     });
 
   // Step 2 - Delivery
-  const [deliveryType, setDeliveryType] = useState<DeliveryType | null>(() =>
-    startAsRestaurant ? 'recogida' : null,
-  );
-  const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
+  const [deliveryType, setDeliveryType] = useState<DeliveryType | null>(() => {
+    // Al editar con «+»: hidratar YA (si no, products no es reachable → pantalla en blanco).
+    if (editingDeliveryOrder && isDeliveryOrderEditableOnTpvBoard(editingDeliveryOrder)) {
+      return editingDeliveryOrder.deliveryType === 'recogida' ? 'recogida' : 'domicilio';
+    }
+    return startAsRestaurant ? 'recogida' : null;
+  });
+  const [selectedAddressId, setSelectedAddressId] = useState<string | null>(() => {
+    if (editingDeliveryOrder && isDeliveryOrderEditableOnTpvBoard(editingDeliveryOrder)) {
+      return editingDeliveryOrder.deliveryAddressId || null;
+    }
+    return null;
+  });
   const [showNewAddress, setShowNewAddress] = useState(false);
   const [newAddrLabel, setNewAddrLabel] = useState('Casa');
   const [newAddrStreet, setNewAddrStreet] = useState('');
@@ -1130,7 +1139,18 @@ export function TpvRapidoOrderFlow({
   const [selectedSectionId, setSelectedSectionId] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const brandInitRef = useRef(false);
-  const [cart, setCart] = useState<CartItem[]>([]);
+  const [cart, setCart] = useState<CartItem[]>(() => {
+    if (!editingDeliveryOrder || !isDeliveryOrderEditableOnTpvBoard(editingDeliveryOrder)) {
+      return [];
+    }
+    const uid = String(registerScope.effectiveDataUserId || 'tpv');
+    return seedTpvCartFromDeliveryOrder(editingDeliveryOrder, {}, uid).map((s) => ({
+      lineId: s.lineId,
+      catalogItem: s.catalogItem,
+      quantity: s.quantity,
+      customization: s.customization,
+    }));
+  });
   const [cartShake, setCartShake] = useState(false);
   const restaurantTableMarkedRef = useRef(false);
   const [customizeTarget, setCustomizeTarget] = useState<{
@@ -1156,11 +1176,22 @@ export function TpvRapidoOrderFlow({
   const [tpvFreeSwapOnRemove, setTpvFreeSwapOnRemove] = useState(false);
   const [tpvDeliveryFee, setTpvDeliveryFee] = useState<number>(0);
   /** Si true, no se cobra el envío automático en este pedido. */
-  const [waiveDeliveryFee, setWaiveDeliveryFee] = useState(false);
+  const [waiveDeliveryFee, setWaiveDeliveryFee] = useState(() => {
+    if (editingDeliveryOrder && isDeliveryOrderEditableOnTpvBoard(editingDeliveryOrder)) {
+      return !(Number(editingDeliveryOrder.deliveryFee) > 0);
+    }
+    return false;
+  });
   const [recentOrdersPool, setRecentOrdersPool] = useState<DeliveryOrder[]>([]);
 
   // Step 4 - Payment
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(() => {
+    if (editingDeliveryOrder && isDeliveryOrderEditableOnTpvBoard(editingDeliveryOrder)) {
+      const raw = String(editingDeliveryOrder.paymentMethod || '').trim();
+      return raw ? normalizeTpvPaymentMethod(raw) : null;
+    }
+    return null;
+  });
   const [paymentSplitOpen, setPaymentSplitOpen] = useState(false);
   /** Restaurant mesa: choice → items | amounts (como delivery al cobrar). */
   const [restaurantSplitStep, setRestaurantSplitStep] = useState<null | 'choice' | 'items' | 'amounts'>(null);
@@ -1168,7 +1199,12 @@ export function TpvRapidoOrderFlow({
   const [cashGiven, setCashGiven] = useState('');
   // Propina (solo cobro de cuenta de mesa en restaurante/bar)
   const [tipInput, setTipInput] = useState('');
-  const [orderNotes, setOrderNotes] = useState('');
+  const [orderNotes, setOrderNotes] = useState(() => {
+    if (editingDeliveryOrder && isDeliveryOrderEditableOnTpvBoard(editingDeliveryOrder)) {
+      return String(editingDeliveryOrder.notes || '').trim();
+    }
+    return '';
+  });
   const [initialStatus, setInitialStatus] = useState<'nuevo' | 'cocina'>('nuevo');
   const [promoCodeInput, setPromoCodeInput] = useState('');
   const [appliedPromo, setAppliedPromo] = useState<AppliedPromo | null>(null);
@@ -1891,7 +1927,19 @@ export function TpvRapidoOrderFlow({
 
   const deliveryFlowClient =
     selectedClient
-    || (quickAttentionActive ? quickAttentionClient : null);
+    || (quickAttentionActive ? quickAttentionClient : null)
+    // Editar con «+»: placeholder al instante (CRM puede llegar async → sin esto = blanco).
+    || (
+      editingDeliveryOrder && isDeliveryOrderEditableOnTpvBoard(editingDeliveryOrder)
+        ? buildDeliveryQuickAttentionClient(
+          userId || 'tpv',
+          writeBusinessId || businessId || 'tpv',
+          resolveTpvCustomerDisplayName(editingDeliveryOrder.customerName, 'Cliente'),
+          editingDeliveryOrder.customerPhone || '',
+          '+34',
+        )
+        : null
+    );
 
   const isStepReachable = useCallback(
     (step: Step) => {
@@ -2412,9 +2460,10 @@ export function TpvRapidoOrderFlow({
         // Sin ficha CRM: flujo sintético (nombre en cocina/ticket).
         clearSelection();
         setQuickAttentionActive(true);
-        setCompletedSteps(new Set(['client']));
       }
-      setCurrentStep('delivery');
+      // Atención rápida = recogida: ir directo a carta (evita paso vacío / blanco).
+      setCompletedSteps(new Set(['client', 'delivery']));
+      setCurrentStep('products');
     };
 
     // Solo nombre (sin teléfono completo) → NO crear ficha en CRM.
@@ -2660,6 +2709,8 @@ export function TpvRapidoOrderFlow({
   const handleSubmitOrder = useCallback(
     async (status: DeliveryOrderStatus, methodOverride?: PaymentMethod, splitParts?: TpvSplitPaymentPart[] | null) => {
       if (!saleClient || !deliveryType || cart.length === 0) return;
+      // Candado sync: doble toque no crea dos pedidos (disabled del botón llega un frame tarde).
+      if (actionBusyRef.current) return;
       if (isJunkTpvCustomerName(saleClient.name)) {
         toast.error('Pon el nombre del cliente antes de cobrar (no vale «Buscar»)');
         return;
@@ -2708,8 +2759,8 @@ export function TpvRapidoOrderFlow({
         || deliveryType === 'recogida'
         || (Boolean(parts?.length) && method === 'mixto');
 
-      setSubmitting(true);
       actionBusyRef.current = true;
+      setSubmitting(true);
       try {
         const items: DeliveryOrderItem[] = cart.map((ci) => {
           const priced = pricedByLineId.get(ci.lineId);
@@ -2965,6 +3016,7 @@ export function TpvRapidoOrderFlow({
         showTpvError(err, 'crear_pedido', 'Error al crear el pedido');
       } finally {
         setSubmitting(false);
+        actionBusyRef.current = false;
       }
     },
     [saleClient, deliveryType, cart, selectedAddressId, paymentMethod, pendingSplitParts, finalTotal, payableTotal, deliveryFeeAmount, orderNotes, userId, phonePrefix, register?.selectedOrderTakerId, selectedOrderTaker, appliedPromo, discountAmount, promoMode, clientPromoSelected, effectiveCalc, register?.session, resolveOpenRegister, boardReady, user?.fullName, user?.user_id, user?.id, user?.email, tabletMode, tpvBrandIngredientSelection, tpvCategoryTemplates, storeIngredients, brands, restaurantTable, restaurantDiningOrder, onRestaurantDiningOrderUpdated, onRestaurantOrderComplete, currentBusiness, writeBusinessId, businessId, catalog, effectiveOrderTakerId, showTpvError, cashGiven, pricedByLineId],
@@ -2972,8 +3024,9 @@ export function TpvRapidoOrderFlow({
 
   const handleSaveEditedDeliveryOrder = useCallback(async () => {
     if (!editingDeliveryOrder || !isEditingDeliveryOrder || cart.length === 0 || !userId) return;
-    setSubmitting(true);
+    if (actionBusyRef.current) return;
     actionBusyRef.current = true;
+    setSubmitting(true);
     try {
       const items: DeliveryOrderItem[] = cart.map((ci) => {
         const priced = pricedByLineId.get(ci.lineId);
@@ -4485,6 +4538,7 @@ export function TpvRapidoOrderFlow({
   })();
 
   const handleFooterPrimary = () => {
+    if (submitting || actionBusyRef.current) return;
     if (isEditingDeliveryOrder) {
       void handleSaveEditedDeliveryOrder();
       return;
@@ -5276,6 +5330,12 @@ export function TpvRapidoOrderFlow({
         ) : null}
 
         {/* ═══════════════ STEP 3: PRODUCTS ═══════════════ */}
+        {currentStep === 'products' && !isStepReachable('products') ? (
+          <div className="min-h-[40vh] flex flex-col items-center justify-center gap-3 p-6 text-center">
+            <div className="animate-spin w-8 h-8 border-2 border-gray-300 border-t-gray-900 rounded-full" />
+            <p className="text-sm text-gray-600 dark:text-gray-400">Cargando el pedido…</p>
+          </div>
+        ) : null}
         {currentStep === 'products' && isStepReachable('products') ? (
           <StepContainer step={3} title="Productos" visible wide className={tabletMode ? 'flex-1 min-h-0 flex flex-col mb-0' : undefined}>
             <div className={tabletMode ? 'flex-1 min-h-0 flex flex-col w-full' : undefined}>

@@ -32,6 +32,8 @@ import { ShiftBrandBillingSummary } from './ShiftBrandBillingSummary';
 import { buildBrandLabelsMap } from '../../lib/brandLabels';
 import { DeliveryFoodUnitLabel } from './delivery/DeliveryFoodUnitIcon';
 import { CajaCashMovementsList } from './caja/CajaCashMovementsList';
+import { sessionToUrielAmounts } from '../../lib/cajaUrielClosingsExcelExport';
+import { formatMoneyEs } from '../../lib/formatNumberEs';
 
 const METHOD_CHIP =
   'bg-zinc-100 text-zinc-700 border border-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:border-zinc-600';
@@ -197,6 +199,20 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
     () => aggregatorRows.reduce((s, r) => s + (Number(r.cashSales) || 0), 0),
     [aggregatorRows],
   );
+  const appsTotal = useMemo(
+    () => aggregatorRows.reduce((s, r) => s + (Number(r.totalSales) || 0), 0),
+    [aggregatorRows],
+  );
+  /** Mismo TOTAL que el resumen Excel / «Caja cerrada» del TPV. */
+  const excelAmounts = useMemo(() => sessionToUrielAmounts(session), [session]);
+  const totalFacturacion = Number(excelAmounts.total) || 0;
+  const tiendaTotal = Math.round(
+    (
+      Number(excelAmounts.efectivo || 0)
+      + Number(excelAmounts.tpv || 0)
+      + Number(excelAmounts.x || 0)
+    ) * 100,
+  ) / 100;
 
   return (
     <div className="space-y-4">
@@ -210,103 +226,120 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
         </span>
       </div>
 
-      {/* Caja 1 · Tienda + Caja 2 · Apps */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-        <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900/50 p-3 space-y-2">
-          <div className="flex items-baseline justify-between gap-2">
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Caja 1</p>
-              <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Tienda (TPV)</p>
-            </div>
-            <p className="text-lg font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
-              {fmtMoney(summary.totalSales)}€
-            </p>
-          </div>
-          <div className="space-y-1 text-xs">
-            <div className="flex justify-between gap-2 text-emerald-700 dark:text-emerald-300">
-              <span className="font-semibold">Efectivo</span>
-              <span className="font-semibold tabular-nums">{fmtMoney(summary.salesByMethod.efectivo)}€</span>
-            </div>
-            <div className="flex justify-between gap-2 text-sky-700 dark:text-sky-300">
-              <span className="font-semibold">Tarjeta</span>
-              <span className="font-semibold tabular-nums">{fmtMoney(summary.salesByMethod.tarjeta)}€</span>
-            </div>
-            {(summary.salesByMethod.bizum || 0) > 0 ? (
-              <div className="flex justify-between gap-2 text-zinc-500">
-                <span>Bizum</span>
-                <span className="font-semibold tabular-nums">{fmtMoney(summary.salesByMethod.bizum)}€</span>
-              </div>
-            ) : null}
-          </div>
-          {!ordersLoading && brandBilling.rows.length > 0 ? (
-            <div className="border-t border-zinc-100 dark:border-zinc-800 pt-1.5 space-y-0.5">
-              {brandBilling.rows.map((row) => (
-                <div key={row.brandId} className="flex justify-between gap-2 text-[11px] text-zinc-600 dark:text-zinc-300">
-                  <span className="truncate">{row.name}</span>
-                  <span className="tabular-nums font-semibold shrink-0">{fmtMoney(row.revenue)}€</span>
-                </div>
-              ))}
-            </div>
+      {/* 1) TOTAL facturación (lo primero, como en el cierre TPV) */}
+      <div className="rounded-2xl border border-zinc-900/10 dark:border-zinc-100/10 bg-zinc-900 dark:bg-zinc-100 px-4 py-4 text-white dark:text-zinc-900">
+        <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-300 dark:text-zinc-500">
+          Total facturación
+        </p>
+        <p className="mt-1 text-3xl font-black tabular-nums tracking-tight">
+          {formatMoneyEs(totalFacturacion)}
+        </p>
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs font-semibold text-zinc-200 dark:text-zinc-600">
+          <span>Tienda {formatMoneyEs(tiendaTotal)}</span>
+          <span>Apps {formatMoneyEs(appsTotal)}</span>
+          {(summary.totalReturns || 0) > 0 ? (
+            <span className="inline-flex items-center gap-1">
+              <TrendingDown className="w-3 h-3" />
+              Dev. {formatMoneyEs(summary.totalReturns)}
+            </span>
           ) : null}
-        </div>
-
-        <div className="rounded-xl border border-blue-200 dark:border-blue-900/50 bg-blue-50/60 dark:bg-blue-950/30 p-3 space-y-2">
-          <div className="flex items-baseline justify-between gap-2">
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-blue-500/80">Caja 2</p>
-              <p className="text-sm font-bold text-blue-950 dark:text-blue-50">Apps (hecho en app)</p>
-            </div>
-            <p className="text-lg font-semibold tabular-nums text-blue-950 dark:text-blue-50">
-              {fmtMoney(aggregatorRows.reduce((s, r) => s + (Number(r.totalSales) || 0), 0))}€
-            </p>
-          </div>
-          <div className="space-y-1 text-xs">
-            {aggregatorRows.map((r) => {
-              const amt = Number(r.totalSales) || 0;
-              if (amt <= 0) return null;
-              return (
-                <div key={r.platform.channel} className="flex justify-between gap-2 text-blue-900/80 dark:text-blue-100/80">
-                  <span className="font-semibold truncate">{r.platform.label}</span>
-                  <span className="font-semibold tabular-nums shrink-0">{fmtMoney(amt)}€</span>
-                </div>
-              );
-            })}
-            {aggregatorCashTotal > 0 ? (
-              <div className="flex justify-between gap-2 text-emerald-700 dark:text-emerald-300">
-                <span className="font-semibold">No pagado efectivo → cajón</span>
-                <span className="font-semibold tabular-nums">{fmtMoney(aggregatorCashTotal)}€</span>
-              </div>
-            ) : null}
-          </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-        {[
-          {
-            label: 'Ventas TPV',
-            value: `${fmtMoney(summary.totalSales)}€`,
-            icon: <TrendingUp className="w-3 h-3" />,
-          },
-          {
-            label: 'Devoluciones',
-            value: `${fmtMoney(summary.totalReturns)}€`,
-            icon: <TrendingDown className="w-3 h-3" />,
-          },
-          { label: 'Entradas efectivo', value: `${fmtMoney(summary.totalCashIn)}€` },
-          { label: 'Salidas efectivo', value: `${fmtMoney(summary.totalCashOut)}€` },
-        ].map((card) => (
-          <div
-            key={card.label}
-            className="p-3 rounded-lg border border-zinc-200 bg-zinc-50/80 dark:border-zinc-700 dark:bg-zinc-900/50"
-          >
-            <div className="text-[11px] text-zinc-500 dark:text-zinc-400 flex items-center gap-1">
-              {card.icon}
-              {card.label}
-            </div>
-            <div className="text-lg font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">{card.value}</div>
+      {/* 2) Entradas y salidas */}
+      <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900/40 p-4">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+            Entradas y salidas
+          </p>
+          <div className="flex gap-2 text-[11px] font-semibold tabular-nums text-zinc-600 dark:text-zinc-300">
+            <span className="inline-flex items-center gap-1">
+              <TrendingUp className="w-3 h-3 text-emerald-600" />
+              In {formatMoneyEs(summary.totalCashIn)}
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <TrendingDown className="w-3 h-3 text-rose-600" />
+              Out {formatMoneyEs(summary.totalCashOut)}
+            </span>
           </div>
-        ))}
+        </div>
+        <CajaCashMovementsList session={session} title="" />
+      </div>
+
+      {/* 3) Por qué: desglose Caja 1 / Caja 2 */}
+      <div>
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+          Desglose del total
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900/50 p-3 space-y-2">
+            <div className="flex items-baseline justify-between gap-2">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Caja 1</p>
+                <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Tienda (TPV)</p>
+              </div>
+              <p className="text-lg font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
+                {formatMoneyEs(summary.totalSales)}
+              </p>
+            </div>
+            <div className="space-y-1 text-xs">
+              <div className="flex justify-between gap-2 text-emerald-700 dark:text-emerald-300">
+                <span className="font-semibold">Efectivo</span>
+                <span className="font-semibold tabular-nums">{formatMoneyEs(summary.salesByMethod.efectivo)}</span>
+              </div>
+              <div className="flex justify-between gap-2 text-sky-700 dark:text-sky-300">
+                <span className="font-semibold">Tarjeta</span>
+                <span className="font-semibold tabular-nums">{formatMoneyEs(summary.salesByMethod.tarjeta)}</span>
+              </div>
+              {(summary.salesByMethod.bizum || 0) > 0 ? (
+                <div className="flex justify-between gap-2 text-zinc-500">
+                  <span>Bizum</span>
+                  <span className="font-semibold tabular-nums">{formatMoneyEs(summary.salesByMethod.bizum)}</span>
+                </div>
+              ) : null}
+            </div>
+            {!ordersLoading && brandBilling.rows.length > 0 ? (
+              <div className="border-t border-zinc-100 dark:border-zinc-800 pt-1.5 space-y-0.5">
+                {brandBilling.rows.map((row) => (
+                  <div key={row.brandId} className="flex justify-between gap-2 text-[11px] text-zinc-600 dark:text-zinc-300">
+                    <span className="truncate">{row.name}</span>
+                    <span className="tabular-nums font-semibold shrink-0">{formatMoneyEs(row.revenue)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="rounded-xl border border-blue-200 dark:border-blue-900/50 bg-blue-50/60 dark:bg-blue-950/30 p-3 space-y-2">
+            <div className="flex items-baseline justify-between gap-2">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-blue-500/80">Caja 2</p>
+                <p className="text-sm font-bold text-blue-950 dark:text-blue-50">Apps (hecho en app)</p>
+              </div>
+              <p className="text-lg font-semibold tabular-nums text-blue-950 dark:text-blue-50">
+                {formatMoneyEs(appsTotal)}
+              </p>
+            </div>
+            <div className="space-y-1 text-xs">
+              {aggregatorRows.map((r) => {
+                const amt = Number(r.totalSales) || 0;
+                if (amt <= 0) return null;
+                return (
+                  <div key={r.platform.channel} className="flex justify-between gap-2 text-blue-900/80 dark:text-blue-100/80">
+                    <span className="font-semibold truncate">{r.platform.label}</span>
+                    <span className="font-semibold tabular-nums shrink-0">{formatMoneyEs(amt)}</span>
+                  </div>
+                );
+              })}
+              {aggregatorCashTotal > 0 ? (
+                <div className="flex justify-between gap-2 text-emerald-700 dark:text-emerald-300">
+                  <span className="font-semibold">No pagado efectivo → cajón</span>
+                  <span className="font-semibold tabular-nums">{formatMoneyEs(aggregatorCashTotal)}</span>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="flex gap-1.5 flex-wrap text-xs">
@@ -317,7 +350,7 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
           const Icon = badge.icon;
           return (
             <span key={method} className={`px-2 py-0.5 rounded-md font-medium flex items-center gap-1 ${badge.color}`}>
-              <Icon className="w-3 h-3 opacity-70" /> {badge.label}: {fmtMoney(amount)}€
+              <Icon className="w-3 h-3 opacity-70" /> {badge.label}: {formatMoneyEs(amount)}
             </span>
           );
         })}
@@ -357,32 +390,32 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
 
       <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50/80 dark:bg-zinc-900/50 p-4 space-y-2 text-sm">
         <p className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Arqueo de efectivo</p>
-        <div className="flex justify-between"><span className="text-zinc-500">Fondo de apertura</span><span className="font-semibold tabular-nums">{fmtMoney(session.initialCashAmount)}€</span></div>
-        <div className="flex justify-between"><span className="text-zinc-600 dark:text-zinc-300">+ Cobros en efectivo</span><span className="font-semibold tabular-nums">{fmtMoney(summary.salesByMethod.efectivo)}€</span></div>
+        <div className="flex justify-between"><span className="text-zinc-500">Fondo de apertura</span><span className="font-semibold tabular-nums">{formatMoneyEs(session.initialCashAmount)}</span></div>
+        <div className="flex justify-between"><span className="text-zinc-600 dark:text-zinc-300">+ Cobros en efectivo</span><span className="font-semibold tabular-nums">{formatMoneyEs(summary.salesByMethod.efectivo)}</span></div>
         {cashStaffConsumption > 0 && (
-          <div className="flex justify-between"><span className="text-zinc-600 dark:text-zinc-300">+ Consumo equipo (efectivo)</span><span className="font-semibold tabular-nums">{fmtMoney(cashStaffConsumption)}€</span></div>
+          <div className="flex justify-between"><span className="text-zinc-600 dark:text-zinc-300">+ Consumo equipo (efectivo)</span><span className="font-semibold tabular-nums">{formatMoneyEs(cashStaffConsumption)}</span></div>
         )}
-        <div className="flex justify-between"><span className="text-zinc-600 dark:text-zinc-300">+ Entradas de efectivo</span><span className="font-semibold tabular-nums">{fmtMoney(summary.totalCashIn)}€</span></div>
-        <div className="flex justify-between"><span className="text-zinc-600 dark:text-zinc-300">− Devoluciones efectivo</span><span className="font-semibold tabular-nums">{fmtMoney(cashReturns)}€</span></div>
-        <div className="flex justify-between"><span className="text-zinc-600 dark:text-zinc-300">− Salidas de efectivo</span><span className="font-semibold tabular-nums">{fmtMoney(summary.totalCashOut)}€</span></div>
+        <div className="flex justify-between"><span className="text-zinc-600 dark:text-zinc-300">+ Entradas de efectivo</span><span className="font-semibold tabular-nums">{formatMoneyEs(summary.totalCashIn)}</span></div>
+        <div className="flex justify-between"><span className="text-zinc-600 dark:text-zinc-300">− Devoluciones efectivo</span><span className="font-semibold tabular-nums">{formatMoneyEs(cashReturns)}</span></div>
+        <div className="flex justify-between"><span className="text-zinc-600 dark:text-zinc-300">− Salidas de efectivo</span><span className="font-semibold tabular-nums">{formatMoneyEs(summary.totalCashOut)}</span></div>
         <div className="border-t border-zinc-200 dark:border-zinc-700 pt-2 flex justify-between">
           <span className="text-zinc-700 dark:text-zinc-300 font-medium">Efectivo esperado</span>
-          <span className="font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">{fmtMoney(session.expectedCash)}€</span>
+          <span className="font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">{formatMoneyEs(session.expectedCash)}</span>
         </div>
         {aggregatorCashTotal > 0 ? (
           <p className="text-[10px] text-zinc-500 dark:text-zinc-400">
-            Incluye {fmtMoney(aggregatorCashTotal)}€ de efectivo de integradores
+            Incluye {formatMoneyEs(aggregatorCashTotal)} de efectivo de integradores
           </p>
         ) : null}
         <div className="flex justify-between">
           <span className="text-zinc-700 dark:text-zinc-300 font-medium">Efectivo contado</span>
-          <span className="font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">{fmtMoney(session.finalCashAmount)}€</span>
+          <span className="font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">{formatMoneyEs(session.finalCashAmount)}</span>
         </div>
         {session.nextDayInitialCash != null ? (
           <div className="flex justify-between">
             <span className="text-emerald-700 dark:text-emerald-300 font-medium">Fondo que queda en caja</span>
             <span className="font-semibold tabular-nums text-emerald-800 dark:text-emerald-200">
-              {fmtMoney(session.nextDayInitialCash)}€
+              {formatMoneyEs(session.nextDayInitialCash)}
             </span>
           </div>
         ) : null}
@@ -401,7 +434,7 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
                 : 'text-zinc-900 dark:text-zinc-50 underline decoration-zinc-400 underline-offset-2'
             }`}
           >
-            {(Number(session.difference) || 0) >= 0 ? '+' : ''}{fmtMoney(session.difference)}€
+            {(Number(session.difference) || 0) >= 0 ? '+' : ''}{formatMoneyEs(session.difference)}
           </span>
         </div>
       </div>
@@ -411,10 +444,6 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
         foodByChannel={aggregatorFoodByChannel}
         title="Caja 2 · apps (declarado en cierre)"
       />
-
-      <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900/40 p-4">
-        <CajaCashMovementsList session={session} title="Entradas y salidas" />
-      </div>
 
       {cashCounts.length > 0 && (
         <div>
