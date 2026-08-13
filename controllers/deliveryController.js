@@ -36,12 +36,9 @@ import {
   buildPointOfSaleDocument,
   sanitizePointOfSale,
   listPointsOfSaleByUser,
+  listPointsOfSaleForApi,
   listScopedPointsOfSaleForUser,
   listScopedPointsOfSaleForBusiness,
-  dedupeActivePointsOfSale,
-  dedupeLinkedPointsOfSale,
-  listActiveWorkCenterIds,
-  filterPointsOfSaleLinkedToWorkCenters,
   findActivePointOfSaleForWorkCenter,
   findOrphanPointOfSaleByName,
   filterTpvRegisterSessionsForBusiness,
@@ -3718,14 +3715,7 @@ export async function listPointsOfSale(req, res) {
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     const includeInactive =
       req.query.includeInactive === 'true' || req.query.includeInactive === '1';
-    let pdvs;
-    if (includeInactive) {
-      const all = dedupeLinkedPointsOfSale(await listPointsOfSaleByUser(req, userId));
-      const workCenterIds = await listActiveWorkCenterIds(req);
-      pdvs = filterPointsOfSaleLinkedToWorkCenters(all, workCenterIds);
-    } else {
-      pdvs = await listScopedPointsOfSaleForUser(req, userId);
-    }
+    let pdvs = await listPointsOfSaleForApi(req, userId, { includeInactive });
     // Códigos tablet: solo bajo demanda (TPV/regenerar), no en cada listado.
     if (req.query.ensureTerminalCodes === 'true' || req.query.ensureTerminalCodes === '1') {
       pdvs = await Promise.all(pdvs.map((p) => ensureTerminalCodeOnPdv(req, p).catch(() => p)));

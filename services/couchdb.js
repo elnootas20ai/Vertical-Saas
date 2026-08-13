@@ -7267,17 +7267,135 @@ export function findOrphanPointOfSaleByName(docs, name) {
 }
 
 export async function listPointsOfSaleByUser(req, userId) {
+  const uid = String(userId || '').trim();
   const db = getDeliveryDbName();
   await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
+  await ensureDeliveryTypeUserIndex(req, db);
+
+  // Mango por type+user_id: no _all_docs de toda la DB delivery compartida.
+  let docs;
+  try {
+    const selector = uid
+      ? { type: 'point_of_sale', user_id: uid }
+      : { type: 'point_of_sale' };
+    docs = await findDocuments(req, db, selector, { pageSize: 500, maxDocs: 10_000 });
+  } catch {
+    docs = await getAllDocuments(req, db);
+  }
+
   return docs
     .filter(
       (doc) =>
         doc?.type === 'point_of_sale' &&
         !doc?.deletedAt &&
-        (!userId || workCenterDocMatchesUser(doc, userId)),
+        (!uid || workCenterDocMatchesUser(doc, uid)),
     )
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+}
+
+/**
+ * PDV con workCenterId muerto o vacío → reenlaza al WC retail vivo
+ * con mismo businessId + nombre (bodegeta/tiana/badalona, etc.).
+ */
+export async function rematchOrphanPointOfSaleWorkCenters(req, userId, pdvs) {
+  const list = Array.isArray(pdvs) ? pdvs : [];
+  if (list.length === 0) return list;
+
+  const wcDb = getWorkCentersDbName();
+  await ensureDatabase(req, wcDb);
+  const wcDocs = await getAllDocuments(req, wcDb);
+  const retailWcs = wcDocs.filter(
+    (d) =>
+      d?.type === 'sales_point' &&
+      !d?.deletedAt &&
+      isRetailWorkCenterDoc(d) &&
+      workCenterDocMatchesUser(d, userId),
+  );
+  const liveWcIds = new Set(
+    retailWcs.map((w) => String(w._id || '').trim()).filter(Boolean),
+  );
+
+  const byBidName = new Map();
+  for (const wc of retailWcs) {
+    const bid = normalizeBusinessScopeId(wc.businessId || wc.business_id);
+    const nameKey = String(wc.name || '').trim().toLowerCase();
+    if (!bid || !nameKey) continue;
+    const key = `${bid}::${nameKey}`;
+    const prev = byBidName.get(key);
+    if (!prev) {
+      byBidName.set(key, wc);
+      continue;
+    }
+    const ta = new Date(prev.createdAt || 0).getTime();
+    const tb = new Date(wc.createdAt || 0).getTime();
+    if (tb < ta || (tb === ta && String(wc._id) < String(prev._id))) {
+      byBidName.set(key, wc);
+    }
+  }
+
+  const deliveryDb = getDeliveryDbName();
+  await ensureDatabase(req, deliveryDb);
+  const out = [];
+
+  for (const p of list) {
+    if (!p || p.deletedAt) {
+      out.push(p);
+      continue;
+    }
+    const curWc = String(p.workCenterId || '').trim();
+    if (curWc && liveWcIds.has(curWc)) {
+      out.push(p);
+      continue;
+    }
+    const bid = normalizeBusinessScopeId(p.businessId || p.business_id);
+    const nameKey = String(p.name || '').trim().toLowerCase();
+    const match = bid && nameKey ? byBidName.get(`${bid}::${nameKey}`) : null;
+    if (!match) {
+      out.push(p);
+      continue;
+    }
+    const nextBid =
+      bid || normalizeBusinessScopeId(match.businessId || match.business_id);
+    const next = {
+      ...p,
+      workCenterId: match._id,
+      ...(nextBid ? { businessId: nextBid, business_id: nextBid } : {}),
+      updatedAt: new Date().toISOString(),
+    };
+    try {
+      const saved = await putDocument(req, deliveryDb, next._id, next);
+      out.push({ ...next, _rev: saved?.rev || next._rev });
+    } catch {
+      out.push(next);
+    }
+  }
+
+  return out;
+}
+
+/** Listado API/Ops: rematch huérfanos + scope por WC (y etiquetados si includeInactive). */
+export async function listPointsOfSaleForApi(req, userId, options = {}) {
+  const includeInactive = options.includeInactive === true;
+  const rematched = await rematchOrphanPointOfSaleWorkCenters(
+    req,
+    userId,
+    await listPointsOfSaleByUser(req, userId),
+  );
+  const all = includeInactive
+    ? dedupeLinkedPointsOfSale(rematched)
+    : dedupeActivePointsOfSale(rematched);
+  const workCenterIds = await listActiveWorkCenterIds(req);
+  const linked = filterPointsOfSaleLinkedToWorkCenters(all, workCenterIds);
+  if (!includeInactive) return linked;
+
+  const linkedIds = new Set(linked.map((p) => p._id));
+  const taggedOrphans = all.filter(
+    (p) =>
+      p &&
+      !linkedIds.has(p._id) &&
+      Boolean(normalizeBusinessScopeId(p.businessId || p.business_id)),
+  );
+  return [...linked, ...taggedOrphans];
 }
 
 /** IDs de centros de trabajo retail existentes (no borrados). */
@@ -7526,9 +7644,14 @@ export async function listScopedPointsOfSaleForBusiness(req, userId, businessId,
   const wcIds = await listWorkCenterIdsForBusiness(req, userId, businessId);
   if (wcIds.size === 0) return [];
   const includeInactive = options.includeInactive === true;
+  const rematched = await rematchOrphanPointOfSaleWorkCenters(
+    req,
+    userId,
+    await listPointsOfSaleByUser(req, userId),
+  );
   const pdvs = includeInactive
-    ? dedupeLinkedPointsOfSale(await listPointsOfSaleByUser(req, userId))
-    : dedupeActivePointsOfSale(await listPointsOfSaleByUser(req, userId));
+    ? dedupeLinkedPointsOfSale(rematched)
+    : dedupeActivePointsOfSale(rematched);
   return filterPointsOfSaleLinkedToWorkCenters(pdvs, wcIds);
 }
 
@@ -7552,9 +7675,7 @@ export function findOrphanPointsOfSale(pdvs, workCenterIds) {
 
 /** PDV activos enlazados a un centro existente (fuente única para listados operativos). */
 export async function listScopedPointsOfSaleForUser(req, userId) {
-  const pdvs = dedupeActivePointsOfSale(await listPointsOfSaleByUser(req, userId));
-  const workCenterIds = await listActiveWorkCenterIds(req);
-  return filterPointsOfSaleLinkedToWorkCenters(pdvs, workCenterIds);
+  return listPointsOfSaleForApi(req, userId, { includeInactive: false });
 }
 
 export async function findWorkCenterById(req, workCenterId) {
