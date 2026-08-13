@@ -2,11 +2,10 @@
  * Core — Excel de cierre de caja (plantilla facturación), hojas según Facturación marcas.
  * El nombre del archivo y los títulos llevan el de la empresa (no “Uriel”).
  *
- * Orden del libro (mega Excel básico, sin pedidos línea a línea):
- *   1) Hojas marca (plantilla cliente), día a día del alcance · todas las tiendas
- *   2) Una hoja por tienda
- *   3) RESUMEN (totales por mes del alcance)
- *   4) COMPARATIVA (marcas; una hoja por año si el alcance es historial)
+ * Orden del libro (hub cliente marca × plaza):
+ *   1–4) MM TIANA · BB TIANA · MM BADALONA · BB BDN
+ *   5) RESUMEN (totales por mes del alcance)
+ *   6+) COMPARATIVA (una hoja por año si el alcance es historial)
  *
  * Alcance (historyRange): all (por defecto) | year | month
  * En mes: columna DIA. En año/historial: columna FECHA (DD/MM/YYYY).
@@ -17,7 +16,7 @@
  * Dinero por hoja marca: se reparte según unidades en Facturación.
  * TPV = tarjeta. X = Bizum + otro. App = Flipdish + app propia.
  *
- * Sin config → fallback 2 hojas: MODOMIO (pizza) + BLACK BURGER (burger + tacos).
+ * Sin config → fallback 2 marcas: MODOMIO (pizza) + BLACK BURGER (burger + tacos).
  * Acceso: CEO / Admin (canDownloadUrielCajaExcel).
  */
 import * as XLSX from 'xlsx';
