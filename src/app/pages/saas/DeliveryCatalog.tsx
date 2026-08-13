@@ -3090,13 +3090,50 @@ export function CatalogPage() {
       detail: 'Un momento — no cierres la ventana',
     });
 
-    let result = await bulkCreateCatalogItemsRequest(dataUserId, items, signal);
+    let result: Awaited<ReturnType<typeof bulkCreateCatalogItemsRequest>>;
+    let recoveredFromTimeout = false;
+    try {
+      result = await bulkCreateCatalogItemsRequest(dataUserId, items, signal);
+    } catch (err) {
+      if (isImportAbortError(err)) throw err;
+      throwIfAborted(signal);
+      // Timeout/red a menudo llega cuando Couch ya guardó: no asustar con error rojo.
+      const refreshed = await listCatalogItemsRequest(dataUserId).catch(() => [] as CatalogItem[]);
+      const skuSet = new Set(
+        refreshed.map((row) => String(row.sku || '').trim().toLowerCase()).filter(Boolean),
+      );
+      const nameSet = new Set(
+        refreshed.map((row) => String(row.name || '').trim().toLowerCase()).filter(Boolean),
+      );
+      let recovered = 0;
+      for (const it of items) {
+        const sku = String(it.sku || '').trim().toLowerCase();
+        const name = String(it.name || '').trim().toLowerCase();
+        if ((sku && skuSet.has(sku)) || (name && nameSet.has(name))) recovered += 1;
+      }
+      if (recovered <= 0) throw err;
+
+      recoveredFromTimeout = true;
+      setAllCatalogItems(refreshed);
+      notifyDeliveryCatalogChanged(dataUserId, businessId);
+      result = {
+        ok: true,
+        created: recovered,
+        updated: 0,
+        errors: Math.max(0, items.length - recovered),
+        items: refreshed,
+      };
+      toast.warning(
+        `La conexión falló a medias, pero hay ${recovered} producto(s) en Carta. Revisa el catálogo.`,
+        { duration: 10000 },
+      );
+    }
     throwIfAborted(signal);
     const totalOk = (result.created || 0) + (result.updated ?? 0);
     const savedItems = Array.isArray(result.items) ? result.items : [];
     const withIngredients = items.filter((i) => String(i.customFields?.ingredients || '').trim()).length;
 
-    if (totalOk > 0 && savedItems.length > 0) {
+    if (totalOk > 0 && savedItems.length > 0 && !recoveredFromTimeout) {
       setAllCatalogItems((prev) => {
         const byId = new Map(prev.map((row) => [row._id, row]));
         for (const row of savedItems) byId.set(row._id, row);
@@ -3139,15 +3176,17 @@ export function CatalogPage() {
     };
 
     if (totalOk > 0) {
-      const importedWithImage = items.filter((i) => Boolean(i.image)).length;
-      const parts = [];
-      if (result.created > 0) parts.push(`${result.created} nuevo(s)`);
-      if ((result.updated ?? 0) > 0) parts.push(`${result.updated} actualizado(s)`);
-      toast.success(
-        `${parts.join(' · ')}` +
-          (importedWithImage > 0 ? ` · ${importedWithImage} con imagen` : '') +
-          (withIngredients > 0 ? ` · ${withIngredients} fila(s) con ingredientes en Excel` : ''),
-      );
+      if (!recoveredFromTimeout) {
+        const importedWithImage = items.filter((i) => Boolean(i.image)).length;
+        const parts = [];
+        if (result.created > 0) parts.push(`${result.created} nuevo(s)`);
+        if ((result.updated ?? 0) > 0) parts.push(`${result.updated} actualizado(s)`);
+        toast.success(
+          `${parts.join(' · ')}` +
+            (importedWithImage > 0 ? ` · ${importedWithImage} con imagen` : '') +
+            (withIngredients > 0 ? ` · ${withIngredients} fila(s) con ingredientes en Excel` : ''),
+        );
+      }
       void runPostImport();
     }
 

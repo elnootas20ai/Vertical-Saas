@@ -298,11 +298,11 @@ export function GenericImportModal({
           toast.message('Importación cancelada');
         }
       } else {
-        // A menudo el servidor ya guardó y el cliente corta por red/timeout: no asustar de más.
-        toast.error(
-          'La importación se cortó o tardó demasiado. Revisa el catálogo: puede que los productos sí se hayan cargado.',
-        );
+        // No toast rojo: suele ser timeout con datos ya guardados. El importador ya avisa si recupera.
         setStep('preview');
+        toast.message('Revisa el catálogo: si los productos están, la importación sí funcionó.', {
+          duration: 8000,
+        });
       }
     } finally {
       setImporting(false);
