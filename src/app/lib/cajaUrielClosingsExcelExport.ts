@@ -281,6 +281,29 @@ function countsFromAmounts(amounts: Pick<UrielCajaDayAmounts, 'totalPizza' | 'to
   };
 }
 
+/** Suma € declarados en Caja 2 (Glovo/Uber/Just/Flipdish/app) al cierre. */
+export function sumSessionAggregatorClosingTotals(session: TpvRegisterSession): number {
+  const t = session.aggregatorClosingTotals;
+  if (!t || typeof t !== 'object') return 0;
+  let sum = 0;
+  for (const v of Object.values(t)) sum += Number(v) || 0;
+  return round2(sum);
+}
+
+/**
+ * Total del turno para listados Caja: TPV del día + integradores declarados al cierre.
+ * Misma lógica que «Total facturación» del cierre (Caja 1 + Caja 2).
+ */
+export function sessionCajaListMoney(
+  session: TpvRegisterSession,
+  dayKey: string,
+  tpvSalesForDay: number,
+): { tpv: number; apps: number; total: number } {
+  const tpv = round2(Number(tpvSalesForDay) || 0);
+  const apps = sumSessionAggregatorClosingTotals(session);
+  return { tpv, apps, total: round2(tpv + apps) };
+}
+
 export function sessionToUrielAmounts(session: TpvRegisterSession): Omit<UrielCajaDayAmounts, 'day'> {
   let method = session.summary?.salesByMethod;
   const methodTotal = method

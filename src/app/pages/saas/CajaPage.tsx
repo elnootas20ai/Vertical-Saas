@@ -36,6 +36,7 @@ import { AggregatorCashSummary } from '../../components/saas/AggregatorCashSumma
 import { CajaTimelineBoard } from '../../components/saas/caja/CajaTimelineBoard';
 import {
   downloadUrielCajaClosings,
+  sessionCajaListMoney,
   type UrielCajaDownloadFormat,
   type UrielCajaHistoryRange,
 } from '../../lib/cajaUrielClosingsExcelExport';
@@ -146,7 +147,10 @@ function groupSessionsByStore(
     const storeName = pdv?.name || rawSessions[0]?.pointOfSaleName || 'Tienda';
     const sessions = sortRegisterSessionsForDisplay(rawSessions);
     const openCount = sessions.filter((s) => s.status === 'open').length;
-    const totalSales = sessions.reduce((sum, s) => sum + buildTpvRegisterSummaryForDay(s, selectedDate).totalSales, 0);
+    const totalSales = sessions.reduce((sum, s) => {
+      const tpv = buildTpvRegisterSummaryForDay(s, selectedDate).totalSales;
+      return sum + sessionCajaListMoney(s, selectedDate, tpv).total;
+    }, 0);
     groups.push({ pdvId, storeName, sessions, openCount, totalSales });
   }
 
@@ -253,6 +257,7 @@ function OpenRegisterHero({
       <div className="divide-y divide-gray-100 dark:divide-gray-700">
         {sessions.map((session) => {
           const summary = buildTpvRegisterSummaryForDay(session, selectedDate);
+          const money = sessionCajaListMoney(session, selectedDate, summary.totalSales);
           const expected = calcTpvExpectedCash(session);
           const expanded = expandedSessionId === session._id;
           const openedTime = new Date(session.openedAt).toLocaleTimeString('es-ES', { timeStyle: 'short' });
@@ -282,12 +287,14 @@ function OpenRegisterHero({
                 </div>
                 <div className="text-right shrink-0">
                   <div className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
-                    {summary.totalSales.toFixed(2)}€
+                    {money.total.toFixed(2)}€
                   </div>
                   <div className="text-[11px] text-gray-400 tabular-nums">
-                    {summary.totalSales <= 0 && Number(session.initialCashAmount || 0) > 0
-                      ? `Fondo ${Number(session.initialCashAmount || 0).toFixed(2)}€`
-                      : `En cajón ${expected.toFixed(2)}€`}
+                    {money.apps > 0
+                      ? `TPV ${money.tpv.toFixed(2)}€ · Apps ${money.apps.toFixed(2)}€`
+                      : summary.totalSales <= 0 && Number(session.initialCashAmount || 0) > 0
+                        ? `Fondo ${Number(session.initialCashAmount || 0).toFixed(2)}€`
+                        : `En cajón ${expected.toFixed(2)}€`}
                   </div>
                 </div>
                 {expanded ? <ChevronUp className="w-4 h-4 text-gray-400 shrink-0" /> : <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />}
@@ -355,6 +362,7 @@ function StoreDayBlock({
         <div className="divide-y divide-gray-100 dark:divide-gray-700">
           {group.sessions.map((session, turnIndex) => {
             const summary = buildTpvRegisterSummaryForDay(session, selectedDate);
+            const money = sessionCajaListMoney(session, selectedDate, summary.totalSales);
             const status = sessionStatusLabel(session);
             const expanded = expandedSessionId === session._id;
             const turnNumber = turnIndex + 1;
@@ -393,9 +401,12 @@ function StoreDayBlock({
                         {status.text}
                       </span>
                       <span className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
-                        {summary.totalSales.toFixed(2)}€
+                        {money.total.toFixed(2)}€
                       </span>
                       <span className="text-xs text-gray-500">
+                        {money.apps > 0
+                          ? `TPV ${money.tpv.toFixed(2)}€ · Apps ${money.apps.toFixed(2)}€ · `
+                          : ''}
                         {summary.totalTransactions} mov. · {session.terminalName}
                       </span>
                     </div>
@@ -435,9 +446,12 @@ function StoreDayBlock({
                       </div>
                       <div className="hidden sm:block text-right shrink-0">
                         <div className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
-                          {summary.totalSales.toFixed(2)}€
+                          {money.total.toFixed(2)}€
                         </div>
                         <div className={`text-[10px] tabular-nums ${session.status === 'closed' && session.difference !== 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                          {money.apps > 0
+                            ? `Apps ${money.apps.toFixed(2)}€ · `
+                            : ''}
                           {session.status === 'closed' ? `Dif. ${diffLabel}` : diffLabel}
                         </div>
                       </div>
@@ -503,6 +517,7 @@ function RegisterCard({
   const ts = session as TpvRegisterSession;
   const expected = calcTpvExpectedCash(ts);
   const summary = buildTpvRegisterSummary(ts);
+  const money = sessionCajaListMoney(ts, String(ts.openedAt || '').slice(0, 10), summary.totalSales);
   const incidentCount = ts.incidents?.filter(i => !i.resolvedAt).length || 0;
   const lastCount = ts.cashCounts[ts.cashCounts.length - 1];
   const accentBorder =
@@ -574,8 +589,13 @@ function RegisterCard({
           </div>
           <div className="flex items-center gap-3">
             <div className="text-right">
-              <div className="text-lg font-bold text-gray-900 dark:text-gray-100">{summary.totalSales.toFixed(2)}€</div>
+              <div className="text-lg font-bold text-gray-900 dark:text-gray-100">{money.total.toFixed(2)}€</div>
               <div className="text-xs text-gray-500">
+                {money.apps > 0 ? (
+                  <span className="block tabular-nums text-gray-500">
+                    TPV {money.tpv.toFixed(2)}€ · Apps {money.apps.toFixed(2)}€
+                  </span>
+                ) : null}
                 {ts.status === 'closed' && (
                   <span className={`font-semibold ${ts.difference === 0 ? 'text-green-600' : Math.abs(ts.difference) > 20 ? 'text-red-600' : 'text-amber-600'}`}>
                     Dif: {ts.difference >= 0 ? '+' : ''}{ts.difference.toFixed(2)}€
@@ -908,15 +928,28 @@ export function CajaPage() {
     const scopedDay = filterPdv ? allDay.filter((s) => s.pointOfSaleId === filterPdv) : allDay;
     const storesWithActivity = new Set(scopedDay.map((s) => s.pointOfSaleId).filter(Boolean)).size;
     const openNow = dedupeOpenRegisterSessions(scopedDay.filter((s) => s.status === 'open')).length;
-    const sales = scopedDay.reduce((sum, s) => sum + buildTpvRegisterSummaryForDay(s, selectedDate).totalSales, 0);
-    const cashIn = scopedDay.reduce((sum, s) => sum + buildTpvRegisterSummaryForDay(s, selectedDate).totalCashIn, 0);
-    const cashOut = scopedDay.reduce((sum, s) => sum + buildTpvRegisterSummaryForDay(s, selectedDate).totalCashOut, 0);
+    let sales = 0;
+    let tpv = 0;
+    let apps = 0;
+    let cashIn = 0;
+    let cashOut = 0;
+    for (const s of scopedDay) {
+      const summary = buildTpvRegisterSummaryForDay(s, selectedDate);
+      const money = sessionCajaListMoney(s, selectedDate, summary.totalSales);
+      sales += money.total;
+      tpv += money.tpv;
+      apps += money.apps;
+      cashIn += summary.totalCashIn;
+      cashOut += summary.totalCashOut;
+    }
     const diff = scopedDay.filter((s) => s.status === 'closed').reduce((sum, s) => sum + (s.difference || 0), 0);
     return {
       stores: storesWithActivity,
       turns: scopedDay.length,
       openNow,
       sales,
+      tpv,
+      apps,
       cashIn,
       cashOut,
       diff,

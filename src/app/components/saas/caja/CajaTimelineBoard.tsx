@@ -18,6 +18,7 @@ import type {
   UrielCajaDownloadFormat,
   UrielCajaHistoryRange,
 } from '../../../lib/cajaUrielClosingsExcelExport';
+import { sessionCajaListMoney } from '../../../lib/cajaUrielClosingsExcelExport';
 import { calcTpvExpectedCash } from '../../../lib/tpvCajaMath';
 import {
   buildTpvRegisterSummaryForDay,
@@ -84,7 +85,16 @@ export type CajaTimelineBoardProps = {
   onFilterPdvChange: (id: string) => void;
   onlyOpenNow: boolean;
   onOnlyOpenNowChange: (v: boolean) => void;
-  dayStats: { stores: number; turns: number; openNow: number; sales: number; cashIn?: number; cashOut?: number };
+  dayStats: {
+    stores: number;
+    turns: number;
+    openNow: number;
+    sales: number;
+    tpv?: number;
+    apps?: number;
+    cashIn?: number;
+    cashOut?: number;
+  };
   excelClosedCount: number;
   /** Un solo formato (p. ej. restaurant). Preferir onDownloadFormat en delivery. */
   onExcelClick?: () => void | Promise<void>;
@@ -201,6 +211,8 @@ export function CajaTimelineBoard({
       title: string;
       sessions: TpvRegisterSession[];
       sales: number;
+      tpv: number;
+      apps: number;
       expectedCash: number;
       difference: number | null;
       openCount: number;
@@ -209,6 +221,8 @@ export function CajaTimelineBoard({
 
     const summarize = (rows: TpvRegisterSession[], title: string, key: string): Section => {
       let sales = 0;
+      let tpv = 0;
+      let apps = 0;
       let expectedCash = 0;
       let difference = 0;
       let hasClosedDiff = false;
@@ -216,7 +230,10 @@ export function CajaTimelineBoard({
       let closedCount = 0;
       for (const s of rows) {
         const summary = buildTpvRegisterSummaryForDay(s, selectedDate);
-        sales += Number(summary.totalSales) || 0;
+        const money = sessionCajaListMoney(s, selectedDate, summary.totalSales);
+        sales += money.total;
+        tpv += money.tpv;
+        apps += money.apps;
         expectedCash += calcTpvExpectedCash(s);
         if (s.status === 'open') openCount += 1;
         else {
@@ -232,6 +249,8 @@ export function CajaTimelineBoard({
         title,
         sessions: rows,
         sales,
+        tpv,
+        apps,
         expectedCash,
         difference: hasClosedDiff ? difference : null,
         openCount,
@@ -527,8 +546,8 @@ export function CajaTimelineBoard({
           </div>
         ) : null}
 
-        {/* KPIs del día seleccionado */}
-        <div className="my-3.5 grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-6">
+        {/* KPIs del día seleccionado: Total = TPV + integradores */}
+        <div className="my-3.5 grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-7">
           <DayStat
             label={locPlural.charAt(0).toUpperCase() + locPlural.slice(1)}
             value={String(dayStats.stores)}
@@ -539,9 +558,10 @@ export function CajaTimelineBoard({
             value={String(dayStats.openNow)}
             good={dayStats.openNow > 0}
           />
-          <DayStat label="Ventas del día" value={formatMoneyEs(dayStats.sales)} />
-          <DayStat label="Entradas" value={formatMoneyEs(dayStats.cashIn || 0)} />
-          <DayStat label="Salidas" value={formatMoneyEs(dayStats.cashOut || 0)} />
+          <DayStat label="Total del día" value={formatMoneyEs(dayStats.sales)} />
+          <DayStat label="TPV" value={formatMoneyEs(dayStats.tpv ?? 0)} />
+          <DayStat label="Integradores" value={formatMoneyEs(dayStats.apps || 0)} />
+          <DayStat label="Entradas / salidas" value={`${formatMoneyEs(dayStats.cashIn || 0)} / ${formatMoneyEs(dayStats.cashOut || 0)}`} />
         </div>
 
         {/* Filtro de tiendas: Todas / Tienda 1 / Tienda 2… */}
@@ -729,7 +749,7 @@ export function CajaTimelineBoard({
               : `Resumen por ${locSingular.toLowerCase()}`}
           </h2>
           <p className="m-0 mt-0.5 text-[11px] text-stone-500 dark:text-stone-400">
-            Primero el total del día. Abre cada {locSingular.toLowerCase()} para ver los turnos.
+            Total = TPV + apps. Abre cada {locSingular.toLowerCase()} para ver los turnos.
           </p>
         </div>
 
@@ -774,7 +794,7 @@ export function CajaTimelineBoard({
                         </p>
                       </div>
                     </div>
-                    <div className="grid grid-cols-3 gap-2 w-full sm:w-auto sm:min-w-[280px] pl-7 sm:pl-0">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 w-full sm:w-auto sm:min-w-[360px] pl-7 sm:pl-0">
                       <div className="rounded-xl bg-stone-50 dark:bg-stone-800/60 border border-stone-100 dark:border-stone-700 px-2.5 py-1.5">
                         <p className="text-[9px] font-bold uppercase tracking-wide text-stone-400">Total</p>
                         <p className="text-sm font-black tabular-nums text-stone-900 dark:text-stone-50 leading-tight">
@@ -782,9 +802,15 @@ export function CajaTimelineBoard({
                         </p>
                       </div>
                       <div className="rounded-xl bg-stone-50 dark:bg-stone-800/60 border border-stone-100 dark:border-stone-700 px-2.5 py-1.5">
-                        <p className="text-[9px] font-bold uppercase tracking-wide text-stone-400">Efectivo</p>
+                        <p className="text-[9px] font-bold uppercase tracking-wide text-stone-400">TPV</p>
                         <p className="text-sm font-black tabular-nums text-stone-900 dark:text-stone-50 leading-tight">
-                          {formatMoneyEs(section.expectedCash)}
+                          {formatMoneyEs(section.tpv)}
+                        </p>
+                      </div>
+                      <div className="rounded-xl bg-stone-50 dark:bg-stone-800/60 border border-stone-100 dark:border-stone-700 px-2.5 py-1.5">
+                        <p className="text-[9px] font-bold uppercase tracking-wide text-stone-400">Apps</p>
+                        <p className="text-sm font-black tabular-nums text-stone-900 dark:text-stone-50 leading-tight">
+                          {formatMoneyEs(section.apps)}
                         </p>
                       </div>
                       <div className="rounded-xl bg-stone-50 dark:bg-stone-800/60 border border-stone-100 dark:border-stone-700 px-2.5 py-1.5">
@@ -817,6 +843,7 @@ export function CajaTimelineBoard({
                               : 'closed';
                         const tag = statusTag(kind);
                         const summary = buildTpvRegisterSummaryForDay(s, selectedDate);
+                        const money = sessionCajaListMoney(s, selectedDate, summary.totalSales);
                         const expected = calcTpvExpectedCash(s);
                         const active = selectedSessionId === s._id;
                         const busyRow = forcingSessionId === s._id;
@@ -866,7 +893,19 @@ export function CajaTimelineBoard({
                               <span className="text-stone-500">
                                 Total{' '}
                                 <span className="font-bold text-stone-900 dark:text-stone-100">
-                                  {formatMoneyEs(summary.totalSales)}
+                                  {formatMoneyEs(money.total)}
+                                </span>
+                              </span>
+                              <span className="text-stone-500">
+                                TPV{' '}
+                                <span className="font-bold text-stone-900 dark:text-stone-100">
+                                  {formatMoneyEs(money.tpv)}
+                                </span>
+                              </span>
+                              <span className="text-stone-500">
+                                Apps{' '}
+                                <span className="font-bold text-stone-900 dark:text-stone-100">
+                                  {formatMoneyEs(money.apps)}
                                 </span>
                               </span>
                               <span className="text-stone-500">
