@@ -7344,12 +7344,43 @@ export async function rematchOrphanPointOfSaleWorkCenters(req, userId, pdvs) {
     }
     const curWc = String(p.workCenterId || '').trim();
     if (curWc && liveWcIds.has(curWc)) {
+      const linkedWc = retailWcs.find((w) => String(w._id || '').trim() === curWc);
+      const wcBid = normalizeBusinessScopeId(linkedWc?.businessId || linkedWc?.business_id);
+      const pBid = normalizeBusinessScopeId(p.businessId || p.business_id);
+      if (wcBid && !pBid) {
+        const tagged = {
+          ...p,
+          businessId: wcBid,
+          business_id: wcBid,
+          updatedAt: new Date().toISOString(),
+        };
+        try {
+          const saved = await putDocument(req, deliveryDb, tagged._id, tagged);
+          out.push({ ...tagged, _rev: saved?.rev || tagged._rev });
+        } catch {
+          out.push(tagged);
+        }
+        continue;
+      }
       out.push(p);
       continue;
     }
     const bid = normalizeBusinessScopeId(p.businessId || p.business_id);
     const nameKey = String(p.name || '').trim().toLowerCase();
-    const match = bid && nameKey ? byBidName.get(`${bid}::${nameKey}`) : null;
+    let match = bid && nameKey ? byBidName.get(`${bid}::${nameKey}`) : null;
+    // Local / legacy: PDV sin businessId → único WC retail con el mismo nombre.
+    if (!match && nameKey) {
+      const sameName = retailWcs.filter(
+        (w) => String(w.name || '').trim().toLowerCase() === nameKey,
+      );
+      if (sameName.length === 1) match = sameName[0];
+      else if (bid) {
+        const sameBid = sameName.filter(
+          (w) => normalizeBusinessScopeId(w.businessId || w.business_id) === bid,
+        );
+        if (sameBid.length === 1) match = sameBid[0];
+      }
+    }
     if (!match) {
       out.push(p);
       continue;
