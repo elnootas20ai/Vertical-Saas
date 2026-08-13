@@ -21,7 +21,7 @@ import {
 } from '../services/salaService.js';
 import {
   ensureDatabase,
-  softDocument,
+  getDocument,
   putDocument,
   bulkPutDocuments,
   softDeleteDocument,
