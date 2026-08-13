@@ -277,4 +277,33 @@ describe('ticket variants — botones Cocina / Reparto / Ticket cliente', () => 
     expect(doc.lines).toHaveLength(1);
     expect(doc.lines[0].name).toBe('OK');
   });
+
+  it('varios combos iguales: Family #1 / #2 y × de cantidad → x (no ?3)', () => {
+    const opts = baseOptions();
+    opts.order.items = [
+      {
+        quantity: 1,
+        name: 'Family',
+        total: 30,
+        extras: ['▸ Margarita', '▸ Aquarius Limon ×3'],
+      },
+      {
+        quantity: 1,
+        name: 'Family',
+        total: 30,
+        extras: ['▸ Apericena', '▸ Aquarius Limon ×4'],
+      },
+    ];
+    const doc = buildTicketDocument({ ...opts, variant: 'kitchen' });
+    expect(doc.lines.map((l) => l.name)).toEqual(['Family #1', 'Family #2']);
+    expect(doc.lines[0].composition?.some((c) => /Aquarius Limon x3/.test(c))).toBe(true);
+    expect(doc.lines[1].composition?.some((c) => /Aquarius Limon x4/.test(c))).toBe(true);
+
+    const text = decodeEscpos(encodeTicketEscpos(doc));
+    expect(text).toContain('Family #1');
+    expect(text).toContain('Family #2');
+    expect(text).toContain('Aquarius Limon x3');
+    expect(text).toContain('Aquarius Limon x4');
+    expect(text).not.toMatch(/\?3|\?4/);
+  });
 });

@@ -19,7 +19,6 @@ import type {
   UrielCajaHistoryRange,
 } from '../../../lib/cajaUrielClosingsExcelExport';
 import { sessionCajaListMoney } from '../../../lib/cajaUrielClosingsExcelExport';
-import { calcTpvExpectedCash } from '../../../lib/tpvCajaMath';
 import {
   buildTpvRegisterSummaryForDay,
   isTpvRegisterSessionFromPriorCalendarDay,
@@ -204,55 +203,33 @@ export function CajaTimelineBoard({
     });
   }, [daySessions]);
 
-  /** Una tarjeta por tienda: resumen arriba, turnos debajo. */
+  /** Una tarjeta por tienda: total completo arriba, turnos debajo. */
   const storeSections = useMemo(() => {
     type Section = {
       key: string;
       title: string;
       sessions: TpvRegisterSession[];
       sales: number;
-      tpv: number;
-      apps: number;
-      expectedCash: number;
-      difference: number | null;
       openCount: number;
       closedCount: number;
     };
 
     const summarize = (rows: TpvRegisterSession[], title: string, key: string): Section => {
       let sales = 0;
-      let tpv = 0;
-      let apps = 0;
-      let expectedCash = 0;
-      let difference = 0;
-      let hasClosedDiff = false;
       let openCount = 0;
       let closedCount = 0;
       for (const s of rows) {
         const summary = buildTpvRegisterSummaryForDay(s, selectedDate);
         const money = sessionCajaListMoney(s, selectedDate, summary.totalSales);
         sales += money.total;
-        tpv += money.tpv;
-        apps += money.apps;
-        expectedCash += calcTpvExpectedCash(s);
         if (s.status === 'open') openCount += 1;
-        else {
-          closedCount += 1;
-          if (typeof s.difference === 'number' && Number.isFinite(s.difference)) {
-            difference += s.difference;
-            hasClosedDiff = true;
-          }
-        }
+        else closedCount += 1;
       }
       return {
         key,
         title,
         sessions: rows,
         sales,
-        tpv,
-        apps,
-        expectedCash,
-        difference: hasClosedDiff ? difference : null,
         openCount,
         closedCount,
       };
@@ -749,7 +726,7 @@ export function CajaTimelineBoard({
               : `Resumen por ${locSingular.toLowerCase()}`}
           </h2>
           <p className="m-0 mt-0.5 text-[11px] text-stone-500 dark:text-stone-400">
-            Total = TPV + apps. Abre cada {locSingular.toLowerCase()} para ver los turnos.
+            Total del turno = TPV + apps. Detalle al abrir el cierre.
           </p>
         </div>
 
@@ -794,41 +771,11 @@ export function CajaTimelineBoard({
                         </p>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 w-full sm:w-auto sm:min-w-[360px] pl-7 sm:pl-0">
-                      <div className="rounded-xl bg-stone-50 dark:bg-stone-800/60 border border-stone-100 dark:border-stone-700 px-2.5 py-1.5">
-                        <p className="text-[9px] font-bold uppercase tracking-wide text-stone-400">Total</p>
-                        <p className="text-sm font-black tabular-nums text-stone-900 dark:text-stone-50 leading-tight">
-                          {formatMoneyEs(section.sales)}
-                        </p>
-                      </div>
-                      <div className="rounded-xl bg-stone-50 dark:bg-stone-800/60 border border-stone-100 dark:border-stone-700 px-2.5 py-1.5">
-                        <p className="text-[9px] font-bold uppercase tracking-wide text-stone-400">TPV</p>
-                        <p className="text-sm font-black tabular-nums text-stone-900 dark:text-stone-50 leading-tight">
-                          {formatMoneyEs(section.tpv)}
-                        </p>
-                      </div>
-                      <div className="rounded-xl bg-stone-50 dark:bg-stone-800/60 border border-stone-100 dark:border-stone-700 px-2.5 py-1.5">
-                        <p className="text-[9px] font-bold uppercase tracking-wide text-stone-400">Apps</p>
-                        <p className="text-sm font-black tabular-nums text-stone-900 dark:text-stone-50 leading-tight">
-                          {formatMoneyEs(section.apps)}
-                        </p>
-                      </div>
-                      <div className="rounded-xl bg-stone-50 dark:bg-stone-800/60 border border-stone-100 dark:border-stone-700 px-2.5 py-1.5">
-                        <p className="text-[9px] font-bold uppercase tracking-wide text-stone-400">Dif.</p>
-                        <p
-                          className={`text-sm font-black tabular-nums leading-tight ${
-                            section.difference == null
-                              ? 'text-stone-400'
-                              : section.difference >= 0
-                                ? 'text-emerald-700 dark:text-emerald-400'
-                                : 'text-red-600 dark:text-red-400'
-                          }`}
-                        >
-                          {section.difference == null
-                            ? '—'
-                            : `${section.difference >= 0 ? '+' : ''}${formatMoneyEs(section.difference)}`}
-                        </p>
-                      </div>
+                    <div className="pl-7 sm:pl-0 sm:text-right shrink-0">
+                      <p className="text-[9px] font-bold uppercase tracking-wide text-stone-400">Total</p>
+                      <p className="text-base font-black tabular-nums text-stone-900 dark:text-stone-50 leading-tight">
+                        {formatMoneyEs(section.sales)}
+                      </p>
                     </div>
                   </button>
 
@@ -844,7 +791,6 @@ export function CajaTimelineBoard({
                         const tag = statusTag(kind);
                         const summary = buildTpvRegisterSummaryForDay(s, selectedDate);
                         const money = sessionCajaListMoney(s, selectedDate, summary.totalSales);
-                        const expected = calcTpvExpectedCash(s);
                         const active = selectedSessionId === s._id;
                         const busyRow = forcingSessionId === s._id;
                         const timeLabel =
@@ -889,37 +835,7 @@ export function CajaTimelineBoard({
                                 </p>
                               </div>
                             </div>
-                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pl-[4.25rem] sm:pl-0 text-[12px] tabular-nums">
-                              <span className="text-stone-500">
-                                Total{' '}
-                                <span className="font-bold text-stone-900 dark:text-stone-100">
-                                  {formatMoneyEs(money.total)}
-                                </span>
-                              </span>
-                              <span className="text-stone-500">
-                                TPV{' '}
-                                <span className="font-bold text-stone-900 dark:text-stone-100">
-                                  {formatMoneyEs(money.tpv)}
-                                </span>
-                              </span>
-                              <span className="text-stone-500">
-                                Apps{' '}
-                                <span className="font-bold text-stone-900 dark:text-stone-100">
-                                  {formatMoneyEs(money.apps)}
-                                </span>
-                              </span>
-                              <span className="text-stone-500">
-                                Ef.{' '}
-                                <span className="font-bold text-stone-900 dark:text-stone-100">
-                                  {formatMoneyEs(expected)}
-                                </span>
-                              </span>
-                              {s.status === 'closed' ? (
-                                <span className={s.difference >= 0 ? 'text-emerald-700 font-bold' : 'text-red-600 font-bold'}>
-                                  {s.difference >= 0 ? '+' : ''}
-                                  {formatMoneyEs(s.difference)}
-                                </span>
-                              ) : null}
+                            <div className="flex items-center gap-3 pl-[4.25rem] sm:pl-0 sm:justify-end sm:min-w-[7.5rem]">
                               {kind === 'warn' && onForceClose ? (
                                 <button
                                   type="button"
@@ -932,11 +848,13 @@ export function CajaTimelineBoard({
                                 >
                                   {busyRow ? '…' : 'Forzar cierre'}
                                 </button>
-                              ) : kind === 'closed' && onViewFullClosing ? (
-                                <span className="text-[11px] font-semibold text-[var(--v-blue,#2563eb)]">
-                                  Ver cierre
-                                </span>
                               ) : null}
+                              <div className="text-right tabular-nums">
+                                <p className="text-[9px] font-bold uppercase tracking-wide text-stone-400">Total</p>
+                                <p className="text-[15px] font-black text-stone-900 dark:text-stone-100 leading-tight">
+                                  {formatMoneyEs(money.total)}
+                                </p>
+                              </div>
                             </div>
                           </div>
                         );

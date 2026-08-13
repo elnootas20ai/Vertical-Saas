@@ -21,6 +21,7 @@ export function sanitizeEscposText(value: string): string {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/€/g, 'EUR')
+    .replace(/[×✕✖⨉]/g, 'x') // cantidades combo: "Aquarius x3" (si no, sale "?3")
     .replace(/[·•]/g, '-') // punto medio → guion (si no, sale "?")
     .replace(/[^\x09\x0a\x0d\x20-\x7e]/g, '?');
 }

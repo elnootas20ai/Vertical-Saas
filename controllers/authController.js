@@ -241,8 +241,8 @@ async function sendWorkerLinkedWelcomeEmail(req, {
 }
 
 /**
- * Genera OTP, lo guarda y lo envía al correo de seguridad.
- * Si el destino ≠ email de la cuenta, también lo espeja a la cuenta (así uriel@admin.com lo recibe en local).
+ * Genera OTP, lo guarda y lo envía al correo de seguridad (ADMIN_LOGIN_OTP_EMAIL / ALERTS_ADMIN_EMAIL).
+ * No se espeja a uriel@admin.com: ese buzón no existe y solo genera bounces en Gmail.
  * @returns {{ ok: true, to: string, hint: string } | { ok: false, status: number, code: string, error: string }}
  */
 async function dispatchLoginOtp(req, account) {
@@ -262,19 +262,6 @@ async function dispatchLoginOtp(req, account) {
   const accountEmail = String(account?.email || '').trim().toLowerCase();
   const { subject, html } = buildLoginCodeEmail(account.email, code);
   await sendEmail({ to, subject, html, requireDelivery: true });
-
-  // Espejo al email de login si el OTP va a buzón de seguridad distinto.
-  if (accountEmail.includes('@') && accountEmail !== to) {
-    try {
-      await sendEmail({ to: accountEmail, subject, html, requireDelivery: false });
-      logger.info({ tag: 'AUTH_LOGIN_CODE', to: accountEmail, primary: to }, 'OTP espejado al email de cuenta');
-    } catch (mirrorErr) {
-      logger.warn(
-        { tag: 'AUTH_LOGIN_CODE', to: accountEmail, err: mirrorErr?.message || mirrorErr },
-        'No se pudo espejar OTP al email de cuenta',
-      );
-    }
-  }
 
   if (process.env.NODE_ENV !== 'production') {
     console.log(`[AUTH_LOGIN_OTP] account=${accountEmail} primary=${to} code=${code}`);

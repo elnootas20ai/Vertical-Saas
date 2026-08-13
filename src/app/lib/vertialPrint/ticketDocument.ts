@@ -41,6 +41,29 @@ export function sortTicketLinesForPrint<T extends Pick<TicketLine, 'name' | 'cat
     .map((row) => row.line);
 }
 
+/**
+ * Varios menús/combos con el mismo nombre → Family #1, Family #2…
+ * (cocina distingue bloques cuando hay 2+ Family en el mismo pedido).
+ */
+export function numberRepeatedComboLines(lines: TicketLine[]): TicketLine[] {
+  const counts = new Map<string, number>();
+  for (const line of lines) {
+    if (!(line.composition && line.composition.length > 0)) continue;
+    const key = String(line.name || '').trim().toLowerCase();
+    if (!key) continue;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  const seen = new Map<string, number>();
+  return lines.map((line) => {
+    if (!(line.composition && line.composition.length > 0)) return line;
+    const key = String(line.name || '').trim().toLowerCase();
+    if (!key || (counts.get(key) || 0) < 2) return line;
+    const n = (seen.get(key) || 0) + 1;
+    seen.set(key, n);
+    return { ...line, name: `${line.name} #${n}` };
+  });
+}
+
 export interface TicketDocument {
   variant: DeliveryTicketVariant;
   title: string;
@@ -213,22 +236,24 @@ export function buildTicketDocument({
     changeGiven: order.changeGiven,
   });
 
-  const lines: TicketLine[] = sortTicketLinesForPrint(
-    (order.items || [])
-      .map((item) => {
-        const parts = orderItemCustomizationParts(item);
-        return {
-          qty: Number(item.quantity || 0),
-          name: String(item.name || '').trim(),
-          total: Number(item.total || 0),
-          note: parts.note || undefined,
-          composition: parts.composition.length > 0 ? parts.composition : undefined,
-          added: parts.added.length > 0 ? parts.added : undefined,
-          removed: parts.removed.length > 0 ? parts.removed : undefined,
-          category: String(item.category || '').trim() || undefined,
-        };
-      })
-      .filter((line) => line.name && line.qty > 0),
+  const lines: TicketLine[] = numberRepeatedComboLines(
+    sortTicketLinesForPrint(
+      (order.items || [])
+        .map((item) => {
+          const parts = orderItemCustomizationParts(item);
+          return {
+            qty: Number(item.quantity || 0),
+            name: String(item.name || '').trim(),
+            total: Number(item.total || 0),
+            note: parts.note || undefined,
+            composition: parts.composition.length > 0 ? parts.composition : undefined,
+            added: parts.added.length > 0 ? parts.added : undefined,
+            removed: parts.removed.length > 0 ? parts.removed : undefined,
+            category: String(item.category || '').trim() || undefined,
+          };
+        })
+        .filter((line) => line.name && line.qty > 0),
+    ),
   );
 
   const deliveryFee = Math.max(0, Number(order.deliveryFee || 0));

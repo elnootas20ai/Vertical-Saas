@@ -92,11 +92,12 @@ export type OrderItemCustomizationParts = {
 function compositionLabelFromExtra(trimmed: string): string | null {
   if (/^▸/.test(trimmed)) {
     const name = trimmed.replace(/^▸\s*/, '').trim();
-    return name || null;
+    // × de cantidad (Aquarius ×3) → x ASCII; la térmica si no imprime "?3".
+    return name ? name.replace(/[×✕✖⨉]/g, 'x') : null;
   }
   if (/^½/.test(trimmed) || /^1\s*\/\s*2\b/i.test(trimmed)) {
     const name = trimmed.replace(/^½\s*/, '').replace(/^1\s*\/\s*2\s*/i, '').trim();
-    return name ? `1/2 ${name}` : null;
+    return name ? `1/2 ${name.replace(/[×✕✖⨉]/g, 'x')}` : null;
   }
   if (/^·/.test(trimmed)) {
     const name = trimmed.replace(/^·\s*/, '').trim();
