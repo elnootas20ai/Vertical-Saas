@@ -5,7 +5,11 @@ import {
   computePurchaseSuggestion,
   inventoryStatus,
   inventoryStatusLabel,
+  listInventoryOrganizerChoices,
   readInventoryProductBrand,
+  resolveInventoryOrganizerId,
+  stockFieldsForOrganizer,
+  ORGANIZER_BEVERAGES,
 } from '../src/app/lib/inventoryUtils.ts';
 
 test('inventoryStatus detects low and out', () => {
@@ -45,4 +49,24 @@ test('computePurchaseSuggestion covers deficit to minimum', () => {
   const out = computePurchaseSuggestion({ stockQuantity: 0, minStock: 20, reorderQuantity: 50 });
   assert.equal(out.quantity, 50);
   assert.equal(out.stockAfter, 50);
+});
+
+test('resolveInventoryOrganizerId respeta inventoryOrganizerId', () => {
+  const id = resolveInventoryOrganizerId(
+    {
+      name: 'Masa',
+      stockCategory: 'ingredient',
+      customFields: { inventoryOrganizerId: 'brand-pizza-1' },
+    },
+    new Map(),
+    new Map(),
+    [{ _id: 'brand-pizza-1', name: 'pizzeria', deliveryLineKind: 'pizza' }],
+  );
+  assert.equal(id, 'brand-pizza-1');
+  assert.equal(stockFieldsForOrganizer(ORGANIZER_BEVERAGES).stockCategory, 'beverage');
+  const choices = listInventoryOrganizerChoices([
+    { _id: 'brand-pizza-1', name: 'pizzeria', deliveryLineKind: 'pizza' },
+  ]);
+  assert.ok(choices.some((c) => c.id === 'brand-pizza-1'));
+  assert.ok(choices.some((c) => c.label === 'Bebidas'));
 });

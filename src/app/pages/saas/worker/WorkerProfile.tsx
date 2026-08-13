@@ -38,6 +38,7 @@ import { formatDateEs } from '../../../lib/formatDateEs';
 import { toast } from 'sonner';
 import { VERTIAL_BTN_PRIMARY } from '../../../lib/vertialUiTokens';
 import { WORKER_CARD, WORKER_INPUT, WORKER_PAGE, WORKER_SECTION_TITLE } from '../../../lib/workerUi';
+import { DeleteAccountSection } from '../../../components/saas/DeleteAccountSection';
 
 const inputClass = WORKER_INPUT;
 const inputDisabledClass =
@@ -368,6 +369,8 @@ export function WorkerProfile() {
             {isSaving ? t('common.saving', 'Guardando…') : t('common.save')}
           </button>
         </div>
+
+        <DeleteAccountSection compact />
       </div>
     </Layout>
   );

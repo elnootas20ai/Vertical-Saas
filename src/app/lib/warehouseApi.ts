@@ -53,6 +53,8 @@ export interface Warehouse {
   phone: string;
   email: string;
   warehouseType: WarehouseType;
+  /** PDV / tienda ligada (stock por tienda). */
+  salesPointId?: string;
   createdAt: string;
   updatedAt: string;
 }

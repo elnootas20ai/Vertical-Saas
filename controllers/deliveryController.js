@@ -533,10 +533,22 @@ async function maybeDeductRecipeStockForDeliveredOrder(req, userId, doc, previou
         quantity: Number(item.quantity || 0),
       }));
     if (orderItems.length === 0) return;
+    let warehouseId = '';
+    try {
+      const { resolveWarehouseIdForSalesPoint } = await import('../services/storeWarehouseService.js');
+      warehouseId = await resolveWarehouseIdForSalesPoint(
+        req,
+        userId,
+        doc.salesPointId || doc.pointOfSaleId || '',
+      );
+    } catch {
+      warehouseId = '';
+    }
     const result = await deductOrderByRecipe(req, userId, {
       orderId: doc._id,
       orderType: 'delivery_order',
       items: orderItems,
+      warehouseId,
       performedBy: 'system',
       deliveryType: doc.deliveryType || 'domicilio',
     });
@@ -544,6 +556,7 @@ async function maybeDeductRecipeStockForDeliveredOrder(req, userId, doc, previou
       orderId: doc._id,
       orderType: 'delivery_order',
       deliveryType: doc.deliveryType || 'domicilio',
+      warehouseId,
       performedBy: 'system',
     });
     if (channelResult.warnings.length > 0) {
@@ -2220,11 +2233,13 @@ export async function bulkUpdateCatalogStock(req, res) {
     const db = getCatalogDbName();
     await ensureDatabase(req, db);
     const existingItems = await listCatalogItemsByUser(req, userId);
+    const byId = new Map();
     const bySku = new Map();
     const byName = new Map();
 
     for (const item of existingItems) {
       if (!item || item.active === false || item.deletedAt) continue;
+      if (item._id) byId.set(String(item._id), item);
       const skuKey = normalizeStockLookupKey(item.sku);
       const nameKey = normalizeStockLookupKey(item.name);
       if (skuKey && !bySku.has(skuKey)) bySku.set(skuKey, item);
@@ -2239,6 +2254,7 @@ export async function bulkUpdateCatalogStock(req, res) {
     for (let idx = 0; idx < entries.length; idx += 1) {
       const entry = entries[idx];
       if (!entry || typeof entry !== 'object') continue;
+      const idKey = String(entry.catalogItemId || entry._id || entry.id || '').trim();
       const skuKey = normalizeStockLookupKey(entry.sku);
       const nameKey = normalizeStockLookupKey(entry.name || entry.nombre);
       const qtyRaw = String(
@@ -2246,8 +2262,8 @@ export async function bulkUpdateCatalogStock(req, res) {
       ).trim();
       const qty = Number(qtyRaw.replace(',', '.'));
 
-      if (!skuKey && !nameKey) {
-        errors.push({ index: idx, error: 'Falta SKU o nombre' });
+      if (!idKey && !skuKey && !nameKey) {
+        errors.push({ index: idx, error: 'Falta id, SKU o nombre' });
         continue;
       }
       if (!qtyRaw || !Number.isFinite(qty) || qty < 0) {
@@ -2260,7 +2276,10 @@ export async function bulkUpdateCatalogStock(req, res) {
         continue;
       }
 
-      const match = (skuKey && bySku.get(skuKey)) || (nameKey && byName.get(nameKey));
+      const match =
+        (idKey && byId.get(idKey)) ||
+        (skuKey && bySku.get(skuKey)) ||
+        (nameKey && byName.get(nameKey));
       if (!match) {
         notFound.push({
           index: idx,
@@ -3863,6 +3882,15 @@ export async function createPointOfSale(req, res) {
       entityId: doc._id, entityLabel: doc.name,
       metadata: { code: doc.code, terminalCount: doc.terminals.length },
     });
+    try {
+      const { ensureStoreWarehouses } = await import('../services/storeWarehouseService.js');
+      await ensureStoreWarehouses(req, userId, [{ ...doc, _rev: saved.rev }]);
+    } catch (whErr) {
+      logger.warn(
+        { tag: 'STORE_WAREHOUSE', err: whErr?.message, pdvId: doc._id },
+        'No se pudo crear almacén de la tienda nueva',
+      );
+    }
     return res.status(201).json({ ok: true, pointOfSale: sanitizePointOfSale({ ...doc, _rev: saved.rev }) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al crear punto de venta' });

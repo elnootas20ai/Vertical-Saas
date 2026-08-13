@@ -298,6 +298,13 @@ export interface CatalogItem {
   costPrice: number;
   taxRate: number;
   stockQuantity: number;
+  /** Stock por almacén/tienda (mismo catálogo, qty separada). */
+  warehouseStock?: Array<{
+    warehouseId: string;
+    warehouseName?: string;
+    quantity: number;
+    minStock?: number;
+  }>;
   minStock: number;
   reorderQuantity: number;
   autoReorder: boolean;
@@ -743,6 +750,8 @@ export interface BulkUpdateStockResult {
 export async function bulkUpdateCatalogStockRequest(
   userId: string,
   entries: Array<{
+    catalogItemId?: string;
+    _id?: string;
     sku?: string;
     name?: string;
     quantity?: number | string;

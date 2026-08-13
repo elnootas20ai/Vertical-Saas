@@ -5315,7 +5315,7 @@ export function CatalogPage() {
       id: 'carta',
       label: 'Carta',
       tabs: [
-        { id: 'catalog', label: 'Menú', count: catalogMenuItems.filter((i) => i.active).length || undefined },
+        { id: 'catalog', label: 'Carta', count: catalogMenuItems.filter((i) => i.active).length || undefined },
         {
           id: 'ingredientes',
           label: 'Ingredientes',

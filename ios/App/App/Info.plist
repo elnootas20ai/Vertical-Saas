@@ -51,6 +51,10 @@
 	<string>Vertial puede guardar en tu galería las fotos que captures dentro de la app.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Vertial necesita tu ubicación al fichar (entrada, descanso y salida) para registrar dónde estás trabajando. Solo se usa mientras usas la app.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Vertial necesita tu ubicación al fichar (entrada, descanso y salida) para registrar dónde estás trabajando. No rastreamos tu ubicación en segundo plano con fines publicitarios.</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>Vertial necesita tu ubicación al fichar (entrada, descanso y salida) para registrar dónde estás trabajando.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Vertial necesita acceder a la red local de tu WiFi para conectar con la impresora de tickets del TPV (por ejemplo 192.168.1.20). Sin este permiso no puede imprimir.</string>
 	<key>NSBonjourServices</key>

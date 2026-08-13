@@ -1604,8 +1604,9 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
    */
   const isOpsCrmBusiness = isDeliveryBusiness;
   const usesDeliveryLikeCrmActions = isDeliveryBusiness;
-  /** Stats desde pedidos delivery: únicamente en empresa delivery. */
-  const useClientLiveStats = isDeliveryBusiness;
+  /** Stats en lista: las persiste el servidor al cobrar (`syncClientAfterDeliveryOrder`).
+   * No reescanear todos los pedidos en cada visita a Clientes (satura Couch/API). */
+  const useClientLiveStats = false;
   const isBusinessScopedClients = usesBusinessScopedClients(currentBusiness?.businessType);
   const scopedClientsBusinessId = isBusinessScopedClients && businessScopeId ? businessScopeId : undefined;
   const clientsBusinessType = String(currentBusiness?.businessType || '').trim() || undefined;

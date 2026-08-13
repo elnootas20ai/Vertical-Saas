@@ -82,13 +82,13 @@ export function SaasTabSearch({
   className?: string;
 }) {
   return (
-    <div className={className || 'relative w-full sm:w-52'}>
-      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+    <div className={className || 'relative w-full min-w-[12rem] sm:w-52 shrink-0'}>
+      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full pl-8 pr-2 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg text-sm focus:border-gray-900 outline-none bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
+        className="w-full min-w-0 pl-8 pr-2 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg text-sm focus:border-gray-900 outline-none bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
       />
     </div>
   );

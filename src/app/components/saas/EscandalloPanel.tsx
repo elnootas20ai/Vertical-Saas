@@ -484,7 +484,8 @@ export function EscandalloPanel() {
   const [categoryFilter, setCategoryFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
+  /** Vacío = todos cerrados al entrar; el usuario abre los que quiera. */
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [editingProduct, setEditingProduct] = useState<CatalogItem | null>(null);
   const [showCategoryPanel, setShowCategoryPanel] = useState(false);
   const [regeneratingEscandallo, setRegeneratingEscandallo] = useState(false);
@@ -572,7 +573,7 @@ export function EscandalloPanel() {
   }, [filteredProducts]);
 
   const toggleCategory = (cat: string) => {
-    setCollapsedCategories((prev) => {
+    setExpandedCategories((prev) => {
       const next = new Set(prev);
       if (next.has(cat)) next.delete(cat);
       else next.add(cat);
@@ -740,7 +741,7 @@ export function EscandalloPanel() {
         ) : (
           <div className="p-3 space-y-3">
             {groupedProducts.map(([category, products]) => {
-              const isCollapsed = collapsedCategories.has(category);
+              const isCollapsed = !expandedCategories.has(category);
               const pendingCount = products.filter((p) => productCostingStatus(p) === 'none').length;
               return (
             <section

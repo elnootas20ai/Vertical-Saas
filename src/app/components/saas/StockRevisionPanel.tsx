@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import {
-  AlertTriangle, CheckCircle2, ClipboardCheck, Loader2, Search, User, X,
+  AlertTriangle, CheckCircle2, ClipboardCheck, Loader2, Minus, Plus, Search, User, X,
 } from 'lucide-react';
 import { DELIVERY_ACTIVE_STORE_CHANGED } from '../../lib/deliveryOpsPdvSelection';
 import { useAuth } from '../../context/AuthContext';
@@ -46,6 +46,7 @@ function RevisionLineCard({
   onCloseMismatch,
   onMismatchQtyChange,
   onSubmitMismatch,
+  onStepCounted,
   resolveUserName,
 }: {
   line: StockCount['lines'][number];
@@ -58,10 +59,17 @@ function RevisionLineCard({
   onCloseMismatch: () => void;
   onMismatchQtyChange: (value: string) => void;
   onSubmitMismatch: (idx: number) => void;
+  onStepCounted: (idx: number, delta: 1 | -1) => void;
   resolveUserName: (uid: string) => string;
 }) {
   const isReviewed = line.countedStock !== null;
   const hasDiff = isReviewed && line.difference !== 0;
+  const displayQty = isReviewed
+    ? Number(line.countedStock)
+    : isMismatchOpen
+      ? Number(mismatchQty.replace(',', '.') || line.theoreticalStock)
+      : Number(line.theoreticalStock);
+  const unit = line.unit || 'ud';
 
   return (
     <div
@@ -94,28 +102,58 @@ function RevisionLineCard({
         <span className="text-gray-500">
           Sistema:{' '}
           <strong className="text-gray-900 dark:text-white tabular-nums">
-            {line.theoreticalStock} {line.unit}
+            {line.theoreticalStock} {unit}
           </strong>
         </span>
-        {isReviewed && (
-          <>
-            <span className="text-gray-500">
-              Contado:{' '}
-              <strong className={`tabular-nums ${hasDiff ? 'text-amber-600' : 'text-emerald-600'}`}>
-                {line.countedStock} {line.unit}
-              </strong>
-            </span>
-            {hasDiff && (
-              <span className={`font-bold tabular-nums ${(line.difference ?? 0) < 0 ? 'text-red-600' : 'text-blue-600'}`}>
-                {(line.difference ?? 0) > 0 ? '+' : ''}{line.difference} {line.unit}
-              </span>
-            )}
-          </>
-        )}
+        {isReviewed && hasDiff ? (
+          <span className={`font-bold tabular-nums ${(line.difference ?? 0) < 0 ? 'text-red-600' : 'text-blue-600'}`}>
+            {(line.difference ?? 0) > 0 ? '+' : ''}
+            {line.difference} {unit}
+          </span>
+        ) : null}
+      </div>
+
+      {/* +/- fácil: misma lógica que almacén CEO */}
+      <div className="mt-3 flex items-center justify-center gap-3">
+        <button
+          type="button"
+          disabled={isBusy || displayQty <= 0}
+          onClick={() => {
+            if (isMismatchOpen) {
+              const next = Math.max(0, displayQty - 1);
+              onMismatchQtyChange(String(next));
+              return;
+            }
+            onStepCounted(lineIdx, -1);
+          }}
+          className="w-12 h-12 touch-manipulation inline-flex items-center justify-center rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 text-red-600 disabled:opacity-40"
+          aria-label="Restar 1"
+        >
+          <Minus className="w-5 h-5" />
+        </button>
+        <div className="min-w-[5.5rem] text-center">
+          <p className="text-2xl font-bold tabular-nums text-gray-900 dark:text-white">{displayQty}</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">{unit}</p>
+        </div>
+        <button
+          type="button"
+          disabled={isBusy}
+          onClick={() => {
+            if (isMismatchOpen) {
+              onMismatchQtyChange(String(displayQty + 1));
+              return;
+            }
+            onStepCounted(lineIdx, 1);
+          }}
+          className="w-12 h-12 touch-manipulation inline-flex items-center justify-center rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 text-emerald-700 disabled:opacity-40"
+          aria-label="Sumar 1"
+        >
+          <Plus className="w-5 h-5" />
+        </button>
       </div>
 
       {isReviewed && line.countedBy && (
-        <p className="mt-2 text-xs text-gray-500 flex items-center gap-1">
+        <p className="mt-2 text-xs text-gray-500 flex items-center gap-1 justify-center">
           <User className="w-3 h-3" />
           {resolveUserName(line.countedBy)}
           {line.countedAt && <> · {formatStockTime(line.countedAt)}</>}
@@ -147,17 +185,18 @@ function RevisionLineCard({
 
       {!isReviewed && isMismatchOpen && (
         <div className="mt-4 space-y-3">
-          <label className="block text-xs font-semibold text-gray-500 uppercase">Cantidad real contada</label>
+          <label className="block text-xs font-semibold text-gray-500 uppercase text-center">
+            Cantidad real · usa + / − o escribe
+          </label>
           <input
             type="number"
             inputMode="decimal"
             min="0"
             step="any"
-            autoFocus
             value={mismatchQty}
             onChange={(e) => onMismatchQtyChange(e.target.value)}
             placeholder={`Ej: ${line.theoreticalStock}`}
-            className="w-full min-h-[52px] px-4 text-lg text-center font-bold bg-gray-50 dark:bg-gray-900 border-2 border-amber-300 dark:border-amber-700 rounded-xl outline-none focus:ring-2 focus:ring-amber-500"
+            className="w-full min-h-[48px] px-4 text-lg text-center font-bold bg-gray-50 dark:bg-gray-900 border-2 border-amber-300 dark:border-amber-700 rounded-xl outline-none focus:ring-2 focus:ring-amber-500"
           />
           <div className="grid grid-cols-2 gap-3">
             <button
@@ -180,7 +219,7 @@ function RevisionLineCard({
       )}
 
       {isReviewed && (
-        <p className="mt-3 text-sm font-semibold text-emerald-600 dark:text-emerald-400">Revisado</p>
+        <p className="mt-3 text-sm font-semibold text-emerald-600 dark:text-emerald-400 text-center">Revisado</p>
       )}
     </div>
   );
@@ -377,6 +416,32 @@ export function StockRevisionPanel({
     }
   };
 
+  /** +/- en revisión: guarda contado al instante (CEO / worker). */
+  const stepCounted = async (lineIdx: number, delta: 1 | -1) => {
+    if (!resolvedActiveCount || !userId) return;
+    const line = resolvedActiveCount.lines[lineIdx];
+    if (!line) return;
+    if (mismatchIdx === lineIdx) {
+      const base = Number(mismatchQty.replace(',', '.') || line.theoreticalStock);
+      setMismatchQty(String(Math.max(0, base + delta)));
+      return;
+    }
+    const base = line.countedStock != null ? Number(line.countedStock) : Number(line.theoreticalStock);
+    const next = Math.max(0, base + delta);
+    setLineBusy(lineIdx);
+    try {
+      const updated = await updateCountLineRequest(userId, resolvedActiveCount._id, lineIdx, {
+        countedStock: next,
+        countedBy: actorUserId || undefined,
+      });
+      syncActiveCount(updated);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al ajustar');
+    } finally {
+      setLineBusy(null);
+    }
+  };
+
   const handleCompleteRevision = async () => {
     if (!resolvedActiveCount || !userId || isWorker) return;
     setCompletingCount(true);
@@ -555,10 +620,15 @@ export function StockRevisionPanel({
               isMismatchOpen={mismatchIdx === lineIdx}
               mismatchQty={mismatchQty}
               onMarkOk={markLineOk}
-              onOpenMismatch={(idx) => { setMismatchIdx(idx); setMismatchQty(''); }}
+              onOpenMismatch={(idx) => {
+                const line = resolvedActiveCount?.lines[idx];
+                setMismatchIdx(idx);
+                setMismatchQty(String(line?.theoreticalStock ?? 0));
+              }}
               onCloseMismatch={() => { setMismatchIdx(null); setMismatchQty(''); }}
               onMismatchQtyChange={setMismatchQty}
               onSubmitMismatch={submitMismatch}
+              onStepCounted={stepCounted}
               resolveUserName={resolveUserName}
             />
           ))}

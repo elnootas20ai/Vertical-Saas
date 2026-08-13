@@ -15,7 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import { useModalClose } from '../../hooks/useModalClose';
-import type { CatalogItem, StockCategory } from '../../lib/deliveryApi';
+import type { CatalogItem } from '../../lib/deliveryApi';
 import {
   createCatalogItemRequest,
   getDeliveryConfigRequest,
@@ -42,11 +42,15 @@ import {
   inventoryStatus,
   inventoryStatusClass,
   inventoryStatusLabel,
+  listInventoryOrganizerChoices,
   movementTypeLabel,
   readInventoryCategoryLabel,
   readInventoryProductBrand,
-  STOCK_CATEGORY_LABELS,
+  stockFieldsForOrganizer,
+  ORGANIZER_TOTAL,
+  type InventoryCommercialBrand,
 } from '../../lib/inventoryUtils';
+import { quantityForWarehouse } from '../../lib/warehouseStockQty';
 import {
   SaasTabEmpty,
   SaasTabPrimaryButton,
@@ -77,21 +81,29 @@ function AddInventoryItemModal({
   onCreated,
   userId,
   businessType,
+  commercialBrands,
+  defaultOrganizerId,
 }: {
   isOpen: boolean;
   onClose: () => void;
   onCreated: () => void;
   userId: string;
   businessType: string;
+  commercialBrands: InventoryCommercialBrand[];
+  defaultOrganizerId?: string | null;
 }) {
   const { config: verticalConfig } = useVerticalCatalog();
   const unitOptions = verticalConfig.units.length > 0 ? verticalConfig.units : DEFAULT_UNITS;
+  const organizerChoices = useMemo(
+    () => listInventoryOrganizerChoices(commercialBrands),
+    [commercialBrands],
+  );
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     name: '',
     productBrand: '',
     category: '',
-    stockCategory: 'ingredient' as StockCategory,
+    organizerId: '',
     unit: unitOptions[0]?.value || 'kg',
     minStock: '',
     costPrice: '',
@@ -99,16 +111,23 @@ function AddInventoryItemModal({
 
   useEffect(() => {
     if (!isOpen) return;
+    const preferred =
+      defaultOrganizerId &&
+      defaultOrganizerId !== ORGANIZER_TOTAL &&
+      defaultOrganizerId !== 'all' &&
+      organizerChoices.some((c) => c.id === defaultOrganizerId)
+        ? defaultOrganizerId
+        : organizerChoices[0]?.id || '';
     setForm({
       name: '',
       productBrand: '',
       category: '',
-      stockCategory: 'ingredient',
+      organizerId: preferred,
       unit: unitOptions[0]?.value || 'kg',
       minStock: '',
       costPrice: '',
     });
-  }, [isOpen, unitOptions]);
+  }, [isOpen, unitOptions, organizerChoices, defaultOrganizerId]);
 
   if (!isOpen) return null;
 
@@ -117,15 +136,20 @@ function AddInventoryItemModal({
       toast.error('El nombre es obligatorio');
       return;
     }
+    if (!form.organizerId.trim()) {
+      toast.error('Elige en qué organizador colocarlo');
+      return;
+    }
+    const fields = stockFieldsForOrganizer(form.organizerId);
     setSubmitting(true);
     try {
       await createCatalogItemRequest(userId, {
         name: form.name.trim(),
-        category: form.category.trim() || STOCK_CATEGORY_LABELS[form.stockCategory],
+        category: form.category.trim() || fields.category,
         module: 'stock',
         itemType: 'product',
         vertical: businessType,
-        stockCategory: form.stockCategory,
+        stockCategory: fields.stockCategory,
         isStockItem: true,
         unit: form.unit,
         minStock: Number(form.minStock.replace(',', '.')) || 0,
@@ -134,9 +158,10 @@ function AddInventoryItemModal({
         active: true,
         available: true,
         webVisible: false,
-        customFields: form.productBrand.trim()
-          ? { productBrand: form.productBrand.trim() }
-          : undefined,
+        customFields: {
+          inventoryOrganizerId: form.organizerId.trim(),
+          ...(form.productBrand.trim() ? { productBrand: form.productBrand.trim() } : {}),
+        },
       });
       toast.success('Artículo añadido al inventario');
       onClose();
@@ -168,6 +193,23 @@ function AddInventoryItemModal({
               placeholder="Ej: Mozzarella, Agua 50cl, Bolsas delivery…"
             />
           </Field>
+          <Field label="Organizador *">
+            <select
+              value={form.organizerId}
+              onChange={(e) => setForm((f) => ({ ...f, organizerId: e.target.value }))}
+              className={inputClass}
+            >
+              {organizerChoices.length === 0 ? (
+                <option value="">Sin organizadores</option>
+              ) : (
+                organizerChoices.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.label}
+                  </option>
+                ))
+              )}
+            </select>
+          </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Categoría">
               <input
@@ -187,21 +229,6 @@ function AddInventoryItemModal({
             </Field>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Tipo almacén">
-              <select
-                value={form.stockCategory}
-                onChange={(e) => setForm((f) => ({ ...f, stockCategory: e.target.value as StockCategory }))}
-                className={inputClass}
-              >
-                {(['ingredient', 'beverage', 'packaging', 'cleaning', 'consumable', 'other'] as StockCategory[]).map(
-                  (cat) => (
-                    <option key={cat} value={cat}>
-                      {STOCK_CATEGORY_LABELS[cat]}
-                    </option>
-                  ),
-                )}
-              </select>
-            </Field>
             <Field label="Unidad">
               <select
                 value={form.unit}
@@ -215,8 +242,6 @@ function AddInventoryItemModal({
                 ))}
               </select>
             </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
             <Field label="Stock mínimo">
               <input
                 type="number"
@@ -227,17 +252,17 @@ function AddInventoryItemModal({
                 className={inputClass}
               />
             </Field>
-            <Field label="Coste base (€)">
-              <input
-                type="number"
-                min="0"
-                step="any"
-                value={form.costPrice}
-                onChange={(e) => setForm((f) => ({ ...f, costPrice: e.target.value }))}
-                className={inputClass}
-              />
-            </Field>
           </div>
+          <Field label="Coste base (€)">
+            <input
+              type="number"
+              min="0"
+              step="any"
+              value={form.costPrice}
+              onChange={(e) => setForm((f) => ({ ...f, costPrice: e.target.value }))}
+              className={inputClass}
+            />
+          </Field>
         </div>
         <div className="flex justify-end gap-2 mt-6">
           <SaasTabSecondaryButton onClick={onClose}>Cancelar</SaasTabSecondaryButton>
@@ -576,6 +601,7 @@ export function InventoryPanel() {
   const {
     dataUserId,
     businessType,
+    storeLabel,
     storeWarehouseId,
     stockItems,
     loading,
@@ -595,6 +621,7 @@ export function InventoryPanel() {
   const [showPurchaseList, setShowPurchaseList] = useState(false);
   const [showInvoiceOcr, setShowInvoiceOcr] = useState(false);
   const [localItems, setLocalItems] = useState<CatalogItem[]>([]);
+  const [commercialBrands, setCommercialBrands] = useState<InventoryCommercialBrand[]>([]);
   const [syncing, setSyncing] = useState(false);
   const initialSyncDone = useRef(false);
 
@@ -602,16 +629,51 @@ export function InventoryPanel() {
     setLocalItems(stockItems);
   }, [stockItems]);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!businessId) {
+        setCommercialBrands([]);
+        return;
+      }
+      try {
+        const brandList = await listBrandsRequest(businessId).catch(() => []);
+        if (cancelled) return;
+        setCommercialBrands(
+          brandList.map((b) => ({
+            _id: b._id,
+            name: b.name,
+            deliveryLineKind: b.deliveryLineKind,
+          })),
+        );
+      } catch {
+        if (!cancelled) setCommercialBrands([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [businessId]);
+
   const activeItems = useMemo(
     () => localItems.filter((i) => i.active !== false && !i.deletedAt),
     [localItems],
   );
 
-  const stats = useMemo(() => computeInventoryStats(activeItems), [activeItems]);
+  const scopedItems = useMemo(
+    () =>
+      activeItems.map((item) => ({
+        ...item,
+        stockQuantity: quantityForWarehouse(item, storeWarehouseId),
+      })),
+    [activeItems, storeWarehouseId],
+  );
+
+  const stats = useMemo(() => computeInventoryStats(scopedItems), [scopedItems]);
 
   const typeGroups = useMemo(
-    () => buildInventoryOrganizerGroups(activeItems).slice(1),
-    [activeItems],
+    () => buildInventoryOrganizerGroups(scopedItems, [], commercialBrands).filter((g) => g.id !== ORGANIZER_TOTAL || g.total > 0),
+    [scopedItems, commercialBrands],
   );
 
   const statusTabs = useMemo(
@@ -626,16 +688,16 @@ export function InventoryPanel() {
 
   const brands = useMemo(() => {
     const set = new Set<string>();
-    activeItems.forEach((i) => {
+    scopedItems.forEach((i) => {
       const brand = readInventoryProductBrand(i);
       if (brand) set.add(brand);
     });
     return [...set].sort((a, b) => a.localeCompare(b, 'es'));
-  }, [activeItems]);
+  }, [scopedItems]);
 
   const filteredItems = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const byType = filterItemsByOrganizer(activeItems, typeFilter || 'all');
+    const byType = filterItemsByOrganizer(scopedItems, typeFilter || 'all', [], commercialBrands);
     return byType
       .filter((item) => {
         const status = inventoryStatus(item);
@@ -666,11 +728,11 @@ export function InventoryPanel() {
         const diff = rank(a) - rank(b);
         return diff !== 0 ? diff : (a.name || '').localeCompare(b.name || '', 'es');
       });
-  }, [activeItems, search, typeFilter, brandFilter, statusFilter]);
+  }, [scopedItems, search, typeFilter, brandFilter, statusFilter, commercialBrands]);
 
   const selectedItem = useMemo(
-    () => filteredItems.find((i) => i._id === selectedId) ?? activeItems.find((i) => i._id === selectedId) ?? null,
-    [filteredItems, activeItems, selectedId],
+    () => filteredItems.find((i) => i._id === selectedId) ?? scopedItems.find((i) => i._id === selectedId) ?? null,
+    [filteredItems, scopedItems, selectedId],
   );
 
   useEffect(() => {
@@ -748,7 +810,7 @@ export function InventoryPanel() {
     void runInventorySync(true, false);
   }, [dataUserId, loading, runInventorySync]);
 
-  if (loading && activeItems.length === 0) {
+  if (loading && scopedItems.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-gray-400">
         <Loader2 className="w-8 h-8 animate-spin mb-3" />
@@ -767,6 +829,12 @@ export function InventoryPanel() {
           { label: 'sin stock', value: stats.out, tone: stats.out > 0 ? 'red' : 'default' },
           { label: 'valor €', value: stats.estimatedValue.toFixed(0), tone: 'indigo' },
         ]}
+        banner={
+          <p className="text-stone-600 dark:text-stone-300">
+            Stock de <strong className="text-stone-900 dark:text-white">{storeLabel || 'Almacén'}</strong>
+            {' · '}mismo catálogo; cantidades por tienda.
+          </p>
+        }
         toolbar={
           <SaasTabToolbarRow
             left={
@@ -796,7 +864,7 @@ export function InventoryPanel() {
                 </SaasTabSecondaryButton>
                 <SaasTabSecondaryButton
                   onClick={() => setShowPurchaseList(true)}
-                  disabled={activeItems.length === 0}
+                  disabled={scopedItems.length === 0}
                   title="Artículos con stock bajo o sin stock"
                 >
                   <ShoppingCart className="w-4 h-4" />
@@ -818,7 +886,7 @@ export function InventoryPanel() {
           />
         }
       >
-        {activeItems.length === 0 ? (
+        {scopedItems.length === 0 ? (
           <SaasTabEmpty
             icon={<Boxes className="w-10 h-10" />}
             title="Sin artículos en inventario"
@@ -848,7 +916,7 @@ export function InventoryPanel() {
                   groups={typeGroups}
                   activeId={typeFilter}
                   onSelect={setTypeFilter}
-                  totalAll={activeItems.length}
+                  totalAll={scopedItems.length}
                 />
               ) : null}
             </div>
@@ -909,7 +977,7 @@ export function InventoryPanel() {
       <InventoryPurchaseListModal
         isOpen={showPurchaseList}
         onClose={() => setShowPurchaseList(false)}
-        items={activeItems}
+        items={scopedItems}
         userId={dataUserId}
         warehouseId={storeWarehouseId}
         onStockUpdated={() => void refreshAll()}
@@ -961,6 +1029,8 @@ export function InventoryPanel() {
         onCreated={() => void refreshAll()}
         userId={dataUserId}
         businessType={businessType}
+        commercialBrands={commercialBrands}
+        defaultOrganizerId={typeFilter}
       />
     </>
   );

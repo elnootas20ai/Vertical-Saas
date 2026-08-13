@@ -20,7 +20,6 @@ import {
 import { Layout } from '../../../components/saas/Layout';
 import { useAuth } from '../../../context/AuthContext';
 import { exportMyDataRequest } from '../../../lib/authApi';
-import { DeleteAccountSection } from '../../../components/saas/DeleteAccountSection';
 import { IOS_PRIVACY_POLICY_URL } from '../../../lib/appStoreCompliance';
 
 export function WorkerSecurity() {
@@ -266,7 +265,6 @@ export function WorkerSecurity() {
             >
               Política de privacidad
             </a>
-            <DeleteAccountSection compact />
           </div>
         </div>
       </div>

@@ -40,10 +40,22 @@ export async function maybeDeductRecipeStockForDiningOrder(req, userId, order, {
   if (items.length === 0) return { deducted: [], warnings: [] };
 
   try {
+    let warehouseId = '';
+    try {
+      const { resolveWarehouseIdForSalesPoint } = await import('./storeWarehouseService.js');
+      warehouseId = await resolveWarehouseIdForSalesPoint(
+        req,
+        userId,
+        order.salesPointId || order.pointOfSaleId || '',
+      );
+    } catch {
+      warehouseId = '';
+    }
     const result = await deductOrderByRecipe(req, userId, {
       orderId: order._id,
       orderType: 'dining_order',
       items,
+      warehouseId,
       performedBy,
     });
     if (result.warnings?.length) {

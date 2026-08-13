@@ -5,6 +5,7 @@ import {
   putDocument,
   getAllDocuments,
 } from './couchdb.js';
+import { applyWarehouseStockDelta } from '../shared/stock/warehouseStockQty.js';
 import logger from './logger.js';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -109,16 +110,37 @@ export async function recordMovement(req, userId, movementData) {
         throw new Error(`Artículo de catálogo no encontrado: ${catalogItemId}`);
       }
 
-      const previousStock = Number(catItem.stockQuantity || 0);
+      const warehouseId = String(movementData.warehouseId || '').trim();
+      let warehouseName = '';
+      if (warehouseId) {
+        try {
+          const whDoc = await getDocument(req, db, warehouseId);
+          if (whDoc?.type === 'warehouse') warehouseName = String(whDoc.name || '');
+        } catch {
+          /* noop */
+        }
+      }
+
+      let previousStock;
       let newStock;
+      let nextWarehouseStock = catItem.warehouseStock;
+      let nextStockQuantity = Number(catItem.stockQuantity || 0);
 
       if (movementType === 'transfer') {
+        // Transferencias: qty global se mantiene; detalle por almacén queda en movimientos.
+        previousStock = warehouseId
+          ? applyWarehouseStockDelta(catItem, warehouseId, 0, warehouseName).previousQty
+          : Number(catItem.stockQuantity || 0);
         newStock = previousStock;
-      } else if (INBOUND_TYPES.has(movementType)) {
-        newStock = previousStock + Math.abs(quantity);
-      } else if (OUTBOUND_TYPES.has(movementType)) {
-        newStock = previousStock - Math.abs(quantity);
+      } else if (INBOUND_TYPES.has(movementType) || OUTBOUND_TYPES.has(movementType)) {
+        const signed = INBOUND_TYPES.has(movementType) ? Math.abs(quantity) : -Math.abs(quantity);
+        const applied = applyWarehouseStockDelta(catItem, warehouseId, signed, warehouseName);
+        previousStock = applied.previousQty;
+        newStock = applied.nextQty;
+        nextWarehouseStock = applied.warehouseStock;
+        nextStockQuantity = warehouseId ? applied.stockQuantity : applied.nextQty;
       } else {
+        previousStock = Number(catItem.stockQuantity || 0);
         newStock = previousStock;
       }
 
@@ -136,7 +158,10 @@ export async function recordMovement(req, userId, movementData) {
       await putDocument(req, db, catItem._id, {
         ...catItem,
         isStockItem: true,
-        stockQuantity: newStock,
+        stockQuantity: nextStockQuantity,
+        ...(warehouseId && movementType !== 'transfer'
+          ? { warehouseStock: nextWarehouseStock }
+          : {}),
         updatedAt: new Date().toISOString(),
       });
 
@@ -147,6 +172,7 @@ export async function recordMovement(req, userId, movementData) {
         quantity,
         previousStock,
         newStock,
+        warehouseId: warehouseId || undefined,
         userId,
       }, 'Movimiento de stock registrado');
 

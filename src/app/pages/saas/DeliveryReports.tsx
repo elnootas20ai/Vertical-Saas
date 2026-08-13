@@ -21,22 +21,24 @@ import {
 import {
   Download, TrendingUp, Calendar, Filter, RefreshCw, BarChart2,
   AlertTriangle, ArrowUpRight, ArrowDownRight, Store, Clock, Truck,
-  Layers, ChevronRight, Package, Euro,
+  ChevronRight, Package, Euro,
 } from 'lucide-react';
+import {
+  DELIVERY_INFORMES_CATEGORIES,
+  getDeliveryInformeEntry,
+  isLiveInformeId,
+  type DeliveryInformeCategoryId,
+  type DeliveryInformeEntry,
+  type DeliveryInformeId,
+  type DeliveryInformeLiveId,
+} from '../../verticals/delivery/informes/deliveryInformesCatalog';
+import { DeliveryInformesCatalogView } from '../../verticals/delivery/informes/DeliveryInformesCatalogView';
+import { DeliveryInformeRunner } from '../../verticals/delivery/informes/DeliveryInformeRunner';
+import { VertialInformeProgress, downloadInforme, type InformeExportFormat } from '../../verticals/delivery/informes/VertialInformeProgress';
 
-type ReportTab = 'resumen' | 'canales' | 'rendimiento' | 'incidencias' | 'productos' | 'tiendas';
 type DatePreset = 'hoy' | '7d' | 'mes' | '30d' | '90d' | 'custom';
 
 const COLORS = ['#6366f1', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899'];
-
-const TABS: { id: ReportTab; label: string; icon: React.ReactNode }[] = [
-  { id: 'resumen', label: 'Resumen', icon: <Layers className="w-4 h-4" /> },
-  { id: 'canales', label: 'Canales', icon: <BarChart2 className="w-4 h-4" /> },
-  { id: 'rendimiento', label: 'Rendimiento', icon: <Clock className="w-4 h-4" /> },
-  { id: 'incidencias', label: 'Incidencias', icon: <AlertTriangle className="w-4 h-4" /> },
-  { id: 'productos', label: 'Productos', icon: <Package className="w-4 h-4" /> },
-  { id: 'tiendas', label: 'Tiendas', icon: <Store className="w-4 h-4" /> },
-];
 
 const PRESETS: { id: DatePreset; label: string }[] = [
   { id: 'hoy', label: 'Hoy' },
@@ -101,34 +103,22 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
   );
 }
 
-async function exportToCsv(rows: Record<string, unknown>[], filename: string) {
-  if (!rows.length) return;
-  const keys = Object.keys(rows[0]);
-  const bom = '\uFEFF';
-  const csv = bom + [keys.join(';'), ...rows.map((r) => keys.map((k) => String(r[k] ?? '')).join(';'))].join('\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${filename}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
 export function DeliveryReports() {
   const navigate = useNavigate();
   const { user: authUser } = useAuth();
   const { currentBusiness } = useBusiness();
   const dataUserId = resolveBusinessDataUserId(authUser, currentBusiness);
 
-  const [tab, setTab] = useState<ReportTab>('resumen');
+  const [category, setCategory] = useState<DeliveryInformeCategoryId>('facturacion');
+  const [openEntry, setOpenEntry] = useState<DeliveryInformeEntry | null>(null);
+
   const [preset, setPreset] = useState<DatePreset>('mes');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
   const [filterPdv, setFilterPdv] = useState('');
   const [showFilters, setShowFilters] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [lastUpdate, setLastUpdate] = useState(new Date());
+  const [loading, setLoading] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const [kpis, setKpis] = useState<any>(null);
@@ -139,6 +129,9 @@ export function DeliveryReports() {
   const [productos, setProductos] = useState<any[]>([]);
   const [tiendas, setTiendas] = useState<any[]>([]);
 
+  const liveId: DeliveryInformeLiveId | null =
+    openEntry && isLiveInformeId(openEntry.id) ? openEntry.id : null;
+
   const dateRange = useMemo(() => {
     if (preset === 'custom' && customFrom && customTo) return { from: customFrom, to: customTo };
     return applyPreset(preset);
@@ -147,152 +140,266 @@ export function DeliveryReports() {
   const filters: DeliveryReportFilters = useMemo(() => ({
     ...dateRange,
     salesPointId: filterPdv || undefined,
-    granularity: preset === 'hoy' || preset === '7d' ? 'day' : 'day',
-  }), [dateRange, filterPdv, preset]);
+    granularity: 'day',
+  }), [dateRange, filterPdv]);
 
-  const loadData = useCallback(async (signal?: AbortSignal) => {
+  const loadLiveReport = useCallback(async (reportId: DeliveryInformeLiveId, signal?: AbortSignal) => {
     if (!dataUserId) return;
     try {
       setLoading(true);
-      const [kpiRes, evolRes, canRes, rendRes, incRes, prodRes, tiendasRes] = await Promise.all([
-        fetchDeliveryReportKpis(dataUserId, filters, signal),
-        fetchDeliveryEvolucion(dataUserId, filters, signal),
-        fetchDeliveryCanales(dataUserId, filters, signal),
-        fetchDeliveryRendimiento(dataUserId, filters, signal),
-        fetchDeliveryIncidencias(dataUserId, filters, signal),
-        fetchDeliveryTopProductos(dataUserId, { ...filters, limit: 15 }, signal),
-        fetchDeliveryTiendas(dataUserId, filters, signal),
-      ]);
-      if (signal?.aborted) return;
-      setKpis(kpiRes.kpis || null);
-      setEvolucion(evolRes.series || []);
-      setCanales(canRes);
-      setRendimiento(rendRes);
-      setIncidencias(incRes);
-      setProductos(prodRes.products || []);
-      setTiendas(tiendasRes.tiendas || []);
-      setLastUpdate(new Date());
+      if (reportId === 'resumen') {
+        const [kpiRes, evolRes] = await Promise.all([
+          fetchDeliveryReportKpis(dataUserId, filters, signal),
+          fetchDeliveryEvolucion(dataUserId, filters, signal),
+        ]);
+        if (signal?.aborted) return;
+        setKpis(kpiRes.kpis || null);
+        setEvolucion(evolRes.series || []);
+      } else if (reportId === 'canales') {
+        const canRes = await fetchDeliveryCanales(dataUserId, filters, signal);
+        if (signal?.aborted) return;
+        setCanales(canRes);
+      } else if (reportId === 'rendimiento') {
+        const rendRes = await fetchDeliveryRendimiento(dataUserId, filters, signal);
+        if (signal?.aborted) return;
+        setRendimiento(rendRes);
+      } else if (reportId === 'incidencias') {
+        const incRes = await fetchDeliveryIncidencias(dataUserId, filters, signal);
+        if (signal?.aborted) return;
+        setIncidencias(incRes);
+      } else if (reportId === 'productos') {
+        const prodRes = await fetchDeliveryTopProductos(dataUserId, { ...filters, limit: 15 }, signal);
+        if (signal?.aborted) return;
+        setProductos(prodRes.products || []);
+      } else if (reportId === 'tiendas') {
+        const tiendasRes = await fetchDeliveryTiendas(dataUserId, filters, signal);
+        if (signal?.aborted) return;
+        setTiendas(tiendasRes.tiendas || []);
+      }
+      if (!signal?.aborted) setLastUpdate(new Date());
     } catch (e: unknown) {
       if (e instanceof Error && e.name === 'AbortError') return;
-      console.error('Error loading delivery reports:', e);
+      console.error('Error loading delivery report:', e);
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
   }, [dataUserId, filters]);
 
+  /** Solo carga al abrir un informe live o al cambiar filtros/periodo de ese informe. */
   useEffect(() => {
+    if (!liveId) return;
     abortRef.current?.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
-    loadData(ctrl.signal);
+    loadLiveReport(liveId, ctrl.signal);
     return () => ctrl.abort();
-  }, [loadData]);
+  }, [liveId, loadLiveReport]);
 
-  const handleExport = () => {
-    const suffix = `${dateRange.from}_${dateRange.to}`;
-    if (tab === 'canales' && canales?.canales) {
-      exportToCsv(canales.canales.map((c: any) => ({
-        Canal: c.label, Pedidos: c.pedidos, Ingresos: c.ingresos, Comision: c.comision, Margen: c.margenNeto,
-      })), `Canales_Delivery_${suffix}`);
-    } else if (tab === 'incidencias' && incidencias?.lista) {
-      exportToCsv(incidencias.lista.map((i: any) => ({
-        Pedido: i.orderNumber, Fecha: i.fecha, Estado: i.estado, Canal: i.canal, Motivo: i.motivo,
-      })), `Incidencias_Delivery_${suffix}`);
-    } else if (tab === 'productos') {
-      exportToCsv(productos.map((p) => ({
-        Producto: p.nombre, Unidades: p.unidades, Ingresos: p.ingresos,
-      })), `Productos_Delivery_${suffix}`);
-    } else if (kpis) {
-      exportToCsv([
-        { Concepto: 'Ventas periodo', Valor: kpis.ventasPeriodo?.total },
-        { Concepto: 'Pedidos entregados', Valor: kpis.ventasPeriodo?.pedidos },
-        { Concepto: 'Ticket medio', Valor: kpis.ventasPeriodo?.ticketMedio },
-        { Concepto: 'Incidencias', Valor: kpis.incidencias?.total },
-      ], `Resumen_Delivery_${suffix}`);
-    }
+  /** Tiendas para el selector de filtro: solo si el usuario abre filtros en un live. */
+  useEffect(() => {
+    if (!liveId || !showFilters || !dataUserId || tiendas.length > 0) return;
+    let cancelled = false;
+    fetchDeliveryTiendas(dataUserId, filters).then((res) => {
+      if (!cancelled) setTiendas(res.tiendas || []);
+    }).catch(() => null);
+    return () => { cancelled = true; };
+  }, [liveId, showFilters, dataUserId, filters, tiendas.length]);
+
+  const handleOpen = (entry: DeliveryInformeEntry) => {
+    setOpenEntry(entry);
+    if (entry.category) setCategory(entry.category);
   };
 
+  const handleBackToCatalog = () => {
+    abortRef.current?.abort();
+    setOpenEntry(null);
+    setLoading(false);
+  };
+
+  const liveExportRows = (): { rows: Record<string, unknown>[]; filename: string; title: string } | null => {
+    if (!liveId) return null;
+    const suffix = `${dateRange.from}_${dateRange.to}`;
+    if (liveId === 'canales' && canales?.canales) {
+      return {
+        title: 'Canales de venta',
+        filename: `Canales_Delivery_${suffix}`,
+        rows: canales.canales.map((c: any) => ({
+          Canal: c.label, Pedidos: c.pedidos, Ingresos: c.ingresos, Comision: c.comision, Margen: c.margenNeto,
+        })),
+      };
+    }
+    if (liveId === 'incidencias' && incidencias?.lista) {
+      return {
+        title: 'Incidencias',
+        filename: `Incidencias_Delivery_${suffix}`,
+        rows: incidencias.lista.map((i: any) => ({
+          Pedido: i.orderNumber, Fecha: i.fecha, Estado: i.estado, Canal: i.canal, Motivo: i.motivo,
+        })),
+      };
+    }
+    if (liveId === 'productos') {
+      return {
+        title: 'Productos top',
+        filename: `Productos_Delivery_${suffix}`,
+        rows: productos.map((p) => ({
+          Producto: p.nombre, Unidades: p.unidades, Ingresos: p.ingresos,
+        })),
+      };
+    }
+    if (liveId === 'tiendas') {
+      return {
+        title: 'Rendimiento por tienda',
+        filename: `Tiendas_Delivery_${suffix}`,
+        rows: tiendas.map((t) => ({
+          Tienda: t.nombre, Pedidos: t.pedidos, Entregados: t.entregados, Ingresos: t.ingresos, Ticket: t.ticketMedio,
+        })),
+      };
+    }
+    if (kpis) {
+      return {
+        title: 'Resumen delivery',
+        filename: `Resumen_Delivery_${suffix}`,
+        rows: [
+          { Concepto: 'Ventas periodo', Valor: kpis.ventasPeriodo?.total },
+          { Concepto: 'Pedidos entregados', Valor: kpis.ventasPeriodo?.pedidos },
+          { Concepto: 'Ticket medio', Valor: kpis.ventasPeriodo?.ticketMedio },
+          { Concepto: 'Incidencias', Valor: kpis.incidencias?.total },
+        ],
+      };
+    }
+    return null;
+  };
+
+  const handleExport = async (format: InformeExportFormat) => {
+    const payload = liveExportRows();
+    if (!payload?.rows.length) return;
+    await downloadInforme(format, payload.title, payload.rows, payload.filename, {
+      summary: `Periodo ${dateRange.from} → ${dateRange.to}`,
+      businessName: currentBusiness?.name,
+    });
+  };
+
+  const openTitle = openEntry?.title
+    || (openEntry ? getDeliveryInformeEntry(openEntry.id as DeliveryInformeId)?.title : null);
+
   return (
-    <Layout backTo="/saas/delivery-ops" title="Informes Delivery" subtitle="Rendimiento operativo y económico con datos reales">
+    <Layout
+      backTo="/saas/delivery-ops"
+      title="Informes"
+      subtitle="Análisis avanzados, KPIs y comparativas por categoría."
+    >
       <div className="flex flex-col gap-4">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <button type="button" onClick={() => navigate('/saas/delivery-ops')} className="text-sm text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">
               Centro operativo
             </button>
             <ChevronRight className="w-3.5 h-3.5 text-gray-300" />
-            <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100">Informes</h2>
+            {openEntry ? (
+              <>
+                <button type="button" onClick={handleBackToCatalog} className="text-sm text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">
+                  Informes
+                </button>
+                <ChevronRight className="w-3.5 h-3.5 text-gray-300" />
+                <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100">{openTitle}</h2>
+              </>
+            ) : (
+              <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100">Informes</h2>
+            )}
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[10px] text-emerald-600 flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              {lastUpdate.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
-            </span>
-            <button type="button" onClick={() => loadData()} disabled={loading} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800">
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            </button>
-            <button type="button" onClick={handleExport} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 rounded-lg text-xs font-semibold">
-              <Download className="w-3.5 h-3.5" /> CSV
-            </button>
-          </div>
+
+          {liveId && (
+            <div className="flex items-center gap-2 flex-wrap">
+              {lastUpdate && (
+                <span className="text-[10px] text-emerald-600 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  {lastUpdate.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              )}
+              <button type="button" onClick={() => liveId && loadLiveReport(liveId)} disabled={loading} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800" title="Actualizar">
+                <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              </button>
+              <button type="button" onClick={() => void handleExport('csv')} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700">
+                <Download className="w-3.5 h-3.5" /> CSV
+              </button>
+              <button type="button" onClick={() => void handleExport('xlsx')} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700">
+                Excel
+              </button>
+              <button type="button" onClick={() => void handleExport('pdf')} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700">
+                PDF
+              </button>
+            </div>
+          )}
         </div>
 
-        <div className="flex flex-wrap gap-2 items-center">
-          {PRESETS.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => setPreset(p.id)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${preset === p.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400'}`}
-            >
-              {p.label}
-            </button>
-          ))}
-          <button type="button" onClick={() => setShowFilters(!showFilters)} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400">
-            <Filter className="w-3.5 h-3.5" /> Filtros
-          </button>
-        </div>
-
-        {showFilters && (
-          <div className="flex flex-wrap gap-3 p-4 bg-gray-50 dark:bg-gray-900/50 rounded-2xl border border-gray-200 dark:border-gray-700">
-            <div>
-              <label className="text-[10px] font-bold text-gray-500 uppercase">Desde</label>
-              <input type="date" value={customFrom} onChange={(e) => { setCustomFrom(e.target.value); setPreset('custom'); }} className="mt-1 px-2 py-1.5 border rounded-lg text-sm dark:bg-gray-800 dark:border-gray-700" />
-            </div>
-            <div>
-              <label className="text-[10px] font-bold text-gray-500 uppercase">Hasta</label>
-              <input type="date" value={customTo} onChange={(e) => { setCustomTo(e.target.value); setPreset('custom'); }} className="mt-1 px-2 py-1.5 border rounded-lg text-sm dark:bg-gray-800 dark:border-gray-700" />
-            </div>
-            <div>
-              <label className="text-[10px] font-bold text-gray-500 uppercase">Tienda / PDV</label>
-              <select value={filterPdv} onChange={(e) => setFilterPdv(e.target.value)} className="mt-1 px-2 py-1.5 border rounded-lg text-sm dark:bg-gray-800 dark:border-gray-700 min-w-[160px]">
-                <option value="">Todas</option>
-                {tiendas.map((t) => <option key={t.id} value={t.id}>{t.nombre}</option>)}
-              </select>
-            </div>
-          </div>
+        {!openEntry && (
+          <DeliveryInformesCatalogView
+            category={category}
+            onCategoryChange={setCategory}
+            onOpen={handleOpen}
+          />
         )}
 
-        <div className="flex gap-1 flex-wrap border-b border-gray-200 dark:border-gray-700 pb-1">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setTab(t.id)}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors ${tab === t.id ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
-            >
-              {t.icon}{t.label}
-            </button>
-          ))}
-        </div>
+        {openEntry && openEntry.kind === 'skeleton' && (
+          <DeliveryInformeRunner entry={openEntry} onBack={handleBackToCatalog} />
+        )}
 
-        {loading && !kpis ? (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 animate-pulse">
-            {Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-28 bg-gray-200 dark:bg-gray-700 rounded-2xl" />)}
-          </div>
-        ) : (
-          <>
-            {tab === 'resumen' && kpis && (
+        {liveId && (
+          <div className="space-y-4">
+            <button
+              type="button"
+              onClick={handleBackToCatalog}
+              className="text-sm font-medium text-stone-500 hover:text-stone-800 dark:text-stone-400 dark:hover:text-stone-200"
+            >
+              ← Volver al catálogo
+            </button>
+
+            <div className="flex flex-wrap gap-2 items-center">
+              {PRESETS.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setPreset(p.id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${preset === p.id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400'}`}
+                >
+                  {p.label}
+                </button>
+              ))}
+              <button type="button" onClick={() => setShowFilters(!showFilters)} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400">
+                <Filter className="w-3.5 h-3.5" /> Filtros
+              </button>
+            </div>
+
+            {showFilters && (
+              <div className="flex flex-wrap gap-3 p-4 bg-gray-50 dark:bg-gray-900/50 rounded-2xl border border-gray-200 dark:border-gray-700">
+                <div>
+                  <label className="text-[10px] font-bold text-gray-500 uppercase">Desde</label>
+                  <input type="date" value={customFrom} onChange={(e) => { setCustomFrom(e.target.value); setPreset('custom'); }} className="mt-1 px-2 py-1.5 border rounded-lg text-sm dark:bg-gray-800 dark:border-gray-700" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-gray-500 uppercase">Hasta</label>
+                  <input type="date" value={customTo} onChange={(e) => { setCustomTo(e.target.value); setPreset('custom'); }} className="mt-1 px-2 py-1.5 border rounded-lg text-sm dark:bg-gray-800 dark:border-gray-700" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-gray-500 uppercase">Tienda / PDV</label>
+                  <select value={filterPdv} onChange={(e) => setFilterPdv(e.target.value)} className="mt-1 px-2 py-1.5 border rounded-lg text-sm dark:bg-gray-800 dark:border-gray-700 min-w-[160px]">
+                    <option value="">Todas</option>
+                    {tiendas.map((t) => <option key={t.id} value={t.id}>{t.nombre}</option>)}
+                  </select>
+                </div>
+              </div>
+            )}
+
+            {loading && (
+              <div className="rounded-2xl border border-stone-200 bg-white p-6 dark:border-stone-700 dark:bg-stone-900">
+                <VertialInformeProgress
+                  progress={kpis || canales || rendimiento || incidencias || productos.length || tiendas.length ? 70 : 35}
+                  label={`Generando «${openTitle || 'informe'}»…`}
+                />
+              </div>
+            )}
+
+            {!loading && liveId === 'resumen' && kpis && (
               <div className="space-y-4">
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                   <KPICard title="Ventas periodo" value={formatEur(kpis.ventasPeriodo?.total || 0)} sub={`${kpis.ventasPeriodo?.pedidos || 0} entregados`} icon={<TrendingUp className="w-4 h-4 text-white" />} color="bg-emerald-500" trend={kpis.ventasPeriodo?.vsPrevPeriod != null ? { value: `${kpis.ventasPeriodo.vsPrevPeriod}%`, up: kpis.ventasPeriodo.vsPrevPeriod >= 0 } : undefined} />
@@ -317,7 +424,7 @@ export function DeliveryReports() {
               </div>
             )}
 
-            {tab === 'canales' && canales && (
+            {!loading && liveId === 'canales' && canales && (
               <div className="space-y-4">
                 <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
                   <KPICard title="Ingresos totales" value={formatEur(canales.resumen?.ingresosTotal || 0)} icon={<TrendingUp className="w-4 h-4 text-white" />} color="bg-emerald-500" />
@@ -371,7 +478,7 @@ export function DeliveryReports() {
               </div>
             )}
 
-            {tab === 'rendimiento' && rendimiento && (
+            {!loading && liveId === 'rendimiento' && rendimiento && (
               <div className="space-y-4">
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                   <KPICard title="Cocina" value={`${rendimiento.medias?.cocina || 0} min`} icon={<Clock className="w-4 h-4 text-white" />} color="bg-orange-500" />
@@ -408,7 +515,7 @@ export function DeliveryReports() {
               </div>
             )}
 
-            {tab === 'incidencias' && incidencias && (
+            {!loading && liveId === 'incidencias' && incidencias && (
               <div className="space-y-4">
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                   <KPICard title="Total incidencias" value={String(incidencias.resumen?.total || 0)} icon={<AlertTriangle className="w-4 h-4 text-white" />} color="bg-red-500" />
@@ -438,7 +545,7 @@ export function DeliveryReports() {
               </div>
             )}
 
-            {tab === 'productos' && (
+            {!loading && liveId === 'productos' && (
               <ChartCard title="Top productos (ingresos)">
                 <ResponsiveContainer width="100%" height={320}>
                   <BarChart data={productos} layout="vertical">
@@ -452,7 +559,7 @@ export function DeliveryReports() {
               </ChartCard>
             )}
 
-            {tab === 'tiendas' && (
+            {!loading && liveId === 'tiendas' && (
               <div className="overflow-x-auto rounded-2xl border border-gray-200 dark:border-gray-700">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 dark:bg-gray-900/50 text-left text-xs text-gray-500">
@@ -473,7 +580,13 @@ export function DeliveryReports() {
                 </table>
               </div>
             )}
-          </>
+          </div>
+        )}
+
+        {!openEntry && (
+          <p className="text-[11px] text-stone-400 dark:text-stone-500">
+            {DELIVERY_INFORMES_CATEGORIES.length} categorías · sin carga de datos hasta abrir un informe.
+          </p>
         )}
       </div>
     </Layout>

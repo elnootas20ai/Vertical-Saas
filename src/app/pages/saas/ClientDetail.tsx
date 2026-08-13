@@ -404,6 +404,8 @@ export function ClientDetail() {
   const [loadingClientRecord, setLoadingClientRecord] = useState(false);
   const [deliveryOrders, setDeliveryOrders] = useState<DeliveryOrder[]>([]);
   const [loadingDeliveryOrders, setLoadingDeliveryOrders] = useState(false);
+  /** Historial/analytics: solo al entrar a Resumen/Pedidos (una vez por cliente). */
+  const deliveryHistoryLoadedForIdRef = useRef<string | null>(null);
 
   const dataUserId = useMemo(
     () => resolveBusinessDataUserId(authUser, currentBusiness),
@@ -425,6 +427,7 @@ export function ClientDetail() {
     setLoadingClientRecord(false);
     setDeliveryOrders([]);
     setLoadingDeliveryOrders(false);
+    deliveryHistoryLoadedForIdRef.current = null;
   }, [id]);
 
   useEffect(() => {
@@ -457,34 +460,66 @@ export function ClientDetail() {
     };
   }, [dataUserId, id, clients, isOpsCrmBusiness]);
 
+  // Entrar a ficha delivery: sync+summary + promos/actividad. SIN historial completo.
   useEffect(() => {
     if (!dataUserId || !id || !isOpsCrmBusiness) return;
 
     let cancelled = false;
     setLoadingClientRecord(true);
     setLoadingSummary(true);
-    setLoadingDeliveryOrders(true);
     setLoadingPromotions(true);
     setLoadingActivities(true);
+
+    Promise.all([
+      getClientDetailBundleRequest(dataUserId, id),
+      fetchClientPromotions(dataUserId, id),
+      fetchClientActivityBundle(dataUserId, id),
+    ])
+      .then(([bundle, promos, activityBundle]) => {
+        if (cancelled) return;
+        if (bundle?.client) setFetchedClientRecord(bundle.client);
+        if (bundle?.summary) setClientSummary(bundle.summary);
+        setClientPromotions(promos || []);
+        setClientActivities(activityBundle.activities || []);
+        setClientActivityKpis(activityBundle.kpis);
+      })
+      .catch(() => {
+        /* silent: la ficha sigue con datos de contexto / summary vacío */
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setLoadingClientRecord(false);
+        setLoadingSummary(false);
+        setLoadingPromotions(false);
+        setLoadingActivities(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dataUserId, id, isOpsCrmBusiness]);
+
+  // Historial de pedidos (qué pide, top productos…): solo Resumen/Pedidos, 1 vez por cliente.
+  useEffect(() => {
+    if (!dataUserId || !id || !isOpsCrmBusiness) return;
+    if (activeTab !== 'resumen' && activeTab !== 'pedidos') return;
+    if (deliveryHistoryLoadedForIdRef.current === id) return;
+
+    let cancelled = false;
+    setLoadingDeliveryOrders(true);
 
     const historyPromise = isDeliveryBusiness
       ? getClientOrderHistoryRequest(dataUserId, id)
       : listDiningOrdersRequest(dataUserId);
 
-    Promise.all([
-      getClientDetailBundleRequest(dataUserId, id),
-      historyPromise,
-      fetchClientPromotions(dataUserId, id),
-      fetchClientActivityBundle(dataUserId, id),
-    ])
-      .then(([bundle, history, promos, activityBundle]) => {
+    historyPromise
+      .then((history) => {
         if (cancelled) return;
-        if (bundle?.client) setFetchedClientRecord(bundle.client);
-        if (bundle?.summary) setClientSummary(bundle.summary);
+        deliveryHistoryLoadedForIdRef.current = id;
         if (isDeliveryBusiness) {
           setDeliveryOrders((history as DeliveryOrder[]) || []);
         } else {
-          const phone = bundle?.client?.phone
+          const phone = fetchedClientRecord?.phone
             || clients.find((c) => c.id === id)?.phone
             || '';
           setDeliveryOrders(diningOrdersToCrmDeliveryOrders(
@@ -493,27 +528,27 @@ export function ClientDetail() {
             phone,
           ));
         }
-        setClientPromotions(promos || []);
-        setClientActivities(activityBundle.activities || []);
-        setClientActivityKpis(activityBundle.kpis);
       })
       .catch(() => {
         if (cancelled) return;
         setDeliveryOrders([]);
       })
       .finally(() => {
-        if (cancelled) return;
-        setLoadingClientRecord(false);
-        setLoadingSummary(false);
-        setLoadingDeliveryOrders(false);
-        setLoadingPromotions(false);
-        setLoadingActivities(false);
+        if (!cancelled) setLoadingDeliveryOrders(false);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [dataUserId, id, isOpsCrmBusiness, isDeliveryBusiness, clients]);
+  }, [
+    dataUserId,
+    id,
+    isOpsCrmBusiness,
+    isDeliveryBusiness,
+    activeTab,
+    clients,
+    fetchedClientRecord?.phone,
+  ]);
 
   useEffect(() => {
     listUsersRequest()
@@ -1726,7 +1761,7 @@ export function ClientDetail() {
           }}
           summary={clientSummary}
           orders={deliveryOrders}
-          loadingSummary={loadingSummary || loadingDeliveryOrders}
+          loadingSummary={loadingSummary}
           activePromotionsCount={activePromotionsCount}
           loyalty={loyalty ? {
             points: loyalty.points,

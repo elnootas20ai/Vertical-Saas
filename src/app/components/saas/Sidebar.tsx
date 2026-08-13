@@ -525,7 +525,7 @@ const sidebarGroupDefs = [
   { id: 'clientesCrm',      icon: <Contact2 className="w-4 h-4 shrink-0" />,      itemIds: ['quotes', 'promotions'] },
   { id: 'equipo',           icon: <UsersRound className="w-4 h-4 shrink-0" />,    itemIds: ['hr-requests', 'team', 'clockins', 'horarios-vacaciones', 'commissions', 'payroll', 'gestoria'] },
   { id: 'catalogProviders', icon: <Package className="w-4 h-4 shrink-0" />,       itemIds: ['catalog', 'catalog-stock', 'costing'] },
-  { id: 'finanzas',         icon: <DollarSign className="w-4 h-4 shrink-0" />,    itemIds: ['client-billing', 'finance', 'income-expenses', 'ebitda', 'taxes', 'verifactu', 'bank-reconciliation', 'reports', 'sales-metrics'] },
+  { id: 'finanzas',         icon: <DollarSign className="w-4 h-4 shrink-0" />,    itemIds: ['reports', 'client-billing', 'finance', 'income-expenses', 'ebitda', 'taxes', 'verifactu', 'bank-reconciliation'] },
   { id: 'documentacion',    icon: <FileText className="w-4 h-4 shrink-0" />,      itemIds: ['doc-society', 'doc-contracts', 'doc-licenses', 'doc-financial', 'doc-other'] },
   { id: 'commercial',       icon: <Car className="w-4 h-4 shrink-0" />,           itemIds: ['compraventa-hub', 'compraventa-vehiculos', 'entrada-vehiculo', 'compraventa-compras', 'compraventa-ventas', 'compraventa-tasaciones', 'compraventa-entregas', 'compraventa-crm', 'compraventa-fiscal', 'publicacion-venta'] },
   { id: 'workshop',         icon: <Wrench className="w-4 h-4 shrink-0" />,        itemIds: ['workshop', 'parts', 'tech'] },
@@ -587,7 +587,7 @@ const VERTICAL_GROUP_ITEM_OVERRIDES: Partial<Record<BusinessType, Record<string,
     clientesCrm: ['clients', 'quotes', 'promotions'],
     equipo: ['hr-requests', 'team', 'dealership-workers', 'clockins', 'horarios-vacaciones', 'commissions', 'payroll', 'gestoria'],
     catalogProviders: ['suppliers'],
-    finanzas: ['client-billing', 'finance', 'income-expenses', 'ebitda', 'taxes', 'verifactu', 'bank-reconciliation', 'reports', 'sales-metrics', 'gastos-preparacion'],
+    finanzas: ['reports', 'client-billing', 'finance', 'income-expenses', 'ebitda', 'taxes', 'verifactu', 'bank-reconciliation', 'gastos-preparacion'],
     documentacion: ['doc-vehiculo', 'doc-contratos-cv', 'doc-facturas-cv', 'doc-itv-cv', 'doc-reparacion-cv', 'doc-cliente-cv', 'doc-anexos-cv'],
     commercial: [
       'compraventa-hub',
@@ -605,7 +605,7 @@ const VERTICAL_GROUP_ITEM_OVERRIDES: Partial<Record<BusinessType, Record<string,
   restaurant: {
     clientesCrm: ['clients', 'promotions'],
     equipo: ['hr-requests', 'team', 'clockins', 'horarios-vacaciones', 'payroll', 'gestoria'],
-    finanzas: ['finance', 'income-expenses', 'reports', 'client-billing', 'taxes', 'verifactu'],
+    finanzas: ['reports', 'finance', 'income-expenses', 'client-billing', 'taxes', 'verifactu'],
     // Hub propio + TPV sala (/saas/caja/tpv) — no DeliveryOps ni TPV delivery.
     delivery: [
       'restaurant-ops',

@@ -44,3 +44,32 @@ export { DeliveryOpsInsightsPanel } from './DeliveryOpsInsightsPanel';
 
 export { DeliveryMobileDashboardBlocks } from './DeliveryMobileDashboardBlocks';
 export { DeliveryMobileHomeAlerts } from './DeliveryMobileHomeAlerts';
+
+export {
+  DELIVERY_INFORMES_CATALOG,
+  DELIVERY_INFORMES_CATEGORIES,
+  getInformesByCategory,
+  getDeliveryInformeEntry,
+  isLiveInformeId,
+} from './informes/deliveryInformesCatalog';
+export type {
+  DeliveryInformeCategoryId,
+  DeliveryInformeEntry,
+  DeliveryInformeId,
+} from './informes/deliveryInformesCatalog';
+export {
+  DeliveryInformesCatalogView,
+  DeliveryInformeSkeletonPanel,
+} from './informes/DeliveryInformesCatalogView';
+export { DeliveryInformeRunner } from './informes/DeliveryInformeRunner';
+export {
+  VertialInformeProgress,
+  VertialInformeReadyCard,
+  downloadCsv,
+  downloadXlsx,
+  downloadPdf,
+  downloadInforme,
+} from './informes/VertialInformeProgress';
+export type { InformeExportFormat } from './informes/VertialInformeProgress';
+export { generateVertialInformePdf, buildInformeKpis } from './informes/vertialInformePdf';
+export type { VertialInformePdfMeta } from './informes/vertialInformePdf';

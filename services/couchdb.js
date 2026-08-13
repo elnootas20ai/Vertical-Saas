@@ -11675,14 +11675,20 @@ export function buildWarehouseDocument(userId, data = {}, existing = null) {
     user_id: userId,
     name: String(data.name || '').trim(),
     code: String(data.code || '').trim().toUpperCase() || (existing?.code || `ALM-${Date.now().toString(36).toUpperCase().slice(-4)}`),
-    address: String(data.address || ''),
+    address: String(data.address || existing?.address || ''),
     isDefault: data.isDefault !== undefined ? Boolean(data.isDefault) : (existing?.isDefault ?? false),
     active: data.active !== undefined ? Boolean(data.active) : (existing?.active ?? true),
-    notes: String(data.notes || ''),
-    contactPerson: String(data.contactPerson || ''),
-    phone: String(data.phone || ''),
-    email: String(data.email || ''),
-    warehouseType: validTypes.includes(data.warehouseType) ? data.warehouseType : (existing?.warehouseType || 'general'),
+    notes: String(data.notes || existing?.notes || ''),
+    contactPerson: String(data.contactPerson || existing?.contactPerson || ''),
+    phone: String(data.phone || existing?.phone || ''),
+    email: String(data.email || existing?.email || ''),
+    warehouseType: validTypes.includes(data.warehouseType)
+      ? data.warehouseType
+      : (existing?.warehouseType || 'general'),
+    /** PDV / tienda dueña de este almacén (stock por tienda). */
+    salesPointId: String(
+      data.salesPointId !== undefined ? data.salesPointId : existing?.salesPointId || '',
+    ).trim(),
     createdAt: existing?.createdAt || now,
     updatedAt: now,
   };
@@ -11706,6 +11712,7 @@ export function sanitizeWarehouse(doc) {
     phone: doc.phone || '',
     email: doc.email || '',
     warehouseType: doc.warehouseType || 'general',
+    salesPointId: doc.salesPointId || '',
     assignedWorkerId: doc.assignedWorkerId || '',
     assignedWorkerName: doc.assignedWorkerName || '',
     vehiclePlate: doc.vehiclePlate || '',

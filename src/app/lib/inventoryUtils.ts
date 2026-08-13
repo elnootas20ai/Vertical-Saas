@@ -1,5 +1,16 @@
 import type { CatalogItem, StockCategory } from './deliveryApi';
 import type { MovementType } from './stockMovementApi';
+import type { StoreIngredient } from './catalogCustomization';
+import { resolveTpvFamilyKey } from './tpvCatalogFamilies';
+
+function foldIngredientKey(value: string): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/\s+/g, ' ');
+}
 
 export type InventoryStatus = 'ok' | 'low' | 'out' | 'negative';
 
@@ -84,15 +95,30 @@ export type InventoryOrganizerGroup = {
   total: number;
 };
 
-const ORGANIZER_STOCK_CATEGORIES: StockCategory[] = [
-  'ingredient',
-  'beverage',
-  'packaging',
-  'finished_product',
-  'consumable',
-  'cleaning',
+export type InventoryCommercialBrand = {
+  _id: string;
+  name: string;
+  deliveryLineKind?: string;
+};
+
+/** Solo UI de almacén — no afecta TPV ni catálogo vendible. */
+export const ORGANIZER_PACKAGING = 'packaging';
+export const ORGANIZER_BEVERAGES = 'beverages';
+export const ORGANIZER_COMPLEMENTS = 'complements';
+export const ORGANIZER_TOTAL = 'total';
+
+const FOOD_LINE_KIND_ORDER = [
+  'pizza',
+  'burger_fastfood',
+  'tacos_mexican',
+  'kebab',
+  'tapas_bar',
+  'sushi_asian',
+  'prepared_meals',
+  'cafe_bakery',
+  'mixed_restaurant',
   'other',
-];
+] as const;
 
 function countStatusForItems(items: CatalogItem[]) {
   let ok = 0;
@@ -109,33 +135,259 @@ function countStatusForItems(items: CatalogItem[]) {
   return { ok, low, out, negative, total: items.length };
 }
 
-/** Agrupa inventario por tipo de almacén con conteos de semáforo. */
-export function buildInventoryOrganizerGroups(items: CatalogItem[]): InventoryOrganizerGroup[] {
-  const all = countStatusForItems(items);
-  const groups: InventoryOrganizerGroup[] = [
-    { id: 'all', label: 'Todo', ...all },
-  ];
+function normalizeBrandIdList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((id) => String(id || '').trim()).filter(Boolean);
+}
 
-  for (const cat of ORGANIZER_STOCK_CATEGORIES) {
-    const subset = items.filter((item) => (item.stockCategory || 'other') === cat);
-    if (subset.length === 0) continue;
-    groups.push({
-      id: cat,
-      label: STOCK_CATEGORY_LABELS[cat],
-      stockCategory: cat,
-      ...countStatusForItems(subset),
-    });
+function normalizeProductParts(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((p) => String(p || '').trim()).filter(Boolean);
+}
+
+function isPackagingStockItem(item: CatalogItem): boolean {
+  const stockCat = item.stockCategory || 'other';
+  return (
+    stockCat === 'packaging' ||
+    stockCat === 'cleaning' ||
+    stockCat === 'consumable' ||
+    Boolean(String(item.customFields?.vertialStockTemplateId || '').trim())
+  );
+}
+
+function isBeverageStockItem(item: CatalogItem): boolean {
+  if ((item.stockCategory || '') === 'beverage') return true;
+  const family = resolveTpvFamilyKey(String(item.category || ''));
+  return family === 'bebidas';
+}
+
+/** Complementos de stock (patatas, nuggets…), no ingredientes de receta. */
+function isComplementStockItem(item: CatalogItem): boolean {
+  if (isPackagingStockItem(item) || isBeverageStockItem(item)) return false;
+  // Ligado a lista de ingredientes → receta, no organizador Complementos.
+  if (String(item.customFields?.storeIngredientId || '').trim()) return false;
+
+  const family = resolveTpvFamilyKey(String(item.category || ''));
+  if (family === 'complementos') return true;
+  if (family === 'bebidas' || family === 'cafes' || family === 'postres') return false;
+
+  const blob = foldIngredientKey(`${item.category || ''} ${item.name || ''}`);
+  if (/complemento|guarnicion|\bside\b|patata|nugget|tequeno|aros|onion.?ring|finger|alitas|wings|croqueta|entrante/.test(blob)) {
+    return true;
+  }
+  if ((item.stockCategory || '') === 'finished_product') {
+    if (/patata|nugget|tequeno|aros|onion|finger|alitas|wings|croqueta/.test(blob)) return true;
+  }
+  return false;
+}
+
+function foodLineLabel(brand: InventoryCommercialBrand): string {
+  const name = String(brand.name || '').trim() || 'Línea';
+  return `Ingredientes · ${name}`;
+}
+
+function resolveFoodLineOrganizerId(
+  ing: StoreIngredient,
+  commercialBrands: InventoryCommercialBrand[],
+): string | null {
+  const brandIds = normalizeBrandIdList(ing.brandIds);
+  if (brandIds.length === 1) {
+    const b = commercialBrands.find((x) => x._id === brandIds[0]);
+    if (!b) return brandIds[0];
+    if (b.deliveryLineKind === 'drinks_desserts') return ORGANIZER_BEVERAGES;
+    return b._id;
+  }
+  if (brandIds.length > 1) {
+    const food = commercialBrands.find(
+      (b) => brandIds.includes(b._id) && b.deliveryLineKind !== 'drinks_desserts',
+    );
+    if (food) return food._id;
   }
 
+  const parts = normalizeProductParts(ing.productParts);
+  if (parts.length === 1 && parts[0] === 'pizzas') {
+    const pizza = commercialBrands.find((b) => b.deliveryLineKind === 'pizza');
+    if (pizza) return pizza._id;
+  }
+  if (parts.length === 1 && parts[0] === 'hamburguesas') {
+    const burger = commercialBrands.find((b) => b.deliveryLineKind === 'burger_fastfood');
+    if (burger) return burger._id;
+  }
+  return null;
+}
+
+/** Opciones al crear artículo de almacén (incluye líneas vacías). */
+export function listInventoryOrganizerChoices(
+  commercialBrands: InventoryCommercialBrand[] = [],
+): Array<{ id: string; label: string }> {
+  const foodBrands = commercialBrands
+    .filter((b) => b.deliveryLineKind !== 'drinks_desserts')
+    .slice()
+    .sort((a, b) => {
+      const ia = FOOD_LINE_KIND_ORDER.indexOf(
+        (a.deliveryLineKind || 'other') as (typeof FOOD_LINE_KIND_ORDER)[number],
+      );
+      const ib = FOOD_LINE_KIND_ORDER.indexOf(
+        (b.deliveryLineKind || 'other') as (typeof FOOD_LINE_KIND_ORDER)[number],
+      );
+      const ra = ia < 0 ? 99 : ia;
+      const rb = ib < 0 ? 99 : ib;
+      if (ra !== rb) return ra - rb;
+      return String(a.name || '').localeCompare(String(b.name || ''), 'es');
+    });
+
+  return [
+    ...foodBrands.map((b) => ({ id: b._id, label: foodLineLabel(b) })),
+    { id: ORGANIZER_BEVERAGES, label: 'Bebidas' },
+    { id: ORGANIZER_COMPLEMENTS, label: 'Complementos' },
+    { id: ORGANIZER_PACKAGING, label: 'Envases' },
+  ];
+}
+
+/** Tipo almacén + categoría por defecto según organizador elegido. */
+export function stockFieldsForOrganizer(organizerId: string): {
+  stockCategory: StockCategory;
+  category: string;
+} {
+  const id = String(organizerId || '').trim();
+  if (id === ORGANIZER_BEVERAGES) return { stockCategory: 'beverage', category: 'Bebidas' };
+  if (id === ORGANIZER_PACKAGING) return { stockCategory: 'packaging', category: 'Envases' };
+  if (id === ORGANIZER_COMPLEMENTS) return { stockCategory: 'ingredient', category: 'Complementos' };
+  return { stockCategory: 'ingredient', category: 'Ingredientes' };
+}
+
+/**
+ * Solo agrupación visual de almacén.
+ * No cambia catálogo TPV, precios ni descuento de stock.
+ */
+export function resolveInventoryOrganizerId(
+  item: CatalogItem,
+  storeIngredientsById: Map<string, StoreIngredient>,
+  storeIngredientsByName: Map<string, StoreIngredient>,
+  commercialBrands: InventoryCommercialBrand[],
+): string {
+  const pinned = String(item.customFields?.inventoryOrganizerId || '').trim();
+  if (pinned) return pinned;
+
+  if (isPackagingStockItem(item)) return ORGANIZER_PACKAGING;
+  if (isBeverageStockItem(item)) return ORGANIZER_BEVERAGES;
+
+  const ingId = String(item.customFields?.storeIngredientId || '').trim();
+  const ing =
+    (ingId ? storeIngredientsById.get(ingId) : undefined) ||
+    storeIngredientsByName.get(foldIngredientKey(item.name));
+
+  if (ing) {
+    const lineId = resolveFoodLineOrganizerId(ing, commercialBrands);
+    if (lineId) return lineId;
+  }
+
+  if (isComplementStockItem(item)) return ORGANIZER_COMPLEMENTS;
+
+  return ORGANIZER_TOTAL;
+}
+
+/**
+ * Orden almacén: ingredientes por línea → Bebidas → Complementos → Envases → Total.
+ * Si no hay nada que agrupar → un solo «Total».
+ */
+export function buildInventoryOrganizerGroups(
+  items: CatalogItem[],
+  storeIngredients: StoreIngredient[] = [],
+  commercialBrands: InventoryCommercialBrand[] = [],
+): InventoryOrganizerGroup[] {
+  const byId = new Map<string, StoreIngredient>();
+  const byName = new Map<string, StoreIngredient>();
+  for (const ing of storeIngredients) {
+    if (ing.id) byId.set(ing.id, ing);
+    byName.set(foldIngredientKey(ing.name), ing);
+  }
+
+  const buckets = new Map<string, CatalogItem[]>();
+  for (const item of items) {
+    const id = resolveInventoryOrganizerId(item, byId, byName, commercialBrands);
+    const arr = buckets.get(id) || [];
+    arr.push(item);
+    buckets.set(id, arr);
+  }
+
+  const foodBrands = commercialBrands
+    .filter((b) => b.deliveryLineKind !== 'drinks_desserts')
+    .slice()
+    .sort((a, b) => {
+      const ia = FOOD_LINE_KIND_ORDER.indexOf(
+        (a.deliveryLineKind || 'other') as (typeof FOOD_LINE_KIND_ORDER)[number],
+      );
+      const ib = FOOD_LINE_KIND_ORDER.indexOf(
+        (b.deliveryLineKind || 'other') as (typeof FOOD_LINE_KIND_ORDER)[number],
+      );
+      const ra = ia < 0 ? 99 : ia;
+      const rb = ib < 0 ? 99 : ib;
+      if (ra !== rb) return ra - rb;
+      return String(a.name || '').localeCompare(String(b.name || ''), 'es');
+    });
+
+  const brandGroups: InventoryOrganizerGroup[] = [];
+  for (const brand of foodBrands) {
+    const subset = buckets.get(brand._id);
+    if (!subset?.length) continue;
+    brandGroups.push({
+      id: brand._id,
+      label: foodLineLabel(brand),
+      ...countStatusForItems(subset),
+    });
+    buckets.delete(brand._id);
+  }
+
+  const extras: InventoryOrganizerGroup[] = [];
+  const bev = buckets.get(ORGANIZER_BEVERAGES);
+  if (bev?.length) {
+    extras.push({ id: ORGANIZER_BEVERAGES, label: 'Bebidas', ...countStatusForItems(bev) });
+    buckets.delete(ORGANIZER_BEVERAGES);
+  }
+  const comp = buckets.get(ORGANIZER_COMPLEMENTS);
+  if (comp?.length) {
+    extras.push({ id: ORGANIZER_COMPLEMENTS, label: 'Complementos', ...countStatusForItems(comp) });
+    buckets.delete(ORGANIZER_COMPLEMENTS);
+  }
+  const pack = buckets.get(ORGANIZER_PACKAGING);
+  if (pack?.length) {
+    extras.push({ id: ORGANIZER_PACKAGING, label: 'Envases', ...countStatusForItems(pack) });
+    buckets.delete(ORGANIZER_PACKAGING);
+  }
+
+  const leftover: CatalogItem[] = [];
+  for (const [, subset] of buckets) {
+    if (subset.length) leftover.push(...subset);
+  }
+
+  if (brandGroups.length === 0 && extras.length === 0) {
+    return [{ id: ORGANIZER_TOTAL, label: 'Total', ...countStatusForItems(items) }];
+  }
+
+  const groups = [...brandGroups, ...extras];
+  if (leftover.length > 0) {
+    groups.push({ id: ORGANIZER_TOTAL, label: 'Total', ...countStatusForItems(leftover) });
+  }
   return groups;
 }
 
 export function filterItemsByOrganizer(
   items: CatalogItem[],
   organizerId: string,
+  storeIngredients: StoreIngredient[] = [],
+  commercialBrands: InventoryCommercialBrand[] = [],
 ): CatalogItem[] {
   if (!organizerId || organizerId === 'all') return items;
-  return items.filter((item) => (item.stockCategory || 'other') === organizerId);
+  const byId = new Map<string, StoreIngredient>();
+  const byName = new Map<string, StoreIngredient>();
+  for (const ing of storeIngredients) {
+    if (ing.id) byId.set(ing.id, ing);
+    byName.set(foldIngredientKey(ing.name), ing);
+  }
+  return items.filter(
+    (item) => resolveInventoryOrganizerId(item, byId, byName, commercialBrands) === organizerId,
+  );
 }
 
 export function movementTypeLabel(type: MovementType | string): string {
