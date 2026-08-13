@@ -3402,19 +3402,25 @@ export function CatalogPage() {
     if (!dataUserId || !businessId) return false;
     const requestUserId = dataUserId;
     const requestBusinessId = businessId;
+    const stillSameScope = () =>
+      requestUserId === resolveBusinessDataUserId(user, currentBusiness)
+      && requestBusinessId === resolveBusinessScopeId(currentBusiness);
     try {
-      const [items, wh] = await Promise.all([
-        listCatalogItemsRequest(requestUserId),
-        listWarehousesRequest(requestUserId).catch(() => [] as Warehouse[]),
-      ]);
-      if (
-        requestUserId !== resolveBusinessDataUserId(user, currentBusiness)
-        || requestBusinessId !== resolveBusinessScopeId(currentBusiness)
-      ) {
-        return false;
-      }
+      // Carta primero (lo que bloquea la UI); almacenes en segundo plano.
+      const items = await listCatalogItemsRequest(requestUserId);
+      if (!stillSameScope()) return false;
       setAllCatalogItems(items);
-      setWarehouses(wh);
+
+      void listWarehousesRequest(requestUserId)
+        .then((wh) => {
+          if (!stillSameScope()) return;
+          setWarehouses(wh);
+        })
+        .catch(() => {
+          if (!stillSameScope()) return;
+          setWarehouses([]);
+        });
+
       return true;
     } catch {
       toast.error('Error al cargar el catálogo');
@@ -3563,8 +3569,14 @@ export function CatalogPage() {
 
   useEffect(() => {
     if (activeTab !== 'catalog' || !dataUserId) return;
+    // Sin productos no hace falta tirar de 60 días de pedidos (antes bloqueaba la sensación de “carta vacía lenta”).
+    if (loading) return;
+    if (catalogMenuItems.length === 0) {
+      setDeliveryOrders([]);
+      return;
+    }
     void loadDeliveryOrders();
-  }, [activeTab, dataUserId, loadDeliveryOrders]);
+  }, [activeTab, dataUserId, loading, catalogMenuItems.length, loadDeliveryOrders]);
 
   const catalogSalesIndex = useMemo(
     () => buildCatalogSalesIndex(catalogForActiveStore, deliveryOrders),

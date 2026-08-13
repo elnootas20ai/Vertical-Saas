@@ -10662,7 +10662,15 @@ export function sanitizeBrand(doc) {
 }
 
 const catalogBrandIndexReady = new Set();
+const catalogTypeUserIndexReady = new Set();
 const brandsByBusinessInflight = new Map();
+
+async function ensureCatalogTypeUserIndex(req, dbName) {
+  if (catalogTypeUserIndexReady.has(dbName)) return;
+  const safeDb = String(dbName || '').replace(/[^a-z0-9]+/g, '-');
+  await ensureIndex(req, dbName, ['type', 'user_id'], `idx-${safeDb}-catalog-type-user_id`).catch(() => null);
+  catalogTypeUserIndexReady.add(dbName);
+}
 
 async function ensureCatalogBrandIndex(req, dbName) {
   if (catalogBrandIndexReady.has(dbName)) return;
@@ -11240,11 +11248,30 @@ export async function listStaffConsumptionsByUser(req, userId) {
 }
 
 export async function listCatalogItemsByUser(req, userId, { module: filterModule } = {}) {
-  const docs = await getCatalogDatabaseDocumentsInflight(req);
+  const uid = String(userId || '').trim();
+  const db = getCatalogDbName();
+  await ensureDatabase(req, db);
+  await ensureCatalogTypeUserIndex(req, db);
+
+  // Mango por type+user_id: no leer el catálogo compartido entero (_all_docs)
+  // solo para listar la carta de un titular (aunque tenga 0 productos).
+  let docs;
+  try {
+    const selector = uid
+      ? { type: 'catalog_item', user_id: uid }
+      : { type: 'catalog_item' };
+    docs = await findDocuments(req, db, selector, { pageSize: 500, maxDocs: 50_000 });
+  } catch {
+    const all = await getCatalogDatabaseDocumentsInflight(req);
+    docs = all.filter(
+      (doc) => doc?.type === 'catalog_item' && (!uid || catalogDocMatchesUser(doc, uid)),
+    );
+  }
+
   return docs
     .filter((doc) => {
       if (!doc || doc.type !== 'catalog_item' || doc.deletedAt) return false;
-      if (userId && !catalogDocMatchesUser(doc, userId)) return false;
+      if (uid && !catalogDocMatchesUser(doc, uid)) return false;
       if (filterModule && (doc.module || 'catalog') !== filterModule) return false;
       return true;
     })
