@@ -63,6 +63,7 @@ import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { isDeliveryBusinessType, loadDeliveryStores } from '../../lib/deliverySetup';
 import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import { RestaurantLiveDashboardPanelFromContext } from '../../components/saas/restaurant/RestaurantLiveDashboardPanel';
+import { RestaurantDashboardBillingCharts } from '../../verticals/restaurant/RestaurantDashboardBillingCharts';
 import { CRM_CLIENTS_SYNC_EVENT } from '../../lib/crmApi';
 import { fetchClientAcquisitionSample } from '../../lib/clientAcquisitionSample';
 import { listBrandsRequest, type Brand } from '../../lib/brandApi';
@@ -493,7 +494,13 @@ function DashboardPage() {
   const isMobile = useIsMobile();
   const vertical = (currentBusiness?.businessType || 'carDealership') as BusinessType;
   const VerticalDashboard = getVerticalDashboard(vertical);
+  const businessKey = String(currentBusiness?.business_id || currentBusiness?.id || '');
   const [showUnifiedDashboard, setShowUnifiedDashboard] = useState(false);
+
+  // Al cambiar de empresa, volver al dashboard vertical (p. ej. bar con gráficas 14d).
+  useEffect(() => {
+    setShowUnifiedDashboard(false);
+  }, [businessKey]);
 
   if (!businessesFetchSettled) {
     return (
@@ -507,11 +514,13 @@ function DashboardPage() {
   }
 
   // App / iPhone: home compacto en verticales genéricos.
-  // Delivery (pizzería/burger/…): SIEMPRE el dashboard completo (pulse, marcas, KPIs, gráficas).
+  // Delivery y bar/restaurante: dashboard completo (KPIs + gráficas).
   if ((isMobile || isVertialNativeApp()) && !isPortfolioView) {
     const isDelivery =
       vertical === 'delivery' || isDeliveryBusinessType(currentBusiness?.businessType);
-    if (!isDelivery) {
+    const isRestaurant =
+      vertical === 'restaurant' || isRestaurantBusinessType(currentBusiness?.businessType);
+    if (!isDelivery && !isRestaurant) {
       return <CeoMobileHome />;
     }
   }
@@ -1516,6 +1525,15 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
             </VertialBillingUpgradeLink>
           </div>
         )}
+
+        {/* Bar/restaurante: facturación 14 días también en vista unificada */}
+        {isRestaurantVertical && financeUserId ? (
+          <RestaurantDashboardBillingCharts
+            userId={financeUserId}
+            businessId={businessId}
+            businessIdForScope={businessId}
+          />
+        ) : null}
 
         {/* Resumen operativo por tienda (solo empresa delivery) — ola 1 */}
         {isDeliveryVertical && deliveryPanelStage < 1 ? (

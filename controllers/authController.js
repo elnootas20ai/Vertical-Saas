@@ -138,9 +138,11 @@ function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
 }
 
-/** OTP por email desactivado: no enviar códigos al login (ni a admin). */
-function accountRequiresLoginOtp(_account) {
-  return false;
+/** Admin SaaS Vertial (uriel@admin.com) o cuentas con requireLoginOtp. */
+function accountRequiresLoginOtp(account) {
+  if (!account) return false;
+  if (account.requireLoginOtp === true) return true;
+  return isVertialSuperAdminEmail(account.email);
 }
 
 /** Destino del código OTP (nunca revelar en la UI). */
@@ -240,15 +242,48 @@ async function sendWorkerLinkedWelcomeEmail(req, {
 
 /**
  * Genera OTP, lo guarda y lo envía al correo de seguridad.
- * Desactivado: no se envían correos de código.
+ * Si el destino ≠ email de la cuenta, también lo espeja a la cuenta (así uriel@admin.com lo recibe en local).
+ * @returns {{ ok: true, to: string, hint: string } | { ok: false, status: number, code: string, error: string }}
  */
-async function dispatchLoginOtp(_req, account) {
+async function dispatchLoginOtp(req, account) {
+  if (!canResendLoginOtp(account)) {
+    return {
+      ok: false,
+      status: 429,
+      code: 'LOGIN_CODE_COOLDOWN',
+      error: 'Ya enviamos un código recientemente. Revisa tu correo (y spam) o espera 1 minuto.',
+      hint: maskEmailForHint(resolveLoginOtpDestination(account)),
+    };
+  }
+
+  const code = String(crypto.randomInt(100000, 1000000));
+  await saveLoginOtp(req, account, code);
+  const to = resolveLoginOtpDestination(account);
+  const accountEmail = String(account?.email || '').trim().toLowerCase();
+  const { subject, html } = buildLoginCodeEmail(account.email, code);
+  await sendEmail({ to, subject, html, requireDelivery: true });
+
+  // Espejo al email de login si el OTP va a buzón de seguridad distinto.
+  if (accountEmail.includes('@') && accountEmail !== to) {
+    try {
+      await sendEmail({ to: accountEmail, subject, html, requireDelivery: false });
+      logger.info({ tag: 'AUTH_LOGIN_CODE', to: accountEmail, primary: to }, 'OTP espejado al email de cuenta');
+    } catch (mirrorErr) {
+      logger.warn(
+        { tag: 'AUTH_LOGIN_CODE', to: accountEmail, err: mirrorErr?.message || mirrorErr },
+        'No se pudo espejar OTP al email de cuenta',
+      );
+    }
+  }
+
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(`[AUTH_LOGIN_OTP] account=${accountEmail} primary=${to} code=${code}`);
+  }
+
   return {
-    ok: false,
-    status: 410,
-    code: 'LOGIN_CODE_DISABLED',
-    error: 'El login por código está desactivado. Usa email y contraseña.',
-    hint: maskEmailForHint(resolveLoginOtpDestination(account)),
+    ok: true,
+    to,
+    hint: maskEmailForHint(to),
   };
 }
 
@@ -1050,13 +1085,56 @@ export async function login(req, res) {
   }
 }
 
-/** Login por código OTP desactivado (no enviar correos de código). */
-export async function requestLoginCode(_req, res) {
-  return res.status(410).json({
-    ok: false,
-    code: 'LOGIN_CODE_DISABLED',
-    error: 'El login por código está desactivado. Usa email y contraseña.',
-  });
+/** Envía un código de 6 dígitos al email (admin: correo de seguridad si está configurado). */
+export async function requestLoginCode(req, res) {
+  try {
+    const { email } = req.body || {};
+    if (!email) {
+      return badRequest(res, 'El email es obligatorio');
+    }
+
+    invalidateDb(ACCOUNTS_DB);
+    const account = await findAccountByEmail(req, email);
+
+    if (!account) {
+      logger.warn({ tag: 'AUTH_LOGIN_CODE', hint: 'no_account' }, 'Código solicitado para email sin cuenta');
+      return res.json({ ok: true, message: 'Si el email existe, recibirás un código en breve' });
+    }
+
+    const otp = await dispatchLoginOtp(req, account);
+    if (!otp.ok) {
+      return res.status(otp.status || 500).json({
+        ok: false,
+        code: otp.code,
+        error: otp.error,
+      });
+    }
+
+    logger.info({ tag: 'AUTH_LOGIN_CODE', to: otp.to, account: account.email }, 'Código de acceso enviado');
+
+    await logAccountActivity(req, {
+      actorUserId: account.user_id,
+      actorName: account.fullName,
+      targetUserId: account.user_id,
+      type: 'security',
+      action: 'Solicitud de código de acceso por email',
+      entityId: account.user_id,
+      entityLabel: account.fullName,
+      ip: getClientIp(req),
+      metadata: { otpHint: otp.hint },
+    });
+
+    return res.json({
+      ok: true,
+      message: `Código enviado. Revisa ${otp.hint} y también tu email de cuenta (y spam).`,
+      otpHint: otp.hint,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al enviar el código',
+    });
+  }
 }
 
 /** Verifica el código de email y abre sesión (resetea bloqueos por contraseña). */

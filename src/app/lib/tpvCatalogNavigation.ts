@@ -2,6 +2,7 @@ import type { Brand } from './brandsApi';
 import type { CatalogItem } from './deliveryApi';
 import { isDefaultBrandNamePlaceholder, sortBrandsForDisplay } from './brandUtils';
 import { resolveBrandLogo } from './brandPlaceholders';
+import { brandIdAliases } from './brandLabels';
 import { UNIVERSAL_CATALOG_CATEGORIES } from './deliveryBrandLineKinds';
 import { shouldClearBrandForCategory, allCommercialLineBrands } from './deliveryCatalogImportLogic';
 import { isTpvWarehouseOnlyCatalogItem } from './tpvCatalogScope';
@@ -307,6 +308,38 @@ export function buildTpvCatalogSections(
 
 export type TpvCatalogLayout = 'default' | 'brand_families';
 
+/** Producto de esta marca (aliases brand:/brand-). Con 1 sola línea comercial, huérfanos y sin marca van ahí. */
+function itemBelongsToBrandTab(
+  item: CatalogItem,
+  brandId: string,
+  brandTabs: Brand[],
+): boolean {
+  const bid = String(brandId || '').trim();
+  if (!bid) return false;
+  const tabAliases = new Set(brandIdAliases(bid));
+  const ids = (item.brandIds || [])
+    .map((id) => String(id || '').trim())
+    .filter(Boolean);
+
+  if (ids.some((id) => brandIdAliases(id).some((a) => tabAliases.has(a)))) {
+    return true;
+  }
+
+  const sole =
+    brandTabs.length === 1
+    && brandIdAliases(String(brandTabs[0]?._id || '')).some((a) => tabAliases.has(a));
+  if (!sole) return false;
+
+  // Una sola marca en TPV: sin brandIds o IDs que no cuadran con esta pestaña → van a bodegeta/etc.
+  if (ids.length === 0) return true;
+
+  const anyTabMatch = brandTabs.some((tab) => {
+    const aliases = new Set(brandIdAliases(String(tab._id || '')));
+    return ids.some((id) => brandIdAliases(id).some((a) => aliases.has(a)));
+  });
+  return !anyTabMatch;
+}
+
 function itemsInScope(
   catalog: CatalogItem[],
   scope: TpvCatalogScope,
@@ -316,10 +349,26 @@ function itemsInScope(
   const sellable = catalog.filter(isSellable);
   if (scope.kind === 'all') return sellable;
   if (scope.kind === 'brand') {
+    const brandTabs = commercialBrandsForTpvTabs(brands, catalog);
+    const brandDoc =
+      brands.find((b) =>
+        brandIdAliases(String(b._id || '')).some((a) =>
+          brandIdAliases(scope.brandId).includes(a),
+        ),
+      ) || null;
+    const brandCatKeys = new Set(
+      (brandDoc?.catalogCategories || []).map((c) => foldKey(c)).filter(Boolean),
+    );
     return sellable.filter((i) => {
-      if (!(i.brandIds || []).includes(scope.brandId)) return false;
+      if (!itemBelongsToBrandTab(i, scope.brandId, brandTabs)) return false;
       const cat = String(i.category || '').trim();
-      if (layout === 'brand_families') return isBrandFoodCategory(cat);
+      if (layout === 'brand_families') {
+        if (!cat) return true;
+        if (isBrandFoodCategory(cat)) return true;
+        // Carta de la marca (aunque el nombre choque con Bebidas/Cafés…)
+        if (brandCatKeys.has(foldKey(cat))) return true;
+        return false;
+      }
       if (cat && isCrossBrandOrganizerCategory(cat, brands, catalog)) return false;
       return true;
     });

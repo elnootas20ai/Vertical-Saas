@@ -1,0 +1,26 @@
+---
+description: Prohibido login/OTP/pruebas con la cuenta admin Uriel (uriel@admin.com)
+alwaysApply: true
+---
+
+# Cuenta admin Uriel: NO entrar, NO probar, NO disparar OTP
+
+La cuenta SaaS admin (`uriel@admin.com` / `SAAS_LOGIN_EMAIL` / superadmin Vertial) es **solo de Uriel**. Un login de prueba dispara correo de código y asusta. Eso **no debe pasar**.
+
+## Prohibido siempre (sin excepciones “por depurar”)
+
+1. **Login** con esa cuenta: UI, `curl`/`fetch` a `/api/auth/login`, Postman, scripts, `node -e`, Playwright, etc.
+2. **Pedir o verificar OTP**: `/login-code/request`, `/login-code/verify`, `dispatchLoginOtp`, `saveLoginOtp`.
+3. Usar **`SAAS_LOGIN_PASSWORD`**, PIN admin, o tokens de esa cuenta “para probar”.
+4. **Apagar** `accountRequiresLoginOtp` / `dispatchLoginOtp` / `requestLoginCode` “para que no lleguen correos”. El OTP de admin se deja como está.
+5. Leer o pegar en chat la contraseña o códigos OTP de esa cuenta.
+
+## Qué sí (sin login admin)
+
+- Cambiar código de auth **sin** llamar a login.
+- Diagnosticar con logs ya existentes o cuentas de prueba **no admin** si Uriel las indica.
+- Si hace falta tocar admin: **Uriel lo hace** o da OK explícito en un mensaje aparte (“entra con admin”, “manda OTP”, “desactiva OTP”).
+
+## Si el agente ya disparó un correo OTP
+
+Parar. Decir qué pasó en una frase. **No** desactivar la seguridad. **No** reintentar login.

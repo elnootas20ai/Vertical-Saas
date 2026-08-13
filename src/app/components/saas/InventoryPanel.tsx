@@ -862,14 +862,19 @@ export function InventoryPanel() {
                   {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                   Sincronizar
                 </SaasTabSecondaryButton>
-                <SaasTabSecondaryButton
+                <SaasTabPrimaryButton
                   onClick={() => setShowPurchaseList(true)}
                   disabled={scopedItems.length === 0}
-                  title="Artículos con stock bajo o sin stock"
+                  title="Según stock tras ventas: bajo o sin stock"
                 >
                   <ShoppingCart className="w-4 h-4" />
-                  Lista de compra
-                </SaasTabSecondaryButton>
+                  Qué comprar hoy
+                  {stats.low + stats.out + stats.negative > 0 ? (
+                    <span className="ml-1 inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-white/25 px-1.5 text-[11px] font-bold tabular-nums">
+                      {stats.low + stats.out + stats.negative}
+                    </span>
+                  ) : null}
+                </SaasTabPrimaryButton>
                 <SaasTabSecondaryButton
                   onClick={() => setShowInvoiceOcr(true)}
                   disabled={!dataUserId}
@@ -878,9 +883,9 @@ export function InventoryPanel() {
                   <ScanLine className="w-4 h-4" />
                   Escanear factura
                 </SaasTabSecondaryButton>
-                <SaasTabPrimaryButton onClick={() => setShowAdd(true)}>
+                <SaasTabSecondaryButton onClick={() => setShowAdd(true)}>
                   <Plus className="w-4 h-4" /> Nuevo artículo
-                </SaasTabPrimaryButton>
+                </SaasTabSecondaryButton>
               </>
             }
           />

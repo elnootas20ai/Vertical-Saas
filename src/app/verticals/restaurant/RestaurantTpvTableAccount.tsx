@@ -11,6 +11,11 @@ import {
   RestaurantTableTpvFlow,
   type RestaurantTableContext,
 } from '../../components/saas/tpv/RestaurantTableTpvFlow';
+import {
+  useTpvRegisterIfOpen,
+  type TpvRegisterContextType,
+} from '../../components/saas/TpvRegisterGate';
+import { isTpvRegisterSessionOpen } from '../../lib/deliveryApi';
 import { resolveTableCapacity } from './tableCapacity';
 
 export const RESTAURANT_COUNTER_TABLE_ID = '__restaurant_counter__';
@@ -25,6 +30,11 @@ type Props = {
   tabletMode?: boolean;
   /** Abrir en carta o directamente en cobro. */
   openIntent?: 'order' | 'pay';
+  /**
+   * Caja abierta capturada fuera del portal (FloorBoard).
+   * El portal a body no debe depender solo del Context (parpadeos → «Abre la caja» al cobrar).
+   */
+  registerOverride?: TpvRegisterContextType | null;
 };
 
 function isDiningTable(table: DiningTable | RestaurantTableContext): table is DiningTable {
@@ -65,8 +75,31 @@ export function RestaurantTpvTableAccount({
   onTableChange,
   tabletMode = true,
   openIntent = 'order',
+  registerOverride: registerOverrideProp = null,
 }: Props) {
   const { user } = useAuth();
+  const registerFromGate = useTpvRegisterIfOpen();
+  const liveRegister =
+    (registerOverrideProp && isTpvRegisterSessionOpen(registerOverrideProp.session)
+      ? registerOverrideProp
+      : null)
+    || (registerFromGate && isTpvRegisterSessionOpen(registerFromGate.session) ? registerFromGate : null);
+  const registerStickyRef = useRef<TpvRegisterContextType | null>(liveRegister);
+  if (liveRegister) {
+    registerStickyRef.current = liveRegister;
+  } else if (
+    registerStickyRef.current
+    && !isTpvRegisterSessionOpen(registerStickyRef.current.session)
+  ) {
+    registerStickyRef.current = null;
+  }
+  const registerOverride =
+    liveRegister
+    || (
+      registerStickyRef.current && isTpvRegisterSessionOpen(registerStickyRef.current.session)
+        ? registerStickyRef.current
+        : null
+    );
   const [refreshing, setRefreshing] = useState(false);
   const onOrderChangeRef = useRef(onOrderChange);
   onOrderChangeRef.current = onOrderChange;
@@ -77,7 +110,7 @@ export function RestaurantTpvTableAccount({
 
   useEffect(() => {
     let cancelled = false;
-    if (!userId || !tableId || restaurantTable.isCounter) return;
+    if (!userId || !tableId) return;
     setRefreshing(true);
     void loadOpenDiningOrderForTable(userId, tableId)
       .then((fresh) => {
@@ -89,7 +122,7 @@ export function RestaurantTpvTableAccount({
     return () => {
       cancelled = true;
     };
-  }, [userId, tableId, restaurantTable.isCounter]);
+  }, [userId, tableId]);
 
   return (
     <div className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden">
@@ -104,6 +137,7 @@ export function RestaurantTpvTableAccount({
         tabletMode={tabletMode}
         openIntent={openIntent}
         permissions={permissions}
+        registerOverride={registerOverride}
         onBack={onBack}
         onOrderChange={onOrderChange}
         onOrderComplete={onBack}

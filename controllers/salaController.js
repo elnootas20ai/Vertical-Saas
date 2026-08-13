@@ -21,15 +21,13 @@ import {
 } from '../services/salaService.js';
 import {
   ensureDatabase,
-  getDocument,
+  softDocument,
   putDocument,
   bulkPutDocuments,
   softDeleteDocument,
   findAccountByUserId,
   logAccountActivity,
-  getDeliveryDbName,
   getCatalogDbName,
-  getAllDocuments,
 } from '../services/couchdb.js';
 import { broadcastToBusiness, broadcastToUser } from '../services/sseService.js';
 import logger from '../services/logger.js';
@@ -1071,33 +1069,9 @@ export async function listPickupOrders(req, res) {
     const { userId } = req.params;
     if (!userId) return badRequest(res, 'Falta userId');
 
-    const db = getDeliveryDbName();
-    await ensureDatabase(req, db);
-    const docs = await getAllDocuments(req, db);
-
-    const pickups = docs
-      .filter((d) =>
-        d?.type === 'delivery_order' &&
-        !d?.deletedAt &&
-        d?.user_id === userId &&
-        d?.deliveryType === 'recogida' &&
-        !['delivered', 'cancelled'].includes(d?.status)
-      )
-      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
-
-    return res.json({ ok: true, pickups: pickups.map((d) => ({
-      _id: d._id,
-      orderNumber: d.orderNumber || '',
-      customerName: d.customerName || '',
-      customerPhone: d.customerPhone || '',
-      status: d.status || 'nuevo',
-      channel: d.channel || 'direct',
-      items: (d.items || []).map((i) => ({ name: i.name, quantity: i.quantity })),
-      totalAmount: d.totalAmount || 0,
-      scheduledAt: d.scheduledAt || d.requestedTime || '',
-      createdAt: d.createdAt || '',
-      notes: d.notes || d.kitchenNotes || '',
-    })) });
+    // Sala NO lee delivery_order. Recogidas delivery viven en TPV/ops delivery.
+    // Endpoint conservado por compat (clientes viejos) → lista vacía.
+    return res.json({ ok: true, pickups: [] });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al cargar recogidas' });
   }

@@ -16,6 +16,9 @@ const CRM_TABS: { id: CrmSection; label: string; path: string }[] = [
 /** Inmobiliaria: CRM core sin leads / facturación / alertas en la barra. */
 const REAL_ESTATE_CRM_TAB_IDS = new Set<CrmSection>(['clients', 'quotes', 'promotions']);
 
+/** Bar/restaurante: igual que el sidebar — Clientes + Promociones (sin leads/presupuestos). */
+const RESTAURANT_CRM_TAB_IDS = new Set<CrmSection>(['clients', 'promotions']);
+
 interface CrmNavProps {
   active: CrmSection;
 }
@@ -24,11 +27,13 @@ export function CrmNav({ active }: CrmNavProps) {
   const navigate = useNavigate();
   const businessType = useBusinessOptional()?.currentBusiness?.businessType;
   const isRealEstate = businessType === 'realEstate';
+  const isRestaurant = businessType === 'restaurant';
 
-  const tabs = useMemo(
-    () => (isRealEstate ? CRM_TABS.filter((t) => REAL_ESTATE_CRM_TAB_IDS.has(t.id)) : CRM_TABS),
-    [isRealEstate],
-  );
+  const tabs = useMemo(() => {
+    if (isRealEstate) return CRM_TABS.filter((t) => REAL_ESTATE_CRM_TAB_IDS.has(t.id));
+    if (isRestaurant) return CRM_TABS.filter((t) => RESTAURANT_CRM_TAB_IDS.has(t.id));
+    return CRM_TABS;
+  }, [isRealEstate, isRestaurant]);
 
   return (
     <div className="flex w-full bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">

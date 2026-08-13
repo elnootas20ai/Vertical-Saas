@@ -81,6 +81,73 @@ describe('restaurant soft-launch P0', () => {
     expect(src).not.toMatch(/createDeliveryOrderRequest/);
   });
 
+  it('TPV sala bloquea createDeliveryOrder en modo restaurant', () => {
+    const src = readFileSync(join(process.cwd(), 'src/app/pages/saas/TpvRapidoPage.tsx'), 'utf8');
+    expect(src).toMatch(/NUNCA crear delivery_order/);
+    expect(src).toMatch(/isRestaurantMode && \(embeddedInRestaurantTpv \|\| restaurantTable\)/);
+  });
+
+  it('mostrador abre cuenta dining, no panel delivery vacío', () => {
+    const src = readFileSync(
+      join(process.cwd(), 'src/app/verticals/restaurant/RestaurantTpvFloorBoard.tsx'),
+      'utf8',
+    );
+    expect(src).toMatch(/RESTAURANT_COUNTER_TABLE_ID/);
+    expect(src).toMatch(/ensureOpenDiningOrder/);
+    expect(src).toMatch(/tableName: 'Mostrador'/);
+  });
+
+  it('PDV restaurant usa storage propio (no deliveryOps)', () => {
+    const sel = readFileSync(
+      join(process.cwd(), 'src/app/verticals/restaurant/restaurantOpsPdvSelection.ts'),
+      'utf8',
+    );
+    expect(sel).toMatch(/vertial\.restaurantOps\.selectedPdv/);
+    expect(sel).not.toMatch(/vertial\.deliveryOps/);
+    const shell = readFileSync(
+      join(process.cwd(), 'src/app/verticals/restaurant/RestaurantSalaTpvShell.tsx'),
+      'utf8',
+    );
+    expect(shell).toMatch(/readRestaurantOpsSelectedPdvId/);
+    expect(shell).not.toMatch(/readDeliveryOpsSelectedPdvId/);
+    expect(shell).not.toMatch(/notifyDeliveryActiveStoreChanged/);
+  });
+
+  it('sala pickups no lee delivery_order', () => {
+    const src = readFileSync(join(process.cwd(), 'controllers/salaController.js'), 'utf8');
+    const fn = src.slice(src.indexOf('export async function listPickupOrders'));
+    const body = fn.slice(0, fn.indexOf('export async function linkClientToOrder'));
+    expect(body).toMatch(/pickups: \[\]/);
+    expect(body).not.toMatch(/type === ['\"]delivery_order['\"]/);
+    expect(body).not.toMatch(/getDeliveryDbName/);
+  });
+
+  it('ops PDV preference enruta restaurant fuera de deliveryOps', () => {
+    const src = readFileSync(join(process.cwd(), 'src/app/lib/opsPdvPreference.ts'), 'utf8');
+    expect(src).toMatch(/readRestaurantOpsSelectedPdvId/);
+    expect(src).toMatch(/isRestaurantBusinessType/);
+    expect(src).toMatch(/writeRestaurantOpsSelectedPdvId/);
+  });
+
+  it('ActiveStoreScope y TpvRegisterGate usan opsPdvPreference', () => {
+    const scope = readFileSync(join(process.cwd(), 'src/app/context/ActiveStoreScopeContext.tsx'), 'utf8');
+    expect(scope).toMatch(/writeOpsSelectedPdvId/);
+    expect(scope).not.toMatch(/writeDeliveryOpsSelectedPdvId/);
+    const gate = readFileSync(join(process.cwd(), 'src/app/components/saas/TpvRegisterGate.tsx'), 'utf8');
+    expect(gate).toMatch(/writeOpsSelectedPdvId/);
+    expect(gate).not.toMatch(/writeDeliveryOpsSelectedPdvId/);
+  });
+
+  it('useSalaManager no dispara notifyDeliveryActiveStoreChanged', () => {
+    const src = readFileSync(
+      join(process.cwd(), 'src/app/components/saas/sala/manager/useSalaManager.ts'),
+      'utf8',
+    );
+    expect(src).toMatch(/notifyOpsActiveStoreChanged/);
+    expect(src).not.toMatch(/notifyDeliveryActiveStoreChanged/);
+    expect(src).not.toMatch(/notifyDeliveryWorkCentersChanged/);
+  });
+
   it('rutas sala endurecen permiso sala', () => {
     const src = readFileSync(join(process.cwd(), 'src/app/routes.tsx'), 'utf8');
     expect(src).toMatch(/lista-espera[\s\S]*permission="sala"/);

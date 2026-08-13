@@ -16,12 +16,12 @@ import { CeoTpvStorePicker } from '../../components/saas/CeoTpvStorePicker';
 import { TpvOfflineBanner } from '../../components/saas/TpvOfflineBanner';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { coerceSelectedPdvId } from '../../lib/deliveryOpsPdvSelection';
 import {
-  coerceSelectedPdvId,
-  notifyDeliveryActiveStoreChanged,
-  readDeliveryOpsSelectedPdvId,
-  writeDeliveryOpsSelectedPdvId,
-} from '../../lib/deliveryOpsPdvSelection';
+  notifyRestaurantActiveStoreChanged,
+  readRestaurantOpsSelectedPdvId,
+  writeRestaurantOpsSelectedPdvId,
+} from './restaurantOpsPdvSelection';
 import { needsCeoTpvStoreBootstrap } from '../../lib/ceoTpvStoreBootstrap';
 import { bootstrapRestaurantCeoTpvStores, buildRestaurantCeoTpvStoreRows } from './ceoTpvStores';
 import { RestaurantTpvFloorBoard } from './RestaurantTpvFloorBoard';
@@ -29,6 +29,11 @@ import { RestaurantTabletBottomNav } from './RestaurantTabletBottomNav';
 import type { DeliverySidebarStoreRow, PointOfSale } from '../../lib/deliveryApi';
 import { isBrowserOnline } from '../../lib/tpvTabletOffline';
 import { flushTpvOfflineQueue } from '../../lib/tpvOfflineSync';
+import { WorkerTpvStockReview } from '../../pages/saas/worker/WorkerTpvStockReview';
+import {
+  consumeTpvStockReviewLaunch,
+  TPV_OPEN_STOCK_REVIEW_EVENT,
+} from '../../lib/tpvStockReview';
 
 const SALA_PATH = '/saas/sala';
 const RESTAURANT_OPS_PATH = '/saas/restaurant-ops';
@@ -40,6 +45,14 @@ type Props = {
 export function RestaurantSalaTpvShell({ tabletMode = false }: Props) {
   const { user } = useAuth();
   const { currentBusiness, businesses, businessesFetchSettled } = useBusiness();
+  const [stockOpen, setStockOpen] = useState(() => consumeTpvStockReviewLaunch());
+
+  useEffect(() => {
+    const onOpen = () => setStockOpen(true);
+    window.addEventListener(TPV_OPEN_STOCK_REVIEW_EVENT, onOpen);
+    return () => window.removeEventListener(TPV_OPEN_STOCK_REVIEW_EVENT, onOpen);
+  }, []);
+
   const {
     pointsOfSale,
     allPointsOfSale,
@@ -62,6 +75,8 @@ export function RestaurantSalaTpvShell({ tabletMode = false }: Props) {
   const [pdvWaitTimedOut, setPdvWaitTimedOut] = useState(false);
   const [seedPdvs, setSeedPdvs] = useState<PointOfSale[]>([]);
   const [seedRows, setSeedRows] = useState<DeliverySidebarStoreRow[]>([]);
+  /** Último PDV bueno: si el scope vacía la lista un instante, no desmontar el gate. */
+  const [stableGatePdvId, setStableGatePdvId] = useState<string | null>(null);
 
   const ceoBootstrapDoneRef = useRef(false);
   const ceoBootstrapInflightRef = useRef(false);
@@ -69,19 +84,32 @@ export function RestaurantSalaTpvShell({ tabletMode = false }: Props) {
   const pinnedPdvRef = useRef<string | null>(null);
 
   // Solo al cambiar de empresa de verdad (no en cada render / Strict Mode).
+  // Primer mount: no borrar pin — hidratar desde storage para no desmontar el gate.
   useEffect(() => {
     if (!businessId) return;
     if (lastBusinessIdRef.current === businessId) return;
+    const prev = lastBusinessIdRef.current;
     lastBusinessIdRef.current = businessId;
-    ceoBootstrapDoneRef.current = false;
-    ceoBootstrapInflightRef.current = false;
-    pinnedPdvRef.current = null;
-    setSelectedPdvId(null);
-    setForceStorePicker(false);
-    setPdvWaitTimedOut(false);
-    setSeedPdvs([]);
-    setSeedRows([]);
-  }, [businessId]);
+
+    if (prev && prev !== businessId) {
+      ceoBootstrapDoneRef.current = false;
+      ceoBootstrapInflightRef.current = false;
+      pinnedPdvRef.current = null;
+      setSelectedPdvId(null);
+      setForceStorePicker(false);
+      setPdvWaitTimedOut(false);
+      setStableGatePdvId(null);
+      setSeedPdvs([]);
+      setSeedRows([]);
+    }
+
+    if (!dataUserId) return;
+    const saved = String(readRestaurantOpsSelectedPdvId(businessId, dataUserId) || '').trim();
+    if (!saved) return;
+    if (!pinnedPdvRef.current) pinnedPdvRef.current = saved;
+    setStableGatePdvId((prevId) => prevId || saved);
+    setSelectedPdvId((prevId) => prevId || saved);
+  }, [businessId, dataUserId]);
 
   // Vaciar cola offline de sala al entrar en TPV con red.
   useEffect(() => {
@@ -168,7 +196,8 @@ export function RestaurantSalaTpvShell({ tabletMode = false }: Props) {
         ceoBootstrapDoneRef.current = true;
 
         // Refresco silencioso: SIN work-centers:changed (eso reabría el gate en bucle).
-        void refreshStores().catch(() => null);
+        // force:false → no pisar tiendas visibles si el fetch llega vacío un instante.
+        void refreshStores({ force: false }).catch(() => null);
       } catch {
         ceoBootstrapDoneRef.current = true;
       } finally {
@@ -188,35 +217,49 @@ export function RestaurantSalaTpvShell({ tabletMode = false }: Props) {
 
   const resolvedInitialPdvId = useMemo(() => {
     if (forceStorePicker || !businessId || !dataUserId || activePdvs.length === 0) return null;
-    const saved = readDeliveryOpsSelectedPdvId(businessId, dataUserId);
+    const saved = readRestaurantOpsSelectedPdvId(businessId, dataUserId);
     return coerceSelectedPdvId(activePdvs, saved || activeSalesPointId);
   }, [forceStorePicker, businessId, dataUserId, activePdvs, activeSalesPointId]);
 
   const scopedSelectedPdvId = useMemo(() => {
     const id = String(selectedPdvId || '').trim();
-    if (!id) return null;
-    if (activePdvs.some((p) => p._id === id)) return id;
-    return null;
-  }, [selectedPdvId, activePdvs]);
+    // Mantener id aunque el scope filtre mal un instante (enviar a cocina / refresh).
+    return id || null;
+  }, [selectedPdvId]);
 
   const effectivePdvId = forceStorePicker
     ? null
-    : (scopedSelectedPdvId || resolvedInitialPdvId || pinnedPdvRef.current);
+    : (scopedSelectedPdvId || resolvedInitialPdvId || pinnedPdvRef.current || stableGatePdvId);
 
   // Fijar PDV una vez y no cambiar (evita remount del gate).
   useEffect(() => {
     if (!effectivePdvId) return;
-    if (pinnedPdvRef.current === effectivePdvId) return;
-    if (activePdvs.some((p) => p._id === effectivePdvId)) {
-      pinnedPdvRef.current = effectivePdvId;
-    }
-  }, [effectivePdvId, activePdvs]);
+    if (pinnedPdvRef.current === effectivePdvId && stableGatePdvId === effectivePdvId) return;
+    pinnedPdvRef.current = effectivePdvId;
+    setStableGatePdvId(effectivePdvId);
+  }, [effectivePdvId, stableGatePdvId]);
 
   const gatePdvId = useMemo(() => {
-    const pinned = pinnedPdvRef.current;
-    if (pinned && activePdvs.some((p) => p._id === pinned)) return pinned;
+    if (forceStorePicker) return undefined;
+    // Nunca soltar el PDV si ya hay pin/storage: si el scope vacía o cambia la lista
+    // al mandar a cocina, desmontar el gate → «Recuperando caja» / «Tarda más…».
+    const pinned = String(
+      pinnedPdvRef.current || stableGatePdvId || selectedPdvId || '',
+    ).trim();
+    if (pinned) return pinned;
+    if (businessId && dataUserId) {
+      const saved = String(readRestaurantOpsSelectedPdvId(businessId, dataUserId) || '').trim();
+      if (saved) return saved;
+    }
     return effectivePdvId || undefined;
-  }, [effectivePdvId, activePdvs]);
+  }, [
+    forceStorePicker,
+    effectivePdvId,
+    stableGatePdvId,
+    selectedPdvId,
+    businessId,
+    dataUserId,
+  ]);
 
   const awaitingPdvResolution =
     !tabletMode
@@ -256,15 +299,16 @@ export function RestaurantSalaTpvShell({ tabletMode = false }: Props) {
   useEffect(() => {
     if (tabletMode || forceStorePicker || selectedPdvId || pinnedPdvRef.current) return;
     if (!businessId || !dataUserId || activePdvs.length === 0) return;
-    const saved = readDeliveryOpsSelectedPdvId(businessId, dataUserId);
+    const saved = readRestaurantOpsSelectedPdvId(businessId, dataUserId);
     const id = coerceSelectedPdvId(activePdvs, saved || activeSalesPointId);
     if (!id) return;
     pinnedPdvRef.current = id;
     setSelectedPdvId(id);
+    setStableGatePdvId(id);
     if (activeSalesPointId !== id) {
       setActiveSalesPoint(id);
     }
-    writeDeliveryOpsSelectedPdvId(businessId, dataUserId, id);
+    writeRestaurantOpsSelectedPdvId(businessId, dataUserId, id);
   }, [
     tabletMode,
     forceStorePicker,
@@ -292,22 +336,24 @@ export function RestaurantSalaTpvShell({ tabletMode = false }: Props) {
       const id = String(pdvId || '').trim();
       if (!id) return;
       pinnedPdvRef.current = id;
+      setStableGatePdvId(id);
       if (businessId && dataUserId) {
-        writeDeliveryOpsSelectedPdvId(businessId, dataUserId, id);
+        writeRestaurantOpsSelectedPdvId(businessId, dataUserId, id);
       }
       setActiveSalesPoint(id);
       setForceStorePicker(false);
       setSelectedPdvId(id);
       // Notify solo en elección manual explícita.
-      notifyDeliveryActiveStoreChanged();
+      notifyRestaurantActiveStoreChanged();
     },
     [businessId, dataUserId, setActiveSalesPoint],
   );
 
   const handleChangeStore = useCallback(() => {
     pinnedPdvRef.current = null;
+    setStableGatePdvId(null);
     if (businessId && dataUserId) {
-      writeDeliveryOpsSelectedPdvId(businessId, dataUserId, null);
+      writeRestaurantOpsSelectedPdvId(businessId, dataUserId, null);
     }
     setForceStorePicker(true);
     setSelectedPdvId(null);
@@ -403,12 +449,16 @@ export function RestaurantSalaTpvShell({ tabletMode = false }: Props) {
             initialManagerPdvId={gatePdvId}
             onManagerStoreCleared={tabletMode ? undefined : handleChangeStore}
           >
-            <RestaurantTpvFloorBoard
-              pdvId={gatePdvId || null}
-              pdvName={selectedPdvName}
-              tabletMode={tabletMode}
-              onChangeStore={tabletMode ? undefined : handleChangeStore}
-            />
+            {stockOpen ? (
+              <WorkerTpvStockReview onBack={() => setStockOpen(false)} />
+            ) : (
+              <RestaurantTpvFloorBoard
+                pdvId={gatePdvId || null}
+                pdvName={selectedPdvName}
+                tabletMode={tabletMode}
+                onChangeStore={tabletMode ? undefined : handleChangeStore}
+              />
+            )}
           </TpvRegisterGate>
         </div>
         {tabletNav}

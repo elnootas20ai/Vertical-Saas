@@ -23,6 +23,7 @@ export function WorkerStockReviewPage() {
   } = useStockWorkspace({
     dataUserId: tpvScope.dataUserId,
     storeLabel: tpvScope.storeLabel,
+    salesPointId: tpvScope.pdvId,
   });
 
   if (tabletBound) {
@@ -32,7 +33,7 @@ export function WorkerStockReviewPage() {
   const itemLabel = config.itemLabelPlural || 'Productos';
 
   return (
-    <Layout title="Revisión de stock" subtitle="Marca si cada artículo cuadra con el sistema">
+    <Layout title="Revisión de stock" subtitle="Revisión de hoy — pasa lista sin esperar al encargado">
       <div className="max-w-2xl mx-auto space-y-4">
         <div className="flex flex-wrap items-center gap-2 px-4 py-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-xl text-sm">
           <MapPin className="w-4 h-4 text-blue-600 shrink-0" />

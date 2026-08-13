@@ -1,5 +1,17 @@
 import type { StockCount } from './stockCountApi';
 
+/** Misma fecha local (día de revisión diaria). */
+export function isSameLocalDay(iso: string | null | undefined, now = new Date()): boolean {
+  if (!iso) return false;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return false;
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  );
+}
+
 export function formatStockDate(iso: string | null | undefined): string {
   if (!iso) return '—';
   const d = new Date(iso);

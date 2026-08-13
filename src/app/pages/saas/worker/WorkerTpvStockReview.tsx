@@ -1,5 +1,7 @@
+import { useMemo } from 'react';
 import { ArrowLeft, ClipboardCheck, MapPin } from 'lucide-react';
 import { StockRevisionPanel } from '../../../components/saas/StockRevisionPanel';
+import { useTpvRegisterIfOpen } from '../../../components/saas/TpvRegisterGate';
 import { useStockWorkspace } from '../../../hooks/useStockWorkspace';
 import { useTpvStockScope, type TpvStockScopeOverride } from '../../../hooks/useTpvStockScope';
 import { useVerticalCatalog } from '../../../hooks/useVerticalCatalog';
@@ -10,7 +12,25 @@ type WorkerTpvStockReviewProps = {
 };
 
 export function WorkerTpvStockReview({ onBack, scopeOverride }: WorkerTpvStockReviewProps) {
-  const tpvScope = useTpvStockScope(scopeOverride);
+  const register = useTpvRegisterIfOpen();
+  const sessionPdvId = String(register?.session?.pointOfSaleId || '').trim();
+  const sessionStoreLabel = String(register?.session?.pointOfSaleName || '').trim();
+
+  const mergedOverride = useMemo<TpvStockScopeOverride | undefined>(() => {
+    const dataUserId = scopeOverride?.dataUserId;
+    const pdvId = scopeOverride?.pdvId || sessionPdvId || undefined;
+    const storeLabel = scopeOverride?.storeLabel || sessionStoreLabel || undefined;
+    if (!dataUserId && !pdvId && !storeLabel) return scopeOverride;
+    return { dataUserId, pdvId, storeLabel };
+  }, [
+    scopeOverride?.dataUserId,
+    scopeOverride?.pdvId,
+    scopeOverride?.storeLabel,
+    sessionPdvId,
+    sessionStoreLabel,
+  ]);
+
+  const tpvScope = useTpvStockScope(mergedOverride);
   const { config } = useVerticalCatalog();
   const {
     dataUserId,
@@ -23,6 +43,7 @@ export function WorkerTpvStockReview({ onBack, scopeOverride }: WorkerTpvStockRe
   } = useStockWorkspace({
     dataUserId: tpvScope.dataUserId,
     storeLabel: tpvScope.storeLabel,
+    salesPointId: tpvScope.pdvId,
   });
 
   const itemLabel = config.itemLabelPlural || 'Productos';
@@ -44,10 +65,10 @@ export function WorkerTpvStockReview({ onBack, scopeOverride }: WorkerTpvStockRe
           </div>
           <div className="min-w-0">
             <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100 truncate">
-              Revisión de stock
+              Revisión de hoy
             </h1>
             <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-              {storeLabel}
+              Pasa lista · {storeLabel}
             </p>
           </div>
         </div>

@@ -179,10 +179,10 @@ export function InventoryPurchaseListModal({
             <div>
               <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
                 <ShoppingCart className="w-5 h-5 text-amber-600" />
-                Lista de compra
+                Qué comprar hoy
               </h3>
               <p className="text-sm text-gray-500 mt-0.5">
-                Repón stock o escanea la factura del proveedor
+                Según stock tras ventas · repón o escanea la factura
               </p>
             </div>
             <button type="button" onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">

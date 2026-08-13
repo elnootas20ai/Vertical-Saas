@@ -7,9 +7,9 @@ import { useBusiness } from '../../context/BusinessContext';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import {
-  notifyDeliveryActiveStoreChanged,
-  writeDeliveryOpsSelectedPdvId,
-} from '../../lib/deliveryOpsPdvSelection';
+  notifyRestaurantActiveStoreChanged,
+  writeRestaurantOpsSelectedPdvId,
+} from './restaurantOpsPdvSelection';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import {
   filterRestaurantRegisterSessions,
@@ -488,7 +488,7 @@ function ClosingViewModal({ session, onClose }: { session: TpvRegisterSession; o
         <div className="flex-shrink-0 p-6 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Cierre de caja</h2>
-            <p className="text-xs text-gray-500 mt-1">Resumen del turno · sala / bar</p>
+            <p className="text-xs text-gray-500 mt-1">Resumen del turno · bar / restaurante</p>
           </div>
           <button type="button" onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-gray-500">✕</button>
         </div>
@@ -655,9 +655,9 @@ export function RestaurantCajaPage() {
       setFilterPdv(pdvId);
       const businessId = resolveBusinessScopeId(currentBusiness);
       if (pdvId && businessId && dataUserId) {
-        writeDeliveryOpsSelectedPdvId(businessId, dataUserId, pdvId);
+        writeRestaurantOpsSelectedPdvId(businessId, dataUserId, pdvId);
         activeStoreScope.setActiveSalesPoint(pdvId);
-        notifyDeliveryActiveStoreChanged();
+        notifyRestaurantActiveStoreChanged();
       }
     },
     [currentBusiness, dataUserId, activeStoreScope],

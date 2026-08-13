@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import {
   ArrowLeftRight,
   CalendarDays,
+  ChefHat,
   LayoutGrid,
   Plus,
   Store,
@@ -65,8 +66,17 @@ import { resolveTableCapacity } from './tableCapacity';
 import {
   RestaurantTpvTableAccount,
   buildCounterTableContext,
+  RESTAURANT_COUNTER_TABLE_ID,
 } from './RestaurantTpvTableAccount';
+import { RestaurantTpvKitchenPanel } from './RestaurantTpvKitchenPanel';
 import type { RestaurantTableContext } from '../../components/saas/tpv/RestaurantTableTpvFlow';
+import {
+  TpvRegisterProvider,
+  useTpvRegisterIfOpen,
+  type TpvRegisterContextType,
+} from '../../components/saas/TpvRegisterGate';
+import { isTpvRegisterSessionOpen } from '../../lib/deliveryApi';
+import { useTpvOrderFlowLockControls } from '../../context/TpvChromeContext';
 
 type Props = {
   pdvId: string | null;
@@ -229,6 +239,28 @@ export function RestaurantTpvFloorBoard({
   const { currentBusiness } = useBusiness();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const orderFlowLock = useTpvOrderFlowLockControls();
+  const accountLockHeldRef = useRef(false);
+  /** Caja viva fuera del portal: al portar la cuenta a body el Context a veces parpadea y el cobro cree que no hay caja. */
+  const liveRegister = useTpvRegisterIfOpen();
+  const registerHoldRef = useRef<TpvRegisterContextType | null>(
+    liveRegister && isTpvRegisterSessionOpen(liveRegister.session) ? liveRegister : null,
+  );
+  if (liveRegister && isTpvRegisterSessionOpen(liveRegister.session)) {
+    registerHoldRef.current = liveRegister;
+  } else if (
+    registerHoldRef.current
+    && !isTpvRegisterSessionOpen(registerHoldRef.current.session)
+  ) {
+    registerHoldRef.current = null;
+  }
+  const registerForTableAccount =
+    (liveRegister && isTpvRegisterSessionOpen(liveRegister.session) ? liveRegister : null)
+    || (
+      registerHoldRef.current && isTpvRegisterSessionOpen(registerHoldRef.current.session)
+        ? registerHoldRef.current
+        : null
+    );
 
   const userId = resolveBusinessDataUserId(user, currentBusiness) || user?.user_id || user?.id || '';
   const businessId = resolveBusinessScopeId(currentBusiness) || normalizeBusinessId(currentBusiness?.business_id);
@@ -255,6 +287,8 @@ export function RestaurantTpvFloorBoard({
   /** Panel de gestión de reservas dentro del TPV (no sale al CEO). */
   const [reservationsPanelOpen, setReservationsPanelOpen] = useState(false);
   const [reservationsPanelStartCreate, setReservationsPanelStartCreate] = useState(false);
+  /** Cocina KDS dentro del TPV (no sale a `/saas/cocina`). */
+  const [kitchenPanelOpen, setKitchenPanelOpen] = useState(false);
   const autoOpenDoneRef = useRef(false);
 
   const urlTableId = String(searchParams.get('mesa') || '').trim();
@@ -409,6 +443,11 @@ export function RestaurantTpvFloorBoard({
       order: DiningOrder | null,
       intent: 'order' | 'pay' = 'order',
     ) => {
+      // Antes del lazy TPV: el gate mantiene la caja sticky (CEO bar).
+      if (!accountLockHeldRef.current) {
+        orderFlowLock.acquire();
+        accountLockHeldRef.current = true;
+      }
       setTpvOpenIntent(intent);
       setActiveTable(table);
       setActiveOrder(order);
@@ -417,7 +456,7 @@ export function RestaurantTpvFloorBoard({
       setBusyId('');
       clearMesaParam();
     },
-    [clearMesaParam],
+    [clearMesaParam, orderFlowLock],
   );
 
   /**
@@ -607,6 +646,10 @@ export function RestaurantTpvFloorBoard({
   };
 
   const handleBackFromAccount = () => {
+    if (accountLockHeldRef.current) {
+      orderFlowLock.release();
+      accountLockHeldRef.current = false;
+    }
     setActiveTable(null);
     setActiveOrder(null);
     setTpvOpenIntent('order');
@@ -625,34 +668,68 @@ export function RestaurantTpvFloorBoard({
   }, [reloadReservations, loadFloor]);
 
   const handleOpenCounter = () => {
-    toast.message('Cobro rápido', {
-      description: 'Mostrador · sin mesa ni cocina. Para comida de sala usa una mesa.',
-    });
-    openOrderPanel(buildCounterTableContext(), null);
+    const ctx = buildCounterTableContext();
+    openOrderPanel(ctx, null, 'order');
+    if (!userId || !businessId) {
+      toast.error('Falta sesión de empresa para el cobro de mostrador');
+      return;
+    }
+    void (async () => {
+      try {
+        const order = await ensureOpenDiningOrder({
+          userId,
+          businessId,
+          tableId: RESTAURANT_COUNTER_TABLE_ID,
+          tableNumber: 0,
+          tableName: 'Mostrador',
+          guests: 1,
+          createdBy: userId,
+          createdByName: actorName,
+          zone: 'Mostrador',
+        });
+        setActiveTable(ctx);
+        setActiveOrder(order);
+        setTpvOpenIntent('order');
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'No se pudo abrir el mostrador');
+        setActiveTable(null);
+        setActiveOrder(null);
+      }
+    })();
   };
 
   // Panel TPV core (carta) — portal a body para salir del overflow del gate.
   // z debe quedar POR DEBAJO de TpvModalRoot (z-70+) o los modales de producto
   // quedan tapados y parece que el TPV no responde a clics.
   if (activeTable) {
+    const tableAccount = (
+      <RestaurantTpvTableAccount
+        userId={userId}
+        table={activeTable}
+        order={activeOrder}
+        tabletMode={tabletMode}
+        openIntent={tpvOpenIntent}
+        registerOverride={registerForTableAccount}
+        onBack={handleBackFromAccount}
+        onOrderChange={setActiveOrder}
+        onTableChange={(nextTable, nextOrder) => {
+          setActiveTable(nextTable);
+          setActiveOrder(nextOrder);
+          if ('_id' in nextTable || ('type' in nextTable && (nextTable as DiningTable).type === 'dining_table')) {
+            setTables((prev) => patchTableList(prev, nextTable as DiningTable));
+          }
+        }}
+      />
+    );
     return createPortal(
       <div className="fixed inset-0 z-[55] flex min-h-0 flex-col bg-gray-50 dark:bg-gray-950">
-        <RestaurantTpvTableAccount
-          userId={userId}
-          table={activeTable}
-          order={activeOrder}
-          tabletMode
-          openIntent={tpvOpenIntent}
-          onBack={handleBackFromAccount}
-          onOrderChange={setActiveOrder}
-          onTableChange={(nextTable, nextOrder) => {
-            setActiveTable(nextTable);
-            setActiveOrder(nextOrder);
-            if ('_id' in nextTable || ('type' in nextTable && (nextTable as DiningTable).type === 'dining_table')) {
-              setTables((prev) => patchTableList(prev, nextTable as DiningTable));
-            }
-          }}
-        />
+        {registerForTableAccount ? (
+          <TpvRegisterProvider value={registerForTableAccount}>
+            {tableAccount}
+          </TpvRegisterProvider>
+        ) : (
+          tableAccount
+        )}
       </div>,
       document.body,
     );
@@ -720,6 +797,14 @@ export function RestaurantTpvFloorBoard({
                   {todayReservations.length}
                 </span>
               ) : null}
+            </button>
+            <button
+              type="button"
+              onClick={() => setKitchenPanelOpen(true)}
+              className="inline-flex h-9 items-center gap-1 rounded-lg border border-stone-200 px-2.5 text-xs font-semibold text-stone-700 hover:bg-stone-50 dark:border-stone-700 dark:text-stone-200"
+            >
+              <ChefHat className="h-3.5 w-3.5" strokeWidth={1.75} />
+              Cocina
             </button>
             {showCeoFloorActions ? (
               <>
@@ -1210,6 +1295,10 @@ export function RestaurantTpvFloorBoard({
         onSeat={handleSeatReservation}
         onChanged={handleReservationsChanged}
         startCreate={reservationsPanelStartCreate}
+      />
+      <RestaurantTpvKitchenPanel
+        open={kitchenPanelOpen}
+        onClose={() => setKitchenPanelOpen(false)}
       />
     </div>
   );

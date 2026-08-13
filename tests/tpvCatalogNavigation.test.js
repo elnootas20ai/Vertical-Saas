@@ -8,6 +8,7 @@ import {
   buildTpvProductSearchIndex,
   filterTpvCatalogProducts,
   foldTpvSearchText,
+  tpvSectionProductCount,
 } from '../src/app/lib/tpvCatalogNavigation';
 
 describe('categoriesForTpvScope', () => {
@@ -334,6 +335,72 @@ describe('categoriesForTpvScope', () => {
       'brand_families',
     );
     expect(brandCats).toEqual(['Tapas']);
+  });
+
+  it('bar: con una sola marca, platos sin brandIds salen en la pestaña de marca', () => {
+    const brands = [
+      { _id: 'bode', name: 'bodegeta', active: true, catalogCategories: ['Platos', 'Tapas'] },
+    ];
+    const catalog = [
+      { _id: 'plato-1', itemType: 'product', category: 'Platos', active: true, brandIds: [], unitPrice: 12 },
+      { _id: 'tapa-1', itemType: 'product', category: 'Tapas', active: true, unitPrice: 6 },
+      { _id: 'cerveza-1', itemType: 'product', category: 'Cervezas', active: true, unitPrice: 3 },
+    ];
+    const brandCats = categoriesForTpvScope(
+      { kind: 'brand', brandId: 'bode' },
+      brands,
+      catalog,
+      'brand_families',
+    );
+    expect(brandCats.sort()).toEqual(['Platos', 'Tapas']);
+    expect(
+      tpvSectionProductCount(catalog, { kind: 'brand', brandId: 'bode' }, brands, 'brand_families'),
+    ).toBe(2);
+  });
+
+  it('bar: brand: alias y brandIds huérfanos van a la única marca', () => {
+    const brands = [
+      {
+        _id: 'brand:abc-bode',
+        name: 'bodegeta',
+        active: true,
+        catalogCategories: ['Raciones', 'Tapas'],
+      },
+    ];
+    const catalog = [
+      {
+        _id: 'r1',
+        itemType: 'product',
+        category: 'Raciones',
+        active: true,
+        brandIds: ['abc-bode'],
+        unitPrice: 9,
+      },
+      {
+        _id: 't1',
+        itemType: 'product',
+        category: 'Tapas',
+        active: true,
+        brandIds: ['brand-viejo-raro'],
+        unitPrice: 5,
+      },
+    ];
+    expect(
+      tpvSectionProductCount(
+        catalog,
+        { kind: 'brand', brandId: 'brand:abc-bode' },
+        brands,
+        'brand_families',
+      ),
+    ).toBe(2);
+    expect(
+      categoriesForTpvScope(
+        { kind: 'brand', brandId: 'abc-bode' },
+        brands,
+        catalog,
+        'brand_families',
+      ).sort(),
+    ).toEqual(['Raciones', 'Tapas']);
   });
 
   it('si varias marcas usan el mismo organizador, sale de cada marca y va a pestaña compartida', () => {

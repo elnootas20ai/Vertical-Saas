@@ -39,16 +39,16 @@ import { listBrandsRequest, type Brand } from '../../lib/brandsApi';
 import { saasPathWithBusinessScope } from '../../lib/businessScopeUrl';
 import { diningOrdersToShiftDeliveryOrders } from '../../lib/restaurantShiftOrderMap';
 import { pointOfSaleDisplayLabel, type PointOfSale } from '../../lib/deliveryApi';
+import { coerceSelectedPdvId } from '../../lib/deliveryOpsPdvSelection';
 import {
-  coerceSelectedPdvId,
-  DELIVERY_OPS_LIVE_ALL_FILTER,
-  notifyDeliveryActiveStoreChanged,
-  readDeliveryOpsSelectedPdvId,
-  readDeliveryOpsViewMode,
-  writeDeliveryOpsSelectedPdvId,
-  writeDeliveryOpsViewMode,
-  type DeliveryOpsViewMode,
-} from '../../lib/deliveryOpsPdvSelection';
+  RESTAURANT_OPS_LIVE_ALL_FILTER,
+  notifyRestaurantActiveStoreChanged,
+  readRestaurantOpsSelectedPdvId,
+  readRestaurantOpsViewMode,
+  writeRestaurantOpsSelectedPdvId,
+  writeRestaurantOpsViewMode,
+  type RestaurantOpsViewMode,
+} from './restaurantOpsPdvSelection';
 import { CompanyBrandPerformancePanel } from '../../components/saas/CompanyBrandPerformancePanel';
 import {
   buildRestaurantOpsSnapshot,
@@ -208,7 +208,7 @@ export function RestaurantOpsCenter() {
     [activeStoreScope.pointsOfSale, activeStoreScope.allPointsOfSale],
   );
 
-  const [viewMode, setViewMode] = useState<DeliveryOpsViewMode>('single');
+  const [viewMode, setViewMode] = useState<RestaurantOpsViewMode>('single');
   const [selectedPdvId, setSelectedPdvId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [hasData, setHasData] = useState(false);
@@ -224,9 +224,9 @@ export function RestaurantOpsCenter() {
   // Solo al cambiar de empresa/cuenta: no re-aplicar bodegeta en cada refresh de PDVs.
   useEffect(() => {
     if (!businessId || !dataUserId) return;
-    const mode = readDeliveryOpsViewMode(businessId, dataUserId);
+    const mode = readRestaurantOpsViewMode(businessId, dataUserId);
     setViewMode(mode);
-    const saved = readDeliveryOpsSelectedPdvId(businessId, dataUserId);
+    const saved = readRestaurantOpsSelectedPdvId(businessId, dataUserId);
     setSelectedPdvId(
       coerceSelectedPdvId(activePdvs, saved || activeStoreScope.activeSalesPointId),
     );
@@ -242,17 +242,17 @@ export function RestaurantOpsCenter() {
   }, [activeStoreScope.activeSalesPointId]);
 
   const handleViewModeChange = useCallback(
-    (mode: DeliveryOpsViewMode, salesPointId?: string) => {
+    (mode: RestaurantOpsViewMode, salesPointId?: string) => {
       if (!businessId || !dataUserId) return;
       setViewMode(mode);
-      writeDeliveryOpsViewMode(businessId, dataUserId, mode);
+      writeRestaurantOpsViewMode(businessId, dataUserId, mode);
       if (mode === 'live_all') return;
       const id = coerceSelectedPdvId(activePdvs, salesPointId || selectedPdvId);
       if (!id) return;
       setSelectedPdvId(id);
-      writeDeliveryOpsSelectedPdvId(businessId, dataUserId, id);
+      writeRestaurantOpsSelectedPdvId(businessId, dataUserId, id);
       activeStoreScope.setActiveSalesPoint(id);
-      notifyDeliveryActiveStoreChanged();
+      notifyRestaurantActiveStoreChanged();
     },
     [businessId, dataUserId, activePdvs, selectedPdvId, activeStoreScope],
   );
@@ -393,7 +393,7 @@ export function RestaurantOpsCenter() {
   const scoped = (path: string) => saasPathWithBusinessScope(path, businessId);
 
   const selectValue = isLiveAll
-    ? DELIVERY_OPS_LIVE_ALL_FILTER
+    ? RESTAURANT_OPS_LIVE_ALL_FILTER
     : effectivePdvId && activePdvs.some((p) => p._id === effectivePdvId)
       ? effectivePdvId
       : '';
@@ -433,14 +433,14 @@ export function RestaurantOpsCenter() {
                 value={selectValue}
                 onChange={(e) => {
                   const v = e.target.value;
-                  if (v === DELIVERY_OPS_LIVE_ALL_FILTER) {
+                  if (v === RESTAURANT_OPS_LIVE_ALL_FILTER) {
                     handleViewModeChange('live_all');
                     return;
                   }
                   handleViewModeChange('single', v || undefined);
                 }}
               >
-                <option value={DELIVERY_OPS_LIVE_ALL_FILTER}>En directo · todas</option>
+                <option value={RESTAURANT_OPS_LIVE_ALL_FILTER}>En directo · todas</option>
                 {activePdvs.map((p) => (
                   <option key={p._id} value={p._id}>
                     {pointOfSaleDisplayLabel(p)}

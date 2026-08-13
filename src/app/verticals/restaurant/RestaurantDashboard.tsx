@@ -6,7 +6,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  AlertTriangle,
   Armchair,
   Banknote,
   BookmarkCheck,
@@ -57,6 +56,7 @@ import {
   formatDwellMinutes,
   type RestaurantOpsPipelineKey,
 } from './restaurantOpsSnapshot';
+import { RestaurantDashboardBillingCharts } from './RestaurantDashboardBillingCharts';
 
 const LONG_STAY_MIN = 90;
 
@@ -419,34 +419,19 @@ export function RestaurantDashboard({ onSelectGeneral }: VerticalDashboardProps)
           ) : null}
         </div>
 
+        {/* Facturación 14 días: carga propia (no espera el resto del dashboard) */}
+        {dataUserId ? (
+          <RestaurantDashboardBillingCharts
+            userId={dataUserId}
+            businessId={businessId}
+            businessIdForScope={businessId}
+          />
+        ) : null}
+
         {loading && !hasData ? (
           <DashboardSkeleton />
         ) : (
           <>
-            {/* Alertas operativas */}
-            {snapshot.alerts.length > 0 && (
-              <div className="space-y-2">
-                {snapshot.alerts.map((a) => (
-                  <button
-                    key={a.id}
-                    type="button"
-                    onClick={() => navigate(scoped(a.href))}
-                    className={`flex w-full items-start gap-3 rounded-xl border px-3.5 py-2.5 text-left transition hover:opacity-95 ${
-                      a.severity === 'danger'
-                        ? 'border-red-200 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-100'
-                        : 'border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100'
-                    }`}
-                  >
-                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold">{a.title}</p>
-                      <p className="text-xs opacity-80">{a.detail}</p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-
             {/* Hoy en el local */}
             <SectionCard
               icon={Euro}

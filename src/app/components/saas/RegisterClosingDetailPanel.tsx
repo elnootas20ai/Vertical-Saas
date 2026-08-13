@@ -80,9 +80,16 @@ interface RegisterClosingDetailPanelProps {
   session: TpvRegisterSession;
   /** Filas agregador ya resueltas; si no, se leen de la sesión cerrada. */
   aggregatorRows?: AggregatorCashRow[];
+  /** Bar/restaurante: sin Apps / Caja 2 / conteo delivery. */
+  variant?: 'delivery' | 'restaurant';
 }
 
-export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregatorRowsProp }: RegisterClosingDetailPanelProps) {
+export function RegisterClosingDetailPanel({
+  session,
+  aggregatorRows: aggregatorRowsProp,
+  variant = 'delivery',
+}: RegisterClosingDetailPanelProps) {
+  const isRestaurant = variant === 'restaurant';
   const { currentBusiness } = useBusiness();
   const businessId =
     resolveBusinessScopeId(currentBusiness)
@@ -150,6 +157,7 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
   );
 
   const aggregatorRows = useMemo(() => {
+    if (isRestaurant) return [] as AggregatorCashRow[];
     if (aggregatorRowsProp?.length) return aggregatorRowsProp;
     const totals = session.aggregatorClosingTotals || summary.salesByChannel;
     return aggregatorRowsFromClosingTotals(
@@ -159,6 +167,7 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
       session.aggregatorClosingCard,
     );
   }, [
+    isRestaurant,
     aggregatorRowsProp,
     session.aggregatorClosingTotals,
     session.aggregatorClosingCash,
@@ -168,6 +177,7 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
 
   /** Conteos por app: los del cierre si existen; si no, estimado desde pedidos del turno. */
   const aggregatorFoodByChannel = useMemo(() => {
+    if (isRestaurant) return {} as Record<string, FoodFamilyCounts>;
     const saved = session.productClosingCounts?.byChannel;
     const out: Record<string, FoodFamilyCounts> = {};
     for (const platform of AGGREGATOR_PLATFORMS) {
@@ -191,7 +201,7 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
       out[ch] = fromOrders[ch] || emptyFoodFamilyCounts();
     }
     return out;
-  }, [session, shiftOrders]);
+  }, [isRestaurant, session, shiftOrders]);
 
   const cashReturns = sumCashReturns(session);
   const cashStaffConsumption = sumCashStaffConsumption(session);
@@ -200,24 +210,27 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
     [aggregatorRows],
   );
   const appsTotal = useMemo(
-    () => aggregatorRows.reduce((s, r) => s + (Number(r.totalSales) || 0), 0),
-    [aggregatorRows],
+    () => (isRestaurant ? 0 : aggregatorRows.reduce((s, r) => s + (Number(r.totalSales) || 0), 0)),
+    [isRestaurant, aggregatorRows],
   );
   /** Mismo TOTAL que el resumen Excel / «Caja cerrada» del TPV. */
   const excelAmounts = useMemo(() => sessionToUrielAmounts(session), [session]);
-  const totalFacturacion = Number(excelAmounts.total) || 0;
-  const tiendaTotal = Math.round(
+  const totalFacturacion = isRestaurant
+    ? Number(summary.totalSales) || 0
+    : Number(excelAmounts.total) || 0;
+  const salaTotal = Math.round(
     (
       Number(excelAmounts.efectivo || 0)
       + Number(excelAmounts.tpv || 0)
       + Number(excelAmounts.x || 0)
     ) * 100,
   ) / 100;
+  const tiendaTotal = isRestaurant ? totalFacturacion : salaTotal;
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
-        <span className="inline-flex items-center gap-1"><Store className="w-3.5 h-3.5" /> {session.pointOfSaleName || 'PDV'} · {session.terminalName}</span>
+        <span className="inline-flex items-center gap-1"><Store className="w-3.5 h-3.5" /> {session.pointOfSaleName || 'Local'} · {session.terminalName}</span>
         <span className="inline-flex items-center gap-1"><User className="w-3.5 h-3.5" /> {session.workerName}</span>
         <span className="inline-flex items-center gap-1">
           <Clock className="w-3.5 h-3.5" />
@@ -226,7 +239,7 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
         </span>
       </div>
 
-      {/* 1) TOTAL facturación (lo primero, como en el cierre TPV) */}
+      {/* 1) TOTAL facturación */}
       <div className="rounded-2xl border border-zinc-900/10 dark:border-zinc-100/10 bg-zinc-900 dark:bg-zinc-100 px-4 py-4 text-white dark:text-zinc-900">
         <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-300 dark:text-zinc-500">
           Total facturación
@@ -235,8 +248,14 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
           {formatMoneyEs(totalFacturacion)}
         </p>
         <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs font-semibold text-zinc-200 dark:text-zinc-600">
-          <span>Tienda {formatMoneyEs(tiendaTotal)}</span>
-          <span>Apps {formatMoneyEs(appsTotal)}</span>
+          {isRestaurant ? (
+            <span>Sala {formatMoneyEs(tiendaTotal)}</span>
+          ) : (
+            <>
+              <span>Tienda {formatMoneyEs(tiendaTotal)}</span>
+              <span>Apps {formatMoneyEs(appsTotal)}</span>
+            </>
+          )}
           {(summary.totalReturns || 0) > 0 ? (
             <span className="inline-flex items-center gap-1">
               <TrendingDown className="w-3 h-3" />
@@ -266,17 +285,21 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
         <CajaCashMovementsList session={session} title="" />
       </div>
 
-      {/* 3) Por qué: desglose Caja 1 / Caja 2 */}
+      {/* 3) Desglose */}
       <div>
         <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
           Desglose del total
         </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+        <div className={`grid grid-cols-1 gap-2.5 ${isRestaurant ? '' : 'sm:grid-cols-2'}`}>
           <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900/50 p-3 space-y-2">
             <div className="flex items-baseline justify-between gap-2">
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Caja 1</p>
-                <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Tienda (TPV)</p>
+                {!isRestaurant ? (
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Caja 1</p>
+                ) : null}
+                <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
+                  {isRestaurant ? 'Sala (TPV)' : 'Tienda (TPV)'}
+                </p>
               </div>
               <p className="text-lg font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
                 {formatMoneyEs(summary.totalSales)}
@@ -297,6 +320,12 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
                   <span className="font-semibold tabular-nums">{formatMoneyEs(summary.salesByMethod.bizum)}</span>
                 </div>
               ) : null}
+              {(summary.salesByMethod.otro || 0) > 0 ? (
+                <div className="flex justify-between gap-2 text-zinc-500">
+                  <span>Otros</span>
+                  <span className="font-semibold tabular-nums">{formatMoneyEs(summary.salesByMethod.otro)}</span>
+                </div>
+              ) : null}
             </div>
             {!ordersLoading && brandBilling.rows.length > 0 ? (
               <div className="border-t border-zinc-100 dark:border-zinc-800 pt-1.5 space-y-0.5">
@@ -310,35 +339,37 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
             ) : null}
           </div>
 
-          <div className="rounded-xl border border-blue-200 dark:border-blue-900/50 bg-blue-50/60 dark:bg-blue-950/30 p-3 space-y-2">
-            <div className="flex items-baseline justify-between gap-2">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-blue-500/80">Caja 2</p>
-                <p className="text-sm font-bold text-blue-950 dark:text-blue-50">Apps (hecho en app)</p>
-              </div>
-              <p className="text-lg font-semibold tabular-nums text-blue-950 dark:text-blue-50">
-                {formatMoneyEs(appsTotal)}
-              </p>
-            </div>
-            <div className="space-y-1 text-xs">
-              {aggregatorRows.map((r) => {
-                const amt = Number(r.totalSales) || 0;
-                if (amt <= 0) return null;
-                return (
-                  <div key={r.platform.channel} className="flex justify-between gap-2 text-blue-900/80 dark:text-blue-100/80">
-                    <span className="font-semibold truncate">{r.platform.label}</span>
-                    <span className="font-semibold tabular-nums shrink-0">{formatMoneyEs(amt)}</span>
-                  </div>
-                );
-              })}
-              {aggregatorCashTotal > 0 ? (
-                <div className="flex justify-between gap-2 text-emerald-700 dark:text-emerald-300">
-                  <span className="font-semibold">No pagado efectivo → cajón</span>
-                  <span className="font-semibold tabular-nums">{formatMoneyEs(aggregatorCashTotal)}</span>
+          {!isRestaurant ? (
+            <div className="rounded-xl border border-blue-200 dark:border-blue-900/50 bg-blue-50/60 dark:bg-blue-950/30 p-3 space-y-2">
+              <div className="flex items-baseline justify-between gap-2">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-blue-500/80">Caja 2</p>
+                  <p className="text-sm font-bold text-blue-950 dark:text-blue-50">Apps (hecho en app)</p>
                 </div>
-              ) : null}
+                <p className="text-lg font-semibold tabular-nums text-blue-950 dark:text-blue-50">
+                  {formatMoneyEs(appsTotal)}
+                </p>
+              </div>
+              <div className="space-y-1 text-xs">
+                {aggregatorRows.map((r) => {
+                  const amt = Number(r.totalSales) || 0;
+                  if (amt <= 0) return null;
+                  return (
+                    <div key={r.platform.channel} className="flex justify-between gap-2 text-blue-900/80 dark:text-blue-100/80">
+                      <span className="font-semibold truncate">{r.platform.label}</span>
+                      <span className="font-semibold tabular-nums shrink-0">{formatMoneyEs(amt)}</span>
+                    </div>
+                  );
+                })}
+                {aggregatorCashTotal > 0 ? (
+                  <div className="flex justify-between gap-2 text-emerald-700 dark:text-emerald-300">
+                    <span className="font-semibold">No pagado efectivo → cajón</span>
+                    <span className="font-semibold tabular-nums">{formatMoneyEs(aggregatorCashTotal)}</span>
+                  </div>
+                ) : null}
+              </div>
             </div>
-          </div>
+          ) : null}
         </div>
       </div>
 
@@ -371,11 +402,11 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
           rows={brandBilling.rows}
           unbranded={brandBilling.unbranded}
           total={brandBilling.total}
-          title="Caja 1 · por marca"
+          title={isRestaurant ? 'Ventas por marca' : 'Caja 1 · por marca'}
         />
       ) : null}
 
-      {(session.productClosingCounts || shiftOrders.length > 0) && (
+      {!isRestaurant && (session.productClosingCounts || shiftOrders.length > 0) ? (
         <div className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50/70 dark:bg-zinc-900/40 p-3">
           <p className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
             Conteo pizzas / burgers / tacos
@@ -386,7 +417,7 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
             <DeliveryFoodUnitLabel unit="taco" count={session.productClosingCounts?.taco ?? '—'} />
           </div>
         </div>
-      )}
+      ) : null}
 
       <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50/80 dark:bg-zinc-900/50 p-4 space-y-2 text-sm">
         <p className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Arqueo de efectivo</p>
@@ -402,7 +433,7 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
           <span className="text-zinc-700 dark:text-zinc-300 font-medium">Efectivo esperado</span>
           <span className="font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">{formatMoneyEs(session.expectedCash)}</span>
         </div>
-        {aggregatorCashTotal > 0 ? (
+        {!isRestaurant && aggregatorCashTotal > 0 ? (
           <p className="text-[10px] text-zinc-500 dark:text-zinc-400">
             Incluye {formatMoneyEs(aggregatorCashTotal)} de efectivo de integradores
           </p>
@@ -439,11 +470,13 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
         </div>
       </div>
 
-      <AggregatorCashSummary
-        rows={aggregatorRows}
-        foodByChannel={aggregatorFoodByChannel}
-        title="Caja 2 · apps (declarado en cierre)"
-      />
+      {!isRestaurant ? (
+        <AggregatorCashSummary
+          rows={aggregatorRows}
+          foodByChannel={aggregatorFoodByChannel}
+          title="Caja 2 · apps (declarado en cierre)"
+        />
+      ) : null}
 
       {cashCounts.length > 0 && (
         <div>

@@ -30,6 +30,7 @@ import {
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
+import { useBusinessOptional } from '../../context/BusinessContext';
 import { Pagination } from '../../components/saas/Pagination';
 import { CrmNav } from '../../components/saas/CrmNav';
 import { usePagination } from '../../hooks/usePagination';
@@ -411,6 +412,8 @@ export type PromotionsPageProps = {
 export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
   const { user } = useAuth();
   const { clients } = useApp();
+  const businessType = useBusinessOptional()?.currentBusiness?.businessType;
+  const isRestaurant = businessType === 'restaurant';
 
   const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [promotionsLoaded, setPromotionsLoaded] = useState(false);
@@ -1094,8 +1097,14 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
                       : 'border-slate-200 dark:border-gray-700'
                   }`}
                 >
-                  <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Total del pedido</p>
-                  <p className="mt-1 text-[11px] text-slate-500">Descuento € o % sobre todo el ticket.</p>
+                  <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    {isRestaurant ? 'Total de la cuenta' : 'Total del pedido'}
+                  </p>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    {isRestaurant
+                      ? 'Descuento € o % sobre todo el ticket de mesa/barra.'
+                      : 'Descuento € o % sobre todo el ticket.'}
+                  </p>
                 </button>
                 <button
                   type="button"
@@ -1110,8 +1119,14 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
                       : 'border-slate-200 dark:border-gray-700'
                   }`}
                 >
-                  <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Productos concretos (varios)</p>
-                  <p className="mt-1 text-[11px] text-slate-500">Ej. varias pizzas a 11€ cada una. Los extras se definen abajo.</p>
+                  <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    {isRestaurant ? 'Platos o bebidas concretas' : 'Productos concretos (varios)'}
+                  </p>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    {isRestaurant
+                      ? 'Ej. caña a 1,50 €, menú del día a 12 €. Los extras se definen abajo.'
+                      : 'Ej. varias pizzas a 11€ cada una. Los extras se definen abajo.'}
+                  </p>
                 </button>
               </div>
 
@@ -1813,7 +1828,15 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
   }
 
   return (
-    <Layout title="Promociones" subtitle="Códigos y descuentos de la empresa para el TPV" noPadding>
+    <Layout
+      title="Promociones"
+      subtitle={
+        isRestaurant
+          ? '2×1, menú del día y códigos para el TPV de sala y barra'
+          : 'Códigos y descuentos de la empresa para el TPV'
+      }
+      noPadding
+    >
       {pageBody}
     </Layout>
   );

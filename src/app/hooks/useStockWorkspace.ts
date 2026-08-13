@@ -20,6 +20,8 @@ import type { BusinessType } from '../lib/businessApi';
 export type StockWorkspaceScopeInput = {
   dataUserId?: string;
   storeLabel?: string;
+  /** PDV del TPV abierto: manda sobre el del sidebar global. */
+  salesPointId?: string;
 };
 
 function findWarehouseForSalesPoint(warehouses: Warehouse[], salesPointId: string): Warehouse | null {

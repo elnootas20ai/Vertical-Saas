@@ -41,18 +41,24 @@ import {
 import type { WorkCenter } from '../../../../lib/workCentersApi';
 import { isSalaQuickSetupComplete, type SalaQuickSetupRoomDraft } from '../../../../lib/salaQuickSetup';
 import { SALA_ROOM_COLORS } from '../../../../lib/salaStudioTypes';
-import { notifyDeliveryActiveStoreChanged } from '../../../../lib/deliveryOpsPdvSelection';
-import { notifyDeliveryWorkCentersChanged } from '../../../../lib/deliverySetup';
 import { clearAllRetailScopeCaches } from '../../../../verticals/retailScopeRegistry';
 import type { RestaurantBusinessRef } from '../../../../verticals/restaurant/retailScope';
+import { notifyOpsActiveStoreChanged } from '../../../../lib/opsPdvPreference';
+import { DELIVERY_WORK_CENTERS_CHANGED } from '../../../../lib/deliverySetup';
 
 const MAX_HISTORY = 40;
 export const SALA_SETUP_VERSION = 3;
 
-function notifyRetailScopeRefresh(businessId: string) {
+function notifyRetailScopeRefresh(businessId: string, businessType?: string | null) {
   clearAllRetailScopeCaches(businessId);
-  notifyDeliveryWorkCentersChanged(businessId);
-  notifyDeliveryActiveStoreChanged();
+  if (typeof window !== 'undefined') {
+    try {
+      window.dispatchEvent(new CustomEvent(DELIVERY_WORK_CENTERS_CHANGED));
+    } catch {
+      /* ignore */
+    }
+  }
+  notifyOpsActiveStoreChanged(businessType);
 }
 
 type ManagerSnapshot = {
@@ -175,7 +181,7 @@ export function useSalaManager(
       tpvSync.cleanup &&
       (tpvSync.cleanup.archivedWorkCenters > 0 || tpvSync.cleanup.removedPdvs > 0 || tpvSync.cleanup.promotedWorkCenters > 0)
     ) {
-      notifyRetailScopeRefresh(businessIdRef.current);
+      notifyRetailScopeRefresh(businessIdRef.current, businessRef.current?.businessType);
       if (tpvSync.cleanup.promotedWorkCenters > 0) {
         toast.success('Centro principal conservado; duplicados de sala archivados');
       } else {
@@ -415,7 +421,7 @@ export function useSalaManager(
         toast.error('Selecciona un centro de trabajo antes de guardar');
       }
       if (tpvSync.cleanup && (tpvSync.cleanup.archivedWorkCenters > 0 || tpvSync.cleanup.removedPdvs > 0)) {
-        notifyRetailScopeRefresh(businessId);
+        notifyRetailScopeRefresh(businessId, businessRef.current?.businessType);
       }
 
       const pending = tables.filter((t) => t._id.startsWith('temp_'));

@@ -14,14 +14,15 @@ import { useAuthOptional, type AuthContextType } from './AuthContext';
 import { useBusinessOptional, type BusinessContextType } from './BusinessContext';
 import { resolveBusinessDataUserId } from '../lib/tenantUserId';
 import {
-  DELIVERY_ACTIVE_STORE_CHANGED,
   coerceSelectedPdvId,
-  notifyDeliveryActiveStoreChanged,
   pickDefaultActiveStorePreference,
-  readDeliveryOpsSelectedPdvId,
   resolvePreferenceToPdvId,
-  writeDeliveryOpsSelectedPdvId,
 } from '../lib/deliveryOpsPdvSelection';
+import {
+  notifyOpsActiveStoreChanged,
+  readOpsSelectedPdvId,
+  writeOpsSelectedPdvId,
+} from '../lib/opsPdvPreference';
 import {
   dedupePointsOfSale,
   pointOfSaleDisplayLabel,
@@ -665,14 +666,24 @@ function ActiveStoreScopeProviderImpl({
 
   useEffect(() => {
     const onExt = () => bump();
-    window.addEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onExt);
-    return () => window.removeEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onExt);
+    // Literales fijos (no import de constantes): evita ReferenceError/HMR stale.
+    const events = ['vertial-delivery-active-store', 'vertial-restaurant-active-store'] as const;
+    for (const ev of events) {
+      window.addEventListener(ev, onExt);
+    }
+    return () => {
+      for (const ev of events) {
+        window.removeEventListener(ev, onExt);
+      }
+    };
   }, [bump]);
+
+  const businessType = currentBusiness?.businessType;
 
   const activePreferenceRaw = useMemo(() => {
     if (!businessId || !dataUserId) return null;
-    return readDeliveryOpsSelectedPdvId(businessId, dataUserId);
-  }, [businessId, dataUserId, version, pointsOfSale.length, allPointsOfSale.length]);
+    return readOpsSelectedPdvId(businessType, businessId, dataUserId);
+  }, [businessId, dataUserId, businessType, version, pointsOfSale.length, allPointsOfSale.length]);
 
   const activeSalesPointId = useMemo(() => {
     const pool = allPointsOfSale.length > 0 ? allPointsOfSale : pointsOfSale;
@@ -691,7 +702,7 @@ function ActiveStoreScopeProviderImpl({
     // Mientras carga, no pisar la tienda elegida con el PDV por defecto.
     if (initialLoading) return;
 
-    const raw = String(readDeliveryOpsSelectedPdvId(businessId, dataUserId) || '').trim();
+    const raw = String(readOpsSelectedPdvId(businessType, businessId, dataUserId) || '').trim();
     const pool = (allPointsOfSale.length > 0 ? allPointsOfSale : pointsOfSale).filter(
       (p) => p.active !== false,
     );
@@ -700,8 +711,8 @@ function ActiveStoreScopeProviderImpl({
     const writeIfChanged = (next: string | null, notify = false) => {
       const value = String(next || '').trim();
       if (!value || value === raw) return;
-      writeDeliveryOpsSelectedPdvId(businessId, dataUserId, value);
-      if (notify) notifyDeliveryActiveStoreChanged();
+      writeOpsSelectedPdvId(businessType, businessId, dataUserId, value);
+      if (notify) notifyOpsActiveStoreChanged(businessType);
       bump();
     };
 
@@ -727,6 +738,7 @@ function ActiveStoreScopeProviderImpl({
   }, [
     businessId,
     dataUserId,
+    businessType,
     pointsOfSale,
     allPointsOfSale,
     retailWorkCenters,
@@ -741,11 +753,11 @@ function ActiveStoreScopeProviderImpl({
       const pool = allPointsOfSale.length > 0 ? allPointsOfSale : pointsOfSale;
       // Lista vacía (refresh): igual guardar la elección del usuario.
       if (pool.length > 0 && !pool.some((p) => p._id === id && p.active !== false)) return;
-      writeDeliveryOpsSelectedPdvId(businessId, dataUserId, id);
-      notifyDeliveryActiveStoreChanged();
+      writeOpsSelectedPdvId(businessType, businessId, dataUserId, id);
+      notifyOpsActiveStoreChanged(businessType);
       bump();
     },
-    [businessId, dataUserId, pointsOfSale, allPointsOfSale, bump],
+    [businessId, dataUserId, businessType, pointsOfSale, allPointsOfSale, bump],
   );
 
   const setActiveWorkCenterPreference = useCallback(
@@ -757,14 +769,14 @@ function ActiveStoreScopeProviderImpl({
         (p) => String(p.workCenterId || '').trim() === wc && p.active !== false,
       );
       if (linkedPdv) {
-        writeDeliveryOpsSelectedPdvId(businessId, dataUserId, linkedPdv._id);
+        writeOpsSelectedPdvId(businessType, businessId, dataUserId, linkedPdv._id);
       } else {
-        writeDeliveryOpsSelectedPdvId(businessId, dataUserId, `wc:${wc}`);
+        writeOpsSelectedPdvId(businessType, businessId, dataUserId, `wc:${wc}`);
       }
-      notifyDeliveryActiveStoreChanged();
+      notifyOpsActiveStoreChanged(businessType);
       bump();
     },
-    [businessId, dataUserId, pointsOfSale, allPointsOfSale, bump],
+    [businessId, dataUserId, businessType, pointsOfSale, allPointsOfSale, bump],
   );
 
   const displayLabelForActive = useMemo(() => {

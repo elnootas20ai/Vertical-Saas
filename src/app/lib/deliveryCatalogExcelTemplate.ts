@@ -68,6 +68,20 @@ export const HELADERIA_CATALOG_CATEGORIES = [
   'Combos',
 ] as const;
 
+/** Categorías TPV típicas de bar/restaurante (sin carta delivery Pizzas/Burgers). */
+export const RESTAURANT_CATALOG_CATEGORIES = [
+  'Tapas',
+  'Raciones',
+  'Bocadillos',
+  'Pinchos',
+  'Entrantes',
+  'Principales',
+  'Complementos',
+  'Bebidas',
+  'Postres',
+  'Combos',
+] as const;
+
 /** Columnas extra de la plantilla heladería (tras el core oficial). */
 export const HELADERIA_CATALOG_EXTRA_HEADERS = ['alergenos', 'formato'] as const;
 
@@ -164,6 +178,10 @@ export function isHeladeriaCatalogVertical(vertical?: string | null): boolean {
   return String(vertical || '').trim() === 'iceCreamShop';
 }
 
+export function isRestaurantCatalogVertical(vertical?: string | null): boolean {
+  return String(vertical || '').trim() === 'restaurant';
+}
+
 export function catalogTemplateFilenameForVertical(vertical?: string | null): string {
   return isHeladeriaCatalogVertical(vertical)
     ? HELADERIA_CATALOG_TEMPLATE_FILENAME
@@ -195,10 +213,26 @@ export function lineCategoriesForCatalogTemplate(
     return [...HELADERIA_CATALOG_CATEGORIES];
   }
 
-  const preset = getDeliveryBrandLinePreset(brand.deliveryLineKind);
+  const kind = String(brand.deliveryLineKind || '').trim();
+  const preset = getDeliveryBrandLinePreset(kind);
   const fromPreset = (preset?.typicalCategories ?? [])
     .map((c) => normalizeImportCategory(c))
     .filter((c) => c && !shouldClearBrandForCategory(c));
+
+  // Bar/restaurante: no inventar Pizzas/Burgers si la marca no trae categorías.
+  // Solo usar preset delivery (pizza/burger/…) si el tipo de línea es explícito.
+  if (isRestaurantCatalogVertical(vertical)) {
+    if (fromPreset.length > 0 && kind && kind !== 'mixed_restaurant') {
+      return [...fromPreset, 'Combos'];
+    }
+    const tapas = getDeliveryBrandLinePreset('tapas_bar');
+    const fromTapas = (tapas?.typicalCategories ?? [])
+      .map((c) => normalizeImportCategory(c))
+      .filter((c) => c && !shouldClearBrandForCategory(c));
+    if (fromTapas.length > 0) return [...fromTapas, 'Combos'];
+    return [...RESTAURANT_CATALOG_CATEGORIES];
+  }
+
   if (fromPreset.length > 0) return [...fromPreset, 'Combos'];
 
   return ['Principales', 'Entrantes', 'Combos'];
@@ -374,7 +408,11 @@ function buildValidValuesRows(
     const cats = lineCategoriesForCatalogTemplate(brand, vertical).join(', ');
     rows.push([
       brand.name,
-      cats || (heladeria ? 'Sabores, Tarrinas, Conos' : 'Principales, Entrantes'),
+      cats || (heladeria
+        ? 'Sabores, Tarrinas, Conos'
+        : isRestaurantCatalogVertical(vertical)
+          ? 'Tapas, Raciones, Bocadillos'
+          : 'Principales, Entrantes'),
       'Nombre exacto en columna linea',
     ]);
   }
@@ -440,6 +478,43 @@ function instructionLines(
     ];
   }
 
+  if (isRestaurantCatalogVertical(vertical)) {
+    return [
+      `PLANTILLA BAR / RESTAURANTE v${DELIVERY_CATALOG_TEMPLATE_VERSION} — Catálogo + TPV`,
+      `${DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS} filas vacías en «catalogo» (desde fila 2).`,
+      '',
+      'HOJA A IMPORTAR: «catalogo» (la primera). Las demás hojas son solo ayuda.',
+      '',
+      'COLUMNAS fila 1 (NO renombrar):',
+      `  ${headers.join(' | ')}`,
+      '',
+      'RELLENA desde la fila 2. Las filas vacías no se importan.',
+      'Lo que pongas en el Excel es lo que se monta en el TPV (categorías y productos).',
+      '',
+      'OBLIGATORIO por producto:',
+      '  · nombre — nombre en TPV (ej. Patatas bravas)',
+      '  · categoria — Tapas, Raciones, Bocadillos, Pinchos, Bebidas, Postres…',
+      '  · precio — número (4.50)',
+      '',
+      'BAR / TAPAS / RESTAURANTE:',
+      '  · categorias habituales: Tapas, Raciones, Bocadillos, Pinchos, Complementos, Bebidas, Postres',
+      '  · NO uses categorías de delivery (Pizzas, Burgers, Tacos) salvo que las vendas de verdad',
+      '  · ingredientes — Patata, Aceite, Jamón, Pan barra… (escandallo)',
+      '  · IVA: se aplica 10% al importar (puedes añadir columna iva si hace falta)',
+      '',
+      'MENÚS / COMBOS (categoria = Combos):',
+      '  · linea = nombre de tu Marca en Ajustes',
+      '  · ingredientes vacío (el cliente elige en TPV)',
+      '',
+      'RECOMENDADO:',
+      '  · codigo — TAP-001 (mismo código = actualiza sin duplicar)',
+      '  · linea — pestaña TPV: ' + namesText,
+      '  · linea VACÍA en Bebidas, Complementos y Postres',
+      '',
+      'Consulta «referencia_tpv» y «valores_validos» para tus líneas y categorías.',
+    ];
+  }
+
   return [
     `PLANTILLA OFICIAL v${DELIVERY_CATALOG_TEMPLATE_VERSION} — Catálogo + TPV`,
     `${DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS} filas vacías en «catalogo» (desde fila 2).`,
@@ -453,26 +528,24 @@ function instructionLines(
     '',
     'OBLIGATORIO por producto:',
     '  · nombre — nombre en TPV',
-    '  · categoria — Pizzas, Tapas, Raciones, Burgers, Bebidas…',
+    '  · categoria — Pizzas, Burgers, Bebidas…',
     '  · precio — número (14.50)',
     '',
-    'BAR / TAPAS / RESTAURANTE:',
-    '  · categorias habituales: Tapas, Raciones, Bocadillos, Pinchos, Complementos, Bebidas',
-    '  · ingredientes — tapas/raciones/bocatas: Patata, Aceite, Jamón, Pan barra (escandallo auto)',
-    '  · sin ingredientes — Vertial aplica coste aprox por categoría (caña ~0,35€, tapa ~2,20€…)',
-    '  · complementos y bebidas: coste fijo auto aunque la columna ingredientes esté vacía',
-    '  · IVA: en bar/restaurante se aplica 10% al importar (puedes añadir columna iva si hace falta)',
+    'DELIVERY:',
+    '  · categorias habituales: Pizzas, Burgers, Tacos, Complementos, Bebidas, Postres',
+    '  · ingredientes — Tomate, Mozzarella, Jamón… (escandallo / coste)',
+    '  · IVA: se aplica 10% al importar (puedes añadir columna iva si hace falta)',
     '',
     'MENÚS / COMBOS (categoria = Combos):',
     '  · linea obligatoria (nombre de tu Marca en Ajustes)',
-    '  · ingredientes vacío (el cliente elige plato/tapa + bebida en TPV)',
+    '  · ingredientes vacío (el cliente elige plato + bebida en TPV)',
     '  · opcional: columna tipo_menu → estandar | duo | familiar | con_postre',
     '',
     'RECOMENDADO:',
     '  · codigo — referencia única por producto (PIZ-001). Opcional. Mismo código = actualiza sin duplicar',
     '  · linea — pestaña TPV: ' + namesText,
     '  · linea VACÍA en Bebidas, Complementos y Postres',
-    '  · ingredientes — pizzas/burgers/tapas: Tomate, Mozzarella, Jamón, Patata…',
+    '  · ingredientes — pizzas/burgers: Tomate, Mozzarella, Jamón…',
     '',
     'Consulta «referencia_tpv» y «valores_validos» para tus líneas y categorías.',
   ];

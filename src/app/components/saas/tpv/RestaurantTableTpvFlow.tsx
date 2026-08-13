@@ -6,6 +6,7 @@ import { Component, type ErrorInfo, type ReactNode, Suspense, lazy } from 'react
 import { Loader2 } from 'lucide-react';
 import type { DiningOrder } from '../../../lib/salaApi';
 import type { RestaurantTpvPermissions } from '../../../lib/restaurantTpvPermissions';
+import type { TpvRegisterContextType } from '../TpvRegisterGate';
 
 export type RestaurantTableContext = {
   id: string;
@@ -27,6 +28,8 @@ export type RestaurantTableTpvFlowProps = {
   tabletMode?: boolean;
   /** Abrir en carta (`order`) o cobro (`pay`). */
   openIntent?: 'order' | 'pay';
+  /** Caja abierta del gate (evita «Abre la caja» al portalar mostrador/mesa). */
+  registerOverride?: TpvRegisterContextType | null;
 };
 
 const TpvRapidoOrderFlowLazy = lazy(async () => {
@@ -87,6 +90,7 @@ export function RestaurantTableTpvFlow({
   permissions,
   tabletMode = true,
   openIntent = 'order',
+  registerOverride = null,
 }: RestaurantTableTpvFlowProps) {
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden bg-gray-50 dark:bg-gray-950">
@@ -108,6 +112,7 @@ export function RestaurantTableTpvFlow({
             restaurantDiningOrder={order}
             restaurantPermissions={permissions}
             restaurantOpenIntent={openIntent}
+            registerOverride={registerOverride || undefined}
             onBack={onBack}
             onRestaurantDiningOrderUpdated={onOrderChange}
             onRestaurantOrderComplete={onOrderComplete}

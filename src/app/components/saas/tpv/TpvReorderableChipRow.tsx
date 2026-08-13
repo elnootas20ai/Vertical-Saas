@@ -104,7 +104,19 @@ export function TpvReorderableChipRow({
               className={`shrink-0 snap-start select-none transition-transform ${
                 dragging ? 'scale-105 opacity-90 z-10' : ''
               } ${touchDragging ? 'cursor-grabbing' : 'cursor-grab active:cursor-grabbing'}`}
+              onMouseDown={(e) => {
+                // Click en el chip (button): no iniciar drag HTML5 o el onClick no dispara.
+                const onChip = Boolean((e.target as HTMLElement | null)?.closest?.('button, a, input'));
+                e.currentTarget.draggable = !onChip;
+              }}
+              onMouseUp={(e) => {
+                e.currentTarget.draggable = true;
+              }}
               onDragStart={(e) => {
+                if (!e.currentTarget.draggable) {
+                  e.preventDefault();
+                  return;
+                }
                 dragFromRef.current = index;
                 dragMovedRef.current = false;
                 e.dataTransfer.effectAllowed = 'move';
@@ -126,7 +138,8 @@ export function TpvReorderableChipRow({
                   dragMovedRef.current = false;
                 }, 0);
               }}
-              onDragEnd={() => {
+              onDragEnd={(e) => {
+                e.currentTarget.draggable = true;
                 dragFromRef.current = null;
                 setDragOverIndex(null);
                 window.setTimeout(() => {

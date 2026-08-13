@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {
-  AlertTriangle, CheckCircle2, ClipboardCheck, Loader2, Minus, Plus, Search, User, X,
+  AlertTriangle, CheckCircle2, ClipboardCheck, Loader2, Minus, Plus, Search, ShoppingCart, User, X,
 } from 'lucide-react';
 import { DELIVERY_ACTIVE_STORE_CHANGED } from '../../lib/deliveryOpsPdvSelection';
 import { useAuth } from '../../context/AuthContext';
@@ -14,11 +14,19 @@ import {
   updateCountLineRequest,
   type StockCount,
 } from '../../lib/stockCountApi';
-import { formatStockTime } from '../../lib/stockRevisionUtils';
+import type { StockPurchaseList } from '../../lib/stockPurchaseListApi';
+import { countDiscrepancies, formatStockTime, isSameLocalDay } from '../../lib/stockRevisionUtils';
+import { StockPurchaseListPreview } from './StockPurchaseListPreview';
 
 export type StockRevisionRole = 'manager' | 'worker';
 
 type RevisionFilter = 'pending' | 'reviewed' | 'all';
+
+type CompletionReport = {
+  count: StockCount;
+  adjustmentsCreated: number;
+  purchaseList?: StockPurchaseList;
+};
 
 export interface StockRevisionPanelProps {
   userId: string;
@@ -113,7 +121,6 @@ function RevisionLineCard({
         ) : null}
       </div>
 
-      {/* +/- fácil: misma lógica que almacén CEO */}
       <div className="mt-3 flex items-center justify-center gap-3">
         <button
           type="button"
@@ -225,6 +232,112 @@ function RevisionLineCard({
   );
 }
 
+function RevisionReportModal({
+  report,
+  userId,
+  onClose,
+}: {
+  report: CompletionReport;
+  userId: string;
+  onClose: () => void;
+}) {
+  const diffs = report.count.lines.filter((l) => l.countedStock !== null && l.difference !== 0);
+  const purchaseCount = report.purchaseList?.itemCount ?? 0;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-0 sm:p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 p-5 border-b border-gray-100 dark:border-gray-700">
+          <div>
+            <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+              <ClipboardCheck className="w-5 h-5 text-emerald-600" />
+              Reporte de revisión
+            </h3>
+            <p className="text-sm text-gray-500 mt-0.5">
+              {report.count.name}
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+            <X className="w-5 h-5 text-gray-400" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
+              <p className="text-[11px] font-semibold uppercase text-gray-400">Ajustes</p>
+              <p className="text-2xl font-bold tabular-nums text-gray-900 dark:text-white">
+                {report.adjustmentsCreated}
+              </p>
+            </div>
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
+              <p className="text-[11px] font-semibold uppercase text-gray-400">No cuadran</p>
+              <p className="text-2xl font-bold tabular-nums text-amber-600">{diffs.length}</p>
+            </div>
+          </div>
+
+          {diffs.length > 0 ? (
+            <div>
+              <p className="text-xs font-semibold uppercase text-gray-500 mb-2">Desvíos</p>
+              <ul className="space-y-2">
+                {diffs.map((line) => (
+                  <li
+                    key={line.catalogItemId}
+                    className="flex items-center justify-between gap-3 text-sm border-b border-gray-50 dark:border-gray-700/50 pb-2"
+                  >
+                    <span className="font-medium text-gray-900 dark:text-white truncate">{line.catalogItemName}</span>
+                    <span className={`shrink-0 font-bold tabular-nums ${(line.difference ?? 0) < 0 ? 'text-red-600' : 'text-blue-600'}`}>
+                      {(line.difference ?? 0) > 0 ? '+' : ''}
+                      {line.difference} {line.unit || 'ud'}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="text-sm text-emerald-700 dark:text-emerald-400 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4" />
+              Todo cuadra. Stock sin desvíos.
+            </p>
+          )}
+
+          {purchaseCount > 0 ? (
+            <div>
+              <p className="text-xs font-semibold uppercase text-gray-500 mb-2 flex items-center gap-1.5">
+                <ShoppingCart className="w-3.5 h-3.5" />
+                Lista de compra sugerida
+              </p>
+              <StockPurchaseListPreview
+                userId={userId}
+                countId={report.count._id}
+                countName={report.count.name}
+              />
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500">Tras esta revisión no hace falta pedido automático.</p>
+          )}
+        </div>
+
+        <div className="p-5 border-t border-gray-100 dark:border-gray-700">
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full min-h-[48px] touch-manipulation rounded-xl bg-gray-900 dark:bg-white text-white dark:text-gray-900 font-semibold"
+          >
+            Listo
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function StockRevisionPanel({
   userId,
   storeLabel,
@@ -241,7 +354,7 @@ export function StockRevisionPanel({
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
   const actorUserId = String(user?.user_id || user?.id || '').trim();
-  const isWorker = role === 'worker';
+  void role; // abierto para todos; se mantiene la prop por compatibilidad
 
   const [activeCount, setActiveCount] = useState<StockCount | null>(null);
   const [loadingCount, setLoadingCount] = useState(false);
@@ -253,6 +366,8 @@ export function StockRevisionPanel({
   const [warehouseId, setWarehouseId] = useState('');
   const [revisionFilter, setRevisionFilter] = useState<RevisionFilter>('pending');
   const [revisionSearch, setRevisionSearch] = useState('');
+  const [completionReport, setCompletionReport] = useState<CompletionReport | null>(null);
+  const autoEnsureKeyRef = useRef('');
 
   const teamMembers = useMemo(
     () => (currentBusiness?.members || []).map((m) => ({
@@ -292,24 +407,30 @@ export function StockRevisionPanel({
     onActiveCountChange?.(count);
   }, [onActiveCountChange]);
 
+  const pickOpenCount = useCallback((counts: StockCount[], wh: string) => {
+    const open = counts.filter(
+      (c) =>
+        (c.status === 'draft' || c.status === 'in_progress') &&
+        (!wh || !c.warehouseId || c.warehouseId === wh),
+    );
+    if (open.length === 0) return null;
+    const today = open.find((c) => isSameLocalDay(c.startedAt || c.createdAt));
+    return today || open[0];
+  }, []);
+
   const loadStockCounts = useCallback(async () => {
     if (!userId) return;
     setLoadingCount(true);
     try {
       const counts = await listStockCountsRequest(userId);
       const wh = warehouseId || storeWarehouseId;
-      const open = counts.find(
-        (c) =>
-          (c.status === 'draft' || c.status === 'in_progress') &&
-          (!wh || !c.warehouseId || c.warehouseId === wh),
-      );
-      syncActiveCount(open || null);
+      syncActiveCount(pickOpenCount(counts, wh));
     } catch {
       syncActiveCount(null);
     } finally {
       setLoadingCount(false);
     }
-  }, [userId, warehouseId, storeWarehouseId, syncActiveCount]);
+  }, [userId, warehouseId, storeWarehouseId, syncActiveCount, pickOpenCount]);
 
   useEffect(() => {
     if (skipCountsFetch) return;
@@ -318,13 +439,17 @@ export function StockRevisionPanel({
 
   useEffect(() => {
     if (skipCountsFetch) return;
+    autoEnsureKeyRef.current = '';
     syncActiveCount(null);
     void loadStockCounts();
   }, [storeWarehouseId, storeLabel, loadStockCounts, syncActiveCount, skipCountsFetch]);
 
   useEffect(() => {
     if (skipCountsFetch) return;
-    const onStoreChange = () => { void (onRequestRefresh?.() ?? loadStockCounts()); };
+    const onStoreChange = () => {
+      autoEnsureKeyRef.current = '';
+      void (onRequestRefresh?.() ?? loadStockCounts());
+    };
     window.addEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStoreChange);
     return () => window.removeEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStoreChange);
   }, [loadStockCounts, skipCountsFetch, onRequestRefresh]);
@@ -346,11 +471,11 @@ export function StockRevisionPanel({
     });
   }, []);
 
-  const handleStartRevision = async () => {
-    if (!userId || isWorker) return;
+  const ensureTodayRevision = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!userId) return null;
     if (stockedCount === 0) {
-      toast.error('Carga el stock inicial antes de hacer una revisión');
-      return;
+      if (!opts?.silent) toast.error('Carga el stock inicial antes de hacer una revisión');
+      return null;
     }
     const wh = warehouses.find((w) => w._id === warehouseId) || defaultWarehouse;
     setStartingCount(true);
@@ -365,13 +490,40 @@ export function StockRevisionPanel({
       syncActiveCount(count);
       setRevisionFilter('pending');
       setRevisionSearch('');
-      toast.success('Revisión iniciada');
+      if (!opts?.silent) toast.success('Revisión de hoy lista');
+      return count;
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'No se pudo iniciar la revisión');
+      if (!opts?.silent) {
+        toast.error(err instanceof Error ? err.message : 'No se pudo iniciar la revisión');
+      }
+      return null;
     } finally {
       setStartingCount(false);
     }
-  };
+  }, [userId, stockedCount, warehouses, warehouseId, defaultWarehouse, storeLabel, syncActiveCount]);
+
+  // Revisión del día: se activa sola (trabajador o encargado), sin permiso previo.
+  // Tras cerrar la de hoy no se vuelve a crear sola hasta mañana (o hasta pulsar el botón).
+  useEffect(() => {
+    if (resolvedLoading || startingCount || resolvedActiveCount) return;
+    if (!userId || stockedCount === 0) return;
+    const wh = warehouseId || storeWarehouseId || 'default';
+    const key = `${userId}:${wh}:${new Date().toLocaleDateString('es-ES')}`;
+    if (autoEnsureKeyRef.current === key) return;
+    autoEnsureKeyRef.current = key;
+    void ensureTodayRevision({ silent: true }).then((count) => {
+      if (!count && autoEnsureKeyRef.current === key) autoEnsureKeyRef.current = '';
+    });
+  }, [
+    resolvedLoading,
+    startingCount,
+    resolvedActiveCount,
+    userId,
+    stockedCount,
+    warehouseId,
+    storeWarehouseId,
+    ensureTodayRevision,
+  ]);
 
   const markLineOk = async (lineIdx: number) => {
     if (!resolvedActiveCount || !userId) return;
@@ -416,7 +568,6 @@ export function StockRevisionPanel({
     }
   };
 
-  /** +/- en revisión: guarda contado al instante (CEO / worker). */
   const stepCounted = async (lineIdx: number, delta: 1 | -1) => {
     if (!resolvedActiveCount || !userId) return;
     const line = resolvedActiveCount.lines[lineIdx];
@@ -443,20 +594,28 @@ export function StockRevisionPanel({
   };
 
   const handleCompleteRevision = async () => {
-    if (!resolvedActiveCount || !userId || isWorker) return;
+    if (!resolvedActiveCount || !userId) return;
     setCompletingCount(true);
     try {
       const result = await completeStockCountRequest(userId, resolvedActiveCount._id);
+      setCompletionReport({
+        count: result.stockCount,
+        adjustmentsCreated: result.adjustmentsCreated ?? 0,
+        purchaseList: result.purchaseList,
+      });
       syncActiveCount(null);
+      // Bloquear auto-crear otra del mismo día; el botón manual sí permite otra.
+      const wh = warehouseId || storeWarehouseId || 'default';
+      autoEnsureKeyRef.current = `${userId}:${wh}:${new Date().toLocaleDateString('es-ES')}`;
       refreshCounts();
       onRevisionCompleted?.();
       const adj = result.adjustmentsCreated ?? 0;
-      const purchaseItems = result.purchaseList?.itemCount ?? 0;
+      const diffs = countDiscrepancies(result.stockCount);
       toast.success(
         adj > 0
-          ? `Revisión cerrada. Stock corregido en ${adj} producto(s).${purchaseItems > 0 ? ` ${purchaseItems} producto(s) sugieren pedido.` : ''}`
-          : purchaseItems > 0
-            ? `Revisión cerrada. ${purchaseItems} producto(s) sugieren pedido de compra.`
+          ? `Revisión cerrada. ${adj} ajuste(s), ${diffs} desvío(s).`
+          : diffs > 0
+            ? `Revisión cerrada. ${diffs} desvío(s).`
             : 'Revisión cerrada. Todo cuadra.',
       );
     } catch (err) {
@@ -488,59 +647,68 @@ export function StockRevisionPanel({
   const totalReviewLines = resolvedActiveCount?.lines.length ?? 0;
   const progressPct = totalReviewLines > 0 ? Math.round((reviewedCount / totalReviewLines) * 100) : 0;
 
-  if (resolvedLoading && !resolvedActiveCount) {
+  if ((resolvedLoading || startingCount) && !resolvedActiveCount) {
     return (
-      <div className="flex justify-center py-16">
+      <div className="flex flex-col items-center justify-center gap-3 py-16">
         <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
+        <p className="text-sm text-gray-500">Preparando revisión de hoy…</p>
       </div>
     );
   }
 
   if (!resolvedActiveCount) {
     return (
-      <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-8 text-center">
-        <ClipboardCheck className="w-12 h-12 mx-auto mb-4 text-emerald-500" />
-        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">
-          {isWorker ? 'Sin revisión activa' : 'Revisión de almacén'}
-        </h3>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 max-w-md mx-auto">
-          {isWorker
-            ? 'Cuando el encargado inicie una revisión desde Catálogo → Stock, podrás marcar productos aquí.'
-            : `Recorre los productos con stock cargado (${stockedCount}) y marca si cuadra o no.`}
-        </p>
-        {!isWorker && (
-          <>
-            {warehouses.length > 1 && (
-              <div className="mb-4 max-w-xs mx-auto text-left">
-                <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Almacén</label>
-                <select
-                  value={warehouseId}
-                  onChange={(e) => setWarehouseId(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500"
-                >
-                  {warehouses.filter((w) => w.active).map((w) => (
-                    <option key={w._id} value={w._id}>{w.name}{w.isDefault ? ' (principal)' : ''}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-            <button
-              type="button"
-              onClick={handleStartRevision}
-              disabled={startingCount || stockedCount === 0}
-              className="inline-flex items-center gap-2 min-h-[52px] touch-manipulation px-6 py-3 bg-emerald-600 text-white rounded-xl text-base font-semibold hover:bg-emerald-700 disabled:opacity-60"
-            >
-              {startingCount ? <Loader2 className="w-5 h-5 animate-spin" /> : <ClipboardCheck className="w-5 h-5" />}
-              Iniciar revisión
-            </button>
-            {stockedCount === 0 && (
-              <p className="mt-4 text-sm text-amber-600 flex items-center justify-center gap-1">
-                <AlertTriangle className="w-4 h-4" /> Primero carga el stock inicial
-              </p>
-            )}
-          </>
+      <>
+        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-8 text-center">
+          <ClipboardCheck className="w-12 h-12 mx-auto mb-4 text-emerald-500" />
+          <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">
+            Revisión de hoy
+          </h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 max-w-md mx-auto">
+            {stockedCount === 0
+              ? 'Primero carga el stock inicial para poder pasar lista.'
+              : `Pasa lista de los productos con stock (${stockedCount}): Cuadra o No cuadra.`}
+          </p>
+          {warehouses.length > 1 && (
+            <div className="mb-4 max-w-xs mx-auto text-left">
+              <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Almacén</label>
+              <select
+                value={warehouseId}
+                onChange={(e) => {
+                  autoEnsureKeyRef.current = '';
+                  setWarehouseId(e.target.value);
+                }}
+                className="w-full px-3 py-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+              >
+                {warehouses.filter((w) => w.active).map((w) => (
+                  <option key={w._id} value={w._id}>{w.name}{w.isDefault ? ' (principal)' : ''}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => void ensureTodayRevision()}
+            disabled={startingCount || stockedCount === 0}
+            className="inline-flex items-center gap-2 min-h-[52px] touch-manipulation px-6 py-3 bg-emerald-600 text-white rounded-xl text-base font-semibold hover:bg-emerald-700 disabled:opacity-60"
+          >
+            {startingCount ? <Loader2 className="w-5 h-5 animate-spin" /> : <ClipboardCheck className="w-5 h-5" />}
+            Empezar revisión de hoy
+          </button>
+          {stockedCount === 0 && (
+            <p className="mt-4 text-sm text-amber-600 flex items-center justify-center gap-1">
+              <AlertTriangle className="w-4 h-4" /> Primero carga el stock inicial
+            </p>
+          )}
+        </div>
+        {completionReport && (
+          <RevisionReportModal
+            report={completionReport}
+            userId={userId}
+            onClose={() => setCompletionReport(null)}
+          />
         )}
-      </div>
+      </>
     );
   }
 
@@ -605,7 +773,7 @@ export function StockRevisionPanel({
           <p className="font-medium text-gray-600 dark:text-gray-300">
             {revisionFilter === 'pending' ? '¡Todos revisados!' : 'Ningún producto en este filtro'}
           </p>
-          {!isWorker && revisionFilter === 'pending' && reviewedCount === totalReviewLines && (
+          {revisionFilter === 'pending' && reviewedCount === totalReviewLines && (
             <p className="text-sm text-gray-400 mt-2">Puedes cerrar la revisión abajo.</p>
           )}
         </div>
@@ -621,9 +789,9 @@ export function StockRevisionPanel({
               mismatchQty={mismatchQty}
               onMarkOk={markLineOk}
               onOpenMismatch={(idx) => {
-                const line = resolvedActiveCount?.lines[idx];
+                const lineItem = resolvedActiveCount?.lines[idx];
                 setMismatchIdx(idx);
-                setMismatchQty(String(line?.theoreticalStock ?? 0));
+                setMismatchQty(String(lineItem?.theoreticalStock ?? 0));
               }}
               onCloseMismatch={() => { setMismatchIdx(null); setMismatchQty(''); }}
               onMismatchQtyChange={setMismatchQty}
@@ -635,23 +803,29 @@ export function StockRevisionPanel({
         </div>
       )}
 
-      {!isWorker && (
-        <div className="sticky bottom-0 pt-3 pb-1 bg-gradient-to-t from-gray-50 via-gray-50 to-transparent dark:from-gray-900 dark:via-gray-900">
-          <button
-            type="button"
-            onClick={handleCompleteRevision}
-            disabled={completingCount || reviewedCount < totalReviewLines}
-            className="w-full sm:w-auto sm:float-right inline-flex items-center justify-center gap-2 min-h-[52px] touch-manipulation px-6 py-3 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-xl text-base font-semibold disabled:opacity-50"
-          >
-            {completingCount ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />}
-            Cerrar revisión y corregir stock
-          </button>
-          {reviewedCount < totalReviewLines && (
-            <p className="text-sm text-gray-500 sm:text-right mt-2 clear-both">
-              Faltan {totalReviewLines - reviewedCount} producto{totalReviewLines - reviewedCount === 1 ? '' : 's'}
-            </p>
-          )}
-        </div>
+      <div className="sticky bottom-0 pt-3 pb-1 bg-gradient-to-t from-gray-50 via-gray-50 to-transparent dark:from-gray-900 dark:via-gray-900">
+        <button
+          type="button"
+          onClick={() => void handleCompleteRevision()}
+          disabled={completingCount || reviewedCount < totalReviewLines}
+          className="w-full sm:w-auto sm:float-right inline-flex items-center justify-center gap-2 min-h-[52px] touch-manipulation px-6 py-3 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-xl text-base font-semibold disabled:opacity-50"
+        >
+          {completingCount ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />}
+          Cerrar revisión y corregir stock
+        </button>
+        {reviewedCount < totalReviewLines && (
+          <p className="text-sm text-gray-500 sm:text-right mt-2 clear-both">
+            Faltan {totalReviewLines - reviewedCount} producto{totalReviewLines - reviewedCount === 1 ? '' : 's'}
+          </p>
+        )}
+      </div>
+
+      {completionReport && (
+        <RevisionReportModal
+          report={completionReport}
+          userId={userId}
+          onClose={() => setCompletionReport(null)}
+        />
       )}
     </div>
   );
