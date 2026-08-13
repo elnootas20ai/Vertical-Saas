@@ -266,23 +266,22 @@ export function GenericImportModal({
       const report =
         typeof raw === 'object' && raw != null && 'report' in raw ? raw.report ?? null : null;
 
-      if (report && (report.errors.length > 0 || count <= 0)) {
-        setImportReport(report);
-        setStep('results');
-        setImporting(false);
-        setImportProgress(null);
-        return;
-      }
-
+      // 0 importados → fallo real
       if (count <= 0) {
-        setStep('preview');
+        if (report) {
+          setImportReport(report);
+          setStep('results');
+        } else {
+          setStep('preview');
+          toast.error('No se importó ninguna fila. Revisa el Excel.');
+        }
         setImporting(false);
         setImportProgress(null);
-        toast.error('No se importó ninguna fila. Revisa el Excel.');
         return;
       }
 
-      if (report && report.warnings.length > 0) {
+      // Hay productos guardados: mostrar informe (avisos/errores parciales) sin toast de fallo total
+      if (report && (report.errors.length > 0 || report.warnings.length > 0)) {
         setImportReport(report);
         setStep('results');
         setImporting(false);
@@ -299,7 +298,10 @@ export function GenericImportModal({
           toast.message('Importación cancelada');
         }
       } else {
-        toast.error('Error durante la importación');
+        // A menudo el servidor ya guardó y el cliente corta por red/timeout: no asustar de más.
+        toast.error(
+          'La importación se cortó o tardó demasiado. Revisa el catálogo: puede que los productos sí se hayan cargado.',
+        );
         setStep('preview');
       }
     } finally {

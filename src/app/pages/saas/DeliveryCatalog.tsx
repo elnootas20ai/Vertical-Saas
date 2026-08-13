@@ -3158,6 +3158,13 @@ export function CatalogPage() {
       result.created,
       result.updated ?? 0,
     );
+    // Filas del Excel omitidas (sin precio, etc.): si el resto se guardó, son avisos — no “error” rojo.
+    const omittedRowNotices = errors.map((e) => ({
+      row: e.row,
+      field: e.field,
+      message: `Fila omitida: ${e.message}`,
+    }));
+    const bulkErrors = bulkReport?.errors ?? [];
     const successReport: CatalogImportReport = {
       at: Date.now(),
       summary:
@@ -3178,14 +3185,18 @@ export function CatalogPage() {
               ? 'Esos productos ya existen en el catálogo (mismo código). No se duplicaron.'
               : `${result.errors} producto(s) no se importaron`
             : 'Importación sin cambios',
-      errors: [
-        ...errors.map((e) => ({ row: e.row, field: e.field, message: e.message })),
-        ...(bulkReport?.errors ?? []),
-      ],
-      warnings: warningLines,
+      errors: totalOk > 0
+        ? bulkErrors
+        : [
+            ...errors.map((e) => ({ row: e.row, field: e.field, message: e.message })),
+            ...bulkErrors,
+          ],
+      warnings: totalOk > 0
+        ? [...warningLines, ...omittedRowNotices]
+        : warningLines,
       created: result.created,
       updated: result.updated ?? 0,
-      failed: result.errors + errors.length,
+      failed: totalOk > 0 ? result.errors : result.errors + errors.length,
     };
 
     if (result.errors > 0 && totalOk === 0) {
