@@ -240,15 +240,19 @@ function KitchenOrderCard({
                   </div>
                   {(() => {
                     const parts = orderItemCustomizationParts(item);
-                    const bits = [
-                      ...parts.composition.map((n) => `▸ ${n}`),
-                      ...parts.added.map((n) => `+ ${n}`),
-                      ...parts.removed.map((n) => `SIN ${n}`),
-                    ];
+                    const bits: string[] = [];
+                    for (const block of parts.compositionBlocks) {
+                      bits.push(`▸ ${block.label}`);
+                      for (const n of block.added) bits.push(`  + ${n}`);
+                      for (const n of block.removed) bits.push(`  SIN ${n}`);
+                      if (block.note) bits.push(`  · ${block.note}`);
+                    }
+                    for (const n of parts.added) bits.push(`+ ${n}`);
+                    for (const n of parts.removed) bits.push(`SIN ${n}`);
                     if (bits.length === 0) return null;
                     return (
-                      <p className="text-xs text-indigo-600 dark:text-indigo-400 ml-6 font-semibold">
-                        {bits.join(' · ')}
+                      <p className="text-xs text-indigo-600 dark:text-indigo-400 ml-6 font-semibold whitespace-pre-line">
+                        {bits.join('\n')}
                       </p>
                     );
                   })()}
@@ -573,15 +577,19 @@ function OrderDetailModal({
                       </div>
                       {(() => {
                         const parts = orderItemCustomizationParts(item);
-                        const bits = [
-                          ...parts.composition.map((n) => `▸ ${n}`),
-                          ...parts.added.map((n) => `+ ${n}`),
-                          ...parts.removed.map((n) => `SIN ${n}`),
-                        ];
+                        const bits: string[] = [];
+                        for (const block of parts.compositionBlocks) {
+                          bits.push(`▸ ${block.label}`);
+                          for (const n of block.added) bits.push(`  + ${n}`);
+                          for (const n of block.removed) bits.push(`  SIN ${n}`);
+                          if (block.note) bits.push(`  · ${block.note}`);
+                        }
+                        for (const n of parts.added) bits.push(`+ ${n}`);
+                        for (const n of parts.removed) bits.push(`SIN ${n}`);
                         if (bits.length === 0) return null;
                         return (
-                          <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-0.5 font-semibold">
-                            {bits.join(' · ')}
+                          <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-0.5 font-semibold whitespace-pre-line">
+                            {bits.join('\n')}
                           </p>
                         );
                       })()}

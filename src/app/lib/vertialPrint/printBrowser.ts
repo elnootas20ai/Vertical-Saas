@@ -3,7 +3,7 @@ import {
   formatRemovedIngredientLabel,
 } from '../deliveryTicketHelpers';
 import type { DeliveryTicketPrintOptions } from '../deliveryTicketTypes';
-import type { TicketDocument } from './ticketDocument';
+import { walkTicketLineCustomization, type TicketDocument } from './ticketDocument';
 
 function escapeHtml(value: string): string {
   return value
@@ -50,36 +50,33 @@ table{width:100%;border-collapse:collapse}.b{font-weight:bold}
 
 function buildLineDetailHtml(line: TicketDocument['lines'][number], kitchen = false): string {
   const bits: string[] = [];
-  if (line.composition?.length) {
-    for (const name of line.composition) {
+  walkTicketLineCustomization(line, {
+    onComposition: (name) => {
       bits.push(
         kitchen
           ? `<div class="kitchen-comp">&gt; ${escapeHtml(name)}</div>`
           : `<div class="comp">&gt; ${escapeHtml(name)}</div>`,
       );
-    }
-  }
-  if (line.added?.length) {
-    for (const name of line.added) {
+    },
+    onAdded: (name, nested) => {
+      const pad = nested ? 'padding-left:16px' : '';
       bits.push(
         kitchen
-          ? `<div class="add">${escapeHtml(formatKitchenExtraLabel(name))}</div>`
-          : `<div class="add">+ ${escapeHtml(name)}</div>`,
+          ? `<div class="add" style="${pad}">${escapeHtml(formatKitchenExtraLabel(name))}</div>`
+          : `<div class="add" style="${pad}">+ ${escapeHtml(name)}</div>`,
       );
-    }
-  }
-  if (line.removed?.length) {
-    for (const name of line.removed) {
+    },
+    onRemoved: (name, nested) => {
+      const pad = nested ? 'padding-left:16px' : '';
       bits.push(
-        kitchen
-          ? `<div class="rem">${escapeHtml(formatRemovedIngredientLabel(name))}</div>`
-          : `<div class="rem">${escapeHtml(formatRemovedIngredientLabel(name))}</div>`,
+        `<div class="rem" style="${pad}">${escapeHtml(formatRemovedIngredientLabel(name))}</div>`,
       );
-    }
-  }
-  if (line.note) {
-    bits.push(`<div class="note">NOTA: ${escapeHtml(line.note)}</div>`);
-  }
+    },
+    onNote: (note, nested) => {
+      const pad = nested ? 'padding-left:16px' : '';
+      bits.push(`<div class="note" style="${pad}">NOTA: ${escapeHtml(note)}</div>`);
+    },
+  });
   return bits.length > 0 ? `<div style="margin-top:3px;padding-left:8px">${bits.join('')}</div>` : '';
 }
 

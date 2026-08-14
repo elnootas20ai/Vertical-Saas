@@ -80,15 +80,26 @@ export function orderItemCustomizationDetail(
   return lines;
 }
 
-export type OrderItemCustomizationParts = {
-  /** Componentes del menú/combo (▸ pizza, guarnición…) y mitades (½). */
-  composition: string[];
+/** Un componente del menú (pizza, guarnición…) con sus extras debajo. */
+export type CompositionBlock = {
+  label: string;
   added: string[];
   removed: string[];
   note: string;
 };
 
-/** Etiqueta legible para ticket (ASCII-safe en cocina). */
+export type OrderItemCustomizationParts = {
+  /** Etiquetas planas (compat / numerar menús repetidos). */
+  composition: string[];
+  /** Bloques anidados: extras/SIN van bajo la pizza que toca. */
+  compositionBlocks: CompositionBlock[];
+  /** Extras a nivel de línea (fuera de un ▸ / ½). */
+  added: string[];
+  removed: string[];
+  note: string;
+};
+
+/** Etiqueta legible para ticket (ASCII-safe en cocina). Solo ▸ / ½ — no notas. */
 function compositionLabelFromExtra(trimmed: string): string | null {
   if (/^▸/.test(trimmed)) {
     const name = trimmed.replace(/^▸\s*/, '').trim();
@@ -99,69 +110,106 @@ function compositionLabelFromExtra(trimmed: string): string | null {
     const name = trimmed.replace(/^½\s*/, '').replace(/^1\s*\/\s*2\s*/i, '').trim();
     return name ? `1/2 ${name.replace(/[×✕✖⨉]/g, 'x')}` : null;
   }
-  if (/^·/.test(trimmed)) {
-    const name = trimmed.replace(/^·\s*/, '').trim();
-    return name ? `Nota: ${name}` : null;
-  }
   return null;
+}
+
+function emptyCompositionBlock(label: string): CompositionBlock {
+  return { label, added: [], removed: [], note: '' };
 }
 
 /** Desglose para UI e impresión (combo ▸, extras, sin ingredientes, nota cocina). */
 export function orderItemCustomizationParts(
   item: Pick<DeliveryOrderItem, 'notes' | 'extras' | 'ingredients'>,
 ): OrderItemCustomizationParts {
-  const composition: string[] = [];
-  const compositionKeys = new Set<string>();
+  const compositionBlocks: CompositionBlock[] = [];
   const added: string[] = [];
   const removed: string[] = [];
   const removedKeys = new Set<string>();
   const addedKeys = new Set<string>();
+  let currentBlock: CompositionBlock | null = null;
+
+  const pushAdded = (name: string, intoBlock: CompositionBlock | null) => {
+    const key = name.toLowerCase();
+    if (!name) return;
+    if (intoBlock) {
+      if (intoBlock.added.some((x) => x.toLowerCase() === key)) return;
+      intoBlock.added.push(name);
+      return;
+    }
+    if (addedKeys.has(key)) return;
+    addedKeys.add(key);
+    added.push(name);
+  };
+
+  const pushRemoved = (name: string, intoBlock: CompositionBlock | null) => {
+    const key = name.toLowerCase();
+    if (!name) return;
+    if (intoBlock) {
+      if (intoBlock.removed.some((x) => x.toLowerCase() === key)) return;
+      intoBlock.removed.push(name);
+      return;
+    }
+    if (removedKeys.has(key)) return;
+    removedKeys.add(key);
+    removed.push(name);
+  };
+
   for (const line of orderItemCustomizationDetail(item)) {
     const trimmed = line.trim();
     const compositionLabel = compositionLabelFromExtra(trimmed);
     if (compositionLabel) {
-      const key = compositionLabel.toLowerCase();
-      if (compositionKeys.has(key)) continue;
-      compositionKeys.add(key);
-      composition.push(compositionLabel);
+      // Cada ▸ es un bloque propio (2 Margaritas en el mismo menú no se fusionan).
+      const block = emptyCompositionBlock(compositionLabel);
+      compositionBlocks.push(block);
+      // Mitades (½): extras siguientes son de la pizza entera, no de una sola mitad.
+      currentBlock = /^1\/2\s/i.test(compositionLabel) ? null : block;
+      continue;
+    }
+    if (/^·/.test(trimmed)) {
+      const noteText = trimmed.replace(/^·\s*/, '').trim();
+      if (!noteText) continue;
+      if (currentBlock) {
+        currentBlock.note = currentBlock.note
+          ? `${currentBlock.note} · ${noteText}`
+          : noteText;
+      }
       continue;
     }
     if (trimmed.startsWith('+')) {
-      const name = trimmed.slice(1).trim();
-      const key = name.toLowerCase();
-      if (!name || addedKeys.has(key)) continue;
-      addedKeys.add(key);
-      added.push(name);
+      pushAdded(trimmed.slice(1).trim(), currentBlock);
       continue;
     }
     const removedName = parseRemovedIngredientLine(trimmed);
     if (removedName) {
-      const key = removedName.toLowerCase();
-      if (removedKeys.has(key)) continue;
-      removedKeys.add(key);
-      removed.push(removedName);
+      pushRemoved(removedName, currentBlock);
     }
   }
+
   return {
-    composition,
+    composition: compositionBlocks.map((b) => b.label),
+    compositionBlocks,
     added,
     removed,
     note: String(item.notes || '').trim(),
   };
 }
 
-/** Notas de cocina / detalle: nota del ítem + menú + quitar + extras. */
+/** Notas de cocina / detalle: menú con extras bajo cada componente. */
 export function orderItemKitchenNotes(
   item: Pick<DeliveryOrderItem, 'notes' | 'extras' | 'ingredients'>,
 ): string {
-  const { composition, added, removed, note } = orderItemCustomizationParts(item);
-  const lines = [
-    ...composition.map((n) => `> ${n}`),
-    ...added.map((n) => `+ ${n}`),
-    ...removed.map((n) => formatRemovedIngredientLabel(n)),
-    note,
-  ].filter(Boolean);
-  return lines.join(' · ');
+  const { compositionBlocks, added, removed, note } = orderItemCustomizationParts(item);
+  const lines: string[] = [];
+  for (const block of compositionBlocks) {
+    lines.push(`> ${block.label}`);
+    for (const n of block.added) lines.push(`  + ${n}`);
+    for (const n of block.removed) lines.push(`  ${formatRemovedIngredientLabel(n)}`);
+    if (block.note) lines.push(`  NOTA: ${block.note}`);
+  }
+  for (const n of added) lines.push(`+ ${n}`);
+  for (const n of removed) lines.push(formatRemovedIngredientLabel(n));
+  if (note) lines.push(note);
+  return lines.filter(Boolean).join(' · ');
 }
 
 type BusinessLike = {

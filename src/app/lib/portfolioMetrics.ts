@@ -1134,7 +1134,12 @@ export function aggregatorChannelsFromClosingSessions(
   return { glovo, uber, justEat, app };
 }
 
-/** Pedidos locales + overlay de lo tecleado en Caja 2 (Glovo / Uber / Just Eat / App). */
+/**
+ * Pedidos locales + overlay Caja 2 (Glovo / Uber / Just Eat / App).
+ * El cierre es un añadido por canal: solo pisa si el importe del cierre es > 0.
+ * Canal a 0 en caja = “no hubo / no tecleado” → se mantiene lo de Vertial.
+ * Varias cajas el mismo día: ya van sumadas en aggregatorChannelsFromClosingSessions.
+ */
 function channelsForOpsDay(
   orders: DeliveryOrder[],
   sessions: TpvRegisterSession[] | undefined,
@@ -1146,13 +1151,15 @@ function channelsForOpsDay(
   if (!sessions?.length) return { channels: base, fromClosing: false };
   const fromClosing = aggregatorChannelsFromClosingSessions(sessions, dayKey, pdvId, workCenterId);
   if (!fromClosing) return { channels: base, fromClosing: false };
+  const pick = (closingAmt: number, vertialAmt: number) =>
+    closingAmt > 0 ? closingAmt : vertialAmt;
   return {
     channels: {
       ...base,
-      glovo: fromClosing.glovo,
-      uber: fromClosing.uber,
-      justEat: fromClosing.justEat,
-      app: fromClosing.app,
+      glovo: pick(fromClosing.glovo, base.glovo),
+      uber: pick(fromClosing.uber, base.uber),
+      justEat: pick(fromClosing.justEat, base.justEat),
+      app: pick(fromClosing.app, base.app),
     },
     fromClosing: true,
   };

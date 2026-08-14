@@ -2,7 +2,7 @@ import {
   formatKitchenExtraLabel,
   formatRemovedIngredientLabel,
 } from '../deliveryTicketHelpers';
-import type { TicketDocument } from './ticketDocument';
+import { walkTicketLineCustomization, type TicketDocument } from './ticketDocument';
 
 const ESC = 0x1b;
 const GS = 0x1d;
@@ -117,18 +117,13 @@ function pushLineDetail(
   chunks.push(textLine(`${line.qty}x ${line.name}`, tallCols));
   chunks.push(setBold(false));
   chunks.push(setSize(SIZE_NORMAL));
-  for (const name of line.composition || []) {
-    chunks.push(textLine(`  > ${name}`, width));
-  }
-  for (const name of line.added || []) {
-    chunks.push(textLine(`  + ${name}`, width));
-  }
-  for (const name of line.removed || []) {
-    chunks.push(textLine(`  ${formatRemovedIngredientLabel(name)}`, width));
-  }
-  if (line.note) {
-    chunks.push(textLine(`  NOTA: ${line.note}`, width));
-  }
+  walkTicketLineCustomization(line, {
+    onComposition: (name) => chunks.push(textLine(`  > ${name}`, width)),
+    onAdded: (name, nested) => chunks.push(textLine(`${nested ? '    ' : '  '}+ ${name}`, width)),
+    onRemoved: (name, nested) =>
+      chunks.push(textLine(`${nested ? '    ' : '  '}${formatRemovedIngredientLabel(name)}`, width)),
+    onNote: (note, nested) => chunks.push(textLine(`${nested ? '    ' : '  '}NOTA: ${note}`, width)),
+  });
 }
 
 /** ESC E n — negrita on/off. */
@@ -158,22 +153,34 @@ function pushKitchenLineDetail(
   chunks.push(setBold(false));
   chunks.push(setSize(SIZE_NORMAL));
 
-  for (const name of line.composition || []) {
-    chunks.push(textLine(`  > ${name}`, widthFor(paperWidthMm)));
-  }
-  for (const name of line.added || []) {
-    chunks.push(setPrintColor(true));
-    chunks.push(textLine(`  ${formatKitchenExtraLabel(name)}`, widthFor(paperWidthMm)));
-    chunks.push(setPrintColor(false));
-  }
-  for (const name of line.removed || []) {
-    chunks.push(setPrintColor(true));
-    chunks.push(textLine(`  ${formatRemovedIngredientLabel(name)}`, widthFor(paperWidthMm)));
-    chunks.push(setPrintColor(false));
-  }
-  if (line.note) {
-    chunks.push(textLine(`  NOTA: ${line.note}`, widthFor(paperWidthMm)));
-  }
+  walkTicketLineCustomization(line, {
+    onComposition: (name) => {
+      chunks.push(textLine(`  > ${name}`, widthFor(paperWidthMm)));
+    },
+    onAdded: (name, nested) => {
+      chunks.push(setPrintColor(true));
+      chunks.push(
+        textLine(
+          `${nested ? '    ' : '  '}${formatKitchenExtraLabel(name)}`,
+          widthFor(paperWidthMm),
+        ),
+      );
+      chunks.push(setPrintColor(false));
+    },
+    onRemoved: (name, nested) => {
+      chunks.push(setPrintColor(true));
+      chunks.push(
+        textLine(
+          `${nested ? '    ' : '  '}${formatRemovedIngredientLabel(name)}`,
+          widthFor(paperWidthMm),
+        ),
+      );
+      chunks.push(setPrintColor(false));
+    },
+    onNote: (note, nested) => {
+      chunks.push(textLine(`${nested ? '    ' : '  '}NOTA: ${note}`, widthFor(paperWidthMm)));
+    },
+  });
 }
 
 function widthFor(paperWidthMm: 58 | 80): number {
@@ -439,18 +446,17 @@ export function encodeTicketEscpos(
       pushMoneyRow(chunks, `${line.qty}x ${line.name}`, money(line.total), tallCols);
       chunks.push(setBold(false));
       chunks.push(setSize(SIZE_NORMAL));
-      for (const name of line.composition || []) {
-        chunks.push(textLine(`  > ${name}`, width));
-      }
-      for (const name of line.added || []) {
-        chunks.push(textLine(`  + ${name}`, width));
-      }
-      for (const name of line.removed || []) {
-        chunks.push(textLine(`  ${formatRemovedIngredientLabel(name)}`, width));
-      }
-      if (line.note) {
-        chunks.push(textLine(`  NOTA: ${line.note}`, width));
-      }
+      walkTicketLineCustomization(line, {
+        onComposition: (name) => chunks.push(textLine(`  > ${name}`, width)),
+        onAdded: (name, nested) =>
+          chunks.push(textLine(`${nested ? '    ' : '  '}+ ${name}`, width)),
+        onRemoved: (name, nested) =>
+          chunks.push(
+            textLine(`${nested ? '    ' : '  '}${formatRemovedIngredientLabel(name)}`, width),
+          ),
+        onNote: (note, nested) =>
+          chunks.push(textLine(`${nested ? '    ' : '  '}NOTA: ${note}`, width)),
+      });
     }
 
     chunks.push(textLine(sepLine(width), width));

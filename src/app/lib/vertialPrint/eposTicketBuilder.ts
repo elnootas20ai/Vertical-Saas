@@ -3,6 +3,7 @@ import {
   formatRemovedIngredientLabel,
 } from '../deliveryTicketHelpers';
 import type { TicketDocument } from './ticketDocument';
+import { walkTicketLineCustomization } from './ticketDocument';
 import {
   sanitizeEscposText,
   wrapEscposLines,
@@ -99,10 +100,13 @@ function pushLineDetail(
   setTextSize(builder, 1, 2);
   line(builder, `${item.qty}x ${item.name}`, tallCols);
   setTextSize(builder, 1, 1);
-  for (const name of item.composition || []) line(builder, `  > ${name}`, width);
-  for (const name of item.added || []) line(builder, `  + ${name}`, width);
-  for (const name of item.removed || []) line(builder, `  ${formatRemovedIngredientLabel(name)}`, width);
-  if (item.note) line(builder, `  NOTA: ${item.note}`, width);
+  walkTicketLineCustomization(item, {
+    onComposition: (name) => line(builder, `  > ${name}`, width),
+    onAdded: (name, nested) => line(builder, `${nested ? '    ' : '  '}+ ${name}`, width),
+    onRemoved: (name, nested) =>
+      line(builder, `${nested ? '    ' : '  '}${formatRemovedIngredientLabel(name)}`, width),
+    onNote: (note, nested) => line(builder, `${nested ? '    ' : '  '}NOTA: ${note}`, width),
+  });
 }
 
 /** Comanda cocina: `xN Nombre` más grande; EXTRA / SIN. */
@@ -116,22 +120,20 @@ function pushKitchenLineDetail(
   setTextSize(builder, 2, 2);
   boldLine(builder, `${item.qty}x ${item.name}`, titleCols);
   setTextSize(builder, 1, 1);
-  for (const name of item.composition || []) {
-    line(builder, `  > ${name}`, cols);
-  }
-  for (const name of item.added || []) {
-    if (builder.addTextStyle) builder.addTextStyle(false, false, true);
-    line(builder, `  ${formatKitchenExtraLabel(name)}`, cols);
-    if (builder.addTextStyle) builder.addTextStyle(false, false, false);
-  }
-  for (const name of item.removed || []) {
-    if (builder.addTextStyle) builder.addTextStyle(true, false, false);
-    line(builder, `  ${formatRemovedIngredientLabel(name)}`, cols);
-    if (builder.addTextStyle) builder.addTextStyle(false, false, false);
-  }
-  if (item.note) {
-    line(builder, `  NOTA: ${item.note}`, cols);
-  }
+  walkTicketLineCustomization(item, {
+    onComposition: (name) => line(builder, `  > ${name}`, cols),
+    onAdded: (name, nested) => {
+      if (builder.addTextStyle) builder.addTextStyle(false, false, true);
+      line(builder, `${nested ? '    ' : '  '}${formatKitchenExtraLabel(name)}`, cols);
+      if (builder.addTextStyle) builder.addTextStyle(false, false, false);
+    },
+    onRemoved: (name, nested) => {
+      if (builder.addTextStyle) builder.addTextStyle(true, false, false);
+      line(builder, `${nested ? '    ' : '  '}${formatRemovedIngredientLabel(name)}`, cols);
+      if (builder.addTextStyle) builder.addTextStyle(false, false, false);
+    },
+    onNote: (note, nested) => line(builder, `${nested ? '    ' : '  '}NOTA: ${note}`, cols),
+  });
 }
 
 function boldLine(builder: EposBuilder, text: string, width: number): void {
@@ -297,10 +299,13 @@ export function buildEposTicket(
       setTextSize(builder, 1, 2);
       moneyRow(builder, `${item.qty}x ${item.name}`, money(item.total), tallCols);
       setTextSize(builder, 1, 1);
-      for (const name of item.composition || []) line(builder, `  > ${name}`, width);
-      for (const name of item.added || []) line(builder, `  + ${name}`, width);
-      for (const name of item.removed || []) line(builder, `  ${formatRemovedIngredientLabel(name)}`, width);
-      if (item.note) line(builder, `  NOTA: ${item.note}`, width);
+      walkTicketLineCustomization(item, {
+        onComposition: (name) => line(builder, `  > ${name}`, width),
+        onAdded: (name, nested) => line(builder, `${nested ? '    ' : '  '}+ ${name}`, width),
+        onRemoved: (name, nested) =>
+          line(builder, `${nested ? '    ' : '  '}${formatRemovedIngredientLabel(name)}`, width),
+        onNote: (note, nested) => line(builder, `${nested ? '    ' : '  '}NOTA: ${note}`, width),
+      });
     }
     sep(builder, width);
     moneyRow(builder, 'Base imponible', money(doc.base), width);

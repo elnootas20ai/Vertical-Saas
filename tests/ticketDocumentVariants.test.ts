@@ -285,17 +285,35 @@ describe('ticket variants — botones Cocina / Reparto / Ticket cliente', () => 
         quantity: 1,
         name: 'Family',
         total: 30,
-        extras: ['▸ Margarita', '▸ Aquarius Limon ×3'],
+        extras: [
+          '▸ Margarita',
+          '+ Extra queso',
+          '- sin cebolla',
+          '▸ Aquarius Limon ×3',
+        ],
       },
       {
         quantity: 1,
         name: 'Family',
         total: 30,
-        extras: ['▸ Apericena', '▸ Aquarius Limon ×4'],
+        extras: [
+          '▸ Apericena',
+          '+ Extra bacon',
+          '▸ Aquarius Limon ×4',
+        ],
       },
     ];
     const doc = buildTicketDocument({ ...opts, variant: 'kitchen' });
     expect(doc.lines.map((l) => l.name)).toEqual(['Family #1', 'Family #2']);
+    expect(doc.lines[0].compositionBlocks?.[0]).toMatchObject({
+      label: 'Margarita',
+      added: ['Extra queso'],
+      removed: ['cebolla'],
+    });
+    expect(doc.lines[1].compositionBlocks?.[0]).toMatchObject({
+      label: 'Apericena',
+      added: ['Extra bacon'],
+    });
     expect(doc.lines[0].composition?.some((c) => /Aquarius Limon x3/.test(c))).toBe(true);
     expect(doc.lines[1].composition?.some((c) => /Aquarius Limon x4/.test(c))).toBe(true);
 
@@ -304,6 +322,9 @@ describe('ticket variants — botones Cocina / Reparto / Ticket cliente', () => 
     expect(text).toContain('Family #2');
     expect(text).toContain('Aquarius Limon x3');
     expect(text).toContain('Aquarius Limon x4');
+    expect(text).toMatch(/EXTRA queso|Extra queso/i);
+    expect(text).toMatch(/EXTRA bacon|Extra bacon/i);
+    expect(text).toContain('SIN cebolla');
     expect(text).not.toMatch(/\?3|\?4/);
   });
 });

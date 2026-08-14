@@ -1,17 +1,59 @@
 import type { DeliveryTicketPrintOptions, DeliveryTicketVariant } from '../deliveryTicketTypes';
-import { resolveDeliveryOrderChargeTotal, orderItemCustomizationParts } from '../deliveryTicketHelpers';
+import {
+  resolveDeliveryOrderChargeTotal,
+  orderItemCustomizationParts,
+  type CompositionBlock,
+} from '../deliveryTicketHelpers';
 
 export interface TicketLine {
   qty: number;
   name: string;
   total: number;
   note?: string;
-  /** Componentes del menú/combo (pizzas, guarnición, bebida…) y mitades. */
+  /** Etiquetas planas de componentes (compat / numerar menús). */
   composition?: string[];
+  /** Componentes con extras/SIN anidados bajo cada uno. */
+  compositionBlocks?: CompositionBlock[];
   added?: string[];
   removed?: string[];
   /** Categoría original del ítem (ordenar comida → bebidas en ticket). */
   category?: string;
+}
+
+function lineHasComposition(line: Pick<TicketLine, 'composition' | 'compositionBlocks'>): boolean {
+  return Boolean(
+    (line.compositionBlocks && line.compositionBlocks.length > 0)
+    || (line.composition && line.composition.length > 0),
+  );
+}
+
+/**
+ * Recorre el detalle de una línea de ticket en orden de cocina:
+ * bajo cada componente del menú van sus extras/SIN/nota; luego extras de línea.
+ */
+export function walkTicketLineCustomization(
+  line: Pick<TicketLine, 'composition' | 'compositionBlocks' | 'added' | 'removed' | 'note'>,
+  handlers: {
+    onComposition: (label: string) => void;
+    onAdded: (name: string, nested: boolean) => void;
+    onRemoved: (name: string, nested: boolean) => void;
+    onNote: (note: string, nested: boolean) => void;
+  },
+): void {
+  const blocks = line.compositionBlocks;
+  if (blocks && blocks.length > 0) {
+    for (const block of blocks) {
+      handlers.onComposition(block.label);
+      for (const name of block.added) handlers.onAdded(name, true);
+      for (const name of block.removed) handlers.onRemoved(name, true);
+      if (block.note) handlers.onNote(block.note, true);
+    }
+  } else {
+    for (const name of line.composition || []) handlers.onComposition(name);
+  }
+  for (const name of line.added || []) handlers.onAdded(name, false);
+  for (const name of line.removed || []) handlers.onRemoved(name, false);
+  if (line.note) handlers.onNote(line.note, false);
 }
 
 /** Prioridad de impresión: comida principal primero, bebidas/postres al final. */
@@ -48,14 +90,14 @@ export function sortTicketLinesForPrint<T extends Pick<TicketLine, 'name' | 'cat
 export function numberRepeatedComboLines(lines: TicketLine[]): TicketLine[] {
   const counts = new Map<string, number>();
   for (const line of lines) {
-    if (!(line.composition && line.composition.length > 0)) continue;
+    if (!lineHasComposition(line)) continue;
     const key = String(line.name || '').trim().toLowerCase();
     if (!key) continue;
     counts.set(key, (counts.get(key) || 0) + 1);
   }
   const seen = new Map<string, number>();
   return lines.map((line) => {
-    if (!(line.composition && line.composition.length > 0)) return line;
+    if (!lineHasComposition(line)) return line;
     const key = String(line.name || '').trim().toLowerCase();
     if (!key || (counts.get(key) || 0) < 2) return line;
     const n = (seen.get(key) || 0) + 1;
@@ -247,6 +289,8 @@ export function buildTicketDocument({
             total: Number(item.total || 0),
             note: parts.note || undefined,
             composition: parts.composition.length > 0 ? parts.composition : undefined,
+            compositionBlocks:
+              parts.compositionBlocks.length > 0 ? parts.compositionBlocks : undefined,
             added: parts.added.length > 0 ? parts.added : undefined,
             removed: parts.removed.length > 0 ? parts.removed : undefined,
             category: String(item.category || '').trim() || undefined,

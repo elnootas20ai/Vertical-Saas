@@ -59,10 +59,10 @@ describe('orderItemCustomizationDetail — sin duplicar SIN', () => {
     const parts = orderItemCustomizationParts({
       extras: [
         '▸ Margarita',
-        '▸ Patatas',
-        '▸ Coca Cola',
         '+ Extra queso',
         '- sin cebolla',
+        '▸ Patatas',
+        '▸ Coca Cola',
         '½ Diávola',
         '½ Barbacoa',
       ],
@@ -74,8 +74,13 @@ describe('orderItemCustomizationDetail — sin duplicar SIN', () => {
       '1/2 Diávola',
       '1/2 Barbacoa',
     ]);
-    expect(parts.added).toEqual(['Extra queso']);
-    expect(parts.removed).toEqual(['cebolla']);
+    expect(parts.compositionBlocks[0]).toMatchObject({
+      label: 'Margarita',
+      added: ['Extra queso'],
+      removed: ['cebolla'],
+    });
+    expect(parts.added).toEqual([]);
+    expect(parts.removed).toEqual([]);
   });
 });
 
@@ -132,26 +137,31 @@ describe('ticket cocina — todos los productos: notas y detalle', () => {
         notes: 'sin picante',
         extras: [
           '▸ Margarita',
-          '▸ Tequeños',
-          '▸ Agua',
           '+ Extra bacon',
           '- sin orégano',
           '· bien caliente',
+          '▸ Tequeños',
+          '▸ Agua',
         ],
       },
     ]);
-    expect(doc.lines[0].composition).toEqual([
-      'Margarita',
-      'Tequeños',
-      'Agua',
-      'Nota: bien caliente',
+    expect(doc.lines[0].composition).toEqual(['Margarita', 'Tequeños', 'Agua']);
+    expect(doc.lines[0].compositionBlocks).toEqual([
+      {
+        label: 'Margarita',
+        added: ['Extra bacon'],
+        removed: ['orégano'],
+        note: 'bien caliente',
+      },
+      { label: 'Tequeños', added: [], removed: [], note: '' },
+      { label: 'Agua', added: [], removed: [], note: '' },
     ]);
-    expect(doc.lines[0].added).toEqual(['Extra bacon']);
-    expect(doc.lines[0].removed).toEqual(['orégano']);
+    expect(doc.lines[0].added).toBeUndefined();
+    expect(doc.lines[0].removed).toBeUndefined();
     expect(doc.lines[0].note).toBe('sin picante');
   });
 
-  it('mitad y mitad: 1/2 + extras', () => {
+  it('mitad y mitad: 1/2 + extras de línea', () => {
     const doc = kitchenDoc([
       {
         quantity: 1,
@@ -189,6 +199,45 @@ describe('ticket cocina — todos los productos: notas y detalle', () => {
     expect(doc.lines[1].added).toEqual(['Extra cheddar']);
     expect(doc.lines[1].removed).toEqual(['pepinillo']);
     expect(doc.lines[2].note).toBe('fria');
+  });
+
+  it('2 combos iguales: #1/#2 y extras bajo su pizza (sin mezclar)', () => {
+    const doc = kitchenDoc([
+      {
+        quantity: 1,
+        name: 'Family',
+        total: 28,
+        extras: [
+          '▸ Margarita',
+          '+ Extra queso',
+          '▸ Margarita',
+          '+ Extra bacon',
+          '▸ Coca',
+        ],
+      },
+      {
+        quantity: 1,
+        name: 'Family',
+        total: 28,
+        extras: [
+          '▸ Diávola',
+          '- sin cebolla',
+          '▸ Barbacoa',
+          '▸ Fanta',
+        ],
+      },
+    ]);
+    expect(doc.lines.map((l) => l.name)).toEqual(['Family #1', 'Family #2']);
+    expect(doc.lines[0].compositionBlocks).toEqual([
+      { label: 'Margarita', added: ['Extra queso'], removed: [], note: '' },
+      { label: 'Margarita', added: ['Extra bacon'], removed: [], note: '' },
+      { label: 'Coca', added: [], removed: [], note: '' },
+    ]);
+    expect(doc.lines[1].compositionBlocks).toEqual([
+      { label: 'Diávola', added: [], removed: ['cebolla'], note: '' },
+      { label: 'Barbacoa', added: [], removed: [], note: '' },
+      { label: 'Fanta', added: [], removed: [], note: '' },
+    ]);
   });
 });
 

@@ -12,11 +12,12 @@ import {
   resolvePrevComparableDayKeys,
 } from '../src/app/lib/portfolioMetrics.ts';
 
-function order({ id, pdv, paidAt, total, items, status = 'entregado' }) {
+function order({ id, pdv, paidAt, total, items, status = 'entregado', channel }) {
   return {
     _id: id,
     salesPointId: pdv,
     status,
+    channel: channel || 'tpv',
     paidAt,
     deliveredAt: paidAt,
     createdAt: paidAt,
@@ -302,6 +303,111 @@ describe('buildStoreOpsPulse', () => {
     const todayRow = pulse.days.find((d) => d.dayKey === today);
     expect(todayRow?.channels.glovo).toBe(120.5);
     expect(todayRow?.revenue).toBe(285.5);
+  });
+
+  it('closing channel at 0 does not wipe Vertial orders on that channel', () => {
+    const today = '2026-07-28';
+    const dayKeys = listTrailingDayKeys(today, 7);
+    const orders = [
+      order({
+        id: 'local',
+        pdv: 'pdv-tiana',
+        paidAt: '2026-07-28T12:00:00',
+        total: 30,
+        channel: 'tpv',
+        items: [{ name: 'Margarita', category: 'Pizzas', qty: 1 }],
+      }),
+      order({
+        id: 'glovo-vertial',
+        pdv: 'pdv-tiana',
+        paidAt: '2026-07-28T13:00:00',
+        total: 50,
+        channel: 'glovo',
+        items: [{ name: 'Margarita', category: 'Pizzas', qty: 1 }],
+      }),
+    ];
+    const sessions = [
+      {
+        _id: 'sess-1',
+        pointOfSaleId: 'pdv-tiana',
+        status: 'closed',
+        openedAt: '2026-07-28T09:00:00',
+        closedAt: '2026-07-28T23:00:00',
+        aggregatorClosingTotals: {
+          glovo: 0,
+          ubereats: 80,
+          justeat: 0,
+          flipdish: 0,
+        },
+      },
+    ];
+    const pulse = buildStoreOpsPulse(orders, {
+      storeId: 'wc-tiana',
+      storeName: 'Tiana',
+      businessId: 'biz-1',
+      businessName: 'Modomio',
+      pdvId: 'pdv-tiana',
+      workCenterId: 'wc-tiana',
+      todayKey: today,
+      dayKeys,
+      sessions,
+    });
+    // Uber del cierre; Glovo a 0 en caja → se conserva el Glovo de Vertial
+    expect(pulse.channels.uber).toBe(80);
+    expect(pulse.channels.glovo).toBe(50);
+    expect(pulse.channels.justEat).toBe(0);
+    // 30 TPV + 50 Glovo Vertial + 80 Uber cierre
+    expect(pulse.revenueToday).toBe(160);
+  });
+
+  it('sums aggregator totals across two cajas the same day', () => {
+    const today = '2026-07-28';
+    const dayKeys = listTrailingDayKeys(today, 7);
+    const orders = [
+      order({
+        id: 'local',
+        pdv: 'pdv-tiana',
+        paidAt: '2026-07-28T12:00:00',
+        total: 20,
+        channel: 'tpv',
+        items: [{ name: 'Margarita', category: 'Pizzas', qty: 1 }],
+      }),
+    ];
+    const sessions = [
+      {
+        _id: 'sess-am',
+        pointOfSaleId: 'pdv-tiana',
+        status: 'closed',
+        openedAt: '2026-07-28T09:00:00',
+        closedAt: '2026-07-28T15:00:00',
+        aggregatorClosingTotals: { glovo: 40, ubereats: 10, justeat: 0, flipdish: 0 },
+      },
+      {
+        _id: 'sess-pm',
+        pointOfSaleId: 'pdv-tiana',
+        status: 'closed',
+        openedAt: '2026-07-28T16:00:00',
+        closedAt: '2026-07-28T23:00:00',
+        aggregatorClosingTotals: { glovo: 25, ubereats: 0, justeat: 15, flipdish: 5 },
+      },
+    ];
+    const pulse = buildStoreOpsPulse(orders, {
+      storeId: 'wc-tiana',
+      storeName: 'Tiana',
+      businessId: 'biz-1',
+      businessName: 'Modomio',
+      pdvId: 'pdv-tiana',
+      workCenterId: 'wc-tiana',
+      todayKey: today,
+      dayKeys,
+      sessions,
+    });
+    expect(pulse.channels.glovo).toBe(65);
+    expect(pulse.channels.uber).toBe(10);
+    expect(pulse.channels.justEat).toBe(15);
+    expect(pulse.channels.app).toBe(5);
+    // 20 local + 65+10+15+5 apps
+    expect(pulse.revenueToday).toBe(115);
   });
 
   it('uses closing productClosingCounts for pizza/burger/taco (Excel / integrators)', () => {
