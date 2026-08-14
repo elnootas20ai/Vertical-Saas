@@ -337,6 +337,7 @@ export function DeliveryReports() {
             category={category}
             onCategoryChange={setCategory}
             onOpen={handleOpen}
+            dataUserId={dataUserId}
           />
         )}
 

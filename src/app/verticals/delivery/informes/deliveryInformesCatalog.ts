@@ -1,7 +1,7 @@
 /**
  * Catálogo de Informes Delivery — solo metadatos (sin fetch).
  * Los informes `live` reutilizan paneles existentes; `skeleton` = UI pendiente de definir.
- * Listas alineadas a las capturas del hub Informes (Finanzas, Clientes…).
+ * Listas alineadas a las capturas del hub Informes (Finanzas, Estadísticas…).
  */
 
 export type DeliveryInformeCategoryId =
@@ -100,7 +100,7 @@ export type DeliveryInformeCategory = {
 export const DELIVERY_INFORMES_CATEGORIES: DeliveryInformeCategory[] = [
   { id: 'finanzas', label: 'Finanzas' },
   { id: 'negocio', label: 'Negocio' },
-  { id: 'clientes', label: 'Clientes' },
+  { id: 'clientes', label: 'Estadísticas' },
   { id: 'stock', label: 'Stock y proveedores' },
   { id: 'equipo', label: 'Equipo' },
   { id: 'facturacion', label: 'Facturación y contabilidad' },
@@ -134,7 +134,8 @@ export const DELIVERY_INFORMES_CATALOG: DeliveryInformeEntry[] = [
     id: 'finanzas-flujo-caja',
     category: 'finanzas',
     title: 'Flujo de caja',
-    description: 'Entradas, salidas y saldo de caja.',
+    description:
+      'Informe profundo: contabilidad, cajón TPV, apps/integradores, descuadres y saldo mes a mes.',
     kind: 'skeleton',
   },
   {
@@ -282,13 +283,15 @@ export const DELIVERY_INFORMES_CATALOG: DeliveryInformeEntry[] = [
     hubHidden: true,
   },
 
-  // ── Clientes (captura hub — 6) ───────────────────────────────────────────
+  // ── Estadísticas: dashboard % en hub (sin listas de clientes) ────────────
+  // Entradas legacy ocultas (siguen abribles por id / runner).
   {
     id: 'clientes-activos',
     category: 'clientes',
     title: 'Clientes activos',
     description: 'Clientes con pedidos recientes en el periodo.',
     kind: 'skeleton',
+    hubHidden: true,
   },
   {
     id: 'clientes-nuevos-vs-recurrentes',
@@ -297,6 +300,7 @@ export const DELIVERY_INFORMES_CATALOG: DeliveryInformeEntry[] = [
     description: 'Comparativa de adquisición y repetición.',
     nivel: 'normal',
     kind: 'skeleton',
+    hubHidden: true,
   },
   {
     id: 'clientes-ingresos',
@@ -305,6 +309,7 @@ export const DELIVERY_INFORMES_CATALOG: DeliveryInformeEntry[] = [
     description: 'Facturación aportada por cada cliente.',
     nivel: 'normal',
     kind: 'skeleton',
+    hubHidden: true,
   },
   {
     id: 'clientes-frecuencia-compra',
@@ -313,6 +318,7 @@ export const DELIVERY_INFORMES_CATALOG: DeliveryInformeEntry[] = [
     description: 'Cada cuánto pide cada cliente.',
     nivel: 'normal',
     kind: 'skeleton',
+    hubHidden: true,
   },
   {
     id: 'clientes-en-riesgo',
@@ -321,6 +327,7 @@ export const DELIVERY_INFORMES_CATALOG: DeliveryInformeEntry[] = [
     description: 'Clientes que dejan de pedir o bajan el ticket.',
     nivel: 'pro',
     kind: 'skeleton',
+    hubHidden: true,
   },
   {
     id: 'clientes-ltv',
@@ -329,9 +336,8 @@ export const DELIVERY_INFORMES_CATALOG: DeliveryInformeEntry[] = [
     description: 'Valor de vida del cliente a lo largo del tiempo.',
     nivel: 'pro',
     kind: 'skeleton',
+    hubHidden: true,
   },
-
-  // Pedidos delivery (los que pediste; fuera del contador de la captura)
   {
     id: 'clientes-productos-top',
     category: 'clientes',
@@ -578,6 +584,8 @@ export const DELIVERY_INFORMES_CATALOG: DeliveryInformeEntry[] = [
 ];
 
 export function countInformesInCategory(categoryId: DeliveryInformeCategoryId): number {
+  // Estadísticas = dashboard fijo de 5 % (no lista de informes).
+  if (categoryId === 'clientes') return 5;
   return DELIVERY_INFORMES_CATALOG.filter((e) => e.category === categoryId && !e.hubHidden).length;
 }
 

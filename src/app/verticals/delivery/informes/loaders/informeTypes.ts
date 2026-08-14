@@ -1,6 +1,8 @@
 export type InformeBuildResult = {
   rows: Record<string, unknown>[];
   summary: string;
+  /** Título corto por bloque (opcional) para la vista en pantalla. */
+  reportTitle?: string;
 };
 
 export type InformeLoadCtx = {

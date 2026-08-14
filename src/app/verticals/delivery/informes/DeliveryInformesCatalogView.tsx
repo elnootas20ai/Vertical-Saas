@@ -38,11 +38,12 @@ import {
   countInformesInCategory,
   getInformesByCategory,
 } from './deliveryInformesCatalog';
+import { DeliveryEstadisticasDashboard } from './DeliveryEstadisticasDashboard';
 
 const CATEGORY_ICON: Record<DeliveryInformeCategoryId, LucideIcon> = {
   finanzas: Wallet,
   negocio: BarChart2,
-  clientes: Users,
+  clientes: Percent,
   stock: Package,
   equipo: Users,
   facturacion: FileText,
@@ -182,15 +183,19 @@ export function DeliveryInformesCatalogView({
   category,
   onCategoryChange,
   onOpen,
+  dataUserId = '',
 }: {
   category: DeliveryInformeCategoryId;
   onCategoryChange: (id: DeliveryInformeCategoryId) => void;
   onOpen: (entry: DeliveryInformeEntry) => void;
+  /** Titular de datos (CEO) para el dashboard de estadísticas. */
+  dataUserId?: string;
 }) {
   const items = getInformesByCategory(category);
   const extraHidden = DELIVERY_INFORMES_CATALOG.filter(
     (e) => e.category === category && e.hubHidden,
   );
+  const showEstadisticasDashboard = category === 'clientes';
 
   return (
     <div className="space-y-4">
@@ -230,7 +235,17 @@ export function DeliveryInformesCatalogView({
         })}
       </div>
 
-      {items.length === 0 ? (
+      {showEstadisticasDashboard ? (
+        dataUserId ? (
+          <DeliveryEstadisticasDashboard userId={dataUserId} />
+        ) : (
+          <div className="rounded-2xl border border-dashed border-stone-200 bg-white px-6 py-12 text-center dark:border-stone-700 dark:bg-stone-900">
+            <p className="text-sm font-medium text-stone-700 dark:text-stone-300">
+              Inicia sesión para ver las estadísticas
+            </p>
+          </div>
+        )
+      ) : items.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-stone-200 bg-white px-6 py-12 text-center dark:border-stone-700 dark:bg-stone-900">
           <p className="text-sm font-medium text-stone-700 dark:text-stone-300">Sin informes en esta categoría</p>
           <p className="mt-1 text-xs text-stone-500">Mándame la captura y los relleno.</p>
@@ -243,10 +258,10 @@ export function DeliveryInformesCatalogView({
         </div>
       )}
 
-      {extraHidden.length > 0 && (
+      {!showEstadisticasDashboard && extraHidden.length > 0 && (
         <div className="space-y-2 pt-2">
           <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-stone-400">
-            {category === 'clientes' ? 'Delivery · métricas pedido' : 'Delivery · datos reales'}
+            Delivery · datos reales
           </p>
           {extraHidden.map((entry) => (
             <InformeRow key={entry.id} entry={entry} onOpen={onOpen} />

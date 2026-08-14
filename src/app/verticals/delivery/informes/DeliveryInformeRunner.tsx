@@ -113,6 +113,7 @@ export function DeliveryInformeRunner({
           title={entry.title}
           summary={summary}
           rowCount={rows.length}
+          rows={rows}
           onBack={onBack}
           onDownload={async (format) => {
             if (!rows.length) return;

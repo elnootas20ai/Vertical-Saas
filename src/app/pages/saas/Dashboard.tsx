@@ -16,6 +16,7 @@ import {
   WorkerPayMonthPanel,
   buildWorkerPayMonthSummary,
   DeliveryOpsInsightsPanel,
+  DeliverySoldProductMarginPanel,
   type WorkerPayMonthSummary,
 } from '../../verticals/delivery';
 import { countsTowardNewClientMetrics } from '../../lib/clientAcquisition';
@@ -36,7 +37,7 @@ import {
 } from 'recharts';
 import { PeriodBadge } from '../../components/ui/PeriodBadge';
 import { subDays, eachDayOfInterval, startOfDay, format } from 'date-fns';
-import { es } from 'date-fns/locale';
+import { formatDateEs } from '../../lib/formatDateEs';
 import type { BusinessType } from '../../lib/businessApi';
 import { clientsRouteForVertical, DELIVERY_CRM_UI_ENABLED } from '../../lib/deliveryCrmFeature';
 import { DELIVERY_CAJA_PATH, RESTAURANT_CAJA_PATH } from '../../lib/retailOpsPaths';
@@ -52,6 +53,7 @@ import {
   ShieldAlert, PieChart, Zap, Building2, FileBarChart, Boxes,
   ArrowUpRight, ArrowDownRight, Minus, CalendarRange, BookmarkCheck, Receipt,
   LayoutGrid, LayoutDashboard, Scale, UtensilsCrossed, ListChecks, Banknote,
+  UserPlus, UserMinus,
 } from 'lucide-react';
 import { DashboardFinanceWidget } from '../../components/saas/finance/DashboardFinanceWidget';
 import { DashboardLazyPanel } from '../../components/saas/DashboardLazyPanel';
@@ -318,6 +320,11 @@ function formatEur(n: number) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M €`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k €`;
   return `${n.toLocaleString('es-ES', { maximumFractionDigits: 0 })} €`;
+}
+
+/** Eje de gráficas 14d: corto y legible (02/08), sin «ago» confuso. */
+function chartDayAxisLabel(d: Date): string {
+  return format(d, 'dd/MM');
 }
 
 // ─── Gráfica de progreso ───────────────────────────────────────────────────
@@ -1351,7 +1358,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
         const dayStr = format(d, 'yyyy-MM-dd');
         return {
           day: dayStr,
-          label: format(d, 'd MMM', { locale: es }),
+          label: chartDayAxisLabel(d),
           value: sumDeliveredRevenueOnDay(scopedDeliveryOrders, dayStr),
         };
       });
@@ -1362,7 +1369,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
         const sold = v.soldAt ? new Date(v.soldAt) : null;
         return sold && format(startOfDay(sold), 'yyyy-MM-dd') === dayStr;
       });
-      return { day: dayStr, label: format(d, 'd MMM', { locale: es }), value: daySales.reduce((s, v) => s + (v.salePrice || 0), 0) };
+      return { day: dayStr, label: chartDayAxisLabel(d), value: daySales.reduce((s, v) => s + (v.salePrice || 0), 0) };
     });
   }, [isDeliveryVertical, deliveryScope, scopedDeliveryOrders, daysRange, soldThisMonth]);
 
@@ -1372,7 +1379,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
         const dayStr = format(d, 'yyyy-MM-dd');
         return {
           day: dayStr,
-          label: format(d, 'd MMM', { locale: es }),
+          label: chartDayAxisLabel(d),
           value: countOrdersCreatedOnDay(scopedDeliveryOrders, dayStr),
         };
       });
@@ -1383,7 +1390,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
         const created = l.createdAt ? new Date(l.createdAt) : null;
         return created && format(startOfDay(created), 'yyyy-MM-dd') === dayStr;
       }).length;
-      return { day: dayStr, label: format(d, 'd MMM', { locale: es }), value: count };
+      return { day: dayStr, label: chartDayAxisLabel(d), value: count };
     });
   }, [isDeliveryVertical, deliveryScope, scopedDeliveryOrders, daysRange, leads]);
 
@@ -1417,7 +1424,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
       soldProductFamilies,
       (dayKey) => {
         const d = daysRange.find((x) => format(x, 'yyyy-MM-dd') === dayKey);
-        return d ? format(d, 'd MMM', { locale: es }) : dayKey.slice(5);
+        return d ? chartDayAxisLabel(d) : dayKey.slice(5).replace('-', '/');
       },
     );
   }, [isDeliveryVertical, scopedDeliveryOrders, soldProductFamilies, daysRange]);
@@ -1580,6 +1587,24 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
           />
         ) : null}
 
+        {isDeliveryVertical && deliveryPanelStage >= 2 && financeUserId ? (
+          <DashboardLazyPanel
+            title="Ranking productos · margen"
+            hint="Semana / mes · por tienda · escandallo · abrir"
+            icon={<Package className="w-4 h-4" />}
+            storageKey={`dash_lazy_sold_margin:${dashboardConfigScope}`}
+          >
+            <DeliverySoldProductMarginPanel
+              orders={scopedDeliveryOrders}
+              userId={financeUserId}
+              businessId={businessId}
+              brands={deliveryBrands}
+              accountBusinessCount={businesses.length || 1}
+              businessType={currentBusiness?.businessType}
+            />
+          </DashboardLazyPanel>
+        ) : null}
+
         {isDeliveryVertical && deliveryPanelStage >= 3 ? (
           <WorkerPayMonthPanel
             summary={workerPayMonth}
@@ -1640,7 +1665,9 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
             <DraggableWidget id="charts" {...dragProps}>
               <DashboardLazyPanel
                 title="Gráficas principales"
-                hint="Entregas, pedidos y productos · abrir para cargar"
+                hint={isDeliveryVertical
+                  ? 'Cobrado €, pedidos creados y productos · abrir para cargar'
+                  : 'Ventas, leads y más · abrir para cargar'}
                 icon={<BarChart3 className="w-4 h-4" />}
                 storageKey={`dash_lazy_charts:${dashboardConfigScope}`}
               >
@@ -1659,16 +1686,23 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                   </div>
                 ) : (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  {/* Ventas 14 días */}
+                  {/* Cobrado / ventas 14 días */}
                   <div className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
-                    <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
-                      <div className="flex items-center gap-2">
-                        <BarChart3 className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-                        <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
-                          {isDeliveryVertical ? 'Entregas (14 días)' : 'Ventas (14 días)'}
-                        </p>
+                    <div className="flex items-center justify-between gap-2 px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <BarChart3 className="w-4 h-4 text-gray-500 dark:text-gray-400 shrink-0" />
+                          <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
+                            {isDeliveryVertical ? 'Cobrado (14 días)' : 'Ventas (14 días)'}
+                          </p>
+                        </div>
+                        {isDeliveryVertical && (
+                          <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 pl-6">
+                            Euros de pedidos pagados · por día de cobro
+                          </p>
+                        )}
                       </div>
-                      <PeriodBadge period="14d" variant="minimal" className="text-[9px] opacity-50" />
+                      <PeriodBadge period="14d" variant="minimal" className="text-[9px] opacity-50 shrink-0" />
                     </div>
                     <div className="p-4 h-48">
                       <ResponsiveContainer width="100%" height="100%">
@@ -1688,8 +1722,9 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                               const pt = payload[0].payload as DailyPoint;
                               return (
                                 <div className="bg-gray-900 text-white text-[10px] font-semibold px-2.5 py-1.5 rounded-lg shadow-lg">
-                                  <span className="opacity-60 mr-1">{pt.label}</span>
+                                  <span className="opacity-60 mr-1">{formatDateEs(pt.day)}</span>
                                   {formatEur(pt.value)}
+                                  {isDeliveryVertical ? ' cobrados' : ''}
                                 </div>
                               );
                             }}
@@ -1700,16 +1735,23 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                     </div>
                   </div>
 
-                  {/* Pedidos / leads 14 días */}
+                  {/* Pedidos creados / leads 14 días */}
                   <div className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
-                    <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
-                      <div className="flex items-center gap-2">
-                        <Users className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-                        <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
-                          {isDeliveryVertical ? 'Pedidos nuevos (14 días)' : 'Nuevos leads (14 días)'}
-                        </p>
+                    <div className="flex items-center justify-between gap-2 px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <Users className="w-4 h-4 text-gray-500 dark:text-gray-400 shrink-0" />
+                          <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
+                            {isDeliveryVertical ? 'Pedidos creados (14 días)' : 'Nuevos leads (14 días)'}
+                          </p>
+                        </div>
+                        {isDeliveryVertical && (
+                          <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 pl-6">
+                            Nº de pedidos · por día de creación (incluye cancelados)
+                          </p>
+                        )}
                       </div>
-                      <PeriodBadge period="14d" variant="minimal" className="text-[9px] opacity-50" />
+                      <PeriodBadge period="14d" variant="minimal" className="text-[9px] opacity-50 shrink-0" />
                     </div>
                     <div className="p-4 h-48">
                       <ResponsiveContainer width="100%" height="100%">
@@ -1729,8 +1771,8 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                               const pt = payload[0].payload as DailyPoint;
                               return (
                                 <div className="bg-gray-900 text-white text-[10px] font-semibold px-2.5 py-1.5 rounded-lg shadow-lg">
-                                  <span className="opacity-60 mr-1">{pt.label}</span>
-                                  {pt.value} {isDeliveryVertical ? 'pedidos' : 'leads'}
+                                  <span className="opacity-60 mr-1">{formatDateEs(pt.day)}</span>
+                                  {pt.value} {isDeliveryVertical ? 'pedidos creados' : 'leads'}
                                 </div>
                               );
                             }}
@@ -1823,22 +1865,35 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
           <div style={{ order: getWidgetOrder('operations') }}>
             <DraggableWidget id="operations" {...dragProps}>
               <DashboardLazyPanel
-                title="Operativa del negocio"
-                hint="Pedidos, clientes, equipo · abrir para ver"
-                icon={<Activity className="w-4 h-4" />}
+                title={isDeliveryVertical ? 'Clientes (CRM)' : 'Operativa del negocio'}
+                hint={isDeliveryVertical
+                  ? 'Cartera, altas y ritmo · abrir para ver'
+                  : 'Pedidos, clientes, equipo · abrir para ver'}
+                icon={isDeliveryVertical ? <Users className="w-4 h-4" /> : <Activity className="w-4 h-4" />}
                 storageKey={`dash_lazy_ops:${dashboardConfigScope}`}
               >
-                <div className={`grid grid-cols-2 gap-3 ${serverData?.salesClosure ? 'lg:grid-cols-5' : 'lg:grid-cols-4'}`}>
+                <div className={`grid grid-cols-2 gap-3 ${
+                  isDeliveryVertical
+                    ? 'lg:grid-cols-4'
+                    : (serverData?.salesClosure ? 'lg:grid-cols-5' : 'lg:grid-cols-4')
+                }`}>
                   <OperativeBlock
                     vertical={vertical}
                     stockCount={stockCount}
                     oportunidades={oportunidades}
                     newClientsMonth={crmNewClientsMonth}
+                    newClientsPrevMonth={crmNewClientsPrevMonth}
+                    newClientsWeek={crmNewClientsWeek}
+                    newClientsToday={crmNewClientsToday}
                     openIncidents={openIncidents}
                     cobrosCount={cobrosCount}
                     activeWorkers={activeWorkers}
                     pendingDeliveries={pendingDeliveriesKpi}
-                    loading={serverLoading || verticalKpiLoading}
+                    loading={
+                      isDeliveryVertical
+                        ? (crmClientsCount == null && (serverLoading || deliveryDataLoading))
+                        : (serverLoading || verticalKpiLoading)
+                    }
                     salesClosure={serverData?.salesClosure}
                     verticalKpi={verticalKpi}
                   />
@@ -2026,10 +2081,16 @@ function FinanceStat({ label, value, color, bg, icon, sub }: {
 // ─── Operative block (adapts to vertical) ───────────────────────────────────
 
 function OperativeBlock({
-  vertical, stockCount, oportunidades, newClientsMonth, openIncidents, cobrosCount, activeWorkers, pendingDeliveries, loading,
+  vertical, stockCount, oportunidades, newClientsMonth, newClientsPrevMonth, newClientsWeek, newClientsToday,
+  openIncidents, cobrosCount, activeWorkers, pendingDeliveries, loading,
   salesClosure, verticalKpi,
 }: {
-  vertical: string; stockCount: number; oportunidades: number; newClientsMonth?: number | null; openIncidents: number;
+  vertical: string; stockCount: number; oportunidades: number;
+  newClientsMonth?: number | null;
+  newClientsPrevMonth?: number | null;
+  newClientsWeek?: number | null;
+  newClientsToday?: number | null;
+  openIncidents: number;
   cobrosCount: number; activeWorkers: number; pendingDeliveries: number; loading: boolean;
   salesClosure?: SalesClosureKpis;
   verticalKpi?: VerticalKpiSnapshot | null;
@@ -2038,9 +2099,77 @@ function OperativeBlock({
 
   const items = useMemo(() => {
     const crmRoute = clientsRouteForVertical(vertical);
-    const crmTitle = vertical === 'delivery' || vertical === 'restaurant' ? 'Clientes' : 'Oportunidades CRM';
+
+    // Delivery: bloque CRM (cartera + altas), no pedidos/caja/fichajes.
+    if (vertical === 'delivery') {
+      const month = typeof newClientsMonth === 'number' ? newClientsMonth : 0;
+      const prevMonth = typeof newClientsPrevMonth === 'number' ? newClientsPrevMonth : null;
+      const week = typeof newClientsWeek === 'number' ? newClientsWeek : 0;
+      const today = typeof newClientsToday === 'number' ? newClientsToday : 0;
+      const monthDelta = prevMonth == null ? null : month - prevMonth;
+      const monthSub =
+        prevMonth == null
+          ? 'Altas orgánicas del mes'
+          : monthDelta === 0
+            ? `Igual que el mes ant. (${prevMonth})`
+            : monthDelta > 0
+              ? `+${monthDelta} vs mes ant. (${prevMonth})`
+              : `${monthDelta} vs mes ant. (${prevMonth})`;
+      const rhythmValue = monthDelta == null ? '—' : (monthDelta > 0 ? `+${monthDelta}` : String(monthDelta));
+      const rhythmBad = monthDelta != null && monthDelta < 0;
+      const rhythmOk = monthDelta != null && monthDelta > 0;
+
+      return [
+        {
+          title: 'Cartera',
+          value: String(oportunidades),
+          sub: 'Clientes registrados',
+          icon: <Users className="w-4 h-4" />,
+          bg: 'bg-blue-50 dark:bg-blue-950/30',
+          text: 'text-blue-600',
+          route: crmRoute,
+        },
+        {
+          title: 'Nuevos este mes',
+          value: String(month),
+          sub: monthSub,
+          icon: <UserPlus className="w-4 h-4" />,
+          bg: month > 0 ? 'bg-emerald-50 dark:bg-emerald-950/30' : 'bg-gray-50 dark:bg-gray-800',
+          text: month > 0 ? 'text-emerald-600' : 'text-gray-500',
+          route: crmRoute,
+        },
+        {
+          title: 'Nuevos esta semana',
+          value: String(week),
+          sub: today > 0 ? `${today} hoy` : 'Últimos 7 días',
+          icon: <Calendar className="w-4 h-4" />,
+          bg: week > 0 ? 'bg-cyan-50 dark:bg-cyan-950/30' : 'bg-gray-50 dark:bg-gray-800',
+          text: week > 0 ? 'text-cyan-600' : 'text-gray-500',
+          route: crmRoute,
+        },
+        {
+          title: 'Ritmo vs mes ant.',
+          value: rhythmValue,
+          sub: rhythmBad
+            ? 'Menos altas que el mes pasado'
+            : rhythmOk
+              ? 'Más altas que el mes pasado'
+              : 'Comparativa de altas',
+          icon: rhythmBad ? <UserMinus className="w-4 h-4" /> : <TrendingUp className="w-4 h-4" />,
+          bg: rhythmBad
+            ? 'bg-red-50 dark:bg-red-950/30'
+            : rhythmOk
+              ? 'bg-emerald-50 dark:bg-emerald-950/30'
+              : 'bg-gray-50 dark:bg-gray-800',
+          text: rhythmBad ? 'text-red-600' : rhythmOk ? 'text-emerald-600' : 'text-gray-500',
+          route: crmRoute,
+        },
+      ];
+    }
+
+    const crmTitle = vertical === 'restaurant' ? 'Clientes' : 'Oportunidades CRM';
     const crmSub =
-      vertical === 'delivery' || vertical === 'restaurant'
+      vertical === 'restaurant'
         ? (typeof newClientsMonth === 'number' && newClientsMonth > 0
           ? `+${newClientsMonth} nuevo${newClientsMonth === 1 ? '' : 's'} este mes`
           : 'Fichas de cliente')
@@ -2055,7 +2184,6 @@ function OperativeBlock({
     const verticalSpecific: Record<string, { title: string; value: string; sub: string; icon: React.ReactNode; bg: string; text: string; route: string }> = {
       carDealership: { title: 'Stock vehículos', value: String(stockCount), sub: 'Disponibles', icon: <Car className="w-4 h-4" />, bg: 'bg-blue-50 dark:bg-blue-950/30', text: 'text-blue-600', route: '/saas/vehicles' },
       workshop: { title: 'Órdenes taller', value: '—', sub: 'Abiertas', icon: <Wrench className="w-4 h-4" />, bg: 'bg-orange-50 dark:bg-orange-950/30', text: 'text-orange-600', route: '/saas/workshop' },
-      delivery: { title: 'Pedidos activos', value: String(pendingDeliveries || 0), sub: 'En curso', icon: <Truck className="w-4 h-4" />, bg: pendingDeliveries > 0 ? 'bg-cyan-50 dark:bg-cyan-950/30' : 'bg-gray-50 dark:bg-gray-800', text: pendingDeliveries > 0 ? 'text-cyan-600' : 'text-gray-500', route: '/saas/delivery-ops' },
       restaurant: { title: 'Centro operativo', value: '—', sub: 'Sala, cocina y caja', icon: <UtensilsCrossed className="w-4 h-4" />, bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-amber-600', route: '/saas/restaurant-ops' },
       cleaning: { title: 'Servicios hoy', value: '—', sub: 'Programados', icon: <CalendarCheck className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/cleaning-hub' },
       gym: { title: 'Socios activos', value: '—', sub: 'Registrados', icon: <Users className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/gym-hub' },
@@ -2103,7 +2231,10 @@ function OperativeBlock({
       });
     }
     return row;
-  }, [vertical, stockCount, oportunidades, newClientsMonth, cobrosCount, activeWorkers, pendingDeliveries, salesClosure, verticalKpi]);
+  }, [
+    vertical, stockCount, oportunidades, newClientsMonth, newClientsPrevMonth, newClientsWeek, newClientsToday,
+    cobrosCount, activeWorkers, pendingDeliveries, salesClosure, verticalKpi,
+  ]);
 
   return (
     <>

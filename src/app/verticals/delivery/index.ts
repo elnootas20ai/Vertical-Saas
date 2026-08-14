@@ -45,6 +45,15 @@ export { DeliveryOpsInsightsPanel } from './DeliveryOpsInsightsPanel';
 export { DeliveryMobileDashboardBlocks } from './DeliveryMobileDashboardBlocks';
 export { DeliveryMobileHomeAlerts } from './DeliveryMobileHomeAlerts';
 
+export { DeliverySoldProductMarginPanel } from './DeliverySoldProductMarginPanel';
+export {
+  buildSoldProductMarginRanking,
+  soldMarginPeriodDayKeys,
+  type SoldMarginPeriod,
+  type SoldMarginRankRow,
+  type SoldMarginRankResult,
+} from './soldProductMarginRanking';
+
 export {
   DELIVERY_INFORMES_CATALOG,
   DELIVERY_INFORMES_CATEGORIES,

@@ -1,8 +1,13 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { isDeliveryBrandActivationComplete, isDefaultCommercialBrand, resolveBrandSetupContext, sortBrandsForDisplay } from '../../lib/brandUtils';
+import { isDeliveryBrandActivationComplete, isDefaultBrandNamePlaceholder, isDefaultCommercialBrand, resolveBrandSetupContext, sortBrandsForDisplay } from '../../lib/brandUtils';
 import { DELIVERY_MARCA_SETTINGS_PATH } from '../../lib/deliveryActivationGates';
+import {
+  DELIVERY_OPS_HOME_PATH,
+  HELADERIA_OPS_HOME_PATH,
+  RESTAURANT_OPS_HOME_PATH,
+} from '../../lib/retailOpsPaths';
 import { notifyDeliveryBrandsChanged, notifyDeliveryCatalogChanged, notifyDeliveryConfigChanged, resolveBusinessScopeId, DELIVERY_CONFIG_CHANGED } from '../../lib/deliverySetup';
 import {
   isDeliveryOpsBusinessType,
@@ -5411,29 +5416,56 @@ export function CatalogPage() {
 
   const brandSetupCtx = useMemo(
     () =>
-      resolveBrandSetupContext(usesTpvCatalogUi, activeStore.retailWorkCenters, {
-        storesConfirmed:
-          retailStoreCount > 0 ||
-          activeStore.allPointsOfSale.length > 0,
-      }),
-    [usesTpvCatalogUi, activeStore.retailWorkCenters, activeStore.allPointsOfSale.length, retailStoreCount],
+      resolveBrandSetupContext(
+        // Igual que Ajustes → Marca: solo delivery/heladería exigen «tipo de línea».
+        // Bar/restaurante no: si no, sale «Marca sin completar» con marcas ya válidas.
+        isDeliveryOps || isHeladeriaCatalog,
+        activeStore.retailWorkCenters,
+        {
+          storesConfirmed:
+            retailStoreCount > 0 ||
+            activeStore.allPointsOfSale.length > 0,
+        },
+      ),
+    [
+      isDeliveryOps,
+      isHeladeriaCatalog,
+      activeStore.retailWorkCenters,
+      activeStore.allPointsOfSale.length,
+      retailStoreCount,
+    ],
   );
 
   const brandReady = useMemo(() => {
     if (!usesTpvCatalogUi) return true;
     if (brands.length === 0) return false;
+    // Bar/restaurante: basta con una marca activa con nombre real (sin reglas delivery).
+    if (isRestaurantCatalog) {
+      return brands.some(
+        (b) => b.active !== false && !(isDefaultCommercialBrand(b) && isDefaultBrandNamePlaceholder(b.name)),
+      );
+    }
     return isDeliveryBrandActivationComplete(brands, brandSetupCtx);
-  }, [usesTpvCatalogUi, brands, brandSetupCtx]);
+  }, [usesTpvCatalogUi, isRestaurantCatalog, brands, brandSetupCtx]);
 
   /** No mostrar el aviso hasta tener marcas + tiendas cargadas (evita flash al entrar). */
   const brandCheckReady =
     pageReady && Boolean(businessId) && !brandsLoading && !activeStore.loading;
   const showBrandIncompleteBanner = usesTpvCatalogUi && brandCheckReady && !brandReady;
 
+  const catalogBackTo = isRestaurantCatalog
+    ? RESTAURANT_OPS_HOME_PATH
+    : isHeladeriaCatalog
+      ? HELADERIA_OPS_HOME_PATH
+      : DELIVERY_OPS_HOME_PATH;
+  const catalogSubtitle = isRestaurantCatalog
+    ? 'Carta · Ingredientes · Inventario · Compras · Consumos'
+    : 'Menú · Ingredientes · Inventario · Compras · Consumos';
+
   const catalogBusy = loading && catalogItems.length === 0;
 
   return (
-    <Layout backTo="/saas/delivery-ops" title="Catálogo" subtitle="Menú · Ingredientes · Inventario · Compras · Consumos">
+    <Layout backTo={catalogBackTo} title="Catálogo" subtitle={catalogSubtitle}>
       <div className="space-y-3">
         {!pageReady && (
           <CatalogTabLoadingState phase="session" />
@@ -5446,9 +5478,13 @@ export function CatalogPage() {
             <div className="flex items-start gap-3 text-left">
               <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
               <div>
-                <p className="font-semibold text-amber-950 dark:text-amber-100">Marca sin completar</p>
+                <p className="font-semibold text-amber-950 dark:text-amber-100">
+                  {isRestaurantCatalog ? 'Falta configurar la marca' : 'Marca sin completar'}
+                </p>
                 <p className="mt-1 text-sm text-amber-900/80 dark:text-amber-200/80">
-                  Puedes usar el catálogo igualmente. Completa la marca en Ajustes para carta, categorías y precios.
+                  {isRestaurantCatalog
+                    ? 'Puedes usar el catálogo. Crea o activa tu marca en Ajustes → Marca para la carta de sala y barra.'
+                    : 'Puedes usar el catálogo igualmente. Completa la marca en Ajustes para carta, categorías y precios.'}
                 </p>
               </div>
             </div>

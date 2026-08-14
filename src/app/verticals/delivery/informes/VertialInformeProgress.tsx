@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../../lib/vertialUiTokens';
+import { formatMoneyEs, formatNumberEs } from '../../../lib/formatNumberEs';
 import { Download, FileSpreadsheet, FileText } from 'lucide-react';
 
 export type InformeExportFormat = 'csv' | 'xlsx' | 'pdf';
@@ -33,16 +34,112 @@ export function VertialInformeProgress({
   );
 }
 
+const MONEY_KEYS = new Set([
+  'Entradas', 'Salidas', 'Neto', 'Saldo', 'Apertura', 'Cierre',
+  'Ingresos', 'Gastos', 'Resultado', 'Total', 'Base', 'IVA', 'Importe',
+  'Pagado', 'Pendiente', 'EBITDA', 'COGS', 'Opex', 'Esperado', 'Contado', 'Diferencia',
+]);
+
+function formatCell(key: string, value: unknown): string {
+  if (value == null || value === '') return '—';
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    if (MONEY_KEYS.has(key) || /pct|margen|desv/i.test(key)) {
+      if (/pct|margen|desv/i.test(key)) {
+        return `${formatNumberEs(value, { minFraction: 1, maxFraction: 1 })} %`;
+      }
+      return formatMoneyEs(value);
+    }
+    return formatNumberEs(value, { minFraction: 0, maxFraction: 2 });
+  }
+  return String(value);
+}
+
+function InformeRowsPreview({ rows }: { rows: Record<string, unknown>[] }) {
+  const sections = useMemo(() => {
+    if (!rows.length) return [] as { title: string; rows: Record<string, unknown>[] }[];
+    const hasSeccion = rows.some((r) => r.Seccion != null && String(r.Seccion).trim() !== '');
+    if (!hasSeccion) {
+      return [{ title: 'Detalle', rows }];
+    }
+    const map = new Map<string, Record<string, unknown>[]>();
+    for (const r of rows) {
+      const title = String(r.Seccion || 'Sin sección').trim() || 'Sin sección';
+      const list = map.get(title) || [];
+      list.push(r);
+      map.set(title, list);
+    }
+    return [...map.entries()].map(([title, sectionRows]) => ({ title, rows: sectionRows }));
+  }, [rows]);
+
+  const displayKeys = useMemo(() => {
+    if (!rows.length) return [] as string[];
+    const keys = Object.keys(rows[0]);
+    return keys.filter((k) => k !== 'Orden' && k !== 'Seccion');
+  }, [rows]);
+
+  if (!rows.length) {
+    return (
+      <p className="text-sm text-stone-500">Sin filas en este informe.</p>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {sections.map((section) => (
+        <div key={section.title} className="space-y-2">
+          <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100 border-b border-stone-200 dark:border-stone-700 pb-1.5">
+            {section.title}
+          </h3>
+          <div className="overflow-x-auto rounded-xl border border-stone-200 dark:border-stone-700">
+            <table className="min-w-full text-left text-xs">
+              <thead className="bg-stone-50 dark:bg-stone-800/80">
+                <tr>
+                  {displayKeys.map((k) => (
+                    <th
+                      key={k}
+                      className="px-3 py-2 font-semibold text-stone-500 dark:text-stone-400 whitespace-nowrap"
+                    >
+                      {k}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-stone-100 dark:divide-stone-800">
+                {section.rows.map((row, idx) => (
+                  <tr key={`${section.title}-${idx}`} className="bg-white dark:bg-stone-900">
+                    {displayKeys.map((k) => (
+                      <td
+                        key={k}
+                        className={`px-3 py-2 text-stone-800 dark:text-stone-200 ${
+                          MONEY_KEYS.has(k) ? 'tabular-nums text-right font-medium' : ''
+                        }`}
+                      >
+                        {formatCell(k, row[k])}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function VertialInformeReadyCard({
   title,
   summary,
   rowCount,
+  rows,
   onDownload,
   onBack,
 }: {
   title: string;
   summary: string;
   rowCount: number;
+  rows?: Record<string, unknown>[];
   onDownload: (format: InformeExportFormat) => void | Promise<void>;
   onBack: () => void;
 }) {
@@ -70,7 +167,14 @@ export function VertialInformeReadyCard({
           {rowCount.toLocaleString('es-ES')} filas · CSV / Excel / PDF
         </p>
       </div>
-      <div className="flex flex-wrap gap-3">
+
+      {rows && rows.length > 0 ? (
+        <div className="max-h-[min(70vh,820px)] overflow-y-auto overscroll-contain pr-1 -mr-1">
+          <InformeRowsPreview rows={rows} />
+        </div>
+      ) : null}
+
+      <div className="flex flex-wrap gap-3 sticky bottom-0 pt-2 bg-white dark:bg-stone-900">
         <button
           type="button"
           className={VERTIAL_BTN_PRIMARY}
