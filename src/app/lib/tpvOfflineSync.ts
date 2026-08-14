@@ -50,11 +50,28 @@ async function syncRegisterSession(
     await updateTpvRegisterSessionRequest(userId, localSession);
     return true;
   }
-  const mergedTxs = mergeTpvRegisterTransactions(remote.transactions, localSession.transactions);
+  const mergedTxs = mergeTpvRegisterTransactions(remote.transactions, localSession.transactions, {
+    purgedSaleTxIds: [
+      ...(Array.isArray(remote.purgedSaleTxIds) ? remote.purgedSaleTxIds : []),
+      ...(Array.isArray(localSession.purgedSaleTxIds) ? localSession.purgedSaleTxIds : []),
+    ],
+    purgedOrderSaleIds: [
+      ...(Array.isArray(remote.purgedOrderSaleIds) ? remote.purgedOrderSaleIds : []),
+      ...(Array.isArray(localSession.purgedOrderSaleIds) ? localSession.purgedOrderSaleIds : []),
+    ],
+  });
+  const purgedOrderSaleIds = [...new Set([
+    ...(Array.isArray(remote.purgedOrderSaleIds) ? remote.purgedOrderSaleIds : []),
+    ...(Array.isArray(localSession.purgedOrderSaleIds) ? localSession.purgedOrderSaleIds : []),
+  ].map((id) => String(id || '').trim()).filter(Boolean))];
+  const purgedSaleTxIds = [...new Set([
+    ...(Array.isArray(remote.purgedSaleTxIds) ? remote.purgedSaleTxIds : []),
+    ...(Array.isArray(localSession.purgedSaleTxIds) ? localSession.purgedSaleTxIds : []),
+  ].map((id) => String(id || '').trim()).filter(Boolean))];
   const linkedOrderIds = [...new Set([
     ...(remote.linkedOrderIds || []),
     ...(localSession.linkedOrderIds || []),
-  ])];
+  ])].filter((id) => !purgedOrderSaleIds.includes(String(id)));
   const salesByChannel: Record<string, number> = {};
   for (const t of mergedTxs) {
     if (t.type === 'sale' && t.channel) {
@@ -105,6 +122,8 @@ async function syncRegisterSession(
     transactions: mergedTxs,
     linkedOrderIds,
     salesByChannel,
+    purgedSaleTxIds,
+    purgedOrderSaleIds,
   });
   return true;
 }

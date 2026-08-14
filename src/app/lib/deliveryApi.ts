@@ -2213,6 +2213,15 @@ export interface TpvRegisterSession {
   /** Movimientos de caja anulados (motivo obligatorio; salen en el cierre). */
   voidedCashMovements?: TpvVoidedCashMovement[];
 
+  /**
+   * Ventas quitadas al cancelar pedido (ids de tx).
+   * El sync offline no debe volver a meterlas.
+   */
+  purgedSaleTxIds?: string[];
+
+  /** Pedidos cuyas ventas se quitaron de caja al cancelar. */
+  purgedOrderSaleIds?: string[];
+
   salesByChannel?: Record<string, number>;
 
   linkedOrderIds?: string[];

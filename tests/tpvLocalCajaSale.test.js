@@ -64,4 +64,19 @@ describe('tpvLocalCajaSale', () => {
     expect(sales.some((t) => t.orderId === 'dord-2')).toBe(true);
     expect(merged.some((t) => t.id === 's2')).toBe(true);
   });
+
+  it('merge local no resucita ventas purgadas tras cancelar', () => {
+    const server = [
+      { id: 's-ok', type: 'sale', orderId: 'dord-ok', amount: 20, date: '2026-01-01T10:00:00Z' },
+    ];
+    const local = [
+      { id: 's-ghost', type: 'sale', orderId: 'dord-cancel', amount: 63.8, date: '2026-01-01T11:00:00Z' },
+      { id: 's-ok', type: 'sale', orderId: 'dord-ok', amount: 20, date: '2026-01-01T10:00:00Z' },
+    ];
+    const merged = mergeTpvRegisterTransactions(server, local, {
+      purgedOrderSaleIds: ['dord-cancel'],
+      purgedSaleTxIds: ['s-ghost'],
+    });
+    expect(merged.map((t) => t.id)).toEqual(['s-ok']);
+  });
 });

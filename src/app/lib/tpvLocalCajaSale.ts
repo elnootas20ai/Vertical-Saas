@@ -153,19 +153,38 @@ export async function ensureLocalCajaSaleForOrder(
   }
 }
 
-/** Merge txs servidor + local sin duplicar ventas del mismo pedido. */
+/** Merge txs servidor + local sin duplicar ventas del mismo pedido ni resucitar purgadas. */
 export function mergeTpvRegisterTransactions(
   serverTxs: TpvRegisterTransaction[] | undefined,
   localTxs: TpvRegisterTransaction[] | undefined,
+  opts?: {
+    purgedSaleTxIds?: string[];
+    purgedOrderSaleIds?: string[];
+  },
 ): TpvRegisterTransaction[] {
+  const purgedTx = new Set(
+    (opts?.purgedSaleTxIds || []).map((id) => String(id || '').trim()).filter(Boolean),
+  );
+  const purgedOrders = new Set(
+    (opts?.purgedOrderSaleIds || []).map((id) => String(id || '').trim()).filter(Boolean),
+  );
+  const isPurgedSale = (t: TpvRegisterTransaction) => {
+    if (t?.type !== 'sale') return false;
+    const id = String(t.id || '').trim();
+    if (id && purgedTx.has(id)) return true;
+    const oid = String(t.orderId || t.linkedDeliveryOrderId || '').trim();
+    return Boolean(oid && purgedOrders.has(oid));
+  };
   const byId = new Map<string, TpvRegisterTransaction>();
   for (const t of serverTxs || []) {
-    if (t?.id) byId.set(String(t.id), t);
+    if (!t?.id || isPurgedSale(t)) continue;
+    byId.set(String(t.id), t);
   }
   for (const t of localTxs || []) {
     if (!t?.id) continue;
     const id = String(t.id);
     if (byId.has(id)) continue;
+    if (isPurgedSale(t)) continue;
     if (t.type === 'sale') {
       const oid = String(t.orderId || t.linkedDeliveryOrderId || '').trim();
       const onum = String(t.orderNumber || '').trim();

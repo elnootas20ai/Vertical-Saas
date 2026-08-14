@@ -7919,6 +7919,14 @@ export function buildTpvRegisterSessionDocument(userId, data = {}, existing = nu
     voidedCashMovements: Array.isArray(data.voidedCashMovements)
       ? data.voidedCashMovements
       : (existing?.voidedCashMovements || []),
+    /** Ventas quitadas al cancelar pedido (ids de tx) — no resucitar en sync tablet. */
+    purgedSaleTxIds: Array.isArray(data.purgedSaleTxIds)
+      ? [...new Set(data.purgedSaleTxIds.map((id) => String(id || '').trim()).filter(Boolean))]
+      : (Array.isArray(existing?.purgedSaleTxIds) ? existing.purgedSaleTxIds : []),
+    /** Pedidos cuyas ventas se quitaron de caja al cancelar. */
+    purgedOrderSaleIds: Array.isArray(data.purgedOrderSaleIds)
+      ? [...new Set(data.purgedOrderSaleIds.map((id) => String(id || '').trim()).filter(Boolean))]
+      : (Array.isArray(existing?.purgedOrderSaleIds) ? existing.purgedOrderSaleIds : []),
     salesByChannel: data.salesByChannel || existing?.salesByChannel || {},
     aggregatorClosingTotals:
       data.aggregatorClosingTotals
@@ -8030,6 +8038,8 @@ export function sanitizeTpvRegisterSession(doc, opts = {}) {
 
     incidents: Array.isArray(doc.incidents) ? doc.incidents : [],
     voidedCashMovements: Array.isArray(doc.voidedCashMovements) ? doc.voidedCashMovements : [],
+    purgedSaleTxIds: Array.isArray(doc.purgedSaleTxIds) ? doc.purgedSaleTxIds : [],
+    purgedOrderSaleIds: Array.isArray(doc.purgedOrderSaleIds) ? doc.purgedOrderSaleIds : [],
     salesByChannel: doc.salesByChannel || {},
     aggregatorClosingTotals: doc.aggregatorClosingTotals || undefined,
     aggregatorClosingCash: doc.aggregatorClosingCash || undefined,

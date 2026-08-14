@@ -120,7 +120,10 @@ import {
   ensureDeliveryOrderRefundServer,
 } from '../services/deliveryOrderFinanceService.js';
 import { triggerReactiveAlert } from '../services/deliveryAlertEngine.js';
-import { mergeTpvRegisterTransactions } from '../services/tpvRegisterTransactionMerge.js';
+import {
+  mergeTpvRegisterTransactions,
+  unionPurgedIds,
+} from '../services/tpvRegisterTransactionMerge.js';
 import {
   canEmitCatalogStockAlerts,
   filterStockTrackedCatalogItems,
@@ -1302,8 +1305,30 @@ async function autoRegisterTpvReturnForOrder(req, userId, orderDoc, {
   });
 }
 
+function isTpvSaleTxForOrder(t, orderId, orderNumber) {
+  const oid = String(t?.orderId || t?.linkedDeliveryOrderId || '').trim();
+  const num = String(t?.orderNumber || '').trim();
+  return (orderId && oid === orderId) || (orderNumber && num === orderNumber);
+}
+
+function findTpvSessionForOrderSalePurge(allSessions, orderPdvId, orderId, orderNumber) {
+  const pdvSessions = (Array.isArray(allSessions) ? allSessions : []).filter((s) => {
+    if (!s || s.deletedAt) return false;
+    return String(s.pointOfSaleId || '').trim() === String(orderPdvId || '').trim();
+  });
+  const open = findOpenTpvRegisterSessionForPointOfSale(pdvSessions, orderPdvId);
+  if (open) return open;
+  // Caja ya cerrada: quitar ventas del pedido en la sesión del PDV que aún las tenga.
+  const withSales = pdvSessions
+    .filter((s) => (Array.isArray(s.transactions) ? s.transactions : [])
+      .some((t) => t?.type === 'sale' && isTpvSaleTxForOrder(t, orderId, orderNumber)))
+    .sort((a, b) => String(b.openedAt || '').localeCompare(String(a.openedAt || '')));
+  return withSales[0] || null;
+}
+
 /**
- * Cancelación: elimina las ventas del pedido en la caja abierta del PDV (como si no hubieran existido).
+ * Cancelación: elimina las ventas del pedido en la caja del PDV (abierta o la que aún las tenga).
+ * Deja lápidas (`purged*`) para que un sync offline de tablet no las resucite.
  * No crea movimiento de devolución.
  * `preloadedSessions`: evita un _all_docs extra en el primer intento (mismo request).
  */
@@ -1322,39 +1347,47 @@ async function removeTpvOrderSalesFromOpenSession(req, userId, orderDoc, { calle
     const allSessions = (attempt === 0 && Array.isArray(preloadedSessions))
       ? preloadedSessions
       : await listTpvRegisterSessionsByUser(req, userId);
-    const openSession = findOpenTpvRegisterSessionForPointOfSale(allSessions, orderPdvId);
-    if (!openSession) {
+    const targetSession = findTpvSessionForOrderSalePurge(allSessions, orderPdvId, orderId, orderNumber);
+    if (!targetSession) {
       return {
         status: 'no_open_session',
-        message: 'No hay caja abierta en esta tienda para quitar la venta cancelada.',
+        message: 'No hay caja en esta tienda para quitar la venta cancelada.',
       };
     }
 
-    const txs = Array.isArray(openSession.transactions) ? openSession.transactions : [];
-    const isOrderTx = (t) => {
-      const oid = String(t?.orderId || t?.linkedDeliveryOrderId || '').trim();
-      const num = String(t?.orderNumber || '').trim();
-      return (orderId && oid === orderId) || (orderNumber && num === orderNumber);
-    };
-    const removed = txs.filter((t) => t?.type === 'sale' && isOrderTx(t));
-    if (removed.length === 0) {
-      return { status: 'already_registered', message: 'Esa venta ya no estaba en la caja abierta.' };
-    }
-
-    const kept = txs.filter((t) => !(t?.type === 'sale' && isOrderTx(t)));
+    const txs = Array.isArray(targetSession.transactions) ? targetSession.transactions : [];
+    const removed = txs.filter((t) => t?.type === 'sale' && isTpvSaleTxForOrder(t, orderId, orderNumber));
+    const kept = txs.filter((t) => !(t?.type === 'sale' && isTpvSaleTxForOrder(t, orderId, orderNumber)));
     const salesByChannel = {};
     for (const t of kept) {
       if (t.type === 'sale' && t.channel) {
         salesByChannel[t.channel] = (salesByChannel[t.channel] || 0) + Number(t.amount || 0);
       }
     }
-    const linkedOrderIds = (openSession.linkedOrderIds || []).filter((id) => String(id) !== orderId);
+    const linkedOrderIds = (targetSession.linkedOrderIds || []).filter((id) => String(id) !== orderId);
+    // Lápidas: el sync de tablet no puede resucitar estas ventas tras cancelar.
+    const purgedSaleTxIds = unionPurgedIds(
+      targetSession.purgedSaleTxIds,
+      removed.map((t) => t.id),
+    );
+    const purgedOrderSaleIds = unionPurgedIds(targetSession.purgedOrderSaleIds, [orderId]);
+    const alreadyPurged = (targetSession.purgedOrderSaleIds || []).map(String).includes(orderId);
+    if (removed.length === 0 && alreadyPurged) {
+      return { status: 'already_registered', message: 'Esa venta ya no estaba en la caja.' };
+    }
+    if (removed.length === 0 && purgedOrderSaleIds.length === (targetSession.purgedOrderSaleIds || []).length) {
+      // Sin ventas y sin poder fijar lápida nueva → misma respuesta que antes.
+      return { status: 'already_registered', message: 'Esa venta ya no estaba en la caja.' };
+    }
+
     const sessionDoc = buildTpvRegisterSessionDocument(userId, {
-      ...openSession,
+      ...targetSession,
       transactions: kept,
       salesByChannel,
       linkedOrderIds,
-    }, openSession);
+      purgedSaleTxIds,
+      purgedOrderSaleIds,
+    }, targetSession);
 
     try {
       const saved = await putDocument(req, db, sessionDoc._id, sessionDoc);
@@ -1362,7 +1395,7 @@ async function removeTpvOrderSalesFromOpenSession(req, userId, orderDoc, { calle
       const sanitized = sanitizeTpvRegisterSession({ ...sessionDoc, _rev: saved.rev });
       broadcastTpvSessionLive(account, userId, sanitized);
       return {
-        status: 'registered',
+        status: removed.length > 0 ? 'registered' : 'already_registered',
         session: sanitized,
         removedAmount: removed.reduce((s, t) => s + Number(t.amount || 0), 0),
       };
@@ -1372,7 +1405,7 @@ async function removeTpvOrderSalesFromOpenSession(req, userId, orderDoc, { calle
         logger.error({ tag: 'CAJA', orderId, err: err?.message, attempt }, 'Error quitando venta cancelada de caja TPV');
         return {
           status: 'error',
-          message: err?.message || 'No se pudo quitar la venta de la caja abierta.',
+          message: err?.message || 'No se pudo quitar la venta de la caja.',
         };
       }
     }
@@ -3410,21 +3443,32 @@ export async function updateTpvRegisterSession(req, res) {
       existing = await ensureTpvRegisterOwner(req, userId, sessionId);
       if (!existing) return res.status(404).json({ ok: false, error: 'Sesión de caja TPV no encontrada' });
 
+      const purgedSaleTxIds = unionPurgedIds(
+        existing.purgedSaleTxIds,
+        sessionWithoutRemovedFlag.purgedSaleTxIds,
+      );
+      const purgedOrderSaleIds = unionPurgedIds(
+        existing.purgedOrderSaleIds,
+        sessionWithoutRemovedFlag.purgedOrderSaleIds,
+      );
       const mergedTransactions = mergeTpvRegisterTransactions(
         existing.transactions,
         sessionWithoutRemovedFlag.transactions,
         removedTransactionIds,
+        { purgedSaleTxIds, purgedOrderSaleIds },
       );
       const linkedOrderIds = [...new Set([
         ...(existing.linkedOrderIds || []),
         ...(sessionWithoutRemovedFlag.linkedOrderIds || []),
         ...mergedTransactions.map((t) => String(t.linkedDeliveryOrderId || t.orderId || '').trim()).filter(Boolean),
-      ])];
+      ])].filter((id) => !purgedOrderSaleIds.includes(String(id)));
       doc = buildTpvRegisterSessionDocument(userId, {
         ...existing,
         ...sessionWithoutRemovedFlag,
         transactions: mergedTransactions,
         linkedOrderIds,
+        purgedSaleTxIds,
+        purgedOrderSaleIds,
       }, existing);
 
       try {

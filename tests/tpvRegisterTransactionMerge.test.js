@@ -34,4 +34,22 @@ describe('mergeTpvRegisterTransactions', () => {
     );
     expect(merged.map((t) => t.id)).toEqual(['sale-1']);
   });
+
+  it('no resucita ventas purgadas por id o por pedido (sync tablet tras cancelar)', () => {
+    const purged = {
+      purgedSaleTxIds: ['sale-old'],
+      purgedOrderSaleIds: ['dord-dup'],
+    };
+    const merged = mergeTpvRegisterTransactions(
+      [{ id: 'sale-keep', type: 'sale', orderId: 'dord-ok', amount: 10, date: '2026-01-01T10:00:00.000Z' }],
+      [
+        { id: 'sale-old', type: 'sale', orderId: 'dord-a', amount: 63.8, date: '2026-01-01T11:00:00.000Z' },
+        { id: 'sale-new-id', type: 'sale', orderId: 'dord-dup', amount: 63.8, date: '2026-01-01T11:01:00.000Z' },
+        { id: 'sale-keep', type: 'sale', orderId: 'dord-ok', amount: 10, date: '2026-01-01T10:00:00.000Z' },
+      ],
+      [],
+      purged,
+    );
+    expect(merged.map((t) => t.id)).toEqual(['sale-keep']);
+  });
 });
