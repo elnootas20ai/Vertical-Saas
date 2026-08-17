@@ -23,7 +23,6 @@ import {
   openNativeAppSettings,
   requestNativeLocalNetworkAccess,
 } from '../../lib/vertialPrint/localNetworkPermission';
-import { pingNativeHost } from '../../lib/vertialPrint/nativePrintClient';
 import {
   clearPrinterVerifiedHost,
   loadNativePrinterDiagnostics,
@@ -195,7 +194,8 @@ function SettingsSection({
   );
 }
 
-const PRINTER_PORT_OPTIONS = [9100, 9101, 9102, 8008, 8043] as const;
+/** Solo puertos ESC/POS crudos (910x). 8008/8043 son ePOS y liaban el ping/prueba. */
+const PRINTER_PORT_OPTIONS = [9100, 9101, 9102] as const;
 
 function sanitizePortInput(raw: string): number {
   const digits = String(raw || '').replace(/\D/g, '').slice(0, 5);
@@ -228,7 +228,6 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
   const [feedDirty, setFeedDirty] = useState(false);
   const ipDirtyRef = useRef(false);
   const [testing, setTesting] = useState(false);
-  const [pingingIp, setPingingIp] = useState(false);
   const [savingIp, setSavingIp] = useState(false);
   const [confirmSaveOpen, setConfirmSaveOpen] = useState(false);
   const [pendingSaveHost, setPendingSaveHost] = useState('');
@@ -460,50 +459,6 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
     void commitSave(host, pendingSavePort);
   }, [commitSave, pendingSaveHost, pendingSavePort]);
 
-  const handleCheckConnection = useCallback(() => {
-    if (!canProbeNetwork) {
-      toast.error('Espera un segundo a que se active la red local, o pulsa «Volver a pedir permiso».');
-      return;
-    }
-    const host = manualIp.trim();
-    const port = sanitizePortInput(String(manualPort));
-    if (!isValidIpv4(host)) {
-      toast.error('Escribe una IP válida, por ejemplo 192.168.1.20');
-      return;
-    }
-    setPingingIp(true);
-    void (async () => {
-      try {
-        const ping = await Promise.race([
-          pingNativeHost(host, port),
-          new Promise<{ ok: false }>((resolve) => {
-            globalThis.setTimeout(() => resolve({ ok: false }), 6_000);
-          }),
-        ]);
-        if (ping.ok) {
-          toast.success(`Responde en ${host}:${port}`, {
-            description:
-              'rtt' in ping && ping.rtt
-                ? `Tiempo de respuesta: ${ping.rtt} ms`
-                : 'Pulsa «Guardar impresora» para usarla en el TPV.',
-            duration: 8000,
-          });
-          refreshDiagnostics();
-        } else {
-          toast.error(`No responde en ${host}:${port}`, {
-            duration: 10000,
-            description:
-              'Prueba otro puerto (9100 / 9101 / 9102). Puedes guardar igual si los datos del ticket son correctos.',
-          });
-        }
-      } catch {
-        toast.error('No se pudo comprobar. Puedes guardar IP y puerto igualmente.');
-      } finally {
-        setPingingIp(false);
-      }
-    })();
-  }, [manualIp, manualPort, canProbeNetwork, refreshDiagnostics]);
-
   const handleRequestLanPermission = useCallback(async () => {
     if (!isNative) return;
     setRequestingLan(true);
@@ -580,6 +535,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
       } catch {
         /* la prueba igual puede salir con effective en memoria */
       }
+      // Timeout UI alineado con el motor (no acortar el print nativo).
       const result = await Promise.race([
         printTestTicket(effective).then((value) => ({ ...value, timedOut: false as const })),
         new Promise<{ ok: false; timedOut: true }>((resolve) => {
@@ -800,14 +756,35 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
           title="1. Red local"
           description="Si ya diste Permitir en iOS, la app lo detecta sola. Puedes escribir la IP abajo sin pulsar nada."
         >
-          {lanConfirmed ? (
+          {diagnostics?.onWifi && diagnostics.deviceIp ? (
             <div className="rounded-lg border border-emerald-200 dark:border-emerald-900 bg-emerald-50/60 dark:bg-emerald-950/30 px-2.5 py-2">
               <div className="flex items-start gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
                 <div className="text-xs text-emerald-900 dark:text-emerald-100 leading-snug">
-                  <p className="font-semibold">Red local lista</p>
-                  <p className="mt-0.5 text-emerald-800/90 dark:text-emerald-200/90">
-                    Puedes poner la IP y guardar. Si no imprime, revisa Ajustes → Vertial → Red local.
+                  <p className="font-semibold">WiFi local detectada</p>
+                  <p className="mt-0.5 text-emerald-800/90 dark:text-emerald-200/90 font-mono">
+                    Tablet {diagnostics.deviceIp}
+                    {diagnostics.devicePrefix ? ` · red ${diagnostics.devicePrefix}.x` : ''}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : lanConfirmed ? (
+            <div className="rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50/60 dark:bg-amber-950/30 px-2.5 py-2">
+              <div className="flex items-start gap-2">
+                {lanDetecting || requestingLan ? (
+                  <Loader2 className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5 animate-spin" />
+                ) : (
+                  <CircleAlert className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                )}
+                <div className="text-xs text-amber-900 dark:text-amber-100 leading-snug">
+                  <p className="font-semibold">
+                    {lanDetecting || requestingLan
+                      ? 'Comprobando WiFi de la tablet…'
+                      : 'Aún no vemos la WiFi de esta tablet'}
+                  </p>
+                  <p className="mt-0.5 text-amber-800/90 dark:text-amber-200/90">
+                    Puedes guardar la IP igual. Si no imprime: Ajustes → Vertial → Red local ON, o «Volver a pedir permiso».
                   </p>
                 </div>
               </div>
@@ -868,7 +845,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
 
       <SettingsSection
         title={isNative ? '2. IP y puerto' : 'IP y puerto'}
-        description="Se guardan en la tienda seleccionada arriba (no se mezclan con otras tiendas)."
+        description="Se guardan en esta tablet. Si la tienda no tiene otra IP distinta, también se sincroniza a la tienda."
       >
             {isConfigured && !hasUnsavedChanges ? (
               <div className="mb-2.5 flex items-center gap-2 rounded-lg border border-emerald-200 dark:border-emerald-900 bg-emerald-50/60 dark:bg-emerald-950/30 px-2.5 py-1.5">
@@ -1027,16 +1004,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
                 Ver estado de red de la tablet
               </button>
             ) : null}
-            <div className="mt-2.5 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-              <button
-                type="button"
-                onClick={handleCheckConnection}
-                disabled={pingingIp || !manualIp.trim() || !canProbeNetwork}
-                className="w-full inline-flex items-center justify-center gap-1.5 h-9 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100 text-xs font-semibold touch-manipulation active:bg-gray-50 dark:active:bg-gray-700 disabled:opacity-60"
-              >
-                {pingingIp ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Network className="w-3.5 h-3.5" />}
-                {pingingIp ? 'Comprobando…' : 'Comprobar conexión'}
-              </button>
+            <div className="mt-2.5">
               <button
                 type="button"
                 onClick={handleRequestSave}
@@ -1050,11 +1018,6 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
             <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400 font-mono">
               Se guardará: {(manualIp.trim() || '—')}:{manualPort}
             </p>
-            {pingingIp ? (
-              <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                La comprobación puede fallar por la red; igual puedes pulsar «Guardar impresora» con la IP del ticket.
-              </p>
-            ) : null}
           </SettingsSection>
 
           <SettingsSection

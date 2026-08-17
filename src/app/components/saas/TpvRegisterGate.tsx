@@ -564,35 +564,17 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
   /** Aviso ANTES de Abrir: otra tablet/PC ya tiene caja abierta en esta tienda. */
   const existingOpenForStore = useMemo(() => {
     const pdvId = selectedPdv?._id || restrictedToPdvId || '';
-    if (!pdvId) return null;
-    const open = pickNewestOpenRegisterSessionForStore(registerSessions, pdvId, pointsOfSale);
-    if (!open || isTpvRegisterSessionStaleOpen(open)) return null;
-    return open;
+    const opens = (registerSessions || []).filter(
+      (s) => isTpvRegisterSessionOpen(s) && !isTpvRegisterSessionStaleOpen(s),
+    );
+    if (pdvId) {
+      const open = pickNewestOpenRegisterSessionForStore(opens, pdvId, pointsOfSale);
+      if (open) return open;
+    }
+    // CEO sin tienda elegida aún: una sola abierta → esa (para el botón Continuar).
+    if (opens.length === 1) return opens[0];
+    return null;
   }, [registerSessions, selectedPdv, restrictedToPdvId, pointsOfSale]);
-
-  const openingAlertBanner = existingOpenForStore ? (
-    <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/90 dark:bg-blue-950/40 px-3 py-2.5 flex flex-wrap items-center gap-2">
-      <div className="min-w-0 flex-1">
-        <p className="text-[11px] font-bold text-blue-950 dark:text-blue-50">
-          Ya hay caja abierta en esta tienda
-        </p>
-        <p className="text-[10px] text-blue-800/90 dark:text-blue-200/80 truncate">
-          {existingOpenForStore.workerName || 'Equipo'}
-          {existingOpenForStore.terminalName ? ` · ${existingOpenForStore.terminalName}` : ''}
-          {' · no abras otra'}
-        </p>
-      </div>
-      <button
-        type="button"
-        onClick={() => onContinueExistingOpen?.(existingOpenForStore)}
-        disabled={parentLoading || openingBusy || !onContinueExistingOpen}
-        className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#2563EB] hover:bg-blue-700 disabled:opacity-60 text-white text-xs font-bold"
-      >
-        <Unlock className="w-3.5 h-3.5" />
-        Entrar
-      </button>
-    </div>
-  ) : null;
 
   const didPrefillFromPreviousCloseRef = useRef(false);
   useEffect(() => {
@@ -814,7 +796,7 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
       return;
     }
     if (existingOpenForStore) {
-      toast.info('Ya hay caja abierta. Usa Entrar arriba.', { id: 'tpv-use-enter-banner', duration: 2500 });
+      toast.info('Ya hay caja abierta. Usa Continuar en esta caja.', { id: 'tpv-use-enter-banner', duration: 2500 });
       return;
     }
     const wName = effectiveWorkerName();
@@ -929,6 +911,55 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
             ? 'Elige el terminal'
             : '';
 
+  // Caja ya abierta: un solo CTA claro (sin pedir fondo otra vez).
+  if (existingOpenForStore) {
+    const who = [
+      existingOpenForStore.workerName || 'Equipo',
+      existingOpenForStore.terminalName || '',
+      displayStoreName || '',
+    ].filter(Boolean).join(' · ');
+    return (
+      <div className="h-full min-h-0 bg-stone-50 dark:bg-stone-950 flex items-center justify-center p-4">
+        <div className="bg-white dark:bg-stone-900 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-lg w-full max-w-md p-6 space-y-5">
+          <div className="text-center space-y-2">
+            <div className="mx-auto w-14 h-14 rounded-2xl bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+              <Unlock className="w-7 h-7 text-emerald-600" />
+            </div>
+            <h1 className="text-lg font-bold text-stone-900 dark:text-stone-100">
+              Caja abierta
+            </h1>
+            <p className="text-sm text-stone-500 dark:text-stone-400">
+              {who}
+            </p>
+            <p className="text-xs text-stone-500 dark:text-stone-400">
+              Saliste sin cerrar. Continúa en la misma caja — no hace falta contar el fondo.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => onContinueExistingOpen?.(existingOpenForStore)}
+            disabled={parentLoading || openingBusy || !onContinueExistingOpen}
+            className={`w-full ${VERTIAL_BTN_PRIMARY} min-h-12 text-base`}
+          >
+            {(parentLoading || openingBusy) ? (
+              <RefreshCw className="w-5 h-5 animate-spin" />
+            ) : (
+              <LogIn className="w-5 h-5" />
+            )}
+            Continuar en esta caja
+          </button>
+          <button
+            type="button"
+            onClick={goBack}
+            className={`w-full ${VERTIAL_BTN_SECONDARY}`}
+          >
+            Volver
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="h-full min-h-0 bg-stone-50 dark:bg-stone-950 flex items-stretch sm:items-center justify-center p-2 sm:p-3 overflow-hidden">
       <div className="bg-white dark:bg-stone-900 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-lg w-full max-w-4xl h-full sm:h-auto sm:max-h-[min(88svh,680px)] min-h-0 flex flex-col overflow-hidden">
@@ -960,12 +991,6 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
             <X className="w-4 h-4 text-stone-500" />
           </button>
         </div>
-
-        {openingAlertBanner ? (
-          <div className="shrink-0 px-3 py-2 border-b border-stone-200 dark:border-stone-800">
-            {openingAlertBanner}
-          </div>
-        ) : null}
 
         <div
           ref={bodyScrollRef}
@@ -5064,6 +5089,11 @@ export function TpvRegisterGate({
     workerId?: string;
     key: number;
   } | null>(null);
+  /**
+   * Al reentrar al TPV con caja ya abierta, hay que pulsar «Continuar en esta caja».
+   * Se resetea al desmontar el gate (salir del TPV). Tras Abrir / Continuar queda marcado.
+   */
+  const [ackedOpenSessionId, setAckedOpenSessionId] = useState<string | null>(null);
   const [managerPdvPickId, setManagerPdvPickId] = useState<string | null>(null);
   const [clockedInWorkers, setClockedInWorkers] = useState<TpvClockedInWorker[]>([]);
   const [clockedInWorkersLoading, setClockedInWorkersLoading] = useState(false);
@@ -5339,9 +5369,16 @@ export function TpvRegisterGate({
     return null;
   }, [activeSession, holdStickyWhileOpen]);
 
+  /** Caja open detectada, pero el usuario aún no ha confirmado Continuar en esta visita. */
+  const needsResumeAck = Boolean(
+    isTpvRegisterSessionOpen(boardSession)
+    && boardSession?._id
+    && ackedOpenSessionId !== boardSession._id,
+  );
+
   // Código / apertura: no mostrar Stock·Salir encima de Abrir caja (antes parpadeaban).
   useTpvSuppressBottomBar(
-    !isTpvRegisterSessionOpen(boardSession),
+    !isTpvRegisterSessionOpen(boardSession) || needsResumeAck,
     'gate-register',
   );
 
@@ -6027,6 +6064,7 @@ export function TpvRegisterGate({
     }
     const storeId = String(opts?.preferredStoreId || existing.pointOfSaleId || '').trim();
     stickyOpenSessionRef.current = existing;
+    setAckedOpenSessionId(existing._id);
     writeTpvOpenRegisterLatch(existing);
     {
       const oid = normalizeClockinUserId(existing.workerId);
@@ -6172,6 +6210,7 @@ export function TpvRegisterGate({
       // Enganchar YA (pick + sticky) antes del fichaje: si no, el botón se queda
       // bloqueado en silencio y hay que pulsar Abrir varias veces.
       stickyOpenSessionRef.current = created;
+      setAckedOpenSessionId(created._id);
       writeTpvOpenRegisterLatch(created);
       if (!isWorkerUser) {
         const bid = resolveBusinessScopeId(currentBusiness);
@@ -7223,7 +7262,7 @@ export function TpvRegisterGate({
     );
   }
 
-  if (!isTpvRegisterSessionOpen(boardSession)) {
+  if (!isTpvRegisterSessionOpen(boardSession) || needsResumeAck) {
     if (isWorkerUser && !isTabletSession && !loading && !resolveEffectiveSalesPointRef({
       employmentSalesPointId: user?.employment?.salesPointId,
       workCenters,
@@ -7286,7 +7325,9 @@ export function TpvRegisterGate({
     }
 
     const openingRestrictedPdvId = tabletRestrictedPdvId
-      || (isWorkerUser ? workerAssignedPdvId : managerPdvPickId);
+      || (isWorkerUser ? workerAssignedPdvId : managerPdvPickId)
+      || (needsResumeAck ? String(boardSession?.pointOfSaleId || '').trim() : '')
+      || null;
 
     // Entrada por código TPV: misma UI de apertura que tienda/CEO, pero sin
     // poderes de gerente (cambiar tienda / volver a cuenta).
