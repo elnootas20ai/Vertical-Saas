@@ -72,11 +72,31 @@ export function resolveEffectivePrinterConfig(options?: {
   const localFallback = scope.localFallback ?? loadLegacyPrinterConfig();
   const localCfg = normalizeVertialPrinterConfig(localFallback);
 
-  // Orden (2 tablets / 2 impresoras en el mismo local):
-  // caché de ESTA tablet → IP local (legacy) → terminal → tienda → espejo.
-  // La IP de tienda/terminal NO debe pisar la de la segunda tablet.
-  const canUseDeviceFallback =
-    !explicitPdvId || !activePdvId || explicitPdvId === activePdvId;
+  // Terminal concreto (si lo hay) → tienda (1 impresora, N tablets) → caché dispositivo → legacy.
+  const terminal = terminalId
+    ? pdv?.terminals?.find((t) => t.id === terminalId)
+    : undefined;
+  const terminalCfg = terminal?.printerConfig
+    ? normalizeVertialPrinterConfig(terminal.printerConfig)
+    : null;
+  if (terminalCfg && isVertialPrinterConfigConfigured(terminalCfg)) {
+    return terminalCfg;
+  }
+
+  // IP de la tienda = la de la tablet que ya imprime. Se copia a esta tablet.
+  const storeCfg = pdv?.printerConfig
+    ? normalizeVertialPrinterConfig(pdv.printerConfig)
+    : null;
+  if (storeCfg && isVertialPrinterConfigConfigured(storeCfg)) {
+    if (pdvId) {
+      try {
+        cachePdvDevicePrinterConfig(pdvId, storeCfg);
+      } catch {
+        /* ignore */
+      }
+    }
+    return storeCfg;
+  }
 
   if (pdvId) {
     const deviceCachedRaw = loadPdvDevicePrinterCache(pdvId);
@@ -88,12 +108,10 @@ export function resolveEffectivePrinterConfig(options?: {
     }
   }
 
-  // Legacy de ESTA tablet con IP WiFi real (antes de tienda/terminal).
-  // No usar connectionType=browser vacío: eso “pisaba” la caché de tienda en tests/web.
   const localHost = String(localCfg.networkHost || '').trim();
   const localNetworkOk =
     localCfg.connectionType === 'network' && isValidIpv4(localHost);
-  if (canUseDeviceFallback && localNetworkOk) {
+  if (localNetworkOk) {
     if (pdvId) {
       try {
         cachePdvDevicePrinterConfig(pdvId, localCfg);
@@ -102,23 +120,6 @@ export function resolveEffectivePrinterConfig(options?: {
       }
     }
     return localCfg;
-  }
-
-  const terminal = terminalId
-    ? pdv?.terminals?.find((t) => t.id === terminalId)
-    : undefined;
-  const terminalCfg = terminal?.printerConfig
-    ? normalizeVertialPrinterConfig(terminal.printerConfig)
-    : null;
-  if (terminalCfg && isVertialPrinterConfigConfigured(terminalCfg)) {
-    return terminalCfg;
-  }
-
-  const storeCfg = pdv?.printerConfig
-    ? normalizeVertialPrinterConfig(pdv.printerConfig)
-    : null;
-  if (storeCfg && isVertialPrinterConfigConfigured(storeCfg)) {
-    return storeCfg;
   }
 
   if (pdvId) {
