@@ -72,20 +72,9 @@ export function resolveEffectivePrinterConfig(options?: {
   const localFallback = scope.localFallback ?? loadLegacyPrinterConfig();
   const localCfg = normalizeVertialPrinterConfig(localFallback);
 
-  // Orden (como cuando “funcionaba” con 2 tablets en el mismo local):
-  // terminal → caché de ESTA tablet → IP local de ESTA tablet (legacy) →
-  // tienda (servidor) → espejo servidor.
-  // La IP de tienda NO debe pisar la de la segunda tablet.
-  const terminal = terminalId
-    ? pdv?.terminals?.find((t) => t.id === terminalId)
-    : undefined;
-  const terminalCfg = terminal?.printerConfig
-    ? normalizeVertialPrinterConfig(terminal.printerConfig)
-    : null;
-  if (terminalCfg && isVertialPrinterConfigConfigured(terminalCfg)) {
-    return terminalCfg;
-  }
-
+  // Orden (2 tablets / 2 impresoras en el mismo local):
+  // caché de ESTA tablet → IP local (legacy) → terminal → tienda → espejo.
+  // La IP de tienda/terminal NO debe pisar la de la segunda tablet.
   const canUseDeviceFallback =
     !explicitPdvId || !activePdvId || explicitPdvId === activePdvId;
 
@@ -99,7 +88,7 @@ export function resolveEffectivePrinterConfig(options?: {
     }
   }
 
-  // Legacy de ESTA tablet con IP WiFi real (antes de la IP de tienda).
+  // Legacy de ESTA tablet con IP WiFi real (antes de tienda/terminal).
   // No usar connectionType=browser vacío: eso “pisaba” la caché de tienda en tests/web.
   const localHost = String(localCfg.networkHost || '').trim();
   const localNetworkOk =
@@ -113,6 +102,16 @@ export function resolveEffectivePrinterConfig(options?: {
       }
     }
     return localCfg;
+  }
+
+  const terminal = terminalId
+    ? pdv?.terminals?.find((t) => t.id === terminalId)
+    : undefined;
+  const terminalCfg = terminal?.printerConfig
+    ? normalizeVertialPrinterConfig(terminal.printerConfig)
+    : null;
+  if (terminalCfg && isVertialPrinterConfigConfigured(terminalCfg)) {
+    return terminalCfg;
   }
 
   const storeCfg = pdv?.printerConfig

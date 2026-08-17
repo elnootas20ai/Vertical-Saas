@@ -280,7 +280,7 @@ describe('resolveEffectivePrinterConfig en app nativa', () => {
     expect(cfg.networkHost).toBe('192.168.1.99');
   });
 
-  it('en app nativa la IP del terminal manda sobre la del dispositivo', async () => {
+  it('en app nativa la IP de ESTA tablet manda sobre la del terminal (2ª impresora)', async () => {
     vi.resetModules();
     vi.doMock('../src/app/lib/vertialPrint/isNativeApp', () => ({
       isVertialNativeApp: () => true,
@@ -313,6 +313,44 @@ describe('resolveEffectivePrinterConfig en app nativa', () => {
       }],
     });
     const cfg = resolveNative({ pdv, terminalId: 'term-1', localFallback: localCfg });
+    expect(cfg.networkHost).toBe('192.168.1.20');
+  });
+
+  it('sin IP en esta tablet, usa la del terminal', async () => {
+    vi.resetModules();
+    vi.doMock('../src/app/lib/vertialPrint/isNativeApp', () => ({
+      isVertialNativeApp: () => true,
+    }));
+    stubLocalStorage();
+    const { resolveEffectivePrinterConfig: resolveNative } = await import(
+      '../src/app/lib/vertialPrint/printerActiveScope'
+    );
+    const pdv = basePdv({
+      terminals: [{
+        id: 'term-1',
+        code: 'Caja 1',
+        name: 'Principal',
+        datafonName: '',
+        printerName: '',
+        scaleDeviceId: '',
+        scaleName: '',
+        active: true,
+        printerConfig: {
+          ...DEFAULT_PRINTER_CONFIG,
+          connectionType: 'network',
+          networkHost: '192.168.1.77',
+        },
+      }],
+    });
+    const cfg = resolveNative({
+      pdv,
+      terminalId: 'term-1',
+      localFallback: {
+        ...DEFAULT_PRINTER_CONFIG,
+        connectionType: 'network',
+        networkHost: '',
+      },
+    });
     expect(cfg.networkHost).toBe('192.168.1.77');
   });
 

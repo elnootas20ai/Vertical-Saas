@@ -174,7 +174,9 @@ export async function printTestTicket(overrideConfig?: VertialPrinterConfig): Pr
       return { method: 'native', ok: false };
     }
     const printConfig = prepared.config;
-    const result = await sendNativeEscpos(escpos, printConfig, { retry: false, timeoutMs: 10_000 });
+    // Mismos timeouts que el motor blindado (20s + reintento): la prueba no debe
+    // fallar antes que un ticket real en la 2ª tablet.
+    const result = await sendNativeEscpos(escpos, printConfig);
     if (result.ok) {
       toast.success('Ticket de prueba enviado a la impresora');
       return { method: 'native', ok: true };

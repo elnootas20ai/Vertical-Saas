@@ -565,15 +565,25 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
     }
     setTesting(true);
     try {
-      const effective = resolveEffectivePrinterConfig({
-        pdv: scope?.pdv,
-        terminalId: scope?.terminalId,
-        localFallback: loadLegacyPrinterConfig(),
+      // Siempre la IP de ESTA tablet (la del panel), no re-resolver contra tienda/terminal:
+      // si no, la 2ª tablet «Probar» iba a la impresora de la 1ª y fallaba.
+      const pdvId = String(pdv?._id || scope?.pdvId || '').trim();
+      const effective = normalizeVertialPrinterConfig({
+        ...config,
+        connectionType: 'network',
+        networkHost: selectedHost,
+        networkPort: selectedPort,
       });
+      try {
+        saveLegacyPrinterConfig(effective);
+        if (pdvId) cachePdvDevicePrinterConfig(pdvId, effective);
+      } catch {
+        /* la prueba igual puede salir con effective en memoria */
+      }
       const result = await Promise.race([
         printTestTicket(effective).then((value) => ({ ...value, timedOut: false as const })),
         new Promise<{ ok: false; timedOut: true }>((resolve) => {
-          globalThis.setTimeout(() => resolve({ ok: false, timedOut: true }), 12_000);
+          globalThis.setTimeout(() => resolve({ ok: false, timedOut: true }), 25_000);
         }),
       ]);
       if (result.ok) {
@@ -589,7 +599,17 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
     } finally {
       setTesting(false);
     }
-  }, [hasUnsavedChanges, isConfigured, refreshDiagnostics, scope?.pdv, scope?.terminalId, canProbeNetwork]);
+  }, [
+    hasUnsavedChanges,
+    isConfigured,
+    refreshDiagnostics,
+    canProbeNetwork,
+    config,
+    selectedHost,
+    selectedPort,
+    pdv?._id,
+    scope?.pdvId,
+  ]);
 
   const handleManualIpChange = useCallback((raw: string) => {
     const value = sanitizeIpv4Input(raw);
