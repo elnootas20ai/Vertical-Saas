@@ -291,26 +291,9 @@ export function encodeTicketEscpos(
   ];
   pushTopMargin(chunks);
 
-  // Comanda cocina: nombre + calle arriba del todo; luego pedido/tipo/tel, productos, notas.
+  // Comanda cocina: pedido/tipo/tel, productos, notas; nombre + calle abajo.
   // Sin importes ni datos fiscales. Misma plantilla para todas las tiendas del negocio.
   if (doc.variant === 'kitchen') {
-    chunks.push(command([ESC, 0x61, 0]));
-    if (doc.customerName) {
-      chunks.push(setSize(SIZE_TITLE));
-      chunks.push(setBold(true));
-      chunks.push(textLine(doc.customerName, colsForSize(paperWidthMm, SIZE_TITLE)));
-      chunks.push(setBold(false));
-      chunks.push(setSize(SIZE_NORMAL));
-    }
-    if (doc.customerAddress) {
-      chunks.push(setSize(SIZE_TALL));
-      chunks.push(setBold(true));
-      chunks.push(textLine(doc.customerAddress, tallCols));
-      chunks.push(setBold(false));
-      chunks.push(setSize(SIZE_NORMAL));
-    }
-    chunks.push(textLine(sepLine(width), width));
-
     pushCenteredTitle(chunks, doc.title, paperWidthMm);
     chunks.push(command([ESC, 0x61, 1]));
     chunks.push(textLine(`${doc.ticketNo} - ${doc.dateLabel}`, width));
@@ -356,6 +339,24 @@ export function encodeTicketEscpos(
       chunks.push(textLine(`NOTA: ${doc.orderNotes}`, tallCols));
       chunks.push(setBold(false));
       chunks.push(setSize(SIZE_NORMAL));
+    }
+    if (doc.customerName || doc.customerAddress) {
+      chunks.push(textLine(sepLine(width), width));
+      chunks.push(command([ESC, 0x61, 0]));
+      if (doc.customerName) {
+        chunks.push(setSize(SIZE_TITLE));
+        chunks.push(setBold(true));
+        chunks.push(textLine(doc.customerName, colsForSize(paperWidthMm, SIZE_TITLE)));
+        chunks.push(setBold(false));
+        chunks.push(setSize(SIZE_NORMAL));
+      }
+      if (doc.customerAddress) {
+        chunks.push(setSize(SIZE_TALL));
+        chunks.push(setBold(true));
+        chunks.push(textLine(doc.customerAddress, tallCols));
+        chunks.push(setBold(false));
+        chunks.push(setSize(SIZE_NORMAL));
+      }
     }
     chunks.push(command([ESC, 0x61, 1]));
     chunks.push(textLine(doc.footer, width));

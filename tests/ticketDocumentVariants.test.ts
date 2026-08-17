@@ -61,7 +61,7 @@ describe('ticket variants — botones Cocina / Reparto / Ticket cliente', () => 
     expect(text).toMatch(/Metodo: Efectivo \(1\.50EUR\)/);
   });
 
-  it('cocina: nombre + calle arriba, luego pedido/tel/productos + mods + notas, sin importes', () => {
+  it('cocina: pedido/tel/productos + mods + notas, nombre + calle abajo, sin importes', () => {
     const doc = buildTicketDocument({ ...baseOptions(), variant: 'kitchen' });
     expect(doc.title).toBe('COMANDA');
     expect(doc.total).toBe(0);
@@ -76,15 +76,20 @@ describe('ticket variants — botones Cocina / Reparto / Ticket cliente', () => 
     expect(doc.orderNotes).toContain('Sin timbre');
 
     const text = decodeEscpos(encodeTicketEscpos(doc));
-    // Nombre y calle los primeros datos útiles (antes de COMANDA / Pedido).
+    // Nombre y calle al final (después de productos / notas).
     const nameIdx = text.indexOf('Maria Garcia');
     const addrIdx = text.indexOf('Av. Principal 12');
     const titleIdx = text.indexOf('COMANDA');
     const orderIdx = text.indexOf('Pedido: #1042');
+    const productIdx = text.indexOf('Pizza Margarita');
+    const noteIdx = text.indexOf('Sin timbre');
     expect(nameIdx).toBeGreaterThanOrEqual(0);
-    expect(addrIdx).toBeGreaterThan(nameIdx);
-    expect(titleIdx).toBeGreaterThan(addrIdx);
+    expect(titleIdx).toBeGreaterThanOrEqual(0);
     expect(orderIdx).toBeGreaterThan(titleIdx);
+    expect(productIdx).toBeGreaterThan(orderIdx);
+    expect(noteIdx).toBeGreaterThan(productIdx);
+    expect(nameIdx).toBeGreaterThan(noteIdx);
+    expect(addrIdx).toBeGreaterThan(nameIdx);
     expect(text).toContain('Envio a domicilio');
     expect(text).toContain('Tel: 666123456');
     expect(text).toContain('Pago: Efectivo');

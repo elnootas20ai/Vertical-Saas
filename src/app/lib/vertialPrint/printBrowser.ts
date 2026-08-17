@@ -112,13 +112,14 @@ body{padding-bottom:${bodyPaddingBottom(doc.variant, customerTailFeedCm)}}
 <div class="hr"></div>
 <p class="kitchen-item">Pedido: #${escapeHtml(doc.orderNumber)}</p>
 ${doc.deliveryTypeLabel ? `<p class="kitchen-item">${escapeHtml(doc.deliveryTypeLabel)}</p>` : ''}
-${doc.customerName ? `<p class="kitchen-item">Cliente: ${escapeHtml(doc.customerName)}</p>` : ''}
 ${doc.customerPhone ? `<p class="kitchen-item">Tel: ${escapeHtml(doc.customerPhone)}</p>` : ''}
-${doc.customerAddress ? `<p class="kitchen-item">Dir: ${escapeHtml(doc.customerAddress)}</p>` : ''}
 ${doc.paymentLabel ? `<p class="kitchen-item">Pago: ${escapeHtml(doc.paymentLabel)}</p>` : ''}
 <div class="hr"></div>
 ${rows}
 ${doc.orderNotes ? `<div class="order-note">NOTA PEDIDO: ${escapeHtml(doc.orderNotes)}</div>` : ''}
+${(doc.customerName || doc.customerAddress) ? `<div class="hr"></div>
+${doc.customerName ? `<p class="kitchen-item">${escapeHtml(doc.customerName)}</p>` : ''}
+${doc.customerAddress ? `<p class="kitchen-item">${escapeHtml(doc.customerAddress)}</p>` : ''}` : ''}
 <div class="f">${escapeHtml(doc.footer)}</div>
 </body></html>`;
 }

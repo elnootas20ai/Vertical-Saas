@@ -162,20 +162,8 @@ export function buildEposTicket(
   // Margen superior mínimo (~0,1 cm; antes 1 línea / ~0,4 cm).
   // Sin feed de línea completa: ahorra ~0,3 cm arriba.
 
-  // Comanda cocina: nombre + calle arriba del todo; luego pedido/tipo/tel, productos, notas
+  // Comanda cocina: pedido/tipo/tel, productos, notas; nombre + calle abajo
   if (doc.variant === 'kitchen') {
-    builder.addTextAlign('left');
-    if (doc.customerName) {
-      setTextSize(builder, 2, 2);
-      boldLine(builder, doc.customerName, titleCols);
-      setTextSize(builder, 1, 1);
-    }
-    if (doc.customerAddress) {
-      setTextSize(builder, 1, 2);
-      boldLine(builder, doc.customerAddress, tallCols);
-      setTextSize(builder, 1, 1);
-    }
-    sep(builder, width);
     builder.addTextAlign('center');
     setTextSize(builder, 2, 2);
     boldLine(builder, doc.title, titleCols);
@@ -211,6 +199,20 @@ export function buildEposTicket(
       setTextSize(builder, 1, 2);
       boldLine(builder, `NOTA: ${doc.orderNotes}`, tallCols);
       setTextSize(builder, 1, 1);
+    }
+    if (doc.customerName || doc.customerAddress) {
+      sep(builder, width);
+      builder.addTextAlign('left');
+      if (doc.customerName) {
+        setTextSize(builder, 2, 2);
+        boldLine(builder, doc.customerName, titleCols);
+        setTextSize(builder, 1, 1);
+      }
+      if (doc.customerAddress) {
+        setTextSize(builder, 1, 2);
+        boldLine(builder, doc.customerAddress, tallCols);
+        setTextSize(builder, 1, 1);
+      }
     }
     builder.addTextAlign('center');
     line(builder, doc.footer, width);
