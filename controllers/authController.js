@@ -1,4 +1,11 @@
-import { canManageBusinessTeam, assertBusinessTeamManage } from '../services/businessAccess.js';
+import {
+  canManageBusinessTeam,
+  assertBusinessTeamManage,
+  assertTenantAccountOwnerSelf,
+  isBusinessOwner,
+  isOwnerGatedTeamRole,
+  canRemoveBusinessMember,
+} from '../services/businessAccess.js';
 import crypto from 'node:crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { OAuth2Client } from 'google-auth-library';
@@ -1743,11 +1750,15 @@ async function provisionAccountFromOnboardingSelection(req, account, { billingMo
 export async function saveBillingCard(req, res) {
   try {
     const userId = req.params.userId;
-    const account = await findAccountByUserId(req, userId);
-
-    if (!account) {
-      return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const ownerGate = await assertTenantAccountOwnerSelf(req, userId);
+    if (!ownerGate.ok) {
+      return res.status(ownerGate.status).json({
+        ok: false,
+        error: ownerGate.error,
+        code: ownerGate.code,
+      });
     }
+    const account = ownerGate.account;
 
     const { cardNumber, cardHolderName, expiryDate, cvv, billingMode, selectedPlanId } = req.body || {};
 
@@ -1811,11 +1822,15 @@ export async function activateOnboardingTrialWithoutCard(req, res) {
     }
 
     const userId = req.params.userId;
-    const account = await findAccountByUserId(req, userId);
-
-    if (!account) {
-      return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const ownerGate = await assertTenantAccountOwnerSelf(req, userId);
+    if (!ownerGate.ok) {
+      return res.status(ownerGate.status).json({
+        ok: false,
+        error: ownerGate.error,
+        code: ownerGate.code,
+      });
     }
+    const account = ownerGate.account;
 
     const { billingMode, selectedPlanId } = req.body || {};
     const savedAccount = await provisionAccountFromOnboardingSelection(req, account, {
@@ -1839,6 +1854,14 @@ export async function activateOnboardingTrialWithoutCard(req, res) {
 export async function getBillingCard(req, res) {
   try {
     const userId = req.params.userId;
+    const ownerGate = await assertTenantAccountOwnerSelf(req, userId);
+    if (!ownerGate.ok) {
+      return res.status(ownerGate.status).json({
+        ok: false,
+        error: ownerGate.error,
+        code: ownerGate.code,
+      });
+    }
     const card = await findCardByUserId(req, userId);
 
     if (!card) {
@@ -1866,12 +1889,6 @@ export async function inviteUser(req, res) {
     }
     if (!String(name || '').trim()) {
       return badRequest(res, 'El nombre es obligatorio');
-    }
-    if (!String(workCenterId || '').trim()) {
-      return badRequest(res, 'Debes asignar una tienda o local al trabajador');
-    }
-    if (!String(scheduleTemplateId || '').trim()) {
-      return badRequest(res, 'Debes asignar una plantilla de horario al trabajador');
     }
 
     const actorUserId = String(req.authUser?.userId || '').trim();
@@ -1901,6 +1918,25 @@ export async function inviteUser(req, res) {
           error: 'No tienes permiso para invitar trabajadores a esta empresa',
         });
       }
+      if (
+        actorUserId
+        && isOwnerGatedTeamRole(role)
+        && !isBusinessOwner(business, actorUserId)
+      ) {
+        return res.status(403).json({
+          ok: false,
+          error: 'Solo el propietario puede invitar roles de administración (Admin, Administrador…)',
+          code: 'OWNER_ONLY',
+        });
+      }
+    }
+
+    const isEventsBusiness = String(business?.businessType || '').trim() === 'events';
+    if (!isEventsBusiness && !String(workCenterId || '').trim()) {
+      return badRequest(res, 'Debes asignar una tienda o local al trabajador');
+    }
+    if (!isEventsBusiness && !String(scheduleTemplateId || '').trim()) {
+      return badRequest(res, 'Debes asignar una plantilla de horario al trabajador');
     }
 
     const existingAccount = await findAccountByEmail(req, email);
@@ -2851,16 +2887,6 @@ export async function deleteUser(req, res) {
     const isSuperAdmin = isVertialSuperAdminEmail(actorEmail);
     const isSelfDelete = Boolean(authUserId && userId && authUserId === userId);
 
-    if (authUserId && userId && authUserId !== userId) {
-      if (!isSuperAdmin) {
-        const actor = authUserId ? await findAccountByUserId(req, authUserId) : null;
-        const isManager = actor && ['Admin', 'Gerente', 'Administrador', 'Encargado'].includes(String(actor.role || ''));
-        if (!isManager) {
-          return res.status(403).json({ ok: false, error: 'No puedes eliminar otro usuario.' });
-        }
-      }
-    }
-
     const account = await findAccountByUserId(req, userId);
     if (!account || account.deletedAt) {
       return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
@@ -2870,12 +2896,37 @@ export async function deleteUser(req, res) {
       return res.status(403).json({ ok: false, error: 'No se puede eliminar la cuenta de super-admin.' });
     }
 
+    const allBusinessesEarly = await listAllBusinesses(req);
+    const targetOwnsBusiness = allBusinessesEarly.some(
+      (b) => String(b.owner_user_id || '').trim() === account.user_id,
+    );
+
+    if (!isSelfDelete && !isSuperAdmin) {
+      if (targetOwnsBusiness) {
+        return res.status(403).json({
+          ok: false,
+          error: 'No se puede eliminar la cuenta del propietario de una empresa',
+          code: 'OWNER_ONLY',
+        });
+      }
+      const canRemove = allBusinessesEarly.some((business) =>
+        canRemoveBusinessMember(business, authUserId, account.user_id),
+      );
+      if (!canRemove) {
+        return res.status(403).json({
+          ok: false,
+          error: 'Solo el propietario puede expulsar a un Admin u otro rol de administración',
+          code: 'OWNER_ONLY',
+        });
+      }
+    }
+
     // Al auto-borrar (o super-admin): soft-delete negocios propios + tarjeta.
     // Al borrar un miembro del equipo: solo se quita de members.
     const shouldCleanupOwned = isSuperAdmin || isSelfDelete;
 
     try {
-      const allBusinesses = await listAllBusinesses(req);
+      const allBusinesses = allBusinessesEarly;
       for (const business of allBusinesses) {
         if (String(business.owner_user_id || '').trim() === account.user_id) {
           if (shouldCleanupOwned) {

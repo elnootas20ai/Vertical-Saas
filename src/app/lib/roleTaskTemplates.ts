@@ -22,37 +22,23 @@ export type RoleTaskTemplateBundle = {
   tasks: RoleTaskTemplateItem[];
 };
 
-function deliveryAdmin(): RoleTaskTemplateBundle {
+/** Admin = nivel creador de cuenta (sin «Mi trabajo»). */
+function deliveryAccountAdmin(): RoleTaskTemplateBundle {
+  return {
+    roleId: 'Admin',
+    roleLabel: 'Admin',
+    summary: 'Como el creador de la cuenta: acceso total al negocio.',
+    tasks: [],
+  };
+}
+
+/** Administrador = lleva el SaaS (sin «Mi trabajo»). */
+function deliveryAdministrador(): RoleTaskTemplateBundle {
   return {
     roleId: 'Administrador',
     roleLabel: 'Administrador',
-    summary: 'Responsable del negocio: caja, equipo, pedidos y cierre del día.',
-    tasks: [
-      {
-        key: 'admin-revisar-equipo',
-        title: 'Revisar que el equipo esté fichado y en su puesto',
-        description: 'Comprueba fichajes, horarios y que cada uno sepa su función del día.',
-        priority: 'high',
-      },
-      {
-        key: 'admin-caja-apertura',
-        title: 'Supervisar apertura de caja del local',
-        description: 'Fondo de caja, TPV listo y que el encargado o cajero confirmen el arqueo inicial.',
-        priority: 'high',
-      },
-      {
-        key: 'admin-pedidos-flujo',
-        title: 'Revisar el flujo de pedidos (TPV → cocina → reparto)',
-        description: 'Que no se acumulen pedidos mal tomados, retrasos en cocina o sin repartidor.',
-        priority: 'medium',
-      },
-      {
-        key: 'admin-caja-cierre',
-        title: 'Cierre de caja y resumen del día',
-        description: 'Arqueo, incidencias de cobro y dejar listo el informe para el siguiente turno.',
-        priority: 'high',
-      },
-    ],
+    summary: 'Lleva el SaaS del negocio: operación y panel de administración.',
+    tasks: [],
   };
 }
 
@@ -295,7 +281,8 @@ function restaurantMostrador(): RoleTaskTemplateBundle {
 }
 
 const DELIVERY_BUNDLES: RoleTaskTemplateBundle[] = [
-  deliveryAdmin(),
+  deliveryAccountAdmin(),
+  deliveryAdministrador(),
   deliveryGestor(),
   deliveryEncargado(),
   deliveryMostrador(),
@@ -304,7 +291,8 @@ const DELIVERY_BUNDLES: RoleTaskTemplateBundle[] = [
 ];
 
 const RESTAURANT_BUNDLES: RoleTaskTemplateBundle[] = [
-  { ...deliveryAdmin(), summary: 'Responsable del bar o restaurante: equipo, caja y servicio.' },
+  deliveryAccountAdmin(),
+  deliveryAdministrador(),
   deliveryGestor(),
   restaurantEncargado(),
   restaurantMostrador(),
@@ -315,37 +303,8 @@ const RESTAURANT_BUNDLES: RoleTaskTemplateBundle[] = [
 ];
 
 const BUTCHER_BUNDLES: RoleTaskTemplateBundle[] = [
-  {
-    roleId: 'Administrador',
-    roleLabel: 'Administrador',
-    summary: 'Responsable de la carnicería: equipo, caja, compras y trazabilidad.',
-    tasks: [
-      {
-        key: 'bt-admin-equipo',
-        title: 'Revisar que el equipo esté fichado y en su puesto',
-        description: 'Mostrador, obrador y, si hay, reparto. Horarios y fichajes en orden.',
-        priority: 'high',
-      },
-      {
-        key: 'bt-admin-caja',
-        title: 'Supervisar apertura y cierre de caja',
-        description: 'Fondo de caja, TPV y báscula listos; arqueo al cerrar.',
-        priority: 'high',
-      },
-      {
-        key: 'bt-admin-caducidad',
-        title: 'Revisar lotes próximos a caducar',
-        description: 'Trazabilidad: rebajar, elaborar o registrar merma a tiempo.',
-        priority: 'urgent',
-      },
-      {
-        key: 'bt-admin-compras',
-        title: 'Revisar compras y stock del día',
-        description: 'Entradas confirmadas, facturas pendientes y mínimos de stock.',
-        priority: 'medium',
-      },
-    ],
-  },
+  deliveryAccountAdmin(),
+  deliveryAdministrador(),
   deliveryGestor(),
   {
     roleId: 'Encargado',
@@ -450,25 +409,8 @@ const BUTCHER_BUNDLES: RoleTaskTemplateBundle[] = [
 ];
 
 const REAL_ESTATE_BUNDLES: RoleTaskTemplateBundle[] = [
-  {
-    roleId: 'Administrador',
-    roleLabel: 'Administrador',
-    summary: 'Responsable de la inmobiliaria: equipo, cartera y operación.',
-    tasks: [
-      {
-        key: 're-admin-equipo',
-        title: 'Revisar equipo y comerciales activos',
-        description: 'Quién cubre visitas, captación y seguimiento del día.',
-        priority: 'high',
-      },
-      {
-        key: 're-admin-cartera',
-        title: 'Revisar cartera y visitas pendientes',
-        description: 'Inmuebles activos, citas del día e incidencias.',
-        priority: 'medium',
-      },
-    ],
-  },
+  deliveryAccountAdmin(),
+  deliveryAdministrador(),
   deliveryGestor(),
   {
     roleId: 'Encargado',
@@ -517,24 +459,13 @@ const REAL_ESTATE_BUNDLES: RoleTaskTemplateBundle[] = [
 ];
 
 const EVENTS_BUNDLES: RoleTaskTemplateBundle[] = [
+  deliveryAccountAdmin(),
   {
     roleId: 'Administrador',
     roleLabel: 'Administrador',
-    summary: 'Opera el negocio de eventos: equipo, contratos y día D.',
-    tasks: [
-      {
-        key: 'ev-admin-equipo',
-        title: 'Revisar equipo y roles del evento',
-        description: 'Quién cubre comercial, operaciones y montaje.',
-        priority: 'high',
-      },
-      {
-        key: 'ev-admin-caja',
-        title: 'Controlar cobros y cierre económico',
-        description: 'Pagos de clientes, proveedores e incidencias.',
-        priority: 'medium',
-      },
-    ],
+    summary: 'Lleva el SaaS de eventos: contrataciones, cobros, equipo y panel.',
+    /** Sin tareas de «Mi trabajo»: entra al SaaS admin, no al backoffice worker. */
+    tasks: [],
   },
   deliveryGestor(),
   {
@@ -611,7 +542,7 @@ function normalizeRoleForTasks(roleId: string): string {
   if (!id) return '';
   const lower = id.toLowerCase();
   const aliases: Record<string, string> = {
-    admin: 'Administrador',
+    // Admin es rol propio (como creador); no fusionar con Administrador.
     administrador: 'Administrador',
     gerente: 'Encargado',
     encargado: 'Encargado',

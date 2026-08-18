@@ -18,7 +18,17 @@ import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
-import { bulkCreateVerticalEntries, entryNum, entryStr } from '../../lib/bulkVerticalImport';
+import { bulkCreateVerticalEntries, entryStr } from '../../lib/bulkVerticalImport';
+import {
+  downloadEventsServicesImportTemplate,
+  EVENTS_SERVICES_HEADER_ALIASES,
+  EVENTS_SERVICES_IMPORT_FIELDS,
+  EVENTS_SERVICES_SHEET_NAME,
+  isEventsServicesExampleName,
+  mapEventServiceCategory,
+  mapEventServiceUnit,
+  parseEventServicePrice,
+} from '../../lib/eventsServicesExcelTemplate';
 
 interface EventService extends VerticalEntity {
   nombre: string;
@@ -54,17 +64,11 @@ const EMPTY_FORM: ServiceForm = {
 };
 
 function mapServiceCategory(raw: string): EventServiceCategory {
-  const catRaw = raw.toLowerCase();
-  return (Object.keys(CATEGORY_CFG) as EventServiceCategory[]).includes(catRaw as EventServiceCategory)
-    ? (catRaw as EventServiceCategory)
-    : 'otro';
+  return mapEventServiceCategory(raw);
 }
 
 function mapServiceUnit(raw: string): EventServiceUnit {
-  const unitRaw = raw.toLowerCase();
-  return (Object.keys(EVENT_SERVICE_UNIT_LABELS) as EventServiceUnit[]).includes(unitRaw as EventServiceUnit)
-    ? (unitRaw as EventServiceUnit)
-    : 'fijo';
+  return mapEventServiceUnit(raw);
 }
 
 export function EventsServices() {
@@ -83,6 +87,7 @@ export function EventsServices() {
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<EventService | null>(null);
   const [form, setForm] = useState<ServiceForm>(EMPTY_FORM);
+  const [precioText, setPrecioText] = useState('');
   const [showAIModal, setShowAIModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
 
@@ -105,6 +110,11 @@ export function EventsServices() {
 
   useModalClose(showModal, () => setShowModal(false));
 
+  useEffect(() => {
+    if (!showModal) return;
+    window.dispatchEvent(new Event('vertial:close-company-dropdown'));
+  }, [showModal]);
+
   const filtered = useMemo(() => items.filter((s) => {
     const q = search.toLowerCase();
     const ms = !q || s.nombre.toLowerCase().includes(q) || s.descripcion.toLowerCase().includes(q);
@@ -121,7 +131,12 @@ export function EventsServices() {
     return { activos, total: items.length, precioMedio };
   }, [items]);
 
-  const openCreate = () => { setEditing(null); setForm(EMPTY_FORM); setShowModal(true); };
+  const openCreate = () => {
+    setEditing(null);
+    setForm(EMPTY_FORM);
+    setPrecioText('');
+    setShowModal(true);
+  };
   const openEdit = (s: EventService) => {
     setEditing(s);
     setForm({
@@ -132,6 +147,7 @@ export function EventsServices() {
       descripcion: s.descripcion,
       activo: s.activo,
     });
+    setPrecioText(s.precio ? String(s.precio).replace('.', ',') : '');
     setShowModal(true);
   };
 
@@ -151,12 +167,17 @@ export function EventsServices() {
       toast.error('Indica el nombre del servicio');
       return;
     }
+    const precio = Number(String(precioText).replace(',', '.').trim());
+    const payload = {
+      ...form,
+      precio: Number.isFinite(precio) ? precio : 0,
+    };
     try {
       if (editing) {
-        await api.update(userId, editing._id, form);
+        await api.update(userId, editing._id, payload);
         toast.success('Servicio actualizado');
       } else {
-        await api.create(userId, form);
+        await api.create(userId, payload);
         toast.success('Servicio creado');
       }
       await loadData();
@@ -183,11 +204,11 @@ export function EventsServices() {
     }
     const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
       const nombre = entryStr(e, 'name', 'nombre');
-      if (!nombre) return null;
+      if (!nombre || isEventsServicesExampleName(nombre)) return null;
       return {
         nombre,
         categoria: mapServiceCategory(entryStr(e, 'category', 'categoria') || 'otro'),
-        precio: entryNum(e, 'price', 'precio'),
+        precio: parseEventServicePrice(entryStr(e, 'price', 'precio')),
         unidad: mapServiceUnit(entryStr(e, 'unit', 'unidad') || 'fijo'),
         descripcion: entryStr(e, 'description', 'descripcion'),
         activo: true,
@@ -214,13 +235,7 @@ export function EventsServices() {
     { key: 'description', label: 'Descripción' },
   ];
 
-  const MODULE_IMPORT_FIELDS: ImportFieldDef[] = [
-    { key: 'name', label: 'Nombre', required: true, example: 'Banquete premium' },
-    { key: 'category', label: 'Categoría', example: 'catering' },
-    { key: 'price', label: 'Precio', example: '85' },
-    { key: 'unit', label: 'Unidad', example: 'por_persona' },
-    { key: 'description', label: 'Descripción', example: '' },
-  ];
+  const MODULE_IMPORT_FIELDS: ImportFieldDef[] = EVENTS_SERVICES_IMPORT_FIELDS;
 
   return (
     <Layout title="Servicios y tarifas">
@@ -357,8 +372,14 @@ export function EventsServices() {
       </div>
 
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowModal(false)}>
-          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full max-w-lg p-6" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+          onMouseDown={(e) => {
+            // Solo el fondo: un click en <select> nativo “cae” en el overlay al soltar y cerraba el modal.
+            if (e.target === e.currentTarget) setShowModal(false);
+          }}
+        >
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full max-w-lg p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">{editing ? 'Editar servicio' : 'Nuevo servicio'}</h2>
               <button type="button" onClick={() => setShowModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400"><X className="w-5 h-5" /></button>
@@ -390,13 +411,32 @@ export function EventsServices() {
                   ))}
                 </select>
               </div>
-              <input
-                type="number"
-                value={form.precio}
-                onChange={(e) => setForm((p) => ({ ...p, precio: Number(e.target.value) || 0 }))}
-                placeholder="Precio €"
-                className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-950 text-sm"
-              />
+              <div>
+                <label htmlFor="events-service-precio" className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+                  Precio
+                </label>
+                <div className="relative">
+                  <input
+                    id="events-service-precio"
+                    name="precio"
+                    type="text"
+                    inputMode="decimal"
+                    value={precioText}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      // Solo dígitos y coma/punto (formato ES); vacío permitido para poder escribir.
+                      if (v === '' || /^[\d.,]*$/.test(v)) setPrecioText(v);
+                    }}
+                    onFocus={(e) => e.target.select()}
+                    placeholder="0,00"
+                    autoComplete="off"
+                    className="w-full pl-3 pr-10 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-950 text-sm tabular-nums"
+                  />
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm font-medium text-gray-500 dark:text-gray-400">
+                    €
+                  </span>
+                </div>
+              </div>
               <textarea
                 value={form.descripcion}
                 onChange={(e) => setForm((p) => ({ ...p, descripcion: e.target.value }))}
@@ -429,8 +469,13 @@ export function EventsServices() {
         isOpen={showImportModal}
         onClose={() => setShowImportModal(false)}
         moduleLabel="Servicios"
+        templateFileName="plantilla_servicios_eventos.xlsx"
         fields={MODULE_IMPORT_FIELDS}
         onImport={handleImportEntries}
+        onDownloadTemplate={downloadEventsServicesImportTemplate}
+        headerAliases={EVENTS_SERVICES_HEADER_ALIASES}
+        skipMappingWhenComplete
+        importSheetName={EVENTS_SERVICES_SHEET_NAME}
       />
     </Layout>
   );

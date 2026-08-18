@@ -18,6 +18,9 @@ export const INVITE_LANDING_PAGE_DEFS = [
   { id: '/saas/cocina', key: 'cocina' },
   { id: '/saas/payroll', key: 'payroll' },
   { id: '/saas/team', key: 'team' },
+  { id: '/saas/dashboard', key: 'dashboard' },
+  { id: '/saas/vertical/eventos', key: 'events-hub' },
+  { id: '/saas/vertical/eventos/contrataciones', key: 'events-pipeline' },
   { id: '/saas/realestate-visits', key: 'realestate-visits' },
   { id: '/saas/realestate-properties', key: 'realestate-properties' },
 ] as const;
@@ -64,6 +67,17 @@ const RESTAURANT_LANDING_IDS = new Set<InviteLandingPageId>([
   '/saas/team',
 ]);
 
+const EVENTS_LANDING_IDS = new Set<InviteLandingPageId>([
+  '/saas/dashboard',
+  '/saas/vertical/eventos',
+  '/saas/vertical/eventos/contrataciones',
+  '/saas/documents',
+  '/saas/calendar',
+  '/saas/payroll',
+  '/saas/team',
+  WORKER_DEFAULT_LANDING_PATH,
+]);
+
 const GENERIC_LANDING_IDS = new Set<InviteLandingPageId>([
   WORKER_DEFAULT_LANDING_PATH,
   '/saas/documents',
@@ -103,6 +117,9 @@ export function getInviteLandingPagesForBusiness(
   if (bt === 'realEstate') {
     return INVITE_LANDING_PAGE_DEFS.filter((p) => REAL_ESTATE_LANDING_IDS.has(p.id));
   }
+  if (bt === 'events') {
+    return INVITE_LANDING_PAGE_DEFS.filter((p) => EVENTS_LANDING_IDS.has(p.id));
+  }
   return INVITE_LANDING_PAGE_DEFS.filter((p) => GENERIC_LANDING_IDS.has(p.id));
 }
 
@@ -116,6 +133,17 @@ export function getDefaultInviteLandingPage(
   roleId: string | null | undefined,
 ): InviteLandingPageId {
   const role = String(roleId || '').trim();
+  // Admin = como el creador; Administrador = lleva el SaaS → ambos al dashboard.
+  if (role === 'Administrador' || role === 'Admin' || role === 'Gerente' || role === 'GerenteGrupo') {
+    return '/saas/dashboard';
+  }
+  if (businessType === 'events') {
+    if (role === 'Gestor') return '/saas/payroll';
+    if (role === 'Encargado' || role === 'Comercial' || role === 'Operaciones') {
+      return '/saas/vertical/eventos';
+    }
+    return '/saas/vertical/eventos';
+  }
   if (isHrManagerRole(role)) return '/saas/payroll';
 
   if (isDeliveryBusinessType(businessType)) {
@@ -129,7 +157,6 @@ export function getDefaultInviteLandingPage(
     return WORKER_DEFAULT_LANDING_PATH;
   }
   if (businessType === 'realEstate') {
-    // Encargado/Gestor/Admin ya van a nóminas vía isHrManagerRole.
     if (role === 'Comercial') return '/saas/realestate-visits';
     return WORKER_DEFAULT_LANDING_PATH;
   }

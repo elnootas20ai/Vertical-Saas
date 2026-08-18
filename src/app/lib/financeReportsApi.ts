@@ -48,8 +48,12 @@ export interface ProfitAndLossReport {
   expenseByCategory: Record<string, number>;
 }
 
-export async function generateProfitAndLoss(userId: string, year: number): Promise<ProfitAndLossReport> {
-  const all = await listFinanceMovements(userId);
+export async function generateProfitAndLoss(
+  userId: string,
+  year: number,
+  businessId?: string,
+): Promise<ProfitAndLossReport> {
+  const all = await listFinanceMovements(userId, businessId);
   const yearly = filterByYear(all, year);
 
   const incomeMovements = yearly.filter(m => m.type === 'cobro');
@@ -105,8 +109,12 @@ export interface CashFlowReport {
   netCashFlow: number;
 }
 
-export async function generateCashFlowReport(userId: string, year: number): Promise<CashFlowReport> {
-  const all = await listFinanceMovements(userId);
+export async function generateCashFlowReport(
+  userId: string,
+  year: number,
+  businessId?: string,
+): Promise<CashFlowReport> {
+  const all = await listFinanceMovements(userId, businessId);
 
   const priorMovements = all.filter(m => getYear(m.date) < year);
   let runningBalance = priorMovements.reduce((sum, m) => {

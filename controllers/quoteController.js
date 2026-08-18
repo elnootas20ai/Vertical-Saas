@@ -6,6 +6,7 @@ import {
   getDocument,
   putDocument,
   buildNotificationDocument,
+  sanitizeNotification,
   buildInvoiceDocument,
   getInvoicesDbName,
   listInvoicesByUser,
@@ -35,36 +36,55 @@ async function findQuoteByToken(req, token) {
 }
 
 async function notifyQuoteAction(req, quote, action) {
-  const userId = quote.user_id;
-  if (!userId) return;
+  try {
+    const userId = String(quote.user_id || '').replace(/^account:/, '').trim();
+    if (!userId) return;
 
-  const account = await findAccountByUserId(req, userId);
-  if (!account) return;
+    const isAccepted = action === 'accepted';
+    const isEvent = Boolean(quote.eventId || quote.source === 'events');
+    const eventName = String(quote.vehicleName || '').trim();
+    const eventRoute = quote.eventId
+      ? `/saas/vertical/eventos/${encodeURIComponent(String(quote.eventId))}`
+      : '/saas/vertical/eventos/contrataciones';
+    const route = isEvent ? eventRoute : '/saas/quotes';
 
-  const isAccepted = action === 'accepted';
-  const notification = buildNotificationDocument({
-    userId,
-    level: isAccepted ? 'success' : 'warning',
-    category: 'quotes',
-    title: isAccepted
-      ? `Presupuesto ${quote.number} aceptado`
-      : `Presupuesto ${quote.number} rechazado`,
-    message: isAccepted
-      ? `${quote.clientName} ha aceptado el presupuesto ${quote.number} por ${quote.total.toFixed(2)} €`
-      : `${quote.clientName} ha rechazado el presupuesto ${quote.number}`,
-    entityId: quote._id,
-    entityType: 'quote',
-    route: '/saas/quotes',
-    metadata: { quoteNumber: quote.number, clientName: quote.clientName, action },
-  });
+    const title = isEvent
+      ? (isAccepted ? 'Cliente aceptado' : 'Cliente rechazado')
+      : (isAccepted
+        ? `Presupuesto ${quote.number} aceptado`
+        : `Presupuesto ${quote.number} rechazado`);
 
-  const saved = await saveNotification(req, notification);
-  broadcastToUser(userId, 'notification', saved);
-  sendPushToUser(req, userId, {
-    title: notification.title,
-    body: notification.message,
-    data: { route: '/saas/quotes', notificationId: saved._id },
-  }).catch((err) => logger.warn({ tag: 'QUOTE_PUSH', err: err?.message }, 'Error enviando push'));
+    const message = isEvent
+      ? (isAccepted
+        ? `${quote.clientName || 'El cliente'} ha aceptado el presupuesto${eventName ? ` de ${eventName}` : ''}`
+        : `${quote.clientName || 'El cliente'} ha rechazado el presupuesto${eventName ? ` de ${eventName}` : ''}`)
+      : (isAccepted
+        ? `${quote.clientName} ha aceptado el presupuesto ${quote.number} por ${Number(quote.total || 0).toFixed(2)} €`
+        : `${quote.clientName} ha rechazado el presupuesto ${quote.number}`);
+
+    const notification = buildNotificationDocument({
+      userId,
+      level: isAccepted ? 'success' : 'warning',
+      category: isEvent ? 'events' : 'quotes',
+      title,
+      message,
+      entityId: isEvent ? (quote.eventId || quote._id) : quote._id,
+      entityType: isEvent ? 'event' : 'quote',
+      route,
+      metadata: { quoteNumber: quote.number, clientName: quote.clientName, action, eventId: quote.eventId || '' },
+    });
+
+    const saved = await saveNotification(req, notification);
+    const sanitized = sanitizeNotification(saved);
+    broadcastToUser(userId, 'notification', sanitized);
+    sendPushToUser(req, userId, {
+      title: sanitized.title,
+      body: sanitized.message,
+      data: { route: sanitized.route, notificationId: sanitized.id },
+    }).catch((err) => logger.warn({ tag: 'QUOTE_PUSH', err: err?.message }, 'Error enviando push'));
+  } catch (err) {
+    logger.warn({ tag: 'QUOTE_NOTIFY', err: err?.message }, 'No se pudo notificar aceptación/rechazo');
+  }
 }
 
 function generateSignatureHash(quoteId, clientName, timestamp) {
@@ -90,6 +110,14 @@ export async function acceptQuote(req, res) {
     }
 
     if (quote.status === 'approved') {
+      if (quote.eventId || quote.source === 'events') {
+        try {
+          const { syncEventFromLinkedQuote } = await import('./eventsQuoteController.js');
+          await syncEventFromLinkedQuote(req, quote, 'accepted');
+        } catch (err) {
+          logger.warn({ tag: 'EVENT_QUOTE_SYNC', err: err?.message }, 'No se pudo sincronizar evento tras aceptar (ya procesado)');
+        }
+      }
       return res.json({ ok: true, alreadyProcessed: true, status: 'approved', quote: sanitizePublicQuote(quote) });
     }
     if (quote.status === 'rejected') {
@@ -123,20 +151,31 @@ export async function acceptQuote(req, res) {
 
     await notifyQuoteAction(req, { ...updated, _rev: result.rev }, 'accepted');
 
-    let generatedInvoiceId = null;
-    try {
-      generatedInvoiceId = await autoCreateInvoiceFromQuote(req, quote);
-      if (generatedInvoiceId) {
-        const quoteDb = getQuotesDbName();
-        const latestQuote = await getDocument(req, quoteDb, quote._id);
-        await putDocument(req, quoteDb, quote._id, {
-          ...latestQuote,
-          convertedToInvoiceId: generatedInvoiceId,
-          updatedAt: new Date().toISOString(),
-        });
+    if (quote.eventId || quote.source === 'events') {
+      try {
+        const { syncEventFromLinkedQuote } = await import('./eventsQuoteController.js');
+        await syncEventFromLinkedQuote(req, { ...updated, _rev: result.rev }, 'accepted');
+      } catch (err) {
+        logger.warn({ tag: 'EVENT_QUOTE_SYNC', err: err?.message }, 'No se pudo sincronizar evento tras aceptar');
       }
-    } catch (err) {
-      logger.warn({ tag: 'QUOTE_AUTO_INVOICE', err: err?.message, quoteId: quote._id }, 'No se pudo crear factura automatica');
+    }
+
+    let generatedInvoiceId = null;
+    if (!quote.eventId && quote.source !== 'events') {
+      try {
+        generatedInvoiceId = await autoCreateInvoiceFromQuote(req, quote);
+        if (generatedInvoiceId) {
+          const quoteDb = getQuotesDbName();
+          const latestQuote = await getDocument(req, quoteDb, quote._id);
+          await putDocument(req, quoteDb, quote._id, {
+            ...latestQuote,
+            convertedToInvoiceId: generatedInvoiceId,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      } catch (err) {
+        logger.warn({ tag: 'QUOTE_AUTO_INVOICE', err: err?.message, quoteId: quote._id }, 'No se pudo crear factura automatica');
+      }
     }
 
     logger.info({ tag: 'QUOTE_ACCEPT', quoteId: quote._id, number: quote.number, invoiceId: generatedInvoiceId }, 'Presupuesto aceptado por email');
@@ -168,6 +207,14 @@ export async function rejectQuote(req, res) {
     }
 
     if (quote.status === 'rejected') {
+      if (quote.eventId || quote.source === 'events') {
+        try {
+          const { syncEventFromLinkedQuote } = await import('./eventsQuoteController.js');
+          await syncEventFromLinkedQuote(req, quote, 'rejected');
+        } catch (err) {
+          logger.warn({ tag: 'EVENT_QUOTE_SYNC', err: err?.message }, 'No se pudo sincronizar evento tras rechazar (ya procesado)');
+        }
+      }
       return res.json({ ok: true, alreadyProcessed: true, status: 'rejected', quote: sanitizePublicQuote(quote) });
     }
     if (quote.status === 'approved') {
@@ -190,6 +237,15 @@ export async function rejectQuote(req, res) {
     const result = await putDocument(req, db, quote._id, updated);
 
     await notifyQuoteAction(req, { ...updated, _rev: result.rev }, 'rejected');
+
+    if (quote.eventId || quote.source === 'events') {
+      try {
+        const { syncEventFromLinkedQuote } = await import('./eventsQuoteController.js');
+        await syncEventFromLinkedQuote(req, { ...updated, _rev: result.rev }, 'rejected');
+      } catch (err) {
+        logger.warn({ tag: 'EVENT_QUOTE_SYNC', err: err?.message }, 'No se pudo sincronizar evento tras rechazar');
+      }
+    }
 
     logger.info({ tag: 'QUOTE_REJECT', quoteId: quote._id, number: quote.number }, 'Presupuesto rechazado por email');
 

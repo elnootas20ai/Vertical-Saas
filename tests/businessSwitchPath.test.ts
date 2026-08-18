@@ -14,14 +14,27 @@ describe('resolvePathAfterBusinessSwitch', () => {
     );
   });
 
-  it('desde delivery-ops a restaurante → caja restaurante', () => {
+  it('desde delivery-ops a restaurante → ops restaurante', () => {
     expect(resolvePathAfterBusinessSwitch('/saas/delivery-ops', 'restaurant')).toBe(
-      '/saas/caja',
+      '/saas/restaurant-ops',
     );
   });
 
   it('misma vertical no redirige', () => {
     expect(resolvePathAfterBusinessSwitch('/saas/caja', 'restaurant')).toBeNull();
     expect(resolvePathAfterBusinessSwitch('/saas/delivery-ops', 'delivery')).toBeNull();
+    expect(resolvePathAfterBusinessSwitch('/saas/events-services', 'events')).toBeNull();
+  });
+
+  it('desde servicios de eventos a restaurante → ops restaurante', () => {
+    expect(resolvePathAfterBusinessSwitch('/saas/events-services', 'restaurant')).toBe(
+      '/saas/restaurant-ops',
+    );
+  });
+
+  it('desde servicios de eventos a otra vertical → panel', () => {
+    expect(resolvePathAfterBusinessSwitch('/saas/events-services', 'cleaning')).toBe(
+      '/saas',
+    );
   });
 });

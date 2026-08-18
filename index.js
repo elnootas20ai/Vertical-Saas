@@ -98,6 +98,7 @@ import { ocrApiRouter } from './routers/ocrRouter.js';
 import aiParserRouter from './routers/aiParserRouter.js';
 import { affiliateRouter } from './routers/affiliateRouter.js';
 import { quoteRouter } from './routers/quoteRouter.js';
+import { eventsQuoteRouter } from './routers/eventsQuoteRouter.js';
 import { catalogConfigRouter } from './routers/catalogConfigRouter.js';
 import { purchaseOrderRouter } from './routers/purchaseOrderRouter.js';
 import { stockMovementRouter } from './routers/stockMovementRouter.js';
@@ -1130,6 +1131,7 @@ app.use('/api/affiliate', affiliateRouter);
 
 // Presupuestos — rutas públicas (accept/reject por token) + protegidas (envío)
 app.use('/api/quotes', quoteRouter);
+app.use('/api/events-quotes', ...saasAuthGate, eventsQuoteRouter);
 
 // API-03: Webhooks salientes (requiere JWT)
 app.use('/api/webhooks', requireAuthAndEmailVerified, requireActiveSubscription, webhooksRouter);

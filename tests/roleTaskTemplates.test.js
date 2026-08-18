@@ -36,9 +36,18 @@ describe('roleTaskTemplates', () => {
     expect(ids).toContain('Encargado');
   });
 
-  it('alias Admin → Administrador', () => {
-    const bundle = getRoleTaskBundle('Admin', 'delivery');
+  it('Admin y Administrador son roles distintos (sin Mi trabajo)', () => {
+    expect(getRoleTaskBundle('Admin', 'delivery')?.roleId).toBe('Admin');
+    expect(getRoleTaskBundle('Administrador', 'delivery')?.roleId).toBe('Administrador');
+    expect(getRoleTaskTemplates('Admin', 'delivery')).toEqual([]);
+    expect(getRoleTaskTemplates('Administrador', 'delivery')).toEqual([]);
+    expect(getRoleTaskTemplates('Administrador', 'restaurant')).toEqual([]);
+    expect(getRoleTaskTemplates('Admin', 'events')).toEqual([]);
+  });
+
+  it('events Administrador no siembra tareas de Mi trabajo (lleva el SaaS)', () => {
+    const bundle = getRoleTaskBundle('Administrador', 'events');
     expect(bundle?.roleId).toBe('Administrador');
-    expect(getRoleTaskTemplates('Admin', 'delivery').length).toBeGreaterThanOrEqual(3);
+    expect(getRoleTaskTemplates('Administrador', 'events')).toEqual([]);
   });
 });

@@ -4884,6 +4884,16 @@ function normalizeInvoiceStatus(value) {
   return allowed.includes(String(value || '')) ? String(value) : 'draft';
 }
 
+function normalizeInvoiceRecurrence(value) {
+  const allowed = ['weekly', 'monthly', 'one_time'];
+  return allowed.includes(String(value || '')) ? String(value) : 'one_time';
+}
+
+function normalizeInvoiceOrigin(value) {
+  const allowed = ['manual', 'auto_service', 'auto_contract'];
+  return allowed.includes(String(value || '')) ? String(value) : 'manual';
+}
+
 function sanitizeInvoiceLines(lines) {
   if (!Array.isArray(lines) || lines.length === 0) return [];
   return lines.map((l) => ({

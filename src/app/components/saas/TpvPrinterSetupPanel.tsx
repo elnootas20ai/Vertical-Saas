@@ -110,25 +110,8 @@ function resolveInitialPrinter(scope?: TpvPrinterScope): {
   const pdvId = String(pdv?._id || scope?.pdvId || '').trim();
   const localHost = String(local.networkHost || '').trim();
 
-  // 1 impresora + N tablets: IP de la tienda primero (la que ya funciona en la otra tablet).
+  // En esta tablet: lo guardado aquí primero. Si no hay, sugerir tienda (sin pisar).
   if (pdvId) {
-    const fromStore = pdv?.printerConfig
-      ? normalizeVertialPrinterConfig({
-          ...DEFAULT_PRINTER_CONFIG,
-          ...pdv.printerConfig,
-          connectionType: 'network',
-        })
-      : null;
-    if (fromStore && isValidIpv4(String(fromStore.networkHost || '').trim())) {
-      try {
-        cachePdvDevicePrinterConfig(pdvId, fromStore);
-        saveLegacyPrinterConfig(fromStore);
-      } catch {
-        /* ignore */
-      }
-      return { config: fromStore, source: 'device' };
-    }
-
     const deviceCached = loadPdvDevicePrinterCache(pdvId);
     if (deviceCached && isValidIpv4(String(deviceCached.networkHost || '').trim())) {
       return {
@@ -149,6 +132,16 @@ function resolveInitialPrinter(scope?: TpvPrinterScope): {
         /* ignore */
       }
       return { config: fromLocal, source: 'legacy' };
+    }
+    const fromStore = pdv?.printerConfig
+      ? normalizeVertialPrinterConfig({
+          ...DEFAULT_PRINTER_CONFIG,
+          ...pdv.printerConfig,
+          connectionType: 'network',
+        })
+      : null;
+    if (fromStore && isValidIpv4(String(fromStore.networkHost || '').trim())) {
+      return { config: fromStore, source: 'store' };
     }
     const cached = loadPdvPrinterCache(pdvId);
     if (cached && isValidIpv4(String(cached.networkHost || '').trim())) {
@@ -370,11 +363,10 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
     });
 
     const pdvId = String(pdv?._id || scope?.pdvId || '').trim();
-    const storeLabel = pdv ? pointOfSaleDisplayLabel(pdv) : '';
 
     setSavingIp(true);
     try {
-      // 1) Dispositivo + caché por tienda (siempre)
+      // 1) Siempre en ESTA tablet (hasta que el usuario guarde otra cosa).
       if (pdvId) {
         setActivePrinterScope({
           pdvId,
@@ -383,8 +375,6 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
         });
       }
       try {
-        // Siempre en ESTA tablet. No tocar la IP de tienda si ya hay otra distinta
-        // (la impresora que ya funciona en la otra tablet).
         saveLegacyPrinterConfig(next);
         if (pdvId) cachePdvDevicePrinterConfig(pdvId, next);
       } catch {
@@ -401,8 +391,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
         return;
       }
 
-      // 2) Servidor solo si la tienda no tiene IP o es la misma (no pisar la otra impresora).
-      let syncedToStore = false;
+      // 2) Espejo a la tienda si no hay IP o es la misma (otras tablets pueden usarla).
       if (scope?.userId && pdvId) {
         try {
           let pdvDoc = pdv && pdv._id === pdvId ? pdv : null;
@@ -426,9 +415,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
             cachePdvPrinterConfig(pdvId, next);
             syncActiveScope(next, saved);
             scope.onPdvUpdated?.(saved);
-            syncedToStore = true;
           } else {
-            // Hay otra IP de tienda: no la tocamos. Esta tablet usa solo su caché local.
             syncActiveScope(next, pdvDoc);
           }
         } catch (error) {
@@ -451,17 +438,10 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
       setIpDirty(false);
       setFeedDirty(false);
       clearPrinterVerifiedHost();
-      toast.success(
-        syncedToStore
-          ? `Impresora de esta tablet: ${host}:${safePort}`
-          : `Impresora solo en esta tablet: ${host}:${safePort}`,
-        {
-          description: syncedToStore
-            ? `Queda en «${storeLabel}» para las tablets del local.`
-            : 'Guardada en esta tablet con la misma IP de la impresora del local.',
-          duration: 7000,
-        },
-      );
+      toast.success(`Guardada: ${host}:${safePort}`, {
+        description: 'Queda en esta tablet hasta que la cambies tú.',
+        duration: 5000,
+      });
       refreshDiagnostics();
     } finally {
       setSavingIp(false);
@@ -862,14 +842,14 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
 
       <SettingsSection
         title={isNative ? '2. IP y puerto' : 'IP y puerto'}
-        description="Se guardan en esta tablet. Si la tienda no tiene otra IP distinta, también se sincroniza a la tienda."
+        description="En esta tablet: pones IP, Guardar, y se queda hasta que la cambies."
       >
             {ipOwnedByThisDevice && isConfigured && !hasUnsavedChanges ? (
               <div className="mb-2.5 flex items-center gap-2 rounded-lg border border-emerald-200 dark:border-emerald-900 bg-emerald-50/60 dark:bg-emerald-950/30 px-2.5 py-1.5">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
                 <div className="min-w-0">
                   <p className="text-xs font-semibold text-emerald-900 dark:text-emerald-100">
-                    Impresora en esta tablet
+                    Guardada en esta tablet
                   </p>
                   <p className="text-xs text-emerald-800/90 dark:text-emerald-200/90 font-mono">
                     {selectedHost}:{selectedPort} · abajo {savedBottomFeedCm} cm
@@ -877,13 +857,12 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
                 </div>
               </div>
             ) : isConfigured && !hasUnsavedChanges && (configSource === 'store' || configSource === 'cache') ? (
-              <div className="mb-2.5 flex items-start gap-2 rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50/60 dark:bg-blue-950/30 px-2.5 py-1.5">
-                <CircleAlert className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
-                <div className="min-w-0 text-xs text-blue-900 dark:text-blue-100 leading-snug">
-                  <p className="font-semibold">Misma impresora del local ({selectedHost})</p>
+              <div className="mb-2.5 flex items-start gap-2 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50/60 dark:bg-amber-950/30 px-2.5 py-1.5">
+                <CircleAlert className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <div className="min-w-0 text-xs text-amber-900 dark:text-amber-100 leading-snug">
+                  <p className="font-semibold">IP sugerida ({selectedHost}:{selectedPort})</p>
                   <p className="mt-0.5">
-                    Hay una sola impresora: esta IP es la correcta. Pulsa <strong>Guardar</strong> en esta
-                    tablet y luego <strong>Probar ticket</strong>. Si no imprime: Ajustes → Vertial → Red local ON.
+                    Pulsa <strong>Guardar impresora</strong> para dejarla fija en esta tablet hasta que tú la cambies.
                   </p>
                 </div>
               </div>
@@ -898,7 +877,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
               <div className="mb-2.5 flex items-center gap-2 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50/60 dark:bg-amber-950/30 px-2.5 py-1.5">
                 <CircleAlert className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
                 <p className="text-xs text-amber-900 dark:text-amber-100">
-                  HPRT: IP del ticket SELF-TEST (la única impresora) y puerto <strong>9100</strong>.
+                  Pon la IP de la impresora, puerto <strong>9100</strong>, y pulsa Guardar.
                 </p>
               </div>
             )}

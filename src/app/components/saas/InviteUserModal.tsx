@@ -8,7 +8,9 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { InviteLookupResult, RoleDefinition } from '../../lib/authApi';
+import { isWorkerAccount } from '../../lib/authApi';
 import type { Business } from '../../lib/businessApi';
+import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useInviteWorkCenters } from '../../hooks/useInviteWorkCenters';
 import { getDefaultInviteLandingPage } from '../../lib/inviteDefaults';
@@ -19,7 +21,8 @@ import {
   getInviteRoleDisplayLabel,
   suggestPositionForInviteRole,
 } from '../../lib/inviteFunctionRoles';
-import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
+import { isBusinessOwner, isOwnerGatedTeamRole } from '../../lib/accountOwnerPrecedence';
+import { isEventsBusinessType, isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import {
   computeLaborCostBreakdown,
   formatLaborCurrency,
@@ -29,6 +32,7 @@ import { listShiftTemplates, type ShiftTemplate } from '../../lib/schedulesApi';
 import { getRoleTaskBundle } from '../../lib/roleTaskTemplates';
 import { workerSeatBillingWarning } from '../../lib/workerSeatLimits';
 import { VertialBillingUpgradeLink } from './VertialBillingUpgradeLink';
+import { inviteRoleUsesCeoAdminPanel } from '../../lib/teamManagerAccess';
 
 interface InviteResult {
   isExistingUser?: boolean;
@@ -128,7 +132,12 @@ const CONTRACT_TYPES = [
   { id: 'obra_servicio', label: 'Por obra o servicio' },
   { id: 'interinidad', label: 'Interinidad' },
   { id: 'fijo_discontinuo', label: 'Fijo discontinuo' },
+  { id: 'autonomo', label: 'Autónomo / colaborador (sin nómina)' },
 ] as const;
+
+function isNoPayrollContract(contractId?: string | null): boolean {
+  return contractId === 'autonomo';
+}
 
 /** Sueldo: solo dígitos → miles con punto (es-ES), p. ej. 1200 → "1.200". */
 function formatSalaryThousandsEs(digitsOnly: string): string {
@@ -155,6 +164,14 @@ const ROLE_STYLE: Record<
     tier: 'standard' | 'normal' | 'pro';
   }
 > = {
+  Admin: {
+    dot: 'bg-amber-500',
+    badgeBg: 'bg-amber-50',
+    badgeText: 'text-amber-800',
+    dotColor: '#f59e0b',
+    icon: <Shield className="w-3.5 h-3.5" />,
+    tier: 'standard',
+  },
   Administrador: {
     dot: 'bg-slate-900',
     badgeBg: 'bg-slate-100',
@@ -492,13 +509,8 @@ function StepIndicator({ current, total }: { current: number; total: number }) {
 export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workCenters, businesses, currentBusinessId, workerSeats }: InviteUserModalProps) {
   useModalClose(true, onClose);
   const { t } = useTranslation();
+  const { user } = useAuth();
   const { currentBusiness: ctxBusiness } = useBusiness();
-  const roleOptions = useMemo(() => {
-    if (roles?.length) return roles;
-    return getFunctionRolesForBusiness(ctxBusiness?.businessType, {
-      ownDeliveryEnabled: Boolean(ctxBusiness?.ownDeliveryEnabled),
-    });
-  }, [roles, ctxBusiness?.businessType, ctxBusiness?.ownDeliveryEnabled]);
 
   const businessList = businesses?.length ? businesses : ctxBusiness ? [ctxBusiness] : [];
   const hasMultipleBusinesses = businessList.length > 1;
@@ -511,9 +523,31 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
     ?? businessList[0]
     ?? null;
 
+  const inviteAsOwner = isBusinessOwner(inviteBusiness, user?.user_id) && !isWorkerAccount(user);
+
+  const roleOptions = useMemo(() => {
+    const base = roles?.length
+      ? roles
+      : getFunctionRolesForBusiness(inviteBusiness?.businessType ?? ctxBusiness?.businessType, {
+          ownDeliveryEnabled: Boolean(
+            inviteBusiness?.ownDeliveryEnabled ?? ctxBusiness?.ownDeliveryEnabled,
+          ),
+        });
+    if (inviteAsOwner) return base;
+    return base.filter((r) => !isOwnerGatedTeamRole(r.id));
+  }, [
+    roles,
+    inviteBusiness?.businessType,
+    inviteBusiness?.ownDeliveryEnabled,
+    ctxBusiness?.businessType,
+    ctxBusiness?.ownDeliveryEnabled,
+    inviteAsOwner,
+  ]);
+
   const hrCopy = getHrLocationCopy(inviteBusiness?.businessType ?? ctxBusiness?.businessType);
   const inviteBusinessType = inviteBusiness?.businessType ?? ctxBusiness?.businessType;
   const isRestaurantInvite = isRestaurantBusinessType(inviteBusinessType);
+  const isEventsInvite = isEventsBusinessType(inviteBusinessType);
   const positionSuggestions = useMemo(
     () => getInvitePositionSuggestions(inviteBusinessType),
     [inviteBusinessType],
@@ -691,24 +725,28 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
     if (!contractType) e.contractType = 'Selecciona un tipo de contrato';
     if (!role) e.role = 'Selecciona una funcion';
     const salaryDigits = salaryDigitsFromDisplay(grossSalary);
-    if (!salaryDigits) e.grossSalary = 'Indica el bruto mensual del contrato';
-    else if (Number(salaryDigits) < 200) e.grossSalary = 'El importe parece demasiado bajo';
-    // Tienda obligatoria si hay locales: el trabajador la necesita para fichar y TPV.
+    if (!isNoPayrollContract(contractType)) {
+      if (!salaryDigits) e.grossSalary = 'Indica el bruto mensual del contrato';
+      else if (Number(salaryDigits) < 200) e.grossSalary = 'El importe parece demasiado bajo';
+    }
+    // Tienda/PDV: obligatorio solo si hay locales y no es eventos (sin PDV).
     const hasStoreOptions =
       !workCentersLoading
       && (
         loadedWorkCenterOptions.length > 0
         || (workCenters || []).some((wc) => wc.active !== false)
       );
-    if (hasStoreOptions && !String(workCenterId || '').trim()) {
+    if (!isEventsInvite && hasStoreOptions && !String(workCenterId || '').trim()) {
       e.workCenterId = 'Selecciona la tienda o local del trabajador';
     }
-    // Horario obligatorio: se aplica al aceptar la invitación.
-    if (!templatesLoading && shiftTemplates.length === 0) {
-      e.scheduleTemplateId =
-        'Crea una plantilla de horario en Equipo → Horarios y vacaciones antes de invitar.';
-    } else if (!templatesLoading && !String(scheduleTemplateId || '').trim()) {
-      e.scheduleTemplateId = 'Selecciona la plantilla de horario del trabajador';
+    // Horario obligatorio salvo Eventos (sin fichaje de tienda).
+    if (!isEventsInvite) {
+      if (!templatesLoading && shiftTemplates.length === 0) {
+        e.scheduleTemplateId =
+          'Crea una plantilla de horario en Equipo → Horarios y vacaciones antes de invitar.';
+      } else if (!templatesLoading && !String(scheduleTemplateId || '').trim()) {
+        e.scheduleTemplateId = 'Selecciona la plantilla de horario del trabajador';
+      }
     }
     return e;
   }
@@ -1150,6 +1188,70 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                       businessType={inviteBusinessType}
                     />
                     {role && (() => {
+                      if (inviteRoleUsesCeoAdminPanel(role)) {
+                        const isEvents = inviteBusinessType === 'events';
+                        const isAccountAdmin = role === 'Admin' || role === 'Gerente' || role === 'GerenteGrupo';
+                        const isAdministrador = role === 'Administrador';
+                        return (
+                          <div className="mt-2 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2.5 dark:border-blue-900 dark:bg-blue-950/30">
+                            <p className="text-[11px] font-semibold text-blue-800 dark:text-blue-200">
+                              {isAccountAdmin
+                                ? 'Al aceptar, tendrá acceso como el creador de la cuenta:'
+                                : isAdministrador
+                                  ? 'Al aceptar, llevará el SaaS del negocio:'
+                                  : 'Al aceptar, entrará al panel de administración:'}
+                            </p>
+                            <ul className="mt-1 space-y-0.5">
+                              {isAccountAdmin ? (
+                                <>
+                                  <li className="text-[11px] text-blue-900/85 dark:text-blue-100/85">
+                                    · Todo el panel (dashboard, finanzas, clientes, equipo y ajustes)
+                                  </li>
+                                  <li className="text-[11px] text-blue-900/85 dark:text-blue-100/85">
+                                    · Misma capacidad operativa que el titular en el día a día
+                                  </li>
+                                  <li className="text-[11px] text-blue-900/85 dark:text-blue-100/85">
+                                    · Sin restricción a «Mi trabajo»
+                                  </li>
+                                </>
+                              ) : isAdministrador ? (
+                                <>
+                                  <li className="text-[11px] text-blue-900/85 dark:text-blue-100/85">
+                                    · Panel SaaS: operación, cobros, clientes y equipo
+                                  </li>
+                                  <li className="text-[11px] text-blue-900/85 dark:text-blue-100/85">
+                                    · Gestiona el negocio en el día a día
+                                  </li>
+                                  <li className="text-[11px] text-blue-900/85 dark:text-blue-100/85">
+                                    · Sin restricción a «Mi trabajo»
+                                  </li>
+                                </>
+                              ) : isEvents ? (
+                                <>
+                                  <li className="text-[11px] text-blue-900/85 dark:text-blue-100/85">
+                                    · Centro de eventos, contrataciones y presupuestos
+                                  </li>
+                                  <li className="text-[11px] text-blue-900/85 dark:text-blue-100/85">
+                                    · Clientes, cobros, finanzas y equipo
+                                  </li>
+                                  <li className="text-[11px] text-blue-900/85 dark:text-blue-100/85">
+                                    · Todo el menú de la vertical eventos
+                                  </li>
+                                </>
+                              ) : (
+                                <>
+                                  <li className="text-[11px] text-blue-900/85 dark:text-blue-100/85">
+                                    · Dashboard y menú completo del negocio
+                                  </li>
+                                  <li className="text-[11px] text-blue-900/85 dark:text-blue-100/85">
+                                    · Equipo, nóminas y operación
+                                  </li>
+                                </>
+                              )}
+                            </ul>
+                          </div>
+                        );
+                      }
                       const bundle = getRoleTaskBundle(role, inviteBusinessType);
                       if (!bundle?.tasks?.length) return null;
                       return (
@@ -1222,6 +1324,7 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                         setErrors((p) => {
                           const n = { ...p };
                           delete n.contractType;
+                          if (isNoPayrollContract(v)) delete n.grossSalary;
                           return n;
                         });
                       }}
@@ -1230,12 +1333,20 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                       error={errors.contractType}
                       icon={<ClipboardList className="w-4 h-4" />}
                     />
+                    {(role === 'Admin' || role === 'Administrador') && (
+                      <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+                        Si es un ayudante y no va a nómina, elige <span className="font-semibold">Autónomo / colaborador</span>.
+                      </p>
+                    )}
                   </div>
 
-                  {/* Sueldo bruto mensual (lo que pone el contrato en cada nómina) */}
+                  {/* Sueldo: obligatorio en nómina; opcional si autónomo */}
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                      Bruto mensual del contrato <span className="text-red-400">*</span>
+                      {isNoPayrollContract(contractType)
+                        ? 'Honorarios / importe (opcional)'
+                        : 'Bruto mensual del contrato'}
+                      {!isNoPayrollContract(contractType) && <span className="text-red-400"> *</span>}
                     </label>
                     <div className="relative">
                       <DollarSign className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-300" />
@@ -1252,7 +1363,7 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                             return n;
                           });
                         }}
-                        placeholder="Ej: 1.200"
+                        placeholder={isNoPayrollContract(contractType) ? 'Sin importe o lo que facture' : 'Ej: 1.200'}
                         className={`w-full rounded-xl border-2 bg-white py-2.5 pl-10 pr-14 text-sm text-gray-900 outline-none transition-colors focus:border-blue-500 dark:bg-gray-800 dark:text-gray-100 ${
                           errors.grossSalary ? 'border-red-300 dark:border-red-700' : 'border-gray-200 dark:border-gray-700'
                         }`}
@@ -1262,13 +1373,17 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                       </span>
                     </div>
                     <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                      Lo que cobra en nómina cada mes, antes de IRPF. Con esto calculamos la Seguridad Social y el coste real para la empresa.
+                      {isNoPayrollContract(contractType)
+                        ? 'No entra en nómina ni Seguridad Social de empresa. Puedes dejarlo vacío.'
+                        : 'Lo que cobra en nómina cada mes, antes de IRPF. Con esto calculamos la Seguridad Social y el coste real para la empresa.'}
                     </p>
                     {errors.grossSalary && (
                       <p className="mt-1 text-xs text-red-500">{errors.grossSalary}</p>
                     )}
                   </div>
 
+                  {!isNoPayrollContract(contractType) && (
+                  <>
                   {/* Pagas al año */}
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
@@ -1285,6 +1400,8 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                       En España lo habitual son 14 pagas (junio y diciembre extras). Si tiene 2 pagas extras, el coste mensual real es mayor que el bruto de nómina.
                     </p>
                   </div>
+                  </>
+                  )}
 
                   {salaryPreview && (
                     <div className="rounded-2xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50/70 dark:bg-emerald-950/20 p-4 space-y-2">
@@ -1331,7 +1448,17 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                     </div>
                   )}
 
-                  {/* Centro de trabajo / local */}
+                  {/* Centro de trabajo / local — en eventos no hay PDV */}
+                  {isEventsInvite ? (
+                    <div className="rounded-xl border border-emerald-100 bg-emerald-50/70 px-3.5 py-2.5 dark:border-emerald-900 dark:bg-emerald-950/20">
+                      <p className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-200">
+                        Sin tienda ni PDV
+                      </p>
+                      <p className="mt-0.5 text-[11px] text-emerald-900/80 dark:text-emerald-100/80">
+                        En catering/eventos no se asigna caja ni punto de venta. Puedes invitar sin crear tiendas.
+                      </p>
+                    </div>
+                  ) : (
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
                       {hrCopy.inviteWorkCenterLabel} <span className="text-red-500">*</span>
@@ -1367,8 +1494,10 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                       </div>
                     )}
                   </div>
+                  )}
 
-                  {/* Plantilla de horario (obligatoria) */}
+                  {/* Plantilla de horario: no en Eventos */}
+                  {!isEventsInvite && (
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
                       Plantilla de horario <span className="text-red-500">*</span>
@@ -1408,6 +1537,7 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                       </div>
                     )}
                   </div>
+                  )}
 
                   {/* Info */}
                   <div className="flex items-start gap-2.5 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 dark:border-blue-800 dark:bg-blue-900/20">

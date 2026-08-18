@@ -15,9 +15,20 @@ import {
   ensureDatabase,
   couchRequest,
 } from '../services/couchdb.js';
+import {
+  assertTenantAccountOwnerSelf,
+  isBusinessOwner,
+} from '../services/businessAccess.js';
+import { getAuthUserId } from '../services/clockinsAccess.js';
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
+}
+
+function assertGroupOwner(group, actorUserId) {
+  const owner = String(group?.owner_user_id || '').trim();
+  const actor = String(actorUserId || '').trim();
+  return Boolean(owner && actor && owner === actor);
 }
 
 // ─── Group CRUD ───────────────────────────────────────────────────────────────
@@ -29,6 +40,15 @@ export async function createGroup(req, res) {
 
     if (!userId) return badRequest(res, 'Falta userId');
     if (!String(name || '').trim()) return badRequest(res, 'El nombre del grupo es obligatorio');
+
+    const ownerGate = await assertTenantAccountOwnerSelf(req, userId);
+    if (!ownerGate.ok) {
+      return res.status(ownerGate.status).json({
+        ok: false,
+        error: ownerGate.error,
+        code: ownerGate.code,
+      });
+    }
 
     const group = buildGroupDocument({ ownerUserId: userId, name, description, logo });
     const saved = await saveGroup(req, group);
@@ -82,6 +102,15 @@ export async function updateGroup(req, res) {
     const group = await findGroupById(req, groupId);
     if (!group) return res.status(404).json({ ok: false, error: 'Grupo no encontrado' });
 
+    const actorId = getAuthUserId(req);
+    if (!assertGroupOwner(group, actorId)) {
+      return res.status(403).json({
+        ok: false,
+        error: 'Solo el creador de la cuenta puede editar el grupo',
+        code: 'OWNER_ONLY',
+      });
+    }
+
     const nextGroup = {
       ...group,
       name: updates.name !== undefined ? String(updates.name || '').trim() : group.name,
@@ -107,6 +136,15 @@ export async function deleteGroup(req, res) {
 
     const group = await findGroupById(req, groupId);
     if (!group) return res.status(404).json({ ok: false, error: 'Grupo no encontrado' });
+
+    const actorId = getAuthUserId(req);
+    if (!assertGroupOwner(group, actorId)) {
+      return res.status(403).json({
+        ok: false,
+        error: 'Solo el creador de la cuenta puede eliminar el grupo',
+        code: 'OWNER_ONLY',
+      });
+    }
 
     await softDeleteDocument(req, GROUPS_DB, group._id);
     return res.json({ ok: true });
@@ -135,6 +173,15 @@ export async function addBusinessToGroup(req, res) {
 
     if (!group) return res.status(404).json({ ok: false, error: 'Grupo no encontrado' });
     if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
+
+    const actorId = getAuthUserId(req);
+    if (!assertGroupOwner(group, actorId) || !isBusinessOwner(business, actorId)) {
+      return res.status(403).json({
+        ok: false,
+        error: 'Solo el propietario puede vincular empresas al grupo',
+        code: 'OWNER_ONLY',
+      });
+    }
 
     const businessIds = Array.isArray(group.business_ids) ? group.business_ids : [];
     if (businessIds.includes(businessId)) {
@@ -181,6 +228,15 @@ export async function removeBusinessFromGroup(req, res) {
 
     if (!group) return res.status(404).json({ ok: false, error: 'Grupo no encontrado' });
     if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
+
+    const actorId = getAuthUserId(req);
+    if (!assertGroupOwner(group, actorId) || !isBusinessOwner(business, actorId)) {
+      return res.status(403).json({
+        ok: false,
+        error: 'Solo el propietario puede desvincular empresas del grupo',
+        code: 'OWNER_ONLY',
+      });
+    }
 
     const now = new Date().toISOString();
     const nextGroup = {

@@ -8,6 +8,7 @@ import {
 import { useActivationChecklist, type OnboardingStep } from '../../context/ActivationChecklistContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
+import { saasPathWithBusinessScope } from '../../lib/businessScopeUrl';
 import {
   getGuidedActivationChecklistTitle,
   isGuidedActivationBusinessType,
@@ -83,7 +84,9 @@ export function ActivationChecklist({ collapsed }: Props) {
     return (
       <div className="px-2 py-3 border-t border-gray-200 dark:border-gray-700">
         <button
-          onClick={() => navigate('/saas/dashboard')}
+          onClick={() =>
+            navigate(saasPathWithBusinessScope('/saas/dashboard', resolveBusinessScopeId(currentBusiness)))
+          }
           title={`${checklistTitle}: ${completionPct}% · ${completedSteps} de ${totalSteps} pasos`}
           className="relative w-10 h-10 mx-auto flex items-center justify-center"
         >
@@ -174,7 +177,9 @@ export function ActivationChecklist({ collapsed }: Props) {
               key={step.id}
               step={step}
               isDelivery={usesGuidedChecklist}
-              onNavigate={(url) => navigate(url)}
+              onNavigate={(url) =>
+                navigate(saasPathWithBusinessScope(url, resolveBusinessScopeId(currentBusiness)))
+              }
             />
           ))}
           {canDismissChecklist && (

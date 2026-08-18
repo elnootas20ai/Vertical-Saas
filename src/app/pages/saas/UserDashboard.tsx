@@ -30,6 +30,7 @@ import {
   resolveWorkerSessionEntryPath,
   userOwnsAnyBusiness,
 } from '../../lib/workerProfileCompletion';
+import { canUseCeoAdminPanel } from '../../lib/teamManagerAccess';
 
 const STATUS_LABELS: Record<string, { label: string; color: string; icon: typeof Clock }> = {
   pending: { label: 'Pendiente', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400', icon: Clock },
@@ -56,9 +57,13 @@ export function UserDashboard() {
   const linkedWorker = isWorker && Boolean(String(user?.linkedBusinessId || '').trim());
 
   // Trabajador ya vinculado → no este home de empresas; va a su backoffice.
+  // Administrador/RRHH invitado: panel como el titular.
   useEffect(() => {
     if (!user || !linkedWorker) return;
-    navigate(resolveWorkerSessionEntryPath(user), { replace: true });
+    navigate(
+      canUseCeoAdminPanel(user) ? '/saas/dashboard' : resolveWorkerSessionEntryPath(user),
+      { replace: true },
+    );
   }, [user, linkedWorker, navigate]);
 
   const ownsBusiness = userOwnsAnyBusiness(user?.user_id, businesses);

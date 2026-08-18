@@ -72,9 +72,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   };
 
   let response = await authFetch(`${API_BASE}${urlPath}`, fetchInit);
-  // 304 vacío: reintento forzado (no tratar como 500 genérico).
-  if (response.status === 304 && isGet) {
-    response = await authFetch(`${API_BASE}${withCacheBust(path)}`, {
+  // 304 vacío: reintentos forzados (no tratar como lista vacía ni tumbar la pantalla).
+  for (let attempt = 0; response.status === 304 && isGet && attempt < 2; attempt += 1) {
+    response = await authFetch(`${API_BASE}${withCacheBust(path)}&retry=${attempt + 1}`, {
       ...fetchInit,
       headers: {
         ...headers,
@@ -93,9 +93,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }>(response);
 
   if (response.status === 304 && isGet) {
-    // Último recurso: no tumbar la pantalla de inmobiliaria; lista vacía y log.
+    // Lista vacía aquí hace parecer que se han borrado fichas (eventos, etc.).
     console.warn('[verticalApi] 304 sin cuerpo en', path);
-    return { ok: true, items: [] } as T;
+    throw new Error('No se pudieron cargar los datos. Recarga la página (Ctrl+Shift+R).');
   }
   if (!response.ok) {
     const msg = extractApiErrorMessage(payload, response.status) || 'No se pudo completar la petición';

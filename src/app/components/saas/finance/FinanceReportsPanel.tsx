@@ -66,11 +66,12 @@ const AMBER = '#f59e0b';
 interface FinanceReportsPanelProps {
   userId: string;
   movements: FinanceMovementRecord[];
+  businessId?: string;
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export default function FinanceReportsPanel({ userId, movements }: FinanceReportsPanelProps) {
+export default function FinanceReportsPanel({ userId, movements, businessId }: FinanceReportsPanelProps) {
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [activeTab, setActiveTab] = useState<TabKey>('pnl');
   const [loading, setLoading] = useState(false);
@@ -92,8 +93,8 @@ export default function FinanceReportsPanel({ userId, movements }: FinanceReport
     setLoading(true);
     try {
       const [pnlData, cfData] = await Promise.all([
-        generateProfitAndLoss(userId, year),
-        generateCashFlowReport(userId, year),
+        generateProfitAndLoss(userId, year, businessId),
+        generateCashFlowReport(userId, year, businessId),
       ]);
       setPnl(pnlData);
       setCashflow(cfData);
@@ -102,7 +103,7 @@ export default function FinanceReportsPanel({ userId, movements }: FinanceReport
     } finally {
       setLoading(false);
     }
-  }, [userId, year]);
+  }, [userId, year, businessId]);
 
   useEffect(() => {
     loadAsyncReports();

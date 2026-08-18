@@ -52,6 +52,7 @@ export const VERTICAL_HIDDEN_MENU_ITEMS: Partial<Record<BusinessType, readonly s
     'promotions',
     'quotes',
     'worker-tpv',
+    'events-guests',
   ],
   /** Inmobiliaria: sin catálogo TPV ni proveedores (cartera = propiedades). */
   realEstate: ['catalog', 'catalog-stock', 'costing', 'suppliers', 'compras-stock'],

@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Plus, ChevronDown, Sparkles, Upload, Zap } from 'lucide-react';
 import { VERTIAL_BTN_PRIMARY } from '../../lib/vertialUiTokens';
 
@@ -30,6 +31,8 @@ interface AddButtonDropdownProps {
   importAddDesc?: string;
 }
 
+const MENU_WIDTH = 288;
+
 export function AddButtonDropdown({
   label = 'Añadir',
   onQuickAdd,
@@ -43,15 +46,16 @@ export function AddButtonDropdown({
   importAddDesc = 'Carga datos desde archivo CSV/Excel',
 }: AddButtonDropdownProps) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [menuBox, setMenuBox] = useState<{
+    top?: number;
+    bottom?: number;
+    left: number;
+    width: number;
+    maxHeight: number;
+  } | null>(null);
 
   const options: AddButtonOption[] = [
     {
@@ -86,15 +90,61 @@ export function AddButtonDropdown({
   // item, que confunde más de lo que ayuda.
   const onlyQuick = options.length === 1;
 
+  useLayoutEffect(() => {
+    if (!open || onlyQuick) {
+      setMenuBox(null);
+      return;
+    }
+    const place = () => {
+      const btn = btnRef.current;
+      if (!btn) return;
+      const r = btn.getBoundingClientRect();
+      const width = Math.min(MENU_WIDTH, window.innerWidth - 16);
+      let left = r.right - width;
+      if (left < 8) left = 8;
+      if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - width - 8);
+      const gap = 8;
+      const spaceBelow = window.innerHeight - r.bottom - gap - 8;
+      const spaceAbove = r.top - gap - 8;
+      const openBelow = spaceBelow >= 160 || spaceBelow >= spaceAbove;
+      const maxHeight = Math.max(120, openBelow ? spaceBelow : spaceAbove);
+      setMenuBox(
+        openBelow
+          ? { top: r.bottom + gap, left, width, maxHeight }
+          : { bottom: window.innerHeight - r.top + gap, left, width, maxHeight },
+      );
+    };
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
+  }, [open, onlyQuick]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (wrapRef.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
   return (
-    <div ref={ref} className="relative flex-shrink-0">
+    <div ref={wrapRef} className="relative flex-shrink-0">
       <button
+        ref={btnRef}
+        type="button"
         onClick={() => {
           if (onlyQuick) {
             onQuickAdd();
             return;
           }
-          setOpen(v => !v);
+          setOpen((v) => !v);
         }}
         className={`${VERTIAL_BTN_PRIMARY} !min-h-0 px-3 py-1.5 text-xs gap-1.5`}
       >
@@ -105,27 +155,36 @@ export function AddButtonDropdown({
         )}
       </button>
 
-      {open && !onlyQuick && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full mt-2 w-72 max-w-[min(18rem,calc(100vw-2rem))] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-xl overflow-hidden z-50">
-            {options.map((opt, i) => (
-              <div key={opt.id}>
-                <button
-                  onClick={opt.action}
-                  className="w-full px-4 py-3.5 hover:bg-gray-50 dark:hover:bg-gray-800 text-left transition-colors flex items-start gap-3"
-                >
-                  <div className="mt-0.5 flex-shrink-0">{opt.icon}</div>
-                  <div className="min-w-0">
-                    <p className="font-semibold text-gray-900 dark:text-gray-100 text-sm">{opt.label}</p>
-                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{opt.description}</p>
-                  </div>
-                </button>
-                {i < options.length - 1 && <div className="border-t border-gray-100 dark:border-gray-800" />}
-              </div>
-            ))}
-          </div>
-        </>
+      {open && !onlyQuick && typeof document !== 'undefined' && menuBox && createPortal(
+        <div
+          ref={menuRef}
+          className="fixed z-[200] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-xl overflow-y-auto"
+          style={{
+            top: menuBox.top,
+            bottom: menuBox.bottom,
+            left: menuBox.left,
+            width: menuBox.width,
+            maxHeight: menuBox.maxHeight,
+          }}
+        >
+          {options.map((opt, i) => (
+            <div key={opt.id}>
+              <button
+                type="button"
+                onClick={opt.action}
+                className="w-full px-4 py-3.5 hover:bg-gray-50 dark:hover:bg-gray-800 text-left transition-colors flex items-start gap-3"
+              >
+                <div className="mt-0.5 flex-shrink-0">{opt.icon}</div>
+                <div className="min-w-0">
+                  <p className="font-semibold text-gray-900 dark:text-gray-100 text-sm">{opt.label}</p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{opt.description}</p>
+                </div>
+              </button>
+              {i < options.length - 1 && <div className="border-t border-gray-100 dark:border-gray-800" />}
+            </div>
+          ))}
+        </div>,
+        document.body,
       )}
     </div>
   );

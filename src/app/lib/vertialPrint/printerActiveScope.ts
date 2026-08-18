@@ -72,32 +72,8 @@ export function resolveEffectivePrinterConfig(options?: {
   const localFallback = scope.localFallback ?? loadLegacyPrinterConfig();
   const localCfg = normalizeVertialPrinterConfig(localFallback);
 
-  // Terminal concreto (si lo hay) → tienda (1 impresora, N tablets) → caché dispositivo → legacy.
-  const terminal = terminalId
-    ? pdv?.terminals?.find((t) => t.id === terminalId)
-    : undefined;
-  const terminalCfg = terminal?.printerConfig
-    ? normalizeVertialPrinterConfig(terminal.printerConfig)
-    : null;
-  if (terminalCfg && isVertialPrinterConfigConfigured(terminalCfg)) {
-    return terminalCfg;
-  }
-
-  // IP de la tienda = la de la tablet que ya imprime. Se copia a esta tablet.
-  const storeCfg = pdv?.printerConfig
-    ? normalizeVertialPrinterConfig(pdv.printerConfig)
-    : null;
-  if (storeCfg && isVertialPrinterConfigConfigured(storeCfg)) {
-    if (pdvId) {
-      try {
-        cachePdvDevicePrinterConfig(pdvId, storeCfg);
-      } catch {
-        /* ignore */
-      }
-    }
-    return storeCfg;
-  }
-
+  // Simple: lo que guardaste en ESTA tablet manda hasta que guardes otra cosa.
+  // Tienda solo si esta tablet aún no tiene IP.
   if (pdvId) {
     const deviceCachedRaw = loadPdvDevicePrinterCache(pdvId);
     if (deviceCachedRaw) {
@@ -120,6 +96,23 @@ export function resolveEffectivePrinterConfig(options?: {
       }
     }
     return localCfg;
+  }
+
+  const terminal = terminalId
+    ? pdv?.terminals?.find((t) => t.id === terminalId)
+    : undefined;
+  const terminalCfg = terminal?.printerConfig
+    ? normalizeVertialPrinterConfig(terminal.printerConfig)
+    : null;
+  if (terminalCfg && isVertialPrinterConfigConfigured(terminalCfg)) {
+    return terminalCfg;
+  }
+
+  const storeCfg = pdv?.printerConfig
+    ? normalizeVertialPrinterConfig(pdv.printerConfig)
+    : null;
+  if (storeCfg && isVertialPrinterConfigConfigured(storeCfg)) {
+    return storeCfg;
   }
 
   if (pdvId) {

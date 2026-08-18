@@ -25,6 +25,7 @@ import { Layout } from '../../components/saas/Layout';
 import { useGroup } from '../../context/GroupContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useAuth } from '../../context/AuthContext';
+import { isWorkerAccount } from '../../lib/authApi';
 import type { BusinessGroup } from '../../lib/groupApi';
 import type { Branch, Business } from '../../lib/businessApi';
 import { toast } from 'sonner';
@@ -645,6 +646,8 @@ function GroupDetailPanel({ group }: { group: BusinessGroup }) {
 
 export function Groups() {
   const { groups, currentGroup, switchGroup, deleteGroup, isLoading, reloadGroups } = useGroup();
+  const { user } = useAuth();
+  const isTenantOwner = !isWorkerAccount(user);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
     async function handleDelete(groupId: string) {
@@ -668,12 +671,18 @@ export function Groups() {
               <p className="text-sm text-neutral-500 dark:text-neutral-400">Gestiona holdings, sedes y KPIs consolidados</p>
             </div>
           </div>
+          {isTenantOwner ? (
           <button
             onClick={() => setShowCreateModal(true)}
             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-xl transition-colors"
           >
             <Plus className="w-4 h-4" /> Nuevo grupo
           </button>
+          ) : (
+            <span className="text-xs text-neutral-500 max-w-[14rem] text-right">
+              Solo el creador de la cuenta puede crear grupos.
+            </span>
+          )}
         </div>
 
         {/* Content */}

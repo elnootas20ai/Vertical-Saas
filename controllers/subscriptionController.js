@@ -53,8 +53,19 @@ import {
   shouldBlockSubscriptionAccess,
 } from '../shared/billing/subscriptionAccess.js';
 import { quoteSubscriptionFromAccount } from '../shared/billing/subscriptionQuote.js';
+import { isTenantAccountOwner } from '../services/businessAccess.js';
 
 const APP_URL = process.env.APP_URL || 'http://localhost:3005';
+
+function forbidInvitedFromBilling(account, res) {
+  if (isTenantAccountOwner(account)) return false;
+  res.status(403).json({
+    ok: false,
+    error: 'Solo el creador de la cuenta puede gestionar la suscripción y la facturación',
+    code: 'OWNER_ONLY',
+  });
+  return true;
+}
 
 const PLAN_CATALOG = {
   basic: { name: 'Básico', monthlyPrice: 4900, annualPrice: 47040 },
@@ -142,6 +153,7 @@ export async function createAndActivate(req, res) {
     if (!account) {
       return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     }
+    if (forbidInvitedFromBilling(account, res)) return;
 
     if (isSkipMoneiSubscription()) {
       const now = new Date().toISOString();
@@ -363,6 +375,7 @@ export async function cancelUserSubscription(req, res) {
     if (!account) {
       return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     }
+    if (forbidInvitedFromBilling(account, res)) return;
 
     const moneiSubId = account.subscription?.moneiSubscriptionId;
     if (!moneiSubId) {
@@ -427,6 +440,7 @@ export async function confirmSubscription(req, res) {
     if (!account) {
       return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     }
+    if (forbidInvitedFromBilling(account, res)) return;
 
     const userApiKey = resolvePlatformApiKey();
     const moneiSub = await getSubscription(subscriptionId, userApiKey);
@@ -752,6 +766,7 @@ export async function purchaseAddon(req, res) {
     if (!account) {
       return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     }
+    if (forbidInvitedFromBilling(account, res)) return;
 
     const validation = canPurchaseAddon(account, addonId);
     if (!validation.ok) {
@@ -860,6 +875,7 @@ export async function getTransferInstructions(req, res) {
     if (!account) {
       return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     }
+    if (forbidInvitedFromBilling(account, res)) return;
 
     const sub = account.subscription || {};
     const quote = quoteSubscriptionFromAccount(account);
@@ -932,6 +948,7 @@ export async function notifyTransferPayment(req, res) {
     if (!account) {
       return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     }
+    if (forbidInvitedFromBilling(account, res)) return;
 
     if (account.accountType === 'user' || !account.subscription) {
       return res.status(400).json({

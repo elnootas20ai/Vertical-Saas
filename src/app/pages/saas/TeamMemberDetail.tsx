@@ -1442,7 +1442,7 @@ export function TeamMemberDetail() {
                         <option value="temporal">Temporal</option>
                         <option value="practicas">Prácticas</option>
                         <option value="formacion">Formación</option>
-                        <option value="autonomo">Autónomo</option>
+                        <option value="autonomo">Autónomo / colaborador</option>
                       </select>
                     </div>
                     <div>

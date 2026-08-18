@@ -12,7 +12,11 @@ import { DuplicatesMergeModal } from './DuplicatesMergeModal';
 import { mergeClientRequest, mergeLeadRequest } from '../../lib/crmApi';
 import { useModalClose } from '../../hooks/useModalClose';
 import { useClientDuplicateSearch } from '../../hooks/useClientDuplicateSearch';
-import { getDniOrNieError, getCifError } from '../../lib/dniCifValidator';
+import {
+  getCifErrorWhileTyping,
+  getDniOrNieErrorWhileTyping,
+  normalizeSpanishTaxId,
+} from '../../lib/dniCifValidator';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { listTeamAgentOptions, resolveTeamAgent } from '../../lib/realEstateTeamAgents';
@@ -94,10 +98,10 @@ function FieldError({ message }: { message?: string }) {
 }
 
 function InputWithIcon({
-  icon: Icon, type = 'text', placeholder, value, onChange, error, suffix, disabled,
+  icon: Icon, type = 'text', placeholder, value, onChange, onBlur, error, suffix, disabled,
 }: {
   icon: React.ElementType; type?: string; placeholder: string;
-  value: string; onChange: (v: string) => void; error?: string;
+  value: string; onChange: (v: string) => void; onBlur?: () => void; error?: string;
   suffix?: React.ReactNode; disabled?: boolean;
 }) {
   return (
@@ -108,6 +112,7 @@ function InputWithIcon({
           type={type}
           value={value}
           onChange={e => onChange(e.target.value)}
+          onBlur={onBlur}
           placeholder={placeholder}
           disabled={disabled}
           className={`w-full pl-10 ${suffix ? 'pr-10' : 'pr-4'} py-3 bg-gray-50 dark:bg-gray-800 border-2 ${
@@ -170,10 +175,14 @@ export function NuevoClienteModal({
   const nameRef = useRef<HTMLInputElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
 
-  // ─── DNI validation ─────────────────────────────────────────────────────
+  // ─── DNI validation (solo avisa con formato completo; acepta espacios/guiones) ─
   const dniValidation = (() => {
-    if (!dni.trim()) return null;
-    const err = clientType === 'empresa' ? getCifError(dni) : getDniOrNieError(dni);
+    const normalized = normalizeSpanishTaxId(dni);
+    if (!normalized) return null;
+    if (normalized.length < 9) return null;
+    const err = clientType === 'empresa'
+      ? getCifErrorWhileTyping(dni)
+      : getDniOrNieErrorWhileTyping(dni);
     return err ? { valid: false, message: err } : { valid: true, message: '' };
   })();
 
@@ -374,7 +383,7 @@ export function NuevoClienteModal({
       };
 
       if (isGerente) {
-        clientData.dni = dni.trim();
+        clientData.dni = normalizeSpanishTaxId(dni);
         clientData.defaultPaymentMethod = paymentMethod;
       }
 
@@ -619,7 +628,11 @@ export function NuevoClienteModal({
                     icon={FileText}
                     placeholder={clientType === 'empresa' ? 'B12345678' : '12345678Z'}
                     value={dni}
-                    onChange={setDni}
+                    onChange={(value) => setDni(value.toUpperCase())}
+                    onBlur={() => {
+                      const normalized = normalizeSpanishTaxId(dni);
+                      if (normalized !== dni) setDni(normalized);
+                    }}
                     suffix={dniValidation ? (
                       dniValidation.valid
                         ? <Check className="w-4 h-4 text-emerald-500" />

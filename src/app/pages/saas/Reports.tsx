@@ -32,6 +32,9 @@ import {
 } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { useWorkCenters } from '../../hooks/useWorkCenters';
+import { useFinanceUserId } from '../../hooks/useFinanceUserId';
+import { useActiveBusinessScope } from '../../hooks/useActiveBusinessScope';
+import { isCompraventaBusinessType } from '../../lib/compraventaSetup';
 import FinanceReportsPanel from '../../components/saas/finance/FinanceReportsPanel';
 import { useReportPlanAccess } from '../../hooks/useReportPlanAccess';
 import {
@@ -50,6 +53,21 @@ type ReportTab = ReportId;
 const SENSITIVE_TABS: ReportTab[] = REPORT_CATALOG
   .filter((r) => r.requiresReportsPermission)
   .map((r) => r.id);
+
+/** Informes del parque / compraventa: no aplican al resto de verticales. */
+const COMPRAVENTA_REPORT_IDS = new Set<ReportId>([
+  'ventas',
+  'inventario',
+  'rotacion',
+  'crm',
+  'comerciales',
+  'proveedores',
+  'margen',
+  'forecast',
+  'comparativa',
+  'heatmap',
+  'rentabilidad',
+]);
 
 type DatePreset = 'month' | '7d' | '30d' | '90d' | '6m' | '1y' | 'custom';
 
@@ -382,6 +400,9 @@ export function Reports() {
   const { t } = useTranslation();
   const { vehicles, leads, clients, sales } = useApp();
   const { user: authUser } = useAuth();
+  const financeUserId = useFinanceUserId();
+  const { businessId, businessType } = useActiveBusinessScope();
+  const isCompraventa = isCompraventaBusinessType(businessType);
   const { groups, currentGroup, groupKpis, isLoadingKpis, switchGroup, loadGroupKpis } = useGroup();
 
   const { activeWorkCenters, hasWorkCenters } = useWorkCenters();
@@ -420,11 +441,16 @@ export function Reports() {
   } = useReportPlanAccess();
 
   useEffect(() => {
-    if (!canAccessReport(tab)) {
-      const fallback = unlockedReports[0]?.id ?? 'ventas';
-      if (canAccessReport(fallback)) setTab(fallback);
+    if (!canAccessReport(tab) || (!isCompraventa && COMPRAVENTA_REPORT_IDS.has(tab))) {
+      const fallback = (isCompraventa
+        ? unlockedReports
+        : unlockedReports.filter((r) => !COMPRAVENTA_REPORT_IDS.has(r.id))
+      )[0]?.id ?? (isCompraventa ? 'ventas' : 'financiero');
+      if (canAccessReport(fallback) && (isCompraventa || !COMPRAVENTA_REPORT_IDS.has(fallback))) {
+        setTab(fallback);
+      }
     }
-  }, [tab, unlockedReports, canAccessReport]);
+  }, [tab, unlockedReports, canAccessReport, isCompraventa]);
 
   // ── Listas únicas para filtros ────────────────────────────────────────────
   const uniqueBrands = useMemo(() =>
@@ -480,44 +506,44 @@ export function Reports() {
   const [gdprLoaded, setGdprLoaded] = useState(false);
 
   const loadFinance = useCallback(() => {
-    if (!authUser?.user_id) return;
+    if (!financeUserId) return;
     setFinanceLoading(true);
-    listFinanceMovements(authUser.user_id)
+    listFinanceMovements(financeUserId, businessId || undefined)
       .then(setFinanceMovements)
-      .catch(() => {})
+      .catch(() => setFinanceMovements([]))
       .finally(() => setFinanceLoading(false));
-  }, [authUser?.user_id]);
+  }, [financeUserId, businessId]);
 
   const loadCommissions = useCallback(() => {
-    if (!authUser?.user_id) return;
-    listCommissions(authUser.user_id)
+    if (!financeUserId) return;
+    listCommissions(financeUserId)
       .then(setCommissions)
       .catch(() => {});
-  }, [authUser?.user_id]);
+  }, [financeUserId]);
 
   useEffect(() => {
-    if ((tab === 'financiero' || tab === 'rentabilidad') && authUser?.user_id && financeMovements.length === 0) {
-      loadFinance();
-    }
-  }, [tab, authUser?.user_id, financeMovements.length, loadFinance]);
+    if (!financeUserId) return;
+    if (isCompraventa && tab !== 'financiero' && tab !== 'rentabilidad') return;
+    loadFinance();
+  }, [tab, isCompraventa, financeUserId, loadFinance]);
 
   useEffect(() => {
-    if (tab === 'margen' && authUser?.user_id && !commissionsLoaded) {
+    if (tab === 'margen' && financeUserId && !commissionsLoaded) {
       setCommissionsLoaded(true);
       loadCommissions();
     }
-  }, [tab, authUser?.user_id, commissionsLoaded, loadCommissions]);
+  }, [tab, financeUserId, commissionsLoaded, loadCommissions]);
 
   // IR-09: Auto-refresh de datos lazy cada 5 min mientras se ven tabs relevantes
   useEffect(() => {
     const finTabs: ReportTab[] = ['financiero', 'rentabilidad', 'margen'];
-    if (!finTabs.includes(tab) || !authUser?.user_id) return;
+    if (!finTabs.includes(tab) || !financeUserId) return;
     const id = setInterval(() => {
       loadFinance();
       if (commissionsLoaded) loadCommissions();
     }, 5 * 60 * 1000);
     return () => clearInterval(id);
-  }, [tab, authUser?.user_id, commissionsLoaded, loadFinance, loadCommissions]);
+  }, [tab, financeUserId, commissionsLoaded, loadFinance, loadCommissions]);
 
   useEffect(() => {
     if (tab === 'rgpd' && authUser?.user_id && !gdprLoaded) {
@@ -1309,8 +1335,9 @@ export function Reports() {
     };
   }, [filteredVehicles]);
 
-  // ── IR-07: Alertas locales de rentabilidad ────────────────────────────────
+  // ── IR-07: Alertas locales de rentabilidad (solo compraventa) ─────────────
   const reportAlerts = useMemo(() => {
+    if (!isCompraventa) return [];
     const alerts: { id: string; level: 'warning' | 'alert'; icon: React.ReactNode; title: string; message: string; route?: string }[] = [];
 
     if (marginStats.avgPct > 0 && marginStats.avgPct < 8) {
@@ -1351,7 +1378,7 @@ export function Reports() {
     }
 
     return alerts;
-  }, [marginStats, stockAgeStats, preparationCostsData, tripleComparison]);
+  }, [isCompraventa, marginStats, stockAgeStats, preparationCostsData, tripleComparison]);
 
   // ── IR-11: Previsión de cierre de mes ─────────────────────────────────────
   const monthEndForecast = useMemo(() => {
@@ -1616,12 +1643,14 @@ export function Reports() {
 
   const visibleTabs = useMemo(
     () =>
-      REPORT_CATALOG.map((entry) => ({
-        ...entry,
-        icon: REPORT_TAB_ICONS[entry.id],
-        unlocked: canAccessReport(entry.id),
-      })),
-    [canAccessReport],
+      REPORT_CATALOG
+        .filter((entry) => isCompraventa || !COMPRAVENTA_REPORT_IDS.has(entry.id))
+        .map((entry) => ({
+          ...entry,
+          icon: REPORT_TAB_ICONS[entry.id],
+          unlocked: canAccessReport(entry.id),
+        })),
+    [canAccessReport, isCompraventa],
   );
 
   const handleTabClick = (id: ReportTab, unlocked: boolean) => {
@@ -1651,10 +1680,14 @@ export function Reports() {
         {/* ── Shortcuts de navegación ────────────────────────────────────── */}
         <div className="flex flex-wrap items-center gap-2 text-[10px] px-1">
           <Link to="/saas/dashboard" className="text-gray-400 hover:text-blue-500 transition-colors">Dashboard</Link>
-          <span className="text-gray-300">·</span>
-          <Link to="/saas/vehicles" className="text-gray-400 hover:text-blue-500 transition-colors">Vehículos</Link>
-          <span className="text-gray-300">·</span>
-          <Link to="/saas/sales" className="text-gray-400 hover:text-blue-500 transition-colors">Ventas</Link>
+          {isCompraventa && (
+            <>
+              <span className="text-gray-300">·</span>
+              <Link to="/saas/vehicles" className="text-gray-400 hover:text-blue-500 transition-colors">Vehículos</Link>
+              <span className="text-gray-300">·</span>
+              <Link to="/saas/sales" className="text-gray-400 hover:text-blue-500 transition-colors">Ventas</Link>
+            </>
+          )}
           <span className="text-gray-300">·</span>
           <Link to="/saas/finance" className="text-gray-400 hover:text-blue-500 transition-colors">Finanzas</Link>
           <span className="text-gray-300">·</span>
@@ -1720,6 +1753,7 @@ export function Reports() {
           </div>
 
           {/* ── Filtros avanzados ──────────────────────────────────────────── */}
+          {isCompraventa && (
           <div className="flex flex-wrap items-center gap-2">
             {uniqueBrands.length > 0 && (
               <select value={filterBrand} onChange={e => setFilterBrand(e.target.value)}
@@ -1757,9 +1791,10 @@ export function Reports() {
               </button>
             )}
           </div>
+          )}
 
           {/* ── Chips de filtros activos ────────────────────────────────────── */}
-          {hasActiveFilters && (
+          {isCompraventa && hasActiveFilters && (
             <div className="flex flex-wrap gap-1.5">
               {filterBrand !== 'all' && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
@@ -2265,7 +2300,11 @@ export function Reports() {
                 )}
 
                 <div className="mt-6">
-                  <FinanceReportsPanel userId={authUser?.user_id || ''} movements={filteredFinance} />
+                  <FinanceReportsPanel
+                    userId={financeUserId}
+                    movements={filteredFinance}
+                    businessId={businessId || undefined}
+                  />
                 </div>
               </>
             )}

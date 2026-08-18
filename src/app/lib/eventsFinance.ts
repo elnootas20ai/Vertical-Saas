@@ -55,6 +55,7 @@ type BusinessIssuer = {
   address?: string;
   phone?: string;
   email?: string;
+  logo?: string;
 };
 
 function quoteLinesToInvoiceLines(lines: QuoteLine[]) {
@@ -94,6 +95,58 @@ export function downloadEventQuotePdf(event: EventRecord, business?: BusinessIss
   generateInvoicePdf(buildEventQuotePdfData(event, business));
 }
 
+export async function sendEventQuoteByEmailRequest(
+  userId: string,
+  eventId: string,
+  business?: BusinessIssuer | null,
+  options?: { clientEmail?: string },
+): Promise<{ event: EventRecord; sentTo?: string; acceptUrl?: string; rejectUrl?: string }> {
+  const { authFetch, getAuthHeaders } = await import('./authApi');
+  const { getApiBase } = await import('./apiBase');
+  const res = await authFetch(
+    `${getApiBase()}/api/events-quotes/${encodeURIComponent(userId)}/${encodeURIComponent(eventId)}/send`,
+    {
+      method: 'POST',
+      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clientEmail: options?.clientEmail || undefined,
+        issuer: {
+          name: business?.name || '',
+          taxId: business?.taxId || '',
+          address: business?.address || '',
+          phone: business?.phone || '',
+          email: business?.email || '',
+          logo: business?.logo || '',
+        },
+      }),
+    },
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.ok === false) {
+    throw new Error(data.error || 'No se pudo enviar el presupuesto por email');
+  }
+  const ev = data.event as EventRecord;
+  return {
+    event: {
+      ...ev,
+      estado: normalizeEventStageSafe(ev?.estado) || 'enviado',
+    },
+    sentTo: data.sentTo,
+    acceptUrl: data.acceptUrl,
+    rejectUrl: data.rejectUrl,
+  };
+}
+
+function normalizeEventStageSafe(value: unknown): EventRecord['estado'] | null {
+  const raw = String(value || '').trim();
+  const allowed: EventRecord['estado'][] = [
+    'presupuesto', 'enviado', 'aceptado', 'contratado',
+    'planificacion', 'en_curso', 'finalizado', 'cancelado',
+  ];
+  return allowed.includes(raw as EventRecord['estado']) ? (raw as EventRecord['estado']) : null;
+}
+
+/** @deprecated Prefer sendEventQuoteByEmailRequest — solo descarga PDF local. */
 export async function markEventQuoteSent(
   userId: string,
   event: EventRecord,

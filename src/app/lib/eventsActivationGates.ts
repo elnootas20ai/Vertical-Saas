@@ -4,12 +4,10 @@ export type EventsSidebarLockFlags = {
   hasEvent: boolean;
 };
 
-/** Planificación operativa: tras la primera contratación. */
+/** Planificación operativa: tras la primera contratación. Contrataciones siempre abierta. */
 export const EVENTS_PLANNING_SIDEBAR_IDS = new Set([
-  'events-pipeline',
   'events-venues',
   'events-vendors',
-  'events-guests',
   'events-catering',
   'events-logistics',
 ]);
@@ -25,22 +23,10 @@ export function getEventsSidebarItemLock(
         title: 'Añade al menos un servicio con precio en Servicios antes de crear contrataciones.',
       };
     }
-    if (!flags.hasClient) {
-      return {
-        disabled: true,
-        title: 'Registra un cliente antes de abrir el asistente de contratación.',
-      };
-    }
+    // Sin cliente: el asistente abre y empieza creando el cliente (no bloquear aquí).
   }
 
-  if (itemId === 'events-pipeline' && !flags.hasEvent) {
-    return {
-      disabled: true,
-      title: 'Crea tu primera contratación con el asistente para ver el pipeline.',
-    };
-  }
-
-  if (EVENTS_PLANNING_SIDEBAR_IDS.has(itemId) && itemId !== 'events-pipeline' && !flags.hasEvent) {
+  if (EVENTS_PLANNING_SIDEBAR_IDS.has(itemId) && !flags.hasEvent) {
     return {
       disabled: true,
       title: 'La planificación (invitados, catering, logística…) se habilita tras la primera contratación.',

@@ -24,11 +24,18 @@ const DB = (env.VITE_COUCHDB_DB || 'vertial') + '-schedules';
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${getApiBase()}${path}`, {
+    credentials: 'include',
     headers: { ...getHeaders(), ...(init?.headers || {}) },
     ...init,
   });
-  const data = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) throw new Error(data?.error || 'Error en horarios');
+  const data = (await res.json().catch(() => ({}))) as T & {
+    error?: string;
+    details?: { reason?: string; error?: string };
+  };
+  if (!res.ok) {
+    const reason = data?.details?.reason || data?.details?.error || data?.error;
+    throw new Error(reason || 'Error en horarios');
+  }
   return data;
 }
 

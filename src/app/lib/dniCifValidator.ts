@@ -4,11 +4,19 @@
 
 const DNI_LETTERS = 'TRWAGMYFPDXBNJZSQVHLCKE';
 
+/** Quita espacios, guiones y puntos; pasa a mayúsculas. */
+export function normalizeSpanishTaxId(value: string): string {
+  return String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[\s.\-/]/g, '');
+}
+
 // ─── DNI ─────────────────────────────────────────────────────────────────────
 // Formato: 8 dígitos + 1 letra de control (excluye I, Ñ, O, U)
 
 export function validateDni(value: string): boolean {
-  const v = value.trim().toUpperCase();
+  const v = normalizeSpanishTaxId(value);
   const match = v.match(/^(\d{8})([A-Z])$/);
   if (!match) return false;
   const num = parseInt(match[1], 10);
@@ -19,7 +27,7 @@ export function validateDni(value: string): boolean {
 // Formato: X/Y/Z + 7 dígitos + 1 letra de control
 
 export function validateNie(value: string): boolean {
-  const v = value.trim().toUpperCase();
+  const v = normalizeSpanishTaxId(value);
   const match = v.match(/^([XYZ])(\d{7})([A-Z])$/);
   if (!match) return false;
   const prefix = { X: '0', Y: '1', Z: '2' }[match[1] as 'X' | 'Y' | 'Z'];
@@ -44,7 +52,7 @@ export function validateDniOrNie(value: string): boolean {
 const CIF_CONTROL_LETTERS = 'JABCDEFGHI';
 
 export function validateCif(value: string): boolean {
-  const v = value.trim().toUpperCase();
+  const v = normalizeSpanishTaxId(value);
   const match = v.match(/^([ABCDEFGHJKLMNPQRSUVW])(\d{7})([0-9A-J])$/);
   if (!match) return false;
 
@@ -91,27 +99,27 @@ export function validateNifOrCif(value: string): boolean {
 // ─── Mensajes de error ────────────────────────────────────────────────────────
 
 export function getDniError(value: string): string | null {
-  if (!value.trim()) return null;
+  if (!normalizeSpanishTaxId(value)) return null;
   return validateDni(value) ? null : 'DNI no válido (formato: 8 dígitos + letra, ej: 12345678Z)';
 }
 
 export function getNieError(value: string): string | null {
-  if (!value.trim()) return null;
+  if (!normalizeSpanishTaxId(value)) return null;
   return validateNie(value) ? null : 'NIE no válido (formato: X/Y/Z + 7 dígitos + letra, ej: X1234567L)';
 }
 
 export function getDniOrNieError(value: string): string | null {
-  if (!value.trim()) return null;
+  if (!normalizeSpanishTaxId(value)) return null;
   return validateDniOrNie(value) ? null : 'DNI/NIE no válido. Comprueba el número y la letra de control';
 }
 
 export function getCifError(value: string): string | null {
-  if (!value.trim()) return null;
+  if (!normalizeSpanishTaxId(value)) return null;
   return validateCif(value) ? null : 'CIF no válido (formato: letra + 7 dígitos + control, ej: B12345678)';
 }
 
 export function getNifOrCifError(value: string): string | null {
-  if (!value.trim()) return null;
+  if (!normalizeSpanishTaxId(value)) return null;
   return validateNifOrCif(value) ? null : 'NIF/CIF no válido. Comprueba el número y el dígito de control';
 }
 
@@ -123,8 +131,22 @@ export const SPANISH_TAX_ID_FULL_LENGTH = 9;
  * 9 caracteres (formato completo). Así no bloquea la captura letra a letra.
  */
 export function getNifOrCifErrorWhileTyping(value: string): string | null {
-  const v = value.trim().toUpperCase();
+  const v = normalizeSpanishTaxId(value);
   if (!v) return null;
   if (v.length < SPANISH_TAX_ID_FULL_LENGTH) return null;
   return getNifOrCifError(v);
+}
+
+export function getDniOrNieErrorWhileTyping(value: string): string | null {
+  const v = normalizeSpanishTaxId(value);
+  if (!v) return null;
+  if (v.length < SPANISH_TAX_ID_FULL_LENGTH) return null;
+  return getDniOrNieError(v);
+}
+
+export function getCifErrorWhileTyping(value: string): string | null {
+  const v = normalizeSpanishTaxId(value);
+  if (!v) return null;
+  if (v.length < SPANISH_TAX_ID_FULL_LENGTH) return null;
+  return getCifError(v);
 }

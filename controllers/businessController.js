@@ -1,6 +1,5 @@
 import {
   buildBusinessDocument,
-  buildDefaultPermissionMatrix,
   findAccountByUserId,
   findBusinessById,
   listBusinessesByUser,
@@ -16,6 +15,14 @@ import { cascadeSoftDeleteBusinessData } from '../services/businessDeleteCascade
 import { seedAlertsConfigIfMissing } from './settingsController.js';
 import { assertCanCreateBusiness } from '../services/entitlementEnforcement.js';
 import { findLikelyDuplicateBusiness, normalizeLinkedBusinessId } from '../shared/billing/onboardingBusiness.js';
+import {
+  assertBusinessOwner,
+  assertBusinessTeamManage,
+  assertTenantAccountOwnerSelf,
+  canChangeBusinessMemberRole,
+  canRemoveBusinessMember,
+  isBusinessOwner,
+} from '../services/businessAccess.js';
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
@@ -28,6 +35,15 @@ export async function createBusiness(req, res) {
 
     if (!userId) return badRequest(res, 'Falta userId');
     if (!String(name || '').trim()) return badRequest(res, 'El nombre de la empresa es obligatorio');
+
+    const ownerGate = await assertTenantAccountOwnerSelf(req, userId);
+    if (!ownerGate.ok) {
+      return res.status(ownerGate.status).json({
+        ok: false,
+        error: ownerGate.error,
+        code: ownerGate.code,
+      });
+    }
 
     const actorEmail = req.authUser?.email || '';
     const limitCheck = await assertCanCreateBusiness(req, userId, actorEmail);
@@ -123,9 +139,30 @@ export async function updateBusiness(req, res) {
     const { businessId } = req.params;
     if (!businessId) return badRequest(res, 'Falta businessId');
 
+    const ownerGate = await assertBusinessOwner(req, businessId);
+    if (!ownerGate.ok) {
+      return res.status(ownerGate.status).json({
+        ok: false,
+        error: ownerGate.error,
+        code: ownerGate.code,
+      });
+    }
+
     const updates = req.body || {};
-    const business = await findBusinessById(req, businessId);
-    if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
+    const business = ownerGate.business;
+
+    // No permitir transferir propiedad por esta vía.
+    if (
+      updates.owner_user_id !== undefined
+      && String(updates.owner_user_id || '').trim()
+      && String(updates.owner_user_id).trim() !== String(business.owner_user_id || '').trim()
+    ) {
+      return res.status(403).json({
+        ok: false,
+        error: 'No se puede transferir la propiedad de la empresa desde aquí',
+        code: 'OWNER_ONLY',
+      });
+    }
 
     const now = new Date().toISOString();
     const nextBusiness = {
@@ -188,8 +225,15 @@ export async function deleteBusiness(req, res) {
       return res.status(403).json({ ok: false, error: 'La contraseña no es correcta' });
     }
 
-    const business = await findBusinessById(req, businessId);
-    if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
+    const ownerGate = await assertBusinessOwner(req, businessId);
+    if (!ownerGate.ok) {
+      return res.status(ownerGate.status).json({
+        ok: false,
+        error: ownerGate.error,
+        code: ownerGate.code,
+      });
+    }
+    const business = ownerGate.business;
 
     const deletedBusinessId = business.business_id || String(business._id || '').replace(/^business:/, '');
     const ownerUserId = String(business.owner_user_id || '').trim();
@@ -237,11 +281,23 @@ export async function addMember(req, res) {
     const { businessId } = req.params;
     if (!businessId) return badRequest(res, 'Falta businessId');
 
+    const manageGate = await assertBusinessTeamManage(req, businessId);
+    if (!manageGate.ok) {
+      return res.status(manageGate.status).json({ ok: false, error: manageGate.error });
+    }
+
     const { user_id, fullName, email, role, permissions } = req.body || {};
     if (!user_id) return badRequest(res, 'Falta user_id del miembro');
 
-    const business = await findBusinessById(req, businessId);
-    if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
+    const business = manageGate.business;
+    const nextRole = String(role || 'Usuario').trim() || 'Usuario';
+    if (!canChangeBusinessMemberRole(business, manageGate.userId, '', nextRole)) {
+      return res.status(403).json({
+        ok: false,
+        error: 'Solo el propietario puede asignar roles de administración',
+        code: 'OWNER_ONLY',
+      });
+    }
 
     const members = Array.isArray(business.members) ? business.members : [];
     if (members.some((m) => m.user_id === user_id)) {
@@ -253,8 +309,8 @@ export async function addMember(req, res) {
       user_id: String(user_id || '').trim(),
       fullName: String(fullName || '').trim(),
       email: String(email || '').trim().toLowerCase(),
-      role: String(role || 'Usuario').trim() || 'Usuario',
-      permissions: normalizePermissionMatrix(permissions, role || 'Usuario'),
+      role: nextRole,
+      permissions: normalizePermissionMatrix(permissions, nextRole),
       joinedAt: now,
     };
 
@@ -280,9 +336,13 @@ export async function updateMember(req, res) {
     if (!businessId) return badRequest(res, 'Falta businessId');
     if (!memberId) return badRequest(res, 'Falta memberId');
 
+    const manageGate = await assertBusinessTeamManage(req, businessId);
+    if (!manageGate.ok) {
+      return res.status(manageGate.status).json({ ok: false, error: manageGate.error });
+    }
+
     const updates = req.body || {};
-    const business = await findBusinessById(req, businessId);
-    if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
+    const business = manageGate.business;
 
     const members = Array.isArray(business.members) ? business.members : [];
     const idx = members.findIndex((m) => m.user_id === memberId);
@@ -290,6 +350,13 @@ export async function updateMember(req, res) {
 
     const current = members[idx];
     const nextRole = updates.role || current.role;
+    if (!canChangeBusinessMemberRole(business, manageGate.userId, current.role, nextRole)) {
+      return res.status(403).json({
+        ok: false,
+        error: 'Solo el propietario puede cambiar roles de administración',
+        code: 'OWNER_ONLY',
+      });
+    }
     const updatedMember = {
       ...current,
       role: nextRole,
@@ -318,11 +385,21 @@ export async function removeMember(req, res) {
     if (!businessId) return badRequest(res, 'Falta businessId');
     if (!memberId) return badRequest(res, 'Falta memberId');
 
-    const business = await findBusinessById(req, businessId);
-    if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
+    const manageGate = await assertBusinessTeamManage(req, businessId);
+    if (!manageGate.ok) {
+      return res.status(manageGate.status).json({ ok: false, error: manageGate.error });
+    }
+    const business = manageGate.business;
 
-    if (business.owner_user_id === memberId) {
+    if (isBusinessOwner(business, memberId)) {
       return badRequest(res, 'No puedes eliminar al propietario de la empresa');
+    }
+    if (!canRemoveBusinessMember(business, manageGate.userId, memberId)) {
+      return res.status(403).json({
+        ok: false,
+        error: 'Solo el propietario puede expulsar a un Admin u otro rol de administración',
+        code: 'OWNER_ONLY',
+      });
     }
 
     const members = Array.isArray(business.members) ? business.members : [];

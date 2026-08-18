@@ -21,6 +21,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { useAuthOptional } from '../../context/AuthContext';
 import { isWorkerAccount, type AccountPermissionMatrix } from '../../lib/authApi';
+import { canUseCeoAdminPanel } from '../../lib/teamManagerAccess';
 import { useBusiness } from '../../context/BusinessContext';
 import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import { isDeliveryBusinessType } from '../../lib/deliverySetup';
@@ -156,6 +157,20 @@ function ownerNavItemsForVertical(businessType?: string | null): BottomNavItem[]
     ];
   }
 
+  if (businessType === 'events') {
+    return [
+      HOME_ITEM,
+      {
+        id: 'events-hub',
+        path: '/saas/vertical/eventos',
+        icon: ClipboardList,
+        label: 'Eventos',
+        matchPaths: ['/saas/vertical/eventos'],
+      },
+      CLIENTS_ITEM,
+    ];
+  }
+
   return [
     HOME_ITEM,
     { id: 'sales', path: '/saas/sales', icon: TrendingUp, label: 'Ventas' },
@@ -216,9 +231,11 @@ export function BottomNav() {
   const location = useLocation();
   const navigate = useNavigate();
   const auth = useAuthOptional();
-  const isWorker = Boolean(auth?.user && isWorkerAccount(auth.user));
+  const { businesses, currentBusiness } = useBusiness();
+  const isWorker = Boolean(
+    auth?.user && isWorkerAccount(auth.user) && !canUseCeoAdminPanel(auth.user, businesses),
+  );
   const { notifications } = useApp();
-  const { currentBusiness } = useBusiness();
   const alertCenterBusinessId = useAlertCenterBusinessId();
   const { unresolved: alertCenterUnresolved, summary } = useAlertCenterSummary(
     !isWorker ? alertCenterBusinessId : undefined,

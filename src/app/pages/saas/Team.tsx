@@ -119,6 +119,7 @@ import { getRetailOpsUiCopy } from '../../lib/retailUiCopy';
 import { getHrLocationCopy } from '../../lib/retailLocationCopy';
 import { fetchTeamAlerts, type TeamAlert } from '../../lib/teamAlertsApi';
 import { canManagePayroll } from '../../lib/teamManagerAccess';
+import { canOwnerPrecedenceRemoveMember } from '../../lib/accountOwnerPrecedence';
 
 type TeamTab = 'members' | 'roles' | 'activity' | 'staff-expenses' | 'staff-consumptions' | 'payroll';
 type MemberStatus = 'active' | 'pending' | 'inactive';
@@ -1243,6 +1244,7 @@ function MemberDrawer({
   roles,
   businessType,
   currentUserId,
+  currentBusiness,
   workCenters = [],
   onClose,
   onMemberUpdated,
@@ -1253,6 +1255,7 @@ function MemberDrawer({
   roles: RoleDefinition[];
   businessType?: string | null;
   currentUserId?: string;
+  currentBusiness?: { owner_user_id?: string; members?: { user_id?: string; role?: string }[] } | null;
   /** Tiendas/locales para asignar TPV y fichaje. */
   workCenters?: WorkCenter[];
   onClose: () => void;
@@ -1355,6 +1358,12 @@ function MemberDrawer({
   const permissionSummary = getPermissionSummary(memberState.permissions, memberState.role, businessType);
   const accessModules = getVertialAccessPermissionModules(businessType);
   const isCurrentUser = currentUserId === memberState.user_id;
+  const canDeleteMember = canOwnerPrecedenceRemoveMember(
+    currentBusiness,
+    currentUserId,
+    memberState.user_id,
+    memberState.role,
+  );
 
   const persistMember = async (payload: Partial<AuthUser>) => {
     setIsSaving(true);
@@ -1870,7 +1879,7 @@ function MemberDrawer({
                         <option value="temporal">Temporal</option>
                         <option value="practicas">Prácticas</option>
                         <option value="formacion">Formación</option>
-                        <option value="autonomo">Autónomo</option>
+                        <option value="autonomo">Autónomo / colaborador</option>
                       </select>
                       <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
                     </div>
@@ -2560,9 +2569,13 @@ function MemberDrawer({
                     setFeedback('No puedes eliminar tu propia cuenta desde aquí.');
                     return;
                   }
+                  if (!canDeleteMember) {
+                    setFeedback('Solo el propietario puede expulsar a un Admin u otro rol de administración.');
+                    return;
+                  }
                   setShowConfirmDelete(true);
                 }}
-                disabled={isDeleting || isCurrentUser}
+                disabled={isDeleting || isCurrentUser || !canDeleteMember}
                 className="flex w-full items-center justify-between rounded-xl border border-red-200 px-4 py-3 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <div className="flex items-center gap-2.5">
@@ -3855,6 +3868,7 @@ export function Team() {
           roles={roles}
           businessType={currentBusiness?.businessType}
           currentUserId={user?.user_id}
+          currentBusiness={currentBusiness}
           workCenters={workCentersData}
           onClose={() => setSelectedMemberId(null)}
           onMemberUpdated={handleMemberUpdated}

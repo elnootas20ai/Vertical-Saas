@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canManagePayroll, canManageTeam } from '../src/app/lib/teamManagerAccess.ts';
+import { canManagePayroll, canManageTeam, canUseCeoAdminPanel } from '../src/app/lib/teamManagerAccess.ts';
 
 describe('teamManagerAccess', () => {
   it('allows Gestor role', () => {
@@ -10,6 +10,7 @@ describe('teamManagerAccess', () => {
   it('allows Encargado and Administrador', () => {
     expect(canManageTeam({ user_id: 'u1', role: 'Encargado' })).toBe(true);
     expect(canManageTeam({ user_id: 'u1', role: 'Administrador' })).toBe(true);
+    expect(canUseCeoAdminPanel({ user_id: 'u1', role: 'Administrador' })).toBe(true);
   });
 
   it('denies plain Usuario', () => {

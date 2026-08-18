@@ -11,6 +11,11 @@ export const TEAM_MANAGER_ROLES = new Set([
   'Superadmin',
 ]);
 
+/** Al invitar: Admin / Administrador / Gestor / Encargado usan panel SaaS (no «Mi trabajo»). */
+export function inviteRoleUsesCeoAdminPanel(role?: string | null): boolean {
+  return TEAM_MANAGER_ROLES.has(String(role || '').trim());
+}
+
 export function canManageTeam(
   user?: {
     user_id?: string;
@@ -24,6 +29,18 @@ export function canManageTeam(
   if (user.permissions?.team?.edit) return true;
   if (TEAM_MANAGER_ROLES.has(String(user.role || '').trim())) return true;
   return false;
+}
+
+/** Invitado de RRHH (Administrador, Gestor, Encargado…): usa el panel SaaS como el titular. */
+export function canUseCeoAdminPanel(
+  user?: {
+    user_id?: string;
+    role?: string;
+    permissions?: Record<string, { view?: boolean; edit?: boolean }>;
+  } | null,
+  businesses?: { owner_user_id?: string }[] | null,
+): boolean {
+  return canManageTeam(user, businesses);
 }
 
 /** Misma regla: quien gestiona equipo puede ver nóminas de la empresa y subir el ZIP. */

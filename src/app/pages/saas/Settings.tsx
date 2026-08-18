@@ -1882,6 +1882,8 @@ function TabBusinesses() {
     deleteBusiness,
   } = useBusiness();
   const entitlements = useTenantEntitlements();
+  const isTenantOwner = !isWorkerAccount(user);
+  const canCreateOwnedBusiness = isTenantOwner && entitlements.canCreateBusiness;
 
   const activationFocus = useMemo(
     () => new URLSearchParams(location.search).get(ACTIVATION_FOCUS_PARAM),
@@ -2180,7 +2182,7 @@ function TabBusinesses() {
               </p>
             </div>
           </div>
-          {entitlements.canCreateBusiness ? (
+          {canCreateOwnedBusiness ? (
             <button
               type="button"
               onClick={() => {
@@ -2192,6 +2194,10 @@ function TabBusinesses() {
               <Plus className="w-4 h-4" />
               Nueva empresa
             </button>
+          ) : !isTenantOwner ? (
+            <span className="text-xs text-gray-500 dark:text-gray-400 max-w-[14rem] text-right">
+              Solo el creador de la cuenta puede añadir empresas.
+            </span>
           ) : shouldHideInAppSubscriptionPurchaseOnIos() ? (
             <span className="text-xs text-gray-500 dark:text-gray-400 max-w-[12rem] text-right">
               Límite de empresas del plan. En iOS no se amplía el plan.
@@ -2417,6 +2423,7 @@ function TabBusinesses() {
           <p className="text-sm text-gray-400 dark:text-gray-500 mb-6 max-w-sm mx-auto">
             Crea tu primera empresa para organizar equipos, datos y configuraciones de forma independiente.
           </p>
+          {isTenantOwner ? (
           <button
             type="button"
             onClick={() => setShowForm(true)}
@@ -2425,6 +2432,9 @@ function TabBusinesses() {
             <Plus className="w-4 h-4" />
             Crear primera empresa
           </button>
+          ) : (
+            <p className="text-xs text-gray-500">Solo el creador de la cuenta puede crear empresas.</p>
+          )}
         </div>
       ) : filteredBusinesses.length === 0 ? (
         <div className="bg-white dark:bg-gray-900 rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 p-8 text-center">
@@ -3995,12 +4005,27 @@ export function Settings() {
   }, [activeTab, currentBusiness?.businessType, navigate]);
 
   useEffect(() => {
+    if (!isWorkerAccount(user)) return;
+    if (activeTab !== 'billing') return;
+    navigate('/saas/settings/empresa', { replace: true });
+  }, [activeTab, navigate, user]);
+
+  useEffect(() => {
     if (isWorkerAccount(user)) return;
     if (!shouldBlockSaasAccess(subscription.status, subscription)) return;
     if (activeTab === 'billing') return;
     // iOS: la pantalla /saas/subscription ya es “solo clientes” (sin cobro).
     navigate('/saas/subscription', { replace: true });
   }, [subscription, subscription.status, activeTab, navigate, user]);
+
+  const visibleSections = useMemo(
+    () =>
+      SECTIONS.filter((section) => {
+        if (section.id === 'billing' && isWorkerAccount(user)) return false;
+        return true;
+      }),
+    [user],
+  );
 
   const teamStats = useMemo(() => {
     const members = currentBusiness?.members;
@@ -4222,7 +4247,7 @@ export function Settings() {
                 className="flex gap-0.5 overflow-x-auto [&::-webkit-scrollbar]:hidden"
                 style={{ scrollbarWidth: 'none' }}
               >
-                {SECTIONS.map((section) => {
+                {visibleSections.map((section) => {
                   const visibleTabs = section.tabs.filter((tabId) =>
                     isSettingsTabVisibleForVertical(tabId, currentBusiness?.businessType),
                   );

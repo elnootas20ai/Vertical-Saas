@@ -42,23 +42,27 @@ import { SchedulesWeekPanel } from '../../components/saas/schedules/SchedulesWee
 import { VacationsTeamPanel } from '../../components/saas/schedules/VacationsTeamPanel';
 import { SchedulesControlPanel } from '../../components/saas/schedules/SchedulesControlPanel';
 import { mergeBusinessMembers } from '../../lib/schedulesDisplay';
+import { canManageTeam, TEAM_MANAGER_ROLES } from '../../lib/teamManagerAccess';
+import { isBusinessOwner } from '../../lib/accountOwnerPrecedence';
 import { formatDateRangeEs } from '../../lib/formatDateEs';
 
 type Tab = 'calendar' | 'vacations' | 'control' | 'config';
 type ConfigSubTab = 'holidays' | 'blocks' | 'templates' | 'rules';
-const MANAGER_ROLES = new Set(['Admin', 'Gerente']);
 
 export function SchedulesVacations() {
   const { t, i18n } = useTranslation();
   const { user, listUsers } = useAuth();
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, businesses } = useBusiness();
   const businessId = currentBusiness?.business_id || '';
   const myBusinessMember = useMemo(
     () => currentBusiness?.members?.find((m) => m.user_id === user?.user_id),
     [currentBusiness?.members, user?.user_id],
   );
   const { activeWorkCenters, hasWorkCenters } = useWorkCenters();
-  const canManage = MANAGER_ROLES.has(myBusinessMember?.role || user?.role || '');
+  const canManage =
+    isBusinessOwner(currentBusiness, user?.user_id)
+    || canManageTeam(user, businesses)
+    || TEAM_MANAGER_ROLES.has(String(myBusinessMember?.role || user?.role || '').trim());
   const lang = (i18n.language?.slice(0, 2) || 'es') as string;
   const dayLabels = WEEKDAY_LABELS[lang] || WEEKDAY_LABELS.es;
   const leaveLabels = LEAVE_TYPE_LABELS[lang] || LEAVE_TYPE_LABELS.es;
@@ -305,22 +309,27 @@ export function SchedulesVacations() {
   };
 
   const handleSaveSchedule = async () => {
-    if (!editingMemberId || !businessId) return;
+    const memberId = editingMemberId;
+    if (!memberId) return;
+    if (!businessId) {
+      setError('No hay empresa activa para guardar el horario.');
+      return;
+    }
     setSaving(true); setError('');
     try {
-      const member = members.find(m => m.user_id === editingMemberId);
+      const member = members.find(m => m.user_id === memberId);
       const existing =
-        schedules.find((s) => s.member_id === editingMemberId && s.week_start === currentWeekStart)
-        || schedules.find((s) => s.member_id === editingMemberId && !s.week_start)
+        schedules.find((s) => s.member_id === memberId && s.week_start === currentWeekStart)
+        || schedules.find((s) => s.member_id === memberId && !s.week_start)
         || null;
       // Si el doc es de otra semana, no reutilizar _id/_rev (crear el de la semana actual).
       const existingForWeek =
         existing && (!existing.week_start || existing.week_start === currentWeekStart)
           ? existing
           : null;
-      await saveSchedule(
+      const saved = await saveSchedule(
         businessId,
-        editingMemberId,
+        memberId,
         member?.fullName || '',
         editWeekly,
         existingForWeek,
@@ -329,10 +338,20 @@ export function SchedulesVacations() {
         editWorkCenterId || undefined,
         editWorkCenterName || undefined,
       );
+      setSchedules((prev) => {
+        const next = prev.filter((s) => {
+          if (s._id === saved._id) return false;
+          if (s.member_id === memberId && (s.week_start === currentWeekStart || !s.week_start)) return false;
+          return true;
+        });
+        return [...next, saved];
+      });
       flash('Horario guardado');
       setEditingMemberId(null);
       await loadData({ silent: true });
-    } catch (e: any) { setError(e.message); } finally { setSaving(false); }
+    } catch (e: any) {
+      setError(e?.message || 'No se pudo guardar el horario');
+    } finally { setSaving(false); }
   };
 
   const openTemplateModal = (existing?: ShiftTemplate) => {
@@ -715,9 +734,15 @@ export function SchedulesVacations() {
           {editWarnings.length > 0 && <div className="mb-4 space-y-1">{editWarnings.map((w, i) => <AlertBanner key={i} type="warning" message={`${dayLabels[w.day]}: ${w.detail}`} />)}</div>}
           {templates.length > 0 && <div className="mb-4"><label className="text-xs font-medium text-gray-500 block mb-1.5">Aplicar plantilla</label><div className="flex flex-wrap gap-2">{templates.map(t => <button key={t._id} onClick={() => setEditWeekly({ ...t.weekly })} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-gray-200 dark:border-gray-600 rounded-lg hover:border-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: t.color }} />{t.name}</button>)}</div></div>}
           <DayEditor weekly={editWeekly} dayLabels={dayLabels} onChange={(day, field, value) => setEditWeekly(p => ({ ...p, [day]: { ...p[day], [field]: value } }))} />
-          <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between rounded-b-2xl -mx-6 -mb-6 mt-4">
+          <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between rounded-b-2xl -mx-6 mt-4">
             <p className="text-sm text-gray-500">Total: <span className="font-bold">{computeWeeklyHours(editWeekly)}h</span></p>
-            <button onClick={handleSaveSchedule} disabled={saving} className="flex items-center gap-2 px-6 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-xl disabled:opacity-50 shadow-lg shadow-amber-600/25">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}Guardar</button>
+            <button
+              type="button"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); void handleSaveSchedule(); }}
+              disabled={saving}
+              className="flex items-center gap-2 px-6 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-xl disabled:opacity-50 shadow-lg shadow-amber-600/25"
+            >{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}Guardar</button>
           </div>
         </Modal>}
 
@@ -800,11 +825,15 @@ export function SchedulesVacations() {
 function Modal({ onClose, title, subtitle, children }: { onClose: () => void; title: string; subtitle?: string; children: React.ReactNode }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div
+        className="relative z-10 bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
         <div className="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between rounded-t-2xl z-10">
           <div><h3 className="text-lg font-bold text-gray-900 dark:text-white">{title}</h3>{subtitle && <p className="text-sm text-gray-500">{subtitle}</p>}</div>
-          <button onClick={onClose} className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"><X className="w-5 h-5 text-gray-500" /></button>
+          <button type="button" onClick={onClose} className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"><X className="w-5 h-5 text-gray-500" /></button>
         </div>
         <div className="p-6">{children}</div>
       </div>

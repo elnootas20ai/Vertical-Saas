@@ -19,6 +19,7 @@ import {
 } from '../../lib/onboardingLocalKeys';
 import { getOnboardingTourSteps } from '../../lib/onboardingTourSteps';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
+import { saasPathWithBusinessScope } from '../../lib/businessScopeUrl';
 import {
   getGuidedActivationFirstStepId,
   isGuidedActivationBusinessType,
@@ -37,15 +38,20 @@ function resolveAccountUserId(user: { user_id?: string; id?: string } | null | u
   return String(user?.user_id || user?.id || '').trim();
 }
 
-function tourRouteNavigate(navigate: ReturnType<typeof useNavigate>, route?: string) {
+function tourRouteNavigate(
+  navigate: ReturnType<typeof useNavigate>,
+  route: string | undefined,
+  businessId?: string | null,
+) {
   const raw = String(route || '').trim();
   if (!raw) return;
-  const qIdx = raw.indexOf('?');
+  const scoped = saasPathWithBusinessScope(raw, businessId);
+  const qIdx = scoped.indexOf('?');
   if (qIdx === -1) {
-    navigate(raw);
+    navigate(scoped);
     return;
   }
-  navigate({ pathname: raw.slice(0, qIdx), search: raw.slice(qIdx) });
+  navigate({ pathname: scoped.slice(0, qIdx), search: scoped.slice(qIdx) });
 }
 
 interface Props {
@@ -109,7 +115,7 @@ export function OnboardingTour({ onComplete }: Props) {
       setPausedThisSession(false);
       setOnboardingTourActive(accountUserId, businessId, true);
       setTourGate('show');
-      if (startStep?.route) tourRouteNavigate(navigate, startStep.route);
+      if (startStep?.route) tourRouteNavigate(navigate, startStep.route, businessId);
     };
 
     window.addEventListener(ONBOARDING_TOUR_ARM_EVENT, onArmed);
@@ -282,7 +288,7 @@ export function OnboardingTour({ onComplete }: Props) {
 
     setStepIndex(next);
     setOnboardingTourStep(accountUserId, businessId, next, step?.id);
-    tourRouteNavigate(navigate, step?.route);
+    tourRouteNavigate(navigate, step?.route, businessId);
   }, [stepIndex, finishTour, navigate, steps, accountUserId, businessId]);
 
   const handlePrev = useCallback(() => {
@@ -291,7 +297,7 @@ export function OnboardingTour({ onComplete }: Props) {
       const step = steps[prev];
       setStepIndex(prev);
       setOnboardingTourStep(accountUserId, businessId, prev, step?.id);
-      tourRouteNavigate(navigate, step?.route);
+      tourRouteNavigate(navigate, step?.route, businessId);
     }
   }, [stepIndex, navigate, steps, accountUserId, businessId]);
 
@@ -300,7 +306,7 @@ export function OnboardingTour({ onComplete }: Props) {
       const step = steps[idx];
       setStepIndex(idx);
       setOnboardingTourStep(accountUserId, businessId, idx, step?.id);
-      tourRouteNavigate(navigate, step?.route);
+      tourRouteNavigate(navigate, step?.route, businessId);
     },
     [navigate, steps, accountUserId, businessId],
   );

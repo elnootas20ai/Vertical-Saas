@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Layout } from '../../../../components/saas/Layout';
@@ -6,25 +6,42 @@ import { useAuth } from '../../../../context/AuthContext';
 import { useBusiness } from '../../../../context/BusinessContext';
 import { EventsProjectFinancePanel } from '../../../../components/saas/events/EventsProjectFinancePanel';
 import { EventsProjectPlanningPanel } from '../../../../components/saas/events/EventsProjectPlanningPanel';
+import { EventsQuoteEditModal } from '../../../../components/saas/events/EventsQuoteEditModal';
 import {
   advanceEventStage,
+  jumpToReachedStage,
   loadEventById,
+  loadEventServices,
   parseQuoteLines,
+  resolveEventsUserId,
+  retreatEventStage,
 } from '../../../../lib/eventsFlow';
-import { markEventQuoteSent } from '../../../../lib/eventsFinance';
-import { loadEventPlanningSnapshot, type EventPlanningSnapshot } from '../../../../lib/eventsPlanning';
-import { canAdvanceTo, type EventContractStage, type EventRecord } from '../../../../lib/eventsTypes';
+import { downloadEventQuotePdf, sendEventQuoteByEmailRequest } from '../../../../lib/eventsFinance';
+import { resolveBusinessScopeId } from '../../../../lib/deliverySetup';
+import {
+  canAdvanceTo,
+  canJumpToReachedStage,
+  EVENT_CONTRACT_STAGES,
+  furthestReachedStage,
+  stageOrder,
+  type EventContractStage,
+  type EventRecord,
+  type EventServiceRecord,
+} from '../../../../lib/eventsTypes';
 import { EventContractStepper, EventStageBadge } from '../../../../components/saas/events/EventContractStepper';
+import { EventsStageMetrics } from '../../../../components/saas/events/EventsStagePulse';
+import { formatMoneyEs, formatQtyEs } from '../../../../lib/formatNumberEs';
+import { currentStageDwellLabel, eventMoney } from '../../../../lib/eventsStageTiming';
+import { formatDateTimeEs } from '../../../../lib/formatDateEs';
+import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../../../lib/vertialUiTokens';
 import {
   ArrowLeft, Loader2, Send, CheckCircle2, FileSignature, CalendarCheck,
-  MapPin, Phone, Mail,
+  MapPin, Phone, Mail, RefreshCw, FileDown, Link2, Pencil,
 } from 'lucide-react';
 
 type TabId = 'resumen' | 'planificacion' | 'finanzas';
 
 const STAGE_ACTIONS: Partial<Record<EventContractStage, { label: string; icon: typeof Send; next: EventContractStage }>> = {
-  presupuesto: { label: 'Enviar presupuesto (PDF)', icon: Send, next: 'enviado' },
-  enviado: { label: 'Marcar presupuesto aceptado', icon: CheckCircle2, next: 'aceptado' },
   aceptado: { label: 'Registrar contrato / señal', icon: FileSignature, next: 'contratado' },
   contratado: { label: 'Iniciar planificación operativa', icon: CalendarCheck, next: 'planificacion' },
   planificacion: { label: 'Evento en curso (día D)', icon: CalendarCheck, next: 'en_curso' },
@@ -42,13 +59,20 @@ export function EventsProjectPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
-  const userId = user?.user_id || user?.id || '';
+  const dataUserId = useMemo(
+    () => resolveEventsUserId(user, currentBusiness),
+    [user, currentBusiness],
+  );
+  const businessId = resolveBusinessScopeId(currentBusiness);
   const [event, setEvent] = useState<EventRecord | null>(null);
-  const [planning, setPlanning] = useState<EventPlanningSnapshot | null>(null);
-  const [planningLoading, setPlanningLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
   const [tab, setTab] = useState<TabId>('resumen');
+  const [sendEmail, setSendEmail] = useState('');
+  const [clientAcceptUrl, setClientAcceptUrl] = useState('');
+  const [services, setServices] = useState<EventServiceRecord[]>([]);
+  const [showQuoteEditor, setShowQuoteEditor] = useState(false);
+  const prevEstadoRef = useRef<string | null>(null);
 
   const businessIssuer = useMemo(() => ({
     name: currentBusiness?.name,
@@ -56,57 +80,195 @@ export function EventsProjectPage() {
     address: currentBusiness?.address,
     phone: currentBusiness?.phone,
     email: currentBusiness?.email,
+    logo: currentBusiness?.logo,
   }), [currentBusiness]);
 
-  const refresh = useCallback(async () => {
-    if (!userId || !eventId) return;
-    setLoading(true);
+  const refresh = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!dataUserId || !eventId) return;
+    if (!opts?.silent) setLoading(true);
     try {
-      const loaded = await loadEventById(userId, eventId);
-      setEvent(loaded);
+      const loaded = await loadEventById(dataUserId, eventId);
+      setEvent((prev) => {
+        if (!loaded) {
+          // Un listado vacío / recarga en segundo plano no puede borrar la ficha en pantalla.
+          return opts?.silent ? prev : (prev && prev._id === eventId ? prev : null);
+        }
+        if (
+          prev
+          && prev._id === loaded._id
+          && String(prev.updatedAt || '') > String(loaded.updatedAt || '')
+        ) {
+          return prev;
+        }
+        return loaded;
+      });
+      if (loaded && !opts?.silent) {
+        setSendEmail(String(loaded.clientEmail || '').trim());
+      } else if (loaded?.clientEmail && opts?.silent) {
+        // Solo sincroniza si el usuario no está editando a mano: si el campo está vacío o igual al guardado
+        setSendEmail((prev) => {
+          const saved = String(loaded.clientEmail || '').trim();
+          if (!prev.trim() || prev.trim() === saved) return saved;
+          return prev;
+        });
+      }
+    } catch {
+      if (!opts?.silent) {
+        toast.error('No se pudo cargar la contratación. Recarga la página.');
+      }
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
-  }, [userId, eventId]);
-
-  const refreshPlanning = useCallback(async (ev: EventRecord) => {
-    if (!userId) return;
-    setPlanningLoading(true);
-    try {
-      setPlanning(await loadEventPlanningSnapshot(userId, ev));
-    } finally {
-      setPlanningLoading(false);
-    }
-  }, [userId]);
+  }, [dataUserId, eventId]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
+  // Mientras espera respuesta del cliente, refrescar el estado periódicamente.
   useEffect(() => {
-    if (!event || tab !== 'planificacion') return;
-    void refreshPlanning(event);
-  }, [event, tab, refreshPlanning]);
+    if (!event || event.estado !== 'enviado') return;
+    const id = window.setInterval(() => { void refresh({ silent: true }); }, 4000);
+    const onFocus = () => { void refresh({ silent: true }); };
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [event?.estado, event?._id, refresh]);
+
+  useEffect(() => {
+    if (!event?.estado) return;
+    if (prevEstadoRef.current === 'enviado' && event.estado === 'aceptado') {
+      toast.success('El cliente ha aceptado el presupuesto');
+    }
+    prevEstadoRef.current = event.estado;
+  }, [event?.estado]);
+
+  const canEdit = Boolean(event) && event?.estado !== 'cancelado';
+
+  useEffect(() => {
+    if (!dataUserId || !canEdit) return;
+    void loadEventServices(dataUserId).then(setServices).catch(() => setServices([]));
+  }, [dataUserId, canEdit]);
 
   const lineas = useMemo(() => parseQuoteLines(event?.lineasPresupuesto), [event?.lineasPresupuesto]);
   const action = event ? STAGE_ACTIONS[event.estado] : null;
   const showPlanningTab = event && ['contratado', 'planificacion', 'en_curso', 'finalizado'].includes(event.estado);
+  const sendEmailTrimmed = sendEmail.trim().toLowerCase();
+  const canSendEmail = Boolean(sendEmailTrimmed && sendEmailTrimmed.includes('@'));
+
+  const handleSendQuote = async (resend = false) => {
+    if (!dataUserId || !event) return;
+    if (!canSendEmail) {
+      toast.error('Indica un email válido para enviar el presupuesto');
+      return;
+    }
+    setActing(true);
+    try {
+      const result = await sendEventQuoteByEmailRequest(dataUserId, event._id, businessIssuer, {
+        clientEmail: sendEmailTrimmed,
+      });
+      setEvent(result.event);
+      setSendEmail(String(result.event.clientEmail || sendEmailTrimmed).trim());
+      if (result.acceptUrl) setClientAcceptUrl(result.acceptUrl);
+      toast.success(
+        resend
+          ? `Presupuesto reenviado a ${result.event.clientEmail || sendEmailTrimmed}`
+          : `Presupuesto enviado a ${result.event.clientEmail || sendEmailTrimmed}`,
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo enviar el presupuesto');
+    } finally {
+      setActing(false);
+    }
+  };
+
+  const handleDownloadPdf = () => {
+    if (!event) return;
+    try {
+      downloadEventQuotePdf(event, businessIssuer);
+      toast.success('PDF descargado');
+    } catch {
+      toast.error('No se pudo generar el PDF');
+    }
+  };
+
+  const handleCopyAcceptLink = async () => {
+    if (!clientAcceptUrl) {
+      toast.error('Envía el presupuesto primero para obtener el enlace');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(clientAcceptUrl);
+      toast.success('Enlace de aceptación copiado');
+    } catch {
+      toast.error('No se pudo copiar el enlace');
+    }
+  };
+
+  const handleSelectStage = async (target: EventContractStage) => {
+    if (!dataUserId || !event || target === event.estado) return;
+    if (canAdvanceTo(event.estado, target)) {
+      await handleAdvance(target);
+      return;
+    }
+    const furthest = furthestReachedStage(event);
+    if (!canJumpToReachedStage(event.estado, target, furthest)) return;
+    const goingBack = stageOrder(target) < stageOrder(event.estado);
+    const fromLate = ['contratado', 'planificacion', 'en_curso', 'finalizado'].includes(event.estado);
+    const label = EVENT_CONTRACT_STAGES.find((s) => s.id === target)?.label || target;
+    if (goingBack && fromLate && !window.confirm(`¿Volver a ${label}? Podrás continuar otra vez desde ahí.`)) return;
+    setActing(true);
+    try {
+      const updated = goingBack
+        ? await retreatEventStage(dataUserId, event, target)
+        : await jumpToReachedStage(dataUserId, event, target);
+      setEvent(updated);
+      if (target === 'planificacion' || target === 'en_curso') setTab('planificacion');
+      else if (target === 'contratado') setTab('finanzas');
+      else setTab('resumen');
+      toast.success(goingBack ? `Volviste a ${label}` : `Continúas en ${label}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : goingBack ? 'No se pudo volver atrás' : 'No se pudo avanzar');
+    } finally {
+      setActing(false);
+    }
+  };
 
   const handleAdvance = async (target: EventContractStage) => {
-    if (!userId || !event) return;
+    if (!dataUserId || !event) return;
     if (!canAdvanceTo(event.estado, target)) {
       toast.error('No se puede avanzar a esa fase');
       return;
     }
     setActing(true);
     try {
-      let current = event;
-      if (target === 'enviado' && event.estado === 'presupuesto') {
-        current = await markEventQuoteSent(userId, event, businessIssuer);
-      }
-      const updated = await advanceEventStage(userId, current, target);
+      const updated = await advanceEventStage(dataUserId, event, target);
+      if (target === 'aceptado') prevEstadoRef.current = 'aceptado';
       setEvent(updated);
       if (target === 'contratado') setTab('finanzas');
       if (target === 'planificacion') setTab('planificacion');
-      toast.success(target === 'enviado' ? 'Presupuesto PDF generado y fase actualizada' : 'Fase actualizada');
+      toast.success(target === 'aceptado' ? 'Presupuesto marcado como aceptado' : 'Fase actualizada');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Error al avanzar');
+    } finally {
+      setActing(false);
+    }
+  };
+
+  const handleMarkAccepted = async () => {
+    if (!dataUserId || !event) return;
+    if (event.estado === 'enviado') {
+      await handleAdvance('aceptado');
+      return;
+    }
+    if (event.estado !== 'presupuesto') return;
+    setActing(true);
+    try {
+      const sent = await advanceEventStage(dataUserId, event, 'enviado');
+      const updated = await advanceEventStage(dataUserId, sent, 'aceptado');
+      prevEstadoRef.current = 'aceptado';
+      setEvent(updated);
+      toast.success('Presupuesto marcado como aceptado');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Error al avanzar');
     } finally {
@@ -155,10 +317,35 @@ export function EventsProjectPage() {
             </div>
             <p className="text-sm text-gray-500 mt-1">{event.cliente} · {event.fecha ? new Date(event.fecha).toLocaleDateString('es-ES') : 'Sin fecha'}</p>
           </div>
-          <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{(Number(event.presupuesto) || 0).toLocaleString('es-ES')} €</p>
+          <div className="text-right">
+            <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{formatMoneyEs(Number(event.presupuesto) || 0)}</p>
+            <p className="text-xs text-stone-500 mt-1">
+              Cobrado {formatMoneyEs(eventMoney(event).collected)}
+              {' · '}pendiente {formatMoneyEs(eventMoney(event).pending)}
+              {' · '}este paso {currentStageDwellLabel(event)}
+            </p>
+          </div>
         </header>
 
-        <EventContractStepper current={event.estado} />
+        <EventsStageMetrics event={event} />
+
+        <EventContractStepper
+          current={event.estado}
+          event={event}
+          onSelectStep={(stage) => void handleSelectStage(stage)}
+        />
+
+        {action && event.estado !== 'presupuesto' && event.estado !== 'enviado' && event.estado !== 'aceptado' ? (
+          <button
+            type="button"
+            disabled={acting}
+            onClick={() => void handleAdvance(action.next)}
+            className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-[#2563EB] text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50"
+          >
+            {acting ? <Loader2 className="w-4 h-4 animate-spin" /> : <action.icon className="w-4 h-4" />}
+            {action.label}
+          </button>
+        ) : null}
 
         <div className="flex gap-1 border-b border-gray-200 dark:border-gray-800">
           {visibleTabs.map((t) => (
@@ -180,7 +367,19 @@ export function EventsProjectPage() {
         {tab === 'resumen' && (
           <div className="grid gap-4 lg:grid-cols-3">
             <section className="lg:col-span-2 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 p-5 space-y-4">
-              <h2 className="font-semibold text-gray-900 dark:text-gray-100">Datos del evento</h2>
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="font-semibold text-gray-900 dark:text-gray-100">Datos del evento</h2>
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={() => setShowQuoteEditor(true)}
+                    className={`${VERTIAL_BTN_SECONDARY} min-h-10 px-3 py-2`}
+                  >
+                    <Pencil className="w-4 h-4" />
+                    Editar
+                  </button>
+                )}
+              </div>
               <dl className="grid sm:grid-cols-2 gap-3 text-sm">
                 <div><dt className="text-gray-500">Cliente</dt><dd className="font-medium">{event.cliente}</dd></div>
                 <div><dt className="text-gray-500">Invitados</dt><dd className="font-medium">{event.invitados || '—'}</dd></div>
@@ -188,41 +387,181 @@ export function EventsProjectPage() {
                 {event.clientEmail && <div className="flex items-center gap-1"><Mail className="w-4 h-4 text-gray-400" />{event.clientEmail}</div>}
                 {event.clientTelefono && <div className="flex items-center gap-1"><Phone className="w-4 h-4 text-gray-400" />{event.clientTelefono}</div>}
               </dl>
-              {lineas.length > 0 && (
-                <>
-                  <h3 className="font-semibold text-sm pt-2">Presupuesto</h3>
-                  <ul className="text-sm divide-y divide-gray-100 dark:divide-gray-800">
-                    {lineas.map((l) => (
-                      <li key={l.id} className="flex justify-between py-2">
-                        <span>{l.concepto} × {l.cantidad}</span>
-                        <span className="font-medium">{l.total.toLocaleString('es-ES')} €</span>
-                      </li>
-                    ))}
-                  </ul>
-                </>
+              <h3 className="font-semibold text-sm pt-2">Presupuesto</h3>
+              {lineas.length > 0 ? (
+                <ul className="text-sm divide-y divide-gray-100 dark:divide-gray-800">
+                  {lineas.map((l) => (
+                    <li key={l.id} className="flex justify-between gap-3 py-2">
+                      <span className="min-w-0">{l.concepto} × {formatQtyEs(l.cantidad)}</span>
+                      <span className="shrink-0 font-medium tabular-nums">{formatMoneyEs(l.total)}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-gray-500">Sin partidas todavía.</p>
               )}
+              <div className="flex items-center justify-between gap-3 border-t border-gray-100 pt-3 dark:border-gray-800">
+                <p className="font-bold tabular-nums">{formatMoneyEs(Number(event.presupuesto) || 0)}</p>
+              </div>
             </section>
 
             <section className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 p-5 space-y-3">
               <h2 className="font-semibold text-gray-900 dark:text-gray-100">Siguiente paso</h2>
+
               {event.estado === 'cancelado' || event.estado === 'finalizado' ? (
                 <p className="text-sm text-gray-500">Operación cerrada.</p>
-              ) : action ? (
-                <button
-                  type="button"
-                  disabled={acting}
-                  onClick={() => void handleAdvance(action.next)}
-                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-cyan-600 text-white text-sm font-semibold hover:bg-cyan-700 disabled:opacity-50"
-                >
-                  {acting ? <Loader2 className="w-4 h-4 animate-spin" /> : <action.icon className="w-4 h-4" />}
-                  {action.label}
-                </button>
               ) : null}
-              {event.estado === 'aceptado' && (
-                <button type="button" onClick={() => setTab('finanzas')} className="w-full text-sm text-cyan-700 dark:text-cyan-300 font-semibold hover:underline">
-                  Ir a cobro de señal →
-                </button>
+
+              {(event.estado === 'presupuesto' || event.estado === 'enviado') && (
+                <div className="space-y-3">
+                  {event.estado === 'enviado' && (
+                    <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2.5 dark:border-sky-800 dark:bg-sky-950/30">
+                      <p className="text-sm font-semibold text-sky-800 dark:text-sky-200">Estado: enviado</p>
+                      <p className="mt-0.5 text-xs text-sky-700/90 dark:text-sky-300/90">
+                        Esperando que el cliente acepte o rechace desde el correo.
+                      </p>
+                      {event.quoteSentAt && (
+                        <p className="mt-1 text-[11px] text-sky-600/80 dark:text-sky-400/80">
+                          Enviado el {formatDateTimeEs(event.quoteSentAt)}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {event.estado === 'presupuesto' && event.quoteRejectedAt && (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-800 dark:bg-amber-950/30">
+                      <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">Presupuesto rechazado</p>
+                      <p className="mt-0.5 text-xs text-amber-700/90 dark:text-amber-300/90">
+                        Puedes ajustar el presupuesto y enviarlo de nuevo.
+                      </p>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                      Email de envío
+                    </label>
+                    <input
+                      type="email"
+                      value={sendEmail}
+                      onChange={(e) => setSendEmail(e.target.value)}
+                      placeholder="cliente@email.com"
+                      className="w-full rounded-xl border-2 border-gray-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                    />
+                    <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                      Puedes cambiarlo antes de enviar o reenviar.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={acting || !canSendEmail}
+                    onClick={() => void handleSendQuote(event.estado === 'enviado')}
+                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-[#2563EB] text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {acting ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : event.estado === 'enviado' ? (
+                      <RefreshCw className="w-4 h-4" />
+                    ) : (
+                      <Send className="w-4 h-4" />
+                    )}
+                    {event.estado === 'enviado' ? 'Enviar de nuevo' : 'Enviar presupuesto'}
+                  </button>
+
+                  <div className="grid grid-cols-1 gap-2">
+                    <button
+                      type="button"
+                      disabled={acting}
+                      onClick={handleDownloadPdf}
+                      className="w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+                    >
+                      <FileDown className="w-3.5 h-3.5" />
+                      Descargar PDF
+                    </button>
+                    {event.estado === 'enviado' && (
+                      <button
+                        type="button"
+                        disabled={acting || !clientAcceptUrl}
+                        onClick={() => void handleCopyAcceptLink()}
+                        className="w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800 disabled:opacity-50"
+                      >
+                        <Link2 className="w-3.5 h-3.5" />
+                        Copiar enlace del cliente
+                      </button>
+                    )}
+                  </div>
+                  {event.estado === 'presupuesto' && (
+                    <>
+                      <button
+                        type="button"
+                        disabled={acting}
+                        onClick={() => void handleAdvance('enviado')}
+                        className={`${VERTIAL_BTN_SECONDARY} w-full`}
+                      >
+                        {acting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                        Continuar sin enviar
+                      </button>
+                      <button
+                        type="button"
+                        disabled={acting}
+                        onClick={() => void handleMarkAccepted()}
+                        className={`${VERTIAL_BTN_SECONDARY} w-full`}
+                      >
+                        {acting ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                        Marcar como aceptado
+                      </button>
+                      <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                        Si el cliente ya aceptó en persona o el email no sale, avanza aquí sin enviarlo.
+                      </p>
+                    </>
+                  )}
+                  {event.estado === 'enviado' && (
+                    <>
+                      <button
+                        type="button"
+                        disabled={acting}
+                        onClick={() => void handleMarkAccepted()}
+                        className={VERTIAL_BTN_PRIMARY + ' w-full'}
+                      >
+                        {acting ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                        Marcar como aceptado
+                      </button>
+                      <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                        Si el cliente ya aceptó por el correo o en persona, pulsa aquí para continuar.
+                      </p>
+                    </>
+                  )}
+                </div>
               )}
+
+              {event.estado === 'aceptado' && (
+                <div className="space-y-3">
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 dark:border-emerald-800 dark:bg-emerald-950/30">
+                    <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-200">Presupuesto aceptado</p>
+                    <p className="mt-0.5 text-xs text-emerald-700/90 dark:text-emerald-300/90">
+                      El cliente confirmó. Siguiente: contrato y cobro de la señal.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={acting}
+                    onClick={() => void handleAdvance('contratado')}
+                    className={VERTIAL_BTN_PRIMARY + ' w-full'}
+                  >
+                    {acting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSignature className="w-4 h-4" />}
+                    Continuar: contrato y señal
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTab('finanzas')}
+                    className={`${VERTIAL_BTN_SECONDARY} w-full`}
+                  >
+                    Ir a cobro de señal
+                  </button>
+                </div>
+              )}
+
               {showPlanningTab && (
                 <button type="button" onClick={() => setTab('planificacion')} className="w-full text-sm text-cyan-700 dark:text-cyan-300 font-semibold hover:underline">
                   Abrir planificación →
@@ -236,18 +575,43 @@ export function EventsProjectPage() {
         )}
 
         {tab === 'planificacion' && showPlanningTab && (
-          <EventsProjectPlanningPanel event={event} snapshot={planning} loading={planningLoading} />
+          <EventsProjectPlanningPanel
+            event={event}
+            userId={dataUserId}
+            businessId={businessId}
+            canEdit={canEdit && event.estado !== 'finalizado'}
+            onEventUpdated={setEvent}
+            onMarkReady={
+              event.estado === 'planificacion'
+                ? () => { void handleAdvance('en_curso'); }
+                : undefined
+            }
+          />
         )}
 
         {tab === 'finanzas' && (
           <EventsProjectFinancePanel
             event={event}
             business={businessIssuer}
-            userId={userId}
+            userId={dataUserId}
             onEventUpdated={setEvent}
           />
         )}
       </div>
+
+      {canEdit && (
+        <EventsQuoteEditModal
+          open={showQuoteEditor}
+          onClose={() => setShowQuoteEditor(false)}
+          userId={dataUserId}
+          event={event}
+          services={services}
+          onSaved={(updated) => {
+            setEvent(updated);
+            setSendEmail(String(updated.clientEmail || '').trim());
+          }}
+        />
+      )}
     </Layout>
   );
 }

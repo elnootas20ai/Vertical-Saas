@@ -158,7 +158,9 @@ export function QuotePublicResponse() {
           </h1>
           <p style={styles.subtitle}>
             {isAccepted
-              ? `Ha aceptado el presupuesto ${quote.number}. Se ha generado una firma digital como confirmación.`
+              ? quote.entityLabel === 'Evento'
+                ? `Ha aceptado el presupuesto ${quote.number}. El organizador ya puede continuar con el contrato y la señal.`
+                : `Ha aceptado el presupuesto ${quote.number}. Se ha generado una firma digital como confirmación.`
               : `Ha rechazado el presupuesto ${quote.number}. El equipo será notificado.`}
           </p>
 

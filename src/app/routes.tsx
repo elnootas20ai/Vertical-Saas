@@ -6,6 +6,7 @@ import { useAuth } from './context/AuthContext';
 import { useBusinessOptional } from './context/BusinessContext';
 import { isWorkerAccount } from './lib/authApi';
 import { resolveWorkerSessionEntryPath, userOwnsAnyBusiness } from './lib/workerProfileCompletion';
+import { canUseCeoAdminPanel } from './lib/teamManagerAccess';
 import { RootLayout } from './components/RootLayout';
 import { LandingNew } from './pages/LandingNew';
 import { NativeOnboarding } from './pages/native/NativeOnboarding';
@@ -427,6 +428,9 @@ function SaasIndexRedirect() {
     return <Navigate to="/saas/user-dashboard" replace />;
   }
   if (isWorkerAccount(user) && !ownsBusiness) {
+    if (canUseCeoAdminPanel(user)) {
+      return <Navigate to="/saas/dashboard" replace />;
+    }
     return <Navigate to={resolveWorkerSessionEntryPath(user)} replace />;
   }
   return <Navigate to="/saas/dashboard" replace />;

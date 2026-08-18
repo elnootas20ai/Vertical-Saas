@@ -411,7 +411,6 @@ const menuItemDefs = [
   { id: 'events-services', navKey: 'eventsServices', icon: <Sparkles className="w-5 h-5" />, path: '/saas/events-services' },
   { id: 'events-venues', navKey: 'eventsVenues', icon: <MapPin className="w-5 h-5" />, path: '/saas/events-venues' },
   { id: 'events-vendors', navKey: 'eventsVendors', icon: <Briefcase className="w-5 h-5" />, path: '/saas/events-vendors' },
-  { id: 'events-guests', navKey: 'eventsGuests', icon: <Users className="w-5 h-5" />, path: '/saas/events-guests' },
   { id: 'events-catering', navKey: 'eventsCatering', icon: <UtensilsCrossed className="w-5 h-5" />, path: '/saas/events-catering' },
   { id: 'events-logistics', navKey: 'eventsLogistics', icon: <ListChecks className="w-5 h-5" />, path: '/saas/events-logistics' },
 
@@ -508,7 +507,7 @@ const workerMenuItemDefs = [
 ] as const;
 
 /** Ítems del menú trabajador que no van en sidebar (acceso operativo vía landing / código tienda). */
-const WORKER_SIDEBAR_HIDDEN_ITEM_IDS = new Set(['worker-tpv', 'worker-stock-review', 'worker-onboarding', 'tpv-rapido', 'caja']);
+const WORKER_SIDEBAR_HIDDEN_ITEM_IDS = new Set(['worker-tpv', 'worker-stock-review', 'worker-onboarding', 'tpv-rapido', 'caja', 'events-guests']);
 
 const WORKER_HOME_GROUP: SidebarGroup = {
   id: 'worker-main',
@@ -539,7 +538,7 @@ const sidebarGroupDefs = [
   { id: 'realEstate',       icon: <Building2 className="w-4 h-4 shrink-0" />,     itemIds: ['realestate-properties', 'realestate-visits', 'realestate-contracts', 'realestate-appraisals'] },
   { id: 'lawyer',           icon: <Scale className="w-4 h-4 shrink-0" />,          itemIds: ['lawyer-cases', 'lawyer-hearings', 'lawyer-deadlines'] },
   { id: 'nightclub',        icon: <Music className="w-4 h-4 shrink-0" />,          itemIds: ['nightclub-events', 'nightclub-vip', 'nightclub-promoters', 'nightclub-guestlist', 'nightclub-artists'] },
-  { id: 'events',           icon: <PartyPopper className="w-4 h-4 shrink-0" />,   itemIds: ['events-hub', 'events-new-contract', 'events-pipeline', 'events-services', 'events-venues', 'events-vendors', 'events-guests', 'events-catering', 'events-logistics'] },
+  { id: 'events',           icon: <PartyPopper className="w-4 h-4 shrink-0" />,   itemIds: ['events-hub', 'events-new-contract', 'events-pipeline', 'events-services', 'events-venues', 'events-vendors', 'events-catering', 'events-logistics'] },
   { id: 'hairSalon',        icon: <Scissors className="w-4 h-4 shrink-0" />,      itemIds: ['salon-services', 'salon-loyalty'] },
   { id: 'scrapyard',        icon: <Container className="w-4 h-4 shrink-0" />,    itemIds: ['scrapyard-hub', 'scrapyard-purchases', 'scrapyard-vehicles', 'scrapyard-dismantling', 'scrapyard-parts', 'scrapyard-deregistrations', 'scrapyard-expedition', 'scrapyard-environment', 'scrapyard-documentation'] },
   { id: 'spareParts',       icon: <Cog className="w-4 h-4 shrink-0" />,          itemIds: ['spareparts-compatibility', 'spareparts-counter'] },
@@ -1102,6 +1101,12 @@ function SidebarInner({
     };
   }, [showCompanyDropdown]);
 
+  useEffect(() => {
+    const close = () => setShowCompanyDropdown(false);
+    window.addEventListener('vertial:close-company-dropdown', close);
+    return () => window.removeEventListener('vertial:close-company-dropdown', close);
+  }, []);
+
   const navScrollDesktopRef = useRef<HTMLElement>(null);
   const navScrollMobileRef = useRef<HTMLElement>(null);
 
@@ -1270,7 +1275,7 @@ function SidebarInner({
       ref={companyDropdownPanelRef}
       data-company-dropdown-root
       onPointerDown={(event) => event.stopPropagation()}
-      className="fixed z-[9999] rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-xl"
+      className="fixed z-[45] rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-xl"
       style={{
         top: companyDropdownStyle.top,
         left: companyDropdownStyle.left,

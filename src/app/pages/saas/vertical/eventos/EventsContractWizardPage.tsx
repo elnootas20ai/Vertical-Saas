@@ -1,16 +1,19 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Layout } from '../../../../components/saas/Layout';
+import { NuevoClienteModal } from '../../../../components/saas/NuevoClienteModal';
 import { useAuth } from '../../../../context/AuthContext';
 import { useApp } from '../../../../context/AppContext';
+import { useBusiness } from '../../../../context/BusinessContext';
 import { createVerticalApi, type VerticalEntity } from '../../../../lib/verticalApiFactory';
-import { computeQuoteTotal, createEventDraft, loadEventServices, quoteLineFromService } from '../../../../lib/eventsFlow';
+import { computeQuoteTotal, createEventDraft, loadEventServices, quoteLineFromService, resolveEventsUserId } from '../../../../lib/eventsFlow';
 import { EVENT_TYPE_LABELS, type EventType, type EventServiceRecord, type QuoteLine } from '../../../../lib/eventsTypes';
 import { useEventsActivationNav } from '../../../../hooks/useEventsActivationNav';
 import { buildActivationTargetUrl } from '../../../../lib/activationGuide';
+import { resolveBusinessScopeId } from '../../../../lib/deliverySetup';
 import {
-  ArrowLeft, ArrowRight, Check, Plus, Trash2, Loader2, User, CalendarDays, MapPin, Receipt, Lock,
+  ArrowLeft, ArrowRight, Check, Plus, Trash2, Loader2, User, CalendarDays, Receipt, Lock, UserPlus,
 } from 'lucide-react';
 
 interface Venue extends VerticalEntity {
@@ -22,7 +25,6 @@ interface Venue extends VerticalEntity {
 const WIZARD_STEPS = [
   { id: 'cliente', label: 'Cliente', icon: User },
   { id: 'evento', label: 'Evento', icon: CalendarDays },
-  { id: 'ubicacion', label: 'Ubicación', icon: MapPin },
   { id: 'presupuesto', label: 'Presupuesto', icon: Receipt },
   { id: 'confirmar', label: 'Confirmar', icon: Check },
 ] as const;
@@ -46,14 +48,21 @@ export function EventsContractWizardPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { clients } = useApp();
+  const { currentBusiness } = useBusiness();
   const eventsNav = useEventsActivationNav();
-  const userId = user?.user_id || user?.id || '';
+  const dataUserId = useMemo(
+    () => resolveEventsUserId(user, currentBusiness),
+    [user, currentBusiness],
+  );
+  const businessId = resolveBusinessScopeId(currentBusiness);
   const venuesApi = useMemo(() => createVerticalApi<Venue>('events', 'venues'), []);
 
   const [step, setStep] = useState<StepId>('cliente');
   const [saving, setSaving] = useState(false);
   const [venues, setVenues] = useState<Venue[]>([]);
   const [services, setServices] = useState<EventServiceRecord[]>([]);
+  const [showNuevoClienteModal, setShowNuevoClienteModal] = useState(false);
+  const autoOpenedClientModalRef = useRef(false);
 
   const [clientId, setClientId] = useState('');
   const [cliente, setCliente] = useState('');
@@ -70,12 +79,21 @@ export function EventsContractWizardPage() {
   const [notas, setNotas] = useState('');
 
   useEffect(() => {
-    if (!userId) return;
+    if (!dataUserId) return;
     void Promise.all([
-      venuesApi.list(userId).then(setVenues).catch(() => setVenues([])),
-      loadEventServices(userId).then(setServices).catch(() => setServices([])),
+      venuesApi.list(dataUserId).then(setVenues).catch(() => setVenues([])),
+      loadEventServices(dataUserId).then(setServices).catch(() => setServices([])),
     ]);
-  }, [userId, venuesApi]);
+  }, [dataUserId, venuesApi]);
+
+  // Sin clientes: al entrar al asistente, abrir alta de cliente (mismo flujo, primer paso).
+  useEffect(() => {
+    if (eventsNav.loading || !eventsNav.hasPricedService) return;
+    if (autoOpenedClientModalRef.current) return;
+    if (clients.length > 0 || eventsNav.hasClient) return;
+    autoOpenedClientModalRef.current = true;
+    setShowNuevoClienteModal(true);
+  }, [eventsNav.loading, eventsNav.hasPricedService, eventsNav.hasClient, clients.length]);
 
   const stepIndex = WIZARD_STEPS.findIndex((s) => s.id === step);
   const total = useMemo(() => computeQuoteTotal(lineas), [lineas]);
@@ -97,10 +115,10 @@ export function EventsContractWizardPage() {
     if (step === 'evento') {
       if (!nombre.trim()) { toast.error('Indica el nombre del evento'); return false; }
       if (!fecha) { toast.error('Indica la fecha'); return false; }
-    }
-    if (step === 'ubicacion' && !lugar.trim() && !venueId) {
-      toast.error('Elige un espacio o escribe la ubicación');
-      return false;
+      if (!lugar.trim() && !venueId) {
+        toast.error('Indica la dirección o elige un espacio');
+        return false;
+      }
     }
     if (step === 'presupuesto' && lineas.every((l) => !l.concepto.trim())) {
       toast.error('Añade al menos una línea al presupuesto');
@@ -129,6 +147,16 @@ export function EventsContractWizardPage() {
     setClientTelefono(hit.phone || '');
   };
 
+  const applyCreatedClient = (created: { id: string; name: string; email?: string; phone?: string }) => {
+    setClientId(created.id);
+    setCliente(created.name || '');
+    setClientEmail(created.email || '');
+    setClientTelefono(created.phone || '');
+    setShowNuevoClienteModal(false);
+    void eventsNav.reload();
+    toast.success(`Cliente "${created.name}" listo — continúa la contratación`);
+  };
+
   const onSelectVenue = (id: string) => {
     setVenueId(id);
     const hit = venues.find((v) => v._id === id);
@@ -146,10 +174,10 @@ export function EventsContractWizardPage() {
   };
 
   const handleSubmit = async () => {
-    if (!userId) return;
+    if (!dataUserId) return;
     setSaving(true);
     try {
-      const event = await createEventDraft(userId, {
+      const event = await createEventDraft(dataUserId, {
         nombre,
         tipo,
         fecha,
@@ -183,8 +211,7 @@ export function EventsContractWizardPage() {
     );
   }
 
-  if (!eventsNav.hasPricedService || !eventsNav.hasClient) {
-    const missingService = !eventsNav.hasPricedService;
+  if (!eventsNav.hasPricedService) {
     return (
       <Layout>
         <div className="max-w-lg mx-auto py-16 px-4 text-center">
@@ -195,26 +222,15 @@ export function EventsContractWizardPage() {
             Completa el alta antes de contratar
           </h1>
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
-            {missingService
-              ? 'Necesitas al menos un servicio con precio en tu catálogo.'
-              : 'Registra un cliente antes de abrir el asistente de contratación.'}
+            Necesitas al menos un servicio con precio en tu catálogo.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            {missingService ? (
-              <Link
-                to={buildActivationTargetUrl('/saas/events-services', 'events_catalog_price')}
-                className="inline-flex items-center justify-center rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-700"
-              >
-                Ir a Servicios
-              </Link>
-            ) : (
-              <Link
-                to={buildActivationTargetUrl('/saas/clients', 'events_first_client')}
-                className="inline-flex items-center justify-center rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-700"
-              >
-                Ir a Clientes
-              </Link>
-            )}
+            <Link
+              to={buildActivationTargetUrl('/saas/events-services', 'events_catalog_price')}
+              className="inline-flex items-center justify-center rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-700"
+            >
+              Ir a Servicios
+            </Link>
             <button
               type="button"
               onClick={() => navigate('/saas/vertical/eventos')}
@@ -252,6 +268,21 @@ export function EventsContractWizardPage() {
         <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 p-5 space-y-4">
           {step === 'cliente' && (
             <>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  {clients.length === 0
+                    ? 'Primero crea el cliente; luego sigues con el evento.'
+                    : 'Elige un cliente o crea uno nuevo.'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowNuevoClienteModal(true)}
+                  className="inline-flex items-center gap-1.5 text-sm font-semibold text-cyan-600 hover:text-cyan-700"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  {clients.length === 0 ? 'Crear cliente' : 'Nuevo cliente'}
+                </button>
+              </div>
               {clients.length > 0 && (
                 <select className={inputClass} value={clientId} onChange={(e) => onSelectClient(e.target.value)}>
                   <option value="">— Cliente manual —</option>
@@ -274,18 +305,43 @@ export function EventsContractWizardPage() {
                 </select>
                 <input type="date" className={inputClass} value={fecha} onChange={(e) => setFecha(e.target.value)} />
               </div>
-              <input type="number" className={inputClass} value={invitados} onChange={(e) => setInvitados(Number(e.target.value) || 0)} placeholder="Invitados" />
-            </>
-          )}
-          {step === 'ubicacion' && (
-            <>
-              {venues.length > 0 && (
-                <select className={inputClass} value={venueId} onChange={(e) => onSelectVenue(e.target.value)}>
-                  <option value="">— Manual —</option>
-                  {venues.map((v) => <option key={v._id} value={v._id}>{v.nombre}</option>)}
-                </select>
-              )}
-              <input className={inputClass} placeholder="Lugar / dirección *" value={lugar} onChange={(e) => setLugar(e.target.value)} />
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                  Nº de invitados
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  className={inputClass}
+                  value={invitados}
+                  onChange={(e) => setInvitados(Math.max(0, Number(e.target.value) || 0))}
+                  placeholder="Ej. 80"
+                  aria-describedby="eventos-invitados-help"
+                />
+                <p id="eventos-invitados-help" className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  Personas previstas en el evento. Si un servicio es «por persona», el presupuesto lo calcula con este número.
+                </p>
+              </div>
+              <div className="space-y-3 border-t border-gray-100 pt-4 dark:border-gray-800">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                  Dirección / lugar del evento *
+                </label>
+                {venues.length > 0 && (
+                  <select className={inputClass} value={venueId} onChange={(e) => onSelectVenue(e.target.value)}>
+                    <option value="">— Escribir dirección manualmente —</option>
+                    {venues.map((v) => <option key={v._id} value={v._id}>{v.nombre}</option>)}
+                  </select>
+                )}
+                <input
+                  className={inputClass}
+                  placeholder="Calle, número, ciudad…"
+                  value={lugar}
+                  onChange={(e) => {
+                    setLugar(e.target.value);
+                    if (venueId) setVenueId('');
+                  }}
+                />
+              </div>
             </>
           )}
           {step === 'presupuesto' && (
@@ -355,6 +411,15 @@ export function EventsContractWizardPage() {
           )}
         </div>
       </div>
+
+      <NuevoClienteModal
+        open={showNuevoClienteModal}
+        onClose={() => setShowNuevoClienteModal(false)}
+        onClientCreated={applyCreatedClient}
+        contexto="vertical"
+        businessId={businessId || undefined}
+        dataUserId={dataUserId || undefined}
+      />
     </Layout>
   );
 }

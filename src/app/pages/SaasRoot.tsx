@@ -35,6 +35,7 @@ import {
 } from '../lib/tpvTabletSession';
 import { AUTH_PATHS } from '../lib/authEntryPaths';
 import { isWorkerAccount } from '../lib/authApi';
+import { canUseCeoAdminPanel } from '../lib/teamManagerAccess';
 import {
   readStoredOnboardingBusinessType,
 } from '../lib/deliverySetup';
@@ -258,6 +259,12 @@ function SaasContent() {
 
     if (unlinkedWorkerNeedsCompany) {
       navigate(WORKER_UNLINKED_HOME_PATH, { replace: true });
+      return;
+    }
+    if (canUseCeoAdminPanel(user)) {
+      if (path === '/auth/gate' || path.startsWith('/saas/settings/empresas') || path === '/saas/user-dashboard') {
+        navigate('/saas/dashboard', { replace: true });
+      }
       return;
     }
     navigate(resolveWorkerSessionEntryPath(user) || WORKER_DEFAULT_LANDING_PATH, { replace: true });

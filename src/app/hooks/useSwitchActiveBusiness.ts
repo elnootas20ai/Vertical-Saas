@@ -45,7 +45,7 @@ export function useSwitchActiveBusiness() {
       switchBusiness(found.business_id);
 
       if (options?.syncUrl !== false) {
-        // Solo cambia de ruta si la actual es incompatible (delivery ↔ restaurant).
+        // Solo cambia de ruta si la actual es incompatible (delivery ↔ restaurant ↔ eventos).
         // En dashboard u otras pantallas comunes, quédate y refresca con la empresa nueva.
         const switchedPath = resolvePathAfterBusinessSwitch(
           location.pathname,

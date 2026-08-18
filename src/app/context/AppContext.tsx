@@ -2516,8 +2516,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [authUser?.user_id]);
 
   const handleSSENotification = useCallback((data: unknown) => {
-    const n = data as AppNotification;
-    if (!n?.id) return;
+    const raw = data as AppNotification & { _id?: string };
+    const n = { ...raw, id: String(raw?.id || raw?._id || '').trim() } as AppNotification;
+    if (!n.id) return;
     setNotifications((prev) => {
       if (prev.some((x) => x.id === n.id)) return prev;
       // Solo avisar a UI (banner / Clockins) cuando es aviso NUEVO, no en refrescos.

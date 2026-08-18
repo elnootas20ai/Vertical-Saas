@@ -156,7 +156,7 @@ describe('cacheServerPdvPrinterConfigs + resolución por pdvId', () => {
     expect(store.size).toBe(0);
   });
 
-  it('la IP de tienda manda y se copia a esta tablet (1 impresora, N tablets)', async () => {
+  it('lo guardado en esta tablet manda; el sync del servidor no lo pisa', async () => {
     stubLocalStorage();
     const {
       cachePdvDevicePrinterConfig,
@@ -172,7 +172,6 @@ describe('cacheServerPdvPrinterConfigs + resolución por pdvId', () => {
     cacheServerPdvPrinterConfigs([
       { _id: 'pdv-tiana', printerConfig: { connectionType: 'network', networkHost: '192.168.1.99', networkPort: 9100 } },
     ]);
-    // Espejo de servidor no pisa la caché dispositivo por sí solo…
     expect(loadPdvDevicePrinterCache('pdv-tiana')?.networkHost).toBe('192.168.1.20');
     setActivePrinterScope({
       pdvId: 'pdv-tiana',
@@ -185,9 +184,7 @@ describe('cacheServerPdvPrinterConfigs + resolución por pdvId', () => {
         },
       }),
     });
-    // …pero al resolver con el PDV de tienda, manda la IP de tienda (tablet buena).
-    expect(resolveEffectivePrinterConfig({ pdvId: 'pdv-tiana' }).networkHost).toBe('192.168.1.99');
-    expect(loadPdvDevicePrinterCache('pdv-tiana')?.networkHost).toBe('192.168.1.99');
+    expect(resolveEffectivePrinterConfig({ pdvId: 'pdv-tiana' }).networkHost).toBe('192.168.1.20');
   });
 });
 
@@ -198,7 +195,7 @@ describe('resolveEffectivePrinterConfig en app nativa', () => {
     vi.doUnmock('../src/app/lib/vertialPrint/isNativeApp');
   });
 
-  it('prioriza la IP de la tienda (1 impresora compartida por tablets)', async () => {
+  it('prioriza lo guardado en esta tablet sobre la tienda', async () => {
     vi.resetModules();
     vi.doMock('../src/app/lib/vertialPrint/isNativeApp', () => ({
       isVertialNativeApp: () => true,
@@ -224,10 +221,10 @@ describe('resolveEffectivePrinterConfig en app nativa', () => {
       },
     });
     const cfg = resolveNative({ pdv });
-    expect(cfg.networkHost).toBe('192.168.1.99');
+    expect(cfg.networkHost).toBe('192.168.1.20');
   });
 
-  it('si la tienda no tiene IP, usa la de esta tablet (legacy)', async () => {
+  it('si esta tablet no tiene IP, usa legacy; si no, la tienda', async () => {
     vi.resetModules();
     vi.doMock('../src/app/lib/vertialPrint/isNativeApp', () => ({
       isVertialNativeApp: () => true,
@@ -279,7 +276,7 @@ describe('resolveEffectivePrinterConfig en app nativa', () => {
     expect(cfg.networkHost).toBe('192.168.1.99');
   });
 
-  it('sin IP en tienda, usa legacy de esta tablet; el terminal no pisa si no hace falta', async () => {
+  it('lo guardado en esta tablet (legacy) manda sobre el terminal', async () => {
     vi.resetModules();
     vi.doMock('../src/app/lib/vertialPrint/isNativeApp', () => ({
       isVertialNativeApp: () => true,
@@ -312,9 +309,8 @@ describe('resolveEffectivePrinterConfig en app nativa', () => {
         },
       }],
     });
-    // Con terminal configurado, el terminal sigue mandando sobre legacy.
     const cfg = resolveNative({ pdv, terminalId: 'term-1', localFallback: localCfg });
-    expect(cfg.networkHost).toBe('192.168.1.77');
+    expect(cfg.networkHost).toBe('192.168.1.20');
   });
 
   it('sin IP en esta tablet, usa la del terminal', async () => {

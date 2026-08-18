@@ -145,7 +145,11 @@ export const eventsConfig = {
       fields: [
         'nombre', 'tipo', 'fecha', 'lugar', 'cliente', 'clientId', 'clientEmail', 'clientTelefono',
         'venueId', 'invitados', 'presupuesto', 'deposito', 'lineasPresupuesto', 'notas',
-        'estado', 'quoteSentAt', 'acceptedAt', 'contractedAt', 'finishedAt',
+        'estado', 'furthestEstado', 'quoteSentAt', 'acceptedAt', 'contractedAt',
+        'planificacionAt', 'enCursoAt', 'finishedAt',
+        'quotePdfSentAt', 'linkedQuoteId', 'quoteRejectedAt',
+        'depositPaidAt', 'depositPaidAmount', 'depositInvoiceId',
+        'finalInvoiceId', 'finalPaidAmount', 'planningChecklist',
       ],
       required: ['nombre', 'fecha', 'cliente'],
     },

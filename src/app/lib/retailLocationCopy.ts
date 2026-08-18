@@ -1,5 +1,9 @@
 import { isCompraventaBusinessType } from './compraventaSetup';
-import { isDeliveryOpsBusinessType, isRestaurantBusinessType } from './deliveryOpsTypes';
+import {
+  isDeliveryOpsBusinessType,
+  isEventsBusinessType,
+  isRestaurantBusinessType,
+} from './deliveryOpsTypes';
 
 export type PdvWizardVariant = 'delivery' | 'compraventa' | 'restaurant';
 
@@ -125,7 +129,28 @@ const HR_COPY: Record<PdvWizardVariant, HrLocationCopy> = {
   },
 };
 
+/** Eventos/catering: sin PDV ni tienda de caja. */
+const EVENTS_HR_COPY: HrLocationCopy = {
+  inviteWorkCenterLabel: 'Sede (opcional)',
+  inviteWorkCentersLoading: 'Cargando sedes…',
+  inviteNoWorkCenters:
+    'En eventos no hace falta tienda ni PDV. Puedes invitar sin asignar un local.',
+  inviteWorkCenterPlaceholder: 'Sin sede (opcional)',
+  workerStoreFallback: 'Tu sede',
+  workerNoStoreTitle: 'Sin sede asignada',
+  workerNoStoreHint: 'En eventos el trabajo no depende de un TPV. La sede es opcional.',
+  scheduleCardSubtitle: 'Horario',
+  clockinsFilterAllCenters: 'Todas las sedes',
+  sedesEmptyHint: 'En eventos no se configuran tiendas PDV',
+  memberStoreLabel: 'Sede (opcional, sin TPV)',
+  memberStoreEmpty: 'Sin sede',
+  memberStoreHint: 'Opcional. Eventos no usa PDV de caja.',
+  memberMissingStoreBadge: 'Sin sede',
+  memberPositionPlaceholder: 'Ej: Comercial, Coordinación, Operaciones…',
+};
+
 export function getHrLocationCopy(businessType?: string | null): HrLocationCopy {
+  if (isEventsBusinessType(businessType)) return EVENTS_HR_COPY;
   const variant = resolvePdvWizardVariant({ businessType });
   return HR_COPY[variant];
 }

@@ -1,16 +1,32 @@
 import { createVerticalApi } from './verticalApiFactory';
-import type {
-  EventContractStage,
-  EventQuoteRecord,
-  EventRecord,
-  EventServiceRecord,
-  EventType,
-  QuoteLine,
+import { resolveBusinessDataUserId } from './tenantUserId';
+import type { Business } from './businessApi';
+import {
+  furthestReachedStage,
+  serializePlanningChecklist,
+  type EventContractStage,
+  type EventPlanningChecklist,
+  type EventQuoteRecord,
+  type EventRecord,
+  type EventServiceRecord,
+  type EventType,
+  type QuoteLine,
 } from './eventsTypes';
 
 const eventsApi = createVerticalApi<EventRecord>('events', 'events');
 const quotesApi = createVerticalApi<EventQuoteRecord>('events', 'quotes');
 const servicesApi = createVerticalApi<EventServiceRecord>('events', 'services');
+
+type AuthLike = { user_id?: string; id?: string } | null | undefined;
+
+/** Misma cuenta que servicios/clientes del negocio (titular si eres miembro del equipo). */
+export function resolveEventsUserId(
+  authUser: AuthLike,
+  business: Business | null | undefined,
+): string {
+  return resolveBusinessDataUserId(authUser, business)
+    || String(authUser?.user_id || authUser?.id || '').trim();
+}
 
 export function parseQuoteLines(raw: unknown): QuoteLine[] {
   if (!raw) return [];
@@ -29,6 +45,57 @@ export function serializeQuoteLines(lines: QuoteLine[]): string {
 
 export function computeQuoteTotal(lines: QuoteLine[]): number {
   return lines.reduce((sum, line) => sum + (Number(line.total) || 0), 0);
+}
+
+export function emptyQuoteLine(): QuoteLine {
+  return {
+    id: `line-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    concepto: '',
+    cantidad: 1,
+    precioUnitario: 0,
+    total: 0,
+  };
+}
+
+/** Precio/cantidad ES: 85,50 · 1.250,00 · 85.5 */
+export function parseQuoteAmount(raw: unknown): number {
+  const s = String(raw ?? '')
+    .trim()
+    .replace(/€/gi, '')
+    .replace(/\s/g, '');
+  if (!s) return 0;
+  const lastComma = s.lastIndexOf(',');
+  const lastDot = s.lastIndexOf('.');
+  const normalized =
+    lastComma > lastDot
+      ? s.replace(/\./g, '').replace(',', '.')
+      : s.replace(',', '.');
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : 0;
+}
+
+export function patchQuoteLine(line: QuoteLine, patch: Partial<QuoteLine>): QuoteLine {
+  const next = { ...line, ...patch };
+  const cantidad = Number(next.cantidad) || 0;
+  const precioUnitario = Number(next.precioUnitario) || 0;
+  next.cantidad = cantidad;
+  next.precioUnitario = precioUnitario;
+  next.total = cantidad * precioUnitario;
+  return next;
+}
+
+export function quoteLinesAreEqual(a: QuoteLine[], b: QuoteLine[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((line, i) => {
+    const other = b[i];
+    return (
+      line.id === other.id
+      && String(line.concepto || '').trim() === String(other.concepto || '').trim()
+      && Number(line.cantidad) === Number(other.cantidad)
+      && Number(line.precioUnitario) === Number(other.precioUnitario)
+      && Number(line.total) === Number(other.total)
+    );
+  });
 }
 
 export function normalizeEventType(value: unknown): EventType {
@@ -62,16 +129,48 @@ export function normalizeEventStage(value: unknown): EventContractStage {
   return allowed.includes(raw as EventContractStage) ? (raw as EventContractStage) : 'presupuesto';
 }
 
-export async function loadEvents(userId: string): Promise<EventRecord[]> {
-  const list = await eventsApi.list(userId);
-  return list.map((item) => ({
+function mapEventRecord(item: EventRecord): EventRecord {
+  const estado = normalizeEventStage(item.estado);
+  let furthest = estado;
+  try {
+    furthest = furthestReachedStage({
+      ...item,
+      estado,
+      furthestEstado: item.furthestEstado
+        ? normalizeEventStage(item.furthestEstado)
+        : undefined,
+    });
+  } catch {
+    furthest = estado;
+  }
+  return {
     ...item,
     tipo: normalizeEventType(item.tipo),
-    estado: normalizeEventStage(item.estado),
+    estado,
+    furthestEstado: furthest,
     invitados: Number(item.invitados) || 0,
     presupuesto: Number(item.presupuesto) || 0,
     deposito: Number(item.deposito) || 0,
-  }));
+  };
+}
+
+export async function loadEvents(userId: string): Promise<EventRecord[]> {
+  const list = await eventsApi.list(userId);
+  const rows = Array.isArray(list) ? list : [];
+  return rows.map((item) => {
+    try {
+      return mapEventRecord(item);
+    } catch {
+      return {
+        ...item,
+        tipo: normalizeEventType(item.tipo),
+        estado: normalizeEventStage(item.estado),
+        invitados: Number(item.invitados) || 0,
+        presupuesto: Number(item.presupuesto) || 0,
+        deposito: Number(item.deposito) || 0,
+      };
+    }
+  });
 }
 
 export async function loadEventById(userId: string, eventId: string): Promise<EventRecord | null> {
@@ -117,6 +216,7 @@ export async function createEventDraft(
     lineasPresupuesto: serializeQuoteLines(input.lineas),
     notas: input.notas || '',
     estado: 'presupuesto',
+    furthestEstado: 'presupuesto',
   });
 
   await quotesApi.create(userId, {
@@ -135,6 +235,7 @@ export async function createEventDraft(
     ...item,
     tipo: normalizeEventType(item.tipo),
     estado: 'presupuesto',
+    furthestEstado: 'presupuesto',
     presupuesto: total,
   };
 }
@@ -148,11 +249,64 @@ export async function updateEventRecord(
     ...event,
     ...patch,
   });
+  const estado = normalizeEventStage(updated.estado);
   return {
     ...updated,
     tipo: normalizeEventType(updated.tipo),
-    estado: normalizeEventStage(updated.estado),
+    estado,
+    furthestEstado: furthestReachedStage({
+      ...event,
+      ...updated,
+      estado,
+      furthestEstado: updated.furthestEstado || event.furthestEstado,
+    }),
   };
+}
+
+export async function saveEventQuoteLines(
+  userId: string,
+  event: EventRecord,
+  lines: QuoteLine[],
+): Promise<EventRecord> {
+  const cleaned = lines
+    .map((line) => patchQuoteLine(line, {}))
+    .filter((line) => String(line.concepto || '').trim());
+  if (cleaned.length === 0) {
+    throw new Error('Deja al menos una línea con concepto en el presupuesto');
+  }
+  const total = computeQuoteTotal(cleaned);
+  const updated = await updateEventRecord(userId, event, {
+    lineasPresupuesto: serializeQuoteLines(cleaned),
+    presupuesto: total,
+  });
+
+  try {
+    const quotes = await loadEventQuotes(userId, event._id);
+    const linked = quotes[0];
+    if (linked) {
+      await quotesApi.update(userId, linked._id, {
+        ...linked,
+        lineas: serializeQuoteLines(cleaned),
+        subtotal: total,
+        iva: Math.round(total * 0.21 * 100) / 100,
+        total,
+      });
+    }
+  } catch {
+    /* el envío lee las líneas del evento; el quote vertical es auxiliar */
+  }
+
+  return { ...updated, presupuesto: total, lineasPresupuesto: serializeQuoteLines(cleaned) };
+}
+
+export async function saveEventPlanningChecklist(
+  userId: string,
+  event: EventRecord,
+  checklist: EventPlanningChecklist,
+): Promise<EventRecord> {
+  return updateEventRecord(userId, event, {
+    planningChecklist: serializePlanningChecklist(checklist),
+  });
 }
 
 export async function advanceEventStage(
@@ -165,8 +319,35 @@ export async function advanceEventStage(
   if (next === 'enviado') patch.quoteSentAt = now;
   if (next === 'aceptado') patch.acceptedAt = now;
   if (next === 'contratado') patch.contractedAt = now;
+  if (next === 'planificacion') patch.planificacionAt = now;
+  if (next === 'en_curso') patch.enCursoAt = now;
   if (next === 'finalizado') patch.finishedAt = now;
+  patch.furthestEstado = next === 'cancelado'
+    ? furthestReachedStage(event)
+    : furthestReachedStage({ ...event, ...patch });
   return updateEventRecord(userId, event, patch);
+}
+
+export async function retreatEventStage(
+  userId: string,
+  event: EventRecord,
+  previous: EventContractStage,
+): Promise<EventRecord> {
+  return updateEventRecord(userId, event, {
+    estado: previous,
+    furthestEstado: furthestReachedStage(event),
+  });
+}
+
+export async function jumpToReachedStage(
+  userId: string,
+  event: EventRecord,
+  target: EventContractStage,
+): Promise<EventRecord> {
+  return updateEventRecord(userId, event, {
+    estado: target,
+    furthestEstado: furthestReachedStage(event),
+  });
 }
 
 export async function loadEventQuotes(userId: string, eventId: string): Promise<EventQuoteRecord[]> {

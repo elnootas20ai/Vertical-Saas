@@ -1,4 +1,5 @@
 import {
+  isEventsBusinessType,
   isIceCreamShopBusinessType,
   isRestaurantBusinessType,
   isStrictDeliveryBusinessType,
@@ -16,9 +17,13 @@ function isHeladeriaOpsPath(path: string): boolean {
   );
 }
 
+function isEventsPath(path: string): boolean {
+  return path.startsWith('/saas/events-') || path.startsWith('/saas/vertical/eventos');
+}
+
 /**
- * Al cambiar de empresa, si la ruta es del otro vertical retail, ir a la home correcta.
- * Delivery ↔ Bar/restaurante ↔ Heladería no se mezclan.
+ * Al cambiar de empresa, si la ruta es de otro vertical, ir a la home correcta.
+ * Delivery ↔ Bar/restaurante ↔ Heladería ↔ Eventos no se mezclan.
  */
 export function resolvePathAfterBusinessSwitch(
   pathname: string,
@@ -28,6 +33,7 @@ export function resolvePathAfterBusinessSwitch(
   const nextIsRestaurant = isRestaurantBusinessType(nextBusinessType);
   const nextIsDelivery = isStrictDeliveryBusinessType(nextBusinessType);
   const nextIsHeladeria = isIceCreamShopBusinessType(nextBusinessType);
+  const nextIsEvents = isEventsBusinessType(nextBusinessType);
 
   const onRestaurantOps =
     path.startsWith('/saas/restaurant-ops')
@@ -63,6 +69,13 @@ export function resolvePathAfterBusinessSwitch(
     if (nextIsRestaurant || nextIsDelivery) {
       if (path.includes('/tpv')) return resolveRetailCeoTpvPath(nextBusinessType);
       if (path.includes('/caja')) return resolveRetailCajaPath(nextBusinessType);
+      return resolveRetailOpsHomePath(nextBusinessType);
+    }
+    return '/saas';
+  }
+
+  if (isEventsPath(path) && !nextIsEvents) {
+    if (nextIsRestaurant || nextIsDelivery || nextIsHeladeria) {
       return resolveRetailOpsHomePath(nextBusinessType);
     }
     return '/saas';

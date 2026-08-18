@@ -3,17 +3,21 @@
  * Mantener alineado al cambiar textos o roles.
  */
 
-function deliveryAdmin() {
+function deliveryAccountAdmin() {
+  return {
+    roleId: 'Admin',
+    roleLabel: 'Admin',
+    summary: 'Como el creador de la cuenta: acceso total al negocio.',
+    tasks: [],
+  };
+}
+
+function deliveryAdministrador() {
   return {
     roleId: 'Administrador',
     roleLabel: 'Administrador',
-    summary: 'Responsable del negocio: caja, equipo, pedidos y cierre del día.',
-    tasks: [
-      { key: 'admin-revisar-equipo', title: 'Revisar que el equipo esté fichado y en su puesto', description: 'Comprueba fichajes, horarios y que cada uno sepa su función del día.', priority: 'high' },
-      { key: 'admin-caja-apertura', title: 'Supervisar apertura de caja del local', description: 'Fondo de caja, TPV listo y que el encargado o cajero confirmen el arqueo inicial.', priority: 'high' },
-      { key: 'admin-pedidos-flujo', title: 'Revisar el flujo de pedidos (TPV → cocina → reparto)', description: 'Que no se acumulen pedidos mal tomados, retrasos en cocina o sin repartidor.', priority: 'medium' },
-      { key: 'admin-caja-cierre', title: 'Cierre de caja y resumen del día', description: 'Arqueo, incidencias de cobro y dejar listo el informe para el siguiente turno.', priority: 'high' },
-    ],
+    summary: 'Lleva el SaaS del negocio: operación y panel de administración.',
+    tasks: [],
   };
 }
 
@@ -116,7 +120,8 @@ function restaurantMostrador() {
 }
 
 const DELIVERY = [
-  deliveryAdmin(),
+  deliveryAccountAdmin(),
+  deliveryAdministrador(),
   deliveryGestor(),
   deliveryEncargado(),
   deliveryMostrador(),
@@ -125,7 +130,8 @@ const DELIVERY = [
 ];
 
 const RESTAURANT = [
-  { ...deliveryAdmin(), summary: 'Responsable del bar o restaurante: equipo, caja y servicio.' },
+  deliveryAccountAdmin(),
+  deliveryAdministrador(),
   deliveryGestor(),
   restaurantEncargado(),
   restaurantMostrador(),
@@ -133,15 +139,8 @@ const RESTAURANT = [
 ];
 
 const REAL_ESTATE = [
-  {
-    roleId: 'Administrador',
-    roleLabel: 'Administrador',
-    summary: 'Responsable de la inmobiliaria: equipo, cartera y operación.',
-    tasks: [
-      { key: 're-admin-equipo', title: 'Revisar equipo y comerciales activos', description: 'Quién cubre visitas, captación y seguimiento del día.', priority: 'high' },
-      { key: 're-admin-cartera', title: 'Revisar cartera y visitas pendientes', description: 'Inmuebles activos, citas del día e incidencias.', priority: 'medium' },
-    ],
-  },
+  deliveryAccountAdmin(),
+  deliveryAdministrador(),
   deliveryGestor(),
   {
     roleId: 'Encargado',
@@ -165,14 +164,12 @@ const REAL_ESTATE = [
 ];
 
 const EVENTS = [
+  deliveryAccountAdmin(),
   {
     roleId: 'Administrador',
     roleLabel: 'Administrador',
-    summary: 'Opera el negocio de eventos: equipo, contratos y día D.',
-    tasks: [
-      { key: 'ev-admin-equipo', title: 'Revisar equipo y roles del evento', description: 'Quién cubre comercial, operaciones y montaje.', priority: 'high' },
-      { key: 'ev-admin-caja', title: 'Controlar cobros y cierre económico', description: 'Pagos de clientes, proveedores e incidencias.', priority: 'medium' },
-    ],
+    summary: 'Lleva el SaaS de eventos: contrataciones, cobros, equipo y panel.',
+    tasks: [],
   },
   deliveryGestor(),
   {
@@ -218,7 +215,7 @@ function normalizeRoleForTasks(roleId) {
   if (!id) return '';
   const lower = id.toLowerCase();
   const aliases = {
-    admin: 'Administrador',
+    // Admin es rol propio (como creador); no fusionar con Administrador.
     administrador: 'Administrador',
     gerente: 'Encargado',
     encargado: 'Encargado',

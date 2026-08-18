@@ -28,10 +28,11 @@ import { notifyDeliveryActiveStoreChanged } from '../lib/deliveryOpsPdvSelection
 import { clearAllRetailScopeCaches } from '../verticals/retailScopeRegistry';
 import { isTpvTabletBindingAllowedForAuth, readTpvTabletBinding, sanitizeTpvTabletBindingForAuth } from '../lib/tpvTabletSession';
 import { recordBusinessOpen } from '../lib/businessUsageOrder';
+import { resolveBusinessAfterReload } from '../lib/pickCurrentBusiness';
 
 export type { BusinessContextType } from './businessContextRef';
 
-function getStoredBusinessId(userId: string): string | null {
+export function getStoredBusinessId(userId: string): string | null {
   try {
     return localStorage.getItem(`vertial_current_business:${userId}`);
   } catch {
@@ -126,6 +127,18 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
   const [businessesFetchSettled, setBusinessesFetchSettled] = useState(false);
   const [businessesLoadError, setBusinessesLoadError] = useState<string | null>(null);
   const businessesLoadSeqRef = useRef(0);
+  const currentBusinessRef = useRef<Business | null>(null);
+  currentBusinessRef.current = currentBusiness;
+
+  const applyResolvedBusiness = useCallback((userId: string, next: Business | null, persistStoredId: boolean) => {
+    if (!next) {
+      setCurrentBusiness(null);
+      if (persistStoredId) storeBusinessId(userId, null);
+      return;
+    }
+    setCurrentBusiness((prev) => (prev?.business_id === next.business_id ? prev : next));
+    if (persistStoredId) storeBusinessId(userId, next.business_id);
+  }, []);
 
   const resolveCurrentBusiness = useCallback(
     (list: Business[], userId: string, linkedBusinessId?: string | null) => {
@@ -134,36 +147,22 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      const linkedId = String(linkedBusinessId || '').trim();
-      if (linkedId) {
-        const linkedBiz = list.find(
-          (b) =>
-            normalizeBusinessScopeId(b.business_id) === normalizeBusinessScopeId(linkedId),
-        );
-        if (linkedBiz) {
-          setCurrentBusiness((prev) =>
-            prev?.business_id === linkedBiz.business_id ? prev : linkedBiz,
-          );
-          storeBusinessId(userId, linkedBiz.business_id);
-          return;
-        }
-      }
-
-      const storedId = getStoredBusinessId(userId);
-      const storedBiz = storedId
-        ? list.find(
-            (b) =>
-              normalizeBusinessScopeId(b.business_id) === normalizeBusinessScopeId(storedId)
-              || normalizeBusinessScopeId(b.id) === normalizeBusinessScopeId(storedId),
-          )
-        : null;
-      if (storedBiz) {
-        setCurrentBusiness((prev) =>
-          prev?.business_id === storedBiz.business_id ? prev : storedBiz,
-        );
-        storeBusinessId(userId, storedBiz.business_id);
+      // linkedBusinessId solo aplica a cuentas de trabajador (igual que el
+      // efecto dedicado); a un dueño no debe clavarle una empresa.
+      const linkedId = user?.accountType === 'user' ? linkedBusinessId : null;
+      const picked = resolveBusinessAfterReload(list, {
+        storedId: getStoredBusinessId(userId),
+        previous: currentBusinessRef.current,
+        linkedId,
+      });
+      if (picked.business) {
+        applyResolvedBusiness(userId, picked.business, picked.persistStoredId);
         return;
       }
+
+      // Solo si no hay empresa guardada/en pantalla: tablet o la primera de la lista.
+      const storedId = getStoredBusinessId(userId);
+      if (storedId) return;
 
       const tabletBusinessId = String(readTpvTabletBinding()?.businessId || '').trim();
       if (tabletBusinessId) {
@@ -180,22 +179,14 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
             businessesSettled: true,
           });
         if (tabletOk && tabletBiz) {
-          setCurrentBusiness((prev) =>
-            prev?.business_id === tabletBiz.business_id ? prev : tabletBiz,
-          );
-          storeBusinessId(userId, tabletBiz.business_id);
+          applyResolvedBusiness(userId, tabletBiz, true);
           return;
         }
       }
 
-      const resolved = list[0];
-
-      setCurrentBusiness((prev) =>
-        prev?.business_id === resolved.business_id ? prev : resolved,
-      );
-      storeBusinessId(userId, resolved.business_id);
+      applyResolvedBusiness(userId, list[0], true);
     },
-    [],
+    [applyResolvedBusiness, user?.accountType],
   );
 
   const reloadBusinesses = useCallback(async () => {

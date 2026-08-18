@@ -3,8 +3,25 @@ import { isRestaurantBusinessType } from './deliveryOpsTypes';
 
 /** Catálogo de funciones al invitar / Equipo, por vertical. IDs estables (permisos). */
 
+/** Admin = nivel del creador de la cuenta (invitado de máxima confianza). */
+const ROLE_ADMIN: RoleDefinition = {
+  id: 'Admin',
+  description: 'Como el creador de la cuenta: acceso total al negocio (panel completo, equipo, finanzas y ajustes).',
+  permissions: [],
+  users: 0,
+};
+
+/** Administrador = quien lleva el SaaS del día a día (no es el titular). */
+const ROLE_ADMINISTRADOR: RoleDefinition = {
+  id: 'Administrador',
+  description: 'Lleva el SaaS del negocio: operación, equipo y panel de administración.',
+  permissions: [],
+  users: 0,
+};
+
 export const RESTAURANT_FUNCTION_ROLES: RoleDefinition[] = [
-  { id: 'Administrador', description: 'Responsable del bar o restaurante.', permissions: [], users: 0 },
+  ROLE_ADMIN,
+  ROLE_ADMINISTRADOR,
   { id: 'Gestor', description: 'Gestiona equipo, altas y nóminas (RRHH).', permissions: [], users: 0 },
   { id: 'Encargado', description: 'Coordina el servicio del local (sala, barra y cocina).', permissions: [], users: 0 },
   {
@@ -17,12 +34,8 @@ export const RESTAURANT_FUNCTION_ROLES: RoleDefinition[] = [
 ];
 
 export const DELIVERY_FUNCTION_ROLES: RoleDefinition[] = [
-  {
-    id: 'Administrador',
-    description: 'Responsable del negocio o del local. Supervisa equipo, caja y flujo de pedidos.',
-    permissions: [],
-    users: 0,
-  },
+  ROLE_ADMIN,
+  ROLE_ADMINISTRADOR,
   {
     id: 'Gestor',
     description: 'Gestiona equipo, altas, horarios y nóminas (RRHH).',
@@ -56,7 +69,8 @@ export const DELIVERY_FUNCTION_ROLES: RoleDefinition[] = [
 ];
 
 export const EVENTS_FUNCTION_ROLES: RoleDefinition[] = [
-  { id: 'Administrador', description: 'Gestiona equipo, permisos y operación del negocio.', permissions: [], users: 0 },
+  ROLE_ADMIN,
+  ROLE_ADMINISTRADOR,
   { id: 'Gestor', description: 'Gestiona equipo, altas y nóminas (RRHH).', permissions: [], users: 0 },
   { id: 'Encargado', description: 'Coordina contrataciones, catering y logística.', permissions: [], users: 0 },
   { id: 'Comercial', description: 'Presupuestos, clientes y cierre de contratos.', permissions: [], users: 0 },
@@ -65,12 +79,8 @@ export const EVENTS_FUNCTION_ROLES: RoleDefinition[] = [
 
 /** Inmobiliaria — Comercial = visitas, captación y seguimiento. */
 export const REAL_ESTATE_FUNCTION_ROLES: RoleDefinition[] = [
-  {
-    id: 'Administrador',
-    description: 'Responsable de la inmobiliaria. Supervisa equipo, cartera y operación.',
-    permissions: [],
-    users: 0,
-  },
+  ROLE_ADMIN,
+  ROLE_ADMINISTRADOR,
   {
     id: 'Gestor',
     description: 'Gestiona equipo, altas, horarios y nóminas (RRHH).',
@@ -93,12 +103,8 @@ export const REAL_ESTATE_FUNCTION_ROLES: RoleDefinition[] = [
 
 /** Carnicería — IDs estables; Reparto se usa si el negocio activa entregas a domicilio. */
 export const BUTCHER_FUNCTION_ROLES: RoleDefinition[] = [
-  {
-    id: 'Administrador',
-    description: 'Responsable de la carnicería. Supervisa equipo, caja, compras y trazabilidad.',
-    permissions: [],
-    users: 0,
-  },
+  ROLE_ADMIN,
+  ROLE_ADMINISTRADOR,
   {
     id: 'Gestor',
     description: 'Gestiona equipo, altas, horarios y nóminas (RRHH).',
@@ -133,6 +139,7 @@ export const BUTCHER_FUNCTION_ROLES: RoleDefinition[] = [
 
 /** Etiqueta visible en UI (el id interno no cambia: permisos / datos). */
 const RESTAURANT_ROLE_LABELS: Record<string, string> = {
+  Admin: 'Admin',
   Administrador: 'Administrador',
   Gestor: 'Gestor',
   Encargado: 'Encargado',
@@ -141,6 +148,7 @@ const RESTAURANT_ROLE_LABELS: Record<string, string> = {
 };
 
 const BUTCHER_ROLE_LABELS: Record<string, string> = {
+  Admin: 'Admin',
   Administrador: 'Administrador',
   Gestor: 'Gestor',
   Encargado: 'Encargado',
@@ -237,6 +245,7 @@ export function suggestPositionForInviteRole(
   businessType?: string | null,
 ): string {
   const role = String(roleId || '').trim();
+  if (role === 'Admin') return 'Admin';
   if (isRealEstateBusinessType(businessType)) {
     if (role === 'Comercial') return 'Comercial';
     if (role === 'Encargado') return 'Encargado/a de zona';
@@ -253,11 +262,21 @@ export function suggestPositionForInviteRole(
     if (role === 'Administrador') return 'Administrador';
     return '';
   }
+  if (businessType === 'events') {
+    if (role === 'Comercial') return 'Comercial';
+    if (role === 'Operaciones') return 'Coordinación';
+    if (role === 'Encargado') return 'Encargado/a';
+    if (role === 'Gestor') return 'Gestor RRHH';
+    if (role === 'Administrador') return 'Administrador';
+    return '';
+  }
   if (!isRestaurantBusinessType(businessType)) {
     if (role === 'Reparto') return 'Repartidor/a';
     if (role === 'Cocina') return 'Cocinero/a';
     if (role === 'Mostrador / Atención') return 'Mostrador';
     if (role === 'Encargado') return 'Encargado/a';
+    if (role === 'Gestor') return 'Gestor RRHH';
+    if (role === 'Administrador') return 'Administrador';
     if (role === 'Comercial') return 'Comercial';
     return '';
   }

@@ -114,7 +114,10 @@ export function SchedulesWeekPanel({
 
   const weekEndIso = weekDates[6] ? isoLocal(weekDates[6]) : weekStart;
 
-  const getSchedule = (id: string) => schedules.find((s) => s.member_id === id);
+  const getSchedule = (id: string) =>
+    schedules.find((s) => s.member_id === id && s.week_start === weekStart)
+    || schedules.find((s) => s.member_id === id && !s.week_start)
+    || schedules.find((s) => s.member_id === id);
   const withSchedule = members.filter((m) => getSchedule(m.user_id)).length;
 
   const weekLeaves = useMemo(() => {

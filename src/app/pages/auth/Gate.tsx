@@ -22,7 +22,9 @@ import { useAuth } from '../../context/AuthContext';
 import { isWorkerAccount } from '../../lib/authApi';
 import { shouldBlockSaasAccess } from '../../lib/billingRecovery';
 import { resolveWorkerSessionEntryPath } from '../../lib/workerProfileCompletion';
-import { useBusiness } from '../../context/BusinessContext';
+import { canUseCeoAdminPanel } from '../../lib/teamManagerAccess';
+import { getStoredBusinessId, useBusiness } from '../../context/BusinessContext';
+import { findBusinessInList } from '../../lib/pickCurrentBusiness';
 import { useApp } from '../../context/AppContext';
 import { BusinessGrid } from '../../components/gate/BusinessGrid';
 import { buildGateSnapshotMap } from '../../components/gate/gateBusinessSnapshots';
@@ -182,8 +184,12 @@ export function Gate() {
       navigate('/saas/invitations', { replace: true });
       return;
     }
-    // Worker invitado a una empresa → directo a su zona de trabajador.
+    // Worker invitado a una empresa → su zona. Administrador/RRHH usa el panel como el CEO.
     if (isWorkerUser) {
+      if (canUseCeoAdminPanel(user)) {
+        navigate('/saas/dashboard', { replace: true });
+        return;
+      }
       navigate(resolveWorkerSessionEntryPath(user), { replace: true });
     }
   }, [user, isWorkerUser, navigate]);
@@ -284,12 +290,14 @@ export function Gate() {
   const showTrulyEmptyBusinesses =
     businessesFetchSettled && !isBusinessesPending && !hasApiBusinesses && !businessesLoadError;
 
-  // Si hay empresas pero aún no hay activa (race tras F5), elegir la primera.
+  // Si hay empresas pero aún no hay activa (race tras F5): primero la guardada
+  // en este navegador; solo si no hay guardada válida, la primera de la lista.
   useEffect(() => {
     if (isBusinessesPending || !hasApiBusinesses || currentBusiness) return;
-    const first = businesses[0];
-    if (first?.business_id) switchBusiness(first.business_id);
-  }, [isBusinessesPending, hasApiBusinesses, currentBusiness, businesses, switchBusiness]);
+    const storedId = user?.user_id ? getStoredBusinessId(user.user_id) : null;
+    const preferred = findBusinessInList(businesses, storedId) || businesses[0];
+    if (preferred?.business_id) switchBusiness(preferred.business_id);
+  }, [isBusinessesPending, hasApiBusinesses, currentBusiness, businesses, switchBusiness, user?.user_id]);
 
   // Sin empresas y fallo de red: reintentar solo, sin muro de error.
   useEffect(() => {

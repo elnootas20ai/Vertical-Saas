@@ -54,9 +54,16 @@ function hasUsableResendKey() {
   return k.startsWith('re_') && k.length > 12;
 }
 
-async function sendViaResend(to, subject, html, replyTo) {
+async function sendViaResend(to, subject, html, replyTo, attachments) {
   const payload = { from: getFormattedFromAddress(), to, subject, html };
   if (replyTo) payload.reply_to = replyTo;
+  if (Array.isArray(attachments) && attachments.length > 0) {
+    payload.attachments = attachments.map((a) => ({
+      filename: a.filename || 'file',
+      content: Buffer.isBuffer(a.content) ? a.content.toString('base64') : String(a.content || ''),
+      content_id: a.cid || undefined,
+    }));
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Number(process.env.EMAIL_SEND_TIMEOUT_MS || 15000));
   const response = await fetch('https://api.resend.com/emails', {
@@ -77,7 +84,7 @@ async function sendViaResend(to, subject, html, replyTo) {
   }
 }
 
-async function sendViaSMTP(to, subject, html, replyTo) {
+async function sendViaSMTP(to, subject, html, replyTo, attachments) {
   const smtpUser = String(process.env.SMTP_USER || '').trim();
   const smtpPass = String(process.env.SMTP_PASS || '').replace(/\s+/g, '');
   if (!smtpPass) {
@@ -106,6 +113,9 @@ async function sendViaSMTP(to, subject, html, replyTo) {
   };
   const rt = replyTo ? String(replyTo).trim() : '';
   if (rt) mail.replyTo = rt;
+  if (Array.isArray(attachments) && attachments.length > 0) {
+    mail.attachments = attachments;
+  }
 
   await transporter.sendMail(mail);
 }
@@ -115,18 +125,20 @@ export async function sendEmail({
   subject,
   html,
   replyTo,
+  attachments,
   _skipAdminAlert,
   /** Si true, falla en lugar de ignorar silenciosamente cuando no hay proveedor usable (p. ej. recuperación de contraseña). */
   requireDelivery = false,
 }) {
   const effectiveReplyTo = resolveReplyTo(replyTo);
   const provider = (process.env.EMAIL_PROVIDER || '').toLowerCase().trim();
+  const attach = Array.isArray(attachments) ? attachments : undefined;
 
   // Si defines EMAIL_PROVIDER=smtp, SIEMPRE usa SMTP (evita que un RESEND_API_KEY viejo/placeholder bloquee Gmail).
   if (provider === 'smtp') {
     if (process.env.SMTP_HOST && process.env.SMTP_USER) {
       try {
-        await sendViaSMTP(to, subject, html, effectiveReplyTo);
+        await sendViaSMTP(to, subject, html, effectiveReplyTo, attach);
       } catch (err) {
         logger.error({ tag: 'EMAIL_SMTP', to, subject, err: err?.message }, 'Fallo envío SMTP');
         if (!_skipAdminAlert) {
@@ -162,7 +174,7 @@ export async function sendEmail({
       return;
     }
     try {
-      await sendViaResend(to, subject, html, effectiveReplyTo);
+      await sendViaResend(to, subject, html, effectiveReplyTo, attach);
     } catch (err) {
       logger.error({ tag: 'EMAIL_RESEND', to, subject, err: err?.message }, 'Fallo envío Resend');
       if (!_skipAdminAlert) {
@@ -181,7 +193,7 @@ export async function sendEmail({
   // Sin EMAIL_PROVIDER: Resend solo si la key parece real; si no, SMTP.
   if (hasUsableResendKey()) {
     try {
-      await sendViaResend(to, subject, html, effectiveReplyTo);
+      await sendViaResend(to, subject, html, effectiveReplyTo, attach);
     } catch (err) {
       logger.error({ tag: 'EMAIL_RESEND', to, subject, err: err?.message }, 'Fallo envío Resend');
       if (!_skipAdminAlert) {
@@ -199,7 +211,7 @@ export async function sendEmail({
 
   if (process.env.SMTP_HOST && process.env.SMTP_USER) {
     try {
-      await sendViaSMTP(to, subject, html, effectiveReplyTo);
+      await sendViaSMTP(to, subject, html, effectiveReplyTo, attach);
     } catch (err) {
       logger.error({ tag: 'EMAIL_SMTP', to, subject, err: err?.message }, 'Fallo envío SMTP');
       if (!_skipAdminAlert) {
