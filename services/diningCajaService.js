@@ -62,7 +62,8 @@ export async function registerDiningSaleInTpvSession(req, userId, {
   let lastOpenSession = null;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const allSessions = await listTpvRegisterSessionsByUser(req, userId);
+    // opsLite: solo abiertas/recientes — no listar miles de cajas cerradas (bloqueaba el cobro).
+    const allSessions = await listTpvRegisterSessionsByUser(req, userId, { opsLite: true });
     const openSession = findOpenTpvRegisterSessionForPointOfSale(allSessions, pointId);
     if (!openSession) {
       return {

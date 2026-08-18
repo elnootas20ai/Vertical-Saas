@@ -7,11 +7,15 @@ import { AuthRouteLoading } from '../AuthRouteLoading';
 /**
  * Bloquea rutas de bar/restaurante si no es restaurant.
  * Nunca return null (pantalla en blanco): loading o redirect.
+ * Si aún no hay empresa/tipo (recarga), no redirigir: evita echar del TPV al SaaS.
  */
 export function RequireRestaurantVertical({ children }: { children: React.ReactNode }) {
   const businessCtx = useBusinessOptional();
   const businessType = businessCtx?.currentBusiness?.businessType;
-  const pending = !businessCtx?.businessesFetchSettled || Boolean(businessCtx?.isLoading);
+  const pending =
+    !businessCtx?.businessesFetchSettled
+    || Boolean(businessCtx?.isLoading)
+    || !businessCtx?.currentBusiness;
   const allowed = isRestaurantBusinessType(businessType);
 
   if (!businessCtx || pending) {

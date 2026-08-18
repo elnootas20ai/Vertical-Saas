@@ -53,6 +53,10 @@ export const VERTICAL_HIDDEN_MENU_ITEMS: Partial<Record<BusinessType, readonly s
     'quotes',
     'worker-tpv',
     'events-guests',
+    'events-venues',
+    'events-vendors',
+    'events-catering',
+    'events-logistics',
   ],
   /** Inmobiliaria: sin catálogo TPV ni proveedores (cartera = propiedades). */
   realEstate: ['catalog', 'catalog-stock', 'costing', 'suppliers', 'compras-stock'],

@@ -16,6 +16,7 @@ import {
   addComandaToOrder,
   updateComandaInOrder,
   shouldAutoTransitionTable,
+  isValidKitchenComandaTransition,
   listDiningTableTicketStatsByUser,
   sanitizeDiningTableTicketStat,
 } from '../services/salaService.js';
@@ -620,7 +621,15 @@ export async function cancelComanda(req, res) {
 export async function payOrder(req, res) {
   try {
     const { userId, orderId } = req.params;
-    const { payment, salesPointId, salesPointName, registerInCaja = true } = req.body || {};
+    const {
+      payment,
+      salesPointId,
+      salesPointName,
+      registerInCaja = true,
+      closeAfterPay = false,
+      forceClose = false,
+      forceCloseReason = '',
+    } = req.body || {};
     if (!payment || typeof payment !== 'object') return badRequest(res, 'Falta el objeto payment');
 
     const existing = await ensureDiningOrderOwner(req, userId, orderId);
@@ -645,26 +654,7 @@ export async function payOrder(req, res) {
     let saved = await putDocument(req, db, doc._id, doc);
     let savedDoc = { ...doc, _rev: saved.rev };
 
-    if (isPaid && !savedDoc.verifactuRecordId) {
-      try {
-        const actorId = req.authUser?.userId || req.authUser?.user_id || userId;
-        const vf = await tryAutoIssueForDiningOrder(req, savedDoc, actorId);
-        if (vf?.record) {
-          doc = buildDiningOrderDocument(userId, {
-            verifactuRecordId: vf.record.id,
-            verifactuFullNumber: vf.record.fullNumber,
-            verifactuQrUrl: vf.record.qrUrl,
-            verifactuHuella: vf.record.huella,
-            invoiceGenerated: true,
-          }, savedDoc);
-          saved = await putDocument(req, db, doc._id, doc);
-          savedDoc = { ...doc, _rev: saved.rev };
-        }
-      } catch (vfErr) {
-        logger.warn({ err: vfErr, orderId: savedDoc._id }, 'Verifactu auto (sala) omitido');
-      }
-    }
-
+    // Camino crítico TPV: pago + caja (+ cierre). Verifactu/stock/finanzas/loyalty → después.
     let cajaRegistration = null;
     if (registerInCaja !== false) {
       const pdvId = String(salesPointId || payment.salesPointId || '').trim();
@@ -685,38 +675,107 @@ export async function payOrder(req, res) {
       });
     }
 
-    if (isPaid) {
-      await maybeDeductRecipeStockForDiningOrder(req, userId, savedDoc, {
-        performedBy: payment.paidByName || payment.paidBy || 'system',
-      });
-      try {
-        const financeOk = await ensureDiningOrderIncomeServer(req, userId, savedDoc);
-        if (financeOk && !savedDoc.financialMovementId) {
-          doc = buildDiningOrderDocument(userId, {
-            financialMovementId: `dining:${savedDoc._id}`,
-          }, savedDoc);
-          saved = await putDocument(req, db, doc._id, doc);
-          savedDoc = { ...doc, _rev: saved.rev };
+    // Un solo round-trip desde el TPV: cobrar y cerrar mesa (libera mesa aquí).
+    if (isPaid && closeAfterPay) {
+      const hasPendingComandas = (savedDoc.comandas || []).some((c) =>
+        ['sent_to_kitchen', 'in_preparation'].includes(c.status));
+      // Si hay cocina pendiente y no forzamos, dejamos `paid` (no fallar tras haber cobrado/caja).
+      if (!hasPendingComandas || forceClose) {
+        const closeReason = String(forceCloseReason || '').trim();
+        doc = buildDiningOrderDocument(userId, {
+          status: 'closed',
+          closedAt: now,
+          notes: forceClose && closeReason
+            ? `${savedDoc.notes ? `${savedDoc.notes} | ` : ''}Cierre forzado: ${closeReason}`
+            : savedDoc.notes,
+        }, savedDoc);
+        saved = await putDocument(req, db, doc._id, doc);
+        savedDoc = { ...doc, _rev: saved.rev };
+
+        if (savedDoc.tableId) {
+          try {
+            const table = await getDocument(req, db, savedDoc.tableId);
+            if (table && table.type === 'dining_table' && table.user_id === userId) {
+              const updatedTable = buildDiningTableDocument(userId, {
+                status: 'available',
+                occupiedAt: '',
+                occupiedBy: '',
+                currentGuests: 0,
+              }, table);
+              await putDocument(req, db, updatedTable._id, updatedTable);
+              broadcastToUser(userId, 'sala:table_status_changed', sanitizeDiningTable(updatedTable));
+            }
+          } catch (tableErr) {
+            logger.warn({ err: tableErr, orderId: savedDoc._id }, 'Liberar mesa tras cobro omitido');
+          }
         }
-      } catch (finErr) {
-        logger.warn({ err: finErr, orderId: savedDoc._id }, 'Finanzas mesa omitidas');
-      }
-      try {
-        await syncClientAfterDiningOrder(req, userId, savedDoc);
-      } catch (loyErr) {
-        logger.warn({ err: loyErr, orderId: savedDoc._id }, 'Loyalty mesa omitida');
+        broadcastToUser(userId, 'sala:order_closed', sanitizeDiningOrder(savedDoc));
       }
     }
 
     const sanitized = sanitizeDiningOrder(savedDoc);
-
     broadcastToUser(userId, 'sala:order_updated', sanitized);
 
-    return res.json({
+    res.json({
       ok: true,
       order: sanitized,
       fullyPaid: isPaid,
       cajaRegistration,
+    });
+
+    if (!isPaid) return;
+
+    const actorId = req.authUser?.userId || req.authUser?.user_id || userId;
+    const performedBy = payment.paidByName || payment.paidBy || 'system';
+    const orderIdForBg = savedDoc._id;
+    setImmediate(() => {
+      void (async () => {
+        let bgDoc = savedDoc;
+        try {
+          if (!bgDoc.verifactuRecordId) {
+            const vf = await tryAutoIssueForDiningOrder(req, bgDoc, actorId);
+            if (vf?.record) {
+              const fresh = await getDocument(req, db, orderIdForBg).catch(() => bgDoc);
+              const next = buildDiningOrderDocument(userId, {
+                verifactuRecordId: vf.record.id,
+                verifactuFullNumber: vf.record.fullNumber,
+                verifactuQrUrl: vf.record.qrUrl,
+                verifactuHuella: vf.record.huella,
+                invoiceGenerated: true,
+              }, fresh);
+              const vfSaved = await putDocument(req, db, next._id, next);
+              bgDoc = { ...next, _rev: vfSaved.rev };
+              broadcastToUser(userId, 'sala:order_updated', sanitizeDiningOrder(bgDoc));
+            }
+          }
+        } catch (vfErr) {
+          logger.warn({ err: vfErr, orderId: orderIdForBg }, 'Verifactu auto (sala) omitido');
+        }
+        try {
+          await maybeDeductRecipeStockForDiningOrder(req, userId, bgDoc, { performedBy });
+        } catch (stockErr) {
+          logger.warn({ err: stockErr, orderId: orderIdForBg }, 'Stock mesa omitido');
+        }
+        try {
+          const financeOk = await ensureDiningOrderIncomeServer(req, userId, bgDoc);
+          if (financeOk && !bgDoc.financialMovementId) {
+            const fresh = await getDocument(req, db, orderIdForBg).catch(() => bgDoc);
+            const next = buildDiningOrderDocument(userId, {
+              financialMovementId: `dining:${orderIdForBg}`,
+            }, fresh);
+            const finSaved = await putDocument(req, db, next._id, next);
+            bgDoc = { ...next, _rev: finSaved.rev };
+            broadcastToUser(userId, 'sala:order_updated', sanitizeDiningOrder(bgDoc));
+          }
+        } catch (finErr) {
+          logger.warn({ err: finErr, orderId: orderIdForBg }, 'Finanzas mesa omitidas');
+        }
+        try {
+          await syncClientAfterDiningOrder(req, userId, bgDoc);
+        } catch (loyErr) {
+          logger.warn({ err: loyErr, orderId: orderIdForBg }, 'Loyalty mesa omitida');
+        }
+      })();
     });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al registrar pago' });
@@ -976,6 +1035,18 @@ export async function updateComandaStatus(req, res) {
 
     const comanda = (existing.comandas || []).find((c) => c.id === comandaId);
     if (!comanda) return res.status(404).json({ ok: false, error: 'Comanda no encontrada' });
+
+    // Cocina: solo un paso (sent→prep→ready→served). Evita doble toque Empezar→Listo.
+    const kitchenFlowStatuses = ['sent_to_kitchen', 'in_preparation', 'ready', 'served'];
+    if (kitchenFlowStatuses.includes(status) && kitchenFlowStatuses.includes(comanda.status)) {
+      if (!isValidKitchenComandaTransition(comanda.status, status)) {
+        return res.status(409).json({
+          ok: false,
+          error: `Transición no permitida: ${comanda.status} → ${status}`,
+          currentStatus: comanda.status,
+        });
+      }
+    }
 
     const now = new Date().toISOString();
     const updates = { status };

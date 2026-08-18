@@ -19,6 +19,25 @@ describe('tpvLocalCajaSale', () => {
     expect(sessionHasIdenticalSaleForOrder(session, 'dord-a', 'tarjeta', 20)).toBe(false);
   });
 
+  it('detecta venta de mesa por linkedDiningOrderId', () => {
+    const session = {
+      transactions: [
+        {
+          id: 'tx1',
+          type: 'sale',
+          orderId: 'dining-1',
+          linkedDiningOrderId: 'dining-1',
+          channel: 'sala',
+          paymentMethod: 'efectivo',
+          amount: 22.5,
+          date: '2026-01-01',
+        },
+      ],
+    };
+    expect(sessionHasIdenticalSaleForOrder(session, 'dining-1', 'efectivo', 22.5)).toBe(true);
+    expect(sessionSaleAmountForOrder(session, 'dining-1')).toBe(22.5);
+  });
+
   it('suma ventas del pedido (orderId o linked) para no doblar airbag', () => {
     const session = {
       transactions: [

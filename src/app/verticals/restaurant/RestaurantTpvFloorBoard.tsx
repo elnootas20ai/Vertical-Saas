@@ -53,7 +53,10 @@ import {
   upcomingReservationsByTableId,
 } from '../../lib/restaurantFloorReservations';
 import { seatGuest } from '../../lib/restaurantReservationsApi';
-import type { RestaurantReservation } from '../../lib/restaurantReservationTypes';
+import {
+  formatReservationSeatPlace,
+  type RestaurantReservation,
+} from '../../lib/restaurantReservationTypes';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
@@ -570,7 +573,13 @@ export function RestaurantTpvFloorBoard({
         setReservedTable(null);
         setSeatTable(null);
         openOrderPanel(occupiedTable, freshOrder, 'order');
-        toast.success(`Sentado · ${reservation.guestName || 'Cliente'}`);
+        const place =
+          String(result.reservation.tableName || '').trim()
+          || occupiedTable.name
+          || `Mesa ${occupiedTable.number}`;
+        toast.success(`Sentado en ${place}`, {
+          description: `${reservation.guestName || 'Cliente'} · ${partySize} pers. · pedido abierto`,
+        });
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'No se pudo sentar al cliente');
       } finally {
@@ -1073,10 +1082,14 @@ export function RestaurantTpvFloorBoard({
                                     }
                                     setReservedTable(table);
                                   }}
-                                  className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-xl bg-violet-600 px-3 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+                                  className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-xl bg-[var(--v-blue,#2563eb)] px-3 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
                                 >
                                   <Users className="h-4 w-4 shrink-0" strokeWidth={2} />
-                                  {seatingThis ? 'Sentando…' : 'Sentar'}
+                                  {seatingThis
+                                    ? 'Sentando…'
+                                    : linkedReservation
+                                      ? `Sentar · ${formatReservationSeatPlace(linkedReservation)}`
+                                      : `Sentar · ${tableTitle}`}
                                 </button>
                               </div>
                             ) : visualStatus !== 'unavailable' ? (
@@ -1220,9 +1233,19 @@ export function RestaurantTpvFloorBoard({
                     setSeatTable(reservedTable);
                     setReservedTable(null);
                   }}
-                  className="w-full rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+                  className="w-full rounded-xl bg-[var(--v-blue,#2563eb)] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
                 >
-                  Sentar y abrir pedido
+                  {(() => {
+                    const rid = String(reservedTable._id || reservedTable.id || '');
+                    const hint = reservationByTableId.get(rid);
+                    const reservation = hint
+                      ? todayReservations.find((r) => r._id === hint.reservationId)
+                      : null;
+                    const place = reservation
+                      ? formatReservationSeatPlace(reservation)
+                      : reservedTable.name || `Mesa ${reservedTable.number}`;
+                    return `Sentar en ${place} y abrir pedido`;
+                  })()}
                 </button>
                 <button
                   type="button"

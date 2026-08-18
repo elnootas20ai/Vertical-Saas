@@ -1,6 +1,7 @@
 import {
   ACTIVE_STATUSES,
   reservationDateTime,
+  reservationTableIds,
   type RestaurantReservation,
 } from './restaurantReservationTypes';
 import { createVerticalApi } from './verticalApiFactory';
@@ -21,7 +22,8 @@ export type TableReservationHint = {
 };
 
 function isActiveFloorReservation(r: RestaurantReservation, today: string): boolean {
-  if (!r.tableId || String(r.date || '').slice(0, 10) !== today) return false;
+  if (reservationTableIds(r).length === 0) return false;
+  if (String(r.date || '').slice(0, 10) !== today) return false;
   if (!ACTIVE_STATUSES.includes(r.status)) return false;
   return true;
 }
@@ -40,14 +42,15 @@ export function upcomingReservationsByTableId(
     );
 
   for (const r of sorted) {
-    const tableId = String(r.tableId || '').trim();
-    if (!tableId || map.has(tableId)) continue;
-    map.set(tableId, {
+    const hint: TableReservationHint = {
       reservationId: r._id,
       guestName: r.guestName || 'Reserva',
       time: r.time || '',
       partySize: parseInt(String(r.partySize || '2'), 10) || 2,
-    });
+    };
+    for (const tableId of reservationTableIds(r)) {
+      if (!map.has(tableId)) map.set(tableId, hint);
+    }
   }
   return map;
 }

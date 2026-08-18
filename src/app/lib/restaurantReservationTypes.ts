@@ -35,9 +35,12 @@ export interface RestaurantReservation extends VerticalEntity {
   time: string;
   partySize: string;
   preferredZone: string;
+  /** Mesa principal (compat / sentar en TPV). */
   tableId: string;
   tableName: string;
   tableNumber: string;
+  /** Una o varias mesas/taburetes que cubren el aforo. */
+  tableIds?: string[];
   notes: string;
   status: ReservationStatus;
   history: string;
@@ -141,6 +144,7 @@ export const EMPTY_FORM: ReservationFormData = {
   tableId: '',
   tableName: '',
   tableNumber: '',
+  tableIds: [],
   notes: '',
   status: 'pending',
 };
@@ -171,6 +175,31 @@ export function parseHistory(raw: string | undefined): ReservationHistoryEntry[]
 
 export function serializeHistory(entries: ReservationHistoryEntry[]): string {
   return JSON.stringify(entries);
+}
+
+/** Ids de mesa de una reserva (multi) con fallback a tableId legacy. */
+export function reservationTableIds(
+  reservation: Pick<RestaurantReservation, 'tableId' | 'tableIds'> | Pick<ReservationFormData, 'tableId' | 'tableIds'>,
+): string[] {
+  const fromList = Array.isArray(reservation.tableIds)
+    ? reservation.tableIds.map((id) => String(id || '').trim()).filter(Boolean)
+    : [];
+  if (fromList.length > 0) return [...new Set(fromList)];
+  const single = String(reservation.tableId || '').trim();
+  return single ? [single] : [];
+}
+
+/** Texto claro de dónde sienta: «Mesa 3», «Taburete 1 + Mesa 4», etc. */
+export function formatReservationSeatPlace(
+  reservation: Pick<RestaurantReservation, 'tableName' | 'tableNumber' | 'tableId' | 'tableIds'>,
+): string {
+  const name = String(reservation.tableName || '').trim();
+  if (name) return name;
+  const num = String(reservation.tableNumber || '').trim();
+  if (num.includes('+')) return `Mesas ${num}`;
+  if (num) return `Mesa ${num}`;
+  if (reservationTableIds(reservation).length > 0) return 'Mesa asignada';
+  return 'Sin mesa';
 }
 
 export function reservationDateTime(date: string, time: string): Date {

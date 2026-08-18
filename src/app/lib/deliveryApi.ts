@@ -2058,6 +2058,8 @@ export interface TpvRegisterTransaction {
   type: TpvTransactionType;
   paymentMethod: TpvPaymentMethod;
   amount: number;
+  /** Propina asociada a la venta (mesa/sala); no suma al ticket, sí al arqueo de propinas/efectivo. */
+  tip?: number;
   description: string;
   orderId?: string;
   orderNumber?: string;
@@ -2065,6 +2067,9 @@ export interface TpvRegisterTransaction {
   date: string;
   registeredBy?: string;
   linkedDeliveryOrderId?: string;
+  /** Cuenta de mesa (dining_order) — canal sala. */
+  linkedDiningOrderId?: string;
+  diningPaymentId?: string;
   refundReason?: string;
   correctionRef?: string;
   staffConsumptionId?: string;

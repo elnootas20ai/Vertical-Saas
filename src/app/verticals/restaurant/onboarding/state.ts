@@ -93,7 +93,7 @@ function makeSpace(presetId: SpacePresetId, order: number): OnboardingSpace {
       ? `${preset.defaultName} ${order + 1}`
       : preset.defaultName;
   const tableCount = presetId === 'barra' ? 6 : presetId === 'privado' ? 4 : 8;
-  const defaultCapacity = presetId === 'barra' ? 2 : 4;
+  const defaultCapacity = presetId === 'barra' ? 1 : 4;
   return {
     key: createSpaceKey(),
     presetId,

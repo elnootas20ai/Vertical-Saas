@@ -546,6 +546,7 @@ export function RestaurantOpsCenter() {
                     brands={brands}
                     orders={brandPanelOrders}
                     loading={loading && !hasData}
+                    variant="restaurant"
                   />
                 ) : null}
 

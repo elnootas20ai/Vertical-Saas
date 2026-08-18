@@ -1,7 +1,11 @@
 import { useMemo, useState } from 'react';
 import { CalendarClock, ChevronDown, ChevronUp, Plus, Users } from 'lucide-react';
 import { reservationMinutesUntil } from '../../../lib/restaurantFloorReservations';
-import { STATUS_CFG, type RestaurantReservation } from '../../../lib/restaurantReservationTypes';
+import {
+  STATUS_CFG,
+  formatReservationSeatPlace,
+  type RestaurantReservation,
+} from '../../../lib/restaurantReservationTypes';
 
 type Props = {
   reservations: RestaurantReservation[];
@@ -112,9 +116,7 @@ export function RestaurantTpvReservationsStrip({
             const minutes = reservationMinutesUntil(reservation);
             const statusCfg = STATUS_CFG[reservation.status];
             const time = reservation.time?.slice(0, 5) || '--:--';
-            const mesa = reservation.tableNumber
-              ? `Mesa ${reservation.tableNumber}`
-              : reservation.preferredZone || 'Sin mesa';
+            const mesa = formatReservationSeatPlace(reservation);
             const canSeat = Boolean(reservation.tableId) && reservation.status !== 'seated';
             const seating = seatingId === reservation._id;
 
@@ -137,10 +139,12 @@ export function RestaurantTpvReservationsStrip({
                       {statusCfg.label}
                     </span>
                   </div>
-                  <p className="mt-0.5 truncate text-[11px] text-stone-500 dark:text-stone-400">
-                    {mesa}
-                    <Users className="mx-1 inline h-3 w-3 -mt-px" />
-                    {reservation.partySize || '2'} pers.
+                  <p className="mt-0.5 truncate text-[11px] font-semibold text-stone-700 dark:text-stone-300">
+                    → {mesa}
+                    <Users className="mx-1 inline h-3 w-3 -mt-px font-normal text-stone-400" />
+                    <span className="font-normal text-stone-500">
+                      {reservation.partySize || '2'} pers.
+                    </span>
                     {minutes <= 0 ? (
                       <span className="ml-1 font-semibold text-rose-600 dark:text-rose-400">
                         · Ahora
@@ -157,9 +161,10 @@ export function RestaurantTpvReservationsStrip({
                     type="button"
                     disabled={seating}
                     onClick={() => onSeat(reservation)}
-                    className="shrink-0 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-700 disabled:opacity-50"
+                    title={`Sentar en ${mesa}`}
+                    className="max-w-[9.5rem] shrink-0 truncate rounded-lg bg-[var(--v-blue,#2563eb)] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#1d4ed8] disabled:opacity-50"
                   >
-                    {seating ? '…' : 'Sentar'}
+                    {seating ? '…' : `Sentar · ${mesa}`}
                   </button>
                 ) : null}
               </div>

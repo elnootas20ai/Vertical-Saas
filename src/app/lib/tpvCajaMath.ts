@@ -33,17 +33,35 @@ function sumAmount(txs: TpvRegisterSession['transactions'], predicate: (tx: NonN
     .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
 }
 
-/** Efectivo esperado en caja (ventas, devoluciones, consumos equipo en efectivo, entradas/salidas). */
+/** Propinas en txs tipo tip + tip embebido en ventas (mesa/sala). */
+export function sumTpvTips(session: Pick<TpvRegisterSession, 'transactions'>): number {
+  const txs = session.transactions || [];
+  const standalone = sumAmount(txs, (t) => t.type === 'tip');
+  const onSales = txs
+    .filter((t) => t.type === 'sale')
+    .reduce((s, t) => s + Math.max(0, Number((t as { tip?: number }).tip || 0)), 0);
+  return Math.round((standalone + onSales) * 100) / 100;
+}
+
+function sumCashTipsOnSales(session: Pick<TpvRegisterSession, 'transactions'>): number {
+  return (session.transactions || [])
+    .filter((t) => t.type === 'sale' && isCashPaymentMethod(t.paymentMethod))
+    .reduce((s, t) => s + Math.max(0, Number((t as { tip?: number }).tip || 0)), 0);
+}
+
+/** Efectivo esperado en caja (ventas, propinas en efectivo, devoluciones, consumos equipo, entradas/salidas). */
 export function calcTpvExpectedCash(session: TpvRegisterSession): number {
   const txs = session.transactions || [];
   const cashSales = sumAmount(
     txs,
     (t) => (t.type === 'sale' || t.type === 'staff_consumption') && isCashPaymentMethod(t.paymentMethod),
   );
+  const cashTips = sumCashTipsOnSales(session)
+    + sumAmount(txs, (t) => t.type === 'tip' && isCashPaymentMethod(t.paymentMethod));
   const cashReturns = sumCashReturns(session);
   const cashIn = sumAmount(txs, (t) => t.type === 'cash_in');
   const cashOut = sumAmount(txs, (t) => t.type === 'cash_out' || t.type === 'expense');
-  return Number(session.initialCashAmount || 0) + cashSales - cashReturns + cashIn - cashOut;
+  return Number(session.initialCashAmount || 0) + cashSales + cashTips - cashReturns + cashIn - cashOut;
 }
 
 export function buildTpvRegisterSummary(session: TpvRegisterSession): TpvRegisterSummary {
@@ -74,7 +92,7 @@ export function buildTpvRegisterSummary(session: TpvRegisterSession): TpvRegiste
     returnCount: returns.length,
     totalCashIn: sumAmount(transactions, (t) => t.type === 'cash_in'),
     totalCashOut: sumAmount(transactions, (t) => t.type === 'cash_out' || t.type === 'expense'),
-    totalTips: sumAmount(transactions, (t) => t.type === 'tip'),
+    totalTips: sumTpvTips(session),
     totalTransactions: transactions.length,
     averageTicket: sales.length > 0 ? totalSales / sales.length : 0,
     incidentCount: session.incidents?.length || 0,

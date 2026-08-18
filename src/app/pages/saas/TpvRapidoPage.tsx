@@ -123,11 +123,13 @@ import {
   buildDiningCajaPayItems,
   buildSplitPartViews,
   diningOrderDueAmount,
+  diningOrderHasDraftComandas,
   diningOrderHasPendingKitchen,
   flattenDiningAccountLines,
   moveDiningOrderToTable,
   payAndCloseDiningOrder,
   scaleAmountsToTotal,
+  sendDraftComandasToKitchen,
   splitDiningOrderCustom,
   splitDiningOrderEqual,
   voidDiningAccountLine,
@@ -158,7 +160,7 @@ import { TpvOfflineBanner } from '../../components/saas/TpvOfflineBanner';
 import { StoreHoursStatusBanner } from '../../components/saas/StoreHoursStatusBanner';
 import { resolveWorkerWorkCenter } from '../../lib/workerStoreHours';
 import { enqueueTpvOfflineItem, isBrowserOnline } from '../../lib/tpvTabletOffline';
-import { ensureLocalCajaSaleForOrder } from '../../lib/tpvLocalCajaSale';
+import { ensureLocalCajaSaleForOrder, ensureLocalCajaSaleForDiningOrder } from '../../lib/tpvLocalCajaSale';
 import { CeoTpvStorePicker, buildCeoTpvStoreRows } from '../../components/saas/CeoTpvStorePicker';
 import { WorkerTpvStockReview } from './worker/WorkerTpvStockReview';
 import { WorkerTpvBottomBar } from '../../components/saas/WorkerTpvBottomBar';
@@ -3229,16 +3231,23 @@ export function TpvRapidoOrderFlow({
     if (!restaurantAccountMode || !restaurantDiningOrder?._id || !userId || cart.length === 0) {
       return;
     }
+    // Mesa: al salir, la comanda debe ir a cocina (si no, cocina no la ve).
+    const sendToKitchen =
+      !restaurantTable?.isCounter
+      && restaurantPermissions?.canSendKitchen !== false;
     const { order } = await addCartToDiningAccount({
       userId,
       orderId: restaurantDiningOrder._id,
       lines: cart,
       createdBy: effectiveOrderTakerId || userId,
       createdByName: selectedOrderTaker?.name || user?.fullName || 'TPV',
-      sendToKitchen: false,
+      sendToKitchen,
       currentOrder: restaurantDiningOrder,
     });
     onRestaurantDiningOrderUpdated?.(order);
+    if (sendToKitchen && restaurantTable && !restaurantTable.isCounter && isBrowserOnline()) {
+      await changeTableStatusRequest(userId, restaurantTable.id, tableStatusOnOrderAdded());
+    }
     setCart([]);
     setProductPickerReset((n) => n + 1);
   }, [
@@ -3246,6 +3255,8 @@ export function TpvRapidoOrderFlow({
     restaurantDiningOrder,
     userId,
     cart,
+    restaurantTable,
+    restaurantPermissions?.canSendKitchen,
     effectiveOrderTakerId,
     selectedOrderTaker?.name,
     user?.fullName,
@@ -3253,16 +3264,45 @@ export function TpvRapidoOrderFlow({
   ]);
 
   const handleGoBack = useCallback(async () => {
-    if (embeddedInRestaurantTpv && restaurantAccountMode && cart.length > 0) {
+    if (embeddedInRestaurantTpv && restaurantAccountMode) {
       try {
-        await flushCartToAccountIfNeeded();
+        if (cart.length > 0) {
+          await flushCartToAccountIfNeeded();
+        } else if (
+          userId
+          && restaurantDiningOrder
+          && !restaurantTable?.isCounter
+          && restaurantPermissions?.canSendKitchen !== false
+          && diningOrderHasDraftComandas(restaurantDiningOrder)
+        ) {
+          const order = await sendDraftComandasToKitchen({
+            userId,
+            order: restaurantDiningOrder,
+          });
+          onRestaurantDiningOrderUpdated?.(order);
+          if (restaurantTable && isBrowserOnline()) {
+            await changeTableStatusRequest(userId, restaurantTable.id, tableStatusOnOrderAdded());
+          }
+        }
       } catch (err: unknown) {
-        showTpvError(err, 'guardar_cuenta', 'No se pudo guardar la cuenta');
+        showTpvError(err, 'guardar_cuenta', 'No se pudo enviar la comanda a cocina');
         return;
       }
     }
     goBack();
-  }, [embeddedInRestaurantTpv, restaurantAccountMode, cart.length, flushCartToAccountIfNeeded, goBack]);
+  }, [
+    embeddedInRestaurantTpv,
+    restaurantAccountMode,
+    cart.length,
+    flushCartToAccountIfNeeded,
+    userId,
+    restaurantDiningOrder,
+    restaurantTable,
+    restaurantPermissions?.canSendKitchen,
+    onRestaurantDiningOrderUpdated,
+    showTpvError,
+    goBack,
+  ]);
 
   const orderPanelCount = restaurantAccountMode ? cartCount + accountItemCount : cartCount;
   const orderPanelEmpty = restaurantAccountMode
@@ -3285,8 +3325,11 @@ export function TpvRapidoOrderFlow({
   const handleAddToAccount = useCallback(
     async (sendToKitchen: boolean) => {
       if (actionBusyRef.current) return;
-      if (!restaurantDiningOrder?._id || !userId || cart.length === 0) return;
-      if (restaurantPermissions && !restaurantPermissions.canAddToAccount) {
+      if (!restaurantDiningOrder?._id || !userId) return;
+      if (cart.length === 0 && !(sendToKitchen && diningOrderHasDraftComandas(restaurantDiningOrder))) {
+        return;
+      }
+      if (restaurantPermissions && !restaurantPermissions.canAddToAccount && cart.length > 0) {
         toast.error('No tienes permiso para añadir a la cuenta');
         return;
       }
@@ -3301,28 +3344,39 @@ export function TpvRapidoOrderFlow({
       setSubmitting(true);
       actionBusyRef.current = true;
       try {
-        const { order, queuedOffline } = await addCartToDiningAccount({
-          userId,
-          orderId: restaurantDiningOrder._id,
-          lines: cart,
-          createdBy: effectiveOrderTakerId || userId,
-          createdByName: selectedOrderTaker?.name || user?.fullName || 'TPV',
-          sendToKitchen,
-          currentOrder: restaurantDiningOrder,
-        });
+        let order = restaurantDiningOrder;
+        if (cart.length > 0) {
+          const added = await addCartToDiningAccount({
+            userId,
+            orderId: restaurantDiningOrder._id,
+            lines: cart,
+            createdBy: effectiveOrderTakerId || userId,
+            createdByName: selectedOrderTaker?.name || user?.fullName || 'TPV',
+            sendToKitchen,
+            currentOrder: restaurantDiningOrder,
+          });
+          order = added.order;
+          if (added.queuedOffline) {
+            onRestaurantDiningOrderUpdated?.(order);
+            setCart([]);
+            setProductPickerReset((n) => n + 1);
+            toast.message(sendToKitchen
+              ? 'Sin red · comanda en cola (se enviará a cocina al sincronizar)'
+              : 'Sin red · añadido en local (se sincronizará al volver la red)');
+            return;
+          }
+        }
+        // Por si había borradores previos al salir sin enviar.
+        if (sendToKitchen && diningOrderHasDraftComandas(order)) {
+          order = await sendDraftComandasToKitchen({ userId, order });
+        }
         onRestaurantDiningOrderUpdated?.(order);
-        if (restaurantTable && !restaurantTable.isCounter && isBrowserOnline()) {
+        if (sendToKitchen && restaurantTable && !restaurantTable.isCounter && isBrowserOnline()) {
           await changeTableStatusRequest(userId, restaurantTable.id, tableStatusOnOrderAdded());
         }
         setCart([]);
         setProductPickerReset((n) => n + 1);
-        if (queuedOffline) {
-          toast.message(sendToKitchen
-            ? 'Sin red · comanda en cola (se enviará a cocina al sincronizar)'
-            : 'Sin red · añadido en local (se sincronizará al volver la red)');
-        } else {
-          toast.success(sendToKitchen ? 'Enviado a cocina' : 'Añadido a la cuenta');
-        }
+        toast.success(sendToKitchen ? 'Enviado a cocina' : 'Añadido a la cuenta');
       } catch (err: unknown) {
         showTpvError(err, 'añadir_cuenta', 'Error al añadir a la cuenta');
       } finally {
@@ -3495,10 +3549,28 @@ export function TpvRapidoOrderFlow({
             description: 'Se registrará en caja al recuperar conexión',
           });
         } else if (cajaStatus && !isCajaRegistrationOk(cajaStatus)) {
-          toast.error(
-            payResult.cajaRegistration?.message
-              || 'Cobrado en mesa, pero no quedó en caja — revisa que el turno esté abierto',
-          );
+          // Airbag: cobro ok en mesa pero servidor no dejó la venta en caja.
+          const localOk = await ensureLocalCajaSaleForDiningOrder(openRegister, closedOrder, {
+            paymentMethod: slice.method,
+            amount,
+            tip: i === slices.length - 1 ? tipValue : 0,
+            registeredBy: takerName,
+            description: slice.label
+              ? `${tableNote || 'Cuenta'} · ${slice.label}`
+              : (tableNote || 'Cuenta mesa'),
+            allowMultiple: slices.length > 1,
+          });
+          if (localOk) {
+            toast.message('Cobrado · registrado en caja del dispositivo', {
+              description: payResult.cajaRegistration?.message
+                || 'Se sincronizará con el servidor cuando pueda',
+            });
+          } else {
+            toast.error(
+              payResult.cajaRegistration?.message
+                || 'Cobrado en mesa, pero no quedó en caja — revisa que el turno esté abierto',
+            );
+          }
         }
 
         if (i === slices.length - 1 && currentBusiness) {
@@ -3567,11 +3639,16 @@ export function TpvRapidoOrderFlow({
 
       const stillDue = diningOrderDueAmount(closedOrder);
       if (stillDue <= 0.02 || closedOrder.status === 'closed') {
-        if (restaurantTable && !restaurantTable.isCounter) {
-          await changeTableStatusRequest(userId, restaurantTable.id, tableStatusOnPaid(), {
+        // closeAfterPay ya libera la mesa en el servidor; no esperar otro round-trip.
+        if (
+          restaurantTable
+          && !restaurantTable.isCounter
+          && closedOrder.status !== 'closed'
+        ) {
+          void changeTableStatusRequest(userId, restaurantTable.id, tableStatusOnPaid(), {
             currentGuests: 0,
             occupiedBy: '',
-          });
+          }).catch(() => { /* plano se actualiza por SSE */ });
         }
         toast.success(
           parts?.length
@@ -4694,16 +4771,24 @@ export function TpvRapidoOrderFlow({
               Preparando cuenta…
             </button>
           ) : null}
-          {restaurantAccountMode && cart.length > 0 ? (
+          {restaurantAccountMode && (
+            cart.length > 0
+            || (
+              !restaurantTable?.isCounter
+              && diningOrderHasDraftComandas(restaurantDiningOrder)
+            )
+          ) ? (
             <>
-              <button
-                type="button"
-                onClick={() => void handleAddToAccount(false)}
-                disabled={submitting}
-                className={`px-3 rounded-lg border-2 border-violet-300 dark:border-violet-800 text-violet-700 dark:text-violet-300 font-semibold touch-manipulation ${tabletMode ? 'min-h-[44px] py-2 text-sm' : 'py-2.5 text-sm'}`}
-              >
-                Añadir a cuenta
-              </button>
+              {cart.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => void handleAddToAccount(false)}
+                  disabled={submitting}
+                  className={`px-3 rounded-lg border-2 border-violet-300 dark:border-violet-800 text-violet-700 dark:text-violet-300 font-semibold touch-manipulation ${tabletMode ? 'min-h-[44px] py-2 text-sm' : 'py-2.5 text-sm'}`}
+                >
+                  Añadir a cuenta
+                </button>
+              ) : null}
               {!restaurantTable?.isCounter ? (
                 <button
                   type="button"
@@ -4711,7 +4796,7 @@ export function TpvRapidoOrderFlow({
                   disabled={submitting || restaurantPermissions?.canSendKitchen === false}
                   className={`px-3 rounded-lg border-2 border-orange-300 dark:border-orange-800 text-orange-700 dark:text-orange-300 font-semibold touch-manipulation ${tabletMode ? 'min-h-[44px] py-2 text-sm' : 'py-2.5 text-sm'}`}
                 >
-                  Cocina
+                  {cart.length > 0 ? 'Cocina' : 'Enviar a cocina'}
                 </button>
               ) : null}
             </>
@@ -5506,6 +5591,11 @@ export function TpvRapidoOrderFlow({
                                     {line.comandaNumber > 0 ? (
                                       <p className="mt-0.5 text-[9px] text-violet-500 dark:text-violet-400 pl-4">
                                         Comanda #{line.comandaNumber}
+                                        {line.comandaStatus === 'draft' ? ' · sin cocina' : ''}
+                                      </p>
+                                    ) : line.comandaStatus === 'draft' ? (
+                                      <p className="mt-0.5 text-[9px] font-semibold text-orange-600 dark:text-orange-400 pl-4">
+                                        Sin enviar a cocina
                                       </p>
                                     ) : null}
                                   </div>

@@ -7,6 +7,7 @@ import { useModalClose } from '../../hooks/useModalClose';
 import { useClientPhoneSearch } from '../../hooks/useClientPhoneSearch';
 import { resolveClientSearchBusinessId } from '../../lib/clientSearchScope';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
+import { formatDateEs, formatDateEsAsTyping, parseDateEsToIso } from '../../lib/formatDateEs';
 import type { Client } from '../../context/AppContext';
 import {
   listDiningTablesRequest,
@@ -95,10 +96,25 @@ function saveAutomationSettings(s: ReservationAutomationSettings) {
   localStorage.setItem(AUTOMATION_STORAGE_KEY, JSON.stringify(s));
 }
 
+function todayLocalIso(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function toLocalIsoDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 function addDays(dateStr: string, days: number): string {
   const d = new Date(`${dateStr}T12:00:00`);
   d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  return toLocalIsoDate(d);
 }
 
 function formatDisplayDate(dateStr: string): string {
@@ -115,7 +131,7 @@ function weekDays(dateStr: string): string[] {
   return Array.from({ length: 7 }, (_, i) => {
     const x = new Date(monday);
     x.setDate(monday.getDate() + i);
-    return x.toISOString().slice(0, 10);
+    return toLocalIsoDate(x);
   });
 }
 
@@ -137,13 +153,14 @@ export function RestaurantReservationsPage() {
   const [tables, setTables] = useState<DiningTable[]>([]);
   const [rooms, setRooms] = useState<SalaRoom[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [selectedDate, setSelectedDate] = useState(todayLocalIso);
   const [filterStatus, setFilterStatus] = useState<ReservationFilterStatus>('all');
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<RestaurantReservation | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<RestaurantReservation | null>(null);
   const [form, setForm] = useState<ReservationFormData>(EMPTY_FORM);
+  const [formDateDisplay, setFormDateDisplay] = useState('');
   const [saving, setSaving] = useState(false);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [showAutomation, setShowAutomation] = useState(false);
@@ -176,6 +193,7 @@ export function RestaurantReservationsPage() {
     setShowModal(false);
     setEditing(null);
     setForm({ ...EMPTY_FORM, date: selectedDate });
+    setFormDateDisplay(formatDateEs(selectedDate));
     setClientLookup('');
     setClientEditing(true);
     clearSelection();
@@ -186,12 +204,13 @@ export function RestaurantReservationsPage() {
 
   const actor = useMemo(() => ({ userId, userName }), [userId, userName]);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (opts?: { silent?: boolean }) => {
     if (!userId) {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    const silent = opts?.silent === true;
+    if (!silent) setLoading(true);
     try {
       const [resList, tableList, floorConfig] = await Promise.all([
         listReservations(userId),
@@ -204,12 +223,18 @@ export function RestaurantReservationsPage() {
         ? (floorConfig.rooms as SalaRoom[])
         : [];
       setRooms(floorRooms);
+      setSelected((prev) => {
+        if (!prev) return null;
+        return resList.find((r) => r._id === prev._id) ?? prev;
+      });
     } catch {
-      setReservations([]);
-      setTables([]);
-      setRooms([]);
+      if (!silent) {
+        setReservations([]);
+        setTables([]);
+        setRooms([]);
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [userId, businessId]);
 
@@ -217,10 +242,10 @@ export function RestaurantReservationsPage() {
     void loadData();
   }, [loadData]);
 
-  // Auto-refresh every 30s + automation tick
+  // Auto-refresh silencioso: no sustituir la lista por el spinner
   useEffect(() => {
     const interval = setInterval(() => {
-      void loadData();
+      void loadData({ silent: true });
     }, 30_000);
     return () => clearInterval(interval);
   }, [loadData]);
@@ -290,6 +315,7 @@ export function RestaurantReservationsPage() {
   const openCreate = () => {
     setEditing(null);
     setForm({ ...EMPTY_FORM, date: selectedDate });
+    setFormDateDisplay(formatDateEs(selectedDate));
     setClientLookup('');
     setClientEditing(true);
     clearSelection();
@@ -334,6 +360,7 @@ export function RestaurantReservationsPage() {
       notes: item.notes,
       status: item.status,
     });
+    setFormDateDisplay(formatDateEs(item.date));
     setClientLookup('');
     setClientEditing(!item.clientId);
     clearSelection();
@@ -342,20 +369,22 @@ export function RestaurantReservationsPage() {
   };
 
   const handleSave = async () => {
-    if (!userId || !form.guestName.trim() || !form.date || !form.time) {
+    const dateIso = parseDateEsToIso(formDateDisplay) || form.date;
+    if (!userId || !form.guestName.trim() || !dateIso || !form.time) {
       toast.error('Completa nombre, fecha y hora');
       return;
     }
+    const payload = { ...form, date: dateIso };
     setSaving(true);
     try {
       if (editing) {
-        const item = await updateReservation(userId, editing, form, actor, tables, reservations, clientScope);
+        const item = await updateReservation(userId, editing, payload, actor, tables, reservations, clientScope);
         toast.success(item.clientId ? 'Reserva actualizada · Cliente en CRM' : 'Reserva actualizada');
         setSelected(item);
       } else {
         const { item, tableAssigned, clientLinked } = await createReservation(
           userId,
-          form,
+          payload,
           actor,
           tables,
           reservations,
@@ -467,7 +496,7 @@ export function RestaurantReservationsPage() {
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={() => setSelectedDate(new Date().toISOString().slice(0, 10))}
+                onClick={() => setSelectedDate(todayLocalIso())}
                 className="rounded-xl border border-gray-200 px-3 py-2 text-sm font-medium hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800"
               >
                 Hoy
@@ -502,7 +531,7 @@ export function RestaurantReservationsPage() {
             </button>
             {week.map((d) => {
               const isSelected = d === selectedDate;
-              const isToday = d === new Date().toISOString().slice(0, 10);
+              const isToday = d === todayLocalIso();
               const dayLabel = new Date(`${d}T12:00:00`).toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric' });
               const count = countsByDate[d] || 0;
               return (
@@ -602,7 +631,7 @@ export function RestaurantReservationsPage() {
                 {calendarCells.map((dateStr, i) => {
                   if (!dateStr) return <span key={`empty-${i}`} />;
                   const isSelected = dateStr === selectedDate;
-                  const isToday = dateStr === new Date().toISOString().slice(0, 10);
+                  const isToday = dateStr === todayLocalIso();
                   const count = countsByDate[dateStr] || 0;
                   return (
                     <button
@@ -672,10 +701,10 @@ export function RestaurantReservationsPage() {
                       }`}
                     >
                       <div className="flex items-start gap-4">
-                        <div className="shrink-0 text-center">
-                          <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{item.time}</p>
+                        <div className="w-14 shrink-0 text-center">
+                          <p className="text-lg font-bold tabular-nums text-gray-900 dark:text-gray-100">{item.time}</p>
                           {isUpcoming && (
-                            <p className="text-[10px] font-medium text-violet-600 dark:text-violet-400">
+                            <p className="min-h-[1rem] text-[10px] font-medium tabular-nums text-violet-600 dark:text-violet-400">
                               {formatRemainingTime(item.date, item.time)}
                             </p>
                           )}
@@ -740,7 +769,7 @@ export function RestaurantReservationsPage() {
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <div className="rounded-xl bg-gray-50 p-3 dark:bg-gray-800/50">
                       <p className="text-[10px] font-semibold uppercase text-gray-400">Fecha</p>
-                      <p className="mt-0.5 font-medium">{selected.date}</p>
+                      <p className="mt-0.5 font-medium">{formatDateEs(selected.date)}</p>
                     </div>
                     <div className="rounded-xl bg-gray-50 p-3 dark:bg-gray-800/50">
                       <p className="text-[10px] font-semibold uppercase text-gray-400">Hora</p>
@@ -1007,9 +1036,25 @@ export function RestaurantReservationsPage() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <input
-                  type="date"
-                  value={form.date}
-                  onChange={(e) => setForm((p) => ({ ...p, date: e.target.value }))}
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="DD/MM/AAAA"
+                  value={formDateDisplay}
+                  onChange={(e) => {
+                    const next = formatDateEsAsTyping(e.target.value);
+                    setFormDateDisplay(next);
+                    const iso = parseDateEsToIso(next);
+                    if (iso) setForm((p) => ({ ...p, date: iso }));
+                  }}
+                  onBlur={() => {
+                    const iso = parseDateEsToIso(formDateDisplay);
+                    if (iso) {
+                      setForm((p) => ({ ...p, date: iso }));
+                      setFormDateDisplay(formatDateEs(iso));
+                    } else if (form.date) {
+                      setFormDateDisplay(formatDateEs(form.date));
+                    }
+                  }}
                   className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm dark:border-gray-700 dark:bg-gray-800"
                 />
                 <input

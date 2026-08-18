@@ -407,12 +407,14 @@ const menuItemDefs = [
   // ── Vertical: Eventos ──────────────────────────────────────────────────────
   { id: 'events-hub', navKey: 'eventsHub', icon: <LayoutDashboard className="w-5 h-5" />, path: '/saas/vertical/eventos' },
   { id: 'events-new-contract', navKey: 'eventsNewContract', icon: <PlusCircle className="w-5 h-5" />, path: '/saas/vertical/eventos/nueva-contratacion' },
+  { id: 'events-quotes', navKey: 'eventsQuotes', icon: <Receipt className="w-5 h-5" />, path: '/saas/vertical/eventos/presupuestos' },
   { id: 'events-pipeline', navKey: 'eventsPipeline', icon: <FileText className="w-5 h-5" />, path: '/saas/vertical/eventos/contrataciones' },
   { id: 'events-services', navKey: 'eventsServices', icon: <Sparkles className="w-5 h-5" />, path: '/saas/events-services' },
   { id: 'events-venues', navKey: 'eventsVenues', icon: <MapPin className="w-5 h-5" />, path: '/saas/events-venues' },
   { id: 'events-vendors', navKey: 'eventsVendors', icon: <Briefcase className="w-5 h-5" />, path: '/saas/events-vendors' },
   { id: 'events-catering', navKey: 'eventsCatering', icon: <UtensilsCrossed className="w-5 h-5" />, path: '/saas/events-catering' },
   { id: 'events-logistics', navKey: 'eventsLogistics', icon: <ListChecks className="w-5 h-5" />, path: '/saas/events-logistics' },
+  { id: 'events-route', navKey: 'eventsRoute', icon: <Route className="w-5 h-5" />, path: '/saas/vertical/eventos/ruta' },
 
   // ── Vertical: Peluquería ───────────────────────────────────────────────────
   { id: 'salon-services',        navKey: 'salonServices',        icon: <Scissors className="w-5 h-5" />,     path: '/saas/salon-services' },
@@ -538,7 +540,7 @@ const sidebarGroupDefs = [
   { id: 'realEstate',       icon: <Building2 className="w-4 h-4 shrink-0" />,     itemIds: ['realestate-properties', 'realestate-visits', 'realestate-contracts', 'realestate-appraisals'] },
   { id: 'lawyer',           icon: <Scale className="w-4 h-4 shrink-0" />,          itemIds: ['lawyer-cases', 'lawyer-hearings', 'lawyer-deadlines'] },
   { id: 'nightclub',        icon: <Music className="w-4 h-4 shrink-0" />,          itemIds: ['nightclub-events', 'nightclub-vip', 'nightclub-promoters', 'nightclub-guestlist', 'nightclub-artists'] },
-  { id: 'events',           icon: <PartyPopper className="w-4 h-4 shrink-0" />,   itemIds: ['events-hub', 'events-new-contract', 'events-pipeline', 'events-services', 'events-venues', 'events-vendors', 'events-catering', 'events-logistics'] },
+  { id: 'events',           icon: <PartyPopper className="w-4 h-4 shrink-0" />,   itemIds: ['events-hub', 'events-new-contract', 'events-quotes', 'events-pipeline', 'events-services', 'events-route'] },
   { id: 'hairSalon',        icon: <Scissors className="w-4 h-4 shrink-0" />,      itemIds: ['salon-services', 'salon-loyalty'] },
   { id: 'scrapyard',        icon: <Container className="w-4 h-4 shrink-0" />,    itemIds: ['scrapyard-hub', 'scrapyard-purchases', 'scrapyard-vehicles', 'scrapyard-dismantling', 'scrapyard-parts', 'scrapyard-deregistrations', 'scrapyard-expedition', 'scrapyard-environment', 'scrapyard-documentation'] },
   { id: 'spareParts',       icon: <Cog className="w-4 h-4 shrink-0" />,          itemIds: ['spareparts-compatibility', 'spareparts-counter'] },
@@ -1603,9 +1605,15 @@ function SidebarInner({
       if (item.id === 'events-hub') {
         return location.pathname === '/saas/vertical/eventos';
       }
+      if (item.id === 'events-quotes') {
+        return location.pathname.startsWith('/saas/vertical/eventos/presupuestos');
+      }
+      if (item.id === 'events-route') {
+        return location.pathname.startsWith('/saas/vertical/eventos/ruta');
+      }
       if (item.id === 'events-pipeline') {
         return location.pathname.startsWith('/saas/vertical/eventos/contrataciones')
-          || /^\/saas\/vertical\/eventos\/(?!nueva-contratacion|contrataciones)[^/]+$/.test(location.pathname);
+          || /^\/saas\/vertical\/eventos\/(?!nueva-contratacion|contrataciones|presupuestos|ruta)[^/]+$/.test(location.pathname);
       }
       return location.pathname.startsWith(item.path);
     })()) ||

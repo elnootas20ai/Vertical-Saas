@@ -14,11 +14,12 @@ import {
 import { createRoomId } from '../../lib/salaRooms';
 import { ensureRoomTpvDetailed } from '../../lib/salaRoomPdv';
 import type { SalaQuickSetupRoomDraft } from '../../lib/salaQuickSetup';
-import { SALA_ROOM_COLORS, type SalaRoom } from '../../lib/salaStudioTypes';
+import { SALA_ROOM_COLORS, type SalaRoom, type SalaRoomType } from '../../lib/salaStudioTypes';
 import { applyTableSizePreset } from '../../lib/salaTableSize';
 import type { PointOfSale } from '../../lib/deliveryApi';
 import type { WorkCenter } from '../../lib/workCentersApi';
 import type { RestaurantBusinessRef } from './retailScope';
+import { isBarraRoomType, seatingUnitLabel } from './restaurantSalaSeating';
 
 export const RESTAURANT_SALA_SETUP_VERSION = 3;
 
@@ -27,30 +28,33 @@ function tablePayload(
   capacity: number,
   roomId: string,
   roomName: string,
+  roomType: SalaRoomType,
   businessId: string,
   indexInRoom: number,
 ) {
-  const preset = capacity <= 2 ? 'bar' : capacity <= 4 ? 'medium' : 'large';
+  const isBarra = isBarraRoomType(roomType);
+  const cap = Math.max(1, Math.round(Number(capacity)) || (isBarra ? 1 : 4));
+  const preset = isBarra || cap <= 2 ? 'bar' : cap <= 4 ? 'medium' : 'large';
   const dims = applyTableSizePreset(preset);
   // Grid inicial para el plano visual (evita migrar el esquema después).
-  const cols = 4;
-  const gapX = 140;
-  const gapY = 120;
+  const cols = isBarra ? 6 : 4;
+  const gapX = isBarra ? 100 : 140;
+  const gapY = isBarra ? 100 : 120;
   const originX = 80;
   const originY = 80;
   const col = indexInRoom % cols;
   const row = Math.floor(indexInRoom / cols);
   return {
     number,
-    name: `Mesa ${number}`,
+    name: seatingUnitLabel(roomType, number),
     // Capacidad de comensales ≠ tamaño visual del plano (gridW×gridH).
-    capacity: Math.max(1, Math.round(Number(capacity)) || 4),
+    capacity: cap,
     roomId,
     zone: roomName,
     gridW: dims.gridW,
     gridH: dims.gridH,
     sizePreset: preset as typeof preset,
-    shape: capacity <= 2 ? ('high' as const) : ('square' as const),
+    shape: isBarra || cap <= 2 ? ('high' as const) : ('square' as const),
     x: originX + col * gapX,
     y: originY + row * gapY,
     /** Libre: sin servicio en curso (no rojo/ámbar). */
@@ -138,7 +142,7 @@ export async function applyRestaurantSalaQuickSetup(
           ? Number(d.capacities[j])
           : d.defaultCapacity;
       tablePayloads.push(
-        tablePayload(num, perTable, room.id, room.name, businessId, j),
+        tablePayload(num, perTable, room.id, room.name, room.roomType, businessId, j),
       );
       num += 1;
     }

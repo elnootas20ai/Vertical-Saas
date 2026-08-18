@@ -31,7 +31,7 @@ type Props = {
 const STEP_TITLES: Record<OnboardingStepId, string> = {
   spaces: 'Espacios',
   names: 'Nombres',
-  tables: 'Mesas',
+  tables: 'Puestos',
   summary: 'Resumen',
 };
 
@@ -88,8 +88,8 @@ export function RestaurantSalaOnboarding({
             </h1>
             <p className="mt-1 text-sm text-neutral-500">
               {storeLabel
-                ? `«${storeLabel}». Cuatro pasos: espacios, nombres, mesas y confirmación.`
-                : 'Cuatro pasos: espacios, nombres, mesas y confirmación.'}
+                ? `«${storeLabel}». Cuatro pasos: espacios, nombres, puestos y confirmación.`
+                : 'Cuatro pasos: espacios, nombres, puestos (mesas o taburetes) y confirmación.'}
             </p>
           </div>
 
@@ -105,7 +105,15 @@ export function RestaurantSalaOnboarding({
               ))}
             </div>
             <p className="mt-2 text-xs text-neutral-400">
-              Paso {stepIndex + 1} de {ONBOARDING_STEPS.length} · {STEP_TITLES[state.step]}
+              Paso {stepIndex + 1} de {ONBOARDING_STEPS.length} ·{' '}
+              {state.step === 'tables' && state.spaces[state.tablesSpaceIndex]?.roomType === 'barra'
+                ? 'Barra / taburetes'
+                : STEP_TITLES[state.step]}
+              {state.step === 'tables' && state.spaces.length > 1
+                ? ` · zona ${state.tablesSpaceIndex + 1}/${state.spaces.length} («${
+                    state.spaces[state.tablesSpaceIndex]?.name || 'Sala'
+                  }»)`
+                : ''}
             </p>
           </div>
         </header>

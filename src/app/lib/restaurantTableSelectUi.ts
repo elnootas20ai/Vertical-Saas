@@ -25,7 +25,10 @@ export function isDiningTablePickable(status: string | undefined): boolean {
 
 export function diningTableDisplayName(table: Pick<DiningTable, 'name' | 'number'>): string {
   const name = String(table.name || '').trim();
-  if (name && !/^mesa\s+\d+$/i.test(name)) return name;
+  if (name) {
+    // No reescribir nombres ya puestos (Mesa N / Taburete N / personalizados).
+    return name;
+  }
   return `Mesa ${table.number}`;
 }
 

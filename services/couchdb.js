@@ -8229,6 +8229,12 @@ export function calcTpvRegisterExpectedCash(session) {
   const cashSales = txs
     .filter((t) => (t?.type === 'sale' || t?.type === 'staff_consumption') && isCash(t))
     .reduce((s, t) => s + Number(t.amount || 0), 0);
+  const cashTips = txs
+    .filter((t) => (t?.type === 'sale' || t?.type === 'tip') && isCash(t))
+    .reduce((s, t) => {
+      if (t?.type === 'tip') return s + Number(t.amount || 0);
+      return s + Math.max(0, Number(t?.tip || 0));
+    }, 0);
   const cashReturns = txs
     .filter((t) => t?.type === 'return' && isCash(t))
     .reduce((s, t) => s + Number(t.amount || 0), 0);
@@ -8238,7 +8244,7 @@ export function calcTpvRegisterExpectedCash(session) {
   const cashOut = txs
     .filter((t) => t?.type === 'cash_out' || t?.type === 'expense')
     .reduce((s, t) => s + Number(t.amount || 0), 0);
-  return resolveTpvOpeningCashAmount(session) + cashSales - cashReturns + cashIn - cashOut;
+  return resolveTpvOpeningCashAmount(session) + cashSales + cashTips - cashReturns + cashIn - cashOut;
 }
 
 /** Suma importes de ventas ya registradas en caja para un pedido (evita doble conteo). */

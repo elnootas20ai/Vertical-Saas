@@ -21,6 +21,12 @@ import {
   type SalaRoomType,
 } from '../../lib/salaStudioTypes';
 import { RESTAURANT_SALA_SETUP_VERSION } from './applyRestaurantSalaQuickSetup';
+import {
+  defaultSeatingCapacity,
+  defaultSeatingCount,
+  isBarraRoomType,
+  seatingUnitLabel,
+} from './restaurantSalaSeating';
 
 function isOccupiedLike(status: string): boolean {
   return (
@@ -31,45 +37,25 @@ function isOccupiedLike(status: string): boolean {
   );
 }
 
-function presetForCapacity(capacity: number) {
-  if (capacity <= 2) return 'bar' as const;
+function presetForCapacity(capacity: number, roomType?: SalaRoomType) {
+  if (isBarraRoomType(roomType) || capacity <= 2) return 'bar' as const;
   if (capacity <= 4) return 'medium' as const;
   return 'large' as const;
 }
 
-/** Nombre operativo: en barra → "Barra N"; resto → "Mesa N". */
+/** @deprecated usar seatingUnitLabel — se mantiene por imports existentes. */
 export function tableLabelForRoom(roomType: SalaRoomType, number: number): string {
-  if (roomType === 'barra') return `Barra ${number}`;
-  return `Mesa ${number}`;
+  return seatingUnitLabel(roomType, number);
 }
 
 /** Capacidad por defecto según tipo de zona (uso típico en un bar). */
 export function defaultCapacityForRoomType(roomType: SalaRoomType): number {
-  switch (roomType) {
-    case 'barra':
-      return 2;
-    case 'vip':
-    case 'privado':
-      return 6;
-    default:
-      return 4;
-  }
+  return defaultSeatingCapacity(roomType);
 }
 
-/** Nº de mesas sugerido al crear una zona nueva. */
+/** Nº de mesas/taburetes sugerido al crear una zona nueva. */
 export function defaultTableCountForRoomType(roomType: SalaRoomType): number {
-  switch (roomType) {
-    case 'barra':
-      return 6;
-    case 'terraza':
-    case 'patio':
-      return 6;
-    case 'vip':
-    case 'privado':
-      return 2;
-    default:
-      return 4;
-  }
+  return defaultSeatingCount(roomType);
 }
 
 function buildTablePayload(
@@ -79,24 +65,25 @@ function buildTablePayload(
   businessId: string,
   indexInRoom: number,
 ): Partial<DiningTable> {
-  const cap = Math.max(1, Math.round(Number(capacity)) || 4);
-  const preset = presetForCapacity(cap);
+  const isBarra = isBarraRoomType(room.roomType);
+  const cap = Math.max(1, Math.round(Number(capacity)) || (isBarra ? 1 : 4));
+  const preset = presetForCapacity(cap, room.roomType);
   const dims = applyTableSizePreset(preset);
-  const cols = 4;
-  const gapX = 140;
-  const gapY = 120;
+  const cols = isBarra ? 6 : 4;
+  const gapX = isBarra ? 100 : 140;
+  const gapY = isBarra ? 100 : 120;
   const col = indexInRoom % cols;
   const row = Math.floor(indexInRoom / cols);
   return {
     number,
-    name: tableLabelForRoom(room.roomType, number),
+    name: seatingUnitLabel(room.roomType, number),
     capacity: cap,
     roomId: room.id,
     zone: room.name,
     gridW: dims.gridW,
     gridH: dims.gridH,
     sizePreset: preset,
-    shape: cap <= 2 ? 'high' : 'square',
+    shape: isBarra || cap <= 2 ? 'high' : 'square',
     x: 80 + col * gapX,
     y: 80 + row * gapY,
     status: 'available',

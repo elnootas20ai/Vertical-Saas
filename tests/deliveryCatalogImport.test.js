@@ -306,6 +306,33 @@ describe('deliveryCatalogExcelTemplate', () => {
     expect(data.some((row) => String(row[0] || '').includes('Pizza Margarita'))).toBe(false);
   });
 
+  it('plantilla bar/restaurante: marca del negocio + sin Bodegeta hardcode', async () => {
+    const {
+      buildDeliveryCatalogImportWorkbook,
+      catalogTemplateFilenameForVertical,
+      RESTAURANT_CATALOG_TEMPLATE_FILENAME,
+    } = await import('../src/app/lib/deliveryCatalogExcelTemplate.ts');
+    expect(catalogTemplateFilenameForVertical('restaurant')).toBe(RESTAURANT_CATALOG_TEMPLATE_FILENAME);
+
+    const wb = buildDeliveryCatalogImportWorkbook(
+      [{ _id: 'm1', name: 'Demo Bar Restaurante', active: true, catalogCategories: ['Tapas', 'Raciones'] }],
+      'restaurant',
+    );
+    expect(wb.SheetNames).toEqual([
+      'catalogo',
+      'referencia_tpv',
+      'valores_validos',
+      'ejemplos',
+      'instrucciones',
+    ]);
+    const valid = XLSX.utils.sheet_to_json(wb.Sheets.valores_validos, { header: 1, defval: '' });
+    expect(valid.some((row) => String(row[0] || '').includes('Demo Bar Restaurante'))).toBe(true);
+    const examples = XLSX.utils.sheet_to_json(wb.Sheets.ejemplos, { header: 1, defval: '' });
+    expect(examples.some((row) => String(row[3] || '') === 'Demo Bar Restaurante')).toBe(true);
+    const allText = JSON.stringify(wb);
+    expect(allText.toLowerCase()).not.toContain('bodegeta');
+  });
+
   it('parseCatalogImportStockFields reads stock columns from Excel', async () => {
     const { parseCatalogImportStockFields } = await import('../src/app/lib/deliveryCatalogImportLogic.ts');
     const stock = parseCatalogImportStockFields({

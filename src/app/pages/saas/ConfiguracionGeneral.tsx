@@ -85,9 +85,8 @@ import {
 } from '../../lib/deliveryCatalogImport';
 import { organizerBrandsForCatalogTemplate } from '../../lib/deliveryCatalogImportLogic';
 import {
-  DELIVERY_CATALOG_IMPORT_FIELDS,
-  HELADERIA_CATALOG_IMPORT_FIELDS,
   DELIVERY_CATALOG_HEADER_ALIASES,
+  catalogImportFieldsForVertical,
   catalogTemplateFilenameForVertical,
   downloadDeliveryCatalogImportTemplate,
   formatDeliveryCatalogImportValidationToast,
@@ -427,7 +426,7 @@ export function ConfiguracionGeneral() {
 
   const catalogImportFields: ImportFieldDef[] = useMemo(() => {
     if (usesTpvCatalogOps) {
-      return isHeladeriaBiz ? HELADERIA_CATALOG_IMPORT_FIELDS : DELIVERY_CATALOG_IMPORT_FIELDS;
+      return catalogImportFieldsForVertical(catalogVertical);
     }
     return [
       { key: 'name', label: 'Nombre', required: true, example: 'Artículo ejemplo' },
@@ -442,7 +441,7 @@ export function ConfiguracionGeneral() {
       { key: 'minStock', label: 'Stock mínimo', example: '20' },
       { key: 'notes', label: 'Notas', example: '' },
     ];
-  }, [usesTpvCatalogOps, isHeladeriaBiz]);
+  }, [usesTpvCatalogOps, catalogVertical]);
 
   const handleDownloadCatalogTemplate = useCallback(async () => {
     if (!bizId) return;

@@ -66,12 +66,15 @@ export async function syncDiningOfflineItem(item: TpvOfflineQueueItem): Promise<
       splitLabel?: string;
     } | undefined;
     if (!payment || !(Number(payment.amount) > 0)) return false;
-    const { fullyPaid } = await payDiningOrderRequest(userId, orderId, payment, {
+    const { fullyPaid, order } = await payDiningOrderRequest(userId, orderId, payment, {
       salesPointId: String(p.salesPointId || '') || undefined,
       salesPointName: String(p.salesPointName || '') || undefined,
       registerInCaja: p.registerInCaja !== false,
+      closeAfterPay: Boolean(p.closeAfterPay),
+      forceClose: Boolean(p.forceClose),
+      forceCloseReason: p.forceClose ? 'Cobrado offline con cocina pendiente' : '',
     });
-    if (fullyPaid && p.closeAfterPay) {
+    if (fullyPaid && p.closeAfterPay && order?.status !== 'closed') {
       await closeDiningOrderRequest(
         userId,
         orderId,

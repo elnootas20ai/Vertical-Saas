@@ -193,6 +193,7 @@ function KitchenTicketCard({
               type="button"
               onClick={() => onAdvance(ticket, next)}
               disabled={acting}
+              onDoubleClick={(e) => e.preventDefault()}
               className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-sm font-semibold transition-all disabled:opacity-50 shadow-sm ${action.color}`}
             >
               {acting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
@@ -290,6 +291,9 @@ export function RestaurantKitchenBoard({
   const [orders, setOrders] = useState<DiningOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [actingKey, setActingKey] = useState<string | null>(null);
+  /** Lock inmediato (antes del re-render) + cooldown tras avance: evita doble toque Empezar→Listo. */
+  const actingLockRef = useRef<string | null>(null);
+  const advanceCooldownRef = useRef<Map<string, number>>(new Map());
   const [oosBusyId, setOosBusyId] = useState<string | null>(null);
   const [mobileTab, setMobileTab] = useState<MobileTab>('nuevas');
   const [soundEnabled, setSoundEnabled] = useState(() => {
@@ -429,14 +433,28 @@ export function RestaurantKitchenBoard({
 
   const advanceComanda = useCallback(async (ticket: KitchenTicket, next: ComandaStatus) => {
     if (!userId) return;
+    const expectedNext = nextKitchenStatus(ticket.status);
+    if (!expectedNext || expectedNext !== next) return;
+    if (actingLockRef.current) return;
+    const coolUntil = advanceCooldownRef.current.get(ticket.key) || 0;
+    if (Date.now() < coolUntil) return;
+
+    actingLockRef.current = ticket.key;
     setActingKey(ticket.key);
     try {
       const updated = await updateComandaStatusRequest(userId, ticket.orderId, ticket.comandaId, next);
       setOrders((prev) => prev.map((o) => (o._id === updated._id ? updated : o)));
+      // Cooldown: el botón cambia de sitio/label; el 2º clic del doble toque no debe avanzar otra vez.
+      advanceCooldownRef.current.set(ticket.key, Date.now() + 900);
       toast.success(`${ticketTableLabel(ticket)} · comanda ${STATUS_TOAST_LABELS[next] || next}`);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Error al actualizar la comanda');
+      const msg = err instanceof Error ? err.message : 'Error al actualizar la comanda';
+      // 409 de transición inválida: silencio suave (doble toque ya bloqueado en servidor)
+      if (!/Transición no permitida/i.test(msg)) {
+        toast.error(msg);
+      }
     } finally {
+      actingLockRef.current = null;
       setActingKey(null);
     }
   }, [userId]);

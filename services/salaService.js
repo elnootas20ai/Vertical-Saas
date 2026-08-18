@@ -291,6 +291,21 @@ const VALID_ORDER_STATUSES = ['open', 'served', 'pending_payment', 'paid', 'clos
 const VALID_COMANDA_STATUSES = ['draft', 'sent_to_kitchen', 'in_preparation', 'ready', 'served', 'cancelled'];
 const VALID_ITEM_STATUSES = ['pending', 'in_preparation', 'ready', 'served', 'cancelled'];
 
+/** Solo un paso adelante en cocina (evita doble toque Empezar → Listo). */
+const KITCHEN_STATUS_NEXT = {
+  sent_to_kitchen: 'in_preparation',
+  in_preparation: 'ready',
+  ready: 'served',
+};
+
+export function isValidKitchenComandaTransition(fromStatus, toStatus) {
+  const from = String(fromStatus || '').trim();
+  const to = String(toStatus || '').trim();
+  if (!from || !to) return false;
+  if (from === to) return true;
+  return KITCHEN_STATUS_NEXT[from] === to;
+}
+
 function normalizeOrderStatus(value) {
   const v = String(value || 'open').toLowerCase();
   return VALID_ORDER_STATUSES.includes(v) ? v : 'open';

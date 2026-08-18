@@ -1,5 +1,9 @@
 import { authFetch } from './authApi';
 import { getApiBase } from './apiBase';
+import {
+  TPV_SESSION_SYNC_EVENT,
+  type TpvRegisterSession,
+} from './deliveryApi';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -486,6 +490,7 @@ export async function updateComandaStatusRequest(
 export type DiningCajaRegistration = {
   status: string;
   message?: string;
+  session?: TpvRegisterSession;
 };
 
 export async function payDiningOrderRequest(
@@ -496,6 +501,10 @@ export async function payDiningOrderRequest(
     salesPointId?: string;
     salesPointName?: string;
     registerInCaja?: boolean;
+    /** Cobrar + cerrar (y liberar mesa) en una sola llamada. */
+    closeAfterPay?: boolean;
+    forceClose?: boolean;
+    forceCloseReason?: string;
   },
 ) {
   const uid = normalizeUserId(userId);
@@ -512,9 +521,18 @@ export async function payDiningOrderRequest(
         salesPointId: opts?.salesPointId,
         salesPointName: opts?.salesPointName,
         registerInCaja: opts?.registerInCaja !== false,
+        closeAfterPay: Boolean(opts?.closeAfterPay),
+        forceClose: Boolean(opts?.forceClose),
+        forceCloseReason: opts?.forceCloseReason || '',
       }),
     },
   );
+  // Sync barra TPV (sin toast de notifyCaja: el TPV mesa gestiona airbag/errores).
+  if (data.cajaRegistration?.session && typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: data.cajaRegistration.session }),
+    );
+  }
   return data;
 }
 

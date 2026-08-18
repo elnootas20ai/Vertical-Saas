@@ -60,9 +60,8 @@ import {
 } from '../../lib/deliveryCatalogImport';
 import { commercialLineBrands, organizerBrandsForCatalogTemplate } from '../../lib/deliveryCatalogImportLogic';
 import {
-  DELIVERY_CATALOG_IMPORT_FIELDS,
-  HELADERIA_CATALOG_IMPORT_FIELDS,
   DELIVERY_CATALOG_HEADER_ALIASES,
+  catalogImportFieldsForVertical,
   catalogTemplateFilenameForVertical,
   downloadDeliveryCatalogImportTemplate,
   partitionDeliveryCatalogImportEntries,
@@ -2882,9 +2881,7 @@ export function CatalogPage() {
     { key: 'allergens', label: 'Alérgenos' },
   ];
 
-  const MODULE_IMPORT_FIELDS: ImportFieldDef[] = isHeladeriaCatalog
-    ? HELADERIA_CATALOG_IMPORT_FIELDS
-    : DELIVERY_CATALOG_IMPORT_FIELDS;
+  const MODULE_IMPORT_FIELDS: ImportFieldDef[] = catalogImportFieldsForVertical(catalogVertical);
 
   const commercialLines = useMemo(
     () => sortBrandsForDisplay(commercialLineBrands(brands)),
@@ -2905,8 +2902,14 @@ export function CatalogPage() {
     downloadDeliveryCatalogImportTemplate(templateOrganizerLines, catalogImportTemplateFilename, {
       vertical: catalogVertical,
     });
-    toast.success(isHeladeriaCatalog ? 'Plantilla catálogo heladería' : 'Plantilla catálogo');
-  }, [templateOrganizerLines, catalogImportTemplateFilename, catalogVertical, isHeladeriaCatalog]);
+    toast.success(
+      isHeladeriaCatalog
+        ? 'Plantilla catálogo heladería'
+        : isRestaurantCatalog
+          ? 'Plantilla catálogo bar/restaurante'
+          : 'Plantilla catálogo',
+    );
+  }, [templateOrganizerLines, catalogImportTemplateFilename, catalogVertical, isHeladeriaCatalog, isRestaurantCatalog]);
 
   const handleAIEntries = async (entries: Record<string, unknown>[]) => {
     if (!dataUserId) return;

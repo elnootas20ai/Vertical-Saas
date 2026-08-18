@@ -26,7 +26,7 @@ import { resolveBusinessScopeId } from '../../../lib/deliverySetup';
 import { localCalendarDayKey } from '../../../lib/tpvCajaScope';
 import { listFloorReservations, reservationMinutesUntil } from '../../../lib/restaurantFloorReservations';
 import {
-  assignTable,
+  assignTables,
   cancelReservation,
   confirmReservation,
   createReservation,
@@ -36,16 +36,14 @@ import {
   ACTIVE_STATUSES,
   EMPTY_FORM,
   STATUS_CFG,
+  formatReservationSeatPlace,
+  reservationTableIds,
   type ReservationFormData,
   type RestaurantReservation,
 } from '../../../lib/restaurantReservationTypes';
 import type { DiningTable } from '../../../lib/salaApi';
-import {
-  formatDiningTablePickerLabel,
-  groupDiningTablesByZone,
-  isDiningTablePickable,
-  sortDiningTablesForPicker,
-} from '../../../lib/restaurantTableSelectUi';
+import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../../lib/vertialUiTokens';
+import { RestaurantReservationTablePicker } from './RestaurantReservationTablePicker';
 
 type Actor = { userId: string; userName: string };
 
@@ -90,6 +88,7 @@ function formFromReservation(item: RestaurantReservation): ReservationFormData {
     tableId: item.tableId,
     tableName: item.tableName,
     tableNumber: item.tableNumber,
+    tableIds: reservationTableIds(item),
     notes: item.notes,
     status: item.status,
   };
@@ -123,6 +122,7 @@ export function RestaurantTpvReservationsPanel({
   const [editing, setEditing] = useState<RestaurantReservation | null>(null);
   const [form, setForm] = useState<ReservationFormData>({ ...EMPTY_FORM, date: today });
   const [assignFor, setAssignFor] = useState<RestaurantReservation | null>(null);
+  const [assignIds, setAssignIds] = useState<string[]>([]);
   const [clientLookup, setClientLookup] = useState('');
   const [clientEditing, setClientEditing] = useState(true);
 
@@ -176,6 +176,7 @@ export function RestaurantTpvReservationsPanel({
       setFormOpen(false);
       setEditing(null);
       setAssignFor(null);
+      setAssignIds([]);
       resetClientLookup();
       return;
     }
@@ -194,26 +195,16 @@ export function RestaurantTpvReservationsPanel({
     return [...new Set(zones)];
   }, [tables]);
 
-  const pickableTables = useMemo(
-    () =>
-      groupDiningTablesByZone(
-        tables.filter((t) => t.active !== false && t.status !== 'hidden'),
-      ),
-    [tables],
+  const assignPartySize = useMemo(
+    () => parseInt(String(assignFor?.partySize || '2'), 10) || 2,
+    [assignFor],
   );
 
-  const assignCandidates = useMemo(() => {
-    if (!assignFor) return [];
-    const party = parseInt(String(assignFor.partySize || '2'), 10) || 2;
-    return sortDiningTablesForPicker(
-      tables.filter(
-        (t) =>
-          t.active !== false
-          && t.status !== 'hidden'
-          && (Number(t.capacity) || 0) >= party,
-      ),
-    );
-  }, [assignFor, tables]);
+  const assignCovered = useMemo(() => {
+    return tables
+      .filter((t) => assignIds.includes(t._id))
+      .reduce((sum, t) => sum + (Number(t.capacity) || 0), 0);
+  }, [tables, assignIds]);
 
   const applyClient = (client: Client) => {
     selectClient(client);
@@ -256,6 +247,17 @@ export function RestaurantTpvReservationsPanel({
     if (!userId || !form.guestName.trim() || !form.date || !form.time) {
       toast.error('Completa nombre, fecha y hora');
       return;
+    }
+    const party = parseInt(String(form.partySize || '2'), 10) || 2;
+    const selected = form.tableIds || [];
+    if (selected.length > 0) {
+      const covered = tables
+        .filter((t) => selected.includes(t._id))
+        .reduce((sum, t) => sum + (Number(t.capacity) || 0), 0);
+      if (covered < party) {
+        toast.error(`Las mesas elegidas cubren ${covered} pers.; hacen falta ${party}.`);
+        return;
+      }
     }
     setSaving(true);
     try {
@@ -333,7 +335,7 @@ export function RestaurantTpvReservationsPanel({
           <button
             type="button"
             onClick={openCreate}
-            className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-violet-600 px-3 text-sm font-semibold text-white"
+            className={`inline-flex h-10 items-center gap-1.5 rounded-xl bg-[var(--v-blue,#2563eb)] px-3 text-sm font-semibold text-white`}
           >
             <Plus className="h-4 w-4" strokeWidth={2} />
             Nueva
@@ -381,9 +383,7 @@ export function RestaurantTpvReservationsPanel({
                 Boolean(reservation.tableId)
                 && ACTIVE_STATUSES.includes(reservation.status);
               const seating = seatingId === reservation._id;
-              const mesa = reservation.tableNumber
-                ? `Mesa ${reservation.tableNumber}`
-                : reservation.preferredZone || 'Sin mesa';
+              const mesa = formatReservationSeatPlace(reservation);
 
               return (
                 <li
@@ -405,11 +405,15 @@ export function RestaurantTpvReservationsPanel({
                           {statusCfg.label}
                         </span>
                       </div>
-                      <p className="mt-1 text-xs text-stone-500">
-                        {mesa}
-                        <Users className="mx-1 inline h-3 w-3 -mt-px" />
-                        {reservation.partySize || '2'} pers.
-                        {reservation.phone ? ` · ${reservation.phone}` : ''}
+                      <p className="mt-1 text-xs font-semibold text-stone-700 dark:text-stone-300">
+                        → {mesa}
+                        <Users className="mx-1 inline h-3 w-3 -mt-px font-normal text-stone-400" />
+                        <span className="font-normal text-stone-500">
+                          {reservation.partySize || '2'} pers.
+                        </span>
+                        {reservation.phone ? (
+                          <span className="font-normal text-stone-500"> · {reservation.phone}</span>
+                        ) : null}
                         {minutes <= 0 && ACTIVE_STATUSES.includes(reservation.status) ? (
                           <span className="ml-1 font-semibold text-rose-600">· Ahora</span>
                         ) : minutes > 0 && minutes <= 15 ? (
@@ -442,17 +446,20 @@ export function RestaurantTpvReservationsPanel({
                           onSeat(reservation);
                           onClose();
                         }}
-                        className="inline-flex min-h-10 flex-1 items-center justify-center gap-1 rounded-xl bg-violet-600 px-3 text-xs font-semibold text-white disabled:opacity-50 sm:flex-none"
+                        className="inline-flex min-h-10 flex-1 items-center justify-center gap-1 rounded-xl bg-[var(--v-blue,#2563eb)] px-3 text-xs font-semibold text-white disabled:opacity-50 sm:flex-none"
                       >
                         <UserCheck className="h-3.5 w-3.5" />
-                        {seating ? '…' : 'Sentar'}
+                        {seating ? '…' : `Sentar · ${mesa}`}
                       </button>
                     ) : null}
                     {!reservation.tableId && ACTIVE_STATUSES.includes(reservation.status) ? (
                       <button
                         type="button"
                         disabled={saving}
-                        onClick={() => setAssignFor(reservation)}
+                        onClick={() => {
+                          setAssignFor(reservation);
+                          setAssignIds(reservationTableIds(reservation));
+                        }}
                         className="inline-flex min-h-10 items-center justify-center gap-1 rounded-xl border border-violet-200 bg-violet-50 px-3 text-xs font-semibold text-violet-800 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-200"
                       >
                         <Armchair className="h-3.5 w-3.5" />
@@ -648,47 +655,34 @@ export function RestaurantTpvReservationsPanel({
                       className="w-full rounded-xl border border-stone-200 px-3 py-2.5 text-sm dark:border-stone-700 dark:bg-stone-950"
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div>
                     <select
                       value={form.preferredZone}
                       onChange={(e) => setForm((p) => ({ ...p, preferredZone: e.target.value }))}
-                      className="w-full rounded-xl border border-stone-200 px-3 py-2.5 text-sm dark:border-stone-700 dark:bg-stone-950"
+                      className="mb-3 w-full rounded-xl border border-stone-200 px-3 py-2.5 text-sm dark:border-stone-700 dark:bg-stone-950"
                     >
-                      <option value="">Zona</option>
+                      <option value="">Zona (opcional)</option>
                       {zoneOptions.map((z) => (
                         <option key={z} value={z}>
                           {z}
                         </option>
                       ))}
                     </select>
-                    <select
-                      value={form.tableId}
-                      onChange={(e) => {
-                        const t = tables.find((x) => x._id === e.target.value);
+                    <RestaurantReservationTablePicker
+                      tables={tables}
+                      selectedIds={form.tableIds || []}
+                      partySize={parseInt(String(form.partySize || '2'), 10) || 2}
+                      preferredZone={form.preferredZone}
+                      onChange={(next) =>
                         setForm((p) => ({
                           ...p,
-                          tableId: e.target.value,
-                          tableName: t?.name || '',
-                          tableNumber: t ? String(t.number) : '',
-                        }));
-                      }}
-                      className="w-full rounded-xl border border-stone-200 px-3 py-2.5 text-sm dark:border-stone-700 dark:bg-stone-950"
-                    >
-                      <option value="">Mesa (auto)</option>
-                      {pickableTables.map(([zone, zoneTables]) => (
-                        <optgroup key={zone} label={zone}>
-                          {zoneTables.map((t) => (
-                            <option
-                              key={t._id}
-                              value={t._id}
-                              disabled={!isDiningTablePickable(t.status)}
-                            >
-                              {formatDiningTablePickerLabel(t)}
-                            </option>
-                          ))}
-                        </optgroup>
-                      ))}
-                    </select>
+                          tableIds: next.tableIds,
+                          tableId: next.tableId,
+                          tableName: next.tableName,
+                          tableNumber: next.tableNumber,
+                        }))
+                      }
+                    />
                   </div>
                   <textarea
                     value={form.notes}
@@ -706,7 +700,7 @@ export function RestaurantTpvReservationsPanel({
                       setEditing(null);
                       resetClientLookup();
                     }}
-                    className="h-11 flex-1 rounded-xl border border-stone-200 text-sm font-semibold text-stone-700 dark:border-stone-700 dark:text-stone-200"
+                    className={`flex-1 ${VERTIAL_BTN_SECONDARY}`}
                   >
                     Cerrar
                   </button>
@@ -714,7 +708,7 @@ export function RestaurantTpvReservationsPanel({
                     type="button"
                     disabled={saving}
                     onClick={() => void handleSave()}
-                    className="h-11 flex-1 rounded-xl bg-violet-600 text-sm font-semibold text-white disabled:opacity-50"
+                    className={`flex-1 ${VERTIAL_BTN_PRIMARY}`}
                   >
                     {saving ? 'Guardando…' : 'Guardar'}
                   </button>
@@ -729,38 +723,53 @@ export function RestaurantTpvReservationsPanel({
             <div className="fixed inset-0 z-[190] flex items-end justify-center bg-black/50 p-3 sm:items-center">
               <div className="max-h-[80vh] w-full max-w-md overflow-y-auto rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-stone-900 sm:p-5">
                 <div className="mb-3 flex items-center justify-between">
-                  <h3 className="text-base font-semibold">Asignar mesa</h3>
-                  <button type="button" onClick={() => setAssignFor(null)}>
+                  <h3 className="text-base font-semibold">Asignar mesas</h3>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAssignFor(null);
+                      setAssignIds([]);
+                    }}
+                  >
                     <X className="h-5 w-5 text-stone-400" />
                   </button>
                 </div>
                 <p className="mb-3 text-xs text-stone-500">
-                  {assignFor.guestName} · {assignFor.partySize || '2'} pers.
+                  {assignFor.guestName} · {assignPartySize} pers.
                 </p>
-                {assignCandidates.length === 0 ? (
-                  <p className="text-sm text-stone-500">No hay mesas compatibles</p>
-                ) : (
-                  <div className="space-y-1.5">
-                    {assignCandidates.map((t) => (
-                      <button
-                        key={t._id}
-                        type="button"
-                        disabled={saving || !isDiningTablePickable(t.status)}
-                        onClick={() =>
-                          void runAction(
-                            () => assignTable(userId, assignFor, t, actor, tables, items),
-                            `Mesa ${t.number} asignada`,
-                          )
-                        }
-                        className="flex w-full items-center justify-between rounded-xl border border-stone-200 px-3 py-2.5 text-left text-sm hover:bg-stone-50 disabled:opacity-40 dark:border-stone-700 dark:hover:bg-stone-800"
-                      >
-                        <span className="font-semibold text-stone-900 dark:text-stone-50">
-                          {formatDiningTablePickerLabel(t)}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
+                <RestaurantReservationTablePicker
+                  tables={tables}
+                  selectedIds={assignIds}
+                  partySize={assignPartySize}
+                  preferredZone={assignFor.preferredZone}
+                  onChange={(next) => setAssignIds(next.tableIds)}
+                />
+                <div className="mt-4 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAssignFor(null);
+                      setAssignIds([]);
+                    }}
+                    className={`flex-1 ${VERTIAL_BTN_SECONDARY}`}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={saving || assignIds.length === 0 || assignCovered < assignPartySize}
+                    onClick={() =>
+                      void runAction(
+                        () =>
+                          assignTables(userId, assignFor, assignIds, actor, tables, items),
+                        assignIds.length > 1 ? 'Mesas asignadas' : 'Mesa asignada',
+                      )
+                    }
+                    className={`flex-1 ${VERTIAL_BTN_PRIMARY}`}
+                  >
+                    Confirmar
+                  </button>
+                </div>
               </div>
             </div>,
             document.body,

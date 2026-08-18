@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import type { SalaRoom } from '../../lib/salaStudioTypes';
+import { ClearableNumberInput } from './ClearableNumberInput';
 import { defaultCapacityForRoomType } from './restaurantSalaLiveEdit';
 
 type Props = {
@@ -48,14 +49,14 @@ export function RestaurantAddTablesModal({ open, room, onClose, busy, onConfirm 
             <label className="mb-1.5 block text-sm font-medium text-neutral-700">
               Cantidad
             </label>
-            <input
-              type="number"
+            <ClearableNumberInput
               min={1}
               max={40}
               value={count}
               disabled={busy}
               autoFocus
-              onChange={(e) => setCount(Number(e.target.value))}
+              aria-label="Cantidad"
+              onCommit={setCount}
               className="w-full rounded-[10px] border border-neutral-200 px-3 py-2.5 text-sm outline-none focus:border-neutral-400"
             />
           </div>
@@ -63,13 +64,13 @@ export function RestaurantAddTablesModal({ open, room, onClose, busy, onConfirm 
             <label className="mb-1.5 block text-sm font-medium text-neutral-700">
               Pax cada una
             </label>
-            <input
-              type="number"
+            <ClearableNumberInput
               min={1}
               max={20}
               value={capacity}
               disabled={busy}
-              onChange={(e) => setCapacity(Number(e.target.value))}
+              aria-label="Pax cada una"
+              onCommit={setCapacity}
               className="w-full rounded-[10px] border border-neutral-200 px-3 py-2.5 text-sm outline-none focus:border-neutral-400"
             />
           </div>

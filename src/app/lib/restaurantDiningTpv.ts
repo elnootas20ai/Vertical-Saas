@@ -185,6 +185,35 @@ export function diningOrderHasPendingKitchen(order: DiningOrder): boolean {
     ['sent_to_kitchen', 'in_preparation'].includes(String(c.status || '')));
 }
 
+/** Comandas en borrador (en cuenta pero aún no en cocina). */
+export function listDraftComandaIds(order: DiningOrder | null | undefined): string[] {
+  if (!order) return [];
+  return (order.comandas || [])
+    .filter((c) => {
+      if (String(c.status || '') !== 'draft') return false;
+      return (c.items || []).some((item) => String(item.status || '') !== 'cancelled');
+    })
+    .map((c) => String(c.id || '').trim())
+    .filter(Boolean);
+}
+
+export function diningOrderHasDraftComandas(order: DiningOrder | null | undefined): boolean {
+  return listDraftComandaIds(order).length > 0;
+}
+
+/** Envía a cocina todas las comandas en borrador de la cuenta. */
+export async function sendDraftComandasToKitchen(params: {
+  userId: string;
+  order: DiningOrder;
+}): Promise<DiningOrder> {
+  let order = params.order;
+  const ids = listDraftComandaIds(order);
+  for (const comandaId of ids) {
+    order = await sendComandaToKitchenRequest(params.userId, order._id, comandaId);
+  }
+  return order;
+}
+
 export type PayAndCloseDiningResult = {
   order: DiningOrder;
   fullyPaid: boolean;
@@ -254,6 +283,8 @@ export async function payAndCloseDiningOrder(params: {
     };
   }
 
+  const force =
+    Boolean(params.forceCloseIfKitchenPending) && diningOrderHasPendingKitchen(params.order);
   const { order, fullyPaid, cajaRegistration } = await payDiningOrderRequest(
     params.userId,
     params.order._id,
@@ -262,11 +293,13 @@ export async function payAndCloseDiningOrder(params: {
       salesPointId: params.salesPointId,
       salesPointName: params.salesPointName,
       registerInCaja: params.registerInCaja,
+      closeAfterPay: true,
+      forceClose: force,
+      forceCloseReason: force ? 'Cobrado con cocina pendiente' : '',
     },
   );
-  if (fullyPaid) {
-    const force =
-      Boolean(params.forceCloseIfKitchenPending) && diningOrderHasPendingKitchen(params.order);
+  // Compat: APIs antiguas sin closeAfterPay → cerrar en segunda llamada.
+  if (fullyPaid && order.status !== 'closed') {
     const closed = await closeDiningOrderRequest(
       params.userId,
       params.order._id,
@@ -275,7 +308,7 @@ export async function payAndCloseDiningOrder(params: {
     );
     return { order: closed, fullyPaid: true, cajaRegistration };
   }
-  return { order, fullyPaid: false, cajaRegistration };
+  return { order, fullyPaid, cajaRegistration };
 }
 
 export function diningOrderPaidAmount(order: DiningOrder): number {
@@ -304,6 +337,8 @@ export type DiningAccountLineView = {
   unitPrice: number;
   lineTotal: number;
   notes: string;
+  /** Estado de la comanda (p. ej. draft = sin enviar a cocina). */
+  comandaStatus?: string;
 };
 
 export type DiningCajaPayLine = {
@@ -336,6 +371,7 @@ export function flattenDiningAccountLines(order: DiningOrder): DiningAccountLine
         unitPrice,
         lineTotal: unitPrice * quantity,
         notes: String(item.notes || '').trim(),
+        comandaStatus: String(comanda.status || ''),
       });
     }
   }

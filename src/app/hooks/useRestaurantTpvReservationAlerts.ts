@@ -4,6 +4,7 @@ import { reservationAlertKind } from '../lib/restaurantFloorReservations';
 import {
   AUTOMATION_STORAGE_KEY,
   DEFAULT_AUTOMATION,
+  formatReservationSeatPlace,
   type RestaurantReservation,
 } from '../lib/restaurantReservationTypes';
 
@@ -51,7 +52,7 @@ function fireAlerts(
     shown.add(alertId);
 
     const time = reservation.time?.slice(0, 5) || '';
-    const mesa = reservation.tableNumber ? `Mesa ${reservation.tableNumber}` : 'Sin mesa asignada';
+    const mesa = formatReservationSeatPlace(reservation);
     const guest = reservation.guestName || 'Cliente';
     const party = reservation.partySize || '2';
 
@@ -60,7 +61,7 @@ function fireAlerts(
         description: `${time} · ${mesa} · ${party} pers.`,
         action: onSeat
           ? {
-              label: 'Sentar',
+              label: mesa === 'Sin mesa' ? 'Sentar' : `Sentar · ${mesa}`,
               onClick: () => onSeat(reservation),
             }
           : undefined,

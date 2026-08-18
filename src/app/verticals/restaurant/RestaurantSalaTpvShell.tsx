@@ -35,7 +35,6 @@ import {
   TPV_OPEN_STOCK_REVIEW_EVENT,
 } from '../../lib/tpvStockReview';
 
-const SALA_PATH = '/saas/sala';
 const RESTAURANT_OPS_PATH = '/saas/restaurant-ops';
 
 type Props = {
@@ -116,6 +115,19 @@ export function RestaurantSalaTpvShell({ tabletMode = false }: Props) {
     if (!isBrowserOnline()) return;
     void flushTpvOfflineQueue();
   }, []);
+
+  // Evitar que Atrás del navegador te tire al SaaS CEO (ops/dashboard) sin querer.
+  useEffect(() => {
+    if (tabletMode) return;
+    window.history.pushState({ restaurantCeoTpv: true }, '');
+    const onPopState = () => {
+      window.history.pushState({ restaurantCeoTpv: true }, '');
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => {
+      window.removeEventListener('popstate', onPopState);
+    };
+  }, [tabletMode]);
 
   const pdvPool = useMemo(() => {
     const fromScope = pointsOfSale.filter((p) => p.active !== false);
@@ -430,7 +442,7 @@ export function RestaurantSalaTpvShell({ tabletMode = false }: Props) {
         loading={effectiveStoresLoading}
         restaurantMode
         onSelect={handleSelectStore}
-        onBack={() => navigate(SALA_PATH, { replace: true })}
+        onBack={() => navigate(RESTAURANT_OPS_PATH, { replace: true })}
       />
     );
   }

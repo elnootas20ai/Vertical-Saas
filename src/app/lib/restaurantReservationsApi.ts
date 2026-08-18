@@ -9,6 +9,7 @@ import {
   ACTIVE_STATUSES,
   parseHistory,
   reservationDateTime,
+  reservationTableIds,
   serializeHistory,
   timesOverlap,
   type ReservationFormData,
@@ -17,6 +18,7 @@ import {
   type ReservationStatus,
 } from './restaurantReservationTypes';
 import { ensureReservationCrmClient } from './restaurantReservationClientSync';
+import { diningTableDisplayName } from './restaurantTableSelectUi';
 
 const api = createVerticalApi<RestaurantReservation>('restaurant', 'reservations');
 
@@ -45,6 +47,34 @@ function isTableOccupied(table: DiningTable): boolean {
   return !['available', 'reserved'].includes(table.status);
 }
 
+function resolveTablesSelection(
+  tables: DiningTable[],
+  ids: string[],
+): { tableId: string; tableName: string; tableNumber: string; tableIds: string[] } {
+  const unique = [...new Set(ids.map((id) => String(id || '').trim()).filter(Boolean))];
+  const selected = unique
+    .map((id) => tables.find((t) => t._id === id))
+    .filter((t): t is DiningTable => Boolean(t));
+  if (selected.length === 0) {
+    return { tableId: '', tableName: '', tableNumber: '', tableIds: [] };
+  }
+  return {
+    tableId: selected[0]._id,
+    tableName: selected.map((t) => diningTableDisplayName(t)).join(' + '),
+    tableNumber: selected.map((t) => String(t.number)).join('+'),
+    tableIds: selected.map((t) => t._id),
+  };
+}
+
+function reservationUsesTable(
+  reservation: Pick<RestaurantReservation, 'tableId' | 'tableIds'>,
+  tableId: string,
+): boolean {
+  const tid = String(tableId || '').trim();
+  if (!tid) return false;
+  return reservationTableIds(reservation).includes(tid);
+}
+
 export function findCompatibleTable(
   tables: DiningTable[],
   reservations: RestaurantReservation[],
@@ -63,7 +93,7 @@ export function findCompatibleTable(
         if (r._id === excludeReservationId) return false;
         if (!ACTIVE_STATUSES.includes(r.status as ReservationStatus) && r.status !== 'confirmed') return false;
         if (r.status === 'cancelled' || r.status === 'finished' || r.status === 'no_show' || r.status === 'seated') return false;
-        if (r.tableId !== t._id) return false;
+        if (!reservationUsesTable(r, t._id)) return false;
         return timesOverlap(r.date, r.time, date, time);
       });
       return !overlaps;
@@ -94,7 +124,7 @@ export function validateReservationTable(
 
   const overlap = reservations.find((r) => {
     if (r._id === excludeReservationId) return false;
-    if (r.tableId !== tableId) return false;
+    if (!reservationUsesTable(r, tableId)) return false;
     if (['cancelled', 'finished', 'no_show', 'seated'].includes(r.status)) return false;
     return timesOverlap(r.date, r.time, date, time);
   });
@@ -122,6 +152,17 @@ async function syncTableReserved(
   }
 }
 
+async function syncTablesReserved(
+  userId: string,
+  tableIds: string[],
+  guestName: string,
+  reserved: boolean,
+) {
+  for (const id of tableIds) {
+    await syncTableReserved(userId, id, guestName, reserved);
+  }
+}
+
 export async function createReservation(
   userId: string,
   form: ReservationFormData,
@@ -130,22 +171,20 @@ export async function createReservation(
   existing: RestaurantReservation[],
   clientScope: ReservationClientScope = {},
 ): Promise<{ item: RestaurantReservation; tableAssigned: boolean; clientLinked: boolean }> {
-  let tableId = form.tableId;
-  let tableName = form.tableName;
-  let tableNumber = form.tableNumber;
+  let selection = resolveTablesSelection(tables, reservationTableIds(form));
   let tableAssigned = false;
 
   const partySize = parseInt(form.partySize, 10) || 2;
 
-  if (tableId) {
-    const err = validateReservationTable(tables, existing, tableId, form.date, form.time);
-    if (err) throw new Error(err);
+  if (selection.tableIds.length > 0) {
+    for (const id of selection.tableIds) {
+      const err = validateReservationTable(tables, existing, id, form.date, form.time);
+      if (err) throw new Error(err);
+    }
   } else {
     const auto = findCompatibleTable(tables, existing, partySize, form.date, form.time, form.preferredZone);
     if (auto) {
-      tableId = auto._id;
-      tableName = auto.name;
-      tableNumber = String(auto.number);
+      selection = resolveTablesSelection(tables, [auto._id]);
       tableAssigned = true;
     }
   }
@@ -156,7 +195,11 @@ export async function createReservation(
       userId: actor.userId,
       userName: actor.userName,
       at: new Date().toISOString(),
-      details: tableAssigned ? `Mesa ${tableNumber} asignada automáticamente` : undefined,
+      details: tableAssigned
+        ? `${selection.tableName || `Mesa ${selection.tableNumber}`} asignada automáticamente`
+        : selection.tableIds.length > 1
+          ? `Mesas: ${selection.tableName}`
+          : undefined,
     },
   ]);
 
@@ -174,15 +217,16 @@ export async function createReservation(
   const item = await api.create(userId, {
     ...form,
     clientId,
-    tableId,
-    tableName,
-    tableNumber,
+    tableId: selection.tableId,
+    tableName: selection.tableName,
+    tableNumber: selection.tableNumber,
+    tableIds: selection.tableIds,
     history,
     orderId: '',
   });
 
-  if (tableId && ACTIVE_STATUSES.includes(form.status as ReservationStatus)) {
-    await syncTableReserved(userId, tableId, form.guestName, true);
+  if (selection.tableIds.length && ACTIVE_STATUSES.includes(form.status as ReservationStatus)) {
+    await syncTablesReserved(userId, selection.tableIds, form.guestName, true);
   }
 
   return { item, tableAssigned, clientLinked: Boolean(clientId) };
@@ -197,15 +241,20 @@ export async function updateReservation(
   allReservations: RestaurantReservation[],
   clientScope: ReservationClientScope = {},
 ): Promise<RestaurantReservation> {
-  const nextTableId = form.tableId !== undefined ? form.tableId : reservation.tableId;
+  const mergedForIds = { ...reservation, ...form };
+  const nextIds =
+    form.tableIds !== undefined || form.tableId !== undefined
+      ? reservationTableIds(mergedForIds)
+      : reservationTableIds(reservation);
   const nextDate = form.date ?? reservation.date;
   const nextTime = form.time ?? reservation.time;
+  const selection = resolveTablesSelection(tables, nextIds);
 
-  if (nextTableId) {
+  for (const id of selection.tableIds) {
     const err = validateReservationTable(
       tables,
       allReservations,
-      nextTableId,
+      id,
       nextDate,
       nextTime,
       reservation._id,
@@ -213,12 +262,15 @@ export async function updateReservation(
     if (err) throw new Error(err);
   }
 
-  const oldTableId = reservation.tableId;
+  const oldIds = reservationTableIds(reservation);
   const history = appendHistory(reservation, {
     action: 'Edición',
     userId: actor.userId,
     userName: actor.userName,
-    details: form.tableId && form.tableId !== oldTableId ? 'Cambio de mesa' : undefined,
+    details:
+      selection.tableId && selection.tableId !== reservation.tableId
+        ? `Cambio de mesa → ${selection.tableName}`
+        : undefined,
   });
 
   const mergedForm = { ...reservation, ...form };
@@ -233,13 +285,27 @@ export async function updateReservation(
     actorName: actor.userName,
   }).catch(() => reservation.clientId || '');
 
-  const item = await api.update(userId, reservation._id, { ...form, clientId, history });
+  const item = await api.update(userId, reservation._id, {
+    ...form,
+    clientId,
+    history,
+    ...(form.tableIds !== undefined || form.tableId !== undefined
+      ? {
+          tableId: selection.tableId,
+          tableName: selection.tableName,
+          tableNumber: selection.tableNumber,
+          tableIds: selection.tableIds,
+        }
+      : {}),
+  });
 
-  if (oldTableId && oldTableId !== nextTableId) {
-    await syncTableReserved(userId, oldTableId, reservation.guestName, false);
+  const nextSet = new Set(selection.tableIds);
+  const oldSet = new Set(oldIds);
+  for (const id of oldIds) {
+    if (!nextSet.has(id)) await syncTableReserved(userId, id, reservation.guestName, false);
   }
-  if (nextTableId && nextTableId !== oldTableId) {
-    await syncTableReserved(userId, nextTableId, item.guestName, true);
+  for (const id of selection.tableIds) {
+    if (!oldSet.has(id)) await syncTableReserved(userId, id, item.guestName, true);
   }
 
   return item;
@@ -256,8 +322,9 @@ export async function confirmReservation(
     userName: actor.userName,
   });
   const item = await api.update(userId, reservation._id, { status: 'confirmed', history });
-  if (item.tableId) {
-    await syncTableReserved(userId, item.tableId, item.guestName, true);
+  const ids = reservationTableIds(item);
+  if (ids.length) {
+    await syncTablesReserved(userId, ids, item.guestName, true);
   }
   return item;
 }
@@ -272,9 +339,10 @@ export async function cancelReservation(
     userId: actor.userId,
     userName: actor.userName,
   });
+  const ids = reservationTableIds(reservation);
   const item = await api.update(userId, reservation._id, { status: 'cancelled', history });
-  if (item.tableId) {
-    await syncTableReserved(userId, item.tableId, item.guestName, false);
+  if (ids.length) {
+    await syncTablesReserved(userId, ids, item.guestName, false);
   }
   return item;
 }
@@ -290,7 +358,7 @@ export async function cancelActiveReservationsForTable(
   const all = await listReservations(userId);
   const active = all.filter(
     (r) =>
-      String(r.tableId || '').trim() === tid
+      reservationUsesTable(r, tid)
       && !['cancelled', 'finished', 'no_show', 'seated'].includes(String(r.status || '')),
   );
   for (const r of active) {
@@ -319,8 +387,13 @@ export async function deleteReservation(
   userId: string,
   reservation: RestaurantReservation,
 ): Promise<void> {
-  if (reservation.tableId && reservation.status !== 'seated') {
-    await syncTableReserved(userId, reservation.tableId, reservation.guestName, false);
+  if (reservation.status !== 'seated') {
+    await syncTablesReserved(
+      userId,
+      reservationTableIds(reservation),
+      reservation.guestName,
+      false,
+    );
   }
   await api.remove(userId, reservation._id);
 }
@@ -347,6 +420,7 @@ export async function duplicateReservation(
       tableId: '',
       tableName: '',
       tableNumber: '',
+      tableIds: [],
       notes: reservation.notes,
       status: 'pending',
     },
@@ -366,35 +440,58 @@ export async function assignTable(
   tables: DiningTable[],
   allReservations: RestaurantReservation[],
 ): Promise<RestaurantReservation> {
-  const err = validateReservationTable(
-    tables,
-    allReservations,
-    table._id,
-    reservation.date,
-    reservation.time,
-    reservation._id,
-  );
-  if (err) throw new Error(err);
+  return assignTables(userId, reservation, [table._id], actor, tables, allReservations);
+}
 
-  const oldTableId = reservation.tableId;
+/** Asigna una o varias mesas que cubren el aforo. */
+export async function assignTables(
+  userId: string,
+  reservation: RestaurantReservation,
+  tableIds: string[],
+  actor: { userId: string; userName: string },
+  tables: DiningTable[],
+  allReservations: RestaurantReservation[],
+): Promise<RestaurantReservation> {
+  const selection = resolveTablesSelection(tables, tableIds);
+  if (selection.tableIds.length === 0) {
+    throw new Error('Elige al menos una mesa');
+  }
+  for (const id of selection.tableIds) {
+    const err = validateReservationTable(
+      tables,
+      allReservations,
+      id,
+      reservation.date,
+      reservation.time,
+      reservation._id,
+    );
+    if (err) throw new Error(err);
+  }
+
+  const oldIds = reservationTableIds(reservation);
   const history = appendHistory(reservation, {
     action: 'Asignación de mesa',
     userId: actor.userId,
     userName: actor.userName,
-    details: `Mesa ${table.number}`,
+    details: selection.tableName,
   });
 
   const item = await api.update(userId, reservation._id, {
-    tableId: table._id,
-    tableName: table.name,
-    tableNumber: String(table.number),
+    tableId: selection.tableId,
+    tableName: selection.tableName,
+    tableNumber: selection.tableNumber,
+    tableIds: selection.tableIds,
     history,
   });
 
-  if (oldTableId && oldTableId !== table._id) {
-    await syncTableReserved(userId, oldTableId, reservation.guestName, false);
+  const nextSet = new Set(selection.tableIds);
+  const oldSet = new Set(oldIds);
+  for (const id of oldIds) {
+    if (!nextSet.has(id)) await syncTableReserved(userId, id, reservation.guestName, false);
   }
-  await syncTableReserved(userId, table._id, item.guestName, true);
+  for (const id of selection.tableIds) {
+    if (!oldSet.has(id)) await syncTableReserved(userId, id, item.guestName, true);
+  }
   return item;
 }
 
@@ -410,18 +507,29 @@ export async function seatGuest(
   actor: { userId: string; userName: string },
   businessId: string,
 ): Promise<SeatGuestResult> {
-  if (!reservation.tableId) {
+  const seatIds = reservationTableIds(reservation);
+  const primaryId = String(reservation.tableId || seatIds[0] || '').trim();
+  if (!primaryId) {
     throw new Error('Asigna una mesa antes de sentar al cliente');
   }
 
   const tables = await listDiningTablesRequest(userId);
-  const table = tables.find((t) => t._id === reservation.tableId);
+  const table = tables.find((t) => t._id === primaryId);
   if (!table) throw new Error('Mesa no encontrada');
   if (isTableOccupied(table) && table.status !== 'reserved') {
     throw new Error('La mesa está ocupada');
   }
 
   const partySize = parseInt(reservation.partySize, 10) || 2;
+  const placeLabel =
+    String(reservation.tableName || '').trim()
+    || (seatIds.length > 1
+      ? seatIds
+          .map((id) => tables.find((t) => t._id === id))
+          .filter((t): t is DiningTable => Boolean(t))
+          .map((t) => diningTableDisplayName(t))
+          .join(' + ')
+      : diningTableDisplayName(table));
 
   const order = await createDiningOrderRequest(userId, {
     tableId: table._id,
@@ -436,25 +544,31 @@ export async function seatGuest(
     notes: reservation.notes,
   });
 
-  await changeTableStatusRequest(userId, table._id, 'occupied', {
-    currentGuests: partySize,
-    occupiedBy: reservation.guestName,
-  });
+  // Ocupar todas las mesas/taburetes de la reserva (aforo repartido).
+  for (const id of seatIds.length ? seatIds : [primaryId]) {
+    const guestsOnTable = id === primaryId ? partySize : 0;
+    await changeTableStatusRequest(userId, id, 'occupied', {
+      currentGuests: guestsOnTable,
+      occupiedBy: reservation.guestName,
+    }).catch(() => undefined);
+  }
 
   const history = appendHistory(reservation, {
     action: 'Cliente sentado',
     userId: actor.userId,
     userName: actor.userName,
-    details: `Mesa ${table.number} · TPV abierto`,
+    details: `${placeLabel} · TPV abierto`,
   });
 
   const updated = await api.update(userId, reservation._id, {
     status: 'seated',
     history,
     orderId: order._id,
+    tableId: primaryId,
+    tableName: placeLabel,
   });
 
-  return { reservation: updated, orderId: order._id, tableId: table._id };
+  return { reservation: updated, orderId: order._id, tableId: primaryId };
 }
 
 export function getUpcomingReservationsForTable(
@@ -464,7 +578,7 @@ export function getUpcomingReservationsForTable(
 ): RestaurantReservation[] {
   const today = date || new Date().toISOString().slice(0, 10);
   return reservations
-    .filter((r) => r.tableId === tableId)
+    .filter((r) => reservationUsesTable(r, tableId))
     .filter((r) => ACTIVE_STATUSES.includes(r.status as ReservationStatus) || r.status === 'confirmed')
     .filter((r) => r.date >= today)
     .sort((a, b) => {

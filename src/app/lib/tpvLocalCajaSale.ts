@@ -28,8 +28,9 @@ export function sessionSaleAmountForOrder(
     .filter((t) => {
       if (t?.type !== 'sale') return false;
       const tid = String(t.orderId || '').trim();
-      const linked = String(t.linkedDeliveryOrderId || '').trim();
-      return tid === oid || linked === oid;
+      const linkedDelivery = String(t.linkedDeliveryOrderId || '').trim();
+      const linkedDining = String(t.linkedDiningOrderId || '').trim();
+      return tid === oid || linkedDelivery === oid || linkedDining === oid;
     })
     .reduce((sum, t) => sum + Number(t.amount || 0), 0);
 }
@@ -59,8 +60,9 @@ export function sessionHasIdenticalSaleForOrder(
   return (session.transactions || []).some((t) => {
     if (t?.type !== 'sale') return false;
     const tid = String(t.orderId || '').trim();
-    const linked = String(t.linkedDeliveryOrderId || '').trim();
-    if (tid !== oid && linked !== oid) return false;
+    const linkedDelivery = String(t.linkedDeliveryOrderId || '').trim();
+    const linkedDining = String(t.linkedDiningOrderId || '').trim();
+    if (tid !== oid && linkedDelivery !== oid && linkedDining !== oid) return false;
     if (normalizeTpvPaymentMethod(t.paymentMethod) !== pm) return false;
     return Math.abs(Math.round(Number(t.amount || 0) * 100) / 100 - amt) < 0.015;
   });
@@ -153,6 +155,73 @@ export async function ensureLocalCajaSaleForOrder(
   }
 }
 
+/**
+ * Airbag caja para cuentas de mesa (dining_order). Canal `sala`, sin delivery_order.
+ */
+export async function ensureLocalCajaSaleForDiningOrder(
+  register: RegisterLike,
+  order: {
+    _id: string;
+    tableNumber?: number;
+    tableName?: string;
+  },
+  opts: {
+    paymentMethod?: string | null;
+    amount: number;
+    tip?: number;
+    registeredBy?: string;
+    description?: string;
+    diningPaymentId?: string;
+    allowMultiple?: boolean;
+  },
+): Promise<boolean> {
+  if (!register?.session || !register.addTransaction) return false;
+  const orderId = String(order._id || '').trim();
+  if (!orderId) return false;
+  const target = Math.round(Number(opts.amount || 0) * 100) / 100;
+  if (!(target > 0)) return false;
+  if (
+    !opts.allowMultiple
+    && sessionHasIdenticalSaleForOrder(
+      register.session,
+      orderId,
+      opts.paymentMethod || 'efectivo',
+      target,
+    )
+  ) {
+    return true;
+  }
+  const already = sessionSaleAmountForOrder(register.session, orderId);
+  const amount = opts.allowMultiple
+    ? target
+    : Math.round((target - already) * 100) / 100;
+  if (!(amount > 0.001)) return true;
+  const tableLabel = order.tableName
+    || (order.tableNumber != null ? `Mesa ${order.tableNumber}` : 'Sala');
+  try {
+    const tip = Math.max(0, Math.round(Number(opts.tip || 0) * 100) / 100);
+    const body: Omit<TpvRegisterTransaction, 'id' | 'date'> = {
+      type: 'sale',
+      paymentMethod: normalizeTpvPaymentMethod(opts.paymentMethod || 'efectivo') as TpvPaymentMethod,
+      amount,
+      tip: tip > 0 ? tip : undefined,
+      description: opts.description || `Sala · ${tableLabel}`,
+      orderId,
+      orderNumber: `MESA-${order.tableNumber ?? '?'}`,
+      linkedDiningOrderId: orderId,
+      linkedDeliveryOrderId: '',
+      channel: 'sala',
+      registeredBy: opts.registeredBy || 'TPV',
+      ...(opts.diningPaymentId ? { diningPaymentId: opts.diningPaymentId } : {}),
+    };
+    if (opts.allowMultiple) allowMultipleSaleTxs.add(body);
+    await register.addTransaction(body);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Merge txs servidor + local sin duplicar ventas del mismo pedido ni resucitar purgadas. */
 export function mergeTpvRegisterTransactions(
   serverTxs: TpvRegisterTransaction[] | undefined,
@@ -172,7 +241,7 @@ export function mergeTpvRegisterTransactions(
     if (t?.type !== 'sale') return false;
     const id = String(t.id || '').trim();
     if (id && purgedTx.has(id)) return true;
-    const oid = String(t.orderId || t.linkedDeliveryOrderId || '').trim();
+    const oid = String(t.orderId || t.linkedDeliveryOrderId || t.linkedDiningOrderId || '').trim();
     return Boolean(oid && purgedOrders.has(oid));
   };
   const byId = new Map<string, TpvRegisterTransaction>();
@@ -186,11 +255,11 @@ export function mergeTpvRegisterTransactions(
     if (byId.has(id)) continue;
     if (isPurgedSale(t)) continue;
     if (t.type === 'sale') {
-      const oid = String(t.orderId || t.linkedDeliveryOrderId || '').trim();
+      const oid = String(t.orderId || t.linkedDeliveryOrderId || t.linkedDiningOrderId || '').trim();
       const onum = String(t.orderNumber || '').trim();
       const dup = [...byId.values()].some((s) => {
         if (s.type !== 'sale') return false;
-        const sid = String(s.orderId || s.linkedDeliveryOrderId || '').trim();
+        const sid = String(s.orderId || s.linkedDeliveryOrderId || s.linkedDiningOrderId || '').trim();
         const snum = String(s.orderNumber || '').trim();
         return (oid && sid && oid === sid) || (onum && snum && onum === snum);
       });

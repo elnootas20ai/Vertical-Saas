@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import type { SalaRoomType } from '../../lib/salaStudioTypes';
 import { SALA_ROOM_TYPE_LABELS } from '../../lib/salaStudioTypes';
+import { ClearableNumberInput } from './ClearableNumberInput';
 import {
   defaultCapacityForRoomType,
   defaultTableCountForRoomType,
@@ -14,7 +15,7 @@ const ZONE_HINTS: Record<SalaRoomType, string> = {
   salon: 'Comedor interior · mesas de 2–6',
   terraza: 'Exterior · mesas estándar',
   patio: 'Patio / jardín',
-  barra: 'Taburetes · servicio rápido (1–2 pax)',
+  barra: 'Taburetes · 1 persona por plaza',
   vip: 'Zona VIP · mesas más grandes',
   privado: 'Sala privada / reservados',
 };
@@ -109,29 +110,29 @@ export function RestaurantAddZoneModal({ open, onClose, busy, onCreate }: Props)
         <div className="mb-5 grid grid-cols-2 gap-3">
           <div>
             <label className="mb-1.5 block text-sm font-medium text-neutral-700">
-              Mesas al crear
+              {roomType === 'barra' ? 'Taburetes al crear' : 'Mesas al crear'}
             </label>
-            <input
-              type="number"
+            <ClearableNumberInput
               min={0}
               max={40}
               value={tableCount}
               disabled={busy}
-              onChange={(e) => setTableCount(Number(e.target.value))}
+              aria-label={roomType === 'barra' ? 'Taburetes al crear' : 'Mesas al crear'}
+              onCommit={setTableCount}
               className="w-full rounded-[10px] border border-neutral-200 px-3 py-2.5 text-sm outline-none focus:border-neutral-400"
             />
           </div>
           <div>
             <label className="mb-1.5 block text-sm font-medium text-neutral-700">
-              Pax por mesa
+              {roomType === 'barra' ? 'Pax por taburete' : 'Pax por mesa'}
             </label>
-            <input
-              type="number"
+            <ClearableNumberInput
               min={1}
               max={20}
               value={capacity}
               disabled={busy}
-              onChange={(e) => setCapacity(Number(e.target.value))}
+              aria-label={roomType === 'barra' ? 'Pax por taburete' : 'Pax por mesa'}
+              onCommit={setCapacity}
               className="w-full rounded-[10px] border border-neutral-200 px-3 py-2.5 text-sm outline-none focus:border-neutral-400"
             />
           </div>

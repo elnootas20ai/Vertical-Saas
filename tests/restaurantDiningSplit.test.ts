@@ -242,4 +242,30 @@ describe('flattenDiningAccountLines', () => {
       ],
     }))).toBe(false);
   });
+
+  it('detecta comandas en borrador (sin enviar a cocina)', async () => {
+    const { diningOrderHasDraftComandas, listDraftComandaIds } = await import('../src/app/lib/restaurantDiningTpv');
+    const draft = makeOrder({
+      comandas: [
+        {
+          id: 'c-draft',
+          orderNumber: 1,
+          status: 'draft',
+          sentToKitchenAt: '',
+          readyAt: '',
+          servedAt: '',
+          createdBy: 'u1',
+          createdByName: 'Ana',
+          createdAt: '',
+          notes: '',
+          items: [
+            { id: 'i1', productId: 'p1', name: 'Bravas', price: 5, quantity: 1, category: '', notes: '', modifiers: [], status: 'pending', cancelledReason: '', cancelledBy: '' },
+          ],
+        },
+      ],
+    });
+    expect(diningOrderHasDraftComandas(draft)).toBe(true);
+    expect(listDraftComandaIds(draft)).toEqual(['c-draft']);
+    expect(diningOrderHasDraftComandas(makeOrder())).toBe(false);
+  });
 });

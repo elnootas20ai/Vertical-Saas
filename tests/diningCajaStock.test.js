@@ -26,6 +26,23 @@ describe('dining services isolation', () => {
     expect(src).toMatch(/maybeDeductRecipeStockForDiningOrder/);
     expect(src).toMatch(/ensureDiningOrderIncomeServer/);
     expect(src).toMatch(/syncClientAfterDiningOrder/);
+    expect(src).toMatch(/setImmediate/);
+    expect(src).toMatch(/closeAfterPay/);
+  });
+
+  it('diningCajaService lista cajas en modo opsLite', () => {
+    const src = readFileSync(join(process.cwd(), 'services/diningCajaService.js'), 'utf8');
+    expect(src).toMatch(/opsLite:\s*true/);
+  });
+
+  it('TPV mesa sincroniza sesión de caja y tiene airbag local', () => {
+    const salaApi = readFileSync(join(process.cwd(), 'src/app/lib/salaApi.ts'), 'utf8');
+    expect(salaApi).toMatch(/TPV_SESSION_SYNC_EVENT/);
+    const local = readFileSync(join(process.cwd(), 'src/app/lib/tpvLocalCajaSale.ts'), 'utf8');
+    expect(local).toMatch(/ensureLocalCajaSaleForDiningOrder/);
+    expect(local).toMatch(/linkedDiningOrderId/);
+    const tpv = readFileSync(join(process.cwd(), 'src/app/pages/saas/TpvRapidoPage.tsx'), 'utf8');
+    expect(tpv).toMatch(/ensureLocalCajaSaleForDiningOrder/);
   });
 
   it('sala expone staff-alert y tablet nav de sala no usa Delivery', () => {

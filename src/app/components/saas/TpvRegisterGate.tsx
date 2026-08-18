@@ -147,6 +147,8 @@ import { ClockedInWorkerBubbles } from './ClockedInWorkerBubbles';
 import { useTpvOrderFlowActive, useTpvSuppressBottomBar } from '../../context/TpvChromeContext';
 import { TpvCashOpsModal } from './TpvCashOpsModal';
 import { TpvCashMovementVoidModal } from './TpvCashMovementVoidModal';
+import { CajaCashMovementsList } from './caja/CajaCashMovementsList';
+import { RegisterClosingDetailPanel } from './RegisterClosingDetailPanel';
 import type { TpvPrinterScope } from './TpvPrinterSetupPanel';
 import { isVertialNativeApp } from '../../lib/vertialPrint/isNativeApp';
 import { readNativePrinterDiagnosticsSync, readPrinterVerifiedHost } from '../../lib/vertialPrint/nativePrinterDiagnostics';
@@ -178,7 +180,6 @@ import {
   MapPin, Store, Plus, LogIn, UserCheck, Loader2, RefreshCw, Coffee, Square,
   MoreVertical, Save, RotateCcw, Eye, ClipboardCheck,
 } from 'lucide-react';
-import { RegisterClosingDetailPanel } from './RegisterClosingDetailPanel';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
   VERTIAL_BTN_PRIMARY,
@@ -832,9 +833,13 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
       void leaveTpvTabletSession(logout, { navigate });
       return;
     }
+    // Bar/restaurante: no history.back() (suele devolver al dashboard/ops al instante).
+    if (isRestaurantBusinessType(currentBusiness?.businessType)) {
+      navigate('/saas/restaurant-ops', { replace: true });
+      return;
+    }
     try {
       if (window.history.length > 1) window.history.back();
-      else if (isRestaurantBusinessType(currentBusiness?.businessType)) navigate('/saas/sala');
       else navigate('/saas/delivery-ops');
     } catch {
       // ignore
@@ -2592,7 +2597,6 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 const voided = (session.voidedCashMovements || []).slice().sort(
                   (a, b) => new Date(a.voidedAt).getTime() - new Date(b.voidedAt).getTime(),
                 );
-                if (cashOps.length === 0 && voided.length === 0) return null;
                 const totalShown = cashOps.length + voided.length;
                 return (
                   <div className="shrink-0 rounded-2xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-950 overflow-hidden">
@@ -2615,6 +2619,11 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                       </span>
                     </button>
                     {cashMovesOpen ? (
+                      totalShown === 0 ? (
+                        <p className="border-t border-stone-100 px-3 py-2.5 text-xs text-stone-400 dark:border-stone-800">
+                          Sin entradas ni salidas en este turno
+                        </p>
+                      ) : (
                       <div className="space-y-1 border-t border-stone-100 px-3 py-2.5 dark:border-stone-800 max-h-44 overflow-y-auto">
                         {[...cashOps].reverse().map((tx) => (
                           <div
@@ -2643,6 +2652,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                           </div>
                         ))}
                       </div>
+                      )
                     ) : null}
                   </div>
                 );
@@ -6917,13 +6927,17 @@ export function TpvRegisterGate({
     setPostCloseAggregatorRows([]);
     setPostCloseShowDetail(false);
     setOpeningResume(null);
-    // CEO / gerente web: salir del TPV a la operativa SaaS.
+    // Bar/restaurante CEO: quedarse en el TPV para reabrir caja (no saltar a Sala/SaaS).
+    if (isRestaurantVertical) {
+      return;
+    }
+    // Delivery CEO / gerente web: salir del TPV a la operativa SaaS.
     if (!isWorkerUser) {
       navigate(opsHomePath, { replace: true });
       return;
     }
     // Trabajador web: se queda en apertura de caja (mismo gate), sin ir al SaaS CEO.
-  }, [isTabletSession, isWorkerUser, logout, navigate, opsHomePath]);
+  }, [isTabletSession, isRestaurantVertical, isWorkerUser, logout, navigate, opsHomePath]);
 
   const requestClockIn = useCallback(() => setShowClockIn(true), []);
 
@@ -7189,6 +7203,18 @@ export function TpvRegisterGate({
                     <span className="text-stone-500">Tarjeta</span>
                     <span className="font-bold tabular-nums">{formatMoneyEs(Number(restaurantSummary.salesByMethod?.tarjeta || 0))}</span>
                   </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-stone-500">Entradas</span>
+                    <span className="font-bold tabular-nums text-emerald-700 dark:text-emerald-300">
+                      +{formatMoneyEs(Number(restaurantSummary.totalCashIn || 0))}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-stone-500">Salidas</span>
+                    <span className="font-bold tabular-nums text-rose-700 dark:text-rose-300">
+                      −{formatMoneyEs(Number(restaurantSummary.totalCashOut || 0))}
+                    </span>
+                  </div>
                   <div className="flex justify-between text-sm border-t border-stone-200 dark:border-stone-700 pt-2">
                     <span className="text-stone-500">Contado / esperado</span>
                     <span className="font-bold tabular-nums">
@@ -7203,6 +7229,7 @@ export function TpvRegisterGate({
                       {excelClosed.diff >= 0 ? '+' : ''}{formatMoneyEs(excelClosed.diff)}
                     </span>
                   </div>
+                  <CajaCashMovementsList session={postCloseSession} title="Detalle entradas / salidas" />
                 </div>
               ) : null
             ) : (
@@ -7397,21 +7424,19 @@ export function TpvRegisterGate({
           minimal={compactRegisterChrome}
           quickActions={statusBarQuickActions}
         />
-        {!isRestaurantVerticalChrome && (
-          <RegisterCashOpsStrip
-            session={openBoardSession}
-            compact={compactRegisterChrome}
-            onRemove={(txId) => {
-              const tx = (openBoardSession.transactions || []).find((t) => t.id === txId);
-              if (!tx || !isTpvCashMovementTx(tx.type)) {
-                toast.error('Solo se pueden eliminar entradas, salidas o devoluciones');
-                return;
-              }
-              setVoidCashTx(tx);
-            }}
-            removingId={voidCashBusy && voidCashTx ? voidCashTx.id : null}
-          />
-        )}
+        <RegisterCashOpsStrip
+          session={openBoardSession}
+          compact={compactRegisterChrome}
+          onRemove={(txId) => {
+            const tx = (openBoardSession.transactions || []).find((t) => t.id === txId);
+            if (!tx || !isTpvCashMovementTx(tx.type)) {
+              toast.error('Solo se pueden eliminar entradas, salidas o devoluciones');
+              return;
+            }
+            setVoidCashTx(tx);
+          }}
+          removingId={voidCashBusy && voidCashTx ? voidCashTx.id : null}
+        />
         <div className="flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden relative">
           {!showClockInGateOverlay ? null : (
             <div className="absolute inset-0 z-30 flex items-center justify-center bg-gray-950/55 backdrop-blur-[2px] p-4">

@@ -31,6 +31,19 @@ describe('calcTpvExpectedCash', () => {
     };
     expect(calcTpvExpectedCash(session)).toBe(130);
   });
+
+  it('incluye propinas de venta mesa en efectivo esperado y totalTips', () => {
+    const session = {
+      initialCashAmount: 50,
+      transactions: [
+        { type: 'sale', paymentMethod: 'efectivo', amount: 20, tip: 3, channel: 'sala' },
+        { type: 'sale', paymentMethod: 'tarjeta', amount: 10, tip: 2, channel: 'sala' },
+      ],
+    };
+    expect(calcTpvExpectedCash(session)).toBe(73); // 50 + 20 + tip efectivo 3
+    expect(buildTpvRegisterSummary(session).totalTips).toBe(5);
+    expect(buildTpvRegisterSummary(session).salesByChannel.sala).toBe(30);
+  });
 });
 
 describe('calcTpvShiftCollectionsTotal', () => {
