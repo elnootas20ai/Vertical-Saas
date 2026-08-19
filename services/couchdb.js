@@ -11663,12 +11663,32 @@ export async function listPurchaseInvoicesByUser(req, userId) {
     .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
 }
 
-export async function findDuplicatePurchaseInvoice(req, userId, invoiceNumber, supplierId, total) {
-  if (!invoiceNumber) return null;
+/** Normaliza nº de factura/albarán para detectar duplicados (código). */
+export function normalizePurchaseInvoiceNumber(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[\s.\-_/#]+/g, '');
+}
+
+/**
+ * Busca factura/albarán ya metido por código.
+ * Criterio principal: mismo nº de factura (normalizado). Si ambos tienen proveedor, debe coincidir.
+ */
+export async function findDuplicatePurchaseInvoice(req, userId, invoiceNumber, supplierId, total, options = {}) {
+  const normalized = normalizePurchaseInvoiceNumber(invoiceNumber);
+  if (!normalized) return null;
+  const excludeId = String(options.excludeId || '').trim();
   const invoices = await listPurchaseInvoicesByUser(req, userId);
   return invoices.find((inv) => {
-    if (inv.invoiceNumber !== invoiceNumber) return false;
-    if (supplierId && inv.supplierId && inv.supplierId !== supplierId) return false;
+    if (excludeId && inv._id === excludeId) return false;
+    const invNum = normalizePurchaseInvoiceNumber(inv.invoiceNumber);
+    if (!invNum || invNum !== normalized) return false;
+    const wantSupplier = String(supplierId || '').trim();
+    const haveSupplier = String(inv.supplierId || '').trim();
+    if (wantSupplier && haveSupplier && wantSupplier !== haveSupplier) return false;
     if (total != null && inv.total != null) {
       const diff = Math.abs(Number(inv.total) - Number(total));
       if (diff > 0.01) return false;
