@@ -32,7 +32,8 @@ import {
   type DiningTableStatus,
 } from '../../lib/salaApi';
 import { isStrictDeliveryBusinessType } from '../../lib/deliveryOpsTypes';
-import { ensureOpenDiningOrder, diningOrderDueAmount, countDiningOrderItems } from '../../lib/restaurantDiningTpv';
+import { diningOrderDueAmount, countDiningOrderItems, ensureOpenDiningOrder } from '../../lib/restaurantDiningTpv';
+import { openOrdersByTableId, resolveTpvFloorVisualStatus } from '../../lib/restaurantTableDisplay';
 import { cancelActiveReservationsForTable } from '../../lib/restaurantReservationsApi';
 import { tableStatusOnOpen } from '../../lib/restaurantTableStatus';
 import { DELIVERY_CEO_TPV_PATH, RESTAURANT_CEO_TPV_PATH } from '../../lib/retailOpsPaths';
@@ -372,9 +373,30 @@ export function RestaurantSalaLiveView({
   const [showAddZone, setShowAddZone] = useState(false);
   const [showAddTables, setShowAddTables] = useState(false);
   const [busyId, setBusyId] = useState('');
+  const [floorOrders, setFloorOrders] = useState<DiningOrder[]>([]);
+
+  const reloadFloorOrders = useCallback(() => {
+    if (!userId) return;
+    const from = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
+    void listDiningOrdersRequest(userId, { dateFrom: from })
+      .then(setFloorOrders)
+      .catch(() => setFloorOrders([]));
+  }, [userId]);
+
+  useEffect(() => {
+    reloadFloorOrders();
+  }, [reloadFloorOrders]);
+
+  const openByTable = useMemo(() => openOrdersByTableId(floorOrders), [floorOrders]);
+  const visualOf = useCallback(
+    (table: DiningTable) =>
+      resolveTpvFloorVisualStatus(table, openByTable.get(String(table._id || table.id || ''))),
+    [openByTable],
+  );
 
   const softReloadTables = useCallback(() => {
     if (!userId || editMode) return;
+    reloadFloorOrders();
     void listDiningTablesRequest(userId)
       .then((rows) => {
         const scoped = businessId
@@ -386,7 +408,7 @@ export function RestaurantSalaLiveView({
         onTablesChange(scoped);
       })
       .catch(() => undefined);
-  }, [userId, businessId, editMode, onTablesChange]);
+  }, [userId, businessId, editMode, onTablesChange, reloadFloorOrders]);
 
   const salaSseHandlers = useMemo(
     () => ({
@@ -500,10 +522,9 @@ export function RestaurantSalaLiveView({
     sortedRooms.find((r) => r.id === activeRoomId) || sortedRooms[0] || null;
   const roomTables = activeRoom ? tablesForRoom(tables, activeRoom) : [];
   const visibleTables = tables.filter((t) => t.active !== false && t.status !== 'hidden');
-  const freeCount = visibleTables.filter((t) => t.status === 'available').length;
-  const toChargeCount = visibleTables.filter((t) => t.status === 'pending_payment').length;
-  const occupiedCount =
-    visibleTables.filter((t) => isOccupiedStatus(t.status)).length - toChargeCount;
+  const freeCount = visibleTables.filter((t) => visualOf(t) === 'available').length;
+  const toChargeCount = visibleTables.filter((t) => visualOf(t) === 'pending_payment').length;
+  const occupiedCount = visibleTables.filter((t) => isOccupiedStatus(visualOf(t))).length - toChargeCount;
   const reservedCount = visibleTables.filter((t) => t.status === 'reserved').length;
   const cleaningCount = visibleTables.filter((t) => t.status === 'unavailable').length;
 
@@ -938,14 +959,15 @@ export function RestaurantSalaLiveView({
             >
             <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
               {roomTables.map((table) => {
-                const ui = STATUS_UI[table.status] || STATUS_UI.available;
+                const visual = visualOf(table);
+                const ui = STATUS_UI[visual] || STATUS_UI.available;
                 const capacity = resolveTableCapacity(table);
                 const tableId = String(table._id || table.id || '');
                 const busy = busyId === tableId;
                 const selectedEdit =
                   editMode && editTable && String(editTable._id || editTable.id) === tableId;
                 const seatedMins = minutesSinceIso(table.occupiedAt);
-                const occupied = isOccupiedStatus(table.status);
+                const occupied = isOccupiedStatus(visual);
                 const longStay =
                   occupied && seatedMins != null && seatedMins >= LONG_STAY_MINUTES;
                 const guests = occupied ? Math.max(0, Number(table.currentGuests) || 0) : 0;

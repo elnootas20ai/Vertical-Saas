@@ -65,7 +65,9 @@ describe('buildRestaurantOpsSnapshot', () => {
       ],
       orders: [
         order({
+          tableId: 'b',
           status: 'open',
+          total: 10,
           comandas: [{
             id: 'c1',
             orderNumber: 1,
@@ -82,8 +84,22 @@ describe('buildRestaurantOpsSnapshot', () => {
         }),
         order({
           _id: 'o2',
+          tableId: 'c',
           status: 'pending_payment',
-          comandas: [],
+          total: 8,
+          comandas: [{
+            id: 'c2',
+            orderNumber: 2,
+            status: 'served',
+            sentToKitchenAt: '',
+            readyAt: '',
+            servedAt: '',
+            createdBy: '',
+            createdByName: '',
+            createdAt: '',
+            notes: '',
+            items: [{ id: 'i2', name: 'Cafe', quantity: 1, status: 'served', notes: '', modifiers: [], price: 8, productId: '', category: '', cancelledReason: '', cancelledBy: '' }],
+          }],
         }),
       ],
       sessions: [],
@@ -200,6 +216,20 @@ describe('buildRestaurantOpsSnapshot', () => {
           status: 'open',
           createdAt: '2026-07-31T12:20:00',
           guests: 2,
+          total: 12,
+          comandas: [{
+            id: 'c1',
+            orderNumber: 1,
+            status: 'open',
+            sentToKitchenAt: '',
+            readyAt: '',
+            servedAt: '',
+            createdBy: '',
+            createdByName: '',
+            createdAt: '',
+            notes: '',
+            items: [{ id: 'i1', name: 'Tapa', quantity: 1, status: 'pending', notes: '', modifiers: [], price: 12, productId: '', category: '', cancelledReason: '', cancelledBy: '' }],
+          }],
         }),
         order({
           _id: 'o-closed',
@@ -223,6 +253,37 @@ describe('buildRestaurantOpsSnapshot', () => {
     expect(closed?.minutes).toBe(60);
     expect(snap.avgClosedDwellMinutes).toBe(60);
     expect(formatDwellMinutes(75)).toBe('1h 15m');
+  });
+
+  it('no cuenta mesa ocupada sin pedido TPV (status colgado)', () => {
+    const snap = buildRestaurantOpsSnapshot({
+      dayKey: '2026-08-19',
+      businessId: 'biz',
+      nowMs: Date.parse('2026-08-19T12:00:00'),
+      tables: [
+        table({
+          _id: 'ghost',
+          status: 'occupied',
+          currentGuests: 2,
+          occupiedAt: '2026-08-18T20:32:00',
+        }),
+      ],
+      orders: [
+        order({
+          tableId: 'ghost',
+          status: 'open',
+          total: 0,
+          comandas: [],
+        }),
+      ],
+      sessions: [],
+      waitlistActiveCount: 0,
+    });
+    expect(snap.pipeline.occupied).toBe(0);
+    expect(snap.pipeline.free).toBe(1);
+    expect(snap.guests).toBe(0);
+    expect(snap.tableDwells.filter((d) => d.status === 'open')).toHaveLength(0);
+    expect(snap.alerts.some((a) => a.id === 'cash-closed')).toBe(false);
   });
 });
 

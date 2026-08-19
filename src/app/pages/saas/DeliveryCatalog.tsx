@@ -103,6 +103,7 @@ import {
   deliveryBrandLineKindLabel,
   getDeliveryBrandLinePreset,
   DELIVERY_BRAND_LINE_ICON_BOX,
+  UNIVERSAL_CATALOG_CATEGORIES,
 } from '../../lib/deliveryBrandLineKinds';
 import {
   listCatalogItemsRequest,
@@ -670,6 +671,61 @@ function CreateCatalogItemModal({
     }
   };
 
+  /** Categorías base del TPV: no se pueden eliminar desde aquí. */
+  const undeletableCategoryKeys = useMemo(
+    () => new Set(UNIVERSAL_CATALOG_CATEGORIES.map((c) => c.toLowerCase())),
+    [],
+  );
+
+  const categoriesInUseKeys = useMemo(
+    () =>
+      new Set(
+        catalogCategoriesInUse
+          .map((c) => normalizeImportCategory(String(c || '')).toLowerCase())
+          .filter(Boolean),
+      ),
+    [catalogCategoriesInUse],
+  );
+
+  const [deletingCategoryKey, setDeletingCategoryKey] = useState<string | null>(null);
+
+  const handleDeleteCategoryChip = async (cat: string) => {
+    const key = cat.toLowerCase();
+    if (categoriesInUseKeys.has(key)) {
+      toast.error(
+        `No se puede eliminar «${cat}»: hay productos en esa categoría. Elimínalos o muévelos primero.`,
+      );
+      return;
+    }
+    const ok = window.confirm(
+      `¿Seguro que quieres eliminar la categoría «${cat}»?\n\nSe quitará de las sugerencias y de las pestañas del TPV de tus marcas. Los productos no se tocan.`,
+    );
+    if (!ok) return;
+
+    setDeletingCategoryKey(key);
+    try {
+      setExtraCategories((prev) => prev.filter((c) => c.toLowerCase() !== key));
+      if (normalizeImportCategory(form.category).toLowerCase() === key) {
+        setForm((f) => ({ ...f, category: '' }));
+      }
+      if (businessId) {
+        const updated = await removeCatalogCategoryFromBrands(businessId, cat);
+        if (updated > 0) {
+          const next = await listBrandsRequest(businessId).catch(() => null);
+          if (next) {
+            onBrandsChange(next);
+            notifyDeliveryBrandsChanged();
+          }
+        }
+      }
+      toast.success(`Categoría «${cat}» eliminada`);
+    } catch {
+      toast.error('No se pudo eliminar la categoría. Inténtalo de nuevo.');
+    } finally {
+      setDeletingCategoryKey(null);
+    }
+  };
+
   const activeBrands = useMemo(
     () => sortBrandsForDisplay(brands.filter((b) => b.active !== false)),
     [brands],
@@ -1183,20 +1239,47 @@ function CreateCatalogItemModal({
       <label className={labelClass}>Categoría</label>
       <div className="mb-1 flex flex-wrap gap-1.5">
         {categoryChips.map((cat) => {
-          const active = normalizeImportCategory(form.category).toLowerCase() === cat.toLowerCase();
+          const key = cat.toLowerCase();
+          const active = normalizeImportCategory(form.category).toLowerCase() === key;
+          const deletable = !undeletableCategoryKeys.has(key);
+          const deleting = deletingCategoryKey === key;
           return (
-            <button
+            <span
               key={cat}
-              type="button"
-              onClick={() => setForm((f) => ({ ...f, category: cat }))}
-              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
+              className={`inline-flex items-center rounded-full border transition-colors ${
                 active
                   ? 'border-gray-900 bg-gray-900 text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900'
                   : 'border-gray-200 bg-gray-50 text-gray-700 hover:border-gray-400 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300'
               }`}
             >
-              {cat}
-            </button>
+              <button
+                type="button"
+                onClick={() => setForm((f) => ({ ...f, category: cat }))}
+                className={`py-1.5 pl-3 text-xs font-semibold ${deletable ? 'pr-1' : 'pr-3'}`}
+              >
+                {cat}
+              </button>
+              {deletable ? (
+                <button
+                  type="button"
+                  disabled={deleting}
+                  onClick={() => void handleDeleteCategoryChip(cat)}
+                  title={`Eliminar categoría «${cat}»`}
+                  aria-label={`Eliminar categoría «${cat}»`}
+                  className={`mr-1.5 flex h-5 w-5 items-center justify-center rounded-full transition-colors disabled:opacity-50 ${
+                    active
+                      ? 'text-white/70 hover:bg-white/20 hover:text-white dark:text-gray-900/60 dark:hover:bg-gray-900/10 dark:hover:text-gray-900'
+                      : 'text-gray-400 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/40 dark:hover:text-red-400'
+                  }`}
+                >
+                  {deleting ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <X className="h-3 w-3" />
+                  )}
+                </button>
+              ) : null}
+            </span>
           );
         })}
         {!addingCategory ? (
@@ -2451,15 +2534,6 @@ function CreateSupplierModal({
                 placeholder="Nombre del contacto"
                 value={form.contactPerson}
                 onChange={e => setForm(f => ({ ...f, contactPerson: e.target.value }))}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Categoría</label>
-              <input
-                className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                placeholder="Ej: Alimentación, Limpieza..."
-                value={form.category}
-                onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
               />
             </div>
           </div>
@@ -6332,7 +6406,9 @@ export function CatalogPage() {
 
         {activeTab === 'ingredientes' && !isRestaurantCatalog && renderIngredientesTab()}
 
-        {activeTab === 'stock' && <InventoryPanel />}
+        {activeTab === 'stock' && (
+          <InventoryPanel seedStockItems={filterStockInventoryItems(catalogItems)} />
+        )}
 
         {activeTab === 'staff-consumption' && (
           catalogBusy ? (

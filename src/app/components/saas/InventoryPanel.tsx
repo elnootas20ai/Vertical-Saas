@@ -637,7 +637,7 @@ function InventoryItemDetailModal({
   );
 }
 
-export function InventoryPanel() {
+export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogItem[] } = {}) {
   const {
     dataUserId,
     businessType,
@@ -647,7 +647,7 @@ export function InventoryPanel() {
     loading,
     loadDetail,
     reload,
-  } = useStockWorkspace();
+  } = useStockWorkspace({ seedStockItems });
   const { currentBusiness } = useBusiness();
   const businessId = String(
     currentBusiness?.business_id || currentBusiness?.id || '',

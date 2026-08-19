@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useBusiness } from '../context/BusinessContext';
 import { useActiveStoreScope } from '../context/ActiveStoreScopeContext';
@@ -22,6 +22,11 @@ export type StockWorkspaceScopeInput = {
   storeLabel?: string;
   /** PDV del TPV abierto: manda sobre el del sidebar global. */
   salesPointId?: string;
+  /**
+   * Artículos de stock ya cargados en la página (p. ej. Carta).
+   * Si vienen, el Almacén pinta al instante y refresca en segundo plano.
+   */
+  seedStockItems?: CatalogItem[];
 };
 
 type StorePdv = { _id: string; name?: string; code?: string; active?: boolean; deletedAt?: string | null };
@@ -127,10 +132,24 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
   const businessType = (currentBusiness?.businessType || '') as BusinessType;
   const ready = businessesFetchSettled && Boolean(dataUserId);
 
-  const [items, setItems] = useState<CatalogItem[]>([]);
+  const seedStockItems = scopeInput?.seedStockItems;
+  const seedKey = useMemo(
+    () =>
+      (seedStockItems || [])
+        .map((i) => `${i._id}:${i._rev || i.updatedAt || ''}`)
+        .join('|'),
+    [seedStockItems],
+  );
+
+  const [items, setItems] = useState<CatalogItem[]>(() =>
+    Array.isArray(seedStockItems) ? filterStockInventoryItems(seedStockItems) : [],
+  );
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !Array.isArray(seedStockItems));
   const [loadDetail, setLoadDetail] = useState('Leyendo almacén…');
+  const pointsOfSaleRef = useRef(activeStore.pointsOfSale);
+  pointsOfSaleRef.current = activeStore.pointsOfSale;
+  const hasPaintedRef = useRef(Array.isArray(seedStockItems));
 
   const activeSalesPointId = String(activeStore.activeSalesPointId || '').trim();
 
@@ -180,6 +199,14 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
     [activeStore.pointsOfSale],
   );
 
+  useEffect(() => {
+    if (!Array.isArray(seedStockItems)) return;
+    setItems(filterStockInventoryItems(seedStockItems));
+    setLoading(false);
+    setLoadDetail('');
+    hasPaintedRef.current = true;
+  }, [seedKey]);
+
   const reload = useCallback(async () => {
     if (!dataUserId) {
       setItems([]);
@@ -188,12 +215,17 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
       setLoadDetail('');
       return;
     }
-    setLoadDetail('Leyendo almacén…');
+    const hasSeed = hasPaintedRef.current;
+    if (!hasSeed) {
+      setLoading(true);
+      setLoadDetail('Leyendo almacén…');
+    }
     try {
+      const needBrands = Boolean(businessId) && businesses.length > 1;
       const [stockCatalog, wh, brands] = await Promise.all([
         listCatalogItemsRequest(dataUserId, 'stock'),
         listWarehousesRequest(dataUserId).catch(() => [] as Warehouse[]),
-        businessId ? listBrandsRequest(businessId).catch(() => []) : Promise.resolve([]),
+        needBrands ? listBrandsRequest(businessId!).catch(() => []) : Promise.resolve([]),
       ]);
       const scoped = businessId
         ? filterCatalogItemsForBusinessScope(stockCatalog, businessId, brands, {
@@ -203,16 +235,20 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
         : stockCatalog;
       setItems(scoped);
       setWarehouses(wh);
+      hasPaintedRef.current = true;
       setLoading(false);
       setLoadDetail('');
-      if (!warehousesCoverAllStores(wh, activeStore.pointsOfSale || [])) {
-        void ensureClientStoreWarehouses(dataUserId, activeStore.pointsOfSale || [], wh).then((ensured) => {
+      const pos = pointsOfSaleRef.current || [];
+      if (!warehousesCoverAllStores(wh, pos)) {
+        void ensureClientStoreWarehouses(dataUserId, pos, wh).then((ensured) => {
           setWarehouses(ensured);
         });
       }
     } catch {
-      setItems([]);
-      setWarehouses([]);
+      if (!hasPaintedRef.current) {
+        setItems([]);
+        setWarehouses([]);
+      }
       setLoading(false);
       setLoadDetail('');
     }
@@ -222,7 +258,6 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
     currentBusiness?.businessType,
     dataUserId,
     posKey,
-    activeStore.pointsOfSale,
   ]);
 
   useEffect(() => {

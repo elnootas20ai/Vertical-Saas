@@ -11461,10 +11461,22 @@ export async function listCatalogItemsByUser(req, userId, { module: filterModule
     }
     docs = await findDocuments(req, db, selector, { pageSize: 1000, maxDocs: 50_000 });
   } catch {
-    const all = await getCatalogDatabaseDocumentsInflight(req);
-    docs = all.filter(
-      (doc) => doc?.type === 'catalog_item' && (!uid || catalogDocMatchesUser(doc, uid)),
-    );
+    // Nunca caer a _all_docs del catálogo compartido (puede tardar decenas de segundos).
+    // Si el selector con module falla, listar solo por type+user_id (índice estable) y filtrar abajo.
+    if (uid) {
+      try {
+        docs = await findDocuments(
+          req,
+          db,
+          { type: 'catalog_item', user_id: uid },
+          { pageSize: 1000, maxDocs: 50_000 },
+        );
+      } catch {
+        docs = [];
+      }
+    } else {
+      docs = [];
+    }
   }
 
   return docs

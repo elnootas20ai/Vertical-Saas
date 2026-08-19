@@ -6,6 +6,11 @@ import type { Brand } from '../../lib/brandsApi';
 import { brandsForBilling } from '../../lib/brandBillingConfig';
 import { isDefaultBrandNamePlaceholder, isDefaultCommercialBrand } from '../../lib/brandUtils';
 import type { DiningOrder, DiningTable, DiningTableStatus, SalaRoomConfig } from '../../lib/salaApi';
+import {
+  diningOrderHasTpvPedido,
+  openOrdersByTableId,
+  resolveTpvFloorVisualStatus,
+} from '../../lib/restaurantTableDisplay';
 import type { TpvRegisterSession } from '../../lib/deliveryApi';
 import { attributeOrderRevenueByBrand } from '../../../../shared/delivery/orderLineRevenueSplit.js';
 import {
@@ -294,6 +299,7 @@ export function buildRestaurantOpsTableDwells(input: {
   const dwells: RestaurantOpsTableDwell[] = [];
 
   for (const order of openOrders) {
+    if (!diningOrderHasTpvPedido(order)) continue;
     const tid = String(order.tableId || '').trim();
     const table = byTableId.get(tid);
     const startedAt = String(
@@ -305,24 +311,6 @@ export function buildRestaurantOpsTableDwells(input: {
       tableLabel: tableLabel(table, order),
       status: 'open',
       guests: Math.max(0, Number(table?.currentGuests || order.guests) || 0),
-      startedAt,
-      endedAt: null,
-      minutes: minutesBetween(startedAt, nowMs),
-    });
-  }
-
-  // Mesas ocupadas sin pedido aún (solo sentados).
-  for (const table of tables) {
-    if (!OCCUPIED.has(table.status)) continue;
-    const tid = String(table._id || table.id || '');
-    if (dwells.some((d) => d.tableId === tid && d.status === 'open')) continue;
-    const startedAt = String(table.occupiedAt || '').trim();
-    if (!startedAt) continue;
-    dwells.push({
-      tableId: tid,
-      tableLabel: tableLabel(table, null),
-      status: 'open',
-      guests: Math.max(0, Number(table.currentGuests) || 0),
       startedAt,
       endedAt: null,
       minutes: minutesBetween(startedAt, nowMs),
@@ -404,10 +392,17 @@ export function buildRestaurantOpsSnapshot(input: {
     return !bid || bid === scope;
   });
 
-  const free = tables.filter((t) => t.status === 'available' || t.status === 'reserved').length;
-  const occupied = tables.filter((t) => OCCUPIED.has(t.status)).length;
-  const toPay = tables.filter((t) => t.status === 'pending_payment').length
-    + orders.filter((o) => o.status === 'pending_payment').length;
+  const openByTable = openOrdersByTableId(orders);
+  const visualOf = (t: DiningTable) =>
+    resolveTpvFloorVisualStatus(t, openByTable.get(String(t._id || t.id || '')));
+
+  const free = tables.filter((t) => {
+    const v = visualOf(t);
+    return v === 'available' || v === 'reserved';
+  }).length;
+  const occupied = tables.filter((t) => OCCUPIED.has(visualOf(t))).length;
+  const toPay = tables.filter((t) => visualOf(t) === 'pending_payment').length
+    + orders.filter((o) => o.status === 'pending_payment' && diningOrderHasTpvPedido(o)).length;
 
   const tickets = buildKitchenTickets(orders, businessId);
   const kitchen = tickets.filter((t) =>
@@ -420,7 +415,7 @@ export function buildRestaurantOpsSnapshot(input: {
     o.status === 'open' || o.status === 'served' || o.status === 'pending_payment',
   ).length;
   const guests = tables
-    .filter((t) => OCCUPIED.has(t.status))
+    .filter((t) => OCCUPIED.has(visualOf(t)))
     .reduce((s, t) => s + Math.max(0, Number(t.currentGuests) || 0), 0);
 
   const cashOpen = sessions.filter((s) => String(s.status || '').toLowerCase() === 'open').length;
