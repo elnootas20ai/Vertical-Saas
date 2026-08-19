@@ -154,12 +154,10 @@ import {
   ChevronDown,
   ChevronRight,
   Zap,
-  Sparkles,
   Globe,
   ArrowLeft,
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
-import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 import { CatalogImportReportPanel } from '../../components/saas/CatalogImportReportPanel';
 import {
@@ -227,20 +225,6 @@ import {
   type CatalogMoveTargetInput,
 } from '../../lib/catalogItemMove';
 
-// ─── Unit options ─────────────────────────────────────────────────────────────
-
-const UNIT_OPTIONS = [
-  { value: 'ud', label: 'Unidad' },
-  { value: 'kg', label: 'Kilogramo' },
-  { value: 'g', label: 'Gramo' },
-  { value: 'l', label: 'Litro' },
-  { value: 'ml', label: 'Mililitro' },
-  { value: 'caja', label: 'Caja' },
-  { value: 'pack', label: 'Pack' },
-  { value: 'bolsa', label: 'Bolsa' },
-  { value: 'm', label: 'Metro' },
-];
-
 const INVOICE_STATUS_CONFIG: Record<string, { label: string; badgeClass: string }> = {
   pending: { label: 'Pendiente', badgeClass: 'bg-amber-100 text-amber-700 border-amber-200' },
   paid: { label: 'Pagada', badgeClass: 'bg-green-100 text-green-700 border-green-200' },
@@ -259,11 +243,9 @@ const CREATE_STEP_LABELS = ['Producto y precio', 'Ingredientes y composición', 
 function CatalogEmptyActions({
   onManualAdd,
   onImport,
-  onAiAdd,
 }: {
   onManualAdd: () => void;
   onImport: () => void;
-  onAiAdd: () => void;
 }) {
   return (
     <div className="flex flex-col items-center justify-center px-4 py-14 text-center">
@@ -272,9 +254,9 @@ function CatalogEmptyActions({
       </div>
       <h3 className="text-base font-bold text-gray-900 dark:text-gray-100">Tu catálogo está vacío</h3>
       <p className="mt-1.5 max-w-md text-sm text-gray-500 dark:text-gray-400">
-        Empieza con productos y precios para el TPV. Puedes añadirlos uno a uno, importar un Excel o describirlos con IA.
+        Empieza con productos y precios para el TPV. Puedes añadirlos uno a uno o importar un Excel.
       </p>
-      <div className="mt-6 grid w-full max-w-lg grid-cols-1 gap-2 sm:grid-cols-3">
+      <div className="mt-6 grid w-full max-w-lg grid-cols-1 gap-2 sm:grid-cols-2">
         <button
           type="button"
           onClick={onManualAdd}
@@ -292,15 +274,6 @@ function CatalogEmptyActions({
           <Upload className="w-5 h-5" />
           <span className="text-sm font-bold">Importar Excel</span>
           <span className="text-[11px] font-normal opacity-80">Plantilla con muchos productos</span>
-        </button>
-        <button
-          type="button"
-          onClick={onAiAdd}
-          className="flex flex-col items-center gap-2 rounded-xl border-2 border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 px-4 py-4 text-violet-900 dark:text-violet-100 hover:bg-violet-100 dark:hover:bg-violet-950/50 transition-colors"
-        >
-          <Sparkles className="w-5 h-5" />
-          <span className="text-sm font-bold">Crear con IA</span>
-          <span className="text-[11px] font-normal opacity-80">Describe la carta en texto</span>
         </button>
       </div>
     </div>
@@ -383,6 +356,9 @@ function CreateCatalogItemModal({
   const [comboStructure, setComboStructure] = useState<ComboStructureSlot[]>(DEFAULT_COMBO_STRUCTURE);
   const [comboStructureConfirmed, setComboStructureConfirmed] = useState(false);
   const [recipePicks, setRecipePicks] = useState<CatalogRecipePick[]>([]);
+  const [extraCategories, setExtraCategories] = useState<string[]>([]);
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [newCategoryDraft, setNewCategoryDraft] = useState('');
   const [form, setForm] = useState({
     itemType: 'product' as CatalogItem['itemType'],
     name: '',
@@ -414,6 +390,9 @@ function CreateCatalogItemModal({
     if (!isOpen) {
       createModalWasOpenRef.current = false;
       setSessionCreated([]);
+      setExtraCategories([]);
+      setAddingCategory(false);
+      setNewCategoryDraft('');
       return;
     }
 
@@ -421,6 +400,9 @@ function CreateCatalogItemModal({
     createModalWasOpenRef.current = true;
 
     if (editItem) {
+      setExtraCategories([]);
+      setAddingCategory(false);
+      setNewCategoryDraft('');
       setComboItems(Array.isArray(editItem.comboItems) ? [...editItem.comboItems] : []);
       const items = Array.isArray(editItem.comboItems) ? editItem.comboItems.length : 0;
       setComboStructure(comboStructureFromCustomFields(editItem.customFields, items));
@@ -489,6 +471,9 @@ function CreateCatalogItemModal({
 
     setSessionCreated([]);
     setRecipePicks([]);
+    setExtraCategories([]);
+    setAddingCategory(false);
+    setNewCategoryDraft('');
     const defaultId = defaultBrandIdForCatalog(brands);
 
     if (seedFromProduct) {
@@ -633,6 +618,36 @@ function CreateCatalogItemModal({
     [brands, form.selectedBrandIds, catalogCategoriesInUse],
   );
 
+  const categoryChips = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const raw of [...categorySuggestions, ...extraCategories, form.category]) {
+      const cat = normalizeImportCategory(String(raw || '').trim());
+      if (!cat) continue;
+      const key = cat.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(cat);
+    }
+    return out;
+  }, [categorySuggestions, extraCategories, form.category]);
+
+  const commitNewCategoryChip = () => {
+    const cat = normalizeImportCategory(newCategoryDraft.trim());
+    if (!cat) {
+      toast.error('Escribe el nombre de la categoría');
+      return;
+    }
+    setExtraCategories((prev) => {
+      if (prev.some((c) => c.toLowerCase() === cat.toLowerCase())) return prev;
+      if (categorySuggestions.some((c) => c.toLowerCase() === cat.toLowerCase())) return prev;
+      return [...prev, cat];
+    });
+    setForm((f) => ({ ...f, category: cat }));
+    setNewCategoryDraft('');
+    setAddingCategory(false);
+  };
+
   const activeBrands = useMemo(
     () => sortBrandsForDisplay(brands.filter((b) => b.active !== false)),
     [brands],
@@ -709,7 +724,7 @@ function CreateCatalogItemModal({
       )
     ) {
       toast.error(
-        'Pizza al gusto: crea antes los ingredientes base en Catálogo → Ingredientes (sin precio extra).',
+        'Producto al gusto: crea antes los ingredientes base en Catálogo → Ingredientes (sin precio extra).',
       );
       return false;
     }
@@ -1108,44 +1123,81 @@ function CreateCatalogItemModal({
   };
 
   const renderCategoryUnit = () => (
-    <>
-      <div>
-        <label className={labelClass}>Categoría</label>
-        <div className="mb-2 flex flex-wrap gap-1.5">
-          {categorySuggestions.map((cat) => {
-            const active = normalizeImportCategory(form.category).toLowerCase() === cat.toLowerCase();
-            return (
-              <button
-                key={cat}
-                type="button"
-                onClick={() => setForm((f) => ({ ...f, category: cat }))}
-                className={`rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors ${
-                  active
-                    ? 'border-gray-900 bg-gray-900 text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900'
-                    : 'border-gray-200 bg-gray-50 text-gray-700 hover:border-gray-400 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300'
-                }`}
-              >
-                {cat}
-              </button>
-            );
-          })}
+    <div>
+      <label className={labelClass}>Categoría</label>
+      <div className="mb-1 flex flex-wrap gap-1.5">
+        {categoryChips.map((cat) => {
+          const active = normalizeImportCategory(form.category).toLowerCase() === cat.toLowerCase();
+          return (
+            <button
+              key={cat}
+              type="button"
+              onClick={() => setForm((f) => ({ ...f, category: cat }))}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                active
+                  ? 'border-gray-900 bg-gray-900 text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900'
+                  : 'border-gray-200 bg-gray-50 text-gray-700 hover:border-gray-400 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300'
+              }`}
+            >
+              {cat}
+            </button>
+          );
+        })}
+        {!addingCategory ? (
+          <button
+            type="button"
+            onClick={() => {
+              setAddingCategory(true);
+              setNewCategoryDraft('');
+            }}
+            className="inline-flex items-center gap-1 rounded-full border border-dashed border-gray-300 dark:border-gray-600 px-3 py-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:border-gray-500 hover:bg-gray-50 dark:hover:bg-gray-900"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Nueva categoría
+          </button>
+        ) : null}
+      </div>
+      {addingCategory ? (
+        <div className="mt-2 flex flex-col sm:flex-row gap-2">
+          <input
+            className={inputClass}
+            placeholder="Nombre de la nueva categoría…"
+            value={newCategoryDraft}
+            autoFocus
+            onChange={(e) => setNewCategoryDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                commitNewCategoryChip();
+              }
+              if (e.key === 'Escape') {
+                setAddingCategory(false);
+                setNewCategoryDraft('');
+              }
+            }}
+          />
+          <div className="flex gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={commitNewCategoryChip}
+              className="px-4 py-2.5 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-semibold"
+            >
+              Añadir
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAddingCategory(false);
+                setNewCategoryDraft('');
+              }}
+              className="px-4 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-sm font-medium text-gray-700 dark:text-gray-300"
+            >
+              Cancelar
+            </button>
+          </div>
         </div>
-        <input
-          className={inputClass}
-          placeholder="O escribe otra categoría…"
-          value={form.category}
-          onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
-        />
-      </div>
-      <div>
-        <label className={labelClass}>Unidad de medida</label>
-        <select className={inputClass} value={form.unit} onChange={(e) => setForm((f) => ({ ...f, unit: e.target.value }))}>
-          {UNIT_OPTIONS.map((u) => (
-            <option key={u.value} value={u.value}>{u.label}</option>
-          ))}
-        </select>
-      </div>
-    </>
+      ) : null}
+    </div>
   );
 
   const renderHalfHalfProductToggle = () => {
@@ -1317,9 +1369,9 @@ function CreateCatalogItemModal({
       >
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="font-bold text-gray-900 dark:text-gray-100">Pizza al gusto</p>
+            <p className="font-bold text-gray-900 dark:text-gray-100">Producto al gusto</p>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-              En TPV el cliente elige ingredientes base · precio fijo del producto
+              En TPV se eligen los ingredientes base · precio fijo del producto
             </p>
           </div>
           <div className={`w-11 h-6 rounded-full relative shrink-0 ${form.buildYourOwn ? 'bg-orange-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
@@ -1701,8 +1753,12 @@ function CreateCatalogItemModal({
           {isEditMode ? (
             <div className="space-y-8">
               <section className="space-y-5">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Marca y producto</h3>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Producto</h3>
                 {renderBrandPicker()}
+                <div>
+                  <label className={labelClass}>Nombre del producto *</label>
+                  <input className={inputClass} placeholder="Ej: Hamburguesa clásica, Coca-Cola 33cl..." value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+                </div>
                 <div>
                   <label className={labelClass}>Tipo de elemento</label>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -1727,19 +1783,13 @@ function CreateCatalogItemModal({
                     ))}
                   </div>
                 </div>
-                <div>
-                  <label className={labelClass}>Nombre del producto *</label>
-                  <input className={inputClass} placeholder="Ej: Hamburguesa clásica, Coca-Cola 33cl..." value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
-                </div>
-                {renderHalfHalfProductToggle()}
-                {renderHalfHalfPizzaPicker()}
+                {renderCategoryUnit()}
                 {renderBuildYourOwnProductToggle()}
                 {renderBuildYourOwnIngredientPicker()}
                 <div>
                   <label className={labelClass}>Descripción</label>
                   <textarea rows={3} className={`${inputClass} resize-none`} placeholder="Descripción detallada del producto..." value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
                 </div>
-                {renderCategoryUnit()}
               </section>
               {renderCustomizationSection()}
               {renderComboBuilderSection()}
@@ -1833,7 +1883,10 @@ function CreateCatalogItemModal({
                 </div>
               ) : null}
               {renderBrandPicker()}
-              {renderCategoryUnit()}
+              <div>
+                <label className={labelClass}>Nombre del producto *</label>
+                <input className={inputClass} placeholder="Ej: Mitad y mitad, Margarita, Coca-Cola 33cl..." value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} autoFocus />
+              </div>
               <div>
                 <label className={labelClass}>Tipo de elemento</label>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -1858,12 +1911,7 @@ function CreateCatalogItemModal({
                   ))}
                 </div>
               </div>
-              <div>
-                <label className={labelClass}>Nombre del producto *</label>
-                <input className={inputClass} placeholder="Ej: Mitad y mitad, Margarita, Coca-Cola 33cl..." value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} autoFocus />
-              </div>
-              {renderHalfHalfProductToggle()}
-              {renderHalfHalfPizzaPicker()}
+              {renderCategoryUnit()}
               {renderBuildYourOwnProductToggle()}
               {renderBuildYourOwnIngredientPicker()}
               <div>
@@ -3086,22 +3134,11 @@ export function CatalogPage() {
   // Invoice state
   const [showCreateInvoice, setShowCreateInvoice] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<PurchaseInvoice | null>(null);
-  const [showAIModal, setShowAIModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [catalogImportReport, setCatalogImportReport] = useState<CatalogImportReport | null>(null);
   const [imageZipMap, setImageZipMap] = useState<Record<string, string>>({});
   const [loadingImageZip, setLoadingImageZip] = useState(false);
   const { focus: activationFocus, clearFocus: clearActivationFocus } = useActivationFocus();
-
-  const MODULE_AI_FIELDS: AIFieldDef[] = [
-    { key: 'name', label: 'Nombre' },
-    { key: 'itemType', label: 'Tipo (product/service/combo)' },
-    { key: 'category', label: 'Categoría (bebidas, complementos…)' },
-    { key: 'marca', label: 'Línea comercial (nombre en Ajustes → Marca)' },
-    { key: 'price', label: 'Precio' },
-    { key: 'description', label: 'Descripción' },
-    { key: 'allergens', label: 'Alérgenos' },
-  ];
 
   const MODULE_IMPORT_FIELDS: ImportFieldDef[] = catalogImportFieldsForVertical(catalogVertical);
 
@@ -3132,49 +3169,6 @@ export function CatalogPage() {
           : 'Plantilla catálogo',
     );
   }, [templateOrganizerLines, catalogImportTemplateFilename, catalogVertical, isHeladeriaCatalog, isRestaurantCatalog]);
-
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    if (!dataUserId) return;
-    let brandCache = [...brands];
-    const unmatchedCommercialBrands: string[] = [];
-    const items: Partial<CatalogItem>[] = [];
-    for (const entry of entries) {
-      const mapped = await mapImportEntryToCatalogItem(entry as Record<string, string>, {
-        businessId: businessId || '',
-        brandCache,
-        vertical: catalogVertical,
-      });
-      if (!mapped) continue;
-      brandCache = mapped.brandCache;
-      unmatchedCommercialBrands.push(...mapped.unmatchedLineNames);
-      items.push(mapped.item);
-    }
-    const brandImportWarn = formatUnmatchedCommercialBrandWarning(unmatchedCommercialBrands, brandCache);
-    if (brandImportWarn) toast.warning(brandImportWarn, { duration: 14000 });
-    if (items.length === 0) {
-      toast.error('No hay productos válidos para importar');
-      return;
-    }
-    const result = await bulkCreateCatalogItemsRequest(dataUserId, items as Partial<CatalogItem>[]);
-    if (result.created > 0) {
-      if (businessId) {
-        const sync = await syncTpvOrganizersAfterCatalogImport(businessId, items);
-        const activation = await activateCommercialLinesAfterCatalogImport(businessId, items);
-        if (sync.updatedBrands > 0 || activation.activated > 0) await loadBrands();
-      }
-      await loadCatalog();
-      notifyDeliveryCatalogChanged(dataUserId, businessId);
-      toast.success(`${result.created} producto(s) importado(s) con IA · TPV actualizado`);
-    }
-    if (result.errors > 0) {
-      const firstError = result.errorDetails?.[0];
-      toast.error(
-        firstError
-          ? `${result.errors} producto(s) no se pudieron importar. Ej: ${firstError.name || 'sin nombre'} -> ${firstError.error}`
-          : `${result.errors} producto(s) no se pudieron importar`,
-      );
-    }
-  };
 
   const handleImportEntries = async (
     entries: Record<string, string>[],
@@ -4383,14 +4377,6 @@ export function CatalogPage() {
     setShowImportModal(true);
   }, [dataUserId]);
 
-  const openCatalogAiAdd = useCallback(() => {
-    if (!dataUserId) {
-      toast.error('Sesión no válida. Recarga la página e inicia sesión de nuevo.');
-      return;
-    }
-    setShowAIModal(true);
-  }, [dataUserId]);
-
   useEffect(() => {
     if (!activationFocus || !pageReady) return;
     if (activationFocus === 'catalog-import') {
@@ -4703,12 +4689,9 @@ export function CatalogPage() {
                   <AddButtonDropdown
                     label="Nuevo producto"
                     onQuickAdd={openNewCatalogItemManual}
-                    onAIAdd={openCatalogAiAdd}
                     onImport={openCatalogImport}
                     quickAddLabel="Añadir manualmente"
                     quickAddDesc="Marca, categoría, precios y stock en 3 pasos"
-                    aiAddLabel="Crear con IA"
-                    aiAddDesc="Describe productos en texto y se importan al catálogo"
                     importAddLabel="Importar Excel"
                     importAddDesc="Plantilla con productos, precios e imágenes opcionales"
                   />
@@ -4763,7 +4746,6 @@ export function CatalogPage() {
           <CatalogEmptyActions
             onManualAdd={openNewCatalogItemManual}
             onImport={openCatalogImport}
-            onAiAdd={openCatalogAiAdd}
           />
         </ActivationFieldWrap>
       ) : !loading && isSearchEmpty ? (
@@ -6261,14 +6243,6 @@ export function CatalogPage() {
         onAdjust={handleStockAdjust}
       />
     
-      <AIAddModal
-        isOpen={showAIModal}
-        onClose={() => setShowAIModal(false)}
-        module="delivery_catalog"
-        moduleLabel="Catálogo"
-        fields={MODULE_AI_FIELDS}
-        onEntriesParsed={handleAIEntries}
-      />
       <CatalogMoveModal
         open={catalogMoveItems !== null}
         items={catalogMoveItems ?? []}

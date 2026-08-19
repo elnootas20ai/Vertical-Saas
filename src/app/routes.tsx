@@ -171,6 +171,7 @@ import { CleaningIncidents } from './pages/saas/CleaningIncidents';
 import { WorkerMaterials } from './pages/saas/worker/WorkerMaterials';
 import { Chat } from './pages/saas/Chat';
 import { SupplierBillingPage } from './pages/saas/SupplierBillingPage';
+import { SupplierInvoiceEmailPage } from './pages/saas/SupplierInvoiceEmailPage';
 import { ClientBillingPage } from './pages/saas/ClientBillingPage';
 import { IncomeExpensesPage } from './pages/saas/IncomeExpensesPage';
 import { EbitdaPage } from './pages/saas/EbitdaPage';
@@ -698,6 +699,7 @@ export const router = createBrowserRouter([
                 { path: 'facturas', element: <SupplierBillingPage /> },
               ],
             },
+            { path: 'correo-facturas', element: <SupplierInvoiceEmailPage /> },
             { path: ':supplierId', element: <SupplierDetailPage /> },
           ]},
           { path: 'orders', element: <Navigate to="/saas/suppliers/facturas" replace /> },

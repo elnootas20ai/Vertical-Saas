@@ -270,6 +270,7 @@ const menuItemDefs = [
   { id: 'catalog-consumos', navKey: 'staffConsumption', icon: <UtensilsCrossed className="w-5 h-5" />, path: '/saas/catalog?tab=staff-consumption' },
   { id: 'costing',          navKey: 'costing',         icon: <Calculator className="w-5 h-5" />,  path: '/saas/catalog?tab=escandallo' },
   { id: 'suppliers',        navKey: 'suppliers',       icon: <Factory className="w-5 h-5" />,     path: '/saas/suppliers' },
+  { id: 'catalog-invoice-email', navKey: 'invoiceEmailReception', icon: <Mail className="w-5 h-5" />, path: '/saas/suppliers/correo-facturas' },
 
   // ── Finanzas ─────────────────────────────────────────────────────────────────
   { id: 'finance',             navKey: 'finance',            icon: <DollarSign className="w-5 h-5" />,  path: '/saas/finance' },
@@ -530,7 +531,7 @@ const workerSidebarGroupDefs = [
 const sidebarGroupDefs = [
   { id: 'clientesCrm',      icon: <Contact2 className="w-4 h-4 shrink-0" />,      itemIds: ['quotes', 'promotions'] },
   { id: 'equipo',           icon: <UsersRound className="w-4 h-4 shrink-0" />,    itemIds: ['hr-requests', 'team', 'clockins', 'horarios-vacaciones', 'commissions', 'payroll', 'gestoria'] },
-  { id: 'catalogProviders', icon: <Package className="w-4 h-4 shrink-0" />,       itemIds: ['catalog', 'catalog-stock', 'costing'] },
+  { id: 'catalogProviders', icon: <Package className="w-4 h-4 shrink-0" />,       itemIds: ['catalog', 'catalog-stock', 'costing', 'catalog-invoice-email'] },
   { id: 'finanzas',         icon: <DollarSign className="w-4 h-4 shrink-0" />,    itemIds: ['reports', 'client-billing', 'finance', 'income-expenses', 'ebitda', 'taxes', 'verifactu', 'bank-reconciliation'] },
   { id: 'documentacion',    icon: <FileText className="w-4 h-4 shrink-0" />,      itemIds: ['doc-society', 'doc-contracts', 'doc-licenses', 'doc-financial', 'doc-other'] },
   { id: 'commercial',       icon: <Car className="w-4 h-4 shrink-0" />,           itemIds: ['compraventa-hub', 'compraventa-vehiculos', 'entrada-vehiculo', 'compraventa-compras', 'compraventa-ventas', 'compraventa-tasaciones', 'compraventa-entregas', 'compraventa-crm', 'compraventa-fiscal', 'publicacion-venta'] },
@@ -592,7 +593,7 @@ const VERTICAL_GROUP_ITEM_OVERRIDES: Partial<Record<BusinessType, Record<string,
   carDealership: {
     clientesCrm: ['clients', 'quotes', 'promotions'],
     equipo: ['hr-requests', 'team', 'dealership-workers', 'clockins', 'horarios-vacaciones', 'commissions', 'payroll', 'gestoria'],
-    catalogProviders: ['suppliers'],
+    catalogProviders: ['suppliers', 'catalog-invoice-email'],
     finanzas: ['reports', 'client-billing', 'finance', 'income-expenses', 'ebitda', 'taxes', 'verifactu', 'bank-reconciliation', 'gastos-preparacion'],
     documentacion: ['doc-vehiculo', 'doc-contratos-cv', 'doc-facturas-cv', 'doc-itv-cv', 'doc-reparacion-cv', 'doc-cliente-cv', 'doc-anexos-cv'],
     commercial: [
@@ -625,7 +626,7 @@ const VERTICAL_GROUP_ITEM_OVERRIDES: Partial<Record<BusinessType, Record<string,
   },
   events: {
     clientesCrm: ['clients'],
-    catalogProviders: ['suppliers'],
+    catalogProviders: ['suppliers', 'catalog-invoice-email'],
   },
   delivery: {
     clientesCrm: ['clients', 'promotions'],
@@ -1249,10 +1250,19 @@ function SidebarInner({
     let itemIds = override ? [...override] : [...g.itemIds];
     if (g.id === 'catalogProviders') {
       if (usesDeliverySidebarCore || isRestaurantVertical) {
-        // TPV: las 4 secciones del módulo (Carta · Almacén · Compras · Consumos), sin Escandallo suelto.
-        itemIds = ['catalog-carta', 'catalog-stock-tpv', 'catalog-purchases', 'catalog-consumos'];
+        // TPV: Carta · Almacén · Compras · Consumos · Correo facturas (abajo).
+        itemIds = [
+          'catalog-carta',
+          'catalog-stock-tpv',
+          'catalog-purchases',
+          'catalog-consumos',
+          'catalog-invoice-email',
+        ];
       } else {
         itemIds = itemIds.filter((id) => id !== 'costing');
+        if (!itemIds.includes('catalog-invoice-email')) {
+          itemIds = [...itemIds, 'catalog-invoice-email'];
+        }
       }
     }
     if (g.id === 'butcherShop' && vertical === 'butcherShop' && !currentBusiness?.ownDeliveryEnabled) {
@@ -1455,7 +1465,7 @@ function SidebarInner({
     'dashboard', 'alertas', 'reports', 'team', 'team-schedules', 'hr-requests', 'horarios-vacaciones', 'commissions', 'payroll', 'gestoria',
     'finance', 'income-expenses', 'ebitda', 'taxes', 'verifactu', 'bank-reconciliation',
     'client-billing', 'costing', 'billing',
-    'suppliers', 'compras-stock', 'catalog-purchases',
+    'suppliers', 'compras-stock', 'catalog-purchases', 'catalog-invoice-email',
     'configuracion', 'settings', 'admin', 'gdpr',
     'pipeline', 'sales-metrics', 'operations', 'affiliates',
     // 'delivery-clients' apunta a /saas/delivery-ops?panel=clients (también owner-only).
@@ -1643,7 +1653,8 @@ function SidebarInner({
     (item.id === 'catalog-consumos' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'staff-consumption') ||
     (item.id === 'costing' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'escandallo') ||
     (item.id === 'costing' && location.pathname.startsWith('/saas/costing')) ||
-    (item.id === 'suppliers' && location.pathname.startsWith('/saas/suppliers')) ||
+    (item.id === 'suppliers' && location.pathname.startsWith('/saas/suppliers') && !location.pathname.startsWith('/saas/suppliers/correo-facturas')) ||
+    (item.id === 'catalog-invoice-email' && location.pathname.startsWith('/saas/suppliers/correo-facturas')) ||
     (item.id === 'income-expenses' && location.pathname.startsWith('/saas/income-expenses')) ||
     (item.id === 'ebitda' && location.pathname.startsWith('/saas/ebitda')) ||
     (item.id === 'taxes' && location.pathname.startsWith('/saas/taxes')) ||

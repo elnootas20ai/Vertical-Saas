@@ -60,6 +60,7 @@ export const SIDEBAR_PLAN_CATALOG: Record<string, SidebarPlanEntry> = {
   'horarios-vacaciones': { minPlan: 'normal' },
   'hr-requests': { minPlan: 'normal' },
   suppliers: { minPlan: 'normal' },
+  'catalog-invoice-email': { minPlan: 'normal' },
   costing: { minPlan: 'normal' },
   'web-config': { minPlan: 'normal' },
   'delivery-integrations': { minPlan: 'normal' },
