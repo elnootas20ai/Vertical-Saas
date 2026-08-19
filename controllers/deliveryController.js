@@ -2564,7 +2564,14 @@ export async function createSupplier(req, res) {
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     const db = getCatalogDbName();
     await ensureDatabase(req, db);
-    const doc = buildSupplierDocument(userId, supplier);
+    // Alta siempre nueva: ignorar _id/_rev/id del cliente (formulario de edición residual).
+    const {
+      _id: _ignoreId,
+      _rev: _ignoreRev,
+      id: _ignoreLegacyId,
+      ...supplierFields
+    } = supplier;
+    const doc = buildSupplierDocument(userId, supplierFields);
     const saved = await putDocument(req, db, doc._id, doc);
     return res.status(201).json({ ok: true, supplier: sanitizeSupplier({ ...doc, _rev: saved.rev }) });
   } catch (error) {

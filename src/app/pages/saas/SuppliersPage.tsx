@@ -57,6 +57,7 @@ import {
 import { useBusinessOptional } from '../../context/BusinessContext';
 import { listBrandsRequest, type Brand } from '../../lib/brandsApi';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 
 interface CreateSupplierModalProps {
   isOpen: boolean;
@@ -99,7 +100,19 @@ function CreateSupplierModal({ isOpen, onClose, onCreate, editItem, brands = [] 
     if (!form.name.trim()) { toast.error('El nombre es obligatorio'); return; }
     setSubmitting(true);
     try {
-      await onCreate({ ...editItem, ...form, active: editItem?.active ?? true });
+      await onCreate({
+        name: form.name,
+        cif: form.cif,
+        email: form.email,
+        phone: form.phone,
+        address: form.address,
+        contactPerson: form.contactPerson,
+        category: form.category,
+        paymentTerms: form.paymentTerms,
+        notes: form.notes,
+        organizerIds: form.organizerIds,
+        active: editItem?.active ?? true,
+      });
     } finally {
       setSubmitting(false);
     }
@@ -173,6 +186,7 @@ export function SuppliersPage() {
   const { user } = useAuth();
   const businessCtx = useBusinessOptional();
   const businessId = resolveBusinessScopeId(businessCtx?.currentBusiness);
+  const dataUserId = resolveBusinessDataUserId(user, businessCtx?.currentBusiness);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -213,12 +227,12 @@ export function SuppliersPage() {
   ];
 
   const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    if (!user?.id) return;
+    if (!dataUserId) return;
     let created = 0;
     for (const entry of entries) {
       try {
-        const sup = await createSupplierRequest(user.id, { ...entry, active: true } as any);
-        setSuppliers(prev => [sup, ...prev]);
+        const sup = await createSupplierRequest(dataUserId, { ...entry, active: true } as any);
+        setSuppliers(prev => [sup, ...prev.filter((s) => s._id !== sup._id)]);
         created++;
       } catch { /* skip */ }
     }
@@ -226,12 +240,12 @@ export function SuppliersPage() {
   };
 
   const handleImportEntries = async (entries: Record<string, string>[]) => {
-    if (!user?.id) return;
+    if (!dataUserId) return;
     let created = 0;
     for (const entry of entries) {
       try {
-        const sup = await createSupplierRequest(user.id, { ...entry, active: true } as any);
-        setSuppliers(prev => [sup, ...prev]);
+        const sup = await createSupplierRequest(dataUserId, { ...entry, active: true } as any);
+        setSuppliers(prev => [sup, ...prev.filter((s) => s._id !== sup._id)]);
         created++;
       } catch { /* skip */ }
     }
@@ -239,13 +253,13 @@ export function SuppliersPage() {
   };
 
   const loadData = useCallback(async () => {
-    if (!user?.id) return;
+    if (!dataUserId) return;
     try {
       const [sups, items, invs, ords] = await Promise.all([
-        listSuppliersRequest(user.id),
-        listCatalogItemsRequest(user.id),
-        listPurchaseInvoicesRequest(user.id),
-        listPurchaseOrdersRequest(user.id),
+        listSuppliersRequest(dataUserId),
+        listCatalogItemsRequest(dataUserId),
+        listPurchaseInvoicesRequest(dataUserId),
+        listPurchaseOrdersRequest(dataUserId),
       ]);
       setSuppliers(sups);
       setCatalogItems(items);
@@ -265,37 +279,46 @@ export function SuppliersPage() {
     } finally {
       setLoading(false);
     }
-  }, [businessId, user?.id]);
+  }, [businessId, dataUserId]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
   useEffect(() => {
     const editId = searchParams.get('edit');
-    if (editId && suppliers.length > 0) {
-      const found = suppliers.find(s => s._id === editId);
-      if (found) { setEditingSupplier(found); setShowCreateSupplier(true); }
-    }
-  }, [searchParams, suppliers]);
+    if (!editId || suppliers.length === 0) return;
+    const found = suppliers.find(s => s._id === editId);
+    if (!found) return;
+    setEditingSupplier(found);
+    setShowCreateSupplier(true);
+    // Quitar ?edit= al abrir: si queda, cada alta reabre el mismo proveedor.
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('edit');
+      return next;
+    }, { replace: true });
+  }, [searchParams, suppliers, setSearchParams]);
 
   useEffect(() => {
     const action = searchParams.get('action');
     if (!action) return;
-    if (action === 'new') setShowCreateSupplier(true);
-    else if (action === 'import') setShowImportModal(true);
+    if (action === 'new') {
+      setEditingSupplier(null);
+      setShowCreateSupplier(true);
+    } else if (action === 'import') setShowImportModal(true);
     else if (action === 'ai') setShowAIModal(true);
     setSearchParams({}, { replace: true });
   }, [searchParams, setSearchParams]);
 
   const handleCreateSupplier = async (data: Partial<Supplier>) => {
-    if (!user?.id) { toast.error('Sesión no válida. Recarga la página e inicia sesión de nuevo.'); return; }
+    if (!dataUserId) { toast.error('Sesión no válida. Recarga la página e inicia sesión de nuevo.'); return; }
     try {
       if (editingSupplier) {
-        const updated = await updateSupplierRequest(user.id, { ...editingSupplier, ...data } as Supplier);
+        const updated = await updateSupplierRequest(dataUserId, { ...editingSupplier, ...data } as Supplier);
         setSuppliers(prev => prev.map(s => s._id === updated._id ? updated : s));
         toast.success('Proveedor actualizado');
       } else {
-        const created = await createSupplierRequest(user.id, data);
-        setSuppliers(prev => [created, ...prev]);
+        const created = await createSupplierRequest(dataUserId, data);
+        setSuppliers(prev => [created, ...prev.filter((s) => s._id !== created._id)]);
         toast.success('Proveedor creado');
       }
       setShowCreateSupplier(false);
@@ -306,10 +329,10 @@ export function SuppliersPage() {
   };
 
   const handleDeleteSupplier = async (supplier: Supplier) => {
-    if (!user?.id) return;
+    if (!dataUserId) return;
     if (!confirm(`¿Eliminar "${supplier.name}"?`)) return;
     try {
-      await deleteSupplierRequest(user.id, supplier._id);
+      await deleteSupplierRequest(dataUserId, supplier._id);
       setSuppliers(prev => prev.filter(s => s._id !== supplier._id));
       toast.success('Proveedor eliminado');
     } catch {
@@ -319,9 +342,9 @@ export function SuppliersPage() {
 
   const handleValidate = async (supplier: Supplier, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!user?.id) return;
+    if (!dataUserId) return;
     try {
-      const updated = await updateSupplierRequest(user.id, {
+      const updated = await updateSupplierRequest(dataUserId, {
         ...supplier,
         validated: true,
         validatedAt: new Date().toISOString(),

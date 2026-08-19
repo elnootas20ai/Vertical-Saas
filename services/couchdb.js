@@ -11435,9 +11435,25 @@ export async function listCatalogItemsByUser(req, userId, { module: filterModule
   // solo para listar la carta de un titular (aunque tenga 0 productos).
   let docs;
   try {
-    const selector = uid
-      ? { type: 'catalog_item', user_id: uid }
-      : { type: 'catalog_item' };
+    let selector;
+    if (uid && filterModule === 'stock') {
+      selector = { type: 'catalog_item', user_id: uid, module: 'stock' };
+    } else if (uid && filterModule === 'catalog') {
+      // Carta: excluir almacén puro en el servidor (menos payload).
+      selector = {
+        type: 'catalog_item',
+        user_id: uid,
+        module: { $ne: 'stock' },
+      };
+    } else if (uid) {
+      selector = { type: 'catalog_item', user_id: uid };
+    } else if (filterModule === 'stock') {
+      selector = { type: 'catalog_item', module: 'stock' };
+    } else if (filterModule === 'catalog') {
+      selector = { type: 'catalog_item', module: { $ne: 'stock' } };
+    } else {
+      selector = { type: 'catalog_item' };
+    }
     docs = await findDocuments(req, db, selector, { pageSize: 500, maxDocs: 50_000 });
   } catch {
     const all = await getCatalogDatabaseDocumentsInflight(req);
@@ -11458,9 +11474,27 @@ export async function listCatalogItemsByUser(req, userId, { module: filterModule
 
 // ─── SUPPLIERS ────────────────────────────────────────────────────────────────
 
+function normalizeSupplierOrganizerIds(raw) {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const item of raw) {
+    const id = String(item || '').trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
 export function buildSupplierDocument(userId, data = {}, existing = null) {
   const now = new Date().toISOString();
+  // Nunca reutilizar _id/_rev del body en altas: si el form arrastra el del anterior,
+  // CouchDB haría conflicto o sobrescribiría y parecería que "solo deja 1 proveedor".
   const id = existing?._id || `sup-${uuidv4()}`;
+  const organizerIds = Object.prototype.hasOwnProperty.call(data, 'organizerIds')
+    ? normalizeSupplierOrganizerIds(data.organizerIds)
+    : normalizeSupplierOrganizerIds(existing?.organizerIds);
 
   return {
     _id: id,
@@ -11475,6 +11509,7 @@ export function buildSupplierDocument(userId, data = {}, existing = null) {
     address: String(data.address || ''),
     contactPerson: String(data.contactPerson || ''),
     category: String(data.category || 'general'),
+    organizerIds,
     paymentTerms: String(data.paymentTerms || '30 días'),
     notes: String(data.notes || ''),
     active: data.active !== undefined ? Boolean(data.active) : (existing?.active ?? true),
@@ -11501,6 +11536,7 @@ export function sanitizeSupplier(doc) {
     address: doc.address || '',
     contactPerson: doc.contactPerson || '',
     category: doc.category || 'general',
+    organizerIds: normalizeSupplierOrganizerIds(doc.organizerIds),
     paymentTerms: doc.paymentTerms || '30 días',
     notes: doc.notes || '',
     active: doc.active !== undefined ? Boolean(doc.active) : true,
@@ -11514,11 +11550,24 @@ export function sanitizeSupplier(doc) {
 }
 
 export async function listSuppliersByUser(req, userId) {
+  const uid = String(userId || '').trim();
   const db = getCatalogDbName();
   await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
+  await ensureCatalogTypeUserIndex(req, db);
+
+  let docs;
+  try {
+    const selector = uid ? { type: 'supplier', user_id: uid } : { type: 'supplier' };
+    docs = await findDocuments(req, db, selector, { pageSize: 200, maxDocs: 5_000 });
+  } catch {
+    const all = await getCatalogDatabaseDocumentsInflight(req);
+    docs = all.filter(
+      (doc) => doc?.type === 'supplier' && !doc?.deletedAt && (!uid || doc?.user_id === uid),
+    );
+  }
+
   return docs
-    .filter((doc) => doc?.type === 'supplier' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .filter((doc) => doc?.type === 'supplier' && !doc?.deletedAt && (!uid || doc?.user_id === uid))
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
 }
 
@@ -11655,11 +11704,30 @@ export function sanitizePurchaseInvoice(doc) {
 }
 
 export async function listPurchaseInvoicesByUser(req, userId) {
+  const uid = String(userId || '').trim();
   const db = getCatalogDbName();
   await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
+  await ensureCatalogTypeUserIndex(req, db);
+
+  let docs;
+  try {
+    const selector = uid
+      ? { type: 'purchase_invoice', user_id: uid }
+      : { type: 'purchase_invoice' };
+    docs = await findDocuments(req, db, selector, { pageSize: 200, maxDocs: 20_000 });
+  } catch {
+    const all = await getCatalogDatabaseDocumentsInflight(req);
+    docs = all.filter(
+      (doc) =>
+        doc?.type === 'purchase_invoice' && !doc?.deletedAt && (!uid || doc?.user_id === uid),
+    );
+  }
+
   return docs
-    .filter((doc) => doc?.type === 'purchase_invoice' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .filter(
+      (doc) =>
+        doc?.type === 'purchase_invoice' && !doc?.deletedAt && (!uid || doc?.user_id === uid),
+    )
     .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
 }
 

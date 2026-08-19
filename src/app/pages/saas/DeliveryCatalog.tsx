@@ -2078,8 +2078,8 @@ function CreateSupplierModal({ isOpen, onClose, onCreate, editItem, brands = [] 
     }
     setSubmitting(true);
     try {
+      // Solo campos del formulario: no esparcir editItem (_id/_rev) en el alta.
       await onCreate({
-        ...editItem,
         name: form.name,
         cif: form.cif,
         email: form.email,
@@ -3950,15 +3950,18 @@ export function CatalogPage() {
   // ── CRUD: Suppliers ─────────────────────────────────────────────────────────
 
   const handleCreateSupplier = async (data: Partial<Supplier>) => {
-    if (!user?.id) { toast.error('Sesión no válida. Recarga la página e inicia sesión de nuevo.'); return; }
+    if (!dataUserId) { toast.error('Sesión no válida. Recarga la página e inicia sesión de nuevo.'); return; }
     try {
       if (editingSupplier) {
-        const updated = await updateSupplierRequest(user.id, { ...editingSupplier, ...data } as Supplier);
+        const updated = await updateSupplierRequest(dataUserId, { ...editingSupplier, ...data } as Supplier);
         setSuppliers(prev => prev.map(s => s._id === updated._id ? updated : s));
         toast.success('Proveedor actualizado');
       } else {
-        const created = await createSupplierRequest(user.id, data);
-        setSuppliers(prev => [created, ...prev]);
+        const created = await createSupplierRequest(dataUserId, data);
+        setSuppliers(prev => {
+          const withoutDup = prev.filter((s) => s._id !== created._id);
+          return [created, ...withoutDup];
+        });
         toast.success('Proveedor creado');
       }
       setShowCreateSupplier(false);
@@ -3969,10 +3972,10 @@ export function CatalogPage() {
   };
 
   const handleDeleteSupplier = async (supplier: Supplier) => {
-    if (!user?.id) return;
+    if (!dataUserId) return;
     if (!confirm(`¿Eliminar "${supplier.name}"?`)) return;
     try {
-      await deleteSupplierRequest(user.id, supplier._id);
+      await deleteSupplierRequest(dataUserId, supplier._id);
       setSuppliers(prev => prev.filter(s => s._id !== supplier._id));
       toast.success('Proveedor eliminado');
     } catch {

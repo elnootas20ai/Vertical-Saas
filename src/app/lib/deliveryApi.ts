@@ -846,17 +846,24 @@ export async function deleteCatalogItemRequest(userId: string, itemId: string): 
 
 export async function listSuppliersRequest(userId: string): Promise<Supplier[]> {
   const id = normalizeUserId(userId);
+  // Cache-bust: un GET cacheado tras el 1.º alta hacía parecer que "solo hay 1 proveedor".
   const payload = await request<{ ok: boolean; suppliers: Supplier[] }>(
-    `/api/delivery/suppliers/${encodeURIComponent(id)}`,
+    `/api/delivery/suppliers/${encodeURIComponent(id)}?_=${Date.now()}`,
   );
   return payload.suppliers || [];
 }
 
 export async function createSupplierRequest(userId: string, data: Partial<Supplier>): Promise<Supplier> {
   const id = normalizeUserId(userId);
+  const {
+    _id: _omitId,
+    _rev: _omitRev,
+    id: _omitLegacyId,
+    ...supplierFields
+  } = data as Partial<Supplier> & { id?: string };
   const result = await request<{ ok: boolean; supplier: Supplier }>(
     `/api/delivery/suppliers/${encodeURIComponent(id)}`,
-    { method: 'POST', body: JSON.stringify({ supplier: data }) },
+    { method: 'POST', body: JSON.stringify({ supplier: supplierFields }) },
   );
   if (!result.supplier) throw new Error('Respuesta inválida del servidor');
   return result.supplier;
