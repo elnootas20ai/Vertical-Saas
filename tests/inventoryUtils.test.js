@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildInventoryOrganizerGroups,
   computeInventoryStats,
   computePurchaseSuggestion,
+  filterItemsByOrganizer,
   inventoryStatus,
   inventoryStatusLabel,
   listInventoryOrganizerChoices,
@@ -10,6 +12,7 @@ import {
   resolveInventoryOrganizerId,
   stockFieldsForOrganizer,
   ORGANIZER_BEVERAGES,
+  ORGANIZER_PACKAGING,
 } from '../src/app/lib/inventoryUtils.ts';
 
 test('inventoryStatus detects low and out', () => {
@@ -69,4 +72,38 @@ test('resolveInventoryOrganizerId respeta inventoryOrganizerId', () => {
   ]);
   assert.ok(choices.some((c) => c.id === 'brand-pizza-1'));
   assert.ok(choices.some((c) => c.label === 'Bebidas'));
+});
+
+test('buildInventoryOrganizerGroups no mete el resto en un Total que no filtra', () => {
+  const pizza = { _id: 'brand-pizza-1', name: 'pizzeria', deliveryLineKind: 'pizza' };
+  const drinks = { _id: 'brand-drinks-1', name: 'bebidas marca', deliveryLineKind: 'drinks_desserts' };
+  const items = [
+    {
+      name: 'Masa',
+      stockQuantity: 4,
+      minStock: 1,
+      customFields: { inventoryOrganizerId: pizza._id },
+    },
+    {
+      name: 'Cola',
+      stockQuantity: 2,
+      minStock: 1,
+      customFields: { inventoryOrganizerId: drinks._id },
+    },
+    {
+      name: 'Caja pizza',
+      stockQuantity: 10,
+      minStock: 1,
+      stockCategory: 'packaging',
+      customFields: { inventoryOrganizerId: ORGANIZER_PACKAGING },
+    },
+  ];
+  const groups = buildInventoryOrganizerGroups(items, [], [pizza, drinks]);
+  const leftover = groups.find((g) => g.id === drinks._id);
+  assert.ok(leftover, 'la línea de bebidas debe ser un chip con su id, no Total');
+  assert.equal(leftover.total, 1);
+  assert.equal(groups.some((g) => g.id === 'total'), false);
+  const filtered = filterItemsByOrganizer(items, drinks._id, [], [pizza, drinks]);
+  assert.equal(filtered.length, 1);
+  assert.equal(filtered[0].name, 'Cola');
 });

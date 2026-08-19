@@ -35,11 +35,11 @@ import {
 import { AggregatorCashSummary } from '../../components/saas/AggregatorCashSummary';
 import { CajaTimelineBoard } from '../../components/saas/caja/CajaTimelineBoard';
 import {
-  downloadUrielCajaClosings,
+  downloadCajaClosings,
   sessionCajaListMoney,
-  type UrielCajaDownloadFormat,
-  type UrielCajaHistoryRange,
-} from '../../lib/cajaUrielClosingsExcelExport';
+  type CajaDownloadFormat,
+  type CajaHistoryRange,
+} from '../../lib/cajaFacturacionExcelExport';
 import { getBrandBillingConfigRequest } from '../../lib/brandBillingApi';
 import { listBrandsRequest } from '../../lib/brandApi';
 import {
@@ -167,7 +167,7 @@ function last7Days(): string[] {
 }
 
 /** Meses YYYY-MM a pedir para el Excel (nunca “todo” en una sola request). */
-function listCajaExportYearMonths(range: UrielCajaHistoryRange, preferredYm: string): string[] {
+function listCajaExportYearMonths(range: CajaHistoryRange, preferredYm: string): string[] {
   const m = /^(\d{4})-(\d{2})$/.exec(String(preferredYm || '').trim());
   if (!m) return [todayIsoDate().slice(0, 7)];
   const y = Number(m[1]);
@@ -1005,8 +1005,8 @@ export function CajaPage() {
   const excelClosedCount = sessions.filter((s) => String(s.status || '').toLowerCase() !== 'open').length;
 
   const handleDownload = async (
-    format: UrielCajaDownloadFormat,
-    historyRange: UrielCajaHistoryRange = 'month',
+    format: CajaDownloadFormat,
+    historyRange: CajaHistoryRange = 'month',
   ) => {
     const toastId = toast.loading('Preparando facturación…');
     try {
@@ -1072,7 +1072,7 @@ export function CajaPage() {
       const scopedExport = Array.from(byId.values());
 
       toast.loading('Generando archivo Excel…', { id: toastId });
-      const { rows, fileName, sheetNames, yearMonth: exportedMonth, historyRange: usedRange } = await downloadUrielCajaClosings(scopedExport, {
+      const { rows, fileName, sheetNames, yearMonth: exportedMonth, historyRange: usedRange } = await downloadCajaClosings(scopedExport, {
         pointOfSaleId: pdvId || undefined,
         pointOfSaleName: pdv ? pointOfSaleDisplayLabel(pdv) : undefined,
         pointsOfSale: pointsOfSale.map((p) => ({

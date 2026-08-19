@@ -19,7 +19,7 @@ const r2 = (n: number): number => Math.round(n * 100) / 100;
 /** Canales de integrador que se declaran al cierre. */
 const CLOSING_AGGREGATOR_CHANNELS = ['glovo', 'ubereats', 'justeat', 'flipdish', 'app'] as const;
 
-/** App propia: 'flipdish' y 'app' son el mismo grupo (como en el Excel Uriel). */
+/** App propia: 'flipdish' y 'app' son el mismo grupo (como en el Excel de cierres). */
 function channelAliases(channel: string): string[] {
   if (channel === 'flipdish' || channel === 'app') return ['flipdish', 'app'];
   return [channel];

@@ -967,7 +967,7 @@ export function computeCompanyBillingBreakdown(
 
 // ─── Pulso operativo por tienda (7 días / mes) ───────────────────────────────
 
-/** Columnas del Excel Uriel (EFECTIVO · TPV · X · App · UBER · JUST EAT · GLOVO). */
+/** Columnas del Excel de cierres (EFECTIVO · TPV · X · App · UBER · JUST EAT · GLOVO). */
 export type OpsExcelChannels = {
   efectivo: number;
   tpv: number;
@@ -1016,7 +1016,7 @@ export function opsExcelChannelsTotal(c: OpsExcelChannels | null | undefined): n
 }
 
 /**
- * Reparte un importe al bucket del Excel Uriel (mismo criterio que cierres):
+ * Reparte un importe al bucket del Excel de cierres (mismo criterio que cierres):
  * apps → Glovo/Uber/Just Eat/App; resto local por método de pago → Efectivo/TPV/X.
  */
 export function addAmountToOpsExcelChannels(
@@ -1078,7 +1078,7 @@ const VERTIAL_APP_CHANNELS = ['flipdish', 'app'] as const;
 
 /**
  * Totales de integradores declarados a mano al cierre (Caja 2).
- * Misma prioridad que el Excel Uriel: aggregatorClosingTotals > salesByChannel.
+ * Misma prioridad que el Excel de cierres: aggregatorClosingTotals > salesByChannel.
  */
 export function aggregatorChannelsFromClosingSessions(
   sessions: TpvRegisterSession[],
@@ -1179,7 +1179,7 @@ export type StoreOpsDay = {
   kebab: number;
   /** vs día anterior; null el primero del rango */
   revenueDeltaPct: number | null;
-  /** Desglose tipo Excel Uriel del día */
+  /** Desglose tipo Excel de cierres del día */
   channels: OpsExcelChannels;
 };
 
@@ -1272,7 +1272,7 @@ function foodCountsForDay(orders: DeliveryOrder[], dayKey: string): {
 
 /**
  * Unidades del día para el resumen por tienda (día a día).
- * Con cierre de caja: mismas cifras que el Excel Uriel / Caja 2
+ * Con cierre de caja: mismas cifras que el Excel de cierres / Caja 2
  * (`productClosingCounts` = TPV + Glovo/Uber/Just/App).
  * Sin cierre: pedidos Vertial.
  */

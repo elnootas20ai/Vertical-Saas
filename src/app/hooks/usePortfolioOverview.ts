@@ -53,7 +53,7 @@ import {
   ceoCajaMonthlyTotals,
   yearMonthFromSession,
   type CeoCajaChannelMix,
-} from '../lib/cajaUrielClosingsExcelExport';
+} from '../lib/cajaFacturacionExcelExport';
 import type { TpvRegisterSession } from '../lib/deliveryApi';
 import { localCalendarDayKey } from '../lib/tpvCajaScope';
 import { computeEbitdaForMonth } from '../lib/ebitdaMetrics';

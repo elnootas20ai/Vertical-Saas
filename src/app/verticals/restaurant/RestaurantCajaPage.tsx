@@ -27,9 +27,9 @@ import { CajaTimelineBoard } from '../../components/saas/caja/CajaTimelineBoard'
 import { CajaCashMovementsList } from '../../components/saas/caja/CajaCashMovementsList';
 import { resolveCajaPageExitPath } from '../../lib/retailOpsPaths';
 import {
-  downloadUrielCajaClosings,
-  type UrielCajaDownloadFormat,
-} from '../../lib/cajaUrielClosingsExcelExport';
+  downloadCajaClosings,
+  type CajaDownloadFormat,
+} from '../../lib/cajaFacturacionExcelExport';
 import { getBrandBillingConfigRequest } from '../../lib/brandBillingApi';
 import { listBrandsRequest } from '../../lib/brandApi';
 import {
@@ -703,7 +703,7 @@ export function RestaurantCajaPage() {
 
   const excelClosedCount = scopedSessions.filter((s) => String(s.status || '').toLowerCase() !== 'open').length;
 
-  const handleDownload = async (format: UrielCajaDownloadFormat) => {
+  const handleDownload = async (format: CajaDownloadFormat) => {
     const toastId = toast.loading('Descargando Excel de facturación… Puede tardar.');
     try {
       const pdvId = String(
@@ -754,7 +754,7 @@ export function RestaurantCajaPage() {
       });
 
       toast.loading('Generando archivo Excel…', { id: toastId });
-      const { rows, fileName, sheetNames } = await downloadUrielCajaClosings(exportSessions, {
+      const { rows, fileName, sheetNames } = await downloadCajaClosings(exportSessions, {
         pointOfSaleId: pdvId,
         pointOfSaleName: pdv ? pointOfSaleDisplayLabel(pdv) : pdvId,
         businessName: String(currentBusiness?.name || '').trim() || undefined,

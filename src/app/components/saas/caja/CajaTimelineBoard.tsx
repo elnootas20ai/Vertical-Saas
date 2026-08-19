@@ -15,10 +15,10 @@ import {
 import type { PointOfSale, TpvRegisterSession } from '../../../lib/deliveryApi';
 import { pointOfSaleDisplayLabel } from '../../../lib/deliveryApi';
 import type {
-  UrielCajaDownloadFormat,
-  UrielCajaHistoryRange,
-} from '../../../lib/cajaUrielClosingsExcelExport';
-import { sessionCajaListMoney } from '../../../lib/cajaUrielClosingsExcelExport';
+  CajaDownloadFormat,
+  CajaHistoryRange,
+} from '../../../lib/cajaFacturacionExcelExport';
+import { sessionCajaListMoney } from '../../../lib/cajaFacturacionExcelExport';
 import {
   buildTpvRegisterSummaryForDay,
   isTpvRegisterSessionFromPriorCalendarDay,
@@ -99,8 +99,8 @@ export type CajaTimelineBoardProps = {
   onExcelClick?: () => void | Promise<void>;
   /** Menú Descargar: Excel / Google Sheets / CSV (+ alcance historial). */
   onDownloadFormat?: (
-    format: UrielCajaDownloadFormat,
-    range?: UrielCajaHistoryRange,
+    format: CajaDownloadFormat,
+    range?: CajaHistoryRange,
   ) => void | Promise<void>;
   onBack: () => void;
   selectedSessionId: string | null;
@@ -397,21 +397,21 @@ export function CajaTimelineBoard({
                       {([
                         {
                           id: 'excel' as const,
-                          range: 'month' as UrielCajaHistoryRange,
+                          range: 'month' as CajaHistoryRange,
                           label: 'Este mes',
                           description: 'Solo el mes del día seleccionado (rápido)',
                           icon: <FileSpreadsheet className="w-4 h-4 text-emerald-600" />,
                         },
                         {
                           id: 'excel' as const,
-                          range: 'year' as UrielCajaHistoryRange,
+                          range: 'year' as CajaHistoryRange,
                           label: 'Este año',
                           description: 'Mes a mes del año + totales',
                           icon: <FileSpreadsheet className="w-4 h-4 text-emerald-600/80" />,
                         },
                         {
                           id: 'excel' as const,
-                          range: 'all' as UrielCajaHistoryRange,
+                          range: 'all' as CajaHistoryRange,
                           label: 'Historial (por meses)',
                           description: 'Hasta ~3 años, cargando mes a mes (no de golpe)',
                           icon: <FileSpreadsheet className="w-4 h-4 text-emerald-600/60" />,

@@ -1,40 +1,40 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildUrielCajaClosingsWorkbook,
-  buildUrielCajaComparativaYearSheetAoa,
-  buildUrielCajaMonthSheet,
-  buildUrielCajaSheetAoa,
+  buildCajaClosingsWorkbook,
+  buildCajaComparativaYearSheetAoa,
+  buildCajaMonthSheet,
+  buildCajaSheetAoa,
   brandMoneyShares,
-  canDownloadUrielCajaExcel,
-  sessionToUrielAmounts,
-  splitSessionUrielAmountsByBillingSheet,
-  splitUrielAmountsByBrand,
-  URIEL_BLACKBURGER_HEADERS,
-  URIEL_CAJA_MONEY_HEADERS,
-  URIEL_MODOMIO_HEADERS,
-} from '../src/app/lib/cajaUrielClosingsExcelExport.ts';
+  canDownloadCajaExcel,
+  sessionToCajaAmounts,
+  splitSessionCajaAmountsByBillingSheet,
+  splitCajaAmountsByBrand,
+  BLACKBURGER_HEADERS,
+  CAJA_MONEY_HEADERS,
+  MODOMIO_HEADERS,
+} from '../src/app/lib/cajaFacturacionExcelExport.ts';
 
-describe('canDownloadUrielCajaExcel', () => {
+describe('canDownloadCajaExcel', () => {
   it('permite cuenta dueña (no worker) y Admin; bloquea cajero/trabajador', () => {
-    expect(canDownloadUrielCajaExcel({ user_id: 'ceo', accountType: 'company' })).toBe(true);
-    expect(canDownloadUrielCajaExcel({ user_id: 'a1', accountType: 'user', role: 'Admin' })).toBe(true);
-    expect(canDownloadUrielCajaExcel(
+    expect(canDownloadCajaExcel({ user_id: 'ceo', accountType: 'company' })).toBe(true);
+    expect(canDownloadCajaExcel({ user_id: 'a1', accountType: 'user', role: 'Admin' })).toBe(true);
+    expect(canDownloadCajaExcel(
       { user_id: 'own', accountType: 'user', invitedBy: 'x' },
       [{ owner_user_id: 'own' }],
     )).toBe(true);
-    expect(canDownloadUrielCajaExcel({
+    expect(canDownloadCajaExcel({
       user_id: 'w1',
       accountType: 'user',
       invitedBy: 'ceo',
       role: 'Encargado',
     })).toBe(false);
-    expect(canDownloadUrielCajaExcel({
+    expect(canDownloadCajaExcel({
       user_id: 'w2',
       accountType: 'user',
       invitedBy: 'ceo',
       role: 'Gerente',
     })).toBe(false);
-    expect(canDownloadUrielCajaExcel(null)).toBe(false);
+    expect(canDownloadCajaExcel(null)).toBe(false);
   });
 });
 
@@ -57,9 +57,9 @@ function closedSession(partial) {
   };
 }
 
-describe('sessionToUrielAmounts', () => {
+describe('sessionToCajaAmounts', () => {
   it('mapea VISA + B(Bizum/otro) + aggregators + Flipdish→App', () => {
-    const amounts = sessionToUrielAmounts(closedSession({
+    const amounts = sessionToCajaAmounts(closedSession({
       summary: {
         salesByMethod: { efectivo: 100.5, tarjeta: 40, bizum: 12, online: 0, otro: 3 },
         salesByChannel: { app: 10 },
@@ -90,7 +90,7 @@ describe('sessionToUrielAmounts', () => {
   });
 
   it('si el total está en marcas y el canal a 0, las marcas cuentan; el no-pagado no', () => {
-    const amounts = sessionToUrielAmounts(closedSession({
+    const amounts = sessionToCajaAmounts(closedSession({
       aggregatorClosingTotals: { glovo: 0, flipdish: 0 },
       aggregatorClosingCard: { flipdish: 48.2 },
       aggregatorClosingBrandTotals: {
@@ -102,7 +102,7 @@ describe('sessionToUrielAmounts', () => {
   });
 });
 
-describe('splitSessionUrielAmountsByBillingSheet', () => {
+describe('splitSessionCajaAmountsByBillingSheet', () => {
   const sheets = [
     {
       id: 'modomio',
@@ -131,8 +131,8 @@ describe('splitSessionUrielAmountsByBillingSheet', () => {
       },
       productClosingCounts: { pizza: 5, burger: 5, taco: 0 },
     });
-    const mm = splitSessionUrielAmountsByBillingSheet(session, sheets[0], sheets);
-    const bb = splitSessionUrielAmountsByBillingSheet(session, sheets[1], sheets);
+    const mm = splitSessionCajaAmountsByBillingSheet(session, sheets[0], sheets);
+    const bb = splitSessionCajaAmountsByBillingSheet(session, sheets[1], sheets);
     expect(mm.efectivo).toBe(50);
     expect(bb.efectivo).toBe(50);
     expect(mm.glovo).toBe(100);
@@ -172,21 +172,21 @@ describe('splitSessionUrielAmountsByBillingSheet', () => {
       },
       productClosingCounts: { pizza: 5, burger: 5, taco: 0 },
     });
-    const mm = splitSessionUrielAmountsByBillingSheet(session, legacy[0], legacy);
-    const bb = splitSessionUrielAmountsByBillingSheet(session, legacy[1], legacy);
+    const mm = splitSessionCajaAmountsByBillingSheet(session, legacy[0], legacy);
+    const bb = splitSessionCajaAmountsByBillingSheet(session, legacy[1], legacy);
     expect(mm.glovo).toBe(70);
     expect(bb.glovo).toBe(30);
     expect(mm.total + bb.total).toBe(200);
   });
 });
 
-describe('brandMoneyShares / splitUrielAmountsByBrand', () => {
+describe('brandMoneyShares / splitCajaAmountsByBrand', () => {
   it('reparte €: pizzas → MODOMIO; burgers+tacos → BLACK BURGER', () => {
     expect(brandMoneyShares(7, 2, 1)).toEqual({
       modomio: 0.7,
       blackburger: 0.3,
     });
-    const full = sessionToUrielAmounts(closedSession({
+    const full = sessionToCajaAmounts(closedSession({
       summary: {
         salesByMethod: { efectivo: 100, tarjeta: 0, bizum: 0, online: 0, otro: 0 },
         salesByChannel: {},
@@ -194,8 +194,8 @@ describe('brandMoneyShares / splitUrielAmountsByBrand', () => {
       },
       productClosingCounts: { pizza: 7, burger: 2, taco: 1 },
     }));
-    const modo = splitUrielAmountsByBrand(full, 'modomio');
-    const bb = splitUrielAmountsByBrand(full, 'blackburger');
+    const modo = splitCajaAmountsByBrand(full, 'modomio');
+    const bb = splitCajaAmountsByBrand(full, 'blackburger');
     expect(modo.efectivo).toBe(70);
     expect(bb.efectivo).toBe(30);
     expect(modo.totalPizza).toBe(7);
@@ -206,7 +206,7 @@ describe('brandMoneyShares / splitUrielAmountsByBrand', () => {
   });
 });
 
-describe('buildUrielCajaMonthSheet', () => {
+describe('buildCajaMonthSheet', () => {
   it('suma varios cierres del mismo día en una fila', () => {
     const sessions = [
       closedSession({
@@ -244,7 +244,7 @@ describe('buildUrielCajaMonthSheet', () => {
       }),
     ];
 
-    const sheet = buildUrielCajaMonthSheet(sessions, {
+    const sheet = buildCajaMonthSheet(sessions, {
       pointOfSaleId: 'pdv-a',
       yearMonth: '2026-07',
     });
@@ -293,12 +293,12 @@ describe('buildUrielCajaMonthSheet', () => {
         productClosingCounts: { pizza: 2, burger: 0, taco: 0 },
       }),
     ];
-    const all = buildUrielCajaMonthSheet(sessions, { yearMonth: '2026-07' });
+    const all = buildCajaMonthSheet(sessions, { yearMonth: '2026-07' });
     expect(all.rows.find((r) => r.day === 5).efectivo).toBe(30);
     expect(all.monthTotalPizzas).toBe(3);
   });
 
-  it('AOA plantilla Uriel (foto) + COMPARATIVA por meses', () => {
+  it('AOA plantilla clasica de cierres (foto) + COMPARATIVA por meses', () => {
     const sessions = [
       closedSession({
         openedAt: '2026-07-01T10:00:00',
@@ -321,31 +321,31 @@ describe('buildUrielCajaMonthSheet', () => {
         productClosingCounts: { pizza: 5, burger: 0, taco: 0 },
       }),
     ];
-    const sheet = buildUrielCajaMonthSheet(sessions, { pointOfSaleId: 'pdv-a', yearMonth: '2026-07' });
+    const sheet = buildCajaMonthSheet(sessions, { pointOfSaleId: 'pdv-a', yearMonth: '2026-07' });
 
-    expect(URIEL_CAJA_MONEY_HEADERS).toEqual([
+    expect(CAJA_MONEY_HEADERS).toEqual([
       'DIA', 'EFECTIVO', 'TPV', 'X', 'App', 'UBER', 'JUST EAT', 'GLOVO', 'TOTAL',
     ]);
-    expect(URIEL_MODOMIO_HEADERS).toContain('TPV');
-    expect(URIEL_MODOMIO_HEADERS).toContain('X');
-    expect(URIEL_MODOMIO_HEADERS).toContain('GLOVO');
-    expect(URIEL_MODOMIO_HEADERS).not.toContain('VISA');
-    expect(URIEL_MODOMIO_HEADERS).not.toContain('GLOVVO');
+    expect(MODOMIO_HEADERS).toContain('TPV');
+    expect(MODOMIO_HEADERS).toContain('X');
+    expect(MODOMIO_HEADERS).toContain('GLOVO');
+    expect(MODOMIO_HEADERS).not.toContain('VISA');
+    expect(MODOMIO_HEADERS).not.toContain('GLOVVO');
 
-    const modo = buildUrielCajaSheetAoa(sheet, 'modomio');
+    const modo = buildCajaSheetAoa(sheet, 'modomio');
     expect(modo[0][0]).toContain('MODOMIO');
-    expect(modo[2]).toEqual([...URIEL_MODOMIO_HEADERS]);
+    expect(modo[2]).toEqual([...MODOMIO_HEADERS]);
     // Día 1 · 70 € pizzas; celdas a 0 en blanco
     expect(modo[3]).toEqual([1, 70, '', '', '', '', '', '', 70, 7]);
     expect(modo[5]).toEqual(['TOTAL MES', 70, '', '', '', '', '', '', 70, 7]);
 
-    const bb = buildUrielCajaSheetAoa(sheet, 'blackburger');
+    const bb = buildCajaSheetAoa(sheet, 'blackburger');
     expect(bb[0][0]).toContain('BLACK BURGER');
-    expect(bb[2]).toEqual([...URIEL_BLACKBURGER_HEADERS]);
+    expect(bb[2]).toEqual([...BLACKBURGER_HEADERS]);
     expect(bb[3]).toEqual([1, 30, '', '', '', '', '', '', 30, 2, 1]);
     expect(bb[5]).toEqual(['TOTAL MES', 30, '', '', '', '', '', '', 30, 2, 1]);
 
-    const comp = buildUrielCajaComparativaYearSheetAoa(sessions, {
+    const comp = buildCajaComparativaYearSheetAoa(sessions, {
       pointOfSaleId: 'pdv-a',
       year: 2026,
       billingSheets: null,
@@ -397,7 +397,7 @@ describe('buildUrielCajaMonthSheet', () => {
         productClosingCounts: { pizza: 0, burger: 2, taco: 1 },
       }),
     ];
-    const built = buildUrielCajaClosingsWorkbook(sessions, {
+    const built = buildCajaClosingsWorkbook(sessions, {
       yearMonth: '2026-07',
       historyRange: 'all',
       pointsOfSale: [
@@ -455,7 +455,7 @@ describe('buildUrielCajaMonthSheet', () => {
         productClosingCounts: { pizza: 50, burger: 0, taco: 0 },
       }),
     ];
-    const built = buildUrielCajaClosingsWorkbook(sessions, {
+    const built = buildCajaClosingsWorkbook(sessions, {
       yearMonth: '2026-07',
       pointsOfSale: [{ id: 'pdv-tiana', name: 'Tiana' }],
     });
@@ -480,7 +480,7 @@ describe('buildUrielCajaMonthSheet', () => {
         productClosingCounts: { pizza: 4, burger: 0, taco: 0 },
       }),
     ];
-    const built = buildUrielCajaClosingsWorkbook(sessions, {
+    const built = buildCajaClosingsWorkbook(sessions, {
       yearMonth: '2026-08',
       historyRange: 'all',
       pointsOfSale: [{ id: 'pdv-a', name: 'Tienda A' }],
@@ -505,7 +505,7 @@ describe('buildUrielCajaMonthSheet', () => {
         productClosingCounts: { pizza: 4, burger: 0, taco: 0 },
       }),
     ];
-    const built = buildUrielCajaClosingsWorkbook(sessions, {
+    const built = buildCajaClosingsWorkbook(sessions, {
       yearMonth: '2026-07',
       historyRange: 'month',
       pointsOfSale: [{ id: 'pdv-a', name: 'Tienda A' }],
@@ -516,7 +516,7 @@ describe('buildUrielCajaMonthSheet', () => {
     expect(headerRow).toBe('DIA');
   });
 
-  it('nombre de archivo y títulos usan la empresa (no Uriel)', () => {
+  it('nombre de archivo y títulos usan el nombre de la empresa', () => {
     const sessions = [
       closedSession({
         openedAt: '2026-07-01T10:00:00',
@@ -528,7 +528,7 @@ describe('buildUrielCajaMonthSheet', () => {
         productClosingCounts: { pizza: 4, burger: 0, taco: 0 },
       }),
     ];
-    const built = buildUrielCajaClosingsWorkbook(sessions, {
+    const built = buildCajaClosingsWorkbook(sessions, {
       yearMonth: '2026-07',
       historyRange: 'month',
       businessName: 'Royo del Amor',
@@ -557,7 +557,7 @@ describe('buildUrielCajaMonthSheet', () => {
         productClosingCounts: { pizza: 2, burger: 0, taco: 0 },
       }),
     ];
-    const built = buildUrielCajaClosingsWorkbook(sessions, {
+    const built = buildCajaClosingsWorkbook(sessions, {
       yearMonth: '2026-07',
       pointsOfSale: [{ id: 'pdv-tiana', name: 'Tiana', workCenterId: 'wc-tiana' }],
     });

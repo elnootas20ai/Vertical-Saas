@@ -14,7 +14,7 @@ import { formatMoneyEs, formatNumberEs } from '../../../../lib/formatNumberEs';
 import { BUSINESS_TYPE_COLORS, BUSINESS_TYPE_LABELS } from '../../BusinessCarousel';
 import type { BusinessType } from '../../../../lib/businessApi';
 import { deliveryBrandSheet, deliveryChannelShares } from '../portfolioCompanyPulse';
-import type { CeoCajaChannelMix } from '../../../../lib/cajaUrielClosingsExcelExport';
+import type { CeoCajaChannelMix } from '../../../../lib/cajaFacturacionExcelExport';
 import {
   type AggregatedChannel,
   type CompanyGlance,

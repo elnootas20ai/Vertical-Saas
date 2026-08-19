@@ -287,7 +287,7 @@ export function pruneEmptyBillingSheets(sheets: BrandBillingSheet[]): BrandBilli
 }
 
 /**
- * Plantilla Uriel: burgers + tacos en la misma hoja.
+ * Plantilla clasica de cierres: burgers + tacos en la misma hoja.
  * - Marcas taco → se mueven a la hoja burger si existe.
  * - Si hay hoja burger sin columna TACOS y no hay hoja taco aparte → se añade TOTAL TACOS.
  */
@@ -385,7 +385,7 @@ function sheetForBrand(brand: Brand): BrandBillingSheet {
 
 /**
  * Sugiere hojas Excel: 1 por marca, pero tacos van con la hoja burger
- * (plantilla Uriel: BLACK BURGER = TOTAL BURGUER + TOTAL TACOS).
+ * (plantilla clasica de cierres: BLACK BURGER = TOTAL BURGUER + TOTAL TACOS).
  */
 export function suggestBillingSheetsFromBrands(brands: Brand[]): BrandBillingSheet[] {
   const eligible = brandsForBilling(brands).filter((b) => !isUnsetDefaultShell(b));
@@ -670,7 +670,7 @@ export type ClosingBillingBrandSlot = {
   memberBrandIds: string[];
 };
 
-/** Hojas listas para cierre/Excel: config guardada o sugerencia Uriel (tacos → burger). */
+/** Hojas listas para cierre/Excel: config guardada o sugerencia clasica (tacos → burger). */
 export function resolveBillingSheetsForClosing(
   sheets: BrandBillingSheet[] | null | undefined,
   brands: Brand[],

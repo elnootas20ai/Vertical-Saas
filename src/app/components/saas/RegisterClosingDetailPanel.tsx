@@ -32,7 +32,7 @@ import { ShiftBrandBillingSummary } from './ShiftBrandBillingSummary';
 import { buildBrandLabelsMap } from '../../lib/brandLabels';
 import { DeliveryFoodUnitLabel } from './delivery/DeliveryFoodUnitIcon';
 import { CajaCashMovementsList } from './caja/CajaCashMovementsList';
-import { sessionToUrielAmounts } from '../../lib/cajaUrielClosingsExcelExport';
+import { sessionToCajaAmounts } from '../../lib/cajaFacturacionExcelExport';
 import { formatMoneyEs } from '../../lib/formatNumberEs';
 
 const METHOD_CHIP =
@@ -214,7 +214,7 @@ export function RegisterClosingDetailPanel({
     [isRestaurant, aggregatorRows],
   );
   /** Mismo TOTAL que el resumen Excel / «Caja cerrada» del TPV. */
-  const excelAmounts = useMemo(() => sessionToUrielAmounts(session), [session]);
+  const excelAmounts = useMemo(() => sessionToCajaAmounts(session), [session]);
   const totalFacturacion = isRestaurant
     ? Number(summary.totalSales) || 0
     : Number(excelAmounts.total) || 0;

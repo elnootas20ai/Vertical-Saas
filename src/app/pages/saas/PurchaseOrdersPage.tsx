@@ -14,6 +14,7 @@ import {
   Send,
   Sparkles,
   Trash2,
+  ChevronDown,
   X,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -127,6 +128,7 @@ function NewPurchaseOrderModal({
   const [itemSearch, setItemSearch] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const [openOrganizerId, setOpenOrganizerId] = useState('');
 
   const activeSuppliers = useMemo(
     () => suppliers.filter((s) => s.active !== false),
@@ -134,12 +136,14 @@ function NewPurchaseOrderModal({
   );
   const supplier = activeSuppliers.find((s) => s._id === supplierId) || null;
 
-  const supplierStockItems = useMemo(
-    () => stockItemsForSupplierOrder(catalogItems, supplier, storeIngredients, commercialBrands),
-    [catalogItems, supplier, storeIngredients, commercialBrands],
-  );
+  const supplierStockItems = useMemo(() => {
+    if (!supplier) return [];
+    return stockItemsForSupplierOrder(catalogItems, supplier, storeIngredients, commercialBrands);
+  }, [catalogItems, supplier, storeIngredients, commercialBrands]);
 
   useEffect(() => {
+    setOpenOrganizerId('');
+    setItemSearch('');
     if (!supplierId || !supplier) {
       setLines([]);
       return;
@@ -149,7 +153,7 @@ function NewPurchaseOrderModal({
         catalogItemId: item._id,
         sku: item.sku || '',
         name: item.name || '',
-        quantity: String(Number(item.reorderQuantity) > 0 ? item.reorderQuantity : 1),
+        quantity: '1',
         unitCost: String(item.costPrice ?? 0),
       })),
     );
@@ -175,7 +179,7 @@ function NewPurchaseOrderModal({
           catalogItemId: item._id,
           sku: item.sku || '',
           name: item.name || '',
-          quantity: String(item.reorderQuantity || 1),
+          quantity: '1',
           unitCost: String(item.costPrice ?? 0),
         },
       ];
@@ -290,14 +294,19 @@ function NewPurchaseOrderModal({
 
           {supplierId ? (
             <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
-              Pedido cargado con lo marcado en el proveedor. Quita líneas o añade más si hace falta.
+              Solo lo de este proveedor. Abre un organizador para ver artículos.
             </p>
-          ) : null}
+          ) : (
+            <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
+              Elige el proveedor. Después verás lo que le puedes pedir.
+            </p>
+          )}
 
+          {!supplierId ? null : (
           <div>
             <div className="flex items-center justify-between gap-2 mb-1">
               <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400">
-                Artículos de almacén
+                Qué le puedes pedir
                 {visibleStockItems.length > 0 ? ` (${visibleStockItems.length})` : ''}
               </label>
               {visibleStockItems.length > 0 ? (
@@ -321,50 +330,66 @@ function NewPurchaseOrderModal({
             </div>
             {pickerGroups.length === 0 ? (
               <p className="text-sm text-gray-400 text-center py-4 rounded-xl border border-dashed border-gray-200 dark:border-gray-700">
-                {supplierId && (supplier?.organizerIds?.length ?? 0) === 0
-                  ? 'Este proveedor no tiene organizadores en «Qué suministra». Edítalo y márcalos, o busca tras asignarlos.'
+                {(supplier?.catalogItemIds?.length ?? 0) === 0 && (supplier?.organizerIds?.length ?? 0) === 0
+                  ? 'Este proveedor no tiene productos en «Qué suministra». Edítalo y márcalos.'
                   : itemSearch.trim()
                     ? 'Ningún artículo coincide con el filtro.'
                     : 'No hay artículos de almacén para este proveedor.'}
               </p>
             ) : (
-              <div className="rounded-xl border border-gray-200 dark:border-gray-700 max-h-64 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800">
-                {pickerGroups.map((group) => (
-                  <div key={group.organizerId}>
-                    <p className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/50 sticky top-0">
-                      {group.organizerLabel}
-                    </p>
-                    <ul>
-                      {group.items.map((item) => {
-                        const added = lines.some((l) => l.catalogItemId === item._id);
-                        return (
-                          <li key={item._id}>
-                            <button
-                              type="button"
-                              onClick={() => addItem(item)}
-                              disabled={added}
-                              className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-60"
-                            >
-                              <span className="min-w-0 truncate font-medium text-gray-900 dark:text-gray-100">
-                                {added ? '✓ ' : '+ '}
-                                {item.name}
-                              </span>
-                              <span className="text-xs text-gray-400 tabular-nums shrink-0">
-                                stock {formatQty(Number(item.stockQuantity || 0))}
-                                {Number(item.minStock) > 0 ? ` / mín. ${formatQty(Number(item.minStock))}` : ''}
-                                {' · '}
-                                {formatMoney(Number(item.costPrice || 0))}
-                              </span>
-                            </button>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-                ))}
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden divide-y divide-gray-100 dark:divide-gray-800">
+                {pickerGroups.map((group) => {
+                  const open = openOrganizerId === group.organizerId;
+                  return (
+                    <div key={group.organizerId}>
+                      <button
+                        type="button"
+                        onClick={() => setOpenOrganizerId(open ? '' : group.organizerId)}
+                        className="w-full px-3 py-2.5 flex items-center justify-between gap-2 text-left bg-gray-50 dark:bg-gray-900/50 hover:bg-gray-100 dark:hover:bg-gray-800"
+                      >
+                        <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">
+                          {group.organizerLabel}
+                          <span className="ml-1.5 font-normal text-gray-400 normal-case tracking-normal">
+                            {group.items.length}
+                          </span>
+                        </span>
+                        <ChevronDown className={`w-4 h-4 text-gray-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+                      </button>
+                      {open ? (
+                        <ul>
+                          {group.items.map((item) => {
+                            const added = lines.some((l) => l.catalogItemId === item._id);
+                            return (
+                              <li key={item._id}>
+                                <button
+                                  type="button"
+                                  onClick={() => addItem(item)}
+                                  disabled={added}
+                                  className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-60"
+                                >
+                                  <span className="min-w-0 truncate font-medium text-gray-900 dark:text-gray-100">
+                                    {added ? '✓ ' : '+ '}
+                                    {item.name}
+                                  </span>
+                                  <span className="text-xs text-gray-400 tabular-nums shrink-0">
+                                    stock {formatQty(Number(item.stockQuantity || 0))}
+                                    {Number(item.minStock) > 0 ? ` / mín. ${formatQty(Number(item.minStock))}` : ''}
+                                    {' · '}
+                                    {formatMoney(Number(item.costPrice || 0))}
+                                  </span>
+                                </button>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      ) : null}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
+          )}
 
           {parsedLines.length > 0 ? (
             <div className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">

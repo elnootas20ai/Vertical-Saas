@@ -68,7 +68,7 @@ import {
 import { AggregatorClosingEditor, type AggregatorClosingSnapshot, type ManualLinesByChannel } from './AggregatorClosingEditor';
 import { DeliveryFoodUnitIcon, DeliveryFoodUnitLabel } from './delivery/DeliveryFoodUnitIcon';
 import { AggregatorCashSummary } from './AggregatorCashSummary';
-import { sessionToUrielAmounts } from '../../lib/cajaUrielClosingsExcelExport';
+import { sessionToCajaAmounts } from '../../lib/cajaFacturacionExcelExport';
 import { ShiftBrandBillingSummary } from './ShiftBrandBillingSummary';
 import {
   buildShiftAppsBrandTotals,
@@ -562,12 +562,10 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
   /** Solo si el cierre dejó fondo explícito. Si no hay / no se detecta → conteo libre y se puede abrir. */
   const openingCashLocked = previousCloseIsNextDayInitial && previousCloseCash != null;
 
-  /** Aviso ANTES de Abrir: otra tablet/PC ya tiene caja abierta en esta tienda. */
-  const existingOpenForStore = useMemo(() => {
+  /** Caja abierta en esta tienda (incluye antiguas >18 h). */
+  const openSessionForStore = useMemo(() => {
     const pdvId = selectedPdv?._id || restrictedToPdvId || '';
-    const opens = (registerSessions || []).filter(
-      (s) => isTpvRegisterSessionOpen(s) && !isTpvRegisterSessionStaleOpen(s),
-    );
+    const opens = (registerSessions || []).filter((s) => isTpvRegisterSessionOpen(s));
     if (pdvId) {
       const open = pickNewestOpenRegisterSessionForStore(opens, pdvId, pointsOfSale);
       if (open) return open;
@@ -576,6 +574,18 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
     if (opens.length === 1) return opens[0];
     return null;
   }, [registerSessions, selectedPdv, restrictedToPdvId, pointsOfSale]);
+
+  /** Turno vivo reciente: pantalla «Continuar» (sin pedir fondo otra vez). */
+  const existingOpenForStore = useMemo(() => {
+    if (!openSessionForStore || isTpvRegisterSessionStaleOpen(openSessionForStore)) return null;
+    return openSessionForStore;
+  }, [openSessionForStore]);
+
+  /** Turno antiguo (>18 h): aviso + Continuar, pero se puede abrir otra si el servidor cierra la vieja. */
+  const staleOpenForStore = useMemo(() => {
+    if (!openSessionForStore || !isTpvRegisterSessionStaleOpen(openSessionForStore)) return null;
+    return openSessionForStore;
+  }, [openSessionForStore]);
 
   const didPrefillFromPreviousCloseRef = useRef(false);
   useEffect(() => {
@@ -916,7 +926,38 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
             ? 'Elige el terminal'
             : '';
 
-  // Caja ya abierta: un solo CTA claro (sin pedir fondo otra vez).
+  const staleOpenBanner = staleOpenForStore ? (() => {
+    const who = [
+      staleOpenForStore.workerName || 'Equipo',
+      staleOpenForStore.terminalName || '',
+      displayStoreName || '',
+    ].filter(Boolean).join(' · ');
+    return (
+      <div className="rounded-xl border border-amber-200 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/30 p-3 space-y-2">
+        <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">
+          Caja abierta desde ayer
+        </p>
+        <p className="text-xs text-amber-800/90 dark:text-amber-200/80">
+          {who || 'Hay un turno antiguo sin cerrar.'} Puedes continuar en esa caja o abrir una nueva (se cerrará la anterior si corresponde).
+        </p>
+        <button
+          type="button"
+          onClick={() => onContinueExistingOpen?.(staleOpenForStore)}
+          disabled={parentLoading || openingBusy || !onContinueExistingOpen}
+          className={`w-full ${VERTIAL_BTN_PRIMARY} min-h-10 text-sm`}
+        >
+          {(parentLoading || openingBusy) ? (
+            <RefreshCw className="w-4 h-4 animate-spin" />
+          ) : (
+            <LogIn className="w-4 h-4" />
+          )}
+          Continuar en esta caja
+        </button>
+      </div>
+    );
+  })() : null;
+
+  // Caja ya abierta (turno reciente): un solo CTA claro (sin pedir fondo otra vez).
   if (existingOpenForStore) {
     const who = [
       existingOpenForStore.workerName || 'Equipo',
@@ -969,6 +1010,11 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
     <div className="h-full min-h-0 bg-stone-50 dark:bg-stone-950 flex items-stretch sm:items-center justify-center p-2 sm:p-3 overflow-hidden">
       <div className="bg-white dark:bg-stone-900 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-lg w-full max-w-4xl h-full sm:h-auto sm:max-h-[min(88svh,680px)] min-h-0 flex flex-col overflow-hidden">
         {/* Header — una sola línea clara */}
+        {staleOpenBanner ? (
+          <div className="shrink-0 px-3 sm:px-4 pt-3">
+            {staleOpenBanner}
+          </div>
+        ) : null}
         <div className="shrink-0 border-b border-stone-200 dark:border-stone-800 flex items-center gap-2.5 px-3 sm:px-4 py-2.5">
           <div className="bg-emerald-100 dark:bg-emerald-900/30 rounded-xl flex items-center justify-center shrink-0 w-9 h-9">
             <Unlock className="text-emerald-600 w-4 h-4" />
@@ -1223,7 +1269,7 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
             Volver
           </button>
           <div className="flex-1 flex flex-col gap-1 min-w-0">
-            {!canOpen && !existingOpenForStore && openBlockedReason ? (
+            {!canOpen && !existingOpenForStore && !staleOpenForStore && openBlockedReason ? (
               <p className="text-[11px] text-amber-700 dark:text-amber-300 font-medium truncate px-0.5">
                 {openBlockedReason}
               </p>
@@ -1501,7 +1547,7 @@ function excelLikeAmountsFromClosedSession(
   session: TpvRegisterSession,
   brandLabels: Record<string, string> = {},
 ): ClosingExcelLikeAmounts {
-  const amounts = sessionToUrielAmounts(session);
+  const amounts = sessionToCajaAmounts(session);
   const expected = Number(session.expectedCash ?? calcTpvExpectedCash(session)) || 0;
   const counted = Number(session.finalCashAmount) || 0;
   const diff = Number.isFinite(Number(session.difference))
@@ -6062,12 +6108,12 @@ export function TpvRegisterGate({
 
   const attachOpenSession = useCallback((
     existing: TpvRegisterSession,
-    opts?: { preferredStoreId?: string; toastMessage?: string | null },
+    opts?: { preferredStoreId?: string; toastMessage?: string | null; allowStale?: boolean },
   ) => {
     if (!existing?._id) return false;
-    if (isTpvRegisterSessionStaleOpen(existing)) {
+    if (!opts?.allowStale && isTpvRegisterSessionStaleOpen(existing)) {
       toast.error(
-        'Hay una caja antigua abierta (más de 18 h). Ciérrala en Caja antes de seguir.',
+        'Hay una caja antigua abierta (más de 18 h). Pulsa «Continuar en esta caja» o ciérrala en Caja.',
         { id: 'tpv-stale-open', duration: 5000 },
       );
       return false;
@@ -6111,7 +6157,9 @@ export function TpvRegisterGate({
   }, [currentBusiness, dataUserId, isWorkerUser]);
 
   const handleContinueExistingOpen = useCallback((existing: TpvRegisterSession) => {
-    attachOpenSession(existing);
+    attachOpenSession(existing, {
+      allowStale: isTpvRegisterSessionStaleOpen(existing),
+    });
   }, [attachOpenSession]);
 
   const startOpenAnotherAfterClose = useCallback((closed: TpvRegisterSession | null) => {
@@ -6173,8 +6221,8 @@ export function TpvRegisterGate({
     const pdvId = String(data.pointOfSaleId || '').trim();
 
     const localOpen = pickNewestOpenRegisterSessionForStore(sessions, pdvId, pointsOfSale);
-    // Seguro: si otra tablet abrió mientras, entrar (el aviso proactivo ya lo cubre en UI).
-    if (localOpen) {
+    // Seguro: si otra tablet abrió mientras, entrar (turnos viejos >18 h se abren vía Continuar o cierre automático al crear).
+    if (localOpen && !isTpvRegisterSessionStaleOpen(localOpen)) {
       attachOpenSession(localOpen, { preferredStoreId: pdvId });
       return;
     }
@@ -6293,7 +6341,14 @@ export function TpvRegisterGate({
         )
         || null;
       if (conflictExisting) {
-        attachOpenSession(conflictExisting, { preferredStoreId: pdvId });
+        if (!isTpvRegisterSessionStaleOpen(conflictExisting)) {
+          attachOpenSession(conflictExisting, { preferredStoreId: pdvId });
+        } else {
+          toast.info(
+            'Hay una caja abierta desde ayer. Pulsa «Continuar en esta caja» arriba o abre una nueva.',
+            { id: 'tpv-stale-open-hint', duration: 4500 },
+          );
+        }
         return;
       }
       const msg = extractErrorMessage(err);
@@ -6306,7 +6361,7 @@ export function TpvRegisterGate({
           const merged = mergeTpvRegisterSessionsPreservingOpen(sessions, fresh);
           setSessions(merged);
           const again = pickNewestOpenRegisterSessionForStore(merged, pdvId, pointsOfSale);
-          if (again) {
+          if (again && !isTpvRegisterSessionStaleOpen(again)) {
             attachOpenSession(again, { preferredStoreId: pdvId });
             return;
           }

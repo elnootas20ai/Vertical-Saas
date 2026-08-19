@@ -15,13 +15,14 @@ const host = values.DEPLOY_HOST || values.VPS_IP;
 const repo = values.REPO_PATH_ON_VPS?.trim();
 const identity = values.SSH_IDENTITY_FILE?.trim();
 const name = process.argv[2] || 'diag-pau-badalona-caja.mjs';
+const extraArgs = process.argv.slice(3).map((a) => `'${String(a).replace(/'/g, `'\\''`)}'`).join(' ');
 const scriptPath = path.join(path.dirname(fileURLToPath(import.meta.url)), name);
 const b64 = fs.readFileSync(scriptPath).toString('base64');
 const bash = `set -e
 cd '${repo.replace(/'/g, `'\\''`)}'
 mkdir -p scripts
 echo '${b64}' | base64 -d > scripts/${name}
-node scripts/${name}
+node scripts/${name}${extraArgs ? ` ${extraArgs}` : ''}
 `;
 const r = sshRunScript(user, host, identity, bash);
 process.stdout.write(r.stdout || '');

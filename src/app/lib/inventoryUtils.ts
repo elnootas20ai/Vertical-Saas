@@ -201,6 +201,23 @@ function foodLineLabel(brand: InventoryCommercialBrand): string {
   return `Ingredientes · ${name}`;
 }
 
+function labelForOrganizerGroup(id: string, commercialBrands: InventoryCommercialBrand[]): string {
+  if (id === ORGANIZER_BEVERAGES) return 'Bebidas';
+  if (id === ORGANIZER_COMPLEMENTS) return 'Complementos';
+  if (id === ORGANIZER_PACKAGING) return 'Envases';
+  if (id === ORGANIZER_CLEANING) return 'Limpieza';
+  if (id === ORGANIZER_VARIOS) return 'Varios';
+  if (id === ORGANIZER_TOTAL) return 'Sin clasificar';
+  const brand = commercialBrands.find((b) => b._id === id);
+  if (brand) {
+    if (brand.deliveryLineKind === 'drinks_desserts') {
+      return String(brand.name || '').trim() || 'Bebidas';
+    }
+    return foodLineLabel(brand);
+  }
+  return 'Otros';
+}
+
 function resolveFoodLineOrganizerId(
   ing: StoreIngredient,
   commercialBrands: InventoryCommercialBrand[],
@@ -308,9 +325,25 @@ export function resolveInventoryOrganizerId(
   return ORGANIZER_TOTAL;
 }
 
+function leftoverOrganizerGroups(
+  buckets: Map<string, CatalogItem[]>,
+  commercialBrands: InventoryCommercialBrand[],
+): InventoryOrganizerGroup[] {
+  const groups: InventoryOrganizerGroup[] = [];
+  for (const [id, subset] of buckets) {
+    if (!subset.length) continue;
+    groups.push({
+      id,
+      label: labelForOrganizerGroup(id, commercialBrands),
+      ...countStatusForItems(subset),
+    });
+  }
+  return groups;
+}
+
 /**
- * Orden almacén: ingredientes por línea → Bebidas → Complementos → Envases → Total.
- * Si no hay nada que agrupar → un solo «Total».
+ * Orden almacén: ingredientes por línea → Bebidas → Complementos → Envases → resto.
+ * El resto conserva su id real (si no, el chip no filtra).
  */
 export function buildInventoryOrganizerGroups(
   items: CatalogItem[],
@@ -387,20 +420,16 @@ export function buildInventoryOrganizerGroups(
     buckets.delete(ORGANIZER_VARIOS);
   }
 
-  const leftover: CatalogItem[] = [];
-  for (const [, subset] of buckets) {
-    if (subset.length) leftover.push(...subset);
-  }
+  const leftoverGroups = leftoverOrganizerGroups(buckets, commercialBrands);
 
   if (brandGroups.length === 0 && extras.length === 0) {
-    return [{ id: ORGANIZER_TOTAL, label: 'Total', ...countStatusForItems(items) }];
+    if (leftoverGroups.length === 1 && leftoverGroups[0].id === ORGANIZER_TOTAL) {
+      return [];
+    }
+    return leftoverGroups;
   }
 
-  const groups = [...brandGroups, ...extras];
-  if (leftover.length > 0) {
-    groups.push({ id: ORGANIZER_TOTAL, label: 'Total', ...countStatusForItems(leftover) });
-  }
-  return groups;
+  return [...brandGroups, ...extras, ...leftoverGroups];
 }
 
 export function filterItemsByOrganizer(

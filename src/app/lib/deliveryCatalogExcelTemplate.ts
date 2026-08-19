@@ -51,8 +51,8 @@ export const DELIVERY_CATALOG_TEMPLATE_FILENAME = 'plantilla_catalogo_tpv.xlsx';
 export const HELADERIA_CATALOG_TEMPLATE_FILENAME = 'plantilla_catalogo_heladeria.xlsx';
 export const RESTAURANT_CATALOG_TEMPLATE_FILENAME = 'plantilla_catalogo_bar_restaurante.xlsx';
 
-/** Filas vacías en «catalogo» (fila 2 en adelante). No se importan si están vacías. */
-export const DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS = 5000;
+/** Filas vacías en «catalogo» (fila 2 en adelante). No se importan si están vacías. Si hacen falta más, se insertan filas en Excel. */
+export const DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS = 100;
 
 export type CatalogTemplateVertical = 'delivery' | 'restaurant' | 'iceCreamShop';
 
@@ -515,7 +515,7 @@ function instructionLines(
   if (isHeladeriaCatalogVertical(vertical)) {
     return [
       `PLANTILLA HELADERÍA v${DELIVERY_CATALOG_TEMPLATE_VERSION} — Catálogo + TPV`,
-      `${DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS} filas vacías en «catalogo» (desde fila 2).`,
+      `${DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS} filas vacías en «catalogo» (desde fila 2). Si necesitas más, inserta filas en Excel; las vacías no se importan.`,
       '',
       'HOJA A IMPORTAR: «catalogo» (la primera). Las demás hojas son solo ayuda.',
       '',
@@ -551,7 +551,7 @@ function instructionLines(
   if (isRestaurantCatalogVertical(vertical)) {
     return [
       `PLANTILLA BAR / RESTAURANTE v${DELIVERY_CATALOG_TEMPLATE_VERSION} — Catálogo + TPV`,
-      `${DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS} filas vacías en «catalogo» (desde fila 2).`,
+      `${DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS} filas vacías en «catalogo» (desde fila 2). Si necesitas más, inserta filas en Excel; las vacías no se importan.`,
       '',
       'HOJA A IMPORTAR: «catalogo» (la primera). Las demás hojas son solo ayuda.',
       '',
@@ -592,7 +592,7 @@ function instructionLines(
 
   return [
     `PLANTILLA OFICIAL v${DELIVERY_CATALOG_TEMPLATE_VERSION} — Catálogo + TPV`,
-    `${DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS} filas vacías en «catalogo» (desde fila 2).`,
+    `${DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS} filas vacías en «catalogo» (desde fila 2). Si necesitas más, inserta filas en Excel; las vacías no se importan.`,
     '',
     'HOJA A IMPORTAR: «catalogo» (la primera). Las demás hojas son solo ayuda.',
     '',

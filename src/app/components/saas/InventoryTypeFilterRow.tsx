@@ -42,7 +42,7 @@ export function InventoryTypeFilterRow({
                   : 'bg-white dark:bg-gray-900 text-gray-400 dark:text-gray-500'
               }`}
             >
-              {pill.count}
+              {pill.count.toLocaleString('es-ES')}
             </span>
           </button>
         );

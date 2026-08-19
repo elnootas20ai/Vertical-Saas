@@ -435,7 +435,7 @@ describe('buildStoreOpsPulse', () => {
           justeat: 0,
           flipdish: 0,
         },
-        // Top-level = TPV + apps (como guarda el cierre / Excel Uriel)
+        // Top-level = TPV + apps (como guarda el cierre / Excel de cierres)
         productClosingCounts: {
           pizza: 25,
           burger: 4,
