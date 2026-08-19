@@ -221,7 +221,10 @@ export function isCatalogResaleStockProduct(item: {
   const cat = fold(item.category || '');
   const name = fold(item.name || '');
   // Carta de bar/restaurante con escandallo — no tratar como reventa de stock envasado.
-  if (/tapas?|raciones?|pinchos?|montaditos?|kebab|principales|platos|cocina|carte/.test(cat)) {
+  if (/tapas?|raciones?|pinchos?|montaditos?|bocadillos?|bocatas?|sandwich|kebab|principales|platos|cocina|carte/.test(cat)) {
+    return false;
+  }
+  if (/bocadillo|bocata|sandwich/.test(name)) {
     return false;
   }
   if (/bebida|refresco|cerveza|agua|zumo|postre|helado|dulce|complemento|side|guarnicion|patata|nugget|tequeño|entrante/.test(cat)) {

@@ -270,7 +270,7 @@ const menuItemDefs = [
   { id: 'catalog-consumos', navKey: 'staffConsumption', icon: <UtensilsCrossed className="w-5 h-5" />, path: '/saas/catalog?tab=staff-consumption' },
   { id: 'costing',          navKey: 'costing',         icon: <Calculator className="w-5 h-5" />,  path: '/saas/catalog?tab=escandallo' },
   { id: 'suppliers',        navKey: 'suppliers',       icon: <Factory className="w-5 h-5" />,     path: '/saas/suppliers' },
-  { id: 'catalog-invoice-email', navKey: 'invoiceEmailReception', icon: <Mail className="w-5 h-5" />, path: '/saas/suppliers/correo-facturas' },
+  { id: 'catalog-invoice-email', navKey: 'invoiceEmailReception', icon: <Mail className="w-5 h-5" />, path: '/saas/correo-facturas' },
 
   // ── Finanzas ─────────────────────────────────────────────────────────────────
   { id: 'finance',             navKey: 'finance',            icon: <DollarSign className="w-5 h-5" />,  path: '/saas/finance' },
@@ -1653,8 +1653,8 @@ function SidebarInner({
     (item.id === 'catalog-consumos' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'staff-consumption') ||
     (item.id === 'costing' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'escandallo') ||
     (item.id === 'costing' && location.pathname.startsWith('/saas/costing')) ||
-    (item.id === 'suppliers' && location.pathname.startsWith('/saas/suppliers') && !location.pathname.startsWith('/saas/suppliers/correo-facturas')) ||
-    (item.id === 'catalog-invoice-email' && location.pathname.startsWith('/saas/suppliers/correo-facturas')) ||
+    (item.id === 'suppliers' && location.pathname.startsWith('/saas/suppliers')) ||
+    (item.id === 'catalog-invoice-email' && location.pathname.startsWith('/saas/correo-facturas')) ||
     (item.id === 'income-expenses' && location.pathname.startsWith('/saas/income-expenses')) ||
     (item.id === 'ebitda' && location.pathname.startsWith('/saas/ebitda')) ||
     (item.id === 'taxes' && location.pathname.startsWith('/saas/taxes')) ||
@@ -1845,7 +1845,9 @@ function SidebarInner({
       if (!needsUpdate) return prev;
       return { ...prev, ...updates };
     });
-  }, [location.pathname, location.search, workerMode, groupedVisibleItems]);
+    // Solo reaccionar a la URL: groupedVisibleItems cambia de identidad cada render y provocaba temblores.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intencional
+  }, [location.pathname, location.search, workerMode]);
 
   const bottomItemIds = allowedBottom;
   const bottomVisibleItems = visibleMenuItems.filter((item) => bottomItemIds.has(item.id));

@@ -347,6 +347,8 @@ export interface Supplier {
   id: string;
   user_id: string;
   name: string;
+  /** Código interno Vertial (PROV-001…). Editable; clave para enlazar compras. */
+  code?: string;
   cif: string;
   email: string;
   phone: string;

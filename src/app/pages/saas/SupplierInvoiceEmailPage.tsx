@@ -230,7 +230,13 @@ export function SupplierInvoiceEmailPage() {
       });
       if (result.ok) {
         setLastTestOk(true);
-        toast.success(`Conexión OK · ${result.totalMessages ?? 0} mensajes en bandeja`);
+        const n = Number(result.totalMessages) || 0;
+        toast.success(
+          n > 0
+            ? `Conexión OK. Inbox IMAP: ${n.toLocaleString('es-ES')} mensajes (Gmail web puede mostrar menos; no se han importado).`
+            : 'Conexión OK',
+          { duration: 6000 },
+        );
       } else {
         const errMsg = String(result.error || '');
         toast.error(
@@ -550,7 +556,8 @@ export function SupplierInvoiceEmailPage() {
 
               {lastTestOk ? (
                 <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
-                  Conexión correcta. Ya puedes sincronizar o ir a Facturas.
+                  Conexión correcta. Eso no importa el histórico: al sincronizar solo se miran correos{' '}
+                  <strong>no leídos</strong> con PDF/imagen de factura.
                 </p>
               ) : null}
               {pollSummary ? (

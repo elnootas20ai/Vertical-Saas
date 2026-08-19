@@ -39,6 +39,11 @@ import {
   SupplierOrganizersField,
 } from '../../components/saas/SupplierOrganizersField';
 import { syncSupplierCatalogItemLinks } from '../../lib/supplierCatalogLinks';
+import {
+  normalizeSupplierCode,
+  suggestNextSupplierCode,
+  supplierCodeAlreadyUsed,
+} from '../../lib/supplierCode';
 import { PurchaseOrdersPage } from './PurchaseOrdersPage';
 import { EscandalloPanel } from './CostingPage';
 import { AlbaranCorroborateModal } from '../../components/saas/AlbaranCorroborateModal';
@@ -84,7 +89,7 @@ import {
   syncTpvOrganizersAfterCatalogImport,
   removeCatalogCategoryFromBrands,
 } from '../../lib/deliveryCatalogImport';
-import { commercialLineBrands, organizerBrandsForCatalogTemplate } from '../../lib/deliveryCatalogImportLogic';
+import { commercialLineBrands, isWarehouseImportCategory, organizerBrandsForCatalogTemplate } from '../../lib/deliveryCatalogImportLogic';
 import {
   DELIVERY_CATALOG_HEADER_ALIASES,
   catalogImportFieldsForVertical,
@@ -156,6 +161,7 @@ import {
   Zap,
   Globe,
   ArrowLeft,
+  ImagePlus,
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
@@ -238,6 +244,8 @@ const ALLERGEN_OPTIONS = [
 ];
 
 const CREATE_STEP_LABELS = ['Producto y precio', 'Ingredientes y composición', 'Foto y publicación'];
+/** Cuadrado recomendado para carta / web / TPV (calidad). */
+const CATALOG_PRODUCT_IMAGE_PX = 1024;
 
 function CatalogEmptyActions({
   onManualAdd,
@@ -577,8 +585,9 @@ function CreateCatalogItemModal({
 
   useEffect(() => {
     if (!isOpen) return;
+    if (storeIngredients.length > 0) return;
     void reloadModalTpvIngredients();
-  }, [isOpen, reloadModalTpvIngredients]);
+  }, [isOpen, storeIngredients.length, reloadModalTpvIngredients]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -648,6 +657,17 @@ function CreateCatalogItemModal({
     setForm((f) => ({ ...f, category: cat }));
     setNewCategoryDraft('');
     setAddingCategory(false);
+    const brandIds = form.selectedBrandIds.filter(Boolean);
+    if (businessId && brandIds.length > 0 && !isWarehouseImportCategory(cat)) {
+      void syncTpvOrganizersAfterCatalogImport(businessId, [{ brandIds, category: cat }]).then(async (r) => {
+        if (r.updatedBrands <= 0) return;
+        const next = await listBrandsRequest(businessId).catch(() => null);
+        if (next) {
+          onBrandsChange(next);
+          notifyDeliveryBrandsChanged();
+        }
+      });
+    }
   };
 
   const activeBrands = useMemo(
@@ -662,6 +682,24 @@ function CreateCatalogItemModal({
     if (!suggested) return;
     setForm((f) => (f.category.trim() ? f : { ...f, category: suggested }));
   }, [isOpen, editItem, form.selectedBrandIds, brands]);
+
+  useEffect(() => {
+    if (!isOpen || !businessId) return;
+    const brandIds = form.selectedBrandIds.filter(Boolean);
+    const cats = extraCategories.filter((c) => c && !isWarehouseImportCategory(c));
+    if (brandIds.length === 0 || cats.length === 0) return;
+    void syncTpvOrganizersAfterCatalogImport(
+      businessId,
+      cats.map((category) => ({ brandIds, category })),
+    ).then(async (r) => {
+      if (r.updatedBrands <= 0) return;
+      const next = await listBrandsRequest(businessId).catch(() => null);
+      if (next) {
+        onBrandsChange(next);
+        notifyDeliveryBrandsChanged();
+      }
+    });
+  }, [isOpen, businessId, extraCategories, form.selectedBrandIds]);
 
   const normalizedCategory = useMemo(
     () => normalizeImportCategory(form.category),
@@ -1673,6 +1711,111 @@ function CreateCatalogItemModal({
     [form.name, form.category, form.itemType, form.image, editItem],
   );
 
+  const productPhotoInputRef = useRef<HTMLInputElement>(null);
+  const hasCustomProductPhoto = Boolean(String(form.image || '').trim());
+
+  const handleProductPhotoFile = (file: File | null | undefined) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      toast.error('Elige una imagen (JPG, PNG o WebP)');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('La foto pesa más de 2 MB. Comprímela o usa una URL.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+      if (!dataUrl) {
+        toast.error('No se pudo leer la imagen');
+        return;
+      }
+      setForm((f) => ({ ...f, image: dataUrl }));
+    };
+    reader.onerror = () => toast.error('No se pudo leer la imagen');
+    reader.readAsDataURL(file);
+  };
+
+  const renderProductPhotoField = (opts?: { autoFocus?: boolean }) => (
+    <div className="space-y-3">
+      <div>
+        <label className={labelClass}>Foto del producto</label>
+        <p className="text-xs text-stone-500 dark:text-stone-400 mb-2">
+          Cuadrado recomendado para web y TPV:{' '}
+          <strong className="text-stone-800 dark:text-stone-200">
+            {CATALOG_PRODUCT_IMAGE_PX} × {CATALOG_PRODUCT_IMAGE_PX} px
+          </strong>
+          . Puedes subir un archivo o pegar una URL.
+        </p>
+      </div>
+      <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4">
+        <button
+          type="button"
+          onClick={() => productPhotoInputRef.current?.click()}
+          className="relative w-44 h-44 shrink-0 rounded-2xl border-2 border-dashed border-stone-300 dark:border-stone-600 bg-stone-50 dark:bg-stone-900/60 overflow-hidden hover:border-[var(--v-blue,#2563eb)] hover:bg-blue-50/40 dark:hover:bg-blue-950/20 transition-colors"
+          title={`Subir foto ${CATALOG_PRODUCT_IMAGE_PX}×${CATALOG_PRODUCT_IMAGE_PX} px`}
+        >
+          {hasCustomProductPhoto ? (
+            <img src={catalogFormPreviewImage} alt="Vista previa" className="w-full h-full object-cover" />
+          ) : (
+            <span className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 p-3 text-center">
+              <ImagePlus className="w-8 h-8 text-stone-400" />
+              <span className="text-xs font-semibold text-stone-600 dark:text-stone-300">Añadir foto</span>
+              <span className="text-[11px] font-bold tabular-nums text-stone-500 dark:text-stone-400">
+                {CATALOG_PRODUCT_IMAGE_PX} × {CATALOG_PRODUCT_IMAGE_PX} px
+              </span>
+            </span>
+          )}
+          {hasCustomProductPhoto ? (
+            <span className="absolute bottom-0 inset-x-0 bg-black/55 text-white text-[10px] font-semibold py-1 text-center tabular-nums">
+              {CATALOG_PRODUCT_IMAGE_PX} × {CATALOG_PRODUCT_IMAGE_PX} px
+            </span>
+          ) : null}
+        </button>
+        <div className="flex-1 w-full space-y-2 min-w-0">
+          <input
+            ref={productPhotoInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            className="sr-only"
+            onChange={(e) => {
+              handleProductPhotoFile(e.target.files?.[0]);
+              e.target.value = '';
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => productPhotoInputRef.current?.click()}
+            className={`${VERTIAL_BTN_SECONDARY} w-full sm:w-auto`}
+          >
+            <Upload className="w-4 h-4" />
+            Elegir archivo
+          </button>
+          {hasCustomProductPhoto ? (
+            <button
+              type="button"
+              onClick={() => setForm((f) => ({ ...f, image: '' }))}
+              className="block text-xs font-semibold text-red-600 dark:text-red-400 hover:underline"
+            >
+              Quitar foto
+            </button>
+          ) : null}
+          <div>
+            <label className={`${labelClass} !mb-1`}>O URL de imagen</label>
+            <input
+              className={inputClass}
+              placeholder="https://ejemplo.com/foto.jpg"
+              value={form.image.startsWith('data:') ? '' : form.image}
+              onChange={(e) => setForm((f) => ({ ...f, image: e.target.value }))}
+              autoFocus={opts?.autoFocus}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
   if (!isOpen) return null;
 
   return (
@@ -1840,15 +1983,7 @@ function CreateCatalogItemModal({
               </section>
               <section className="space-y-5 border-t border-gray-200 dark:border-gray-700 pt-6">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Publicación</h3>
-                <div>
-                  <label className={labelClass}>URL de imagen</label>
-                  <input className={inputClass} placeholder="https://ejemplo.com/imagen.jpg" value={form.image} onChange={(e) => setForm((f) => ({ ...f, image: e.target.value }))} />
-                </div>
-                <div className="flex justify-center">
-                  <div className="w-40 h-40 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden bg-gray-100 dark:bg-gray-900">
-                    <img src={catalogFormPreviewImage} alt="Preview" className="w-full h-full object-cover" />
-                  </div>
-                </div>
+                {renderProductPhotoField()}
                 <div>
                   <label className={labelClass}>Alérgenos</label>
                   <div className="flex flex-wrap gap-2">
@@ -2002,15 +2137,7 @@ function CreateCatalogItemModal({
                   Un servicio no lleva receta ni stock. Aquí solo foto, alérgenos y si está a la venta.
                 </p>
               ) : null}
-              <div>
-                <label className={labelClass}>URL de imagen</label>
-                <input className={inputClass} placeholder="https://ejemplo.com/imagen.jpg" value={form.image} onChange={(e) => setForm((f) => ({ ...f, image: e.target.value }))} autoFocus />
-              </div>
-              <div className="flex justify-center">
-                <div className="w-40 h-40 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden bg-gray-100 dark:bg-gray-900">
-                  <img src={catalogFormPreviewImage} alt="Preview" className="w-full h-full object-cover" />
-                </div>
-              </div>
+              {renderProductPhotoField({ autoFocus: true })}
               <div>
                 <label className={labelClass}>Alérgenos</label>
                 <div className="flex flex-wrap gap-2 max-h-28 overflow-y-auto">
@@ -2133,6 +2260,8 @@ interface CreateSupplierModalProps {
   brands?: Brand[];
   catalogItems?: CatalogItem[];
   storeIngredients?: StoreIngredient[];
+  /** Para sugerir PROV-001… y avisar si el código ya existe. */
+  existingSuppliers?: Supplier[];
 }
 
 function CreateSupplierModal({
@@ -2143,10 +2272,12 @@ function CreateSupplierModal({
   brands = [],
   catalogItems = [],
   storeIngredients = [],
+  existingSuppliers = [],
 }: CreateSupplierModalProps) {
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     name: '',
+    code: '',
     cif: '',
     email: '',
     phone: '',
@@ -2165,6 +2296,7 @@ function CreateSupplierModal({
       const catalogItemIds = initialSupplierCatalogItemIds(editItem, catalogItems);
       setForm({
         name: editItem.name,
+        code: editItem.code || '',
         cif: editItem.cif || '',
         email: editItem.email || '',
         phone: editItem.phone || '',
@@ -2180,6 +2312,7 @@ function CreateSupplierModal({
     } else {
       setForm({
         name: '',
+        code: suggestNextSupplierCode(existingSuppliers),
         cif: '',
         email: '',
         phone: '',
@@ -2204,11 +2337,21 @@ function CreateSupplierModal({
       toast.error('El nombre es obligatorio');
       return;
     }
+    const code = normalizeSupplierCode(form.code);
+    if (!code) {
+      toast.error('El código del proveedor es obligatorio');
+      return;
+    }
+    if (supplierCodeAlreadyUsed(code, existingSuppliers, editItem?._id)) {
+      toast.error(`Ya existe un proveedor con el código ${code}`);
+      return;
+    }
     setSubmitting(true);
     try {
       // Solo campos del formulario: no esparcir editItem (_id/_rev) en el alta.
       await onCreate({
         name: form.name,
+        code,
         cif: form.cif,
         email: form.email,
         phone: form.phone,
@@ -2268,6 +2411,18 @@ function CreateSupplierModal({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
+              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Código *</label>
+              <input
+                className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-mono uppercase"
+                placeholder="PROV-001"
+                value={form.code}
+                onChange={e => setForm(f => ({ ...f, code: e.target.value.toUpperCase() }))}
+              />
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
+                Código interno Vertial. Predeterminado; puedes cambiarlo. Sirve para enlazar pedidos y facturas.
+              </p>
+            </div>
+            <div>
               <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Email</label>
               <input
                 type="email"
@@ -2277,6 +2432,9 @@ function CreateSupplierModal({
                 onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
               />
             </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Teléfono</label>
               <input
@@ -2286,19 +2444,6 @@ function CreateSupplierModal({
                 onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
               />
             </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Dirección</label>
-            <input
-              className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-              placeholder="Dirección del proveedor"
-              value={form.address}
-              onChange={e => setForm(f => ({ ...f, address: e.target.value }))}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Persona de contacto</label>
               <input
@@ -2317,6 +2462,16 @@ function CreateSupplierModal({
                 onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
               />
             </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Dirección</label>
+            <input
+              className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+              placeholder="Dirección del proveedor"
+              value={form.address}
+              onChange={e => setForm(f => ({ ...f, address: e.target.value }))}
+            />
           </div>
 
           <SupplierOrganizersField
@@ -3701,12 +3856,6 @@ export function CatalogPage() {
     void loadTpvIngredients();
   }, [pageReady, loadTpvIngredients]);
 
-  useEffect(() => {
-    if (!pageReady) return;
-    if (!showCreateItem && !editingItem) return;
-    void loadTpvIngredients();
-  }, [showCreateItem, editingItem, pageReady, loadTpvIngredients]);
-
   const loadCatalog = useCallback(async (): Promise<boolean> => {
     if (!dataUserId || !businessId) return false;
     const requestUserId = dataUserId;
@@ -3979,49 +4128,55 @@ export function CatalogPage() {
         if (!options?.keepOpen) {
           toast.success('Artículo creado');
         }
-        if (usesTpvCatalogUi && businessId) {
-          try {
-            const sync = await syncTpvOrganizersAfterCatalogImport(businessId, [created]);
-            const activation = await activateCommercialLinesAfterCatalogImport(businessId, [created]);
-            if (sync.updatedBrands > 0 || activation.activated > 0) await loadBrands();
-          } catch {
-            // El artículo ya está guardado; no bloquear el alta por sincronización TPV.
-          }
-        }
       }
       if (!options?.keepOpen) {
         setShowCreateItem(false);
         setEditingItem(null);
         setComboSeedProduct(null);
       }
-      if (businessId && savedItem && normalizeCatalogIngredientsForSave(savedItem.customFields?.ingredients)) {
-        await syncStoreIngredientsFromCatalogImport(dataUserId, businessId, [savedItem]).catch(() => null);
-      }
-      // Escandallo → inventario de ingredientes + receta (para descontar stock al vender).
-      if (
-        savedItem &&
-        savedItem.customFields?.costingType === 'recipe' &&
-        Array.isArray(savedItem.customFields?.costingRecipe) &&
-        (savedItem.customFields.costingRecipe as unknown[]).length > 0
-      ) {
+      const uid = dataUserId;
+      const bid = businessId;
+      const createdOrUpdated = savedItem;
+      const ingredientsText = createdOrUpdated
+        ? normalizeCatalogIngredientsForSave(createdOrUpdated.customFields?.ingredients)
+        : '';
+      const recipeLines = Array.isArray(createdOrUpdated?.customFields?.costingRecipe)
+        ? (createdOrUpdated.customFields.costingRecipe as unknown[])
+        : [];
+      const needsRecipeStock =
+        createdOrUpdated?.customFields?.costingType === 'recipe' && recipeLines.length > 0;
+      void (async () => {
         try {
-          const bizType = currentBusiness?.businessType || 'delivery';
-          await syncInventoryCatalogFromSources(dataUserId, {
-            businessType: String(bizType),
-            businessId: businessId || undefined,
-            storeIngredients,
-            catalogItems: [savedItem, ...allCatalogItems],
-            brands,
-          });
-          const refreshed = await listCatalogItemsRequest(dataUserId).catch(() => allCatalogItems);
-          const inventory = filterStockInventoryItems(refreshed);
-          await syncRecipesFromCostingCatalog(dataUserId, [savedItem], inventory);
-          setAllCatalogItems(refreshed);
+          if (usesTpvCatalogUi && bid && createdOrUpdated) {
+            const sync = await syncTpvOrganizersAfterCatalogImport(bid, [createdOrUpdated]);
+            const activation = await activateCommercialLinesAfterCatalogImport(bid, [createdOrUpdated]);
+            if (sync.updatedBrands > 0 || activation.activated > 0) await loadBrands();
+          }
+          if (bid && createdOrUpdated && ingredientsText) {
+            await syncStoreIngredientsFromCatalogImport(uid, bid, [createdOrUpdated]).catch(() => null);
+          }
+          if (createdOrUpdated && needsRecipeStock) {
+            const bizType = currentBusiness?.businessType || 'delivery';
+            await syncInventoryCatalogFromSources(uid, {
+              businessType: String(bizType),
+              businessId: bid || undefined,
+              storeIngredients,
+              catalogItems: [createdOrUpdated, ...allCatalogItems],
+              brands,
+            });
+            const refreshed = await listCatalogItemsRequest(uid).catch(() => null);
+            if (refreshed) {
+              const inventory = filterStockInventoryItems(refreshed);
+              await syncRecipesFromCostingCatalog(uid, [createdOrUpdated], inventory);
+              setAllCatalogItems(refreshed);
+            }
+          }
         } catch {
-          /* el producto ya está guardado; el stock/receta se puede regenerar en Escandallo */
+          /* el producto ya está en carta; TPV/escandallo se pueden regenerar luego */
+        } finally {
+          notifyDeliveryCatalogChanged(uid, bid);
         }
-      }
-      notifyDeliveryCatalogChanged(dataUserId, businessId);
+      })();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar el artículo');
       throw err;
@@ -5365,6 +5520,11 @@ export function CatalogPage() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="font-semibold text-sm text-gray-900 dark:text-gray-100 break-words">{supplier.name}</p>
+                    {supplier.code ? (
+                      <span className="px-2 py-0.5 text-[10px] font-bold font-mono rounded-full border bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:border-gray-600">
+                        {supplier.code}
+                      </span>
+                    ) : null}
                     <span className={`px-2 py-0.5 text-[10px] font-semibold rounded-full border shrink-0 ${
                       supplier.active
                         ? 'bg-green-100 text-green-700 border-green-200'
@@ -5418,6 +5578,9 @@ export function CatalogPage() {
                 <tr key={supplier._id} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors align-top">
                   <td className="px-3 py-3">
                     <div className="font-semibold text-gray-900 dark:text-gray-100 text-sm break-words">{supplier.name}</div>
+                    {supplier.code ? (
+                      <div className="text-[11px] font-mono font-semibold text-gray-500 dark:text-gray-400 mt-0.5">{supplier.code}</div>
+                    ) : null}
                     <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 break-words">
                       {[supplier.cif, supplier.contactPerson, supplier.phone, supplier.email, supplier.category]
                         .filter(Boolean)
@@ -6269,6 +6432,7 @@ export function CatalogPage() {
         brands={brands}
         catalogItems={catalogItems}
         storeIngredients={storeIngredients}
+        existingSuppliers={suppliers}
       />
 
       <CreateInvoiceModal

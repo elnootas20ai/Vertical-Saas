@@ -10849,6 +10849,9 @@ async function ensureCatalogTypeUserIndex(req, dbName) {
   if (catalogTypeUserIndexReady.has(dbName)) return;
   const safeDb = String(dbName || '').replace(/[^a-z0-9]+/g, '-');
   await ensureIndex(req, dbName, ['type', 'user_id'], `idx-${safeDb}-catalog-type-user_id`).catch(() => null);
+  await ensureIndex(req, dbName, ['type', 'user_id', 'module'], `idx-${safeDb}-catalog-type-user-module`).catch(
+    () => null,
+  );
   catalogTypeUserIndexReady.add(dbName);
 }
 
@@ -11456,7 +11459,7 @@ export async function listCatalogItemsByUser(req, userId, { module: filterModule
     } else {
       selector = { type: 'catalog_item' };
     }
-    docs = await findDocuments(req, db, selector, { pageSize: 500, maxDocs: 50_000 });
+    docs = await findDocuments(req, db, selector, { pageSize: 1000, maxDocs: 50_000 });
   } catch {
     const all = await getCatalogDatabaseDocumentsInflight(req);
     docs = all.filter(
@@ -11508,6 +11511,7 @@ export function buildSupplierDocument(userId, data = {}, existing = null) {
     id,
     user_id: userId,
     name: String(data.name || ''),
+    code: String(data.code || existing?.code || '').trim().toUpperCase(),
     cif: String(data.cif || ''),
     email: String(data.email || ''),
     phone: String(data.phone || ''),
@@ -11536,6 +11540,7 @@ export function sanitizeSupplier(doc) {
     id: doc._id,
     user_id: doc.user_id,
     name: doc.name || '',
+    code: doc.code || '',
     cif: doc.cif || '',
     email: doc.email || '',
     phone: doc.phone || '',

@@ -688,6 +688,7 @@ export const router = createBrowserRouter([
           { path: 'taxes', element: <RequireBusinessOwner><TaxesPage /></RequireBusinessOwner> },
           { path: 'bank-reconciliation', element: <RequireBusinessOwner><BankReconciliationPage /></RequireBusinessOwner> },
           { path: 'catalog', element: <RedirectEventsFromRetailRoutes><VerticalCatalogEntry /></RedirectEventsFromRetailRoutes> },
+          { path: 'correo-facturas', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><SupplierInvoiceEmailPage /></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
           { path: 'inventory', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><InventoryPage /></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
           { path: 'articles', element: <RedirectEventsFromRetailRoutes><VerticalArticlesRedirect /></RedirectEventsFromRetailRoutes> },
           { path: 'suppliers', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><Outlet /></RedirectEventsFromRetailRoutes></RequireBusinessOwner>, children: [
@@ -699,7 +700,7 @@ export const router = createBrowserRouter([
                 { path: 'facturas', element: <SupplierBillingPage /> },
               ],
             },
-            { path: 'correo-facturas', element: <SupplierInvoiceEmailPage /> },
+            { path: 'correo-facturas', element: <Navigate to="/saas/correo-facturas" replace /> },
             { path: ':supplierId', element: <SupplierDetailPage /> },
           ]},
           { path: 'orders', element: <Navigate to="/saas/suppliers/facturas" replace /> },

@@ -43,7 +43,11 @@ import {
   readProductRecipeLines,
   resolveProductUnitCost,
   storeIngredientsById,
+  type ProductRecipeLine,
 } from '../../lib/catalogCosting';
+import { resolveBocataIngredientQuantity } from '../../lib/barEscandalloPresets';
+import { formatQtyEs } from '../../lib/formatNumberEs';
+import { CatalogUnitChip } from './CatalogUnitChip';
 import { ProductCostingModal } from './EscandalloPanel';
 import type { CatalogItemSalesStats } from '../../lib/catalogItemSalesStats';
 import { resolveCatalogProductImage } from '../../lib/catalogProductPlaceholders';
@@ -129,6 +133,33 @@ function formatEsNumber(n: number, digits = 0): string {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   });
+}
+
+function foldIngredientChipKey(value: string): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/\s+/g, ' ');
+}
+
+function quantityForIngredientChip(
+  name: string,
+  productName: string,
+  recipeLines: ProductRecipeLine[],
+): { quantity: number; unit: string } | null {
+  const foldedName = foldIngredientChipKey(name);
+  const productFold = foldIngredientChipKey(productName);
+  const fromRecipe = recipeLines.find((line) => {
+    const ln = foldIngredientChipKey(line.name);
+    if (!ln || ln === productFold) return false;
+    return ln === foldedName || ln.includes(foldedName) || foldedName.includes(ln);
+  });
+  if (fromRecipe && Number(fromRecipe.quantity) > 0) {
+    return { quantity: Number(fromRecipe.quantity), unit: fromRecipe.unit || 'ud' };
+  }
+  return resolveBocataIngredientQuantity(name);
 }
 
 function ChartTooltip({
@@ -271,21 +302,40 @@ export function CatalogItemDetailModal({
   const [dirty, setDirty] = useState(false);
   const [activeTab, setActiveTab] = useState<DetailTab>('datos');
 
-  useEffect(() => {
+  const hydrateFromItem = (next: CatalogItem) => {
     const raw =
-      typeof item.customFields?.ingredients === 'string' ? item.customFields.ingredients : '';
-    setNameDraft(item.name);
-    setUnitPriceDraft(String(item.unitPrice ?? ''));
-    setCostPriceDraft(String(item.costPrice ?? ''));
-    setActiveDraft(item.active !== false);
+      typeof next.customFields?.ingredients === 'string' ? next.customFields.ingredients : '';
+    setNameDraft(next.name);
+    setUnitPriceDraft(String(next.unitPrice ?? ''));
+    setCostPriceDraft(String(next.costPrice ?? ''));
+    setActiveDraft(next.active !== false);
     setIngredientDraft(raw);
-    setComboItems(Array.isArray(item.comboItems) ? [...item.comboItems] : []);
-    setComboStructure(comboStructureFromCustomFields(item.customFields, item.comboItems?.length ?? 0));
-    setComboStructureConfirmed(isComboStructureConfirmed(item.customFields, item.comboItems?.length ?? 0));
+    setComboItems(Array.isArray(next.comboItems) ? [...next.comboItems] : []);
+    setComboStructure(comboStructureFromCustomFields(next.customFields, next.comboItems?.length ?? 0));
+    setComboStructureConfirmed(isComboStructureConfirmed(next.customFields, next.comboItems?.length ?? 0));
     setNewIngredient('');
+  };
+
+  useEffect(() => {
+    hydrateFromItem(item);
     setDirty(false);
     setActiveTab('datos');
-  }, [item._id, item.name, item.unitPrice, item.costPrice, item.active, item.customFields?.ingredients, item.comboItems]);
+    // Solo al abrir otro producto: si no, Guardar se apaga y te echa a «Precio y datos».
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- item._id
+  }, [item._id]);
+
+  useEffect(() => {
+    if (dirty) return;
+    hydrateFromItem(item);
+  }, [
+    dirty,
+    item.name,
+    item.unitPrice,
+    item.costPrice,
+    item.active,
+    item.customFields?.ingredients,
+    item.comboItems,
+  ]);
 
   const ingredientList = useMemo(() => parseIngredientsBulkText(ingredientDraft), [ingredientDraft]);
 
@@ -348,8 +398,8 @@ export function CatalogItemDetailModal({
       });
       setDirty(false);
       toast.success('Ficha guardada');
-    } catch {
-      toast.error('No se pudo guardar');
+    } catch (err) {
+      toast.error(err instanceof Error && err.message ? err.message : 'No se pudo guardar');
     } finally {
       setSaving(false);
     }
@@ -602,17 +652,29 @@ export function CatalogItemDetailModal({
                 </p>
                 {ingredientList.length > 0 ? (
                   <div className="flex flex-wrap gap-2">
-                    {ingredientList.map((name) => (
+                    {ingredientList.map((name) => {
+                      const qty = quantityForIngredientChip(name, item.name, costingRecipeLines);
+                      return (
                       <button
                         key={name}
                         type="button"
                         onClick={() => removeIngredient(name)}
-                        className="px-3 py-1.5 rounded-full text-xs font-semibold border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-red-300"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-red-300"
                         title="Quitar"
                       >
-                        {name} ×
+                        <span>{name}</span>
+                        {qty ? (
+                          <>
+                            <span className="tabular-nums font-bold text-gray-700 dark:text-gray-200">
+                              {formatQtyEs(qty.quantity, 3)}
+                            </span>
+                            <CatalogUnitChip unit={qty.unit} size="sm" />
+                          </>
+                        ) : null}
+                        <span aria-hidden>×</span>
                       </button>
-                    ))}
+                      );
+                    })}
                   </div>
                 ) : (
                   <p className="text-sm text-amber-800 dark:text-amber-300 rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/30 px-3 py-2">
@@ -961,7 +1023,7 @@ export function CatalogItemDetailModal({
           </button>
           <button
             type="button"
-            disabled={!dirty || saving}
+            disabled={saving}
             onClick={() => void handleSave()}
             className={`px-5 py-2.5 text-sm font-bold disabled:opacity-40 ${VERTIAL_BTN_PRIMARY}`}
           >

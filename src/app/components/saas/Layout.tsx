@@ -167,6 +167,10 @@ function SaasAppShellInner({ children }: { children: ReactNode }) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
 
+  const closeMobileSidebar = useCallback(() => {
+    setMobileSidebarOpen(false);
+  }, []);
+
   const isDashboard = location.pathname === '/saas/dashboard';
   const showBusinessCarousel =
     isDashboard && businesses.length > 1 && !isWorkerAccount(user);
@@ -299,7 +303,7 @@ function SaasAppShellInner({ children }: { children: ReactNode }) {
       <Sidebar
         collapsed={sidebarCollapsed}
         mobileOpen={mobileSidebarOpen}
-        onMobileClose={() => setMobileSidebarOpen(false)}
+        onMobileClose={closeMobileSidebar}
       />
 
       <div className={`md:transition-[margin-left] md:duration-300 ${desktopMargin}`}>

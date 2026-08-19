@@ -241,6 +241,11 @@ export function SupplierDetailPage() {
                     </span>
                   )}
                 </div>
+                {supplier.code ? (
+                  <p className="text-sm font-mono text-gray-500 dark:text-gray-400 mt-1">
+                    {supplier.code}
+                  </p>
+                ) : null}
                 {supplier.cif && (
                   <p className="text-sm font-mono text-gray-500 dark:text-gray-400 mt-1 flex items-center gap-1.5">
                     <CreditCard className="w-3.5 h-3.5" /> {supplier.cif}

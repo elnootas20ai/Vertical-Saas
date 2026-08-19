@@ -222,6 +222,7 @@ export const BOCATA_QUANTITY_RULES: Array<{ patterns: string[]; quantity: number
   { patterns: ['mayonesa', 'alioli', 'salsa'], quantity: 0.02, unit: 'kg' },
   { patterns: ['lechuga', 'cebolla'], quantity: 0.02, unit: 'kg' },
   { patterns: ['huevo'], quantity: 1, unit: 'ud' },
+  { patterns: ['tortilla'], quantity: 0.12, unit: 'kg' },
 ];
 
 export function matchBarCategoryPreset(category: string): BarCategoryEscandalloPreset | null {
@@ -249,6 +250,20 @@ export function isBarEscandalloCategory(category: string): boolean {
 export function isBarBocataCategory(category: string): boolean {
   const preset = matchBarCategoryPreset(category);
   return Boolean(preset?.bocataStyle);
+}
+
+/** Cantidad/unidad típica de un ingrediente en bocadillo (para ficha e import). */
+export function resolveBocataIngredientQuantity(
+  ingredientName: string,
+): { quantity: number; unit: string } | null {
+  const folded = foldBarKey(ingredientName);
+  if (!folded) return null;
+  for (const rule of BOCATA_QUANTITY_RULES) {
+    if (matchesPatterns(folded, rule.patterns)) {
+      return { quantity: rule.quantity, unit: rule.unit };
+    }
+  }
+  return null;
 }
 
 /** Coste fijo aproximado según categoría + nombre (bar). */

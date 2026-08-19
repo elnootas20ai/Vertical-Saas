@@ -165,6 +165,19 @@ Si algún campo no se puede determinar, usa null.`,
   }
 }
 
+function suggestNextSupplierCodeFromDocs(suppliers) {
+  let max = 0;
+  for (const s of suppliers || []) {
+    const code = String(s?.code || '')
+      .trim()
+      .toUpperCase()
+      .replace(/\s+/g, '-');
+    const m = code.match(/^PROV-?(\d+)$/);
+    if (m) max = Math.max(max, Number(m[1]) || 0);
+  }
+  return `PROV-${String(max + 1).padStart(3, '0')}`;
+}
+
 // ─── Matching de proveedor ───────────────────────────────────────────────────
 
 async function matchSupplier(userId, ocrData, emailFrom) {
@@ -226,6 +239,7 @@ async function ensureSupplierFromOcr(userId, ocrData, emailFrom) {
   try {
     const doc = buildSupplierDocument(userId, {
       name,
+      code: suggestNextSupplierCodeFromDocs(suppliers),
       cif: String(ocrData?.emitterCIF || '').trim(),
       email: String(emailFrom || '').trim().split('<').pop()?.replace('>', '').trim() || '',
       notes: 'Creado automáticamente desde factura por email (OCR)',

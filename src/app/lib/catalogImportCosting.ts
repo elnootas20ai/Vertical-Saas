@@ -184,6 +184,10 @@ function parseImportIngredientNames(raw: string): string[] {
     .filter(Boolean);
 }
 
+function hasCatalogIngredientList(item: Pick<CatalogItem, 'customFields'>): boolean {
+  return parseImportIngredientNames(String(item.customFields?.ingredients || '')).length > 0;
+}
+
 const CATEGORY_FIXED_FALLBACK: Record<string, number> = {
   pizzas: 3.2,
   pizza: 3.2,
@@ -1000,11 +1004,44 @@ export function applyVertialAutoCostingToCatalogItem(
     return applyHalfHalfCosting(item, storeIngredients, brands, catalog, inventoryContext);
   }
 
-  if (
-    isDrinkCatalogProduct(item) ||
-    isDessertCatalogProduct(item) ||
-    isCatalogResaleStockProduct(item)
-  ) {
+  if (isDrinkCatalogProduct(item) || isDessertCatalogProduct(item)) {
+    const resaleLines = inventoryContext
+      ? buildResaleConsumptionRecipe(item, inventoryContext.byLinkedCatalogId)
+      : null;
+    if (resaleLines?.length) {
+      const ingredientsById = storeIngredientsById(storeIngredients);
+      return {
+        item: withProductCosting(
+          item,
+          { costingType: 'recipe', recipeLines: resaleLines },
+          ingredientsById,
+          brands,
+          inventoryContext?.costByCatalogId,
+        ),
+        mode: 'recipe',
+      };
+    }
+    let drinkFixed = resolveBarEscandalloFixedCost(item.category || '', item.name || '');
+    if (drinkFixed == null) drinkFixed = resolveVertialDefaultRetailCost(item);
+    if (!(drinkFixed > 0)) {
+      drinkFixed =
+        resolveCategoryFixedFallback(item, inferImportCostingLineKind(item, brands)) ?? 0;
+    }
+    return {
+      item: withProductCosting(
+        item,
+        { costingType: 'fixed', fixedCost: drinkFixed },
+        new Map(),
+        brands,
+        inventoryContext?.costByCatalogId,
+      ),
+      mode: 'fixed',
+    };
+  }
+
+  // Reventa envasada: 1 ud del artículo de almacén. Si la ficha trae ingredientes
+  // (bocadillo, tapa…), la receta sale de esos nombres con cantidades, no del clon.
+  if (isCatalogResaleStockProduct(item) && !hasCatalogIngredientList(item)) {
     const resaleLines = inventoryContext
       ? buildResaleConsumptionRecipe(item, inventoryContext.byLinkedCatalogId)
       : null;

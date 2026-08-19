@@ -58,6 +58,11 @@ import {
   SupplierOrganizersField,
 } from '../../components/saas/SupplierOrganizersField';
 import { syncSupplierCatalogItemLinks } from '../../lib/supplierCatalogLinks';
+import {
+  normalizeSupplierCode,
+  suggestNextSupplierCode,
+  supplierCodeAlreadyUsed,
+} from '../../lib/supplierCode';
 import type { StoreIngredient } from '../../lib/catalogCustomization';
 import { useBusinessOptional } from '../../context/BusinessContext';
 import { listBrandsRequest, type Brand } from '../../lib/brandsApi';
@@ -72,6 +77,7 @@ interface CreateSupplierModalProps {
   brands?: Brand[];
   catalogItems?: CatalogItem[];
   storeIngredients?: StoreIngredient[];
+  existingSuppliers?: Supplier[];
 }
 
 function CreateSupplierModal({
@@ -82,10 +88,11 @@ function CreateSupplierModal({
   brands = [],
   catalogItems = [],
   storeIngredients = [],
+  existingSuppliers = [],
 }: CreateSupplierModalProps) {
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
-    name: '', cif: '', email: '', phone: '', address: '',
+    name: '', code: '', cif: '', email: '', phone: '', address: '',
     contactPerson: '', category: '', paymentTerms: '', notes: '',
     organizerIds: [] as string[],
     catalogItemIds: [] as string[],
@@ -96,7 +103,7 @@ function CreateSupplierModal({
     if (editItem) {
       const catalogItemIds = initialSupplierCatalogItemIds(editItem, catalogItems);
       setForm({
-        name: editItem.name, cif: editItem.cif || '', email: editItem.email || '',
+        name: editItem.name, code: editItem.code || '', cif: editItem.cif || '', email: editItem.email || '',
         phone: editItem.phone || '', address: editItem.address || '',
         contactPerson: editItem.contactPerson || '', category: editItem.category || '',
         paymentTerms: editItem.paymentTerms || '', notes: editItem.notes || '',
@@ -106,7 +113,7 @@ function CreateSupplierModal({
       });
     } else {
       setForm({
-        name: '', cif: '', email: '', phone: '', address: '', contactPerson: '',
+        name: '', code: suggestNextSupplierCode(existingSuppliers), cif: '', email: '', phone: '', address: '', contactPerson: '',
         category: '', paymentTerms: '', notes: '', organizerIds: [], catalogItemIds: [],
         itemCosts: {},
       });
@@ -119,10 +126,17 @@ function CreateSupplierModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name.trim()) { toast.error('El nombre es obligatorio'); return; }
+    const code = normalizeSupplierCode(form.code);
+    if (!code) { toast.error('El código del proveedor es obligatorio'); return; }
+    if (supplierCodeAlreadyUsed(code, existingSuppliers, editItem?._id)) {
+      toast.error(`Ya existe un proveedor con el código ${code}`);
+      return;
+    }
     setSubmitting(true);
     try {
       await onCreate({
         name: form.name,
+        code,
         cif: form.cif,
         email: form.email,
         phone: form.phone,
@@ -160,14 +174,21 @@ function CreateSupplierModal({
             <div><label className={labelClass}>CIF/NIF</label><input className={`${inputClass} font-mono uppercase`} placeholder="B12345678" value={form.cif} onChange={e => setForm(f => ({ ...f, cif: e.target.value.toUpperCase() }))} /></div>
           </div>
           <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className={labelClass}>Código *</label>
+              <input className={`${inputClass} font-mono uppercase`} placeholder="PROV-001" value={form.code} onChange={e => setForm(f => ({ ...f, code: e.target.value.toUpperCase() }))} />
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Código interno Vertial. Predeterminado; puedes cambiarlo.</p>
+            </div>
             <div><label className={labelClass}>Email</label><input type="email" className={inputClass} placeholder="proveedor@email.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
             <div><label className={labelClass}>Teléfono</label><input className={inputClass} placeholder="600 000 000" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} /></div>
+            <div>
+              <label className={labelClass}>Persona de contacto</label>
+              <input className={inputClass} placeholder="Nombre del contacto" value={form.contactPerson} onChange={e => setForm(f => ({ ...f, contactPerson: e.target.value }))} />
+            </div>
           </div>
           <div><label className={labelClass}>Dirección</label><input className={inputClass} placeholder="Dirección del proveedor" value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} /></div>
-          <div>
-            <label className={labelClass}>Persona de contacto</label>
-            <input className={inputClass} placeholder="Nombre del contacto" value={form.contactPerson} onChange={e => setForm(f => ({ ...f, contactPerson: e.target.value }))} />
-          </div>
           <SupplierOrganizersField
             organizerIds={form.organizerIds}
             catalogItemIds={form.catalogItemIds}
@@ -615,6 +636,11 @@ export function SuppliersPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <h3 className="font-bold text-gray-900 dark:text-gray-100 truncate">{supplier.name}</h3>
+                        {supplier.code ? (
+                          <span className="px-2 py-0.5 text-[10px] font-bold font-mono rounded-full border bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:border-gray-600">
+                            {supplier.code}
+                          </span>
+                        ) : null}
                         <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full border ${supplier.active ? 'bg-green-100 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700'}`}>
                           {supplier.active ? 'Activo' : 'Inactivo'}
                         </span>
@@ -689,6 +715,7 @@ export function SuppliersPage() {
         editItem={editingSupplier}
         brands={brands}
         catalogItems={catalogItems}
+        existingSuppliers={suppliers}
       />
 
       <AIAddModal

@@ -10,11 +10,9 @@ import {
   Loader2,
   PackageCheck,
   Plus,
-  Search,
   Send,
   Sparkles,
   Trash2,
-  ChevronDown,
   X,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -34,12 +32,12 @@ import {
   type SuggestionItem,
 } from '../../lib/purchaseOrderApi';
 import {
-  groupStockItemsByOrganizer,
   groupSuggestionsForVertial,
   stockItemsForSupplierOrder,
   suggestionOrderQuantity,
   type VertialSuggestionGroup,
 } from '../../lib/purchaseSuggestions';
+import { CatalogUnitChip } from '../../components/saas/CatalogUnitChip';
 import type { InventoryCommercialBrand } from '../../lib/inventoryUtils';
 import { formatMoneyEs, formatQtyEs } from '../../lib/formatNumberEs';
 import { nextPurchaseOrderNumber } from '../../lib/purchaseOrderNumber';
@@ -100,6 +98,7 @@ type DraftLine = {
   catalogItemId: string;
   sku: string;
   name: string;
+  unit: string;
   quantity: string;
   unitCost: string;
 };
@@ -125,10 +124,8 @@ function NewPurchaseOrderModal({
 }) {
   const [supplierId, setSupplierId] = useState(initialSupplierId);
   const [lines, setLines] = useState<DraftLine[]>([]);
-  const [itemSearch, setItemSearch] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
-  const [openOrganizerId, setOpenOrganizerId] = useState('');
 
   const activeSuppliers = useMemo(
     () => suppliers.filter((s) => s.active !== false),
@@ -142,8 +139,6 @@ function NewPurchaseOrderModal({
   }, [catalogItems, supplier, storeIngredients, commercialBrands]);
 
   useEffect(() => {
-    setOpenOrganizerId('');
-    setItemSearch('');
     if (!supplierId || !supplier) {
       setLines([]);
       return;
@@ -153,42 +148,12 @@ function NewPurchaseOrderModal({
         catalogItemId: item._id,
         sku: item.sku || '',
         name: item.name || '',
+        unit: item.unit || 'ud',
         quantity: '1',
         unitCost: String(item.costPrice ?? 0),
       })),
     );
   }, [supplierId, supplier, supplierStockItems]);
-
-  const visibleStockItems = useMemo(() => {
-    const q = itemSearch.trim().toLowerCase();
-    if (!q) return supplierStockItems;
-    return supplierStockItems.filter((i) => (i.name || '').toLowerCase().includes(q));
-  }, [supplierStockItems, itemSearch]);
-
-  const pickerGroups = useMemo(
-    () => groupStockItemsByOrganizer(visibleStockItems, storeIngredients, commercialBrands),
-    [visibleStockItems, storeIngredients, commercialBrands],
-  );
-
-  const addItem = (item: CatalogItem) => {
-    setLines((prev) => {
-      if (prev.some((l) => l.catalogItemId === item._id)) return prev;
-      return [
-        ...prev,
-        {
-          catalogItemId: item._id,
-          sku: item.sku || '',
-          name: item.name || '',
-          quantity: '1',
-          unitCost: String(item.costPrice ?? 0),
-        },
-      ];
-    });
-  };
-
-  const addAllVisible = () => {
-    for (const item of visibleStockItems) addItem(item);
-  };
 
   const updateLine = (catalogItemId: string, patch: Partial<DraftLine>) => {
     setLines((prev) => prev.map((l) => (l.catalogItemId === catalogItemId ? { ...l, ...patch } : l)));
@@ -229,6 +194,7 @@ function NewPurchaseOrderModal({
         notes: '',
       }));
       await onCreate({
+        orderNumber: nextOrderNumber,
         supplierId: supplier?._id || '',
         supplierName: supplier?.name || 'Sin proveedor',
         items,
@@ -261,8 +227,10 @@ function NewPurchaseOrderModal({
         <div className="shrink-0 px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Nuevo pedido a proveedor</h2>
-            <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mt-0.5 font-mono">
-              {nextOrderNumber}
+            <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
+              Nº pedido{' '}
+              <span className="font-bold tabular-nums text-gray-900 dark:text-gray-100">{nextOrderNumber}</span>
+              <span className="text-xs font-semibold text-gray-400 ml-1.5">automático</span>
             </p>
           </div>
           <button type="button" onClick={onClose} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800">
@@ -278,7 +246,7 @@ function NewPurchaseOrderModal({
               onChange={(e) => setSupplierId(e.target.value)}
               className="w-full px-3 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm font-semibold text-gray-900 dark:text-gray-100"
             >
-              <option value="">Sin proveedor asignado</option>
+              <option value="">Elige proveedor</option>
               {activeSuppliers.map((s) => (
                 <option key={s._id} value={s._id}>
                   {s.name}
@@ -292,160 +260,75 @@ function NewPurchaseOrderModal({
             ) : null}
           </div>
 
-          {supplierId ? (
-            <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
-              Solo lo de este proveedor. Abre un organizador para ver artículos.
+          {!supplierId ? (
+            <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-6 rounded-xl border border-dashed border-gray-200 dark:border-gray-700">
+              Elige el proveedor. Después verás la lista de lo que le puedes pedir.
             </p>
-          ) : (
-            <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
-              Elige el proveedor. Después verás lo que le puedes pedir.
-            </p>
-          )}
-
-          {!supplierId ? null : (
-          <div>
-            <div className="flex items-center justify-between gap-2 mb-1">
-              <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400">
-                Qué le puedes pedir
-                {visibleStockItems.length > 0 ? ` (${visibleStockItems.length})` : ''}
-              </label>
-              {visibleStockItems.length > 0 ? (
-                <button
-                  type="button"
-                  onClick={addAllVisible}
-                  className="text-xs font-semibold text-[var(--v-blue,#2563eb)] hover:underline shrink-0"
-                >
-                  Añadir todo
-                </button>
-              ) : null}
-            </div>
-            <div className="relative mb-2">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input
-                value={itemSearch}
-                onChange={(e) => setItemSearch(e.target.value)}
-                placeholder="Filtrar por nombre…"
-                className="w-full pl-9 pr-3 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm"
-              />
-            </div>
-            {pickerGroups.length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-4 rounded-xl border border-dashed border-gray-200 dark:border-gray-700">
-                {(supplier?.catalogItemIds?.length ?? 0) === 0 && (supplier?.organizerIds?.length ?? 0) === 0
-                  ? 'Este proveedor no tiene productos en «Qué suministra». Edítalo y márcalos.'
-                  : itemSearch.trim()
-                    ? 'Ningún artículo coincide con el filtro.'
-                    : 'No hay artículos de almacén para este proveedor.'}
+          ) : parsedLines.length > 0 ? (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">
+                Qué pedir ({parsedLines.length})
               </p>
-            ) : (
-              <div className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden divide-y divide-gray-100 dark:divide-gray-800">
-                {pickerGroups.map((group) => {
-                  const open = openOrganizerId === group.organizerId;
-                  return (
-                    <div key={group.organizerId}>
-                      <button
-                        type="button"
-                        onClick={() => setOpenOrganizerId(open ? '' : group.organizerId)}
-                        className="w-full px-3 py-2.5 flex items-center justify-between gap-2 text-left bg-gray-50 dark:bg-gray-900/50 hover:bg-gray-100 dark:hover:bg-gray-800"
-                      >
-                        <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">
-                          {group.organizerLabel}
-                          <span className="ml-1.5 font-normal text-gray-400 normal-case tracking-normal">
-                            {group.items.length}
-                          </span>
-                        </span>
-                        <ChevronDown className={`w-4 h-4 text-gray-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
-                      </button>
-                      {open ? (
-                        <ul>
-                          {group.items.map((item) => {
-                            const added = lines.some((l) => l.catalogItemId === item._id);
-                            return (
-                              <li key={item._id}>
-                                <button
-                                  type="button"
-                                  onClick={() => addItem(item)}
-                                  disabled={added}
-                                  className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-60"
-                                >
-                                  <span className="min-w-0 truncate font-medium text-gray-900 dark:text-gray-100">
-                                    {added ? '✓ ' : '+ '}
-                                    {item.name}
-                                  </span>
-                                  <span className="text-xs text-gray-400 tabular-nums shrink-0">
-                                    stock {formatQty(Number(item.stockQuantity || 0))}
-                                    {Number(item.minStock) > 0 ? ` / mín. ${formatQty(Number(item.minStock))}` : ''}
-                                    {' · '}
-                                    {formatMoney(Number(item.costPrice || 0))}
-                                  </span>
-                                </button>
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-          )}
-
-          {parsedLines.length > 0 ? (
-            <div className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50/80 dark:bg-gray-900/40 text-gray-500 text-xs">
-                  <tr>
-                    <th className="text-left px-3 py-2 font-semibold">Artículo</th>
-                    <th className="text-right px-3 py-2 font-semibold w-20">Cant.</th>
-                    <th className="text-right px-3 py-2 font-semibold w-24">Coste/u</th>
-                    <th className="text-right px-3 py-2 font-semibold w-20">Total</th>
-                    <th className="w-9" />
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                  {parsedLines.map((l) => (
-                    <tr key={l.catalogItemId}>
-                      <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">{l.name}</td>
-                      <td className="px-2 py-1.5 text-right">
-                        <input
-                          type="number"
-                          min="0"
-                          step="any"
-                          value={l.quantity}
-                          onChange={(e) => updateLine(l.catalogItemId, { quantity: e.target.value })}
-                          className="w-16 px-1.5 py-1 text-right text-sm tabular-nums rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800"
-                        />
-                      </td>
-                      <td className="px-2 py-1.5 text-right">
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={l.unitCost}
-                          onChange={(e) => updateLine(l.catalogItemId, { unitCost: e.target.value })}
-                          className="w-20 px-1.5 py-1 text-right text-sm tabular-nums rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800"
-                        />
-                      </td>
-                      <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatMoney(l.total)}</td>
-                      <td className="px-1 py-1.5 text-center">
-                        <button
-                          type="button"
-                          onClick={() => removeLine(l.catalogItemId)}
-                          className="p-1 rounded-lg text-gray-300 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
-                          title="Quitar línea"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </td>
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50/80 dark:bg-gray-900/40 text-gray-500 text-xs">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-semibold">Artículo</th>
+                      <th className="text-right px-3 py-2 font-semibold w-28">Cant.</th>
+                      <th className="text-right px-3 py-2 font-semibold w-24">Coste/u</th>
+                      <th className="text-right px-3 py-2 font-semibold w-20">Total</th>
+                      <th className="w-9" />
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                    {parsedLines.map((l) => (
+                      <tr key={l.catalogItemId}>
+                        <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">{l.name}</td>
+                        <td className="px-2 py-1.5 text-right">
+                          <span className="inline-flex items-center justify-end gap-1.5">
+                            <input
+                              type="number"
+                              min="0"
+                              step="any"
+                              value={l.quantity}
+                              onChange={(e) => updateLine(l.catalogItemId, { quantity: e.target.value })}
+                              className="w-16 px-1.5 py-1 text-right text-sm tabular-nums rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800"
+                            />
+                            <CatalogUnitChip unit={l.unit} size="sm" />
+                          </span>
+                        </td>
+                        <td className="px-2 py-1.5 text-right">
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={l.unitCost}
+                            onChange={(e) => updateLine(l.catalogItemId, { unitCost: e.target.value })}
+                            className="w-20 px-1.5 py-1 text-right text-sm tabular-nums rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800"
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatMoney(l.total)}</td>
+                        <td className="px-1 py-1.5 text-center">
+                          <button
+                            type="button"
+                            onClick={() => removeLine(l.catalogItemId)}
+                            className="p-1 rounded-lg text-gray-300 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                            title="Quitar línea"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           ) : (
             <p className="text-sm text-gray-400 text-center py-4 rounded-xl border border-dashed border-gray-200 dark:border-gray-700">
-              Añade artículos de la lista de almacén.
+              {(supplier?.catalogItemIds?.length ?? 0) === 0 && (supplier?.organizerIds?.length ?? 0) === 0
+                ? 'Este proveedor no tiene productos en «Qué suministra». Edítalo y márcalos.'
+                : 'No hay artículos de almacén para este proveedor.'}
             </p>
           )}
 

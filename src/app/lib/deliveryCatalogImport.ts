@@ -226,8 +226,9 @@ export async function resolveBrandIdsFromImportText(
 }
 
 /**
- * Tras importar productos, actualiza catalogCategories de cada línea comercial
- * para que el TPV muestre las pestañas inferiores (Pizzas, Bebidas…) en orden lógico.
+ * Tras importar o crear a mano: escribe la categoría en catalogCategories de cada marca
+ * que tenga productos (igual que el Excel). Sin esto, TPV / ingredientes / proveedor
+ * no enganchan la categoría nueva.
  */
 export async function syncTpvOrganizersAfterCatalogImport(
   businessId: string,
@@ -242,7 +243,6 @@ export async function syncTpvOrganizersAfterCatalogImport(
 
   const updates: Promise<unknown>[] = [];
   for (const brand of brands) {
-    if (!isCommercialLineBrand(brand)) continue;
     const importedCats = categoryMap.get(brand._id);
     if (!importedCats?.length) continue;
 

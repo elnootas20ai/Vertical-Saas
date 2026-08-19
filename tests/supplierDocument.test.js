@@ -33,6 +33,15 @@ describe('buildSupplierDocument', () => {
     expect(clean.organizerIds).toEqual(['org-envases', 'org-limpieza']);
   });
 
+  it('persiste code de proveedor', () => {
+    const doc = buildSupplierDocument('user-1', {
+      name: 'Makro',
+      code: 'prov-12',
+    });
+    expect(doc.code).toBe('PROV-12');
+    expect(sanitizeSupplier(doc).code).toBe('PROV-12');
+  });
+
   it('en update conserva _id existente', () => {
     const existing = buildSupplierDocument('user-1', { name: 'Uno' });
     const updated = buildSupplierDocument(

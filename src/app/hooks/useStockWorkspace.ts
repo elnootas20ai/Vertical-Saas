@@ -24,6 +24,8 @@ export type StockWorkspaceScopeInput = {
   salesPointId?: string;
 };
 
+type StorePdv = { _id: string; name?: string; code?: string; active?: boolean; deletedAt?: string | null };
+
 function findWarehouseForSalesPoint(warehouses: Warehouse[], salesPointId: string): Warehouse | null {
   const pdvId = String(salesPointId || '').trim();
   if (!pdvId) return null;
@@ -34,69 +36,85 @@ function findWarehouseForSalesPoint(warehouses: Warehouse[], salesPointId: strin
   );
 }
 
+function warehousesCoverAllStores(warehouses: Warehouse[], pointsOfSale: StorePdv[]): boolean {
+  const pdvs = pointsOfSale.filter((p) => p && !p.deletedAt && p.active !== false);
+  return pdvs.every((pdv) => {
+    const pdvId = String(pdv._id || '').trim();
+    if (!pdvId) return true;
+    const desiredName = storeWarehouseDisplayName(pdv.name || pdv.code || 'Tienda');
+    const linked = findWarehouseForSalesPoint(warehouses, pdvId);
+    return Boolean(linked && String(linked.name || '').trim() === desiredName);
+  });
+}
+
 async function ensureClientStoreWarehouses(
   userId: string,
-  pointsOfSale: Array<{ _id: string; name?: string; code?: string; active?: boolean; deletedAt?: string | null }>,
+  pointsOfSale: StorePdv[],
   existing: Warehouse[],
 ): Promise<Warehouse[]> {
   const uid = String(userId || '').trim();
   if (!uid) return existing;
-  let warehouses = [...existing];
+  if (warehousesCoverAllStores(existing, pointsOfSale)) return existing;
+
+  const warehouses = [...existing];
   const pdvs = pointsOfSale.filter((p) => p && !p.deletedAt && p.active !== false);
 
-  for (const pdv of pdvs) {
-    const pdvId = String(pdv._id || '').trim();
-    if (!pdvId) continue;
-    const desiredName = storeWarehouseDisplayName(pdv.name || pdv.code || 'Tienda');
-    const linked = findWarehouseForSalesPoint(warehouses, pdvId);
-    if (linked) {
-      if (String(linked.name || '').trim() !== desiredName) {
+  const results = await Promise.all(
+    pdvs.map(async (pdv) => {
+      const pdvId = String(pdv._id || '').trim();
+      if (!pdvId) return null;
+      const desiredName = storeWarehouseDisplayName(pdv.name || pdv.code || 'Tienda');
+      const linked = findWarehouseForSalesPoint(warehouses, pdvId);
+      if (linked) {
+        if (String(linked.name || '').trim() === desiredName) return null;
         try {
-          const updated = await updateWarehouseRequest(uid, { ...linked, name: desiredName });
-          warehouses = warehouses.map((w) => (w._id === updated._id ? updated : w));
+          return await updateWarehouseRequest(uid, { ...linked, name: desiredName });
         } catch {
-          /* noop */
+          return null;
         }
       }
-      continue;
-    }
 
-    const byName = warehouses.find(
-      (w) =>
-        w.active !== false &&
-        !String(w.salesPointId || '').trim() &&
-        String(w.name || '').trim().toLowerCase() === desiredName.toLowerCase(),
-    );
-    if (byName) {
+      const byName = warehouses.find(
+        (w) =>
+          w.active !== false &&
+          !String(w.salesPointId || '').trim() &&
+          String(w.name || '').trim().toLowerCase() === desiredName.toLowerCase(),
+      );
+      if (byName) {
+        try {
+          return await updateWarehouseRequest(uid, {
+            ...byName,
+            name: desiredName,
+            salesPointId: pdvId,
+            warehouseType: 'store',
+          });
+        } catch {
+          return null;
+        }
+      }
+
       try {
-        const updated = await updateWarehouseRequest(uid, {
-          ...byName,
+        return await createWarehouseRequest(uid, {
           name: desiredName,
           salesPointId: pdvId,
           warehouseType: 'store',
+          isDefault: warehouses.filter((w) => w.active !== false).length === 0,
+          active: true,
         });
-        warehouses = warehouses.map((w) => (w._id === updated._id ? updated : w));
       } catch {
-        /* noop */
+        return null;
       }
-      continue;
-    }
+    }),
+  );
 
-    try {
-      const created = await createWarehouseRequest(uid, {
-        name: desiredName,
-        salesPointId: pdvId,
-        warehouseType: 'store',
-        isDefault: warehouses.filter((w) => w.active !== false).length === 0,
-        active: true,
-      });
-      warehouses.push(created);
-    } catch {
-      /* noop */
-    }
+  const next = [...warehouses];
+  for (const updated of results) {
+    if (!updated?._id) continue;
+    const idx = next.findIndex((w) => w._id === updated._id);
+    if (idx >= 0) next[idx] = updated;
+    else next.push(updated);
   }
-
-  return warehouses;
+  return next;
 }
 
 export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
@@ -154,6 +172,14 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
     [stockItems, storeWarehouseId],
   );
 
+  const posKey = useMemo(
+    () =>
+      (activeStore.pointsOfSale || [])
+        .map((p) => `${p._id}:${p.name || p.code || ''}`)
+        .join('|'),
+    [activeStore.pointsOfSale],
+  );
+
   const reload = useCallback(async () => {
     if (!dataUserId) {
       setItems([]);
@@ -162,34 +188,31 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
       setLoadDetail('');
       return;
     }
-    setLoading(true);
-    setLoadDetail('1/3 · artículos de almacén');
+    setLoadDetail('Leyendo almacén…');
     try {
-      // Solo module=stock: no arrastrar toda la carta (pizzas/burgers…) al abrir Inventario.
       const [stockCatalog, wh, brands] = await Promise.all([
         listCatalogItemsRequest(dataUserId, 'stock'),
         listWarehousesRequest(dataUserId).catch(() => [] as Warehouse[]),
         businessId ? listBrandsRequest(businessId).catch(() => []) : Promise.resolve([]),
       ]);
-      setLoadDetail('2/3 · almacenes de tienda');
       const scoped = businessId
         ? filterCatalogItemsForBusinessScope(stockCatalog, businessId, brands, {
             accountBusinessCount: businesses.length,
             activeBusinessType: currentBusiness?.businessType,
           })
         : stockCatalog;
-      const ensured = await ensureClientStoreWarehouses(
-        dataUserId,
-        activeStore.pointsOfSale || [],
-        wh,
-      );
-      setLoadDetail('3/3 · listo');
       setItems(scoped);
-      setWarehouses(ensured);
+      setWarehouses(wh);
+      setLoading(false);
+      setLoadDetail('');
+      if (!warehousesCoverAllStores(wh, activeStore.pointsOfSale || [])) {
+        void ensureClientStoreWarehouses(dataUserId, activeStore.pointsOfSale || [], wh).then((ensured) => {
+          setWarehouses(ensured);
+        });
+      }
     } catch {
       setItems([]);
       setWarehouses([]);
-    } finally {
       setLoading(false);
       setLoadDetail('');
     }
@@ -198,6 +221,7 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
     businesses.length,
     currentBusiness?.businessType,
     dataUserId,
+    posKey,
     activeStore.pointsOfSale,
   ]);
 
