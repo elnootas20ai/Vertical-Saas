@@ -179,7 +179,6 @@ import { StaffConsumptionTabPanel } from '../../components/saas/StaffConsumption
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { createMovementFromInvoice, listFinanceMovements } from '../../lib/financeApi';
 import {
-  isCustomizableCatalogItem,
   isCatalogTpvConfigurable,
   catalogBuildYourOwnIngredientOptions,
   catalogPizzaCandidatesForHalfHalf,
@@ -1504,20 +1503,6 @@ function CreateCatalogItemModal({
   const inputClass = 'w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100';
   const labelClass = 'block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5';
 
-  const showCustomization =
-    !form.buildYourOwn &&
-    isCatalogTpvConfigurable(
-    {
-      category: form.category,
-      name: form.name,
-      brandIds: form.selectedBrandIds,
-      itemType: form.itemType,
-      customFields: form.ingredients.trim()
-        ? { ingredients: form.ingredients.trim() }
-        : editItem?.customFields,
-    },
-    brands,
-  );
   const showComboBuilder =
     form.itemType === 'combo' || /combo/i.test(form.category.trim());
 
@@ -1550,7 +1535,7 @@ function CreateCatalogItemModal({
   };
 
   const renderSupplementsSection = () => {
-    if (!showCustomization) return null;
+    if (form.itemType === 'service') return null;
     return (
           <div className="space-y-3 pt-2">
             <div>
@@ -1629,7 +1614,22 @@ function CreateCatalogItemModal({
   };
 
   const renderCustomizationSection = () => {
-    if (form.itemType === 'service' || form.buildYourOwn) return null;
+    if (form.itemType === 'service') return null;
+    if (form.buildYourOwn) {
+      return (
+        <section className="space-y-4 border-t border-gray-200 dark:border-gray-700 pt-6">
+          <div className="rounded-xl border border-orange-200 dark:border-orange-800 bg-orange-50/60 dark:bg-orange-950/20 px-3 py-2.5">
+            <p className="text-sm font-semibold text-orange-900 dark:text-orange-200">
+              Producto al gusto
+            </p>
+            <p className="text-xs text-orange-800/90 dark:text-orange-300/90 mt-0.5">
+              Los ingredientes base se eligen en el paso 1. Aquí puedes añadir extras de pago.
+            </p>
+          </div>
+          {renderSupplementsSection()}
+        </section>
+      );
+    }
     return (
       <section className="space-y-4 border-t border-gray-200 dark:border-gray-700 pt-6">
         <CatalogProductRecipePicker
@@ -1754,11 +1754,11 @@ function CreateCatalogItemModal({
             <div className="space-y-8">
               <section className="space-y-5">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Producto</h3>
-                {renderBrandPicker()}
                 <div>
                   <label className={labelClass}>Nombre del producto *</label>
                   <input className={inputClass} placeholder="Ej: Hamburguesa clásica, Coca-Cola 33cl..." value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
                 </div>
+                {renderCategoryUnit()}
                 <div>
                   <label className={labelClass}>Tipo de elemento</label>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -1783,7 +1783,7 @@ function CreateCatalogItemModal({
                     ))}
                   </div>
                 </div>
-                {renderCategoryUnit()}
+                {renderBrandPicker()}
                 {renderBuildYourOwnProductToggle()}
                 {renderBuildYourOwnIngredientPicker()}
                 <div>
@@ -1882,11 +1882,11 @@ function CreateCatalogItemModal({
                   </ul>
                 </div>
               ) : null}
-              {renderBrandPicker()}
               <div>
                 <label className={labelClass}>Nombre del producto *</label>
                 <input className={inputClass} placeholder="Ej: Mitad y mitad, Margarita, Coca-Cola 33cl..." value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} autoFocus />
               </div>
+              {renderCategoryUnit()}
               <div>
                 <label className={labelClass}>Tipo de elemento</label>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -1911,7 +1911,7 @@ function CreateCatalogItemModal({
                   ))}
                 </div>
               </div>
-              {renderCategoryUnit()}
+              {renderBrandPicker()}
               {renderBuildYourOwnProductToggle()}
               {renderBuildYourOwnIngredientPicker()}
               <div>

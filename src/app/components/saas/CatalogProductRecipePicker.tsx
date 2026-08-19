@@ -282,7 +282,11 @@ export function CatalogProductRecipePicker({
         </p>
       ) : available.length === 0 ? (
         <p className="text-xs text-gray-500 text-center py-1">
-          {search.trim() ? 'Sin resultados' : 'Todos los ingredientes ya están en el escandallo'}
+          {search.trim()
+            ? 'Sin resultados'
+            : scoped.length === 0
+              ? 'No hay ingredientes para esta marca. Prueba sin filtrar marca o crea ingredientes en Catálogo → Ingredientes.'
+              : 'Todos los ingredientes ya están en el escandallo'}
         </p>
       ) : (
         <div
