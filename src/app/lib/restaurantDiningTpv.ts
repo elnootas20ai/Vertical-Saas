@@ -19,7 +19,12 @@ import {
 import { tableStatusOnRelease } from './restaurantTableStatus';
 import { isOpenDiningOrder } from './restaurantTableDisplay';
 import type { CartLineCustomization } from './catalogCustomization';
-import { cartLineUnitPrice, productBrandIdsFromItem } from './catalogCustomization';
+import {
+  buildOrderExtras,
+  buildOrderIngredients,
+  cartLineUnitPrice,
+  productBrandIdsFromItem,
+} from './catalogCustomization';
 import { enqueueTpvOfflineItem, isBrowserOnline } from './tpvTabletOffline';
 import { optimisticAppendDraftComanda } from './restaurantTpvOfflineSync';
 import {
@@ -35,39 +40,60 @@ export type RestaurantCartLine = {
 };
 
 export function cartLinesToDiningItems(lines: RestaurantCartLine[]): DiningOrderItem[] {
-  return lines.map((ci) => ({
-    id: ci.lineId || uuidv4(),
-    productId: ci.catalogItem._id,
-    name: ci.catalogItem.name,
-    price: cartLineUnitPrice(ci.catalogItem.unitPrice, ci.customization),
-    quantity: ci.quantity,
-    category: ci.catalogItem.category || '',
-    notes: ci.customization.notes?.trim() || '',
-    modifiers: [],
-    status: 'pending' as const,
-    cancelledReason: '',
-    cancelledBy: '',
-    brandIds: productBrandIdsFromItem(ci.catalogItem),
-  }));
+  return lines.map((ci) => {
+    const extras = buildOrderExtras(ci.customization);
+    const ingredients = buildOrderIngredients(ci.catalogItem, ci.customization);
+    return {
+      id: ci.lineId || uuidv4(),
+      productId: ci.catalogItem._id,
+      name: ci.catalogItem.name,
+      price: cartLineUnitPrice(ci.catalogItem.unitPrice, ci.customization),
+      quantity: ci.quantity,
+      category: ci.catalogItem.category || '',
+      notes: ci.customization.notes?.trim() || '',
+      modifiers: extras,
+      extras,
+      ingredients,
+      status: 'pending' as const,
+      cancelledReason: '',
+      cancelledBy: '',
+      brandIds: productBrandIdsFromItem(ci.catalogItem),
+    };
+  });
 }
 
 export function deliveryItemsToDiningItems(items: DeliveryOrderItem[]): DiningOrderItem[] {
-  return items.map((i) => ({
-    id: i.id || uuidv4(),
-    productId: String(i.catalogItemId || i.id || ''),
-    name: i.name,
-    price: Number(i.unitPrice || 0),
-    quantity: Number(i.quantity || 1),
-    category: i.category || '',
-    notes: i.notes || '',
-    modifiers: [],
-    status: 'pending' as const,
-    cancelledReason: '',
-    cancelledBy: '',
-    brandIds: Array.isArray(i.brandIds)
-      ? i.brandIds.map((b) => String(b || '').trim()).filter(Boolean)
-      : [],
-  }));
+  return items.map((i) => {
+    const extras = Array.isArray(i.extras)
+      ? i.extras.map((e) => String(e || '').trim()).filter(Boolean)
+      : [];
+    const ingredients = Array.isArray(i.ingredients)
+      ? i.ingredients
+          .map((ing) => ({
+            name: String(ing?.name || '').trim(),
+            quantity: String(ing?.quantity || 'normal').trim() || 'normal',
+          }))
+          .filter((ing) => ing.name)
+      : [];
+    return {
+      id: i.id || uuidv4(),
+      productId: String(i.catalogItemId || i.id || ''),
+      name: i.name,
+      price: Number(i.unitPrice || 0),
+      quantity: Number(i.quantity || 1),
+      category: i.category || '',
+      notes: i.notes || '',
+      modifiers: extras,
+      extras,
+      ingredients,
+      status: 'pending' as const,
+      cancelledReason: '',
+      cancelledBy: '',
+      brandIds: Array.isArray(i.brandIds)
+        ? i.brandIds.map((b) => String(b || '').trim()).filter(Boolean)
+        : [],
+    };
+  });
 }
 
 export async function findOpenDiningOrderForTable(

@@ -26,6 +26,7 @@ import {
   nextKitchenStatus,
   type KitchenTicket,
 } from './restaurantKitchen';
+import { orderItemCustomizationParts } from '../../lib/deliveryTicketHelpers';
 import { setCatalogItemAvailabilityRequest } from '../../lib/deliveryApi';
 import { DELIVERY_CATALOG_CHANGED } from '../../lib/deliverySetup';
 import {
@@ -75,6 +76,33 @@ function timerColor(mins: number): string {
 
 function ticketTableLabel(ticket: KitchenTicket): string {
   return ticket.tableName || (ticket.tableNumber ? `Mesa ${ticket.tableNumber}` : 'Mostrador');
+}
+
+function KitchenItemCustomization({
+  item,
+}: {
+  item: KitchenTicket['items'][number];
+}) {
+  const parts = orderItemCustomizationParts({
+    notes: item.notes,
+    extras: item.extras.length > 0 ? item.extras : item.modifiers,
+    ingredients: item.ingredients,
+  });
+  const bits: string[] = [];
+  for (const block of parts.compositionBlocks) {
+    bits.push(`▸ ${block.label}`);
+    for (const n of block.added) bits.push(`  + ${n}`);
+    for (const n of block.removed) bits.push(`  SIN ${n}`);
+    if (block.note) bits.push(`  · ${block.note}`);
+  }
+  for (const n of parts.added) bits.push(`+ ${n}`);
+  for (const n of parts.removed) bits.push(`SIN ${n}`);
+  if (bits.length === 0) return null;
+  return (
+    <p className="text-xs text-indigo-600 dark:text-indigo-400 font-semibold whitespace-pre-line">
+      {bits.join('\n')}
+    </p>
+  );
 }
 
 function KitchenTicketCard({
@@ -144,11 +172,7 @@ function KitchenTicketCard({
             </span>
             <div className="min-w-0 flex-1">
               <span className="text-sm text-gray-800 dark:text-gray-200">{item.name}</span>
-              {item.modifiers.length > 0 && (
-                <p className="text-xs text-indigo-600 dark:text-indigo-400">
-                  + {item.modifiers.join(', ')}
-                </p>
-              )}
+              <KitchenItemCustomization item={item} />
               {item.notes && (
                 <p className="text-xs text-amber-600 dark:text-amber-400 italic">{item.notes}</p>
               )}
@@ -403,6 +427,8 @@ export function RestaurantKitchenBoard({
           name: item.name,
           total: 0,
           notes: item.notes,
+          extras: item.extras.length > 0 ? item.extras : item.modifiers,
+          ingredients: item.ingredients,
         })),
         notes: ticket.notes,
         createdAt: ticket.sentToKitchenAt || new Date().toISOString(),

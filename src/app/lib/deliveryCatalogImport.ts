@@ -31,6 +31,7 @@ import {
   readImportLineText,
   resolveCatalogImportBrandIds,
   resolveCommercialLineIdsFromText,
+  resolveWarehouseImportMeta,
   shouldClearBrandForCategory,
   isImportComboCategory,
 } from './deliveryCatalogImportLogic';
@@ -53,7 +54,14 @@ function inferInventoryBusinessType(
   fallback = 'delivery',
 ): string {
   const kinds = brands.map((b) => String(b.deliveryLineKind || '').trim());
-  if (kinds.includes('tapas_bar') || kinds.includes('cafe_bakery')) return 'restaurant';
+  if (
+    kinds.includes('tapas_bar') ||
+    kinds.includes('cafe_bakery') ||
+    kinds.includes('mixed_restaurant') ||
+    kinds.includes('prepared_meals')
+  ) {
+    return 'restaurant';
+  }
   return fallback;
 }
 
@@ -564,7 +572,8 @@ export async function mapImportEntryToCatalogItem(
   const category = normalizeImportCategory(entry.category || '', {
     preserveSubfamilies: String(options.vertical || '').trim() === 'restaurant',
   });
-  const lineText = readImportLineText(entry);
+  const warehouseMeta = resolveWarehouseImportMeta(category);
+  const lineText = warehouseMeta ? '' : readImportLineText(entry);
   let brandCache = options.brandCache;
   let explicitBrandIds: string[] = [];
   const unmatchedLineNames: string[] = [];
@@ -578,9 +587,12 @@ export async function mapImportEntryToCatalogItem(
 
   const itemBase: Partial<CatalogItem> = {
     name,
-    category,
-    brandIds: resolveCatalogImportBrandIds(explicitBrandIds, category, brandCache, name),
+    category: warehouseMeta?.categoryLabel || category,
+    brandIds: warehouseMeta
+      ? []
+      : resolveCatalogImportBrandIds(explicitBrandIds, category, brandCache, name),
     itemType: (() => {
+      if (warehouseMeta) return 'product' as const;
       const explicit = String(entry.itemType || '').trim();
       if (explicit === 'combo' || isImportComboCategory(category)) return 'combo' as const;
       if (['product', 'service'].includes(explicit)) return explicit as CatalogItem['itemType'];
@@ -588,10 +600,14 @@ export async function mapImportEntryToCatalogItem(
     })(),
     description: String(entry.description || '').trim(),
     unitPrice: (() => {
+      if (warehouseMeta) {
+        const p = parseImportPrice(String(entry.price || entry.unitPrice || ''));
+        return Number.isFinite(p) && p > 0 ? p : 0;
+      }
       const p = parseImportPrice(String(entry.price || entry.unitPrice || ''));
       return Number.isFinite(p) ? p : 0;
     })(),
-    costPrice: Number(String(entry.costPrice || '').replace(',', '.')) || 0,
+    costPrice: Number(String(entry.costPrice || entry.coste || '').replace(',', '.')) || 0,
     stockQuantity: 0,
     minStock: 0,
     allergens: String(entry.allergens || '')
@@ -603,14 +619,14 @@ export async function mapImportEntryToCatalogItem(
       String(entry.sku || '').trim() ||
       buildStableImportCatalogSku({
         name,
-        category,
+        category: warehouseMeta?.categoryLabel || category,
         business_id: options.businessId,
-        module: 'catalog',
+        module: warehouseMeta ? 'stock' : 'catalog',
       }) ||
       undefined,
     unit: String(entry.unit || entry.unidad || 'ud').trim() || 'ud',
     taxRate: resolveImportTaxRate(entry, options.vertical),
-    module: 'catalog',
+    module: warehouseMeta ? 'stock' : 'catalog',
     ...(options.businessId
       ? {
           business_id: options.businessId,
@@ -618,10 +634,42 @@ export async function mapImportEntryToCatalogItem(
         }
       : {}),
   };
-  /** Carta TPV: isStockItem false, finished_product, active, sin deletedAt sticky. */
-  const item = applyCatalogImportCartaStockGuard(itemBase, null) as Partial<CatalogItem>;
 
-  const ingredientsRaw = String(entry.ingredients || entry.ingredientes || '').trim();
+  // Carta TPV vs almacén (envases / limpieza / varios): no mezclar flags.
+  const item = (
+    warehouseMeta
+      ? {
+          ...itemBase,
+          module: 'stock',
+          isStockItem: true,
+          stockCategory: warehouseMeta.stockCategory,
+          active: true,
+          available: true,
+          webVisible: false,
+          deletedAt: null,
+          customFields: {
+            inventoryOrganizerId: warehouseMeta.organizerId,
+          },
+        }
+      : applyCatalogImportCartaStockGuard(itemBase, null)
+  ) as Partial<CatalogItem>;
+
+  // Stock opcional desde columnas stock_actual / stock_minimo del Excel.
+  {
+    const stockRaw = String(entry.stockQuantity || entry.stock_actual || entry.stock || '').trim();
+    const minStockRaw = String(entry.minStock || entry.stock_minimo || '').trim();
+    if (stockRaw || minStockRaw) {
+      const stockQuantity = stockRaw ? Number(stockRaw.replace(',', '.')) : 0;
+      const minStock = minStockRaw ? Number(minStockRaw.replace(',', '.')) : 0;
+      if (Number.isFinite(stockQuantity) && stockQuantity >= 0) item.stockQuantity = stockQuantity;
+      if (Number.isFinite(minStock) && minStock >= 0) item.minStock = minStock;
+      if (warehouseMeta) item.isStockItem = true;
+    }
+  }
+
+  const ingredientsRaw = warehouseMeta
+    ? ''
+    : String(entry.ingredients || entry.ingredientes || '').trim();
   if (ingredientsRaw) {
     const parsed = parseIngredientsBulkText(ingredientsRaw);
     if (parsed.length > 0) {
@@ -632,7 +680,9 @@ export async function mapImportEntryToCatalogItem(
     }
   }
 
-  const formatoRaw = String(entry.formato || entry.format || entry.tamano || entry.tamaño || '').trim();
+  const formatoRaw = warehouseMeta
+    ? ''
+    : String(entry.formato || entry.format || entry.tamano || entry.tamaño || '').trim();
   if (formatoRaw) {
     item.customFields = {
       ...(item.customFields || {}),
@@ -640,7 +690,7 @@ export async function mapImportEntryToCatalogItem(
     };
   }
 
-  if (item.itemType === 'combo') {
+  if (!warehouseMeta && item.itemType === 'combo') {
     // Solo estructura del Excel: allowlists/surcharges se conservan en merge al guardar
     // (mergeCatalogCustomFields) si el import no los envía.
     item.customFields = {
@@ -648,12 +698,13 @@ export async function mapImportEntryToCatalogItem(
       comboStructure: resolveImportComboStructure(entry, { vertical: options.vertical }),
       comboStructureConfirmed: true,
     };
-  } else if (/mitad\s*y\s*mitad|half\s*and\s*half|half-half/i.test(name)) {
+  } else if (!warehouseMeta && /mitad\s*y\s*mitad|half\s*and\s*half|half-half/i.test(name)) {
     item.customFields = {
       ...(item.customFields || {}),
       halfHalf: true,
     };
   } else if (
+    !warehouseMeta &&
     /al\s*gusto|a\s*gusto|build\s*your\s*own|\d+\s*ingredientes?/i.test(name)
   ) {
     const maxMatch = name.match(/(\d+)\s*ingredientes?/i);

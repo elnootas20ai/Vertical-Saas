@@ -186,7 +186,12 @@ export interface DiningOrderItem {
   quantity: number;
   category: string;
   notes: string;
+  /** Líneas cocina (+ extra, SIN, ▸ combo…) — misma semántica que delivery `extras`. */
   modifiers: string[];
+  /** Alias delivery: extras de pago / composición / SIN (se sincroniza con modifiers). */
+  extras?: string[];
+  /** Receta con quantity `normal` | `sin` (para cocina e impresión). */
+  ingredients?: { name: string; quantity: string }[];
   status: ComandaItemStatus;
   cancelledReason: string;
   cancelledBy: string;

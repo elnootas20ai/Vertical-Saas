@@ -19,7 +19,6 @@ import {
 } from '../../lib/catalogBusinessScope';
 import { listBrandsRequest, type Brand } from '../../lib/brandsApi';
 import { commercialLineBrands } from '../../lib/deliveryCatalogImportLogic';
-import { repairVertialFoodEscandallo } from '../../lib/deliveryCatalogImport';
 import { sortBrandsForDisplay } from '../../lib/brandUtils';
 import {
   getDeliveryConfigRequest,
@@ -56,11 +55,13 @@ import {
   type ProductCostingType,
   type ProductRecipeLine,
 } from '../../lib/catalogCosting';
+import { downloadEscandalloProductsExcel } from '../../lib/escandalloExcelExport';
 import {
   Calculator,
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  Download,
   Edit3,
   Layers,
   Loader2,
@@ -488,7 +489,6 @@ export function EscandalloPanel() {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [editingProduct, setEditingProduct] = useState<CatalogItem | null>(null);
   const [showCategoryPanel, setShowCategoryPanel] = useState(false);
-  const [regeneratingEscandallo, setRegeneratingEscandallo] = useState(false);
 
   const ingredientsById = useMemo(() => storeIngredientsById(storeIngredients), [storeIngredients]);
 
@@ -608,23 +608,22 @@ export function EscandalloPanel() {
     setCatalogItems((prev) => prev.map((item) => byId.get(item._id) ?? item));
   };
 
-  const handleRegenerateAllEscandallo = useCallback(async () => {
-    const uid = dataUserId || user?.id;
-    if (!uid || !businessId || regeneratingEscandallo) return;
-    setRegeneratingEscandallo(true);
-    try {
-      const result = await repairVertialFoodEscandallo(uid, businessId, { allMenuProducts: true });
-      await load();
-      toast.success(
-        `Escandallos Vertial: ${result.updated} actualizado(s) · ${result.recipe} receta · ${result.fixed} coste fijo`,
-        { duration: 9000 },
-      );
-    } catch {
-      toast.error('No se pudieron generar los escandallos');
-    } finally {
-      setRegeneratingEscandallo(false);
+  const handleDownloadEscandalloExcel = useCallback(() => {
+    if (catalogItems.length === 0) {
+      toast.error('No hay productos para exportar');
+      return;
     }
-  }, [businessId, dataUserId, load, regeneratingEscandallo, user?.id]);
+    try {
+      const { rows, filename } = downloadEscandalloProductsExcel(
+        catalogItems,
+        storeIngredients,
+        brands,
+      );
+      toast.success(`Excel descargado: ${rows} fila(s) · ${filename}`);
+    } catch {
+      toast.error('No se pudo generar el Excel de escandallo');
+    }
+  }, [brands, catalogItems, storeIngredients]);
 
   if (!isDeliveryOpsBusinessType(businessType) && !isRestaurantBusinessType(businessType)) {
     const escandalloCopy = getRetailOpsUiCopy(businessType);
@@ -689,16 +688,9 @@ export function EscandalloPanel() {
             right={
               <>
                 {catalogItems.length > 0 ? (
-                  <SaasTabSecondaryButton
-                    disabled={regeneratingEscandallo}
-                    onClick={() => void handleRegenerateAllEscandallo()}
-                  >
-                    {regeneratingEscandallo ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Calculator className="w-3.5 h-3.5" />
-                    )}
-                    Generar escandallos (todas las marcas)
+                  <SaasTabSecondaryButton onClick={handleDownloadEscandalloExcel}>
+                    <Download className="w-3.5 h-3.5" />
+                    Descargar Excel escandallo
                   </SaasTabSecondaryButton>
                 ) : null}
                 {categories.length > 0 ? (

@@ -325,6 +325,21 @@ function sanitizeComandaItem(item) {
   const brandIds = Array.isArray(item?.brandIds)
     ? item.brandIds.map((b) => String(b || '').trim()).filter(Boolean)
     : [];
+  const modifiers = Array.isArray(item.modifiers)
+    ? item.modifiers.map((m) => String(m || '').trim()).filter(Boolean)
+    : [];
+  const extrasRaw = Array.isArray(item.extras)
+    ? item.extras.map((e) => String(e || '').trim()).filter(Boolean)
+    : [];
+  const extras = extrasRaw.length > 0 ? extrasRaw : modifiers;
+  const ingredients = Array.isArray(item.ingredients)
+    ? item.ingredients
+        .map((ing) => ({
+          name: String(ing?.name || '').trim(),
+          quantity: String(ing?.quantity || 'normal').trim() || 'normal',
+        }))
+        .filter((ing) => ing.name)
+    : [];
   return {
     id: item.id || uuidv4(),
     productId: String(item.productId || ''),
@@ -333,7 +348,9 @@ function sanitizeComandaItem(item) {
     quantity: Math.max(1, Number(item.quantity || 1)),
     category: String(item.category || ''),
     notes: String(item.notes || ''),
-    modifiers: Array.isArray(item.modifiers) ? item.modifiers : [],
+    modifiers: modifiers.length > 0 ? modifiers : extras,
+    extras,
+    ingredients,
     status: normalizeItemStatus(item.status),
     cancelledReason: String(item.cancelledReason || ''),
     cancelledBy: String(item.cancelledBy || ''),

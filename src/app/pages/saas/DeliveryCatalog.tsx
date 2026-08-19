@@ -27,6 +27,11 @@ import { DELIVERY_ACTIVE_STORE_CHANGED } from '../../lib/deliveryOpsPdvSelection
 import { listWarehousesRequest, type Warehouse } from '../../lib/warehouseApi';
 import { useVerticalCatalog } from '../../hooks/useVerticalCatalog';
 import { InventoryPanel } from '../../components/saas/InventoryPanel';
+import { SupplierPaymentTermsField } from '../../components/saas/SupplierPaymentTermsField';
+import {
+  labelsForSupplierOrganizerIds,
+  SupplierOrganizersField,
+} from '../../components/saas/SupplierOrganizersField';
 import { PurchaseOrdersPage } from './PurchaseOrdersPage';
 import { EscandalloPanel } from './CostingPage';
 import JSZip from 'jszip';
@@ -87,6 +92,7 @@ import {
   createPurchaseInvoiceRequest,
   updatePurchaseInvoiceRequest,
   deletePurchaseInvoiceRequest,
+  loadPurchaseInvoiceStockRequest,
   filterDeliveryOrdersRequest,
   getDeliveryConfigRequest,
   updateDeliveryConfigRequest,
@@ -113,6 +119,7 @@ import {
   CheckCircle2,
   Clock,
   DollarSign,
+  PackageCheck,
   BarChart3,
   ArrowUpDown,
   Minus,
@@ -2012,9 +2019,10 @@ interface CreateSupplierModalProps {
   onClose: () => void;
   onCreate: (data: Partial<Supplier>) => Promise<void>;
   editItem?: Supplier | null;
+  brands?: Brand[];
 }
 
-function CreateSupplierModal({ isOpen, onClose, onCreate, editItem }: CreateSupplierModalProps) {
+function CreateSupplierModal({ isOpen, onClose, onCreate, editItem, brands = [] }: CreateSupplierModalProps) {
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     name: '',
@@ -2026,6 +2034,7 @@ function CreateSupplierModal({ isOpen, onClose, onCreate, editItem }: CreateSupp
     category: '',
     paymentTerms: '',
     notes: '',
+    organizerIds: [] as string[],
   });
 
   useEffect(() => {
@@ -2040,9 +2049,21 @@ function CreateSupplierModal({ isOpen, onClose, onCreate, editItem }: CreateSupp
         category: editItem.category || '',
         paymentTerms: editItem.paymentTerms || '',
         notes: editItem.notes || '',
+        organizerIds: Array.isArray(editItem.organizerIds) ? [...editItem.organizerIds] : [],
       });
     } else {
-      setForm({ name: '', cif: '', email: '', phone: '', address: '', contactPerson: '', category: '', paymentTerms: '', notes: '' });
+      setForm({
+        name: '',
+        cif: '',
+        email: '',
+        phone: '',
+        address: '',
+        contactPerson: '',
+        category: '',
+        paymentTerms: '',
+        notes: '',
+        organizerIds: [],
+      });
     }
   }, [editItem, isOpen]);
   useModalClose(isOpen, onClose);
@@ -2068,6 +2089,7 @@ function CreateSupplierModal({ isOpen, onClose, onCreate, editItem }: CreateSupp
         category: form.category,
         paymentTerms: form.paymentTerms,
         notes: form.notes,
+        organizerIds: form.organizerIds,
         active: editItem?.active ?? true,
       });
     } finally {
@@ -2167,15 +2189,16 @@ function CreateSupplierModal({ isOpen, onClose, onCreate, editItem }: CreateSupp
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Condiciones de pago</label>
-            <input
-              className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-              placeholder="Ej: 30 días, contado..."
-              value={form.paymentTerms}
-              onChange={e => setForm(f => ({ ...f, paymentTerms: e.target.value }))}
-            />
-          </div>
+          <SupplierOrganizersField
+            value={form.organizerIds}
+            onChange={(organizerIds) => setForm((f) => ({ ...f, organizerIds }))}
+            brands={brands}
+          />
+
+          <SupplierPaymentTermsField
+            value={form.paymentTerms}
+            onChange={(paymentTerms) => setForm((f) => ({ ...f, paymentTerms }))}
+          />
 
           <div>
             <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Notas</label>
@@ -2718,7 +2741,7 @@ function CatalogModuleNav({
 export function CatalogPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const CATALOG_TABS = ['catalog', 'ingredientes', 'escandallo', 'stock', 'suppliers', 'purchase-orders', 'invoices', 'staff-consumption'] as const;
+  const CATALOG_TABS = ['catalog', 'ingredientes', 'escandallo', 'stock', 'suppliers', 'purchase-orders', 'albaranes', 'invoices', 'staff-consumption'] as const;
   const { user } = useAuth();
   const { currentBusiness, businessesFetchSettled, businesses } = useBusiness();
   const activeStore = useActiveStoreScope();
@@ -2798,8 +2821,10 @@ export function CatalogPage() {
   const activeTab = useMemo(() => {
     const raw = searchParams.get('tab') || 'catalog';
     const tab = raw === 'tpv-templates' ? 'ingredientes' : raw;
+    // Bar/restaurante: ingredientes van dentro de cada producto de Carta (sin pestaña aparte).
+    if (isRestaurantCatalog && tab === 'ingredientes') return 'catalog';
     return (CATALOG_TABS as readonly string[]).includes(tab) ? tab : 'catalog';
-  }, [searchParams]);
+  }, [searchParams, isRestaurantCatalog]);
   const setActiveTab = useCallback((tab: string) => setSearchParams({ tab }), [setSearchParams]);
 
   const storeLabel = activeStore.displayLabelForActive || 'Tienda activa';
@@ -4033,6 +4058,22 @@ export function CatalogPage() {
     }
   };
 
+  const handleLoadInvoiceToWarehouse = async (invoice: PurchaseInvoice) => {
+    if (!dataUserId) return;
+    try {
+      const result = await loadPurchaseInvoiceStockRequest(dataUserId, invoice._id);
+      setInvoices((prev) => prev.map((i) => (i._id === result.invoice._id ? result.invoice : i)));
+      if (result.skipped) {
+        toast.message('Ya estaba cargado en almacén');
+      } else {
+        const n = result.reconcile?.stockUpdated || 0;
+        toast.success(n > 0 ? `Cargado al almacén: ${n} artículo(s)` : 'Sin líneas vinculadas a inventario');
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo cargar al almacén');
+    }
+  };
+
   // ── Derived data ────────────────────────────────────────────────────────────
 
   const categories = useMemo(() => {
@@ -5040,6 +5081,7 @@ export function CatalogPage() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Teléfono</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Contacto</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Categoría</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Suministra</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Estado</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Acciones</th>
               </tr>
@@ -5091,6 +5133,27 @@ export function CatalogPage() {
                     ) : <span className="text-gray-400 text-sm">—</span>}
                   </td>
                   <td className="px-4 py-3">
+                    {(() => {
+                      const labels = labelsForSupplierOrganizerIds(supplier.organizerIds, brands);
+                      if (labels.length === 0) return <span className="text-gray-400 text-sm">—</span>;
+                      return (
+                        <div className="flex flex-wrap gap-1 max-w-[220px]">
+                          {labels.slice(0, 4).map((label) => (
+                            <span
+                              key={label}
+                              className="px-2 py-0.5 bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300 text-[11px] font-medium rounded-lg border border-sky-200 dark:border-sky-800"
+                            >
+                              {label}
+                            </span>
+                          ))}
+                          {labels.length > 4 ? (
+                            <span className="text-[11px] text-gray-400">+{labels.length - 4}</span>
+                          ) : null}
+                        </div>
+                      );
+                    })()}
+                  </td>
+                  <td className="px-4 py-3">
                     <span className={`px-2 py-1 text-xs font-semibold rounded-full border ${
                       supplier.active
                         ? 'bg-green-100 text-green-700 border-green-200'
@@ -5134,6 +5197,66 @@ export function CatalogPage() {
       )}
     </SaasTabWorkspace>
   );
+
+  // ── Tab: Albarán ────────────────────────────────────────────────────────────
+
+  const renderAlbaranesTab = () => {
+    const albaranes = invoices.filter(
+      (inv) =>
+        inv.documentKind === 'albaran' ||
+        inv.ocrData?.documentType === 'albaran',
+    );
+    return (
+      <SaasTabWorkspace
+        stats={[
+          { label: 'albaranes', value: albaranes.length },
+          {
+            label: 'pte. almacén',
+            value: albaranes.filter((a) => !a.ocrStockReceivedAt).length,
+            tone: 'amber',
+          },
+        ]}
+      >
+        {albaranes.length === 0 ? (
+          <SaasTabEmpty
+            icon={<Package className="w-10 h-10" />}
+            title="Sin albaranes"
+            description="Los albaranes de proveedor (OCR o correo) aparecerán aquí"
+          />
+        ) : (
+          <ul className="divide-y divide-gray-100 dark:divide-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden bg-white dark:bg-gray-800">
+            {albaranes.map((inv) => (
+              <li key={inv._id} className="px-4 py-3 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate">
+                    {inv.invoiceNumber || 'Sin código'} · {inv.supplierName || 'Proveedor'}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {inv.date ? new Date(inv.date).toLocaleDateString('es-ES') : '—'}
+                    {inv.ocrStockReceivedAt ? ' · en almacén' : ' · pendiente de almacén'}
+                  </p>
+                </div>
+                {!inv.ocrStockReceivedAt ? (
+                  <button
+                    type="button"
+                    onClick={() => handleLoadInvoiceToWarehouse(inv)}
+                    className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold"
+                  >
+                    <PackageCheck className="w-3.5 h-3.5" />
+                    Cargar al almacén
+                  </button>
+                ) : (
+                  <span className="shrink-0 text-xs font-medium text-emerald-600 flex items-center gap-1">
+                    <PackageCheck className="w-3.5 h-3.5" /> Cargado
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </SaasTabWorkspace>
+    );
+  };
 
   // ── Tab: Facturas ───────────────────────────────────────────────────────────
 
@@ -5218,6 +5341,15 @@ export function CatalogPage() {
                       </p>
                     </div>
                     <div className="flex items-center shrink-0">
+                      {!originalInvoice.ocrStockReceivedAt && (
+                        <button
+                          onClick={() => handleLoadInvoiceToWarehouse(originalInvoice)}
+                          className="p-2 hover:bg-emerald-100 rounded-lg transition-colors"
+                          title="Cargar al almacén"
+                        >
+                          <PackageCheck className="w-4 h-4 text-emerald-600" />
+                        </button>
+                      )}
                       {!invoiceFinanceLinks.has(originalInvoice._id) && (
                         <button
                           onClick={() => handleLinkInvoiceToFinance(originalInvoice)}
@@ -5317,6 +5449,15 @@ export function CatalogPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
+                          {!originalInvoice.ocrStockReceivedAt && (
+                            <button
+                              onClick={() => handleLoadInvoiceToWarehouse(originalInvoice)}
+                              className="p-1.5 hover:bg-emerald-100 rounded-lg transition-colors"
+                              title="Cargar al almacén"
+                            >
+                              <PackageCheck className="w-4 h-4 text-emerald-600" />
+                            </button>
+                          )}
                           {!invoiceFinanceLinks.has(originalInvoice._id) && (
                             <button
                               onClick={() => handleLinkInvoiceToFinance(originalInvoice)}
@@ -5380,42 +5521,56 @@ export function CatalogPage() {
 
   // ── Tabs config ─────────────────────────────────────────────────────────────
 
-  const navGroups = useMemo<CatalogNavGroup[]>(() => [
-    {
-      id: 'carta',
-      label: 'Carta',
-      tabs: [
-        { id: 'catalog', label: 'Carta', count: catalogMenuItems.filter((i) => i.active).length || undefined },
-        {
-          id: 'ingredientes',
-          label: 'Ingredientes',
-          count: storeIngredients.length || undefined,
-        },
-        { id: 'escandallo', label: 'Escandallo' },
-      ],
-    },
-    {
-      id: 'almacen',
-      label: 'Almacén',
-      tabs: [
-        { id: 'stock', label: 'Inventario', count: stockTabCount || undefined },
-      ],
-    },
-    {
-      id: 'compras',
-      label: 'Compras',
-      tabs: [
-        { id: 'suppliers', label: 'Proveedores', count: supplierKpis.active || undefined },
-        { id: 'purchase-orders', label: 'Pedidos' },
-        { id: 'invoices', label: 'Facturas', count: invoiceKpis.pending || undefined },
-      ],
-    },
-    {
-      id: 'equipo',
-      label: 'Equipo',
-      tabs: [{ id: 'staff-consumption', label: 'Consumos' }],
-    },
-  ], [stockTabCount, catalogMenuItems, storeIngredients, supplierKpis.active, invoiceKpis.pending]);
+  const navGroups = useMemo<CatalogNavGroup[]>(() => {
+    const cartaTabs: CatalogNavGroup['tabs'] = [
+      { id: 'catalog', label: 'Carta', count: catalogMenuItems.filter((i) => i.active).length || undefined },
+    ];
+    if (!isRestaurantCatalog) {
+      cartaTabs.push({
+        id: 'ingredientes',
+        label: 'Ingredientes',
+        count: storeIngredients.length || undefined,
+      });
+    }
+    cartaTabs.push({ id: 'escandallo', label: 'Escandallo' });
+
+    return [
+      {
+        id: 'carta',
+        label: 'Carta',
+        tabs: cartaTabs,
+      },
+      {
+        id: 'almacen',
+        label: 'Almacén',
+        tabs: [
+          { id: 'stock', label: 'Inventario', count: stockTabCount || undefined },
+        ],
+      },
+      {
+        id: 'compras',
+        label: 'Compras',
+        tabs: [
+          { id: 'suppliers', label: 'Proveedores', count: supplierKpis.active || undefined },
+          { id: 'purchase-orders', label: 'Pedidos' },
+          { id: 'albaranes', label: 'Albarán' },
+          { id: 'invoices', label: 'Facturas', count: invoiceKpis.pending || undefined },
+        ],
+      },
+      {
+        id: 'equipo',
+        label: 'Equipo',
+        tabs: [{ id: 'staff-consumption', label: 'Consumos' }],
+      },
+    ];
+  }, [
+    isRestaurantCatalog,
+    stockTabCount,
+    catalogMenuItems,
+    storeIngredients,
+    supplierKpis.active,
+    invoiceKpis.pending,
+  ]);
 
   const brandSetupCtx = useMemo(
     () =>
@@ -5462,7 +5617,7 @@ export function CatalogPage() {
       ? HELADERIA_OPS_HOME_PATH
       : DELIVERY_OPS_HOME_PATH;
   const catalogSubtitle = isRestaurantCatalog
-    ? 'Carta · Ingredientes · Inventario · Compras · Consumos'
+    ? 'Carta · Escandallo · Inventario · Compras · Consumos'
     : 'Menú · Ingredientes · Inventario · Compras · Consumos';
 
   const catalogBusy = loading && catalogItems.length === 0;
@@ -5515,7 +5670,7 @@ export function CatalogPage() {
           catalogBusy ? <CatalogTabLoadingState phase="catalog" /> : renderCatalogTab()
         )}
 
-        {activeTab === 'ingredientes' && renderIngredientesTab()}
+        {activeTab === 'ingredientes' && !isRestaurantCatalog && renderIngredientesTab()}
 
         {activeTab === 'stock' && (
           catalogBusy ? (
@@ -5552,6 +5707,8 @@ export function CatalogPage() {
             onGoToInvoices={() => setActiveTab('invoices')}
           />
         )}
+
+        {activeTab === 'albaranes' && renderAlbaranesTab()}
 
         {activeTab === 'invoices' && (
           (invoicesLoading || suppliersLoading) && invoices.length === 0
@@ -5615,6 +5772,7 @@ export function CatalogPage() {
         onClose={() => { setShowCreateSupplier(false); setEditingSupplier(null); }}
         onCreate={handleCreateSupplier}
         editItem={editingSupplier}
+        brands={brands}
       />
 
       <CreateInvoiceModal

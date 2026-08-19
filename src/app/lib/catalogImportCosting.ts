@@ -26,6 +26,7 @@ import {
   isBarBocataCategory,
   resolveBarEscandalloDefaultIngredients,
   resolveBarEscandalloFixedCost,
+  resolveBarEscandalloApproxFromSalePrice,
   shouldUseBarEscandalloPresets,
 } from './barEscandalloPresets.ts';
 
@@ -207,6 +208,20 @@ const CATEGORY_FIXED_FALLBACK: Record<string, number> = {
   kebab: 2.8,
   principales: 4.2,
   principal: 4.2,
+  ensaladas: 2.4,
+  ensalada: 2.4,
+  carnes: 5.5,
+  carne: 5.5,
+  pescados: 5.2,
+  pescado: 5.2,
+  arroces: 4.8,
+  arroz: 4.8,
+  pastas: 3.6,
+  pasta: 3.6,
+  menus: 5.5,
+  menu: 5.5,
+  sopas: 2.8,
+  sopa: 2.8,
 };
 
 function foldName(value: string): string {
@@ -379,35 +394,61 @@ export function inferImportCostingLineKind(
 ): DeliveryBrandLineKindId | 'generic' {
   const brandId = item.brandIds?.[0];
   const brand = brandId ? brands.find((b) => b._id === brandId) : undefined;
-  if (brand?.deliveryLineKind) return brand.deliveryLineKind as DeliveryBrandLineKindId;
+  const brandKind = brand?.deliveryLineKind
+    ? (brand.deliveryLineKind as DeliveryBrandLineKindId)
+    : null;
 
-  const cat = foldName(normalizeImportCategoryLocal(item.category || ''));
-  const name = foldName(item.name || '');
-  if (/pizza|calzone|especialidad|premium/.test(cat) || /pizza|calzone/.test(name)) return 'pizza';
-  if (/burger|hamburguesa|top burger/.test(cat) || /burger|hamburguesa/.test(name)) {
-    return 'burger_fastfood';
+  const fromCategoryAndName = (): DeliveryBrandLineKindId | 'generic' => {
+    const cat = foldName(normalizeImportCategoryLocal(item.category || ''));
+    const name = foldName(item.name || '');
+    if (/pizza|calzone|especialidad|premium/.test(cat) || /pizza|calzone/.test(name)) return 'pizza';
+    if (/burger|hamburguesa|top burger/.test(cat) || /burger|hamburguesa/.test(name)) {
+      return 'burger_fastfood';
+    }
+    if (/taco|burrito|quesadilla|mexican|pastor|carnitas/.test(cat) || /taco|burrito|quesadilla/.test(name)) {
+      return 'tacos_mexican';
+    }
+    if (
+      /tapa|racion|raciones|pincho|montadito|bocadillo|bocata|sandwich|taberna|cerveceria|cervecería|para picar|picoteo/.test(cat) ||
+      /tapa|pincho|racion|montadito|bocadillo|bocata|bravas|iberico|ibérico/.test(name)
+    ) {
+      return 'tapas_bar';
+    }
+    if (/complemento|bebida|postre/.test(cat)) {
+      return 'tapas_bar';
+    }
+    if (/kebab|doner|döner|wrap|durum/.test(cat) || /kebab|doner|döner|durum/.test(name)) {
+      return 'kebab';
+    }
+    if (
+      /cafe|café|bolleria|bollería|desayuno|panaderia|panadería/.test(cat) ||
+      /cafe|café|croissant|capuccino|cappuccino/.test(name)
+    ) {
+      return 'cafe_bakery';
+    }
+    if (
+      /entrante|principal|plato|cocina|carte|ensalada|carne|pescado|arroz|pasta|sopa|guiso|menu|menú/.test(cat) ||
+      /plato|menu del dia|menú del día/.test(name)
+    ) {
+      return 'prepared_meals';
+    }
+    return 'generic';
+  };
+
+  const inferred = fromCategoryAndName();
+
+  // Marca paraguas bar/restaurante: la categoría manda (Tapas ≠ Principales ≠ Bebidas).
+  if (
+    brandKind === 'mixed_restaurant' ||
+    brandKind === 'prepared_meals' ||
+    brandKind === 'tapas_bar'
+  ) {
+    if (inferred !== 'generic') return inferred;
+    return brandKind;
   }
-  if (/taco|burrito|quesadilla|mexican|pastor|carnitas/.test(cat) || /taco|burrito|quesadilla/.test(name)) {
-    return 'tacos_mexican';
-  }
-  if (/tapa|racion|raciones|pincho|montadito|bocadillo|bocata|sandwich|taberna|cerveceria|cervecería/.test(cat) ||
-      /tapa|pincho|racion|montadito|bocadillo|bocata|bravas|iberico|ibérico/.test(name)) {
-    return 'tapas_bar';
-  }
-  if (/complemento|bebida|postre/.test(cat)) {
-    return 'tapas_bar';
-  }
-  if (/kebab|doner|döner|wrap|durum/.test(cat) || /kebab|doner|döner|durum/.test(name)) {
-    return 'kebab';
-  }
-  if (/cafe|café|bolleria|bollería|desayuno|panaderia|panadería/.test(cat) ||
-      /cafe|café|croissant|capuccino|cappuccino/.test(name)) {
-    return 'cafe_bakery';
-  }
-  if (/entrante|principal|plato|cocina|carte/.test(cat) || /plato|menu del dia|menú del día/.test(name)) {
-    return 'prepared_meals';
-  }
-  return 'generic';
+
+  if (brandKind) return brandKind;
+  return inferred;
 }
 
 function brandScopeMatch(ing: CostingStoreIngredient, brandIds: string[]): boolean {
@@ -887,9 +928,18 @@ export function ensureVertialEscandalloBaseStoreIngredients(
   addForKind('mixed_restaurant', VERTIAL_ESCANDALLO_BASE_NAMES.mixed_restaurant ?? []);
   addForKind('cafe_bakery', VERTIAL_ESCANDALLO_BASE_NAMES.cafe_bakery ?? []);
 
-  const tapasBrandIds = brands.filter((b) => b.deliveryLineKind === 'tapas_bar').map((b) => b._id);
-  if (tapasBrandIds.length > 0) {
-    const scopeIds = tapasBrandIds;
+  const restaurantKinds = new Set([
+    'tapas_bar',
+    'mixed_restaurant',
+    'prepared_meals',
+    'cafe_bakery',
+  ]);
+  const restaurantBrandIds = brands
+    .filter((b) => restaurantKinds.has(String(b.deliveryLineKind || '').trim()))
+    .map((b) => b._id);
+  // Bar/restaurante: bases de escandallo aunque la marca sea «mixed_restaurant» (no solo tapas_bar).
+  if (restaurantBrandIds.length > 0 || brands.length === 0) {
+    const scopeIds = restaurantBrandIds;
     for (const name of BAR_ESCANDALLO_BASE_INGREDIENTS) {
       const exists =
         findStoreIngredientForCosting(name, merged, scopeIds) ??
@@ -899,7 +949,7 @@ export function ensureVertialEscandalloBaseStoreIngredients(
         id: `ing-vertial-bar-${foldName(name)}`,
         name,
         role: 'escandallo',
-        brandIds: scopeIds,
+        ...(scopeIds.length > 0 ? { brandIds: scopeIds } : {}),
         baseCost: resolveVertialDefaultBaseCost(name, 'tapas_bar'),
       });
       added += 1;
@@ -1021,6 +1071,25 @@ export function applyVertialAutoCostingToCatalogItem(
       item: withProductCosting(item, { costingType: 'fixed', fixedCost: fallback }, new Map(), brands),
       mode: 'fixed',
     };
+  }
+
+  // Bar/restaurante: nunca dejar comida sin coste aprox al importar Excel (las bebidas ya
+  // muestran referencia Vertial; la comida sin costingType aparece como «Sin escandallo»).
+  if (shouldUseBarEscandalloPresets(lineKind, item.category || '')) {
+    const approx =
+      resolveBarEscandalloApproxFromSalePrice(Number(item.unitPrice) || 0) ??
+      resolveVertialDefaultBaseCost(item.name, lineKind === 'generic' ? undefined : lineKind);
+    if (approx != null && approx > 0) {
+      return {
+        item: withProductCosting(
+          item,
+          { costingType: 'fixed', fixedCost: approx },
+          new Map(),
+          brands,
+        ),
+        mode: 'fixed',
+      };
+    }
   }
 
   const nameCost = resolveVertialDefaultBaseCost(item.name, lineKind === 'generic' ? undefined : lineKind);

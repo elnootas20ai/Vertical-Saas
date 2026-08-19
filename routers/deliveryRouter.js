@@ -33,6 +33,7 @@ import {
   validatePurchaseInvoice,
   rejectPurchaseInvoice,
   checkDuplicateInvoice,
+  loadPurchaseInvoiceToStock,
   uploadInvoicePdf,
   getInvoicePdf,
   listDriverCashSessions,
@@ -161,6 +162,7 @@ deliveryRouter.delete('/suppliers/:userId/:supplierId', removeSupplier);
 deliveryRouter.get('/invoices/:userId', listPurchaseInvoices);
 deliveryRouter.post('/invoices/:userId', createPurchaseInvoice);
 deliveryRouter.post('/invoices/:userId/check-duplicate', checkDuplicateInvoice);
+deliveryRouter.post('/invoices/:userId/:invoiceId/load-stock', loadPurchaseInvoiceToStock);
 deliveryRouter.put('/invoices/:userId/:invoiceId', updatePurchaseInvoice);
 deliveryRouter.put('/invoices/:userId/:invoiceId/validate', validatePurchaseInvoice);
 deliveryRouter.put('/invoices/:userId/:invoiceId/reject', rejectPurchaseInvoice);

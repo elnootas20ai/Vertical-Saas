@@ -20,6 +20,8 @@ export interface KitchenTicket {
     quantity: number;
     notes: string;
     modifiers: string[];
+    extras: string[];
+    ingredients: { name: string; quantity: string }[];
   }[];
 }
 
@@ -56,14 +58,21 @@ function comandaToTicket(order: DiningOrder, comanda: DiningComanda): KitchenTic
     createdByName: comanda.createdByName || '',
     items: (comanda.items || [])
       .filter((item) => item.status !== 'cancelled')
-      .map((item) => ({
-        id: item.id,
-        productId: String(item.productId || '').trim(),
-        name: item.name,
-        quantity: Number(item.quantity) || 1,
-        notes: item.notes || '',
-        modifiers: item.modifiers || [],
-      })),
+      .map((item) => {
+        const extras = Array.isArray(item.extras) && item.extras.length > 0
+          ? item.extras
+          : (item.modifiers || []);
+        return {
+          id: item.id,
+          productId: String(item.productId || '').trim(),
+          name: item.name,
+          quantity: Number(item.quantity) || 1,
+          notes: item.notes || '',
+          modifiers: item.modifiers || extras,
+          extras,
+          ingredients: Array.isArray(item.ingredients) ? item.ingredients : [],
+        };
+      }),
   };
 }
 

@@ -237,6 +237,8 @@ export function SAAS__OcrScanModal({
   const [creatingSupplier, setCreatingSupplier] = useState(false);
   const [linkedSupplier, setLinkedSupplier] = useState<{ _id: string; name: string } | null>(null);
   const [stockMatchDecision, setStockMatchDecision] = useState<'pending' | 'confirmed'>('pending');
+  /** Opción explícita: cargar líneas al almacén al aprobar factura/albarán. */
+  const [loadToWarehouse, setLoadToWarehouse] = useState(true);
   const contextVehicleId = String(context?.vehicleId || '').trim();
   const [selectedVehicleId, setSelectedVehicleId] = useState(contextVehicleId);
   const hideModeToggle = lockOcrMode || (defaultOcrMode === 'vehicle' && Boolean(contextVehicleId));
@@ -638,13 +640,21 @@ export function SAAS__OcrScanModal({
     }
     setStep('saving');
     try {
-      const approveFields = linkedSupplier
-        ? {
-            supplierId: { value: linkedSupplier._id, confidence: 100, source: 'created' },
-            supplierName: { value: linkedSupplier.name, confidence: 100, source: 'created' },
-          }
-        : undefined;
-      const res = await approveProposal(proposal._id, approveFields);
+      const approveFields = {
+        ...(linkedSupplier
+          ? {
+              supplierId: { value: linkedSupplier._id, confidence: 100, source: 'created' },
+              supplierName: { value: linkedSupplier.name, confidence: 100, source: 'created' },
+            }
+          : {}),
+        ...(isComprasPurchaseDoc(ocrResult, targetModule)
+          ? { loadToWarehouse: { value: loadToWarehouse, confidence: 100, source: 'user' } }
+          : {}),
+      };
+      const res = await approveProposal(
+        proposal._id,
+        Object.keys(approveFields).length > 0 ? approveFields : undefined,
+      );
       setRouteResult(res.routeResult);
       setProposal(res.proposal);
       setStep('done');
@@ -995,12 +1005,29 @@ export function SAAS__OcrScanModal({
               )}
 
               {isComprasDoc && (
-                <div className="flex items-start gap-2 p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl text-xs text-emerald-800 dark:text-emerald-200">
-                  <PackagePlus className="w-4 h-4 shrink-0 mt-0.5" />
-                  <span>
-                    Al aprobar: factura en Compras, <strong>pago en Finanzas</strong> y <strong>entrada de stock</strong> en artículos vinculados del inventario.
-                    {catalogMatchSummary ? ` ${catalogMatchSummary.matchedLines}/${catalogMatchSummary.totalLines} líneas ya emparejadas.` : ''}
-                  </span>
+                <div className="space-y-2">
+                  <label className="flex items-start gap-3 p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="mt-1 rounded border-emerald-400"
+                      checked={loadToWarehouse}
+                      onChange={(e) => setLoadToWarehouse(e.target.checked)}
+                    />
+                    <span className="text-sm text-emerald-900 dark:text-emerald-100">
+                      <span className="font-semibold flex items-center gap-1.5">
+                        <PackagePlus className="w-4 h-4" />
+                        Cargar al almacén
+                      </span>
+                      <span className="block text-xs text-emerald-800/80 dark:text-emerald-200/80 mt-0.5">
+                        Suma las líneas vinculadas al inventario. Si lo dejas apagado, la factura/albarán se guarda y podrás cargar el stock después.
+                        {catalogMatchSummary ? ` ${catalogMatchSummary.matchedLines}/${catalogMatchSummary.totalLines} líneas emparejadas.` : ''}
+                      </span>
+                    </span>
+                  </label>
+                  <div className="flex items-start gap-2 px-3 text-xs text-gray-600 dark:text-gray-400">
+                    <Send className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                    Al aprobar también se registra en Compras y el pago en Finanzas.
+                  </div>
                 </div>
               )}
 
@@ -1194,13 +1221,23 @@ export function SAAS__OcrScanModal({
               <div className="w-16 h-16 bg-amber-100 dark:bg-amber-900/30 rounded-full flex items-center justify-center mx-auto">
                 <Copy className="w-8 h-8 text-amber-600" />
               </div>
-              <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Documento duplicado</h3>
-              <p className="text-sm text-gray-500 max-w-md mx-auto">Este documento ya fue procesado anteriormente. Puedes ignorar el duplicado o forzar un nuevo procesamiento.</p>
+              <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">
+                {(duplicateInfo as { duplicateType?: string } | null)?.duplicateType === 'invoice_number'
+                  ? 'Código de factura ya registrado'
+                  : 'Documento duplicado'}
+              </h3>
+              <p className="text-sm text-gray-500 max-w-md mx-auto">
+                {(duplicateInfo as { duplicateType?: string; original?: { invoiceNumber?: string } } | null)?.duplicateType === 'invoice_number'
+                  ? `Ya existe una factura/albarán con el código ${(duplicateInfo as { original?: { invoiceNumber?: string } })?.original?.invoiceNumber || 'indicado'}. No se mete otra igual.`
+                  : 'Este documento ya fue procesado anteriormente. Puedes cancelar o forzar un nuevo registro.'}
+              </p>
               <div className="flex gap-3 justify-center pt-2">
                 <button onClick={reset} className="px-6 py-3 border-2 border-gray-200 dark:border-gray-700 hover:border-gray-300 text-gray-700 dark:text-gray-300 font-medium rounded-xl transition-colors">Cancelar</button>
-                <button onClick={handleForceDuplicate} className="px-6 py-3 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-xl transition-colors flex items-center gap-2">
-                  <RotateCcw className="w-4 h-4" /> Procesar igualmente
-                </button>
+                {(duplicateInfo as { duplicateType?: string } | null)?.duplicateType !== 'invoice_number' && (
+                  <button onClick={handleForceDuplicate} className="px-6 py-3 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-xl transition-colors flex items-center gap-2">
+                    <RotateCcw className="w-4 h-4" /> Procesar igualmente
+                  </button>
+                )}
               </div>
             </div>
           )}

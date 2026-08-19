@@ -21,9 +21,11 @@ import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import {
   changeTableStatusRequest,
   emitSalaStaffAlertRequest,
+  getFloorConfigRequest,
   listDiningTablesRequest,
   type DiningTable,
 } from '../../lib/salaApi';
+import { SALA_ROOM_TYPE_LABELS, type SalaRoom } from '../../lib/salaStudioTypes';
 import { ensureOpenDiningOrder } from '../../lib/restaurantDiningTpv';
 import { tableStatusOnOpen } from '../../lib/restaurantTableStatus';
 import { writeSalaTpvOpenTable } from '../../lib/salaTpvLaunch';
@@ -53,6 +55,8 @@ import {
   type WaitlistFormData,
 } from '../../lib/restaurantWaitlistTypes';
 
+const FALLBACK_ZONE_OPTIONS = Object.values(SALA_ROOM_TYPE_LABELS);
+
 function normalizeBusinessId(value: string | null | undefined): string {
   return String(value || '').replace(/^business:/, '').trim();
 }
@@ -79,19 +83,28 @@ export function RestaurantWaitlistPage() {
   const [showDone, setShowDone] = useState(false);
   const [seatEntry, setSeatEntry] = useState<RestaurantWaitlistEntry | null>(null);
   const [tables, setTables] = useState<DiningTable[]>([]);
+  const [rooms, setRooms] = useState<SalaRoom[]>([]);
   const [tablesLoading, setTablesLoading] = useState(false);
   const [seatingTableId, setSeatingTableId] = useState('');
 
   const load = useCallback(async () => {
     if (!dataUserId) {
       setEntries([]);
+      setRooms([]);
       setLoading(false);
       return;
     }
     setLoading(true);
     try {
-      const items = await listWaitlistForBusiness(dataUserId, businessId);
+      const [items, floorConfig] = await Promise.all([
+        listWaitlistForBusiness(dataUserId, businessId),
+        getFloorConfigRequest(dataUserId, businessId ? { businessId } : undefined).catch(() => null),
+      ]);
       setEntries(items);
+      const floorRooms = Array.isArray(floorConfig?.rooms)
+        ? (floorConfig.rooms as SalaRoom[])
+        : [];
+      setRooms(floorRooms);
     } catch {
       setEntries([]);
       toast.error('No se pudo cargar la lista de espera');
@@ -115,6 +128,15 @@ export function RestaurantWaitlistPage() {
     }, 45_000);
     return () => window.clearInterval(refresh);
   }, [load]);
+
+  const zoneOptions = useMemo(() => {
+    const fromRooms = rooms.map((r) => String(r.name || '').trim()).filter(Boolean);
+    const fromTables = tables
+      .map((t) => String(t.zone || '').trim())
+      .filter(Boolean);
+    const merged = [...new Set([...fromRooms, ...fromTables])];
+    return merged.length > 0 ? merged : FALLBACK_ZONE_OPTIONS;
+  }, [rooms, tables]);
 
   const activeQueue = useMemo(
     () => sortWaitlistQueue(entries.filter((e) => isActiveWaitlistStatus(e.status))),
@@ -328,12 +350,16 @@ export function RestaurantWaitlistPage() {
             </label>
             <label className="block">
               <span className="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-400">Zona preferida</span>
-              <input
+              <select
                 value={form.zone}
                 onChange={(e) => setForm((p) => ({ ...p, zone: e.target.value }))}
-                placeholder="Terraza, barra…"
                 className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm text-stone-900 outline-none focus:border-stone-500 dark:border-stone-600 dark:bg-stone-950 dark:text-stone-50"
-              />
+              >
+                <option value="">Sin preferencia</option>
+                {zoneOptions.map((z) => (
+                  <option key={z} value={z}>{z}</option>
+                ))}
+              </select>
             </label>
             <label className="block sm:col-span-2">
               <span className="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-400">Notas</span>

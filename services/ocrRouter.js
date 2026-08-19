@@ -16,6 +16,7 @@ import {
   getDocumentsDbName,
   findOcrLogByHash,
   findOcrLogByFingerprint,
+  findDuplicatePurchaseInvoice,
   sanitizeOcrLog,
   sanitizeOcrProposal,
 } from './couchdb.js';
@@ -44,6 +45,25 @@ export async function checkDuplicate(sourceHash, ocrData, userId) {
         documentType: existing.detectedDocumentType,
         routedTo: existing.routedTo,
         processedAt: existing.createdAt,
+      };
+      return result;
+    }
+  }
+
+  // Mismo código de factura/albarán ya registrado en compras
+  const invoiceNumber = String(ocrData?.documentNumber || '').trim();
+  if (invoiceNumber && userId) {
+    const dupInv = await findDuplicatePurchaseInvoice(fakeReq, userId, invoiceNumber, '', null);
+    if (dupInv) {
+      result.isDuplicate = true;
+      result.duplicateType = 'invoice_number';
+      result.original = {
+        logId: dupInv._id,
+        invoiceId: dupInv._id,
+        invoiceNumber: dupInv.invoiceNumber,
+        documentType: dupInv.documentKind || 'factura_proveedor',
+        routedTo: 'compras',
+        processedAt: dupInv.createdAt,
       };
       return result;
     }
@@ -182,14 +202,33 @@ export async function executeProposal(proposal, userId) {
   switch (dest.action) {
     case 'create_purchase_invoice':
     case 'create_delivery_note': {
+      const invoiceNumber = String(fields.invoiceNumber || fields.documentNumber || proposal.ocrData?.documentNumber || '').trim();
+      if (invoiceNumber && !proposal.forceDuplicate) {
+        const dupInv = await findDuplicatePurchaseInvoice(fakeReq, userId, invoiceNumber, fields.supplierId || '', null);
+        if (dupInv) {
+          const err = new Error(`Factura duplicada: ya existe el código ${dupInv.invoiceNumber}`);
+          err.code = 'DUPLICATE_INVOICE';
+          err.existingInvoiceId = dupInv._id;
+          throw err;
+        }
+      }
+      const loadToWarehouse = fields.loadToWarehouse === true
+        || String(fields.loadToWarehouse || '').toLowerCase() === 'true';
+      const docKind = dest.action === 'create_delivery_note'
+        ? 'albaran'
+        : (proposal.ocrData?.documentType || 'factura_proveedor');
       createdDoc = buildPurchaseInvoiceDocument(userId, {
         ...fields,
+        invoiceNumber,
+        documentKind: docKind,
         entryMethod: 'ocr',
         ocrData: proposal.ocrData,
         ocrImageBase64: proposal.sourceImageBase64 || '',
         ocrProcessedAt: now,
         ocrConfidence: proposal.ocrData?.confidenceScore || 0,
+        flags: { stockPending: !loadToWarehouse },
       });
+      createdDoc.__loadToWarehouse = loadToWarehouse;
       break;
     }
     case 'create_client_invoice':
@@ -268,7 +307,10 @@ export async function executeProposal(proposal, userId) {
     if (dest.action === 'create_purchase_invoice' || dest.action === 'create_delivery_note') {
       sideEffects = await reconcilePurchaseInvoiceFromOcr(fakeReq, userId, createdDoc, {
         performedBy: 'ocr-system',
+        applyStock: Boolean(createdDoc.__loadToWarehouse),
+        createFinance: true,
       });
+      delete createdDoc.__loadToWarehouse;
     }
 
     if (dest.action === 'create_client_invoice') {
@@ -389,6 +431,7 @@ export async function processOcrResult(params) {
     sourceFileName: sourceFileName,
     sourceImageBase64: sourceImageBase64 || '',
     ocrData: ocrData,
+    forceDuplicate: Boolean(forceDuplicate),
   });
 
   await putDocument(fakeReq, logsDb, proposal._id, proposal);

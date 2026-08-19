@@ -15,6 +15,7 @@ import {
   rejectInvoiceRequest,
   uploadInvoicePdfRequest,
   getInvoicePdfUrl,
+  loadPurchaseInvoiceStockRequest,
   listSuppliersRequest,
   createSupplierRequest,
   listCatalogItemsRequest,
@@ -41,7 +42,7 @@ import {
   Plus, Search, X, Trash2, Edit3, Receipt, CheckCircle2, Clock, DollarSign,
   BarChart3, AlertTriangle, Minus, Download, TrendingUp,
   FileText, ScanLine, Upload, Eye, EyeOff, Link2, Unlink, Building2, PlusCircle,
-  ArrowRight, Loader2, AlertCircle, PackageCheck, ChevronDown,
+  ArrowRight, ArrowLeft, Loader2, AlertCircle, PackageCheck, ChevronDown,
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { getApiBase } from '../../lib/apiBase';
@@ -114,6 +115,7 @@ function InvoiceModal({
   const [newCcName, setNewCcName] = useState('');
   const [newCcType, setNewCcType] = useState<WorkCenterType>('punto_de_venta');
   const [creatingCc, setCreatingCc] = useState(false);
+  const [loadToWarehouse, setLoadToWarehouse] = useState(true);
 
   useEffect(() => {
     if (editItem) {
@@ -364,6 +366,7 @@ function InvoiceModal({
       ocrData: ocrResult || undefined,
       ocrImageBase64: base64Ref.current || undefined,
       entryMethod,
+      ...(editItem ? {} : { loadToWarehouse } as any),
     });
   };
 
@@ -771,6 +774,26 @@ function InvoiceModal({
             {/* Notes */}
             <div><label className={labelClass}>Notas</label><textarea rows={2} className={`${inputClass} resize-none`} placeholder="Notas adicionales..." value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} /></div>
 
+            {!editItem && (
+              <label className="flex items-start gap-3 p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={loadToWarehouse}
+                  onChange={(e) => setLoadToWarehouse(e.target.checked)}
+                />
+                <span className="text-sm text-emerald-900 dark:text-emerald-100">
+                  <span className="font-semibold flex items-center gap-1.5">
+                    <PackageCheck className="w-4 h-4" />
+                    Cargar al almacén
+                  </span>
+                  <span className="block text-xs mt-0.5 opacity-80">
+                    Suma las cantidades al inventario. Si no marcas, podrás cargarlo después desde la lista.
+                  </span>
+                </span>
+              </label>
+            )}
+
             {/* Actions */}
             <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 -mx-6 px-6 -mb-6 pb-6 pt-4 flex gap-3 rounded-b-2xl">
               {!editItem && entryMethod === 'ocr' && (
@@ -853,7 +876,7 @@ export function SupplierBillingPage() {
     setShowModal(true);
   };
 
-  const handleSaveInvoice = async (data: Partial<PurchaseInvoice>) => {
+  const handleSaveInvoice = async (data: Partial<PurchaseInvoice> & { loadToWarehouse?: boolean; forceDuplicate?: boolean }) => {
     if (!user?.id) return;
     try {
       if (editingInvoice) {
@@ -864,14 +887,19 @@ export function SupplierBillingPage() {
         try {
           const created = await createPurchaseInvoiceRequest(user.id, data);
           setInvoices(prev => [created, ...prev]);
-          toast.success('Factura registrada');
-        } catch (err: any) {
-          if (err?.message?.includes('409') || err?.status === 409) {
+          toast.success(
+            data.loadToWarehouse
+              ? 'Factura registrada y cargada al almacén'
+              : 'Factura registrada (stock pendiente)',
+          );
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : '';
+          if (/duplicad|409/i.test(msg)) {
             const doForce = confirm(
-              `Ya existe una factura con el mismo n\u00famero y proveedor. \u00bfDeseas crearla igualmente como posible duplicado?`,
+              `${msg || 'Ya existe una factura con ese código.'}\n\n¿Crearla igualmente como posible duplicado?`,
             );
             if (doForce) {
-              const created = await createPurchaseInvoiceRequest(user.id, { ...data, forceDuplicate: true } as any);
+              const created = await createPurchaseInvoiceRequest(user.id, { ...data, forceDuplicate: true });
               setInvoices(prev => [created, ...prev]);
               toast.success('Factura registrada (marcada como posible duplicado)');
             } else {
@@ -886,6 +914,22 @@ export function SupplierBillingPage() {
       setEditingInvoice(null);
     } catch {
       toast.error('Error al guardar la factura');
+    }
+  };
+
+  const handleLoadToWarehouse = async (invoice: PurchaseInvoice) => {
+    if (!user?.id) return;
+    try {
+      const result = await loadPurchaseInvoiceStockRequest(user.id, invoice._id);
+      setInvoices(prev => prev.map(i => (i._id === result.invoice._id ? result.invoice : i)));
+      if (result.skipped) {
+        toast.message('Este albarán/factura ya estaba cargado en almacén');
+      } else {
+        const n = result.reconcile?.stockUpdated || 0;
+        toast.success(n > 0 ? `Cargado al almacén: ${n} artículo(s)` : 'Sin líneas vinculadas a inventario');
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo cargar al almacén');
     }
   };
 
@@ -1385,6 +1429,20 @@ export function SupplierBillingPage() {
                         </td>
                         <td className="px-3 py-3">
                           <div className="flex items-center gap-0.5">
+                            {!original.ocrStockReceivedAt && (
+                              <button
+                                onClick={() => handleLoadToWarehouse(original)}
+                                className="p-1.5 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 rounded-lg transition-colors"
+                                title="Cargar al almacén"
+                              >
+                                <PackageCheck className="w-4 h-4 text-emerald-600" />
+                              </button>
+                            )}
+                            {original.ocrStockReceivedAt && (
+                              <span title="Ya cargado en almacén" className="p-1.5">
+                                <PackageCheck className="w-4 h-4 text-emerald-400" />
+                              </span>
+                            )}
                             {(vs === 'pending_validation' || vs === 'pending') && (
                               <button onClick={() => handleValidate(original)} className="p-1.5 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded-lg transition-colors" title="Validar factura">
                                 <CheckCircle2 className="w-4 h-4 text-blue-600" />

@@ -373,10 +373,30 @@ async function processSingleEmail(userId, email) {
 
     const invoiceNumber = ocrData?.documentNumber || '';
     let duplicateResult = null;
-    if (invoiceNumber && matchResult.supplier) {
+    if (invoiceNumber) {
       duplicateResult = await findDuplicatePurchaseInvoice(
-        fakeReq, userId, invoiceNumber, matchResult.supplier._id, ocrData?.total,
+        fakeReq, userId, invoiceNumber, matchResult.supplier?._id || '', ocrData?.total,
       );
+    }
+
+    // No meter 2 facturas con el mismo código
+    if (duplicateResult) {
+      result.alerts.push({
+        type: 'duplicate',
+        data: {
+          invoiceId: duplicateResult._id,
+          duplicateOf: duplicateResult._id,
+          invoiceNumber,
+          supplierName: duplicateResult.supplierName || matchResult.supplier?.name || '',
+          total: duplicateResult.total,
+        },
+      });
+      result.skippedDuplicate = true;
+      logger.warn(
+        { tag: 'SINV_PROC', invoiceNumber, existingId: duplicateResult._id },
+        'Factura duplicada por código — no se crea de nuevo',
+      );
+      continue;
     }
 
     const proposal = proposeExpenseAndPayment(ocrData, matchResult.supplier);
@@ -412,12 +432,13 @@ async function processSingleEmail(userId, email) {
         couchAttachmentId: attachment.filename,
       }],
       flags: {
-        duplicate: Boolean(duplicateResult),
-        duplicateOf: duplicateResult?._id || '',
+        duplicate: false,
+        duplicateOf: '',
         noAttachment: false,
         supplierNotFound: !matchResult.matched,
         ocrFailed,
-        manualReview: ocrFailed || !matchResult.matched || Boolean(duplicateResult),
+        manualReview: ocrFailed || !matchResult.matched,
+        stockPending: true,
       },
     };
 
@@ -428,8 +449,11 @@ async function processSingleEmail(userId, email) {
 
     if (!ocrFailed) {
       try {
+        // Correo: registra finanzas, stock pendiente hasta «Cargar al almacén»
         await reconcilePurchaseInvoiceFromOcr(fakeReq, userId, { ...doc, _rev: saved.rev }, {
           performedBy: 'email-ocr',
+          applyStock: false,
+          createFinance: true,
         });
       } catch (reconcileErr) {
         logger.warn({ tag: 'SINV_PROC', invoiceId: doc._id, err: reconcileErr.message }, 'Reconciliación stock/finanzas falló');
@@ -446,9 +470,6 @@ async function processSingleEmail(userId, email) {
     result.created = true;
     result.invoiceId = doc._id;
 
-    if (duplicateResult) {
-      result.alerts.push({ type: 'duplicate', data: { invoiceId: doc._id, duplicateOf: duplicateResult._id, invoiceNumber, supplierName: invoiceData.supplierName, total: doc.total } });
-    }
     if (!matchResult.matched) {
       result.alerts.push({ type: 'unknown_supplier', data: { invoiceId: doc._id, from: email.from, emitter: ocrData?.emitter, cif: ocrData?.emitterCIF } });
     }

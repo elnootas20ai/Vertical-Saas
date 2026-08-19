@@ -577,6 +577,56 @@ describe('deliveryCatalogExcelTemplate', () => {
     expect(isImportComboCategory('Combos')).toBe(true);
   });
 
+  it('restaurant import: Envases/Limpieza/Varios van a almacén (no TPV)', async () => {
+    const { mapImportEntryToCatalogItem } = await import('../src/app/lib/deliveryCatalogImport.ts');
+    const {
+      normalizeImportCategory,
+      isWarehouseImportCategory,
+      resolveWarehouseImportMeta,
+    } = await import('../src/app/lib/deliveryCatalogImportLogic.ts');
+    const { isTpvWarehouseOnlyCatalogItem } = await import(
+      '../shared/catalog/tpvWarehouseCatalog.js',
+    );
+
+    expect(normalizeImportCategory('packaging')).toBe('Envases');
+    expect(normalizeImportCategory('papel')).toBe('Envases');
+    expect(isWarehouseImportCategory('Limpieza')).toBe(true);
+    expect(resolveWarehouseImportMeta('Varios')?.stockCategory).toBe('consumable');
+
+    const brands = [
+      { _id: 'bode', name: 'Bar Casa', active: true, catalogCategories: ['Tapas'], deliveryLineKind: 'tapas_bar' },
+    ];
+    const papel = await mapImportEntryToCatalogItem(
+      {
+        name: 'Papel higiénico',
+        category: 'Limpieza',
+        price: '0',
+        sku: 'ALM-PAP-1',
+      },
+      { businessId: 'biz-rest', brandCache: brands, vertical: 'restaurant' },
+    );
+    expect(papel?.item.module).toBe('stock');
+    expect(papel?.item.stockCategory).toBe('cleaning');
+    expect(papel?.item.isStockItem).toBe(true);
+    expect(papel?.item.brandIds).toEqual([]);
+    expect(papel?.item.webVisible).toBe(false);
+    expect(papel?.item.customFields?.inventoryOrganizerId).toBe('cleaning');
+    expect(isTpvWarehouseOnlyCatalogItem(papel?.item)).toBe(true);
+
+    const vaso = await mapImportEntryToCatalogItem(
+      {
+        name: 'Vasos plástico',
+        category: 'Envases',
+        price: '',
+        sku: 'ALM-VAS-1',
+      },
+      { businessId: 'biz-rest', brandCache: brands, vertical: 'restaurant' },
+    );
+    expect(vaso?.item.module).toBe('stock');
+    expect(vaso?.item.stockCategory).toBe('packaging');
+    expect(isTpvWarehouseOnlyCatalogItem(vaso?.item)).toBe(true);
+  });
+
   it('restaurant import: IVA 10% y combos de bar (plato/tapa)', async () => {
     const {
       mapImportEntryToCatalogItem,

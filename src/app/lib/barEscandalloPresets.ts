@@ -37,7 +37,7 @@ function matchesPatterns(folded: string, patterns: string[]): boolean {
   });
 }
 
-/** Categorías típicas de bar con coste e ingredientes base. */
+/** Categorías típicas de bar/restaurante con coste e ingredientes base. */
 export const BAR_CATEGORY_ESCANDALLO_PRESETS: BarCategoryEscandalloPreset[] = [
   {
     categoryPatterns: ['bebidas', 'bebida', 'cervezas', 'vinos', 'combinados'],
@@ -50,7 +50,7 @@ export const BAR_CATEGORY_ESCANDALLO_PRESETS: BarCategoryEscandalloPreset[] = [
     defaultIngredients: ['Patata', 'Aceite de oliva', 'Sal'],
   },
   {
-    categoryPatterns: ['tapas', 'tapa'],
+    categoryPatterns: ['tapas', 'tapa', 'para picar', 'picoteo'],
     fixedCost: 2.2,
     defaultIngredients: ['Aceite de oliva', 'Sal', 'Pan'],
   },
@@ -91,8 +91,48 @@ export const BAR_CATEGORY_ESCANDALLO_PRESETS: BarCategoryEscandalloPreset[] = [
     defaultIngredients: ['Aceite de oliva', 'Sal'],
   },
   {
-    categoryPatterns: ['principales', 'principal', 'platos', 'plato', 'cocina'],
+    categoryPatterns: ['principales', 'principal', 'platos', 'plato', 'cocina', 'carta'],
     fixedCost: 4.2,
+    defaultIngredients: ['Aceite de oliva', 'Sal'],
+  },
+  {
+    categoryPatterns: ['ensaladas', 'ensalada', 'ensaladilla'],
+    fixedCost: 2.4,
+    defaultIngredients: ['Lechuga', 'Tomate', 'Aceite de oliva', 'Sal'],
+  },
+  {
+    categoryPatterns: ['carnes', 'carne', 'parrilla', 'asados', 'asado'],
+    fixedCost: 5.5,
+    defaultIngredients: ['Carne', 'Aceite de oliva', 'Sal'],
+  },
+  {
+    categoryPatterns: ['pescados', 'pescado', 'mariscos', 'marisco'],
+    fixedCost: 5.2,
+    defaultIngredients: ['Pescado', 'Aceite de oliva', 'Limón', 'Sal'],
+  },
+  {
+    categoryPatterns: ['arroces', 'arroz', 'paellas', 'paella'],
+    fixedCost: 4.8,
+    defaultIngredients: ['Arroz', 'Aceite de oliva', 'Sal'],
+  },
+  {
+    categoryPatterns: ['pastas', 'pasta', 'italiana'],
+    fixedCost: 3.6,
+    defaultIngredients: ['Pasta', 'Aceite de oliva', 'Sal'],
+  },
+  {
+    categoryPatterns: ['hamburguesas', 'hamburguesa', 'burgers', 'burger'],
+    fixedCost: 2.6,
+    defaultIngredients: ['Pan brioche', 'Carne burger', 'Lechuga', 'Tomate'],
+  },
+  {
+    categoryPatterns: ['menus', 'menús', 'menu', 'menú'],
+    fixedCost: 5.5,
+    defaultIngredients: ['Aceite de oliva', 'Sal'],
+  },
+  {
+    categoryPatterns: ['sopas', 'sopa', 'cremas', 'crema', 'guisos', 'guiso'],
+    fixedCost: 2.8,
     defaultIngredients: ['Aceite de oliva', 'Sal'],
   },
 ];
@@ -157,6 +197,16 @@ export const BAR_ESCANDALLO_BASE_INGREDIENTS: string[] = [
   'Lomo',
   'Pollo',
   'Carne pincho',
+  'Lechuga',
+  'Carne',
+  'Pescado',
+  'Arroz',
+  'Pasta',
+  'Pan brioche',
+  'Carne burger',
+  'Queso',
+  'Mayonesa',
+  'Salsa',
 ];
 
 /** Reglas de cantidad para bocadillos / bocatas. */
@@ -230,6 +280,22 @@ export function shouldUseBarEscandalloPresets(
   category: string,
 ): boolean {
   const kind = String(lineKind || '').trim();
-  if (kind === 'tapas_bar' || kind === 'cafe_bakery' || kind === 'mixed_restaurant') return true;
+  if (
+    kind === 'tapas_bar' ||
+    kind === 'cafe_bakery' ||
+    kind === 'mixed_restaurant' ||
+    kind === 'prepared_meals'
+  ) {
+    return true;
+  }
   return isBarEscandalloCategory(category);
+}
+
+/** Coste fijo aprox. por % del PVP cuando no hay preset de categoría (carta bar/restaurante). */
+export function resolveBarEscandalloApproxFromSalePrice(unitPrice: number): number | null {
+  const sale = Number(unitPrice) || 0;
+  if (!(sale > 0)) return null;
+  // Orientativo ~30% food cost, con suelo/techo razonables.
+  const approx = Math.min(Math.max(sale * 0.3, 0.9), sale * 0.42);
+  return Math.round(approx * 100) / 100;
 }

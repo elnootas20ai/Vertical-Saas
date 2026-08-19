@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { Tabs } from '../../components/saas/Tabs';
 import { useAuth } from '../../context/AuthContext';
+import { useBusinessOptional } from '../../context/BusinessContext';
 import {
   listSuppliersRequest,
   updateSupplierRequest,
@@ -13,6 +14,9 @@ import {
   type CatalogItem,
   type PurchaseInvoice,
 } from '../../lib/deliveryApi';
+import { listBrandsRequest, type Brand } from '../../lib/brandsApi';
+import { labelsForSupplierOrganizerIds } from '../../components/saas/SupplierOrganizersField';
+import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import {
   listPurchaseOrdersRequest,
   type PurchaseOrder,
@@ -95,9 +99,11 @@ function isHabitualSupplier(orders: PurchaseOrder[], invoices: PurchaseInvoice[]
 export function SupplierDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
+  const businessId = resolveBusinessScopeId(useBusinessOptional()?.currentBusiness);
   const navigate = useNavigate();
   const [supplier, setSupplier] = useState<Supplier | null>(null);
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
+  const [brands, setBrands] = useState<Brand[]>([]);
   const [invoices, setInvoices] = useState<PurchaseInvoice[]>([]);
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
@@ -107,12 +113,13 @@ export function SupplierDetailPage() {
   const loadData = useCallback(async () => {
     if (!user?.id || !id) return;
     try {
-      const [sups, items, invs, ords, docs] = await Promise.all([
+      const [sups, items, invs, ords, docs, brandList] = await Promise.all([
         listSuppliersRequest(user.id),
         listCatalogItemsRequest(user.id),
         listPurchaseInvoicesRequest(user.id),
         listPurchaseOrdersRequest(user.id),
         listDocumentsRequest(user.id),
+        businessId ? listBrandsRequest(businessId).catch(() => [] as Brand[]) : Promise.resolve([] as Brand[]),
       ]);
       const found = sups.find(s => s._id === id);
       if (!found) { toast.error('Proveedor no encontrado'); navigate('/saas/suppliers'); return; }
@@ -121,14 +128,20 @@ export function SupplierDetailPage() {
       setInvoices(invs);
       setOrders(ords);
       setDocuments(docs);
+      setBrands(brandList);
     } catch {
       toast.error('Error al cargar datos del proveedor');
     } finally {
       setLoading(false);
     }
-  }, [user?.id, id, navigate]);
+  }, [user?.id, id, navigate, businessId]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  const organizerLabels = useMemo(
+    () => labelsForSupplierOrganizerIds(supplier?.organizerIds, brands),
+    [supplier?.organizerIds, brands],
+  );
 
   const supplierOrders = useMemo(() => orders.filter(o => o.supplierId === id), [orders, id]);
   const supplierInvoices = useMemo(() => invoices.filter(i => i.supplierId === id), [invoices, id]);
@@ -237,6 +250,18 @@ export function SupplierDetailPage() {
                   <span className="inline-block mt-1.5 px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-lg">
                     {supplier.category}
                   </span>
+                )}
+                {organizerLabels.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {organizerLabels.map((label) => (
+                      <span
+                        key={label}
+                        className="px-2 py-0.5 text-xs bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300 rounded-lg border border-sky-200 dark:border-sky-800"
+                      >
+                        {label}
+                      </span>
+                    ))}
+                  </div>
                 )}
               </div>
             </div>

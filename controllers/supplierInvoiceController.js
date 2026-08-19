@@ -81,9 +81,32 @@ export async function createSupplierInvoice(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
+    const forceDuplicate = Boolean(invoice.forceDuplicate);
+    const invoiceNumber = String(invoice.invoiceNumber || '').trim();
+    if (invoiceNumber && !forceDuplicate) {
+      const dup = await findDuplicatePurchaseInvoice(req, userId, invoiceNumber, invoice.supplierId || '', invoice.total);
+      if (dup) {
+        return res.status(409).json({
+          ok: false,
+          error: `Factura duplicada: ya existe el código ${dup.invoiceNumber}`,
+          code: 'DUPLICATE_INVOICE',
+          existingInvoice: sanitizePurchaseInvoice(dup),
+        });
+      }
+    }
+
     const db = getCatalogDbName();
     await ensureDatabase(req, db);
-    const doc = buildPurchaseInvoiceDocument(userId, { ...invoice, source: invoice.source || 'manual' });
+    const doc = buildPurchaseInvoiceDocument(userId, {
+      ...invoice,
+      source: invoice.source || 'manual',
+      flags: {
+        ...(invoice.flags || {}),
+        duplicate: forceDuplicate,
+        stockPending: invoice.loadToWarehouse ? false : true,
+      },
+      duplicateWarning: forceDuplicate,
+    });
     const saved = await putDocument(req, db, doc._id, doc);
 
     await logAccountActivity(req, {

@@ -10,6 +10,7 @@ import {
   allCommercialLineBrands,
   shouldClearBrandForCategory,
   isImportComboCategory,
+  isWarehouseImportCategory,
   formatUnmatchedImportLineRowWarning,
   MISSING_BRAND_IMPORT_CODE,
   type ImportBrandLike,
@@ -82,6 +83,9 @@ export const RESTAURANT_CATALOG_CATEGORIES = [
   'Postres',
   'Combos',
 ] as const;
+
+/** Categorías de almacén en la plantilla bar (no van al TPV). */
+export const RESTAURANT_WAREHOUSE_CATEGORIES = ['Envases', 'Limpieza', 'Varios'] as const;
 
 /** Columnas extra de la plantilla heladería (tras el core oficial). */
 export const HELADERIA_CATALOG_EXTRA_HEADERS = ['alergenos', 'formato'] as const;
@@ -384,6 +388,9 @@ export function buildDeliveryCatalogSampleRows(
         ['Caña', 'BEB-001', 'Bebidas', '', '1.80', '', 'linea vacía en bebidas'],
         ['Patatas fritas', 'COM-001', 'Complementos', '', '3.00', '', ''],
         ['Tarta de queso', 'POS-001', 'Postres', '', '4.50', '', ''],
+        ['Papel higiénico', 'ALM-001', 'Limpieza', '', '0', '', 'Almacén · no sale en TPV'],
+        ['Vasos de plástico', 'ALM-002', 'Envases', '', '0', '', 'Almacén · packaging'],
+        ['Guantes desechables', 'ALM-003', 'Varios', '', '0', '', 'Almacén · consumible'],
       ];
     }
     return [
@@ -415,13 +422,14 @@ function buildCatalogReferenceRows(
   }
 
   if (isRestaurantCatalogVertical(vertical) && lines.length === 0) {
-    for (const cat of RESTAURANT_CATALOG_CATEGORIES) {
-      const shared = ['Bebidas', 'Complementos', 'Postres'].includes(cat);
+    for (const cat of [...RESTAURANT_CATALOG_CATEGORIES, ...RESTAURANT_WAREHOUSE_CATEGORIES]) {
+      const shared = ['Bebidas', 'Complementos', 'Postres', 'Envases', 'Limpieza', 'Varios'].includes(cat);
+      const warehouse = ['Envases', 'Limpieza', 'Varios'].includes(cat);
       rows.push([
         shared ? '' : '(tu marca en Ajustes)',
         cat,
         shared ? '' : '(nombre exacto de tu marca)',
-        cat,
+        warehouse ? `${cat} · solo Inventario (no TPV)` : cat,
       ]);
     }
     return rows;
@@ -484,6 +492,13 @@ function buildValidValuesRows(
       ['(dejar vacío)', 'Complementos', 'Pestaña compartida — sin linea'],
       ['(dejar vacío)', 'Postres', 'Pestaña compartida — sin linea'],
     );
+    if (isRestaurantCatalogVertical(vertical)) {
+      rows.push(
+        ['(dejar vacío)', 'Envases', 'Solo Inventario · packaging / papel / vasos — no TPV'],
+        ['(dejar vacío)', 'Limpieza', 'Solo Inventario · detergentes — no TPV'],
+        ['(dejar vacío)', 'Varios', 'Solo Inventario · consumibles — no TPV'],
+      );
+    }
   }
   return rows;
 }
@@ -552,9 +567,14 @@ function instructionLines(
       '  · precio — número (4.50)',
       '',
       'BAR / TAPAS / RESTAURANTE:',
-      '  · categorias habituales: Tapas, Raciones, Bocadillos, Pinchos, Complementos, Bebidas, Postres',
+      '  · categorias carta (TPV): Tapas, Raciones, Bocadillos, Pinchos, Complementos, Bebidas, Postres',
+      '  · categorias ALMACÉN (NO salen en TPV): Envases, Limpieza, Varios',
+      '      · Envases — packaging, vasos, servilletas, papel de baño, bolsas…',
+      '      · Limpieza — detergente, lejía, bayetas…',
+      '      · Varios — otros consumibles de local',
+      '  · en almacén: deja linea vacía y precio 0 (o vacío). Van a Catálogo → Inventario',
       '  · NO uses categorías de delivery (Pizzas, Burgers, Tacos) salvo que las vendas de verdad',
-      '  · ingredientes — Patata, Aceite, Jamón, Pan barra… (escandallo)',
+      '  · ingredientes — Patata, Aceite, Jamón, Pan barra… (escandallo; solo carta)',
       '  · IVA: se aplica 10% al importar (puedes añadir columna iva si hace falta)',
       '',
       'MENÚS / COMBOS (categoria = Combos):',
@@ -564,7 +584,7 @@ function instructionLines(
       'RECOMENDADO:',
       '  · codigo — TAP-001 (mismo código = actualiza sin duplicar)',
       '  · linea — pestaña TPV / marca: ' + namesText,
-      '  · linea VACÍA en Bebidas, Complementos y Postres',
+      '  · linea VACÍA en Bebidas, Complementos, Postres y en Envases/Limpieza/Varios',
       '',
       'Consulta «referencia_tpv», «valores_validos» y «ejemplos» (no importes la hoja ejemplos).',
     ];
@@ -740,7 +760,7 @@ function collectDeliveryCatalogImportRowIssues(
   }
 
   if (!categoryRaw) {
-    issues.push({ row, field: 'categoria', message: 'Falta la categoría TPV', severity: 'error' });
+    issues.push({ row, field: 'categoria', message: 'Falta la categoría', severity: 'error' });
   } else if (/^dato\s*\d+$/i.test(categoryRaw)) {
     issues.push({
       row,
@@ -751,10 +771,12 @@ function collectDeliveryCatalogImportRowIssues(
   }
 
   if (!priceRaw) {
-    issues.push({ row, field: 'precio', message: 'Falta el precio', severity: 'error' });
+    if (!isWarehouseImportCategory(category)) {
+      issues.push({ row, field: 'precio', message: 'Falta el precio', severity: 'error' });
+    }
   } else if (!Number.isFinite(price) || price < 0) {
     issues.push({ row, field: 'precio', message: 'Precio no válido (usa formato 9.50)', severity: 'error' });
-  } else if (price <= 0) {
+  } else if (price <= 0 && !isWarehouseImportCategory(category)) {
     issues.push({
       row,
       field: 'precio',

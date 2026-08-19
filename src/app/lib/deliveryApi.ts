@@ -352,6 +352,8 @@ export interface Supplier {
   address: string;
   contactPerson: string;
   category: string;
+  /** Organizadores de almacén a los que este proveedor suministra (uno o varios). */
+  organizerIds: string[];
   paymentTerms: string;
   notes: string;
   active: boolean;
@@ -368,6 +370,8 @@ export interface PurchaseInvoiceLine {
   quantity: number;
   unitPrice: number;
   total: number;
+  catalogItemId?: string;
+  catalogItemName?: string;
 }
 
 export interface OcrData {
@@ -414,6 +418,18 @@ export interface PurchaseInvoice {
   ocrData?: OcrData;
   ocrImageBase64?: string;
   entryMethod?: 'ocr' | 'manual';
+  documentKind?: string;
+  ocrStockReceivedAt?: string;
+  ocrStockLinesReceived?: number;
+  flags?: {
+    duplicate?: boolean;
+    duplicateOf?: string;
+    stockPending?: boolean;
+    noAttachment?: boolean;
+    supplierNotFound?: boolean;
+    ocrFailed?: boolean;
+    manualReview?: boolean;
+  };
 
   validationStatus: InvoiceValidationStatus;
   validatedAt?: string;
@@ -874,14 +890,44 @@ export async function listPurchaseInvoicesRequest(userId: string): Promise<Purch
   return payload.invoices || [];
 }
 
-export async function createPurchaseInvoiceRequest(userId: string, data: Partial<PurchaseInvoice>): Promise<PurchaseInvoice> {
+export async function createPurchaseInvoiceRequest(userId: string, data: Partial<PurchaseInvoice> & { loadToWarehouse?: boolean; forceDuplicate?: boolean }): Promise<PurchaseInvoice> {
   const id = normalizeUserId(userId);
-  const result = await request<{ ok: boolean; invoice: PurchaseInvoice }>(
+  const result = await request<{ ok: boolean; invoice: PurchaseInvoice; error?: string; code?: string }>(
     `/api/delivery/invoices/${encodeURIComponent(id)}`,
     { method: 'POST', body: JSON.stringify({ invoice: data }) },
   );
   if (!result.invoice) throw new Error('Respuesta inválida del servidor');
   return result.invoice;
+}
+
+export async function checkPurchaseInvoiceDuplicateRequest(
+  userId: string,
+  payload: { invoiceNumber: string; supplierId?: string; supplierName?: string; excludeId?: string },
+): Promise<{ duplicate: boolean; existingInvoice?: PurchaseInvoice }> {
+  const id = normalizeUserId(userId);
+  const result = await request<{ ok: boolean; duplicate: boolean; existingInvoice?: PurchaseInvoice }>(
+    `/api/delivery/invoices/${encodeURIComponent(id)}/check-duplicate`,
+    { method: 'POST', body: JSON.stringify(payload) },
+  );
+  return { duplicate: Boolean(result.duplicate), existingInvoice: result.existingInvoice };
+}
+
+export async function loadPurchaseInvoiceStockRequest(
+  userId: string,
+  invoiceId: string,
+): Promise<{ invoice: PurchaseInvoice; skipped?: boolean; reconcile?: { stockUpdated?: number; stockUnits?: number } }> {
+  const id = normalizeUserId(userId);
+  const result = await request<{
+    ok: boolean;
+    invoice: PurchaseInvoice;
+    skipped?: boolean;
+    reconcile?: { stockUpdated?: number; stockUnits?: number };
+  }>(
+    `/api/delivery/invoices/${encodeURIComponent(id)}/${encodeURIComponent(invoiceId)}/load-stock`,
+    { method: 'POST', body: JSON.stringify({}) },
+  );
+  if (!result.invoice) throw new Error('Respuesta inválida del servidor');
+  return result;
 }
 
 export async function updatePurchaseInvoiceRequest(userId: string, invoice: PurchaseInvoice): Promise<PurchaseInvoice> {

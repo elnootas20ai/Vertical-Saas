@@ -28,7 +28,8 @@ export function useDeliveryAlertsReviewPrompt(options: Options = {}) {
   const { createNotification, notifications } = useApp();
   const businessId = useAlertCenterBusinessId();
   const { vertical } = useAlertDepartments();
-  const isDeliveryLike = vertical === 'delivery' || vertical === 'restaurant';
+  // Solo Delivery: bar/restaurante no debe ver «Revisa tus alertas de Delivery».
+  const isDeliveryLike = vertical === 'delivery';
   const isOwner = Boolean(auth?.user && !isWorkerAccount(auth.user));
 
   const [config, setConfig] = useState<AlertsConfig | null>(null);

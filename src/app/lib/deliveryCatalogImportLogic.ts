@@ -180,7 +180,55 @@ const IMPORT_CATEGORY_ALIASES: Record<string, string> = {
   encargo: 'Encargos',
   tartas: 'Encargos',
   tarta: 'Encargos',
+  // Almacén (no TPV)
+  envases: 'Envases',
+  envase: 'Envases',
+  packaging: 'Envases',
+  packing: 'Envases',
+  embalaje: 'Envases',
+  embalajes: 'Envases',
+  papel: 'Envases',
+  limpieza: 'Limpieza',
+  cleaning: 'Limpieza',
+  higienico: 'Limpieza',
+  higienicos: 'Limpieza',
+  'higiénico': 'Limpieza',
+  'higiénicos': 'Limpieza',
+  varios: 'Varios',
+  consumibles: 'Varios',
+  consumible: 'Varios',
+  consumable: 'Varios',
+  consumables: 'Varios',
 };
+
+/** Categorías de Excel → solo almacén (no aparecen en TPV). */
+export const WAREHOUSE_IMPORT_CATEGORIES = ['Envases', 'Limpieza', 'Varios'] as const;
+
+export type WarehouseImportStockCategory = 'packaging' | 'cleaning' | 'consumable';
+
+export function isWarehouseImportCategory(category: string): boolean {
+  const key = foldKey(normalizeImportCategory(category));
+  return key === 'envases' || key === 'limpieza' || key === 'varios';
+}
+
+/** stockCategory + organizador de Inventario según categoría Excel. */
+export function resolveWarehouseImportMeta(category: string): {
+  stockCategory: WarehouseImportStockCategory;
+  categoryLabel: string;
+  organizerId: 'packaging' | 'cleaning' | 'varios';
+} | null {
+  const key = foldKey(normalizeImportCategory(category));
+  if (key === 'envases') {
+    return { stockCategory: 'packaging', categoryLabel: 'Envases', organizerId: 'packaging' };
+  }
+  if (key === 'limpieza') {
+    return { stockCategory: 'cleaning', categoryLabel: 'Limpieza', organizerId: 'cleaning' };
+  }
+  if (key === 'varios') {
+    return { stockCategory: 'consumable', categoryLabel: 'Varios', organizerId: 'varios' };
+  }
+  return null;
+}
 
 export function isImportComboCategory(category: string): boolean {
   return foldKey(normalizeImportCategory(category)) === 'combos';
@@ -452,6 +500,9 @@ export function resolveCatalogImportBrandIds(
   brands: ImportBrandLike[],
   productName = '',
 ): string[] {
+  // Envases / Limpieza / Varios → almacén, sin pestaña TPV.
+  if (isWarehouseImportCategory(category)) return [];
+
   // El Excel manda: la columna «linea» explícita siempre gana sobre cualquier
   // heurística. Las inferencias por nombre/categoría son solo para filas sin línea.
   if (explicitBrandIds.length > 0) return explicitBrandIds;
@@ -557,12 +608,13 @@ export function extractMissingBrandNameFromWarningMessage(message: string): stri
 }
 
 export function buildBrandCategoryMapFromItems(
-  items: Array<{ brandIds?: string[]; category?: string }>,
+  items: Array<{ brandIds?: string[]; category?: string; module?: string }>,
 ): Map<string, string[]> {
   const map = new Map<string, Set<string>>();
   for (const item of items) {
+    if (String(item.module || '').trim() === 'stock') continue;
     const cat = normalizeImportCategory(String(item.category || ''));
-    if (!cat) continue;
+    if (!cat || isWarehouseImportCategory(cat)) continue;
     for (const brandId of item.brandIds || []) {
       if (!map.has(brandId)) map.set(brandId, new Set());
       map.get(brandId)!.add(cat);

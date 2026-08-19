@@ -153,6 +153,7 @@ export async function createFinanceCobroFromClientInvoice(req, userId, invoice) 
 
 /**
  * Tras crear factura de compra por OCR: recepción stock + pago en finanzas.
+ * `applyStock` (default false): solo sube almacén si el usuario elige «Cargar al almacén».
  */
 export async function reconcilePurchaseInvoiceFromOcr(req, userId, invoiceDoc, options = {}) {
   const db = getCatalogDbName();
@@ -161,36 +162,51 @@ export async function reconcilePurchaseInvoiceFromOcr(req, userId, invoiceDoc, o
   let stockUnits = 0;
   const now = new Date().toISOString();
   const performedBy = options.performedBy || 'ocr-system';
+  const applyStock = options.applyStock === true;
 
-  for (const line of lines) {
-    const catalogItemId = String(line.catalogItemId || '').trim();
-    const qty = Number(line.quantity || 0);
-    const unitCost = Number(line.unitPrice || line.unitCost || 0);
-    if (!catalogItemId || qty <= 0) continue;
+  if (applyStock && invoiceDoc.ocrStockReceivedAt) {
+    return {
+      stockUpdated: 0,
+      stockUnits: 0,
+      skipped: true,
+      reason: 'already_loaded',
+      financeMovementId: invoiceDoc.linkedFinanceId || null,
+      financeSkipped: true,
+      ...summarizeCatalogMatches(lines),
+    };
+  }
 
-    try {
-      const catItemBefore = await getDocument(req, db, catalogItemId);
-      const prevQty = Number(catItemBefore?.stockQuantity || 0);
+  if (applyStock) {
+    for (const line of lines) {
+      const catalogItemId = String(line.catalogItemId || '').trim();
+      const qty = Number(line.quantity || 0);
+      const unitCost = Number(line.unitPrice || line.unitCost || 0);
+      if (!catalogItemId || qty <= 0) continue;
 
-      await recordMovement(req, userId, {
-        catalogItemId,
-        movementType: 'purchase_reception',
-        quantity: qty,
-        unitCost,
-        referenceId: invoiceDoc._id,
-        referenceType: 'purchase_invoice_ocr',
-        notes: `Recepción OCR - Factura ${invoiceDoc.invoiceNumber || invoiceDoc._id.slice(-8)}`,
-        performedBy,
-      });
+      try {
+        const catItemBefore = await getDocument(req, db, catalogItemId);
+        const prevQty = Number(catItemBefore?.stockQuantity || 0);
 
-      if (unitCost > 0) {
-        await updateWeightedCatalogCost(req, userId, catalogItemId, qty, unitCost, prevQty);
+        await recordMovement(req, userId, {
+          catalogItemId,
+          movementType: 'purchase_reception',
+          quantity: qty,
+          unitCost,
+          referenceId: invoiceDoc._id,
+          referenceType: 'purchase_invoice_ocr',
+          notes: `Recepción - ${invoiceDoc.documentKind === 'albaran' ? 'Albarán' : 'Factura'} ${invoiceDoc.invoiceNumber || invoiceDoc._id.slice(-8)}`,
+          performedBy,
+        });
+
+        if (unitCost > 0) {
+          await updateWeightedCatalogCost(req, userId, catalogItemId, qty, unitCost, prevQty);
+        }
+
+        stockUpdated += 1;
+        stockUnits += qty;
+      } catch (err) {
+        logger.warn({ tag: 'OCR-STOCK', err: err?.message, catalogItemId }, 'Stock reception failed');
       }
-
-      stockUpdated += 1;
-      stockUnits += qty;
-    } catch (err) {
-      logger.warn({ tag: 'OCR-STOCK', err: err?.message, catalogItemId }, 'Stock reception failed');
     }
   }
 
@@ -210,12 +226,18 @@ export async function reconcilePurchaseInvoiceFromOcr(req, userId, invoiceDoc, o
 
   try {
     const invFresh = await getDocument(req, db, invoiceDoc._id);
+    const stockPending = applyStock
+      ? false
+      : Boolean(invFresh.flags?.stockPending !== false);
     await putDocument(req, db, invFresh._id, {
       ...invFresh,
       linkedFinanceId: financeResult?.movementId || invFresh.linkedFinanceId || '',
       ocrStockReceivedAt: stockUpdated > 0 ? now : invFresh.ocrStockReceivedAt || '',
-      ocrStockLinesReceived: stockUpdated,
-      ocrCatalogLinesMatched: matchSummary.matchedLines,
+      ocrStockLinesReceived: stockUpdated > 0 ? stockUpdated : (invFresh.ocrStockLinesReceived || 0),
+      flags: {
+        ...(invFresh.flags || {}),
+        stockPending: stockUpdated > 0 ? false : stockPending,
+      },
       updatedAt: now,
     });
   } catch (err) {

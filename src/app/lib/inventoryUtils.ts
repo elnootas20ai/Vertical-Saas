@@ -103,6 +103,8 @@ export type InventoryCommercialBrand = {
 
 /** Solo UI de almacén — no afecta TPV ni catálogo vendible. */
 export const ORGANIZER_PACKAGING = 'packaging';
+export const ORGANIZER_CLEANING = 'cleaning';
+export const ORGANIZER_VARIOS = 'varios';
 export const ORGANIZER_BEVERAGES = 'beverages';
 export const ORGANIZER_COMPLEMENTS = 'complements';
 export const ORGANIZER_TOTAL = 'total';
@@ -146,10 +148,16 @@ function normalizeProductParts(raw: unknown): string[] {
 }
 
 function isPackagingStockItem(item: CatalogItem): boolean {
+  return (item.stockCategory || '') === 'packaging';
+}
+
+function isCleaningStockItem(item: CatalogItem): boolean {
+  return (item.stockCategory || '') === 'cleaning';
+}
+
+function isVariosStockItem(item: CatalogItem): boolean {
   const stockCat = item.stockCategory || 'other';
   return (
-    stockCat === 'packaging' ||
-    stockCat === 'cleaning' ||
     stockCat === 'consumable' ||
     Boolean(String(item.customFields?.vertialStockTemplateId || '').trim())
   );
@@ -163,7 +171,14 @@ function isBeverageStockItem(item: CatalogItem): boolean {
 
 /** Complementos de stock (patatas, nuggets…), no ingredientes de receta. */
 function isComplementStockItem(item: CatalogItem): boolean {
-  if (isPackagingStockItem(item) || isBeverageStockItem(item)) return false;
+  if (
+    isPackagingStockItem(item) ||
+    isCleaningStockItem(item) ||
+    isVariosStockItem(item) ||
+    isBeverageStockItem(item)
+  ) {
+    return false;
+  }
   // Ligado a lista de ingredientes → receta, no organizador Complementos.
   if (String(item.customFields?.storeIngredientId || '').trim()) return false;
 
@@ -241,6 +256,8 @@ export function listInventoryOrganizerChoices(
     { id: ORGANIZER_BEVERAGES, label: 'Bebidas' },
     { id: ORGANIZER_COMPLEMENTS, label: 'Complementos' },
     { id: ORGANIZER_PACKAGING, label: 'Envases' },
+    { id: ORGANIZER_CLEANING, label: 'Limpieza' },
+    { id: ORGANIZER_VARIOS, label: 'Varios' },
   ];
 }
 
@@ -252,6 +269,8 @@ export function stockFieldsForOrganizer(organizerId: string): {
   const id = String(organizerId || '').trim();
   if (id === ORGANIZER_BEVERAGES) return { stockCategory: 'beverage', category: 'Bebidas' };
   if (id === ORGANIZER_PACKAGING) return { stockCategory: 'packaging', category: 'Envases' };
+  if (id === ORGANIZER_CLEANING) return { stockCategory: 'cleaning', category: 'Limpieza' };
+  if (id === ORGANIZER_VARIOS) return { stockCategory: 'consumable', category: 'Varios' };
   if (id === ORGANIZER_COMPLEMENTS) return { stockCategory: 'ingredient', category: 'Complementos' };
   return { stockCategory: 'ingredient', category: 'Ingredientes' };
 }
@@ -270,6 +289,8 @@ export function resolveInventoryOrganizerId(
   if (pinned) return pinned;
 
   if (isPackagingStockItem(item)) return ORGANIZER_PACKAGING;
+  if (isCleaningStockItem(item)) return ORGANIZER_CLEANING;
+  if (isVariosStockItem(item)) return ORGANIZER_VARIOS;
   if (isBeverageStockItem(item)) return ORGANIZER_BEVERAGES;
 
   const ingId = String(item.customFields?.storeIngredientId || '').trim();
@@ -354,6 +375,16 @@ export function buildInventoryOrganizerGroups(
   if (pack?.length) {
     extras.push({ id: ORGANIZER_PACKAGING, label: 'Envases', ...countStatusForItems(pack) });
     buckets.delete(ORGANIZER_PACKAGING);
+  }
+  const clean = buckets.get(ORGANIZER_CLEANING);
+  if (clean?.length) {
+    extras.push({ id: ORGANIZER_CLEANING, label: 'Limpieza', ...countStatusForItems(clean) });
+    buckets.delete(ORGANIZER_CLEANING);
+  }
+  const varios = buckets.get(ORGANIZER_VARIOS);
+  if (varios?.length) {
+    extras.push({ id: ORGANIZER_VARIOS, label: 'Varios', ...countStatusForItems(varios) });
+    buckets.delete(ORGANIZER_VARIOS);
   }
 
   const leftover: CatalogItem[] = [];

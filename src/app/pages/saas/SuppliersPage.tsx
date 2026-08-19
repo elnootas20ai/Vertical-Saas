@@ -49,19 +49,29 @@ import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 import { SUPPLIERS_HUB } from '../../lib/suppliersHubPaths';
+import { SupplierPaymentTermsField } from '../../components/saas/SupplierPaymentTermsField';
+import {
+  labelsForSupplierOrganizerIds,
+  SupplierOrganizersField,
+} from '../../components/saas/SupplierOrganizersField';
+import { useBusinessOptional } from '../../context/BusinessContext';
+import { listBrandsRequest, type Brand } from '../../lib/brandsApi';
+import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 
 interface CreateSupplierModalProps {
   isOpen: boolean;
   onClose: () => void;
   onCreate: (data: Partial<Supplier>) => Promise<void>;
   editItem?: Supplier | null;
+  brands?: Brand[];
 }
 
-function CreateSupplierModal({ isOpen, onClose, onCreate, editItem }: CreateSupplierModalProps) {
+function CreateSupplierModal({ isOpen, onClose, onCreate, editItem, brands = [] }: CreateSupplierModalProps) {
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     name: '', cif: '', email: '', phone: '', address: '',
     contactPerson: '', category: '', paymentTerms: '', notes: '',
+    organizerIds: [] as string[],
   });
 
   useEffect(() => {
@@ -71,9 +81,13 @@ function CreateSupplierModal({ isOpen, onClose, onCreate, editItem }: CreateSupp
         phone: editItem.phone || '', address: editItem.address || '',
         contactPerson: editItem.contactPerson || '', category: editItem.category || '',
         paymentTerms: editItem.paymentTerms || '', notes: editItem.notes || '',
+        organizerIds: Array.isArray(editItem.organizerIds) ? [...editItem.organizerIds] : [],
       });
     } else {
-      setForm({ name: '', cif: '', email: '', phone: '', address: '', contactPerson: '', category: '', paymentTerms: '', notes: '' });
+      setForm({
+        name: '', cif: '', email: '', phone: '', address: '', contactPerson: '',
+        category: '', paymentTerms: '', notes: '', organizerIds: [],
+      });
     }
   }, [editItem, isOpen]);
   useModalClose(isOpen, onClose);
@@ -118,7 +132,18 @@ function CreateSupplierModal({ isOpen, onClose, onCreate, editItem }: CreateSupp
             <div><label className={labelClass}>Persona de contacto</label><input className={inputClass} placeholder="Nombre del contacto" value={form.contactPerson} onChange={e => setForm(f => ({ ...f, contactPerson: e.target.value }))} /></div>
             <div><label className={labelClass}>Categoría</label><input className={inputClass} placeholder="Ej: Alimentación, Limpieza..." value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} /></div>
           </div>
-          <div><label className={labelClass}>Condiciones de pago</label><input className={inputClass} placeholder="Ej: 30 días, contado..." value={form.paymentTerms} onChange={e => setForm(f => ({ ...f, paymentTerms: e.target.value }))} /></div>
+          <SupplierOrganizersField
+            value={form.organizerIds}
+            onChange={(organizerIds) => setForm((f) => ({ ...f, organizerIds }))}
+            brands={brands}
+            labelClassName={labelClass}
+          />
+          <SupplierPaymentTermsField
+            value={form.paymentTerms}
+            onChange={(paymentTerms) => setForm((f) => ({ ...f, paymentTerms }))}
+            labelClassName={labelClass}
+            inputClassName={inputClass}
+          />
           <div><label className={labelClass}>Notas</label><textarea rows={2} className={`${inputClass} resize-none`} placeholder="Notas adicionales..." value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} /></div>
           <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 -mx-6 px-6 -mb-6 pb-6 pt-4 flex gap-3 rounded-b-2xl">
             <button type="button" onClick={onClose} className="flex-1 px-4 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">Cancelar</button>
@@ -146,12 +171,15 @@ type QuickFilter = 'all' | 'unvalidated' | 'overdue' | 'habitual' | 'inactive';
 
 export function SuppliersPage() {
   const { user } = useAuth();
+  const businessCtx = useBusinessOptional();
+  const businessId = resolveBusinessScopeId(businessCtx?.currentBusiness);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [invoices, setInvoices] = useState<PurchaseInvoice[]>([]);
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
+  const [brands, setBrands] = useState<Brand[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateSupplier, setShowCreateSupplier] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
@@ -223,12 +251,21 @@ export function SuppliersPage() {
       setCatalogItems(items);
       setInvoices(invs);
       setOrders(ords);
+      if (businessId) {
+        try {
+          setBrands(await listBrandsRequest(businessId));
+        } catch {
+          setBrands([]);
+        }
+      } else {
+        setBrands([]);
+      }
     } catch {
       toast.error('Error al cargar proveedores');
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [businessId, user?.id]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -516,6 +553,11 @@ export function SuppliersPage() {
                       <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
                         {supplier.cif && <span className="font-mono flex items-center gap-1"><CreditCard className="w-3 h-3" />{supplier.cif}</span>}
                         {supplier.category && <span className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-gray-600 dark:text-gray-400">{supplier.category}</span>}
+                        {labelsForSupplierOrganizerIds(supplier.organizerIds, brands).slice(0, 3).map((label) => (
+                          <span key={label} className="px-1.5 py-0.5 bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300 rounded text-gray-600 dark:text-gray-400 border border-sky-200 dark:border-sky-800">
+                            {label}
+                          </span>
+                        ))}
                         {supplier.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{supplier.phone}</span>}
                         {supplier.email && <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{supplier.email}</span>}
                       </div>
@@ -550,6 +592,7 @@ export function SuppliersPage() {
         onClose={() => { setShowCreateSupplier(false); setEditingSupplier(null); }}
         onCreate={handleCreateSupplier}
         editItem={editingSupplier}
+        brands={brands}
       />
 
       <AIAddModal

@@ -16,6 +16,8 @@ import {
   buildPurchaseInvoiceDocument,
   sanitizePurchaseInvoice,
   listPurchaseInvoicesByUser,
+  findDuplicatePurchaseInvoice,
+  normalizePurchaseInvoiceNumber,
   generateExpenseFromInvoice,
   generateInputTaxFromInvoice,
   createDocumentFromInvoice,
@@ -2622,9 +2624,43 @@ export async function createPurchaseInvoice(req, res) {
     if (!invoice || typeof invoice !== 'object') return badRequest(res, 'Falta el objeto invoice');
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    const forceDuplicate = Boolean(invoice.forceDuplicate);
+    const invoiceNumber = String(invoice.invoiceNumber || invoice.documentNumber || '').trim();
+    if (invoiceNumber && !forceDuplicate) {
+      const dup = await findDuplicatePurchaseInvoice(
+        req,
+        userId,
+        invoiceNumber,
+        invoice.supplierId || '',
+        invoice.total,
+      );
+      if (dup) {
+        return res.status(409).json({
+          ok: false,
+          error: `Factura duplicada: ya existe el código ${dup.invoiceNumber}`,
+          code: 'DUPLICATE_INVOICE',
+          existingInvoice: sanitizePurchaseInvoice(dup),
+        });
+      }
+    }
+
     const db = getCatalogDbName();
     await ensureDatabase(req, db);
-    const doc = buildPurchaseInvoiceDocument(userId, invoice);
+    const loadToWarehouse = Boolean(invoice.loadToWarehouse);
+    const documentKind = String(
+      invoice.documentKind || invoice.ocrData?.documentType || 'factura_proveedor',
+    );
+    const doc = buildPurchaseInvoiceDocument(userId, {
+      ...invoice,
+      documentKind,
+      flags: {
+        ...(invoice.flags || {}),
+        duplicate: forceDuplicate,
+        stockPending: !loadToWarehouse,
+      },
+      duplicateWarning: forceDuplicate,
+    });
     const saved = await putDocument(req, db, doc._id, doc);
     let reconciled = null;
     try {
@@ -2633,6 +2669,8 @@ export async function createPurchaseInvoice(req, res) {
         performedBy: account.fullName || userId,
         financeSource: 'invoice',
         entryMethod: doc.entryMethod || 'manual',
+        applyStock: loadToWarehouse,
+        createFinance: true,
       });
     } catch (reconcileErr) {
       console.error('[createPurchaseInvoice] reconcile stock/finance:', reconcileErr?.message || reconcileErr);
@@ -2770,21 +2808,32 @@ export async function rejectPurchaseInvoice(req, res) {
 export async function checkDuplicateInvoice(req, res) {
   try {
     const { userId } = req.params;
-    const { invoiceNumber, supplierId, supplierName } = req.body || {};
+    const { invoiceNumber, supplierId, supplierName, excludeId } = req.body || {};
     if (!invoiceNumber) return res.json({ ok: true, duplicate: false });
 
-    const invoices = await listPurchaseInvoicesByUser(req, userId);
-    const normalizedNum = String(invoiceNumber).trim().toLowerCase().replace(/\s+/g, '');
+    const match = await findDuplicatePurchaseInvoice(
+      req,
+      userId,
+      invoiceNumber,
+      supplierId || '',
+      null,
+      { excludeId },
+    );
 
-    const match = invoices.find((inv) => {
-      const invNum = String(inv.invoiceNumber || '').trim().toLowerCase().replace(/\s+/g, '');
-      if (invNum !== normalizedNum) return false;
-      if (supplierId && inv.supplierId) return inv.supplierId === supplierId;
-      if (supplierName && inv.supplierName) {
-        return inv.supplierName.toLowerCase().trim() === String(supplierName).toLowerCase().trim();
+    // Si no hay supplierId pero sí nombre, filtrar en memoria
+    if (!match && supplierName) {
+      const invoices = await listPurchaseInvoicesByUser(req, userId);
+      const normalizedNum = normalizePurchaseInvoiceNumber(invoiceNumber);
+      const byName = invoices.find((inv) => {
+        if (excludeId && inv._id === excludeId) return false;
+        if (normalizePurchaseInvoiceNumber(inv.invoiceNumber) !== normalizedNum) return false;
+        return String(inv.supplierName || '').toLowerCase().trim()
+          === String(supplierName).toLowerCase().trim();
+      });
+      if (byName) {
+        return res.json({ ok: true, duplicate: true, existingInvoice: sanitizePurchaseInvoice(byName) });
       }
-      return true;
-    });
+    }
 
     if (match) {
       return res.json({ ok: true, duplicate: true, existingInvoice: sanitizePurchaseInvoice(match) });
@@ -2792,6 +2841,46 @@ export async function checkDuplicateInvoice(req, res) {
     return res.json({ ok: true, duplicate: false });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al comprobar duplicados' });
+  }
+}
+
+/** Carga líneas de factura/albarán al almacén (stock). Idempotente. */
+export async function loadPurchaseInvoiceToStock(req, res) {
+  try {
+    const { userId, invoiceId } = req.params;
+    const existing = await ensurePurchaseInvoiceOwner(req, userId, invoiceId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Factura no encontrada' });
+
+    if (existing.ocrStockReceivedAt) {
+      return res.json({
+        ok: true,
+        skipped: true,
+        reason: 'already_loaded',
+        invoice: sanitizePurchaseInvoice(existing),
+        reconcile: { stockUpdated: 0, stockUnits: 0 },
+      });
+    }
+
+    const account = await findAccountByUserId(req, userId);
+    const { reconcilePurchaseInvoiceFromOcr } = await import('../services/ocrPurchasePipeline.js');
+    const reconciled = await reconcilePurchaseInvoiceFromOcr(req, userId, existing, {
+      performedBy: account?.fullName || userId,
+      applyStock: true,
+      createFinance: false,
+      financeSource: 'invoice',
+      entryMethod: existing.entryMethod || 'manual',
+    });
+
+    const db = getCatalogDbName();
+    const fresh = await getDocument(req, db, invoiceId);
+    return res.json({
+      ok: true,
+      skipped: false,
+      invoice: sanitizePurchaseInvoice(fresh || existing),
+      reconcile: reconciled,
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al cargar al almacén' });
   }
 }
 
