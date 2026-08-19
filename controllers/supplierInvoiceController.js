@@ -547,7 +547,7 @@ export async function updateConfig(req, res) {
       imapPort: config.imapPort !== undefined ? Number(config.imapPort) : existing.imapPort,
       imapUser: config.imapUser !== undefined ? String(config.imapUser).trim() : existing.imapUser,
       imapPassword: config.imapPassword && config.imapPassword !== '••••••••'
-        ? String(config.imapPassword)
+        ? String(config.imapPassword).replace(/\s+/g, '').trim()
         : existing.imapPassword,
       imapTls: config.imapTls !== undefined ? Boolean(config.imapTls) : existing.imapTls,
       pollIntervalMinutes: config.pollIntervalMinutes !== undefined
@@ -597,7 +597,44 @@ export async function updateConfig(req, res) {
 
 export async function testImap(req, res) {
   try {
-    const overrides = req.body || {};
+    const body = req.body || {};
+    let overrides = {
+      host: body.host,
+      port: body.port,
+      user: body.user,
+      pass: body.pass,
+      tls: body.tls,
+    };
+
+    // Tras guardar, el front solo tiene la máscara ••••••••. Si no envían pass real,
+    // reutilizamos la guardada en la cuenta (o pedimos que la vuelvan a escribir).
+    const passBlank =
+      !String(overrides.pass || '').trim()
+      || String(overrides.pass) === '••••••••';
+    const userId = String(body.userId || req.params?.userId || '').trim();
+    if (passBlank && userId) {
+      const account = await findAccountByUserId(req, userId);
+      const saved = account?.supplierInvoiceConfig || {};
+      overrides = {
+        host: overrides.host || saved.imapHost,
+        port: overrides.port || saved.imapPort || 993,
+        user: overrides.user || saved.imapUser,
+        pass: saved.imapPassword || '',
+        tls: overrides.tls !== undefined ? overrides.tls : saved.imapTls !== false,
+      };
+    }
+
+    const passClean = String(overrides.pass || '').replace(/\s+/g, '').trim();
+    if (!passClean) {
+      return res.json({
+        ok: false,
+        error: 'Falta la contraseña de aplicación. Vuelve a escribirla y guarda antes de probar.',
+      });
+    }
+    overrides.pass = passClean;
+    if (overrides.user) overrides.user = String(overrides.user).trim();
+    if (overrides.host) overrides.host = String(overrides.host).trim();
+
     const result = await testImapConnection(overrides);
     return res.json(result);
   } catch (error) {

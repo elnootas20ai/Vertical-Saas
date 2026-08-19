@@ -61,16 +61,24 @@ export async function saveSupplierInvoiceEmailConfig(
 }
 
 export async function testSupplierInvoiceImap(
-  overrides: Partial<Pick<SupplierInvoiceEmailConfig, 'imapHost' | 'imapPort' | 'imapUser' | 'imapPassword' | 'imapTls'>>,
+  overrides: Partial<Pick<SupplierInvoiceEmailConfig, 'imapHost' | 'imapPort' | 'imapUser' | 'imapPassword' | 'imapTls'>> & {
+    userId?: string;
+  },
 ): Promise<{ ok: boolean; error?: string; folders?: string[]; totalMessages?: number }> {
+  const passRaw = String(overrides.imapPassword || '');
+  const pass =
+    !passRaw || passRaw === '••••••••'
+      ? undefined
+      : passRaw.replace(/\s+/g, '').trim();
   return apiRequest('/api/supplier-invoices/test-imap', {
     method: 'POST',
     body: JSON.stringify({
       host: overrides.imapHost,
       port: overrides.imapPort,
       user: overrides.imapUser,
-      pass: overrides.imapPassword,
+      pass,
       tls: overrides.imapTls,
+      userId: overrides.userId || undefined,
     }),
   });
 }

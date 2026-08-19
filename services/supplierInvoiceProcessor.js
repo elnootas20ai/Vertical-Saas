@@ -39,7 +39,7 @@ async function buildImapOverridesForUser(userId) {
     if (!c?.enabled) return {};
     const host = String(c.imapHost || '').trim();
     const user = String(c.imapUser || '').trim();
-    const pass = String(c.imapPassword || '').trim();
+    const pass = String(c.imapPassword || '').replace(/\s+/g, '').trim();
     if (!host || !user || !pass) {
       logger.warn(
         { tag: 'SINV_PROC', userId },
