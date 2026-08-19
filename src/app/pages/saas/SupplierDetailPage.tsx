@@ -252,15 +252,21 @@ export function SupplierDetailPage() {
                   </span>
                 )}
                 {organizerLabels.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {organizerLabels.map((label) => (
+                  <div className="flex flex-wrap gap-1.5 mt-2 max-h-16 overflow-hidden">
+                    {organizerLabels.slice(0, 6).map((label) => (
                       <span
                         key={label}
-                        className="px-2 py-0.5 text-xs bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300 rounded-lg border border-sky-200 dark:border-sky-800"
+                        title={label}
+                        className="px-2 py-0.5 text-xs bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300 rounded-lg border border-sky-200 dark:border-sky-800 max-w-[10rem] truncate"
                       >
                         {label}
                       </span>
                     ))}
+                    {organizerLabels.length > 6 ? (
+                      <span className="px-2 py-0.5 text-xs font-semibold bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-lg">
+                        +{organizerLabels.length - 6} más
+                      </span>
+                    ) : null}
                   </div>
                 )}
               </div>

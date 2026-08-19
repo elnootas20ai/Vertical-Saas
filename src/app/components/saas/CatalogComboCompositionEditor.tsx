@@ -1,22 +1,23 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, Search, Zap } from 'lucide-react';
+import { Check, ChevronDown, Minus, Plus, Search, Trash2, Zap } from 'lucide-react';
 import type { CatalogComboRef, CatalogItem } from '../../lib/deliveryApi';
 import {
   COMBO_MENU_PRESETS,
   COMBO_SLOT_META,
   DEFAULT_COMBO_STRUCTURE,
   buildComboMenuSections,
+  catalogProductsForCategory,
   catalogProductsForComboSection,
   comboItemsInCatalogSection,
-  comboItemsInSlotKind,
-  inferComboMenuPresetId,
+  comboMenuSectionKey,
+  inferComboSlotKind,
   isComboMenuComplete,
   normalizeComboItemsForSave,
   pickComboProductInSection,
   totalUnitsInCatalogSection,
-  totalUnitsInSlotKind,
+  uniqueCatalogCategoriesForComboParts,
+  unitsNeededInComboSection,
   type ComboMenuCatalogSection,
-  type ComboSlotKind,
   type ComboStructureSlot,
 } from '../../lib/catalogComboSlots';
 import { foldTpvSearchText } from '../../lib/tpvCatalogNavigation';
@@ -69,34 +70,25 @@ function MenuProgressBar({
   comboItems: CatalogComboRef[];
   catalogItems: CatalogItem[];
 }) {
-  const steps = useMemo(() => {
-    const map = new Map<ComboSlotKind, { label: string; emoji: string; quota: number; required: boolean }>();
-    for (const s of sections) {
-      if (s.slotQuota <= 0) continue;
-      if (!map.has(s.slotKind)) {
-        map.set(s.slotKind, {
-          label: COMBO_SLOT_META[s.slotKind].shortLabel,
-          emoji: COMBO_SLOT_META[s.slotKind].emoji,
-          quota: s.slotQuota,
-          required: s.required,
-        });
-      }
-    }
-    return (['main', 'side', 'drink', 'dessert'] as const)
-      .filter((k) => map.has(k))
-      .map((k) => ({ kind: k, ...map.get(k)! }));
-  }, [sections]);
+  const steps = sections
+    .filter((s) => s.slotQuota > 0 || s.expectedCount > 0)
+    .map((s) => ({
+      key: comboMenuSectionKey(s),
+      label: s.catalogCategory,
+      emoji: sectionHeaderStyle(s).emoji,
+      quota: unitsNeededInComboSection(s),
+      have: totalUnitsInCatalogSection(s, comboItems, catalogItems),
+    }));
 
   if (steps.length === 0) return null;
 
   return (
     <div className="flex flex-wrap gap-2 p-3 rounded-xl bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
       {steps.map((step) => {
-        const have = totalUnitsInSlotKind(step.kind, comboItems, catalogItems);
-        const done = have >= step.quota;
+        const done = step.quota > 0 && step.have >= step.quota;
         return (
           <div
-            key={step.kind}
+            key={step.key}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold ${
               done
                 ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300'
@@ -106,12 +98,196 @@ function MenuProgressBar({
             <span>{step.emoji}</span>
             <span>{step.label}</span>
             <span className="tabular-nums opacity-80">
-              {have}/{step.quota}
+              {step.have}/{step.quota}
             </span>
             {done ? <Check className="w-3.5 h-3.5" /> : null}
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function ComboPartRow({
+  slot,
+  categories,
+  catalogItems,
+  excludeItemId,
+  onPatch,
+  onRemove,
+}: {
+  slot: ComboStructureSlot;
+  categories: string[];
+  catalogItems: CatalogItem[];
+  excludeItemId?: string;
+  onPatch: (patch: Partial<ComboStructureSlot>) => void;
+  onRemove: () => void;
+}) {
+  const category = String(slot.catalogCategory || '').trim();
+  const count = Math.max(1, slot.expectedCount ?? 1);
+  const allowed = slot.allowedProductIds || [];
+  const [pickOpen, setPickOpen] = useState(allowed.length > 0);
+
+  const products = useMemo(
+    () => (category ? catalogProductsForCategory(category, catalogItems, excludeItemId) : []),
+    [category, catalogItems, excludeItemId],
+  );
+
+  const applyCategory = (nextCategory: string) => {
+    const cat = nextCategory.trim();
+    if (!cat) return;
+    onPatch({
+      catalogCategory: cat,
+      slotKind: inferComboSlotKind(cat),
+      label: count > 1 ? `${cat} (×${count})` : cat,
+      allowedProductIds: [],
+    });
+    setPickOpen(false);
+  };
+
+  const applyCount = (nextCount: number) => {
+    const n = Math.max(1, Math.min(20, nextCount));
+    onPatch({
+      expectedCount: n,
+      ...(category ? { label: n > 1 ? `${category} (×${n})` : category } : {}),
+    });
+  };
+
+  const toggleAllowed = (productId: string) => {
+    // Lista vacía = todos permitidos; al desmarcar uno, quedan todos menos ese.
+    if (allowed.length === 0) {
+      onPatch({
+        allowedProductIds: products.filter((p) => p._id !== productId).map((p) => p._id),
+      });
+      return;
+    }
+    let next = allowed.includes(productId)
+      ? allowed.filter((id) => id !== productId)
+      : [...allowed, productId];
+    if (next.length >= products.length) next = [];
+    onPatch({ allowedProductIds: next });
+  };
+
+  return (
+    <div className="rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3 space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={category}
+          onChange={(e) => applyCategory(e.target.value)}
+          className="flex-1 min-w-[10rem] px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 outline-none focus:border-blue-500"
+        >
+          <option value="">
+            {slot.label ? `${slot.label} — elegir organizador…` : 'Elegir organizador…'}
+          </option>
+          {categories.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+        <div className="flex items-center gap-1 rounded-xl border-2 border-gray-200 dark:border-gray-700 px-1 py-0.5">
+          <button
+            type="button"
+            onClick={() => applyCount(count - 1)}
+            className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300"
+            title="Una unidad menos"
+          >
+            <Minus className="w-4 h-4" />
+          </button>
+          <span className="w-8 text-center text-sm font-bold text-gray-900 dark:text-gray-100 tabular-nums">
+            {count}
+          </span>
+          <button
+            type="button"
+            onClick={() => applyCount(count + 1)}
+            className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300"
+            title="Una unidad más"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="p-2 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+          title="Quitar parte"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
+
+      {category ? (
+        <div>
+          <button
+            type="button"
+            onClick={() => setPickOpen((v) => !v)}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100"
+          >
+            <ChevronDown
+              className={`w-4 h-4 transition-transform ${pickOpen ? 'rotate-0' : '-rotate-90'}`}
+            />
+            {allowed.length > 0
+              ? `${allowed.length} de ${products.length} productos elegibles`
+              : `Todos los productos de «${category}» (${products.length})`}
+          </button>
+          {pickOpen ? (
+            products.length === 0 ? (
+              <p className="text-xs text-gray-400 mt-1.5">Sin productos en esta categoría todavía.</p>
+            ) : (
+              <div className="mt-1.5 space-y-1.5">
+                <button
+                  type="button"
+                  onClick={() => onPatch({ allowedProductIds: [] })}
+                  className="text-xs font-semibold text-[var(--v-blue,#2563eb)] hover:underline"
+                >
+                  Permitir todos
+                </button>
+                <ul className="max-h-40 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                  {products.map((p) => {
+                    const on = allowed.length === 0 || allowed.includes(p._id);
+                    return (
+                      <li key={p._id}>
+                        <button
+                          type="button"
+                          onClick={() => toggleAllowed(p._id)}
+                          className="w-full flex items-center gap-2 px-2.5 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
+                        >
+                          <span
+                            className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 ${
+                              on
+                                ? 'border-blue-600 bg-blue-600 text-white'
+                                : 'border-gray-300 dark:border-gray-600'
+                            }`}
+                          >
+                            {on ? <Check className="w-3.5 h-3.5" /> : null}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate text-gray-900 dark:text-gray-100">
+                            {p.name}
+                          </span>
+                          <span className="text-xs text-gray-500 shrink-0">{p.unitPrice.toFixed(2)} €</span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {allowed.length > 0 ? (
+                  <p className="text-[11px] text-gray-500">
+                    Solo los marcados se podrán elegir en esta parte del menú.
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-gray-500">
+                    Todos permitidos. Marca productos para limitar la elección.
+                  </p>
+                )}
+              </div>
+            )
+          ) : null}
+        </div>
+      ) : (
+        <p className="text-[11px] text-gray-500">
+          Parte clásica ({slot.label}). Elige un organizador para usar tus categorías reales.
+        </p>
+      )}
     </div>
   );
 }
@@ -134,13 +310,9 @@ function CatalogSectionBlock({
   const [search, setSearch] = useState('');
   const style = sectionHeaderStyle(section);
   const selected = comboItemsInCatalogSection(section, comboItems, catalogItems);
-  const slotSelected = comboItemsInSlotKind(section.slotKind, comboItems, catalogItems);
-  const categoryNeed = section.expectedCount;
-  const slotNeed = section.slotQuota;
-  const categoryHave = totalUnitsInCatalogSection(section, comboItems, catalogItems);
-  const slotHave = totalUnitsInSlotKind(section.slotKind, comboItems, catalogItems);
-  const categoryDone = categoryNeed > 0 && categoryHave >= categoryNeed;
-  const slotDone = slotNeed > 0 && slotHave >= slotNeed;
+  const need = unitsNeededInComboSection(section);
+  const have = totalUnitsInCatalogSection(section, comboItems, catalogItems);
+  const done = need > 0 && have >= need;
 
   const products = useMemo(() => {
     const q = foldTpvSearchText(search);
@@ -150,16 +322,7 @@ function CatalogSectionBlock({
     });
   }, [section, catalogItems, excludeItemId, search]);
 
-  const pickLabel =
-    categoryNeed > 1
-      ? `Elige ${categoryNeed} de esta sección`
-      : slotNeed > 1 && section.slotKind !== 'main'
-        ? `Elige ${slotNeed} (${slotHave}/${slotNeed} en total)`
-        : slotNeed > 1
-          ? `Elige ${categoryNeed || slotNeed} (${categoryHave}/${categoryNeed || slotNeed})`
-          : section.required || slotNeed > 0
-            ? 'Elige 1'
-            : 'Opcional';
+  const pickLabel = need > 1 ? `Elige ${need} (${have}/${need})` : need === 1 ? 'Elige 1' : 'Opcional';
 
   return (
     <section className={`rounded-2xl border-2 ${style.border} ${style.bg} overflow-hidden`}>
@@ -170,12 +333,10 @@ function CatalogSectionBlock({
             <h4 className="text-base font-bold text-gray-900 dark:text-gray-100">
               {section.catalogCategory}
             </h4>
-            <p className="text-xs text-gray-600 dark:text-gray-400">
-              {pickLabel}
-            </p>
+            <p className="text-xs text-gray-600 dark:text-gray-400">{pickLabel}</p>
           </div>
         </div>
-        {(categoryDone || (slotDone && slotSelected.some((s) => selected.some((x) => x.productId === s.productId)))) && (
+        {done && (
           <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 dark:text-emerald-400 bg-white/80 dark:bg-gray-900/80 px-2 py-1 rounded-lg">
             <Check className="w-4 h-4" /> OK
           </span>
@@ -197,7 +358,7 @@ function CatalogSectionBlock({
       )}
 
       <div className="p-4 space-y-2">
-        {categoryDone ? (
+        {done ? (
           <p className="text-sm text-center text-emerald-700 dark:text-emerald-400 py-1 font-medium">
             Completo — toca otro producto para cambiar
           </p>
@@ -263,42 +424,61 @@ export function CatalogComboCompositionEditor({
   onImportIngredients,
   compact = false,
 }: CatalogComboCompositionEditorProps) {
-  const initialStructure =
-    comboStructureProp && comboStructureProp.length > 0
-      ? comboStructureProp.map((s) => ({ ...s }))
-      : DEFAULT_COMBO_STRUCTURE.map((s) => ({ ...s }));
-
-  const [sizeId, setSizeId] = useState(() => {
-    const id = inferComboMenuPresetId(initialStructure);
-    return id === 'custom' ? 'estandar' : id || 'estandar';
-  });
+  const structure = useMemo(
+    () =>
+      comboStructureProp && comboStructureProp.length > 0
+        ? comboStructureProp
+        : DEFAULT_COMBO_STRUCTURE.map((s) => ({ ...s })),
+    [comboStructureProp],
+  );
 
   useEffect(() => {
     onStructureConfirmedChange?.(true);
   }, [onStructureConfirmedChange]);
 
-  const menuSections = useMemo(
-    () => buildComboMenuSections(sizeId, catalogItems),
-    [sizeId, catalogItems],
+  const categories = useMemo(
+    () => uniqueCatalogCategoriesForComboParts(catalogItems, excludeItemId),
+    [catalogItems, excludeItemId],
   );
 
-  const visibleSections = menuSections.filter(
-    (s) => s.slotQuota > 0 || s.expectedCount > 0,
+  const emitStructure = (next: ComboStructureSlot[]) => {
+    onStructureChange?.(next);
+    onStructureConfirmedChange?.(true);
+  };
+
+  const patchPart = (idx: number, patch: Partial<ComboStructureSlot>) => {
+    emitStructure(structure.map((s, i) => (i === idx ? { ...s, ...patch } : s)));
+  };
+
+  const removePart = (idx: number) => {
+    emitStructure(structure.filter((_, i) => i !== idx));
+  };
+
+  const addPart = () => {
+    emitStructure([
+      ...structure,
+      { slotKind: 'other', label: 'Nueva parte', required: true, expectedCount: 1 },
+    ]);
+  };
+
+  const applyPreset = (presetId: string) => {
+    const preset = COMBO_MENU_PRESETS.find((p) => p.id === presetId);
+    if (!preset) return;
+    emitStructure(preset.structure.map((s) => ({ ...s })));
+    if (comboItems.length > 0) emitChange([]);
+  };
+
+  const menuSections = useMemo(
+    () => buildComboMenuSections('estandar', catalogItems, structure),
+    [catalogItems, structure],
   );
+
+  const visibleSections = menuSections.filter((s) => s.slotQuota > 0 || s.expectedCount > 0);
 
   const menuComplete = isComboMenuComplete(menuSections, comboItems, catalogItems);
 
   const emitChange = (next: CatalogComboRef[]) => {
     onChange(normalizeComboItemsForSave(next, catalogItems));
-  };
-
-  const applySize = (presetId: string) => {
-    const preset = COMBO_MENU_PRESETS.find((p) => p.id === presetId);
-    if (!preset) return;
-    setSizeId(presetId);
-    onStructureChange?.(preset.structure.map((s) => ({ ...s })));
-    onStructureConfirmedChange?.(true);
-    if (comboItems.length > 0) emitChange([]);
   };
 
   const pickProduct = (section: ComboMenuCatalogSection, product: CatalogItem) => {
@@ -310,9 +490,9 @@ export function CatalogComboCompositionEditor({
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-base font-bold text-gray-900 dark:text-gray-100">Arma el menú</h3>
+          <h3 className="text-base font-bold text-gray-900 dark:text-gray-100">Partes del menú</h3>
           <p className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">
-            Elige pizza, complemento y bebida — las mismas secciones que en tu catálogo.
+            Cada parte es un organizador de tu carta: cuántas unidades y qué productos se pueden elegir.
           </p>
         </div>
         {onImportIngredients && comboItems.length > 0 && (
@@ -327,44 +507,62 @@ export function CatalogComboCompositionEditor({
         )}
       </div>
 
-      <div>
-        <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Tamaño del menú</p>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+      <div className="space-y-2">
+        {structure.map((slot, idx) => (
+          <ComboPartRow
+            key={`${idx}-${slot.catalogCategory || slot.slotKind}`}
+            slot={slot}
+            categories={categories}
+            catalogItems={catalogItems}
+            excludeItemId={excludeItemId}
+            onPatch={(patch) => patchPart(idx, patch)}
+            onRemove={() => removePart(idx)}
+          />
+        ))}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={addPart}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600 text-sm font-semibold text-gray-700 dark:text-gray-300 hover:border-gray-500 hover:bg-gray-50 dark:hover:bg-gray-800"
+          >
+            <Plus className="w-4 h-4" />
+            Añadir parte
+          </button>
+          <span className="text-[11px] text-gray-400">Plantillas:</span>
           {MENU_SIZES.map((preset) => (
             <button
               key={preset.id}
               type="button"
-              onClick={() => applySize(preset.id)}
-              className={`p-3 rounded-xl border-2 text-left ${
-                sizeId === preset.id
-                  ? 'border-gray-900 dark:border-white bg-gray-900 dark:bg-white text-white dark:text-gray-900'
-                  : 'border-gray-200 dark:border-gray-700'
-              }`}
+              onClick={() => applyPreset(preset.id)}
+              className="px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+              title={preset.hint}
             >
-              <span className="block text-sm font-bold">
-                {preset.id === 'estandar' && '1 persona'}
-                {preset.id === 'duo' && '2 personas'}
-                {preset.id === 'familiar' && 'Familia'}
-              </span>
-              <span className={`block text-xs mt-1 ${sizeId === preset.id ? 'opacity-90' : 'text-gray-500'}`}>
-                {preset.hint}
-              </span>
+              {preset.id === 'estandar' && '1 persona'}
+              {preset.id === 'duo' && '2 personas'}
+              {preset.id === 'familiar' && 'Familia'}
             </button>
           ))}
         </div>
       </div>
 
-      <MenuProgressBar sections={menuSections} comboItems={comboItems} catalogItems={catalogItems} />
-
-      <div className="space-y-3">
+      <div className="border-t border-gray-200 dark:border-gray-700 pt-4 space-y-3">
+        <div>
+          <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">
+            Contenido por defecto (opcional)
+          </h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+            Si lo dejas vacío, el cliente elige al pedir. Si marcas productos, salen preseleccionados.
+          </p>
+        </div>
+        <MenuProgressBar sections={menuSections} comboItems={comboItems} catalogItems={catalogItems} />
         {visibleSections.length === 0 ? (
           <p className="text-sm text-amber-800 dark:text-amber-300 rounded-xl border border-amber-200 px-4 py-3">
-            No hay secciones de catálogo detectadas. Importa productos en Pizzas, Complementos y Bebidas.
+            Añade al menos una parte con organizador para componer el menú.
           </p>
         ) : (
           visibleSections.map((section) => (
             <CatalogSectionBlock
-              key={`${section.slotKind}-${section.catalogCategory}`}
+              key={comboMenuSectionKey(section)}
               section={section}
               comboItems={comboItems}
               catalogItems={catalogItems}
@@ -374,13 +572,12 @@ export function CatalogComboCompositionEditor({
             />
           ))
         )}
+        {menuComplete && (
+          <div className="rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 px-4 py-3 text-sm text-emerald-800 dark:text-emerald-200 text-center font-medium">
+            Menú completo — guarda los cambios
+          </div>
+        )}
       </div>
-
-      {menuComplete && (
-        <div className="rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 px-4 py-3 text-sm text-emerald-800 dark:text-emerald-200 text-center font-medium">
-          Menú completo — guarda los cambios
-        </div>
-      )}
     </div>
   );
 }

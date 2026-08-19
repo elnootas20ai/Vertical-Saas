@@ -11,6 +11,14 @@ export type ComboStructureSlot = {
   required: boolean;
   /** Cuántos productos distintos van en este hueco (p. ej. 2 pizzas en Dúo). */
   expectedCount?: number;
+  /**
+   * Parte definida por el dueño sobre una categoría real de su carta
+   * (Pizzas, Bebidas, Postres…). Si está, la sección del menú sale de esta
+   * categoría en vez de las heurísticas por slotKind.
+   */
+  catalogCategory?: string;
+  /** Subconjunto de productos elegibles dentro de la categoría (vacío = todos). */
+  allowedProductIds?: string[];
 };
 
 export type ComboSlotMeta = {
@@ -219,6 +227,8 @@ export type ComboMenuCatalogSection = {
   groupBySlotKind?: boolean;
   /** Plato principal: agrupa Pizzas + Premium / Burgers / Tacos en un solo bloque. */
   groupByMainFamily?: ComboMainFamily;
+  /** Subconjunto elegible definido por el dueño para esta parte (vacío/ausente = todos). */
+  allowedProductIds?: string[];
 };
 
 const MAIN_CATEGORY_ORDER = [
@@ -295,6 +305,25 @@ export function uniqueCatalogCategoriesForSlotKind(
     if (sa !== sb) return sa - sb;
     return a.localeCompare(b, 'es');
   });
+}
+
+/** Todas las categorías reales de la carta con productos vendibles (para partes de menú). */
+export function uniqueCatalogCategoriesForComboParts(
+  catalog: CatalogItem[],
+  excludeItemId?: string,
+): string[] {
+  const seen = new Set<string>();
+  const found: string[] = [];
+  for (const item of sellableCatalogProducts(catalog, excludeItemId)) {
+    if (isTpvWarehouseOnlyCatalogItem(item)) continue;
+    const cat = String(item.category || '').trim();
+    if (!cat) continue;
+    const key = foldCategory(normalizeImportCategory(cat));
+    if (seen.has(key)) continue;
+    seen.add(key);
+    found.push(cat);
+  }
+  return found.sort((a, b) => a.localeCompare(b, 'es'));
 }
 
 export function catalogProductsForSlotKind(
@@ -390,6 +419,23 @@ export function buildComboMenuSections(
   for (const slot of structure) {
     const quota = Math.max(0, slot.expectedCount ?? (slot.required ? 1 : 0));
     if (quota <= 0 && !slot.required) continue;
+
+    // Parte definida por el dueño sobre una categoría concreta de su carta.
+    const ownCategory = String(slot.catalogCategory || '').trim();
+    if (ownCategory) {
+      const allowed = (slot.allowedProductIds || [])
+        .map((id) => String(id || '').trim())
+        .filter(Boolean);
+      sections.push({
+        catalogCategory: ownCategory,
+        slotKind: slot.slotKind,
+        expectedCount: quota,
+        required: slot.required,
+        slotQuota: quota,
+        ...(allowed.length > 0 ? { allowedProductIds: allowed } : {}),
+      });
+      continue;
+    }
 
     const categories = uniqueCatalogCategoriesForSlotKind(slot.slotKind, catalog);
     if (categories.length === 0) {
@@ -599,8 +645,17 @@ export function catalogProductsForComboSection(
   excludeItemId?: string,
   options?: { allowlistIds?: string[] | null },
 ): CatalogItem[] {
+  // Parte por categoría con subconjunto del dueño: manda su selección.
+  const sectionAllow = (section.allowedProductIds || [])
+    .map((id) => String(id || '').trim())
+    .filter(Boolean);
   // Plato principal (pizzas/burgers): nunca limitar por allowlist — salir TODAS las de carta.
-  const allow = section.slotKind === 'main' ? null : options?.allowlistIds;
+  const allow =
+    sectionAllow.length > 0
+      ? sectionAllow
+      : section.slotKind === 'main'
+        ? null
+        : options?.allowlistIds;
 
   let products: CatalogItem[];
   // Allowlist de menú = fuente de verdad: sale aunque isStockItem (control stock),
@@ -783,6 +838,21 @@ export function isComboMenuComplete(
   comboItems: CatalogComboRef[],
   catalog: CatalogItem[],
 ): boolean {
+  // Partes por categoría del dueño: cada sección exige su propio cupo
+  // (dos partes pueden compartir slotKind, p. ej. Tapas y Raciones).
+  const categoryParts = sections.filter(
+    (s) => !s.groupBySlotKind && !s.groupByMainFamily && s.expectedCount > 0,
+  );
+  if (categoryParts.length > 0 && categoryParts.length === sections.filter((s) => s.slotQuota > 0).length) {
+    for (const section of categoryParts) {
+      if (!section.required) continue;
+      if (totalUnitsInCatalogSection(section, comboItems, catalog) < section.expectedCount) {
+        return false;
+      }
+    }
+    return categoryParts.length > 0;
+  }
+
   const quotas = new Map<ComboSlotKind, { quota: number; required: boolean }>();
   for (const section of sections) {
     if (section.slotQuota <= 0) continue;
@@ -800,7 +870,10 @@ export function isComboMenuComplete(
 
 function structurePresetKey(structure: ComboStructureSlot[]): string {
   return structure
-    .map((s) => `${s.slotKind}:${s.required ? 1 : 0}:${Math.max(1, s.expectedCount ?? 1)}`)
+    .map((s) => {
+      const cat = String(s.catalogCategory || '').trim();
+      return `${s.slotKind}:${s.required ? 1 : 0}:${Math.max(1, s.expectedCount ?? 1)}${cat ? `:${cat}` : ''}`;
+    })
     .join('|');
 }
 
@@ -1015,11 +1088,19 @@ export function comboStructureFromCustomFields(
     if (!row || typeof row !== 'object') continue;
     const slotKind = (row as ComboStructureSlot).slotKind;
     if (!(slotKind in COMBO_SLOT_META)) continue;
+    const catalogCategory = String((row as ComboStructureSlot).catalogCategory || '').trim();
+    const allowedProductIds = Array.isArray((row as ComboStructureSlot).allowedProductIds)
+      ? (row as ComboStructureSlot)
+          .allowedProductIds!.map((id) => String(id || '').trim())
+          .filter(Boolean)
+      : [];
     out.push({
       slotKind,
       label: String((row as ComboStructureSlot).label || COMBO_SLOT_META[slotKind].shortLabel).trim(),
       required: Boolean((row as ComboStructureSlot).required),
       expectedCount: Math.max(1, Number((row as ComboStructureSlot).expectedCount) || 1),
+      ...(catalogCategory ? { catalogCategory } : {}),
+      ...(catalogCategory && allowedProductIds.length > 0 ? { allowedProductIds } : {}),
     });
   }
   return out.length > 0 ? out : DEFAULT_COMBO_STRUCTURE;

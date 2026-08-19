@@ -32,6 +32,8 @@ import { CatalogUnitChip, StockQtyWithUnit } from '../../components/saas/Catalog
 import { SupplierPaymentTermsField } from '../../components/saas/SupplierPaymentTermsField';
 import {
   initialSupplierCatalogItemIds,
+  initialSupplierItemCosts,
+  parseSupplierItemCosts,
   labelsForSupplierOrganizerIds,
   SupplierOrganizersField,
 } from '../../components/saas/SupplierOrganizersField';
@@ -152,7 +154,6 @@ import {
   ChevronDown,
   ChevronRight,
   Zap,
-  Archive,
   Sparkles,
   Globe,
   ArrowLeft,
@@ -253,7 +254,7 @@ const ALLERGEN_OPTIONS = [
   'Lácteos', 'Frutos de cáscara', 'Apio', 'Mostaza', 'Sésamo', 'Sulfitos', 'Moluscos', 'Altramuces',
 ];
 
-const CREATE_STEP_LABELS = ['Marca y producto', 'Precio, escandallo y stock', 'Publicación'];
+const CREATE_STEP_LABELS = ['Producto y precio', 'Ingredientes y composición', 'Foto y publicación'];
 
 function CatalogEmptyActions({
   onManualAdd,
@@ -372,6 +373,8 @@ function CreateCatalogItemModal({
   const [submitting, setSubmitting] = useState(false);
   const [sessionCreated, setSessionCreated] = useState<Array<{ name: string; price: number }>>([]);
   const createModalWasOpenRef = useRef(false);
+  const modalOverlayRef = useRef<HTMLDivElement>(null);
+  const modalPanelRef = useRef<HTMLDivElement>(null);
   const [modalStoreIngredients, setModalStoreIngredients] = useState<StoreIngredient[]>([]);
   const [modalBrandIngredientSelection, setModalBrandIngredientSelection] =
     useState<TpvBrandIngredientSelection>({});
@@ -715,6 +718,23 @@ function CreateCatalogItemModal({
 
   useModalClose(isOpen, onClose);
 
+  // Modal alto + items-center dejaba el título fuera de vista (parecía abrir abajo).
+  useEffect(() => {
+    if (!isOpen) return;
+    const scrollTop = () => {
+      modalOverlayRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+      modalPanelRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+    };
+    scrollTop();
+    const raf = requestAnimationFrame(scrollTop);
+    // autoFocus puede hacer scrollIntoView después del primer paint
+    const t = window.setTimeout(scrollTop, 50);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(t);
+    };
+  }, [isOpen, step, editItem?._id]);
+
   const totalSteps = 3;
   const isEditMode = Boolean(editItem);
 
@@ -921,7 +941,7 @@ function CreateCatalogItemModal({
           available: true,
         }));
         setStep(1);
-        toast.success(`«${savedName}» guardado. Añade otro artículo a «${category}».`);
+        toast.success(`«${savedName}» guardado. Añade otro producto a «${category}».`);
       }
     } catch {
       // onCreate ya muestra el error al usuario
@@ -1432,8 +1452,6 @@ function CreateCatalogItemModal({
   const inputClass = 'w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100';
   const labelClass = 'block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5';
 
-  const margin = Number(form.unitPrice) - Number(form.costPrice);
-  const marginPct = Number(form.costPrice) > 0 ? ((margin / Number(form.costPrice)) * 100).toFixed(0) : '—';
   const showCustomization =
     !form.buildYourOwn &&
     isCatalogTpvConfigurable(
@@ -1479,24 +1497,13 @@ function CreateCatalogItemModal({
     );
   };
 
-  const renderCustomizationSection = () => {
-    if (form.itemType === 'service' || form.buildYourOwn) return null;
+  const renderSupplementsSection = () => {
+    if (!showCustomization) return null;
     return (
-      <section className="space-y-4 border-t border-gray-200 dark:border-gray-700 pt-6">
-        <CatalogProductRecipePicker
-          picks={recipePicks}
-          onChange={setRecipePicks}
-          storeIngredients={effectiveStoreIngredients}
-          brands={brands}
-          brandIds={form.selectedBrandIds}
-          salePrice={Number(form.unitPrice) || 0}
-          compact
-        />
-        {showCustomization ? (
           <div className="space-y-3 pt-2">
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className={labelClass}>Suplementos de pago (solo web)</label>
+                <label className={labelClass}>Extras de pago (ej: más queso)</label>
                 <button
                   type="button"
                   onClick={() =>
@@ -1566,7 +1573,23 @@ function CreateCatalogItemModal({
               )}
             </div>
           </div>
-        ) : null}
+    );
+  };
+
+  const renderCustomizationSection = () => {
+    if (form.itemType === 'service' || form.buildYourOwn) return null;
+    return (
+      <section className="space-y-4 border-t border-gray-200 dark:border-gray-700 pt-6">
+        <CatalogProductRecipePicker
+          picks={recipePicks}
+          onChange={setRecipePicks}
+          storeIngredients={effectiveStoreIngredients}
+          brands={brands}
+          brandIds={form.selectedBrandIds}
+          salePrice={Number(form.unitPrice) || 0}
+          compact
+        />
+        {renderSupplementsSection()}
       </section>
     );
   };
@@ -1585,9 +1608,14 @@ function CreateCatalogItemModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
+    <div
+      ref={modalOverlayRef}
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-2 sm:p-4 bg-black/40 backdrop-blur-sm"
+      onClick={onClose}
+    >
       <div
-        className={`bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-h-[95vh] sm:max-h-[90vh] overflow-y-auto ${
+        ref={modalPanelRef}
+        className={`bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-h-[95vh] sm:max-h-[90vh] overflow-y-auto my-2 sm:my-4 ${
           showComboBuilder ? 'max-w-3xl' : 'max-w-2xl'
         }`}
         onClick={(e) => e.stopPropagation()}
@@ -1597,7 +1625,7 @@ function CreateCatalogItemModal({
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-                {editItem ? 'Editar artículo' : 'Nuevo artículo'}
+                {editItem ? 'Editar producto' : 'Nuevo producto'}
               </h2>
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
                 {editItem
@@ -1790,7 +1818,7 @@ function CreateCatalogItemModal({
               {sessionCreated.length > 0 ? (
                 <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-2.5">
                   <p className="text-xs font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
-                    {sessionCreated.length} artículo(s) guardado(s) en «{normalizedCategory || form.category || 'esta sección'}»
+                    {sessionCreated.length} producto(s) guardado(s) en «{normalizedCategory || form.category || 'esta sección'}»
                   </p>
                   <ul className="mt-1.5 space-y-0.5 text-xs text-emerald-900 dark:text-emerald-200">
                     {sessionCreated.slice(-4).map((item) => (
@@ -1842,69 +1870,42 @@ function CreateCatalogItemModal({
                 <label className={labelClass}>Descripción</label>
                 <textarea rows={2} className={`${inputClass} resize-none`} placeholder="Opcional: ingredientes, tamaño, etc." value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
               </div>
-              {renderComboBuilderSection()}
-            </div>
-          ) : step === 2 ? (
-            <div className="space-y-5">
-              <div className="flex items-center gap-3 p-4 bg-green-50 dark:bg-green-900/20 border-2 border-green-200 dark:border-green-800 rounded-xl">
-                <DollarSign className="w-6 h-6 text-green-600 shrink-0" />
-                <p className="text-sm text-green-800 dark:text-green-300">
-                  Precio de venta y escandallo: el coste se calcula solo al elegir ingredientes con + / −.
-                </p>
-              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className={labelClass}>Precio venta (€)</label>
-                  <input type="number" step="0.01" className={inputClass} placeholder="0.00" value={form.unitPrice} onChange={(e) => setForm((f) => ({ ...f, unitPrice: e.target.value }))} autoFocus />
+                  <input type="number" step="0.01" className={inputClass} placeholder="0.00" value={form.unitPrice} onChange={(e) => setForm((f) => ({ ...f, unitPrice: e.target.value }))} />
                 </div>
                 <div>
                   <label className={labelClass}>Precio empleado (€)</label>
                   <input type="number" step="0.01" className={inputClass} placeholder="Opcional" value={form.staffPrice} onChange={(e) => setForm((f) => ({ ...f, staffPrice: e.target.value }))} />
                 </div>
-                <div>
-                  <label className={labelClass}>
-                    Precio coste (€){recipePicks.length > 0 ? ' · auto escandallo' : ''}
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    className={inputClass}
-                    placeholder="0.00"
-                    value={form.costPrice}
-                    readOnly={recipePicks.length > 0}
-                    onChange={(e) => setForm((f) => ({ ...f, costPrice: e.target.value }))}
-                  />
-                </div>
               </div>
-              {(Number(form.unitPrice) > 0 || Number(form.costPrice) > 0) && (
-                <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-xl">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600 dark:text-gray-400">Margen</span>
-                    <span className={`font-bold ${margin >= 0 ? 'text-green-700' : 'text-red-600'}`}>
-                      {margin.toFixed(2)}€ ({marginPct}%)
-                    </span>
-                  </div>
+            </div>
+          ) : step === 2 ? (
+            <div className="space-y-5">
+              {form.itemType === 'service' && !showComboBuilder ? (
+                <div className="flex items-center gap-3 p-4 bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-200 dark:border-blue-800 rounded-xl">
+                  <DollarSign className="w-6 h-6 text-blue-600 shrink-0" />
+                  <p className="text-sm text-blue-800 dark:text-blue-300">
+                    Los servicios no llevan ingredientes ni stock. Pasa al siguiente paso para la foto y la publicación.
+                  </p>
                 </div>
-              )}
-              {form.itemType !== 'service' && (
+              ) : showComboBuilder ? (
                 <>
-                  <div className="flex items-center gap-3 p-4 bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-200 dark:border-amber-800 rounded-xl">
-                    <Archive className="w-6 h-6 text-amber-600 shrink-0" />
-                    <p className="text-sm text-amber-800 dark:text-amber-300">Stock inicial y alerta de reposición.</p>
+                  {renderComboBuilderSection()}
+                  {renderSupplementsSection()}
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center gap-3 p-4 bg-green-50 dark:bg-green-900/20 border-2 border-green-200 dark:border-green-800 rounded-xl">
+                    <DollarSign className="w-6 h-6 text-green-600 shrink-0" />
+                    <p className="text-sm text-green-800 dark:text-green-300">
+                      Escandallo: el coste se calcula solo al elegir ingredientes con + / −.
+                    </p>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className={labelClass}>Stock actual</label>
-                      <input type="number" className={inputClass} placeholder="0" value={form.stockQuantity} onChange={(e) => setForm((f) => ({ ...f, stockQuantity: e.target.value }))} />
-                    </div>
-                    <div>
-                      <label className={labelClass}>Stock mínimo (alerta)</label>
-                      <input type="number" className={inputClass} placeholder="0" value={form.minStock} onChange={(e) => setForm((f) => ({ ...f, minStock: e.target.value }))} />
-                    </div>
-                  </div>
+                  {renderCustomizationSection()}
                 </>
               )}
-              {renderCustomizationSection()}
             </div>
           ) : (
             <div className="space-y-5">
@@ -2017,7 +2018,7 @@ function CreateCatalogItemModal({
                     disabled={submitting}
                     className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-semibold transition-colors disabled:opacity-60 disabled:cursor-wait"
                   >
-                    {submitting ? 'Guardando…' : sessionCreated.length > 0 ? 'Guardar y cerrar' : 'Crear artículo'}
+                    {submitting ? 'Guardando…' : sessionCreated.length > 0 ? 'Guardar y cerrar' : 'Crear producto'}
                   </button>
                 </>
               )}
@@ -2034,7 +2035,7 @@ function CreateCatalogItemModal({
 interface CreateSupplierModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onCreate: (data: Partial<Supplier>) => Promise<void>;
+  onCreate: (data: Partial<Supplier> & { catalogItemCosts?: Record<string, number> }) => Promise<void>;
   editItem?: Supplier | null;
   brands?: Brand[];
   catalogItems?: CatalogItem[];
@@ -2063,10 +2064,12 @@ function CreateSupplierModal({
     notes: '',
     organizerIds: [] as string[],
     catalogItemIds: [] as string[],
+    itemCosts: {} as Record<string, string>,
   });
 
   useEffect(() => {
     if (editItem) {
+      const catalogItemIds = initialSupplierCatalogItemIds(editItem, catalogItems);
       setForm({
         name: editItem.name,
         cif: editItem.cif || '',
@@ -2078,7 +2081,8 @@ function CreateSupplierModal({
         paymentTerms: editItem.paymentTerms || '',
         notes: editItem.notes || '',
         organizerIds: Array.isArray(editItem.organizerIds) ? [...editItem.organizerIds] : [],
-        catalogItemIds: initialSupplierCatalogItemIds(editItem, catalogItems),
+        catalogItemIds,
+        itemCosts: initialSupplierItemCosts(catalogItemIds, catalogItems),
       });
     } else {
       setForm({
@@ -2093,6 +2097,7 @@ function CreateSupplierModal({
         notes: '',
         organizerIds: [],
         catalogItemIds: [],
+        itemCosts: {},
       });
     }
   }, [editItem, isOpen, catalogItems]);
@@ -2121,6 +2126,7 @@ function CreateSupplierModal({
         notes: form.notes,
         organizerIds: form.organizerIds,
         catalogItemIds: form.catalogItemIds,
+        catalogItemCosts: parseSupplierItemCosts(form.itemCosts),
         active: editItem?.active ?? true,
       });
     } finally {
@@ -2223,7 +2229,10 @@ function CreateSupplierModal({
           <SupplierOrganizersField
             organizerIds={form.organizerIds}
             catalogItemIds={form.catalogItemIds}
-            onChange={({ organizerIds, catalogItemIds }) => setForm((f) => ({ ...f, organizerIds, catalogItemIds }))}
+            itemCosts={form.itemCosts}
+            onChange={({ organizerIds, catalogItemIds, itemCosts }) =>
+              setForm((f) => ({ ...f, organizerIds, catalogItemIds, itemCosts }))
+            }
             brands={brands}
             catalogItems={catalogItems}
             storeIngredients={storeIngredients}
@@ -4192,21 +4201,34 @@ export function CatalogPage() {
 
   // ── CRUD: Suppliers ─────────────────────────────────────────────────────────
 
-  const handleCreateSupplier = async (data: Partial<Supplier>) => {
+  const handleCreateSupplier = async (data: Partial<Supplier> & { catalogItemCosts?: Record<string, number> }) => {
     if (!dataUserId) { toast.error('Sesión no válida. Recarga la página e inicia sesión de nuevo.'); return; }
+    const { catalogItemCosts, ...supplierData } = data;
     try {
       if (editingSupplier) {
-        const updated = await updateSupplierRequest(dataUserId, { ...editingSupplier, ...data } as Supplier);
-        const linked = await syncSupplierCatalogItemLinks(dataUserId, updated, data.catalogItemIds || [], catalogItems);
+        const updated = await updateSupplierRequest(dataUserId, { ...editingSupplier, ...supplierData } as Supplier);
+        const linked = await syncSupplierCatalogItemLinks(
+          dataUserId,
+          updated,
+          supplierData.catalogItemIds || [],
+          catalogItems,
+          catalogItemCosts,
+        );
         if (linked.length > 0) {
           const byId = new Map(linked.map((i) => [i._id, i]));
           setAllCatalogItems((prev) => prev.map((i) => byId.get(i._id) ?? i));
         }
-        setSuppliers(prev => prev.map(s => s._id === updated._id ? { ...updated, ...data, _id: updated._id } : s));
+        setSuppliers(prev => prev.map(s => s._id === updated._id ? { ...updated, ...supplierData, _id: updated._id } : s));
         toast.success('Proveedor actualizado');
       } else {
-        const created = await createSupplierRequest(dataUserId, data);
-        const linked = await syncSupplierCatalogItemLinks(dataUserId, created, data.catalogItemIds || [], catalogItems);
+        const created = await createSupplierRequest(dataUserId, supplierData);
+        const linked = await syncSupplierCatalogItemLinks(
+          dataUserId,
+          created,
+          supplierData.catalogItemIds || [],
+          catalogItems,
+          catalogItemCosts,
+        );
         if (linked.length > 0) {
           const byId = new Map(linked.map((i) => [i._id, i]));
           setAllCatalogItems((prev) => prev.map((i) => byId.get(i._id) ?? i));
@@ -4679,7 +4701,7 @@ export function CatalogPage() {
                   }
                 >
                   <AddButtonDropdown
-                    label="Nuevo artículo"
+                    label="Nuevo producto"
                     onQuickAdd={openNewCatalogItemManual}
                     onAIAdd={openCatalogAiAdd}
                     onImport={openCatalogImport}

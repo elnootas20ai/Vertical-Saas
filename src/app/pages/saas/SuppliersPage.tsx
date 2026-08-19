@@ -52,6 +52,8 @@ import { SUPPLIERS_HUB } from '../../lib/suppliersHubPaths';
 import { SupplierPaymentTermsField } from '../../components/saas/SupplierPaymentTermsField';
 import {
   initialSupplierCatalogItemIds,
+  initialSupplierItemCosts,
+  parseSupplierItemCosts,
   labelsForSupplierOrganizerIds,
   SupplierOrganizersField,
 } from '../../components/saas/SupplierOrganizersField';
@@ -65,7 +67,7 @@ import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 interface CreateSupplierModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onCreate: (data: Partial<Supplier>) => Promise<void>;
+  onCreate: (data: Partial<Supplier> & { catalogItemCosts?: Record<string, number> }) => Promise<void>;
   editItem?: Supplier | null;
   brands?: Brand[];
   catalogItems?: CatalogItem[];
@@ -87,22 +89,26 @@ function CreateSupplierModal({
     contactPerson: '', category: '', paymentTerms: '', notes: '',
     organizerIds: [] as string[],
     catalogItemIds: [] as string[],
+    itemCosts: {} as Record<string, string>,
   });
 
   useEffect(() => {
     if (editItem) {
+      const catalogItemIds = initialSupplierCatalogItemIds(editItem, catalogItems);
       setForm({
         name: editItem.name, cif: editItem.cif || '', email: editItem.email || '',
         phone: editItem.phone || '', address: editItem.address || '',
         contactPerson: editItem.contactPerson || '', category: editItem.category || '',
         paymentTerms: editItem.paymentTerms || '', notes: editItem.notes || '',
         organizerIds: Array.isArray(editItem.organizerIds) ? [...editItem.organizerIds] : [],
-        catalogItemIds: initialSupplierCatalogItemIds(editItem, catalogItems),
+        catalogItemIds,
+        itemCosts: initialSupplierItemCosts(catalogItemIds, catalogItems),
       });
     } else {
       setForm({
         name: '', cif: '', email: '', phone: '', address: '', contactPerson: '',
         category: '', paymentTerms: '', notes: '', organizerIds: [], catalogItemIds: [],
+        itemCosts: {},
       });
     }
   }, [editItem, isOpen, catalogItems]);
@@ -127,6 +133,7 @@ function CreateSupplierModal({
         notes: form.notes,
         organizerIds: form.organizerIds,
         catalogItemIds: form.catalogItemIds,
+        catalogItemCosts: parseSupplierItemCosts(form.itemCosts),
         active: editItem?.active ?? true,
       });
     } finally {
@@ -157,14 +164,17 @@ function CreateSupplierModal({
             <div><label className={labelClass}>Teléfono</label><input className={inputClass} placeholder="600 000 000" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} /></div>
           </div>
           <div><label className={labelClass}>Dirección</label><input className={inputClass} placeholder="Dirección del proveedor" value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} /></div>
-          <div className="grid grid-cols-2 gap-4">
-            <div><label className={labelClass}>Persona de contacto</label><input className={inputClass} placeholder="Nombre del contacto" value={form.contactPerson} onChange={e => setForm(f => ({ ...f, contactPerson: e.target.value }))} /></div>
-            <div><label className={labelClass}>Categoría</label><input className={inputClass} placeholder="Ej: Alimentación, Limpieza..." value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} /></div>
+          <div>
+            <label className={labelClass}>Persona de contacto</label>
+            <input className={inputClass} placeholder="Nombre del contacto" value={form.contactPerson} onChange={e => setForm(f => ({ ...f, contactPerson: e.target.value }))} />
           </div>
           <SupplierOrganizersField
             organizerIds={form.organizerIds}
             catalogItemIds={form.catalogItemIds}
-            onChange={({ organizerIds, catalogItemIds }) => setForm((f) => ({ ...f, organizerIds, catalogItemIds }))}
+            itemCosts={form.itemCosts}
+            onChange={({ organizerIds, catalogItemIds, itemCosts }) =>
+              setForm((f) => ({ ...f, organizerIds, catalogItemIds, itemCosts }))
+            }
             brands={brands}
             catalogItems={catalogItems}
             storeIngredients={storeIngredients}
@@ -328,21 +338,34 @@ export function SuppliersPage() {
     setSearchParams({}, { replace: true });
   }, [searchParams, setSearchParams]);
 
-  const handleCreateSupplier = async (data: Partial<Supplier>) => {
+  const handleCreateSupplier = async (data: Partial<Supplier> & { catalogItemCosts?: Record<string, number> }) => {
     if (!dataUserId) { toast.error('Sesión no válida. Recarga la página e inicia sesión de nuevo.'); return; }
+    const { catalogItemCosts, ...supplierData } = data;
     try {
       if (editingSupplier) {
-        const updated = await updateSupplierRequest(dataUserId, { ...editingSupplier, ...data } as Supplier);
-        const linked = await syncSupplierCatalogItemLinks(dataUserId, updated, data.catalogItemIds || [], catalogItems);
+        const updated = await updateSupplierRequest(dataUserId, { ...editingSupplier, ...supplierData } as Supplier);
+        const linked = await syncSupplierCatalogItemLinks(
+          dataUserId,
+          updated,
+          supplierData.catalogItemIds || [],
+          catalogItems,
+          catalogItemCosts,
+        );
         if (linked.length > 0) {
           const byId = new Map(linked.map((i) => [i._id, i]));
           setCatalogItems((prev) => prev.map((i) => byId.get(i._id) ?? i));
         }
-        setSuppliers(prev => prev.map(s => s._id === updated._id ? { ...updated, ...data, _id: updated._id } : s));
+        setSuppliers(prev => prev.map(s => s._id === updated._id ? { ...updated, ...supplierData, _id: updated._id } : s));
         toast.success('Proveedor actualizado');
       } else {
-        const created = await createSupplierRequest(dataUserId, data);
-        const linked = await syncSupplierCatalogItemLinks(dataUserId, created, data.catalogItemIds || [], catalogItems);
+        const created = await createSupplierRequest(dataUserId, supplierData);
+        const linked = await syncSupplierCatalogItemLinks(
+          dataUserId,
+          created,
+          supplierData.catalogItemIds || [],
+          catalogItems,
+          catalogItemCosts,
+        );
         if (linked.length > 0) {
           const byId = new Map(linked.map((i) => [i._id, i]));
           setCatalogItems((prev) => prev.map((i) => byId.get(i._id) ?? i));
@@ -580,6 +603,10 @@ export function SuppliersPage() {
               const overdueAmount = invoices.filter(i => i.supplierId === supplier._id && isOverdueInvoice(i)).reduce((s, i) => s + (i.total || 0), 0);
               const hab = isHabitual(supplier._id, orders, invoices);
               const isValid = supplier.validated !== false;
+              const organizerLabels = labelsForSupplierOrganizerIds(supplier.organizerIds, brands);
+              const maxOrganizerChips = 6;
+              const visibleOrganizers = organizerLabels.slice(0, maxOrganizerChips);
+              const hiddenOrganizerCount = Math.max(0, organizerLabels.length - maxOrganizerChips);
               return (
                 <div key={supplier._id}
                   onClick={() => navigate(`/saas/suppliers/${supplier._id}`)}
@@ -587,7 +614,7 @@ export function SuppliersPage() {
                   <div className="flex items-start justify-between">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <h3 className="font-bold text-gray-900 dark:text-gray-100">{supplier.name}</h3>
+                        <h3 className="font-bold text-gray-900 dark:text-gray-100 truncate">{supplier.name}</h3>
                         <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full border ${supplier.active ? 'bg-green-100 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700'}`}>
                           {supplier.active ? 'Activo' : 'Inactivo'}
                         </span>
@@ -604,15 +631,31 @@ export function SuppliersPage() {
                       </div>
                       <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
                         {supplier.cif && <span className="font-mono flex items-center gap-1"><CreditCard className="w-3 h-3" />{supplier.cif}</span>}
-                        {supplier.category && <span className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-gray-600 dark:text-gray-400">{supplier.category}</span>}
-                        {labelsForSupplierOrganizerIds(supplier.organizerIds, brands).slice(0, 3).map((label) => (
-                          <span key={label} className="px-1.5 py-0.5 bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300 rounded text-gray-600 dark:text-gray-400 border border-sky-200 dark:border-sky-800">
-                            {label}
-                          </span>
-                        ))}
+                        {supplier.category && <span className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-gray-600 dark:text-gray-400 max-w-[10rem] truncate">{supplier.category}</span>}
                         {supplier.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{supplier.phone}</span>}
-                        {supplier.email && <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{supplier.email}</span>}
+                        {supplier.email && <span className="flex items-center gap-1 min-w-0 max-w-full"><Mail className="w-3 h-3 shrink-0" /><span className="truncate">{supplier.email}</span></span>}
                       </div>
+                      {visibleOrganizers.length > 0 ? (
+                        <div className="flex flex-wrap items-center gap-1.5 mt-1.5 max-h-14 overflow-hidden">
+                          {visibleOrganizers.map((label) => (
+                            <span
+                              key={label}
+                              title={label}
+                              className="px-1.5 py-0.5 bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300 rounded text-[11px] border border-sky-200 dark:border-sky-800 max-w-[9rem] truncate"
+                            >
+                              {label}
+                            </span>
+                          ))}
+                          {hiddenOrganizerCount > 0 ? (
+                            <span
+                              className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded text-[11px] font-semibold"
+                              title={`${hiddenOrganizerCount} organizador${hiddenOrganizerCount !== 1 ? 'es' : ''} más`}
+                            >
+                              +{hiddenOrganizerCount} más
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : null}
                       {supplier.address && <div className="text-xs text-gray-400 dark:text-gray-500 mt-1 flex items-center gap-1"><MapPin className="w-3 h-3" />{supplier.address}</div>}
                       <div className="flex gap-3 mt-2 text-xs flex-wrap">
                         <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400"><Package className="w-3 h-3" />{productCount} productos</span>
