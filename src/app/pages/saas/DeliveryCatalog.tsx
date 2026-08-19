@@ -2536,6 +2536,15 @@ function CreateSupplierModal({
                 onChange={e => setForm(f => ({ ...f, contactPerson: e.target.value }))}
               />
             </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Categoría</label>
+              <input
+                className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                placeholder="Ej: Alimentación, Limpieza..."
+                value={form.category}
+                onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
+              />
+            </div>
           </div>
 
           <div>
