@@ -4,7 +4,10 @@ import {
   listInventoryOrganizerChoices,
   type InventoryCommercialBrand,
 } from '../../lib/inventoryUtils';
-import { commercialLineBrands } from '../../lib/deliveryCatalogImportLogic';
+import {
+  commercialLineBrands,
+  listCatalogCategoryOrganizerChoices,
+} from '../../lib/deliveryCatalogImportLogic';
 import { stockItemsForOrganizer } from '../../lib/purchaseSuggestions';
 import type { CatalogItem } from '../../lib/deliveryApi';
 import type { StoreIngredient } from '../../lib/catalogCustomization';
@@ -63,9 +66,32 @@ export function SupplierOrganizersField({
     () => commercialLineBrands(brands) as InventoryCommercialBrand[],
     [brands],
   );
+  const allChoices = useMemo(() => {
+    const warehouse = listInventoryOrganizerChoices(commercialBrands);
+    const categories = listCatalogCategoryOrganizerChoices(brands, catalogItems);
+    const seen = new Set(warehouse.map((c) => c.id));
+    const merged = [...warehouse];
+    for (const c of categories) {
+      if (seen.has(c.id)) continue;
+      seen.add(c.id);
+      merged.push(c);
+    }
+    return merged;
+  }, [commercialBrands, brands, catalogItems]);
+  const selectedOrgSet = useMemo(
+    () => new Set((organizerIds || []).map((id) => String(id || '').trim()).filter(Boolean)),
+    [organizerIds],
+  );
   const choices = useMemo(
-    () => listInventoryOrganizerChoices(commercialBrands),
-    [commercialBrands],
+    () =>
+      allChoices.filter((c) => {
+        if (selectedOrgSet.has(c.id)) return true;
+        // Categorías del producto: salen siempre (aunque aún no haya ítems).
+        if (String(c.id).startsWith('cat:')) return true;
+        // Organizadores de almacén: solo si ya tienen artículos.
+        return stockItemsForOrganizer(catalogItems, c.id, storeIngredients, commercialBrands).length > 0;
+      }),
+    [allChoices, catalogItems, storeIngredients, commercialBrands, selectedOrgSet],
   );
   const labelById = useMemo(
     () => new Map(choices.map((c) => [c.id, c.label])),
@@ -159,7 +185,7 @@ export function SupplierOrganizersField({
       <div>
         <label className={labelClassName}>Qué te vende</label>
         <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-          Elige un organizador, marca lo que te vende y pon el precio que te cobra (€/ud). Ese coste sale luego en el pedido.
+          Elige una categoría del catálogo (las mismas chips del producto), marca lo que te vende y pon el precio €/ud. Eso sale luego en el pedido / lista de la compra.
         </p>
         <div className="flex flex-col sm:flex-row gap-2">
           <select
@@ -172,7 +198,7 @@ export function SupplierOrganizersField({
             }}
             className="flex-1 min-h-11 px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 outline-none focus:border-blue-500"
           >
-            <option value="">Elegir organizador…</option>
+            <option value="">Elegir categoría…</option>
             {remaining.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.label}
@@ -190,16 +216,18 @@ export function SupplierOrganizersField({
             }}
             disabled={remaining.length === 0}
             className={VERTIAL_BTN_SECONDARY}
-            title="Añadir otro organizador"
+            title="Añadir otra categoría"
           >
             <Plus className="w-4 h-4" />
             Añadir otro
           </button>
         </div>
         {choices.length === 0 ? (
-          <p className="text-sm text-gray-400 mt-2">No hay organizadores todavía. Importa el Excel de catálogo/almacén.</p>
+          <p className="text-sm text-gray-400 mt-2">
+            No hay categorías todavía. Crea una al dar de alta un producto (Nueva categoría) y vuelve aquí.
+          </p>
         ) : remaining.length === 0 && selectedOrgs.length > 0 ? (
-          <p className="text-xs text-gray-400 mt-2">Ya tienes todos los organizadores añadidos.</p>
+          <p className="text-xs text-gray-400 mt-2">Ya tienes todas las categorías añadidas.</p>
         ) : null}
       </div>
 
@@ -236,7 +264,7 @@ export function SupplierOrganizersField({
                       </p>
                       <p className="text-xs text-gray-500 dark:text-gray-400">
                         {items.length === 0
-                          ? 'Sin artículos de almacén en este organizador'
+                          ? 'Sin productos en esta categoría'
                           : `${checkedCount} de ${items.length} producto${items.length !== 1 ? 's' : ''} marcado${checkedCount !== 1 ? 's' : ''}`}
                       </p>
                     </span>
@@ -248,7 +276,7 @@ export function SupplierOrganizersField({
                     type="button"
                     onClick={() => removeOrganizer(orgId)}
                     className="p-2 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
-                    title="Quitar organizador"
+                    title="Quitar categoría"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -257,7 +285,7 @@ export function SupplierOrganizersField({
                   <div className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2">
                     {items.length === 0 ? (
                       <p className="text-xs text-gray-400 py-2">
-                        Este organizador no tiene productos de almacén. Cuando los importes en el Excel, saldrán aquí para marcarlos.
+                        Esta categoría no tiene productos. Cuando crees productos con esa categoría, saldrán aquí para marcarlos.
                       </p>
                     ) : (
                       <>
@@ -331,13 +359,17 @@ export function SupplierOrganizersField({
 export function labelsForSupplierOrganizerIds(
   organizerIds: string[] | undefined,
   brands: BrandLike[] = [],
+  catalogItems: CatalogItem[] = [],
 ): string[] {
   const ids = (Array.isArray(organizerIds) ? organizerIds : [])
     .map((id) => String(id || '').trim())
     .filter(Boolean);
   if (ids.length === 0) return [];
   const lines = commercialLineBrands(brands) as InventoryCommercialBrand[];
-  const byId = new Map(listInventoryOrganizerChoices(lines).map((c) => [c.id, c.label]));
+  const byId = new Map([
+    ...listInventoryOrganizerChoices(lines).map((c) => [c.id, c.label] as const),
+    ...listCatalogCategoryOrganizerChoices(brands, catalogItems).map((c) => [c.id, c.label] as const),
+  ]);
   return ids.map((id) => byId.get(id) || id);
 }
 

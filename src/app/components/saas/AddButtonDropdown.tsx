@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, ChevronDown, Sparkles, Upload, Zap } from 'lucide-react';
+import { Plus, ChevronDown, Sparkles, Upload, Zap, ClipboardList } from 'lucide-react';
 import { VERTIAL_BTN_PRIMARY } from '../../lib/vertialUiTokens';
 
 export interface AddButtonOption {
-  id: 'quick' | 'ai' | 'import';
+  id: 'quick' | 'ai' | 'import' | 'purchase';
   label: string;
   description: string;
   icon: React.ReactNode;
@@ -23,12 +23,16 @@ interface AddButtonDropdownProps {
    * Si se omite, la opción "Importar" no se muestra en el desplegable.
    */
   onImport?: () => void;
+  /** Última opción: lista de la compra / pedido a proveedor. */
+  onPurchaseList?: () => void;
   quickAddLabel?: string;
   quickAddDesc?: string;
   aiAddLabel?: string;
   aiAddDesc?: string;
   importAddLabel?: string;
   importAddDesc?: string;
+  purchaseListLabel?: string;
+  purchaseListDesc?: string;
 }
 
 const MENU_WIDTH = 288;
@@ -38,12 +42,15 @@ export function AddButtonDropdown({
   onQuickAdd,
   onAIAdd,
   onImport,
+  onPurchaseList,
   quickAddLabel = 'Alta rápida',
   quickAddDesc = 'Formulario del módulo',
   aiAddLabel = 'Crear con IA',
   aiAddDesc = 'Describe en texto libre y la IA lo organiza',
   importAddLabel = 'Importar',
   importAddDesc = 'Carga datos desde archivo CSV/Excel',
+  purchaseListLabel = 'Lista de la compra',
+  purchaseListDesc = 'Pedido a proveedor con lo que te venden',
 }: AddButtonDropdownProps) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -82,6 +89,15 @@ export function AddButtonDropdown({
       description: importAddDesc,
       icon: <Upload className="w-4 h-4 text-blue-500" />,
       action: () => { onImport(); setOpen(false); },
+    });
+  }
+  if (onPurchaseList) {
+    options.push({
+      id: 'purchase',
+      label: purchaseListLabel,
+      description: purchaseListDesc,
+      icon: <ClipboardList className="w-4 h-4 text-emerald-600" />,
+      action: () => { onPurchaseList(); setOpen(false); },
     });
   }
 

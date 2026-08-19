@@ -139,8 +139,8 @@ export function SupplierDetailPage() {
   useEffect(() => { loadData(); }, [loadData]);
 
   const organizerLabels = useMemo(
-    () => labelsForSupplierOrganizerIds(supplier?.organizerIds, brands),
-    [supplier?.organizerIds, brands],
+    () => labelsForSupplierOrganizerIds(supplier?.organizerIds, brands, catalogItems),
+    [supplier?.organizerIds, brands, catalogItems],
   );
 
   const supplierOrders = useMemo(() => orders.filter(o => o.supplierId === id), [orders, id]);

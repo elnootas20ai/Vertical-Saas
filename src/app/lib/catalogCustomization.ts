@@ -849,6 +849,28 @@ export function normalizeCatalogIngredientsForSave(raw: string | undefined | nul
   return parseIngredientsBulkText(String(raw || '').trim()).join(', ');
 }
 
+/**
+ * Ingredientes de la ficha (TPV quitar / carta). No usa el filtro de prosa de pizza:
+ * si no, «Huevo y patatas» o un plato combinado desaparece al añadir.
+ */
+export function parseCatalogFichaIngredientNames(raw: string | undefined | null): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const chunk of String(raw || '').split(/[,;\n|]+/)) {
+    const name = chunk.trim();
+    if (!name || isCatalogIngredientPlaceholder(name)) continue;
+    const key = ingredientNameKey(name);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(name);
+  }
+  return out;
+}
+
+export function normalizeCatalogFichaIngredientsForSave(raw: string | undefined | null): string {
+  return parseCatalogFichaIngredientNames(raw).join(', ');
+}
+
 function ingredientNameKey(name: string): string {
   return String(name || '').trim().toLowerCase();
 }

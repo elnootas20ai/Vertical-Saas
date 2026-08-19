@@ -8,7 +8,9 @@ import {
   parseCatalogSupplements,
   isCatalogIngredientPlaceholder,
   parseIngredientsBulkText,
+  parseCatalogFichaIngredientNames,
   normalizeCatalogIngredientsForSave,
+  normalizeCatalogFichaIngredientsForSave,
   resolveTpvCategoryTemplateKey,
 } from '../src/app/lib/catalogCustomization.ts';
 
@@ -119,6 +121,14 @@ describe('catalogCustomization TPV', () => {
       productIngredientsOnly: true,
       tpvFallbackWhenEmpty: true,
     })).toEqual([]);
+  });
+
+  it('ficha de plato combinado no tira ingredientes con «y»', () => {
+    expect(parseCatalogFichaIngredientNames('Huevo frito y patatas, Filete')).toEqual([
+      'Huevo frito y patatas',
+      'Filete',
+    ]);
+    expect(normalizeCatalogFichaIngredientsForSave('Huevo frito y patatas')).toBe('Huevo frito y patatas');
   });
 
   it('ignora placeholder «Ver carta» en ingredientes de ficha', () => {

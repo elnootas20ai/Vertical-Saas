@@ -284,7 +284,7 @@ export function SupplierInvoiceEmailPage() {
       },
       {
         title: 'Revisa facturas en Proveedores',
-        body: 'Vertial lee los PDF, hace OCR y los deja en Proveedores → Facturas. Tú confirmas y pasan a gastos (y stock cuando toque).',
+        body: 'Vertial lee los PDF, hace OCR y los deja en Compras → Facturas. Tú confirmas y pasan a gastos (y stock cuando toque).',
       },
     ],
     [],
@@ -355,7 +355,7 @@ export function SupplierInvoiceEmailPage() {
                 <strong>No desactives la verificación en 2 pasos</strong> para “que sea más fácil”.
               </li>
               <li>
-                <strong>No borres correos a ciegas</strong> antes de confirmar en Proveedores → Facturas.
+                <strong>No borres correos a ciegas</strong> antes de confirmar en Compras → Facturas.
               </li>
               <li>
                 <strong>No compartas tu contraseña personal</strong> por WhatsApp; usa contraseña de aplicación.
@@ -566,10 +566,10 @@ export function SupplierInvoiceEmailPage() {
 
               <button
                 type="button"
-                onClick={() => navigate('/saas/suppliers/facturas')}
+                onClick={() => navigate('/saas/catalog?tab=invoices')}
                 className={`${VERTIAL_BTN_PRIMARY} w-full sm:w-auto`}
               >
-                Ir a Proveedores → Facturas
+                Ir a Compras → Facturas
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>

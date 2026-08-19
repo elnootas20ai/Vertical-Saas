@@ -248,10 +248,15 @@ function resolveFoodLineOrganizerId(
   return null;
 }
 
-/** Opciones al crear artículo de almacén (incluye líneas vacías). */
+/**
+ * Opciones al crear artículo de almacén (incluye líneas vacías).
+ * Con opts.inUseOrganizerIds, los genéricos (Bebidas, Envases…) se marcan
+ * inUse=false si no tienen artículos — la UI los aparta en «Crear otro tipo».
+ */
 export function listInventoryOrganizerChoices(
   commercialBrands: InventoryCommercialBrand[] = [],
-): Array<{ id: string; label: string }> {
+  opts?: { inUseOrganizerIds?: string[] },
+): Array<{ id: string; label: string; inUse: boolean }> {
   const foodBrands = commercialBrands
     .filter((b) => b.deliveryLineKind !== 'drinks_desserts')
     .slice()
@@ -268,13 +273,16 @@ export function listInventoryOrganizerChoices(
       return String(a.name || '').localeCompare(String(b.name || ''), 'es');
     });
 
+  const inUseIds = opts?.inUseOrganizerIds ? new Set(opts.inUseOrganizerIds) : null;
+  const genericInUse = (id: string) => (inUseIds ? inUseIds.has(id) : true);
+
   return [
-    ...foodBrands.map((b) => ({ id: b._id, label: foodLineLabel(b) })),
-    { id: ORGANIZER_BEVERAGES, label: 'Bebidas' },
-    { id: ORGANIZER_COMPLEMENTS, label: 'Complementos' },
-    { id: ORGANIZER_PACKAGING, label: 'Envases' },
-    { id: ORGANIZER_CLEANING, label: 'Limpieza' },
-    { id: ORGANIZER_VARIOS, label: 'Varios' },
+    ...foodBrands.map((b) => ({ id: b._id, label: foodLineLabel(b), inUse: true })),
+    { id: ORGANIZER_BEVERAGES, label: 'Bebidas', inUse: genericInUse(ORGANIZER_BEVERAGES) },
+    { id: ORGANIZER_COMPLEMENTS, label: 'Complementos', inUse: genericInUse(ORGANIZER_COMPLEMENTS) },
+    { id: ORGANIZER_PACKAGING, label: 'Envases', inUse: genericInUse(ORGANIZER_PACKAGING) },
+    { id: ORGANIZER_CLEANING, label: 'Limpieza', inUse: genericInUse(ORGANIZER_CLEANING) },
+    { id: ORGANIZER_VARIOS, label: 'Varios', inUse: genericInUse(ORGANIZER_VARIOS) },
   ];
 }
 

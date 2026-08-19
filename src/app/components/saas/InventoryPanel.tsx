@@ -87,7 +87,9 @@ function AddInventoryItemModal({
   userId,
   businessType,
   commercialBrands,
+  productBrands,
   defaultOrganizerId,
+  inUseOrganizerIds,
 }: {
   isOpen: boolean;
   onClose: () => void;
@@ -95,19 +97,34 @@ function AddInventoryItemModal({
   userId: string;
   businessType: string;
   commercialBrands: InventoryCommercialBrand[];
+  /** Marcas activas de la empresa (las que hayas creado en Marcas). */
+  productBrands: { id: string; name: string }[];
   defaultOrganizerId?: string | null;
+  /** Organizadores con artículos: los genéricos sin uso van a «Crear otro tipo». */
+  inUseOrganizerIds?: string[];
 }) {
   const { config: verticalConfig } = useVerticalCatalog();
   const unitOptions = verticalConfig.units.length > 0 ? verticalConfig.units : DEFAULT_UNITS;
   const organizerChoices = useMemo(
-    () => listInventoryOrganizerChoices(commercialBrands),
-    [commercialBrands],
+    () => listInventoryOrganizerChoices(commercialBrands, { inUseOrganizerIds }),
+    [commercialBrands, inUseOrganizerIds],
   );
+  const myOrganizers = useMemo(() => organizerChoices.filter((c) => c.inUse), [organizerChoices]);
+  const otherOrganizers = useMemo(() => organizerChoices.filter((c) => !c.inUse), [organizerChoices]);
+  const brandChoices = useMemo(() => {
+    const byName = new Map<string, { id: string; name: string }>();
+    for (const b of productBrands) {
+      const name = String(b.name || '').trim();
+      if (!name) continue;
+      const key = name.toLowerCase();
+      if (!byName.has(key)) byName.set(key, { id: b.id, name });
+    }
+    return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  }, [productBrands]);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     name: '',
     productBrand: '',
-    category: '',
     organizerId: '',
     unit: unitOptions[0]?.value || 'kg',
     minStock: '',
@@ -122,17 +139,16 @@ function AddInventoryItemModal({
       defaultOrganizerId !== 'all' &&
       organizerChoices.some((c) => c.id === defaultOrganizerId)
         ? defaultOrganizerId
-        : organizerChoices[0]?.id || '';
+        : myOrganizers[0]?.id || organizerChoices[0]?.id || '';
     setForm({
       name: '',
       productBrand: '',
-      category: '',
       organizerId: preferred,
       unit: unitOptions[0]?.value || 'kg',
       minStock: '',
       costPrice: '',
     });
-  }, [isOpen, unitOptions, organizerChoices, defaultOrganizerId]);
+  }, [isOpen, unitOptions, organizerChoices, myOrganizers, defaultOrganizerId]);
 
   if (!isOpen) return null;
 
@@ -142,7 +158,7 @@ function AddInventoryItemModal({
       return;
     }
     if (!form.organizerId.trim()) {
-      toast.error('Elige en qué organizador colocarlo');
+      toast.error('Elige una categoría');
       return;
     }
     const fields = stockFieldsForOrganizer(form.organizerId);
@@ -150,7 +166,7 @@ function AddInventoryItemModal({
     try {
       await createCatalogItemRequest(userId, {
         name: form.name.trim(),
-        category: form.category.trim() || fields.category,
+        category: fields.category,
         module: 'stock',
         itemType: 'product',
         vertical: businessType,
@@ -198,14 +214,14 @@ function AddInventoryItemModal({
               placeholder="Ej: Mozzarella, Agua 50cl, Bolsas delivery…"
             />
           </Field>
-          <Field label="Organizador *">
+          <Field label="Categoría *">
             <select
               value={form.organizerId}
               onChange={(e) => setForm((f) => ({ ...f, organizerId: e.target.value }))}
               className={inputClass}
             >
               {organizerChoices.length === 0 ? (
-                <option value="">Sin organizadores</option>
+                <option value="">Sin categorías</option>
               ) : (
                 organizerChoices.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -215,24 +231,23 @@ function AddInventoryItemModal({
               )}
             </select>
           </Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Categoría">
-              <input
-                value={form.category}
-                onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
-                className={inputClass}
-                placeholder="Ej: Lácteos"
-              />
-            </Field>
-            <Field label="Marca">
-              <input
-                value={form.productBrand}
-                onChange={(e) => setForm((f) => ({ ...f, productBrand: e.target.value }))}
-                className={inputClass}
-                placeholder="Ej: Galbani"
-              />
-            </Field>
-          </div>
+          <Field label="Marca">
+            <select
+              value={form.productBrand}
+              onChange={(e) => setForm((f) => ({ ...f, productBrand: e.target.value }))}
+              className={inputClass}
+            >
+              <option value="">Sin marca</option>
+              {brandChoices.map((b) => (
+                <option key={b.id} value={b.name}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+            {brandChoices.length === 0 ? (
+              <p className="mt-1 text-[11px] text-gray-400">No hay marcas activas.</p>
+            ) : null}
+          </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Unidad">
               <select
@@ -662,6 +677,7 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
   const [showInvoiceOcr, setShowInvoiceOcr] = useState(false);
   const [localItems, setLocalItems] = useState<CatalogItem[]>([]);
   const [commercialBrands, setCommercialBrands] = useState<InventoryCommercialBrand[]>([]);
+  const [productBrands, setProductBrands] = useState<{ id: string; name: string }[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [syncDetail, setSyncDetail] = useState('');
   const [selectMode, setSelectMode] = useState(false);
@@ -682,6 +698,7 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
     (async () => {
       if (!businessId) {
         setCommercialBrands([]);
+        setProductBrands([]);
         return;
       }
       try {
@@ -694,8 +711,17 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
             deliveryLineKind: b.deliveryLineKind,
           })),
         );
+        setProductBrands(
+          brandList
+            .filter((b) => b.active !== false && !b.deletedAt)
+            .map((b) => ({ id: b._id || b.id, name: String(b.name || '').trim() }))
+            .filter((b) => b.id && b.name),
+        );
       } catch {
-        if (!cancelled) setCommercialBrands([]);
+        if (!cancelled) {
+          setCommercialBrands([]);
+          setProductBrands([]);
+        }
       }
     })();
     return () => {
@@ -1234,7 +1260,9 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
         userId={dataUserId}
         businessType={businessType}
         commercialBrands={commercialBrands}
+        productBrands={productBrands}
         defaultOrganizerId={typeFilter}
+        inUseOrganizerIds={typeGroups.map((g) => g.id)}
       />
 
       <CatalogDeleteGuardModal

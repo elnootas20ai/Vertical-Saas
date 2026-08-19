@@ -17,8 +17,35 @@ import {
   resolveInventoryOrganizerId,
   type InventoryCommercialBrand,
 } from './inventoryUtils';
+import {
+  catalogCategoryKeyFromOrganizerId,
+  isCatalogCategoryOrganizerId,
+  normalizeImportCategory,
+} from './deliveryCatalogImportLogic';
 
 export const SUGGESTION_NO_SUPPLIER_ID = '__no_supplier__';
+
+function foldCatKey(value: string): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+}
+
+function itemCategoryKey(item: Pick<CatalogItem, 'category'>): string {
+  return foldCatKey(normalizeImportCategory(String(item.category || '')));
+}
+
+function itemMatchesCategoryOrganizer(
+  item: Pick<CatalogItem, 'category'>,
+  organizerId: string,
+): boolean {
+  const want = catalogCategoryKeyFromOrganizerId(organizerId);
+  if (!want) return false;
+  const have = itemCategoryKey(item);
+  return Boolean(have) && have === want;
+}
 
 export type VertialSuggestionGroup = {
   supplierId: string;
@@ -91,15 +118,19 @@ export function catalogItemBelongsToSupplier(
 ): boolean {
   if (!isStockInventoryItem(item)) return false;
   const marked = supplierCatalogItemIdSet(supplier);
-  if (marked.size > 0) return marked.has(item._id);
+  if (marked.has(item._id)) return true;
   if (item.supplierId && item.supplierId === supplier._id) return true;
   const orgs = supplierOrganizerIdSet(supplier);
   if (orgs.size === 0) return false;
   const organizerId = resolveStockOrganizerId(item, storeIngredients, commercialBrands);
-  return Boolean(organizerId) && orgs.has(organizerId);
+  if (organizerId && orgs.has(organizerId)) return true;
+  for (const org of orgs) {
+    if (isCatalogCategoryOrganizerId(org) && itemMatchesCategoryOrganizer(item, org)) return true;
+  }
+  return false;
 }
 
-/** Artículos de almacén de un organizador (Excel / inventario). */
+/** Artículos de un organizador (almacén clásico o categoría de catálogo). */
 export function stockItemsForOrganizer(
   catalogItems: CatalogItem[],
   organizerId: string,
@@ -108,6 +139,12 @@ export function stockItemsForOrganizer(
 ): CatalogItem[] {
   const want = String(organizerId || '').trim();
   if (!want) return [];
+  if (isCatalogCategoryOrganizerId(want)) {
+    return catalogItems
+      .filter((item) => !item.deletedAt && item.active !== false)
+      .filter((item) => itemMatchesCategoryOrganizer(item, want))
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+  }
   return catalogItems
     .filter(isStockInventoryItem)
     .filter((item) => resolveStockOrganizerId(item, storeIngredients, commercialBrands) === want)
@@ -155,6 +192,15 @@ export function groupStockItemsByOrganizer(
     const arr = buckets.get(id) || [];
     arr.push(item);
     buckets.set(id, arr);
+  }
+  // También agrupar por categoría de catálogo cuando el artículo no tiene organizador de almacén.
+  for (const item of items) {
+    const catKey = itemCategoryKey(item);
+    if (!catKey) continue;
+    const catId = `cat:${catKey}`;
+    if (!labels.has(catId)) {
+      labels.set(catId, normalizeImportCategory(String(item.category || '')) || catKey);
+    }
   }
   const order = listInventoryOrganizerChoices(commercialBrands).map((c) => c.id);
   const groups: SupplierOrderPickerGroup[] = [];

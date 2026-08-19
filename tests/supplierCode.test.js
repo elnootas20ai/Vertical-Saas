@@ -1,14 +1,36 @@
 import { describe, expect, it } from 'vitest';
 import {
   normalizeSupplierCode,
+  sanitizeSupplierCodeInput,
+  slugFromSupplierName,
   suggestNextSupplierCode,
+  suggestSupplierCodeFromName,
   supplierCodeAlreadyUsed,
+  SUPPLIER_CODE_MAX_LEN,
 } from '../src/app/lib/supplierCode';
 
 describe('supplierCode', () => {
-  it('normaliza a mayúsculas sin espacios', () => {
+  it('normaliza a mayúsculas sin espacios y respeta el tope', () => {
     expect(normalizeSupplierCode(' prov 12 ')).toBe('PROV-12');
     expect(normalizeSupplierCode('makro.01')).toBe('MAKRO.01');
+    expect(normalizeSupplierCode('ABCDEFGHIJKLMNOP')).toHaveLength(SUPPLIER_CODE_MAX_LEN);
+  });
+
+  it('sanitiza la entrada del input', () => {
+    expect(sanitizeSupplierCodeInput('makro!!')).toBe('MAKRO');
+    expect(sanitizeSupplierCodeInput('a'.repeat(40))).toHaveLength(SUPPLIER_CODE_MAX_LEN);
+  });
+
+  it('slug desde el nombre', () => {
+    expect(slugFromSupplierName('Makro')).toBe('MAKRO');
+    expect(slugFromSupplierName('Proveedor Café SL')).toBe('PROVEEDORCAF');
+    expect(slugFromSupplierName('  ')).toBe('');
+  });
+
+  it('sugiere código desde el nombre y evita duplicados', () => {
+    expect(suggestSupplierCodeFromName('Makro', [])).toBe('MAKRO');
+    expect(suggestSupplierCodeFromName('Makro', [{ code: 'MAKRO' }])).toBe('MAKRO-2');
+    expect(suggestSupplierCodeFromName('', [])).toBe('PROV-001');
   });
 
   it('sugiere PROV-001 y sigue la secuencia', () => {

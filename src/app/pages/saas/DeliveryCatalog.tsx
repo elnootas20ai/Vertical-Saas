@@ -41,8 +41,11 @@ import {
 import { syncSupplierCatalogItemLinks } from '../../lib/supplierCatalogLinks';
 import {
   normalizeSupplierCode,
+  sanitizeSupplierCodeInput,
   suggestNextSupplierCode,
+  suggestSupplierCodeFromName,
   supplierCodeAlreadyUsed,
+  SUPPLIER_CODE_MAX_LEN,
 } from '../../lib/supplierCode';
 import { PurchaseOrdersPage } from './PurchaseOrdersPage';
 import { EscandalloPanel } from './CostingPage';
@@ -180,6 +183,7 @@ import { MISSING_BRAND_IMPORT_CODE } from '../../lib/deliveryCatalogImportLogic'
 import { throwIfAborted, yieldToUi, isImportAbortError } from '../../lib/importAbort';
 import { CatalogDeleteGuardModal } from '../../components/saas/CatalogDeleteGuardModal';
 import { CatalogMoveModal } from '../../components/saas/CatalogMoveModal';
+import { VehicleConfirmDialog } from '../../components/saas/vehicles/VehicleConfirmDialog';
 import { useActivationFocus } from '../../hooks/useActivationFocus';
 import { ActivationFieldWrap } from '../../components/saas/ActivationGuideUi';
 import { StaffConsumptionTabPanel } from '../../components/saas/StaffConsumptionTabPanel';
@@ -197,6 +201,7 @@ import {
   normalizeHalfHalfAllowedProductIds,
   parseCatalogSupplements,
   parseIngredientsBulkText,
+  normalizeCatalogFichaIngredientsForSave,
   normalizeCatalogIngredientsForSave,
   unifyStoreIngredientsFromConfig,
   resolveTpvBrandConfigFromDeliveryConfig,
@@ -630,7 +635,31 @@ function CreateCatalogItemModal({
     [brands, form.selectedBrandIds, catalogCategoriesInUse],
   );
 
+  /** Categorías que vienen de tus marcas (Ajustes → Marca), normalizadas. */
+  const brandCategoryKeys = useMemo(() => {
+    const relevant =
+      form.selectedBrandIds.length > 0
+        ? brands.filter((b) => form.selectedBrandIds.includes(b._id))
+        : brands;
+    const keys = new Set<string>();
+    for (const b of relevant) {
+      for (const c of b.catalogCategories ?? []) {
+        const cat = normalizeImportCategory(String(c || '').trim());
+        if (cat) keys.add(cat.toLowerCase());
+      }
+    }
+    return keys;
+  }, [brands, form.selectedBrandIds]);
+
   const categoryChips = useMemo(() => {
+    // Genéricas hardcodeadas (Bebidas, Postres…): solo salen si las usan
+    // productos reales o tus marcas — nada fijo que no se pueda quitar.
+    const universalKeys = new Set(UNIVERSAL_CATALOG_CATEGORIES.map((c) => c.toLowerCase()));
+    const inUseKeys = new Set(
+      catalogCategoriesInUse
+        .map((c) => normalizeImportCategory(String(c || '')).toLowerCase())
+        .filter(Boolean),
+    );
     const seen = new Set<string>();
     const out: string[] = [];
     for (const raw of [...categorySuggestions, ...extraCategories, form.category]) {
@@ -638,11 +667,20 @@ function CreateCatalogItemModal({
       if (!cat) continue;
       const key = cat.toLowerCase();
       if (seen.has(key)) continue;
+      if (
+        universalKeys.has(key) &&
+        !inUseKeys.has(key) &&
+        !brandCategoryKeys.has(key) &&
+        !extraCategories.some((c) => c.toLowerCase() === key) &&
+        normalizeImportCategory(form.category).toLowerCase() !== key
+      ) {
+        continue;
+      }
       seen.add(key);
       out.push(cat);
     }
     return out;
-  }, [categorySuggestions, extraCategories, form.category]);
+  }, [categorySuggestions, extraCategories, form.category, catalogCategoriesInUse, brandCategoryKeys]);
 
   const commitNewCategoryChip = () => {
     const cat = normalizeImportCategory(newCategoryDraft.trim());
@@ -652,7 +690,8 @@ function CreateCatalogItemModal({
     }
     setExtraCategories((prev) => {
       if (prev.some((c) => c.toLowerCase() === cat.toLowerCase())) return prev;
-      if (categorySuggestions.some((c) => c.toLowerCase() === cat.toLowerCase())) return prev;
+      // Solo saltar si ya está visible como chip (las genéricas ocultas se re-añaden).
+      if (categoryChips.some((c) => c.toLowerCase() === cat.toLowerCase())) return prev;
       return [...prev, cat];
     });
     setForm((f) => ({ ...f, category: cat }));
@@ -671,12 +710,6 @@ function CreateCatalogItemModal({
     }
   };
 
-  /** Categorías base del TPV: no se pueden eliminar desde aquí. */
-  const undeletableCategoryKeys = useMemo(
-    () => new Set(UNIVERSAL_CATALOG_CATEGORIES.map((c) => c.toLowerCase())),
-    [],
-  );
-
   const categoriesInUseKeys = useMemo(
     () =>
       new Set(
@@ -688,8 +721,9 @@ function CreateCatalogItemModal({
   );
 
   const [deletingCategoryKey, setDeletingCategoryKey] = useState<string | null>(null);
+  const [categoryPendingDelete, setCategoryPendingDelete] = useState<string | null>(null);
 
-  const handleDeleteCategoryChip = async (cat: string) => {
+  const handleDeleteCategoryChip = (cat: string) => {
     const key = cat.toLowerCase();
     if (categoriesInUseKeys.has(key)) {
       toast.error(
@@ -697,11 +731,13 @@ function CreateCatalogItemModal({
       );
       return;
     }
-    const ok = window.confirm(
-      `¿Seguro que quieres eliminar la categoría «${cat}»?\n\nSe quitará de las sugerencias y de las pestañas del TPV de tus marcas. Los productos no se tocan.`,
-    );
-    if (!ok) return;
+    setCategoryPendingDelete(cat);
+  };
 
+  const confirmDeleteCategoryChip = async () => {
+    const cat = categoryPendingDelete;
+    if (!cat) return;
+    const key = cat.toLowerCase();
     setDeletingCategoryKey(key);
     try {
       setExtraCategories((prev) => prev.filter((c) => c.toLowerCase() !== key));
@@ -719,6 +755,7 @@ function CreateCatalogItemModal({
         }
       }
       toast.success(`Categoría «${cat}» eliminada`);
+      setCategoryPendingDelete(null);
     } catch {
       toast.error('No se pudo eliminar la categoría. Inténtalo de nuevo.');
     } finally {
@@ -1241,7 +1278,6 @@ function CreateCatalogItemModal({
         {categoryChips.map((cat) => {
           const key = cat.toLowerCase();
           const active = normalizeImportCategory(form.category).toLowerCase() === key;
-          const deletable = !undeletableCategoryKeys.has(key);
           const deleting = deletingCategoryKey === key;
           return (
             <span
@@ -1255,30 +1291,28 @@ function CreateCatalogItemModal({
               <button
                 type="button"
                 onClick={() => setForm((f) => ({ ...f, category: cat }))}
-                className={`py-1.5 pl-3 text-xs font-semibold ${deletable ? 'pr-1' : 'pr-3'}`}
+                className="py-1.5 pl-3 pr-1 text-xs font-semibold"
               >
                 {cat}
               </button>
-              {deletable ? (
-                <button
-                  type="button"
-                  disabled={deleting}
-                  onClick={() => void handleDeleteCategoryChip(cat)}
-                  title={`Eliminar categoría «${cat}»`}
-                  aria-label={`Eliminar categoría «${cat}»`}
-                  className={`mr-1.5 flex h-5 w-5 items-center justify-center rounded-full transition-colors disabled:opacity-50 ${
-                    active
-                      ? 'text-white/70 hover:bg-white/20 hover:text-white dark:text-gray-900/60 dark:hover:bg-gray-900/10 dark:hover:text-gray-900'
-                      : 'text-gray-400 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/40 dark:hover:text-red-400'
-                  }`}
-                >
-                  {deleting ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : (
-                    <X className="h-3 w-3" />
-                  )}
-                </button>
-              ) : null}
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => void handleDeleteCategoryChip(cat)}
+                title={`Eliminar categoría «${cat}»`}
+                aria-label={`Eliminar categoría «${cat}»`}
+                className={`mr-1.5 flex h-5 w-5 items-center justify-center rounded-full transition-colors disabled:opacity-50 ${
+                  active
+                    ? 'text-white/70 hover:bg-white/20 hover:text-white dark:text-gray-900/60 dark:hover:bg-gray-900/10 dark:hover:text-gray-900'
+                    : 'text-gray-400 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/40 dark:hover:text-red-400'
+                }`}
+              >
+                {deleting ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <X className="h-3 w-3" />
+                )}
+              </button>
             </span>
           );
         })}
@@ -1902,6 +1936,7 @@ function CreateCatalogItemModal({
   if (!isOpen) return null;
 
   return (
+    <>
     <div
       ref={modalOverlayRef}
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-2 sm:p-4 bg-black/40 backdrop-blur-sm"
@@ -2330,6 +2365,24 @@ function CreateCatalogItemModal({
         </div>
       </div>
     </div>
+      <VehicleConfirmDialog
+        open={Boolean(categoryPendingDelete)}
+        title="Eliminar categoría"
+        message={
+          categoryPendingDelete
+            ? `¿Seguro que quieres eliminar «${categoryPendingDelete}»? Se quitará de las sugerencias y de las pestañas del TPV de tus marcas.`
+            : ''
+        }
+        confirmLabel="Sí, eliminar"
+        cancelLabel="Cancelar"
+        tone="danger"
+        loading={Boolean(deletingCategoryKey)}
+        onConfirm={() => void confirmDeleteCategoryChip()}
+        onCancel={() => {
+          if (!deletingCategoryKey) setCategoryPendingDelete(null);
+        }}
+      />
+    </>
   );
 }
 
@@ -2358,6 +2411,8 @@ function CreateSupplierModal({
   existingSuppliers = [],
 }: CreateSupplierModalProps) {
   const [submitting, setSubmitting] = useState(false);
+  /** Si el usuario toca el código a mano, deja de regenerarlo al escribir el nombre. */
+  const [codeManual, setCodeManual] = useState(false);
   const [form, setForm] = useState({
     name: '',
     code: '',
@@ -2375,6 +2430,8 @@ function CreateSupplierModal({
   });
 
   useEffect(() => {
+    if (!isOpen) return;
+    setCodeManual(Boolean(editItem?.code));
     if (editItem) {
       const catalogItemIds = initialSupplierCatalogItemIds(editItem, catalogItems);
       setForm({
@@ -2409,8 +2466,23 @@ function CreateSupplierModal({
         itemCosts: {},
       });
     }
-  }, [editItem, isOpen, catalogItems]);
+  }, [editItem, isOpen, catalogItems, existingSuppliers]);
   useModalClose(isOpen, onClose);
+
+  const handleNameChange = (name: string) => {
+    setForm((f) => ({
+      ...f,
+      name,
+      code: codeManual
+        ? f.code
+        : suggestSupplierCodeFromName(name, existingSuppliers, editItem?._id),
+    }));
+  };
+
+  const handleCodeChange = (raw: string) => {
+    setCodeManual(true);
+    setForm((f) => ({ ...f, code: sanitizeSupplierCodeInput(raw) }));
+  };
 
   if (!isOpen) return null;
 
@@ -2454,8 +2526,8 @@ function CreateSupplierModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[95vh] sm:max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/40 backdrop-blur-sm">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[95vh] sm:max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700">
           <div>
             <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
@@ -2478,9 +2550,26 @@ function CreateSupplierModal({
                 className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
                 placeholder="Nombre del proveedor"
                 value={form.name}
-                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                onChange={(e) => handleNameChange(e.target.value)}
+                autoFocus={!editItem}
               />
             </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Código *</label>
+              <input
+                className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-mono uppercase"
+                placeholder="MAKRO"
+                maxLength={SUPPLIER_CODE_MAX_LEN}
+                value={form.code}
+                onChange={(e) => handleCodeChange(e.target.value)}
+              />
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
+                Se rellena solo con el nombre (ej. Makro → MAKRO). Puedes editarlo. Máx. {SUPPLIER_CODE_MAX_LEN} caracteres: A–Z, 0–9 y guión.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">CIF/NIF</label>
               <input
@@ -2489,21 +2578,6 @@ function CreateSupplierModal({
                 value={form.cif}
                 onChange={e => setForm(f => ({ ...f, cif: e.target.value.toUpperCase() }))}
               />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Código *</label>
-              <input
-                className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-mono uppercase"
-                placeholder="PROV-001"
-                value={form.code}
-                onChange={e => setForm(f => ({ ...f, code: e.target.value.toUpperCase() }))}
-              />
-              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
-                Código interno Vertial. Predeterminado; puedes cambiarlo. Sirve para enlazar pedidos y facturas.
-              </p>
             </div>
             <div>
               <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Email</label>
@@ -2534,15 +2608,6 @@ function CreateSupplierModal({
                 placeholder="Nombre del contacto"
                 value={form.contactPerson}
                 onChange={e => setForm(f => ({ ...f, contactPerson: e.target.value }))}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Categoría</label>
-              <input
-                className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                placeholder="Ej: Alimentación, Limpieza..."
-                value={form.category}
-                onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
               />
             </div>
           </div>
@@ -4429,7 +4494,7 @@ export function CatalogPage() {
     if (!dataUserId || !detailItem) throw new Error('missing item');
     const category = String(detailItem.category || '');
     const rawIngredients = payload.ingredients.trim();
-    const normalizedIngredients = normalizeCatalogIngredientsForSave(rawIngredients);
+    const normalizedIngredients = normalizeCatalogFichaIngredientsForSave(rawIngredients);
     if (rawIngredients && !normalizedIngredients) {
       toast.warning('«Ver carta» no cuenta como ingrediente. Escribe ingredientes reales separados por comas.');
     }
@@ -4985,10 +5050,13 @@ export function CatalogPage() {
                     label="Nuevo producto"
                     onQuickAdd={openNewCatalogItemManual}
                     onImport={openCatalogImport}
+                    onPurchaseList={() => setSearchParams({ tab: 'purchase-orders' })}
                     quickAddLabel="Añadir manualmente"
                     quickAddDesc="Marca, categoría, precios y stock en 3 pasos"
                     importAddLabel="Importar Excel"
                     importAddDesc="Plantilla con productos, precios e imágenes opcionales"
+                    purchaseListLabel="Lista de la compra"
+                    purchaseListDesc="Pedido a proveedor con las categorías que te venden"
                   />
                 </ActivationFieldWrap>
               ) : null}
@@ -5677,7 +5745,7 @@ export function CatalogPage() {
                     {(() => {
                       const linked = catalogItems.filter((i) => i.supplierId === supplier._id && i.active && !i.deletedAt);
                       const names = linked.map((i) => i.name).filter(Boolean);
-                      const labels = labelsForSupplierOrganizerIds(supplier.organizerIds, brands);
+                      const labels = labelsForSupplierOrganizerIds(supplier.organizerIds, brands, catalogItems);
                       if (linked.length === 0 && labels.length === 0) {
                         return <span className="text-gray-400 text-sm">—</span>;
                       }

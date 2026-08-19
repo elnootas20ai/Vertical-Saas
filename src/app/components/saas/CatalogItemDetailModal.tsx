@@ -4,6 +4,7 @@ import {
   BarChart3,
   Calculator,
   Loader2,
+  Minus,
   Plus,
   Tag,
   UtensilsCrossed,
@@ -25,10 +26,11 @@ import {
 import { toast } from 'sonner';
 import type { Brand } from '../../lib/brandsApi';
 import type { CatalogComboRef, CatalogItem } from '../../lib/deliveryApi';
+import { updateCatalogItemRequest } from '../../lib/deliveryApi';
 import {
   isCatalogTpvConfigurable,
   mergeComboProductIngredients,
-  parseIngredientsBulkText,
+  parseCatalogFichaIngredientNames,
   readStoreIngredientTpvFlags,
   resolveIngredientExtraPrice,
   resolveStoreIngredientBrandIds,
@@ -43,6 +45,7 @@ import {
   readProductRecipeLines,
   resolveProductUnitCost,
   storeIngredientsById,
+  withProductCosting,
   type ProductRecipeLine,
 } from '../../lib/catalogCosting';
 import { resolveBocataIngredientQuantity } from '../../lib/barEscandalloPresets';
@@ -334,10 +337,12 @@ export function CatalogItemDetailModal({
     item.costPrice,
     item.active,
     item.customFields?.ingredients,
-    item.comboItems,
   ]);
 
-  const ingredientList = useMemo(() => parseIngredientsBulkText(ingredientDraft), [ingredientDraft]);
+  const ingredientList = useMemo(
+    () => parseCatalogFichaIngredientNames(ingredientDraft),
+    [ingredientDraft],
+  );
 
   const markDirty = () => setDirty(true);
 
@@ -353,7 +358,92 @@ export function CatalogItemDetailModal({
 
   const removeIngredient = (name: string) => {
     setIngredientDraft(ingredientList.filter((n) => n !== name).join(', '));
+    setQtyEditorFor((prev) => (prev === name ? null : prev));
     markDirty();
+  };
+
+  /** Chip abierto para sumar/restar cantidad (p. ej. más huevos). */
+  const [qtyEditorFor, setQtyEditorFor] = useState<string | null>(null);
+  const [qtySaving, setQtySaving] = useState(false);
+
+  const findRecipeLineForChip = (chipName: string): ProductRecipeLine | null => {
+    const foldedChip = foldIngredientChipKey(chipName);
+    const productFold = foldIngredientChipKey(item.name);
+    return (
+      costingRecipeLines.find((line) => {
+        const ln = foldIngredientChipKey(line.name);
+        if (!ln || ln === productFold) return false;
+        return ln === foldedChip || ln.includes(foldedChip) || foldedChip.includes(ln);
+      }) ?? null
+    );
+  };
+
+  const findStoreIngredientForChip = (chipName: string): StoreIngredient | null => {
+    const folded = foldIngredientChipKey(chipName);
+    const list = storeIngredients || [];
+    return (
+      list.find((ing) => foldIngredientChipKey(ing.name) === folded) ??
+      list.find((ing) => {
+        const f = foldIngredientChipKey(ing.name);
+        return Boolean(f) && (f.includes(folded) || folded.includes(f));
+      }) ??
+      null
+    );
+  };
+
+  const changeIngredientQty = async (chipName: string, delta: 1 | -1) => {
+    if (qtySaving) return;
+    const lines = readProductRecipeLines(item).map((l) => ({ ...l }));
+    const foldedChip = foldIngredientChipKey(chipName);
+    const productFold = foldIngredientChipKey(item.name);
+    let line = lines.find((l) => {
+      const ln = foldIngredientChipKey(l.name);
+      if (!ln || ln === productFold) return false;
+      return ln === foldedChip || ln.includes(foldedChip) || foldedChip.includes(ln);
+    });
+
+    if (!line) {
+      if (costingStatus === 'fixed') {
+        toast.error('Este producto usa coste fijo. Edita la receta en la pestaña Escandallo.');
+        return;
+      }
+      const ing = findStoreIngredientForChip(chipName);
+      if (!ing) {
+        toast.error(
+          `«${chipName}» no está en Catálogo → Ingredientes. Créalo ahí (o en Gestionar ingredientes) para poder poner cantidad.`,
+        );
+        return;
+      }
+      line = {
+        storeIngredientId: ing.id,
+        name: ing.name,
+        quantity: 0,
+        unit: ing.unit || 'ud',
+        stockCategory: 'ingredient',
+      };
+      lines.push(line);
+    }
+
+    const unitLower = String(line.unit || 'ud').toLowerCase();
+    const step = unitLower === 'kg' || unitLower === 'l' || unitLower === 'lt' ? 0.01 : 1;
+    const next = Math.round((Number(line.quantity || 0) + delta * step) * 1000) / 1000;
+    line.quantity = Math.max(step, next);
+
+    setQtySaving(true);
+    try {
+      const nextItem = withProductCosting(
+        item,
+        { costingType: 'recipe', recipeLines: lines },
+        ingredientsById,
+        brands,
+      );
+      const saved = await updateCatalogItemRequest(item.user_id, nextItem);
+      onCostingSaved?.(saved);
+    } catch {
+      toast.error('No se pudo guardar la cantidad');
+    } finally {
+      setQtySaving(false);
+    }
   };
 
   const importIngredientsFromCombo = () => {
@@ -654,25 +744,42 @@ export function CatalogItemDetailModal({
                   <div className="flex flex-wrap gap-2">
                     {ingredientList.map((name) => {
                       const qty = quantityForIngredientChip(name, item.name, costingRecipeLines);
+                      const editing = qtyEditorFor === name;
                       return (
-                      <button
+                      <span
                         key={name}
-                        type="button"
-                        onClick={() => removeIngredient(name)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-red-300"
-                        title="Quitar"
+                        className={`inline-flex items-center gap-1.5 pl-3 pr-1.5 py-1 rounded-full text-xs font-semibold border-2 bg-white dark:bg-gray-800 transition-colors ${
+                          editing
+                            ? 'border-emerald-400 dark:border-emerald-700'
+                            : 'border-gray-200 dark:border-gray-700'
+                        }`}
                       >
-                        <span>{name}</span>
-                        {qty ? (
-                          <>
-                            <span className="tabular-nums font-bold text-gray-700 dark:text-gray-200">
-                              {formatQtyEs(qty.quantity, 3)}
-                            </span>
-                            <CatalogUnitChip unit={qty.unit} size="sm" />
-                          </>
-                        ) : null}
-                        <span aria-hidden>×</span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => setQtyEditorFor((prev) => (prev === name ? null : name))}
+                          className="inline-flex items-center gap-1.5"
+                          title="Cambiar cantidad"
+                        >
+                          <span>{name}</span>
+                          {qty ? (
+                            <>
+                              <span className="tabular-nums font-bold text-gray-700 dark:text-gray-200">
+                                {formatQtyEs(qty.quantity, 3)}
+                              </span>
+                              <CatalogUnitChip unit={qty.unit} size="sm" />
+                            </>
+                          ) : null}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeIngredient(name)}
+                          className="flex h-5 w-5 items-center justify-center rounded-full text-gray-400 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/40 dark:hover:text-red-400 transition-colors"
+                          title={`Quitar «${name}»`}
+                          aria-label={`Quitar «${name}»`}
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
                       );
                     })}
                   </div>
@@ -681,6 +788,63 @@ export function CatalogItemDetailModal({
                     Sin ingredientes — el TPV no mostrará opciones para quitar.
                   </p>
                 )}
+                {qtyEditorFor && ingredientList.includes(qtyEditorFor) ? (() => {
+                  const line = findRecipeLineForChip(qtyEditorFor);
+                  const qty = quantityForIngredientChip(qtyEditorFor, item.name, costingRecipeLines);
+                  return (
+                    <div className="flex flex-wrap items-center gap-2 rounded-xl border-2 border-emerald-300 dark:border-emerald-800 bg-white dark:bg-gray-800 px-3 py-2.5">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">
+                          {qtyEditorFor}
+                        </p>
+                        <p className="text-[11px] text-gray-500">
+                          {line
+                            ? 'Cantidad en la receta (escandallo y stock)'
+                            : 'Aún sin cantidad en la receta — usa + para añadirla'}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          disabled={qtySaving || !line}
+                          onClick={() => void changeIngredientQty(qtyEditorFor, -1)}
+                          className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-40"
+                          aria-label="Menos"
+                        >
+                          <Minus className="w-4 h-4" />
+                        </button>
+                        <span className="min-w-[64px] text-center text-sm font-bold tabular-nums text-gray-900 dark:text-gray-100">
+                          {qtySaving ? (
+                            <Loader2 className="w-4 h-4 animate-spin inline" />
+                          ) : qty ? (
+                            <>
+                              {formatQtyEs(qty.quantity, 3)} {qty.unit}
+                            </>
+                          ) : (
+                            '—'
+                          )}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={qtySaving}
+                          onClick={() => void changeIngredientQty(qtyEditorFor, 1)}
+                          className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-40"
+                          aria-label="Más"
+                        >
+                          <Plus className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setQtyEditorFor(null)}
+                        className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
+                        aria-label="Cerrar"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  );
+                })() : null}
                 <div className="flex gap-2">
                   <input
                     value={newIngredient}

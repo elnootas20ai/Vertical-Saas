@@ -211,6 +211,53 @@ export function isWarehouseImportCategory(category: string): boolean {
   return key === 'envases' || key === 'limpieza' || key === 'varios';
 }
 
+/** Prefijo de organizador = categoría de catálogo (chips del producto → proveedor). */
+export const CATALOG_CATEGORY_ORGANIZER_PREFIX = 'cat:';
+
+export function catalogCategoryOrganizerId(category: string): string {
+  const label = normalizeImportCategory(category);
+  const key = foldKey(label);
+  return key ? `${CATALOG_CATEGORY_ORGANIZER_PREFIX}${key}` : '';
+}
+
+export function isCatalogCategoryOrganizerId(organizerId: string): boolean {
+  return String(organizerId || '').startsWith(CATALOG_CATEGORY_ORGANIZER_PREFIX);
+}
+
+export function catalogCategoryKeyFromOrganizerId(organizerId: string): string {
+  const raw = String(organizerId || '').trim();
+  if (!isCatalogCategoryOrganizerId(raw)) return '';
+  return raw.slice(CATALOG_CATEGORY_ORGANIZER_PREFIX.length);
+}
+
+/**
+ * Categorías del catálogo (marcas + productos) como opciones de «Qué te vende».
+ * Misma conexión que chips al crear producto → desplegable del proveedor.
+ */
+export function listCatalogCategoryOrganizerChoices(
+  brands: Array<{ catalogCategories?: string[] } | null | undefined> = [],
+  catalogItems: Array<{ category?: string; active?: boolean; deletedAt?: string | null } | null | undefined> = [],
+): Array<{ id: string; label: string }> {
+  const labelByKey = new Map<string, string>();
+  const add = (raw: string) => {
+    const label = normalizeImportCategory(raw);
+    if (!label || isWarehouseImportCategory(label)) return;
+    const key = foldKey(label);
+    if (!key) return;
+    if (!labelByKey.has(key)) labelByKey.set(key, label);
+  };
+  for (const b of brands || []) {
+    for (const c of b?.catalogCategories ?? []) add(String(c || ''));
+  }
+  for (const item of catalogItems || []) {
+    if (!item || item.deletedAt || item.active === false) continue;
+    add(String(item.category || ''));
+  }
+  return [...labelByKey.entries()]
+    .map(([key, label]) => ({ id: `${CATALOG_CATEGORY_ORGANIZER_PREFIX}${key}`, label }))
+    .sort((a, b) => a.label.localeCompare(b.label, 'es'));
+}
+
 /** stockCategory + organizador de Inventario según categoría Excel. */
 export function resolveWarehouseImportMeta(category: string): {
   stockCategory: WarehouseImportStockCategory;

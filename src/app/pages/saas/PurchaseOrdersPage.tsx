@@ -327,8 +327,8 @@ function NewPurchaseOrderModal({
           ) : (
             <p className="text-sm text-gray-400 text-center py-4 rounded-xl border border-dashed border-gray-200 dark:border-gray-700">
               {(supplier?.catalogItemIds?.length ?? 0) === 0 && (supplier?.organizerIds?.length ?? 0) === 0
-                ? 'Este proveedor no tiene productos en «Qué suministra». Edítalo y márcalos.'
-                : 'No hay artículos de almacén para este proveedor.'}
+                ? 'Este proveedor no tiene categorías en «Qué te vende». Edítalo, elige las categorías del catálogo y marca productos.'
+                : 'No hay artículos de almacén en esas categorías. Crea stock con esa categoría o márcalos en el proveedor.'}
             </p>
           )}
 

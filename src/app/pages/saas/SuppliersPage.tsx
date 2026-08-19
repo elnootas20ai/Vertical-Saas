@@ -60,8 +60,11 @@ import {
 import { syncSupplierCatalogItemLinks } from '../../lib/supplierCatalogLinks';
 import {
   normalizeSupplierCode,
+  sanitizeSupplierCodeInput,
   suggestNextSupplierCode,
+  suggestSupplierCodeFromName,
   supplierCodeAlreadyUsed,
+  SUPPLIER_CODE_MAX_LEN,
 } from '../../lib/supplierCode';
 import type { StoreIngredient } from '../../lib/catalogCustomization';
 import { useBusinessOptional } from '../../context/BusinessContext';
@@ -91,6 +94,7 @@ function CreateSupplierModal({
   existingSuppliers = [],
 }: CreateSupplierModalProps) {
   const [submitting, setSubmitting] = useState(false);
+  const [codeManual, setCodeManual] = useState(false);
   const [form, setForm] = useState({
     name: '', code: '', cif: '', email: '', phone: '', address: '',
     contactPerson: '', category: '', paymentTerms: '', notes: '',
@@ -100,6 +104,8 @@ function CreateSupplierModal({
   });
 
   useEffect(() => {
+    if (!isOpen) return;
+    setCodeManual(Boolean(editItem?.code));
     if (editItem) {
       const catalogItemIds = initialSupplierCatalogItemIds(editItem, catalogItems);
       setForm({
@@ -118,8 +124,23 @@ function CreateSupplierModal({
         itemCosts: {},
       });
     }
-  }, [editItem, isOpen, catalogItems]);
+  }, [editItem, isOpen, catalogItems, existingSuppliers]);
   useModalClose(isOpen, onClose);
+
+  const handleNameChange = (name: string) => {
+    setForm((f) => ({
+      ...f,
+      name,
+      code: codeManual
+        ? f.code
+        : suggestSupplierCodeFromName(name, existingSuppliers, editItem?._id),
+    }));
+  };
+
+  const handleCodeChange = (raw: string) => {
+    setCodeManual(true);
+    setForm((f) => ({ ...f, code: sanitizeSupplierCodeInput(raw) }));
+  };
 
   if (!isOpen) return null;
 
@@ -159,8 +180,8 @@ function CreateSupplierModal({
   const labelClass = 'block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
           <div>
             <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">{editItem ? 'Editar proveedor' : 'Nuevo proveedor'}</h2>
@@ -170,15 +191,20 @@ function CreateSupplierModal({
         </div>
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
           <div className="grid grid-cols-2 gap-4">
-            <div><label className={labelClass}>Nombre *</label><input className={inputClass} placeholder="Nombre del proveedor" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} autoFocus /></div>
-            <div><label className={labelClass}>CIF/NIF</label><input className={`${inputClass} font-mono uppercase`} placeholder="B12345678" value={form.cif} onChange={e => setForm(f => ({ ...f, cif: e.target.value.toUpperCase() }))} /></div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className={labelClass}>Nombre *</label>
+              <input className={inputClass} placeholder="Nombre del proveedor" value={form.name} onChange={(e) => handleNameChange(e.target.value)} autoFocus={!editItem} />
+            </div>
             <div>
               <label className={labelClass}>Código *</label>
-              <input className={`${inputClass} font-mono uppercase`} placeholder="PROV-001" value={form.code} onChange={e => setForm(f => ({ ...f, code: e.target.value.toUpperCase() }))} />
-              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Código interno Vertial. Predeterminado; puedes cambiarlo.</p>
+              <input className={`${inputClass} font-mono uppercase`} placeholder="MAKRO" maxLength={SUPPLIER_CODE_MAX_LEN} value={form.code} onChange={(e) => handleCodeChange(e.target.value)} />
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
+                Se rellena solo con el nombre (ej. Makro → MAKRO). Puedes editarlo. Máx. {SUPPLIER_CODE_MAX_LEN} caracteres: A–Z, 0–9 y guión.
+              </p>
             </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div><label className={labelClass}>CIF/NIF</label><input className={`${inputClass} font-mono uppercase`} placeholder="B12345678" value={form.cif} onChange={e => setForm(f => ({ ...f, cif: e.target.value.toUpperCase() }))} /></div>
             <div><label className={labelClass}>Email</label><input type="email" className={inputClass} placeholder="proveedor@email.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div>
           </div>
           <div className="grid grid-cols-2 gap-4">
@@ -624,7 +650,7 @@ export function SuppliersPage() {
               const overdueAmount = invoices.filter(i => i.supplierId === supplier._id && isOverdueInvoice(i)).reduce((s, i) => s + (i.total || 0), 0);
               const hab = isHabitual(supplier._id, orders, invoices);
               const isValid = supplier.validated !== false;
-              const organizerLabels = labelsForSupplierOrganizerIds(supplier.organizerIds, brands);
+              const organizerLabels = labelsForSupplierOrganizerIds(supplier.organizerIds, brands, catalogItems);
               const maxOrganizerChips = 6;
               const visibleOrganizers = organizerLabels.slice(0, maxOrganizerChips);
               const hiddenOrganizerCount = Math.max(0, organizerLabels.length - maxOrganizerChips);
