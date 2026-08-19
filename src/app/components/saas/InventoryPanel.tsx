@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import {
@@ -15,6 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import { CatalogCoreLoadingState } from './CatalogCoreLoadingState';
+import { CatalogDeleteGuardModal } from './CatalogDeleteGuardModal';
 import { useModalClose } from '../../hooks/useModalClose';
 import type { CatalogItem } from '../../lib/deliveryApi';
 import {
@@ -24,6 +25,7 @@ import {
   listCatalogItemsRequest,
   updateCatalogItemRequest,
 } from '../../lib/deliveryApi';
+import { deleteCatalogItemsRelentlessly } from '../../lib/catalogBulkDelete';
 import { filterStockInventoryItems } from '../../lib/stockInventoryScope';
 import {
   createAdjustmentRequest,
@@ -662,6 +664,14 @@ export function InventoryPanel() {
   const [commercialBrands, setCommercialBrands] = useState<InventoryCommercialBrand[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [syncDetail, setSyncDetail] = useState('');
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [bulkDeleteConfirmStep, setBulkDeleteConfirmStep] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  type InventoryDeleteOp = { mode: 'bulk'; items: CatalogItem[] } | null;
+  const [deleteGuard, setDeleteGuard] = useState<InventoryDeleteOp>(null);
+  const deleteOpRef = useRef<InventoryDeleteOp>(null);
+  deleteOpRef.current = deleteGuard;
 
   useEffect(() => {
     setLocalItems(stockItems);
@@ -788,6 +798,92 @@ export function InventoryPanel() {
     }
   }, [reload, dataUserId]);
 
+  const selectedCount = selectedIds.size;
+
+  const exitSelectMode = useCallback(() => {
+    setSelectMode(false);
+    setBulkDeleteConfirmStep(false);
+    setSelectedIds(new Set());
+  }, []);
+
+  const toggleItemSelected = useCallback((itemId: string) => {
+    setBulkDeleteConfirmStep(false);
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
+  }, []);
+
+  const handleDeleteAllFiltered = useCallback(() => {
+    if (!dataUserId || bulkDeleting || filteredItems.length === 0) return;
+    setSelectMode(true);
+    setSelectedIds(new Set(filteredItems.map((item) => item._id)));
+    setBulkDeleteConfirmStep(true);
+    toast.warning(
+      search.trim()
+        ? `Almacén: ${filteredItems.length} artículo(s) visibles. Pulsa «Estoy seguro» y confirma.`
+        : `Almacén: ${filteredItems.length} artículo(s). Pulsa «Estoy seguro» y confirma.`,
+      { duration: 8000 },
+    );
+  }, [dataUserId, bulkDeleting, filteredItems, search]);
+
+  const handleBulkDeleteSelected = useCallback(() => {
+    if (!dataUserId || bulkDeleting) return;
+    const items = filteredItems.filter((item) => selectedIds.has(item._id));
+    if (items.length === 0) {
+      toast.error('Selecciona al menos un artículo');
+      return;
+    }
+    if (!bulkDeleteConfirmStep) {
+      setBulkDeleteConfirmStep(true);
+      return;
+    }
+    setDeleteGuard({ mode: 'bulk', items });
+    setBulkDeleteConfirmStep(false);
+  }, [dataUserId, bulkDeleting, filteredItems, selectedIds, bulkDeleteConfirmStep]);
+
+  const executeBulkDeleteAfterGuard = useCallback(async () => {
+    const op = deleteOpRef.current;
+    setDeleteGuard(null);
+    if (!dataUserId || !op || op.mode !== 'bulk') return;
+    const list = op.items;
+    setBulkDeleting(true);
+    const toastId = toast.loading(`Eliminando ${list.length} artículo(s) del Almacén…`, {
+      duration: Infinity,
+    });
+    try {
+      const result = await deleteCatalogItemsRelentlessly(
+        dataUserId,
+        list.map((item) => item._id),
+        {
+          maxRounds: 6,
+          onProgress: ({ pending, deleted }) => {
+            toast.loading(`Eliminando… ${pending} pendiente(s) · ${deleted} ok`, { id: toastId });
+          },
+        },
+      );
+      await refreshAll();
+      toast.dismiss(toastId);
+      exitSelectMode();
+      if (result.failed === 0) {
+        toast.success(
+          `Almacén: ${result.deleted} artículo${result.deleted !== 1 ? 's' : ''} eliminado${result.deleted !== 1 ? 's' : ''}`,
+        );
+      } else {
+        toast.error(
+          `Almacén: eliminados ${result.deleted}, fallaron ${result.failed}. Revisa e inténtalo de nuevo.`,
+        );
+      }
+    } catch (err) {
+      toast.dismiss(toastId);
+      toast.error(err instanceof Error ? err.message : 'No se pudo completar el borrado masivo');
+    } finally {
+      setBulkDeleting(false);
+    }
+  }, [dataUserId, exitSelectMode, refreshAll]);
+
   const runInventorySync = useCallback(
     async (silent = false, full = false) => {
       if (!dataUserId) return null;
@@ -900,9 +996,43 @@ export function InventoryPanel() {
             }
             right={
               <>
+                {!selectMode ? (
+                  <SaasTabSecondaryButton
+                    onClick={handleDeleteAllFiltered}
+                    disabled={bulkDeleting || filteredItems.length === 0 || !dataUserId}
+                    className="!border-red-300 !text-red-700"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    {search.trim()
+                      ? `Eliminar (${filteredItems.length})`
+                      : `Eliminar todo (${filteredItems.length})`}
+                  </SaasTabSecondaryButton>
+                ) : (
+                  <>
+                    <SaasTabSecondaryButton onClick={exitSelectMode} disabled={bulkDeleting}>
+                      Cancelar
+                    </SaasTabSecondaryButton>
+                    <SaasTabSecondaryButton
+                      onClick={handleBulkDeleteSelected}
+                      disabled={bulkDeleting || selectedCount === 0}
+                      className={
+                        bulkDeleteConfirmStep
+                          ? '!bg-red-700 !text-white !border-red-800 hover:!bg-red-800'
+                          : '!border-red-300 !text-red-700'
+                      }
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      {bulkDeleting
+                        ? 'Eliminando…'
+                        : bulkDeleteConfirmStep
+                          ? `Estoy seguro (${selectedCount})`
+                          : `Eliminar (${selectedCount})`}
+                    </SaasTabSecondaryButton>
+                  </>
+                )}
                 <SaasTabSecondaryButton
                   onClick={() => void runInventorySync(false, true)}
-                  disabled={syncing || !dataUserId}
+                  disabled={syncing || !dataUserId || bulkDeleting}
                   title="Inventario + escandallo + recetas (puede tardar un minuto)"
                 >
                   {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
@@ -910,13 +1040,13 @@ export function InventoryPanel() {
                 </SaasTabSecondaryButton>
                 <SaasTabSecondaryButton
                   onClick={() => setShowInvoiceOcr(true)}
-                  disabled={!dataUserId}
+                  disabled={!dataUserId || bulkDeleting}
                   title="Escanea factura o albarán de proveedor para subir stock"
                 >
                   <ScanLine className="w-4 h-4" />
                   Escanear factura
                 </SaasTabSecondaryButton>
-                <SaasTabPrimaryButton onClick={() => setShowAdd(true)}>
+                <SaasTabPrimaryButton onClick={() => setShowAdd(true)} disabled={bulkDeleting}>
                   <Plus className="w-4 h-4" /> Nuevo artículo
                 </SaasTabPrimaryButton>
               </>
@@ -962,52 +1092,84 @@ export function InventoryPanel() {
             {filteredItems.length === 0 ? (
               <p className="p-6 text-sm text-gray-500 text-center">Ningún artículo coincide con los filtros.</p>
             ) : (
-              <ul className="divide-y divide-gray-100 dark:divide-gray-800 sm:grid sm:grid-cols-2 xl:grid-cols-3 sm:divide-y-0 sm:gap-px sm:bg-gray-100 dark:sm:bg-gray-800">
-                {filteredItems.map((item) => {
-                  const status = inventoryStatus(item);
-                  return (
-                    <li key={item._id} className="sm:bg-white dark:sm:bg-gray-900">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedId(item._id)}
-                        title="Ver ficha: stock, operaciones e historial"
-                        className="w-full h-full text-left px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className="font-semibold text-sm text-gray-900 dark:text-white truncate">{item.name}</p>
-                            <p className="text-[11px] text-gray-500 truncate">
-                              {readInventoryCategoryLabel(item)}
-                              {readInventoryProductBrand(item) ? ` · ${readInventoryProductBrand(item)}` : ''}
-                            </p>
-                          </div>
-                          <span className={`shrink-0 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${inventoryStatusClass(status)}`}>
-                            {inventoryStatusLabel(status)}
-                          </span>
-                        </div>
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                          <StockQtyWithUnit
-                            quantity={item.stockQuantity ?? 0}
-                            unit={item.unit}
-                            low={status === 'low' || status === 'out' || status === 'negative'}
-                          />
-                          {Number(item.minStock) > 0 ? (
-                            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                              mín {item.minStock}
-                            </span>
+              <>
+                {selectMode && selectedCount > 0 && bulkDeleteConfirmStep ? (
+                  <p className="px-4 py-2 text-xs font-medium text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/40 border-b border-red-100 dark:border-red-900/40">
+                    Vas a borrar {selectedCount} artículo(s) del Almacén. Pulsa «Estoy seguro» otra vez y confirma con la frase.
+                  </p>
+                ) : null}
+                <ul className="divide-y divide-gray-100 dark:divide-gray-800 sm:grid sm:grid-cols-2 xl:grid-cols-3 sm:divide-y-0 sm:gap-px sm:bg-gray-100 dark:sm:bg-gray-800">
+                  {filteredItems.map((item) => {
+                    const status = inventoryStatus(item);
+                    const isChecked = selectedIds.has(item._id);
+                    return (
+                      <li key={item._id} className="sm:bg-white dark:sm:bg-gray-900">
+                        <div
+                          className={`flex items-stretch gap-0 ${
+                            selectMode && isChecked ? 'bg-red-50/60 dark:bg-red-950/20' : ''
+                          }`}
+                        >
+                          {selectMode ? (
+                            <label className="flex items-center px-3 shrink-0 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                disabled={bulkDeleting}
+                                onChange={() => toggleItemSelected(item._id)}
+                                className="rounded border-gray-300 text-red-600 focus:ring-red-500"
+                                aria-label={`Seleccionar ${item.name}`}
+                              />
+                            </label>
                           ) : null}
-                          {Number(item.costPrice) > 0 ? (
-                            <span className="text-xs font-medium text-gray-500 dark:text-gray-400 inline-flex items-center gap-1">
-                              {formatInventoryMoney(Number(item.costPrice))}/
-                              <CatalogUnitChip unit={item.unit} size="sm" />
-                            </span>
-                          ) : null}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (selectMode) {
+                                toggleItemSelected(item._id);
+                                return;
+                              }
+                              setSelectedId(item._id);
+                            }}
+                            title={selectMode ? 'Seleccionar para borrar' : 'Ver ficha: stock, operaciones e historial'}
+                            className="w-full min-w-0 text-left px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="font-semibold text-sm text-gray-900 dark:text-white truncate">{item.name}</p>
+                                <p className="text-[11px] text-gray-500 truncate">
+                                  {readInventoryCategoryLabel(item)}
+                                  {readInventoryProductBrand(item) ? ` · ${readInventoryProductBrand(item)}` : ''}
+                                </p>
+                              </div>
+                              <span className={`shrink-0 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${inventoryStatusClass(status)}`}>
+                                {inventoryStatusLabel(status)}
+                              </span>
+                            </div>
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              <StockQtyWithUnit
+                                quantity={item.stockQuantity ?? 0}
+                                unit={item.unit}
+                                low={status === 'low' || status === 'out' || status === 'negative'}
+                              />
+                              {Number(item.minStock) > 0 ? (
+                                <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                                  mín {item.minStock}
+                                </span>
+                              ) : null}
+                              {Number(item.costPrice) > 0 ? (
+                                <span className="text-xs font-medium text-gray-500 dark:text-gray-400 inline-flex items-center gap-1">
+                                  {formatInventoryMoney(Number(item.costPrice))}/
+                                  <CatalogUnitChip unit={item.unit} size="sm" />
+                                </span>
+                              ) : null}
+                            </div>
+                          </button>
                         </div>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
             )}
           </div>
           </>
@@ -1073,6 +1235,22 @@ export function InventoryPanel() {
         businessType={businessType}
         commercialBrands={commercialBrands}
         defaultOrganizerId={typeFilter}
+      />
+
+      <CatalogDeleteGuardModal
+        open={deleteGuard !== null}
+        payload={
+          deleteGuard?.mode === 'bulk'
+            ? { mode: 'bulk', kind: 'almacen', count: deleteGuard.items.length }
+            : null
+        }
+        onClose={() => {
+          setDeleteGuard(null);
+          setBulkDeleteConfirmStep(false);
+        }}
+        onVerified={() => {
+          void executeBulkDeleteAfterGuard();
+        }}
       />
     </>
   );

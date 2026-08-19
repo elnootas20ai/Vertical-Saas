@@ -11,8 +11,8 @@ export type CatalogDeleteGuardPayload =
   | {
       mode: 'single';
       itemName: string;
-      /** Borrado de Carta (venta). */
-      kind?: 'carta' | 'generic';
+      /** Borrado de Carta (venta), Almacén (stock) o genérico. */
+      kind?: 'carta' | 'almacen' | 'generic';
       /** Si true, este producto de carta también controla stock / Almacén. */
       alsoAffectsWarehouse?: boolean;
     }
@@ -21,8 +21,8 @@ export type CatalogDeleteGuardPayload =
       count: number;
       organizerLabel?: string;
       confirmPhrase?: string;
-      /** Borrado de Carta (venta). Si no se indica, texto genérico (p. ej. CRM). */
-      kind?: 'carta' | 'generic';
+      /** Borrado de Carta (venta), Almacén (stock) o genérico (p. ej. CRM). */
+      kind?: 'carta' | 'almacen' | 'generic';
       /** Productos de carta que también salen en Almacén. */
       warehouseOverlapCount?: number;
       cartaOnlyCount?: number;
@@ -125,6 +125,12 @@ export function CatalogDeleteGuardModal({
                 <strong className="text-gray-900 dark:text-gray-100">{payload.itemName}</strong>. Esta acción
                 no se puede deshacer.
               </>
+            ) : payload.kind === 'almacen' ? (
+              <>
+                Vas a eliminar del <strong className="text-gray-900 dark:text-gray-100">Almacén</strong>{' '}
+                <strong className="text-gray-900 dark:text-gray-100">{payload.itemName}</strong>. Esta acción
+                no se puede deshacer.
+              </>
             ) : (
               <>
                 Vas a eliminar <strong className="text-gray-900 dark:text-gray-100">{payload.itemName}</strong>. Esta acción
@@ -138,6 +144,14 @@ export function CatalogDeleteGuardModal({
                 organizador{' '}
                 <strong className="text-gray-900 dark:text-gray-100">«{payload.organizerLabel}»</strong> y sus{' '}
                 <strong className="text-gray-900 dark:text-gray-100">{payload.count}</strong> producto
+                {payload.count !== 1 ? 's' : ''}. Esta acción no se puede deshacer.
+              </>
+            ) : payload.kind === 'almacen' ? (
+              <>
+                Vas a eliminar del <strong className="text-gray-900 dark:text-gray-100">Almacén</strong> el
+                organizador{' '}
+                <strong className="text-gray-900 dark:text-gray-100">«{payload.organizerLabel}»</strong> y sus{' '}
+                <strong className="text-gray-900 dark:text-gray-100">{payload.count}</strong> artículo
                 {payload.count !== 1 ? 's' : ''}. Esta acción no se puede deshacer.
               </>
             ) : (
@@ -154,6 +168,12 @@ export function CatalogDeleteGuardModal({
               <strong className="text-gray-900 dark:text-gray-100">{payload.count}</strong> producto
               {payload.count !== 1 ? 's' : ''} de venta. Esto <strong>no</strong> es el borrado del Almacén
               (artículos de stock puro).
+            </>
+          ) : payload.kind === 'almacen' ? (
+            <>
+              Vas a eliminar del <strong className="text-gray-900 dark:text-gray-100">Almacén</strong>{' '}
+              <strong className="text-gray-900 dark:text-gray-100">{payload.count}</strong> artículo
+              {payload.count !== 1 ? 's' : ''} de stock. Esta acción no se puede deshacer.
             </>
           ) : (
             <>
