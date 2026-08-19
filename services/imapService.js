@@ -33,22 +33,49 @@ function createClient(overrides = {}) {
 }
 
 export async function testImapConnection(overrides = {}) {
-  const client = createClient(overrides);
+  const cleaned = {
+    ...overrides,
+    pass: String(overrides.pass || '').replace(/\s+/g, '').trim(),
+    user: String(overrides.user || '').trim(),
+    host: String(overrides.host || '').trim(),
+  };
+  if (!cleaned.pass) {
+    return {
+      ok: false,
+      error: 'Falta la contraseña de aplicación. Vuelve a escribirla y guarda antes de probar.',
+    };
+  }
+  const client = createClient(cleaned);
   try {
     await client.connect();
-    const mailboxes = [];
-    for await (const mb of client.listTree()) {
-      mailboxes.push(mb.path);
+    // listTree() en imapflow devuelve un árbol (Promise), no un async iterable.
+    let folders = [];
+    try {
+      const listed = await client.list();
+      folders = (Array.isArray(listed) ? listed : [])
+        .map((mb) => mb?.path)
+        .filter(Boolean);
+    } catch {
+      folders = ['INBOX'];
     }
     const inbox = await client.getMailboxLock('INBOX');
-    const totalMessages = client.mailbox.exists;
+    const totalMessages = client.mailbox?.exists ?? 0;
     inbox.release();
     await client.logout();
-    return { ok: true, folders: mailboxes, totalMessages };
+    return { ok: true, folders, totalMessages };
   } catch (err) {
-    logger.warn({ tag: 'IMAP_TEST', err: err.message }, 'Error al probar conexión IMAP');
+    const raw = String(err?.message || err || '');
+    logger.warn({ tag: 'IMAP_TEST', err: raw }, 'Error al probar conexión IMAP');
     try { await client.logout(); } catch { /* ignore */ }
-    return { ok: false, error: err.message };
+    let friendly = raw;
+    if (/no password configured/i.test(raw)) {
+      friendly = 'Falta la contraseña de aplicación. Vuelve a escribirla, guarda y prueba.';
+    } else if (/authentication|invalid credentials|login failed|auth/i.test(raw)) {
+      friendly = 'Usuario o contraseña de aplicación incorrectos. Revisa Gmail (contraseña de aplicación, no la normal).';
+    } else if (/listTree|not a function|async iterable/i.test(raw)) {
+      friendly = 'Error interno al listar carpetas IMAP. Reintenta; si persiste, avisa a soporte.';
+    }
+    return { ok: false, error: friendly };
   }
 }
 

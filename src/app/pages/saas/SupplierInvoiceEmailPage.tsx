@@ -199,8 +199,12 @@ export function SupplierInvoiceEmailPage() {
         imapPassword: passClean,
         enabled: true,
       });
-      // El API devuelve ••••••••; conservamos la pass en local para poder “Probar” al momento.
-      setImapDraft({ ...saved, imapPassword: passClean });
+      // Conservamos lo que escribió el usuario (con espacios) para que no “desaparezcan” caracteres en pantalla.
+      // Al API / IMAP siempre va sin espacios.
+      setImapDraft({
+        ...saved,
+        imapPassword: passRaw === '••••••••' ? passClean : passRaw,
+      });
       toast.success('Correo guardado y recepción activada');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar correo');
