@@ -548,6 +548,11 @@ type Props = {
   loading?: boolean;
   /** Móvil: sin tablas anchas de canales, toggles táctiles. */
   compact?: boolean;
+  /**
+   * Delivery: pizzas/burgers/tacos + integradores.
+   * Restaurant: solo marcas/€ (sin familias delivery ni apps).
+   */
+  variant?: 'delivery' | 'restaurant';
 };
 
 export type BrandPerfStore = {
@@ -572,7 +577,9 @@ export function CompanyBrandPerformancePanel({
   stores = [],
   loading = false,
   compact = false,
+  variant = 'delivery',
 }: Props) {
+  const isRestaurant = variant === 'restaurant';
   const [rules, setRules] = useState<BrandBillingSplitRules>(() =>
     splitRulesFromBillingConfig(null),
   );
@@ -895,7 +902,7 @@ export function CompanyBrandPerformancePanel({
         })}
       </div>
 
-      {!loading ? (
+      {!loading && !isRestaurant ? (
         <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
           <span className="text-[9px] font-bold uppercase tracking-wide text-gray-400">Uds</span>
           <FoodFamilyStrip food={foodNow} prev={foodPrev} vsLabel={vsLabel} />
@@ -955,7 +962,7 @@ export function CompanyBrandPerformancePanel({
                 {rows.map((row) => {
                   const prev = prevById.get(row.brandId);
                   const mom = monthOverMonthPct(row.revenue, prev?.revenue || 0);
-                  const foodTxt = foodLine(row.food);
+                  const foodTxt = isRestaurant ? '' : foodLine(row.food);
                   const avgTicket = row.orderCount > 0 ? row.revenue / row.orderCount : 0;
                   return (
                     <button
@@ -973,7 +980,7 @@ export function CompanyBrandPerformancePanel({
                           <span className="truncate text-[11px] font-bold text-gray-900 dark:text-gray-100">
                             {row.name}
                           </span>
-                          {row.lineLabel ? (
+                          {!isRestaurant && row.lineLabel ? (
                             <span className="shrink-0 text-[9px] text-gray-400">
                               {row.lineLabel}
                             </span>
@@ -1018,12 +1025,14 @@ export function CompanyBrandPerformancePanel({
             </>
           )}
 
-          <IntegratorsBlock
-            rows={integratorRows}
-            prevByKey={prevIntegratorByKey}
-            vsLabel={vsLabel}
-            rangeLabel={RANGE_LABEL[range].toLowerCase()}
-          />
+          {!isRestaurant ? (
+            <IntegratorsBlock
+              rows={integratorRows}
+              prevByKey={prevIntegratorByKey}
+              vsLabel={vsLabel}
+              rangeLabel={RANGE_LABEL[range].toLowerCase()}
+            />
+          ) : null}
         </div>
       ) : selected ? (
         <div className="mt-2 space-y-2">
@@ -1065,15 +1074,18 @@ export function CompanyBrandPerformancePanel({
             </span>
           </div>
 
-          <FoodFamilyStrip food={selectedFood} prev={selectedFoodPrev} vsLabel={vsLabel} />
-
-          <IntegratorsBlock
-            rows={integratorRows}
-            prevByKey={prevIntegratorByKey}
-            vsLabel={vsLabel}
-            rangeLabel={RANGE_LABEL[range].toLowerCase()}
-            scopeLabel={selected.name}
-          />
+          {!isRestaurant ? (
+            <>
+              <FoodFamilyStrip food={selectedFood} prev={selectedFoodPrev} vsLabel={vsLabel} />
+              <IntegratorsBlock
+                rows={integratorRows}
+                prevByKey={prevIntegratorByKey}
+                vsLabel={vsLabel}
+                rangeLabel={RANGE_LABEL[range].toLowerCase()}
+                scopeLabel={selected.name}
+              />
+            </>
+          ) : null}
         </div>
       ) : (
         <p className="mt-2 text-[11px] text-gray-500">Esta marca no tiene ventas en el periodo.</p>

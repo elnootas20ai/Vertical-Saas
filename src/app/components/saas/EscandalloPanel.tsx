@@ -9,6 +9,7 @@ import {
   SaasTabToolbarRow,
   SaasTabWorkspace,
 } from './SaasTabWorkspace';
+import { CatalogCoreLoadingState } from './CatalogCoreLoadingState';
 import { useAuth } from '../../context/AuthContext';
 import { useActiveBusinessScope } from '../../hooks/useActiveBusinessScope';
 import { isDeliveryOpsBusinessType, isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
@@ -481,6 +482,7 @@ export function EscandalloPanel() {
   const [storeIngredients, setStoreIngredients] = useState<StoreIngredient[]>([]);
   const [brands, setBrands] = useState<Array<{ _id: string; deliveryLineKind?: string }>>([]);
   const [loading, setLoading] = useState(true);
+  const [loadDetail, setLoadDetail] = useState('Cargando escandallo…');
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -499,15 +501,19 @@ export function EscandalloPanel() {
       return;
     }
     setLoading(true);
+    setLoadDetail('1/3 · productos de carta');
     try {
-      const [items, config] = await Promise.all([
-        listCatalogItemsRequest(uid),
+      const brandsPromise = businessId
+        ? listBrandsRequest(businessId).catch(() => [])
+        : Promise.resolve([]);
+      const [items, config, rawBrands] = await Promise.all([
+        listCatalogItemsRequest(uid, 'catalog'),
         getDeliveryConfigRequest(uid),
+        brandsPromise,
       ]);
+      setLoadDetail('2/3 · ingredientes y costes');
       const lineBrands: Brand[] = businessId
-        ? sortBrandsForDisplay(
-            commercialLineBrands(await listBrandsRequest(businessId).catch(() => [])),
-          )
+        ? sortBrandsForDisplay(commercialLineBrands(rawBrands))
         : [];
 
       const visibleItems = businessId
@@ -517,6 +523,7 @@ export function EscandalloPanel() {
           })
         : items;
 
+      setLoadDetail('3/3 · preparando lista');
       setBrands(lineBrands);
       setCatalogItems(
         dedupeCatalogItemsForDisplay(visibleItems.filter(isCatalogCostingProduct), businessId),
@@ -529,6 +536,7 @@ export function EscandalloPanel() {
       toast.error('No se pudo cargar el catálogo');
     } finally {
       setLoading(false);
+      setLoadDetail('');
     }
   }, [user?.id, dataUserId, businessId, accountBusinessCount, businessType]);
 
@@ -716,10 +724,7 @@ export function EscandalloPanel() {
         >
           <div className="min-w-0">
         {loading ? (
-          <div className="flex items-center justify-center py-12 text-gray-500 dark:text-gray-400 text-sm">
-            <Loader2 className="w-5 h-5 animate-spin mr-2" />
-            Cargando…
-          </div>
+          <CatalogCoreLoadingState kind="escandallo" detail={loadDetail || undefined} compact />
         ) : filteredProducts.length === 0 ? (
           <SaasTabEmpty
             icon={<Calculator className="w-10 h-10" />}

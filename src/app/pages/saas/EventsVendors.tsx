@@ -41,7 +41,7 @@ const SERVICE_CONFIG: Record<ServiceType, { label: string; bg: string; text: str
 
 const EMPTY_FORM: VendorForm = { empresa: '', tipoServicio: 'catering', contacto: '', telefono: '', email: '', valoracion: 5, eventosRealizados: 0, tarifaBase: 0 };
 
-export function EventsVendors() {
+export function EventsVendors({ embedded = false }: { embedded?: boolean } = {}) {
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const linkedEventName = searchParams.get('eventName') || '';
@@ -194,10 +194,10 @@ export function EventsVendors() {
     { label: 'Valoración media', value: stats.valorMedia, icon: <Star className="w-5 h-5 text-amber-500" />, bg: 'bg-amber-50 dark:bg-amber-900/30' },
   ];
 
-  return (
-    <Layout title="Externos">
+  const inner = (
+    <>
       <div className="space-y-6">
-        {linkedEventName && (
+        {!embedded && linkedEventName && (
           <div className="rounded-xl border border-cyan-200 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-950/30 px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-sm">
             <span>Evento: <strong>{linkedEventName}</strong></span>
             {linkedEventId && (
@@ -366,6 +366,8 @@ export function EventsVendors() {
         fields={MODULE_IMPORT_FIELDS}
         onImport={handleImportEntries}
       />
-    </Layout>
+    </>
   );
+  if (embedded) return inner;
+  return <Layout title="Externos">{inner}</Layout>;
 }

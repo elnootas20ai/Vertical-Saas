@@ -228,7 +228,7 @@ export function EventsDashboard({ onSelectGeneral }: EventsDashboardProps) {
               </button>
               <button
                 type="button"
-                onClick={() => navigate('/saas/events-vendors')}
+                onClick={() => navigate('/saas/events-services?tab=externos')}
                 className={VERTIAL_BTN_SECONDARY}
               >
                 <Briefcase className="w-4 h-4" />

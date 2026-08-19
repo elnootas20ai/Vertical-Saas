@@ -112,6 +112,7 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
   const [items, setItems] = useState<CatalogItem[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadDetail, setLoadDetail] = useState('Leyendo almacén…');
 
   const activeSalesPointId = String(activeStore.activeSalesPointId || '').trim();
 
@@ -158,26 +159,31 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
       setItems([]);
       setWarehouses([]);
       setLoading(false);
+      setLoadDetail('');
       return;
     }
     setLoading(true);
+    setLoadDetail('1/3 · artículos de almacén');
     try {
-      const [catalogItems, wh, brands] = await Promise.all([
-        listCatalogItemsRequest(dataUserId),
+      // Solo module=stock: no arrastrar toda la carta (pizzas/burgers…) al abrir Inventario.
+      const [stockCatalog, wh, brands] = await Promise.all([
+        listCatalogItemsRequest(dataUserId, 'stock'),
         listWarehousesRequest(dataUserId).catch(() => [] as Warehouse[]),
         businessId ? listBrandsRequest(businessId).catch(() => []) : Promise.resolve([]),
       ]);
+      setLoadDetail('2/3 · almacenes de tienda');
       const scoped = businessId
-        ? filterCatalogItemsForBusinessScope(catalogItems, businessId, brands, {
+        ? filterCatalogItemsForBusinessScope(stockCatalog, businessId, brands, {
             accountBusinessCount: businesses.length,
             activeBusinessType: currentBusiness?.businessType,
           })
-        : catalogItems;
+        : stockCatalog;
       const ensured = await ensureClientStoreWarehouses(
         dataUserId,
         activeStore.pointsOfSale || [],
         wh,
       );
+      setLoadDetail('3/3 · listo');
       setItems(scoped);
       setWarehouses(ensured);
     } catch {
@@ -185,6 +191,7 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
       setWarehouses([]);
     } finally {
       setLoading(false);
+      setLoadDetail('');
     }
   }, [
     businessId,
@@ -208,6 +215,7 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
     stockItems,
     stockedCount,
     loading: !ready || loading,
+    loadDetail,
     reload,
   };
 }

@@ -122,7 +122,7 @@ export function WorkerEventsOps() {
                       <p className="text-xs text-gray-500 mt-1">{task.evento} · {task.fechaLimite || 'Sin fecha'}</p>
                     </div>
                     <Link
-                      to={`/saas/events-logistics?eventName=${encodeURIComponent(task.evento)}${task.eventId ? `&eventId=${encodeURIComponent(task.eventId)}` : ''}`}
+                      to={`/saas/events-services?tab=logistica&eventName=${encodeURIComponent(task.evento)}${task.eventId ? `&eventId=${encodeURIComponent(task.eventId)}` : ''}`}
                       className="text-xs font-semibold text-cyan-600 shrink-0"
                     >
                       Abrir

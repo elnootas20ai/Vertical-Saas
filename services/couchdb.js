@@ -28,6 +28,7 @@ import {
   mergeCatalogCustomFields,
   resolveCatalogItemIsStockItem,
 } from '../shared/catalog/catalogStockGuard.js';
+import { nextPurchaseOrderNumber } from './purchaseOrderNumber.js';
 
 export { clientMatchesBusinessScope };
 
@@ -11495,6 +11496,9 @@ export function buildSupplierDocument(userId, data = {}, existing = null) {
   const organizerIds = Object.prototype.hasOwnProperty.call(data, 'organizerIds')
     ? normalizeSupplierOrganizerIds(data.organizerIds)
     : normalizeSupplierOrganizerIds(existing?.organizerIds);
+  const catalogItemIds = Object.prototype.hasOwnProperty.call(data, 'catalogItemIds')
+    ? normalizeSupplierOrganizerIds(data.catalogItemIds)
+    : normalizeSupplierOrganizerIds(existing?.catalogItemIds);
 
   return {
     _id: id,
@@ -11510,6 +11514,7 @@ export function buildSupplierDocument(userId, data = {}, existing = null) {
     contactPerson: String(data.contactPerson || ''),
     category: String(data.category || 'general'),
     organizerIds,
+    catalogItemIds,
     paymentTerms: String(data.paymentTerms || '30 días'),
     notes: String(data.notes || ''),
     active: data.active !== undefined ? Boolean(data.active) : (existing?.active ?? true),
@@ -11537,6 +11542,7 @@ export function sanitizeSupplier(doc) {
     contactPerson: doc.contactPerson || '',
     category: doc.category || 'general',
     organizerIds: normalizeSupplierOrganizerIds(doc.organizerIds),
+    catalogItemIds: normalizeSupplierOrganizerIds(doc.catalogItemIds),
     paymentTerms: doc.paymentTerms || '30 días',
     notes: doc.notes || '',
     active: doc.active !== undefined ? Boolean(doc.active) : true,
@@ -11632,8 +11638,17 @@ export function buildPurchaseInvoiceDocument(userId, data = {}, existing = null)
     workCenterId: String(data.workCenterId || data.costCenterId || existing?.workCenterId || existing?.costCenterId || '').trim(),
     workCenterName: String(data.workCenterName || data.costCenterName || existing?.workCenterName || existing?.costCenterName || '').trim(),
     entryMethod: data.entryMethod || existing?.entryMethod || 'manual',
+    documentKind: String(
+      data.documentKind || data.ocrData?.documentType || existing?.documentKind || 'factura_proveedor',
+    ),
     ocrData: data.ocrData || existing?.ocrData || null,
     ocrImageBase64: data.ocrImageBase64 || existing?.ocrImageBase64 || '',
+    ocrStockReceivedAt: String(data.ocrStockReceivedAt || existing?.ocrStockReceivedAt || ''),
+    ocrStockLinesReceived: Number(data.ocrStockLinesReceived ?? existing?.ocrStockLinesReceived ?? 0) || 0,
+    flags: {
+      ...(existing?.flags || {}),
+      ...(data.flags || {}),
+    },
     createdAt: existing?.createdAt || now,
     updatedAt: now,
   };
@@ -11677,6 +11692,7 @@ export function sanitizePurchaseInvoice(doc) {
     workCenterId: doc.workCenterId || doc.costCenterId || '',
     workCenterName: doc.workCenterName || doc.costCenterName || '',
     entryMethod: doc.entryMethod || 'manual',
+    documentKind: doc.documentKind || doc.ocrData?.documentType || 'factura_proveedor',
     source: doc.source || 'manual',
     sourceEmailId: doc.sourceEmailId || '',
     sourceEmailFrom: doc.sourceEmailFrom || '',
@@ -11686,6 +11702,8 @@ export function sanitizePurchaseInvoice(doc) {
     ocrData: doc.ocrData || null,
     ocrImageBase64: doc.ocrImageBase64 || '',
     ocrConfidence: doc.ocrConfidence || '',
+    ocrStockReceivedAt: doc.ocrStockReceivedAt || '',
+    ocrStockLinesReceived: Number(doc.ocrStockLinesReceived || 0) || 0,
     flags: {
       duplicate: Boolean(doc.flags?.duplicate),
       duplicateOf: doc.flags?.duplicateOf || '',
@@ -11693,6 +11711,7 @@ export function sanitizePurchaseInvoice(doc) {
       supplierNotFound: Boolean(doc.flags?.supplierNotFound),
       ocrFailed: Boolean(doc.flags?.ocrFailed),
       manualReview: Boolean(doc.flags?.manualReview),
+      stockPending: Boolean(doc.flags?.stockPending),
     },
     reviewNotes: doc.reviewNotes || '',
     reviewedBy: doc.reviewedBy || '',
@@ -11873,7 +11892,9 @@ function normalizePurchaseOrderStatus(value) {
 export function buildPurchaseOrderDocument(userId, data = {}, existing = null) {
   const now = new Date().toISOString();
   const id = existing?._id || `po-${uuidv4()}`;
-  const orderNumber = existing?.orderNumber || `PO-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+  const orderNumber = existing?.orderNumber
+    || String(data.orderNumber || '').trim()
+    || nextPurchaseOrderNumber([]);
 
   const items = Array.isArray(data.items) ? data.items.map((item, idx) => ({
     id: item.id || `poi-${idx}-${uuidv4().slice(0, 8)}`,

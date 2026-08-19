@@ -233,3 +233,70 @@ export function EventStageBadge({ stage }: { stage: EventContractStage }) {
     </span>
   );
 }
+
+/**
+ * Indicador compacto para listados (Centro de eventos): paso actual + progreso del flujo.
+ */
+export function EventHubStageProgress({
+  stage,
+  rejected = false,
+}: {
+  stage: EventContractStage;
+  rejected?: boolean;
+}) {
+  if (rejected) {
+    return (
+      <div className="shrink-0 min-w-[7.5rem] text-right sm:text-left">
+        <span className="inline-flex items-center rounded-lg px-2 py-0.5 text-[11px] font-semibold bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300">
+          Rechazado
+        </span>
+      </div>
+    );
+  }
+
+  if (stage === 'cancelado') {
+    return (
+      <div className="shrink-0 min-w-[7.5rem]">
+        <EventStageBadge stage="cancelado" />
+      </div>
+    );
+  }
+
+  const idx = Math.max(0, FLOW_STEPS.findIndex((s) => s.id === stage));
+  const cfg = EVENT_STAGE_CONFIG[stage] || EVENT_STAGE_CONFIG.presupuesto;
+  const stepLabel = FLOW_STEPS[idx]?.label || cfg.label;
+
+  return (
+    <div
+      className="shrink-0 w-[8.5rem] sm:w-44"
+      title={`Paso ${idx + 1} de ${FLOW_STEPS.length}: ${stepLabel}`}
+    >
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        <span className={`inline-flex items-center rounded-lg px-2 py-0.5 text-[11px] font-semibold ${cfg.bg} ${cfg.text}`}>
+          {stepLabel}
+        </span>
+        <span className="text-[10px] font-semibold tabular-nums text-stone-400 dark:text-stone-500">
+          {idx + 1}/{FLOW_STEPS.length}
+        </span>
+      </div>
+      <div className="flex gap-0.5" aria-hidden>
+        {FLOW_STEPS.map((step, i) => (
+          <span
+            key={step.id}
+            className={`h-1 flex-1 rounded-full ${
+              i < idx
+                ? 'bg-emerald-500'
+                : i === idx
+                  ? 'bg-[#2563EB]'
+                  : 'bg-stone-200 dark:bg-stone-700'
+            }`}
+          />
+        ))}
+      </div>
+      <p className="mt-1 text-[10px] text-stone-400 dark:text-stone-500 truncate hidden sm:block">
+        {FLOW_STEPS[idx]?.hint || ''}
+      </p>
+    </div>
+  );
+}
+

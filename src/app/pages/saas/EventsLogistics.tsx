@@ -66,7 +66,7 @@ const CATEGORY_CONFIG: Record<Category, { label: string; bg: string; text: strin
 
 const EMPTY_FORM: LogisticsForm = { evento: '', tarea: '', responsable: '', fechaLimite: '', estado: 'pendiente', prioridad: 'media', categoria: 'montaje' };
 
-export function EventsLogistics() {
+export function EventsLogistics({ embedded = false }: { embedded?: boolean } = {}) {
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const linkedEventName = searchParams.get('eventName') || '';
@@ -248,10 +248,10 @@ export function EventsLogistics() {
     { label: 'Completadas', value: stats.completadas, icon: <CheckCircle className="w-5 h-5 text-emerald-500" />, bg: 'bg-emerald-50 dark:bg-emerald-900/30' },
   ];
 
-  return (
-    <Layout title="Logística">
+  const inner = (
+    <>
       <div className="space-y-6">
-        {linkedEventName && (
+        {!embedded && linkedEventName && (
           <div className="rounded-xl border border-cyan-200 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-950/30 px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-sm">
             <span>Evento: <strong>{linkedEventName}</strong></span>
             {linkedEventId && (
@@ -431,6 +431,8 @@ export function EventsLogistics() {
         fields={MODULE_IMPORT_FIELDS}
         onImport={handleImportEntries}
       />
-    </Layout>
+    </>
   );
+  if (embedded) return inner;
+  return <Layout title="Logística">{inner}</Layout>;
 }

@@ -16,7 +16,7 @@ import {
   resolveEventsUserId,
   retreatEventStage,
 } from '../../../../lib/eventsFlow';
-import { downloadEventQuotePdf, sendEventQuoteByEmailRequest } from '../../../../lib/eventsFinance';
+import { downloadEventQuotePdf, sendEventQuoteByEmailRequest, sendEventReviewInviteRequest, summarizeEventFinancials } from '../../../../lib/eventsFinance';
 import { resolveBusinessScopeId } from '../../../../lib/deliverySetup';
 import {
   canAdvanceTo,
@@ -30,13 +30,19 @@ import {
 } from '../../../../lib/eventsTypes';
 import { EventContractStepper, EventStageBadge } from '../../../../components/saas/events/EventContractStepper';
 import { EventsStageMetrics } from '../../../../components/saas/events/EventsStagePulse';
+import { EventsStagePaymentCard, formatEventPaymentBreakdown } from '../../../../components/saas/events/EventsStagePaymentCard';
+import { EventsQuoteSettingsModal } from '../../../../components/saas/events/EventsQuoteSettingsModal';
+import {
+  loadEventsQuoteSettings,
+  shouldAutoSendReviewOnFinish,
+} from '../../../../lib/eventsQuoteSettings';
 import { formatMoneyEs, formatQtyEs } from '../../../../lib/formatNumberEs';
-import { currentStageDwellLabel, eventMoney } from '../../../../lib/eventsStageTiming';
+import { currentStageDwellLabel } from '../../../../lib/eventsStageTiming';
 import { formatDateTimeEs } from '../../../../lib/formatDateEs';
 import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../../../lib/vertialUiTokens';
 import {
   ArrowLeft, Loader2, Send, CheckCircle2, FileSignature, CalendarCheck,
-  MapPin, Phone, Mail, RefreshCw, FileDown, Link2, Pencil,
+  MapPin, Phone, Mail, RefreshCw, FileDown, Link2, Pencil, Settings,
 } from 'lucide-react';
 
 type TabId = 'resumen' | 'planificacion' | 'finanzas';
@@ -72,6 +78,7 @@ export function EventsProjectPage() {
   const [clientAcceptUrl, setClientAcceptUrl] = useState('');
   const [services, setServices] = useState<EventServiceRecord[]>([]);
   const [showQuoteEditor, setShowQuoteEditor] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const prevEstadoRef = useRef<string | null>(null);
 
   const businessIssuer = useMemo(() => ({
@@ -234,6 +241,31 @@ export function EventsProjectPage() {
     }
   };
 
+  const trySendReviewOnFinish = async (finished: EventRecord) => {
+    if (!dataUserId) return finished;
+    const settings = loadEventsQuoteSettings(businessId || '');
+    if (!shouldAutoSendReviewOnFinish(settings, finished)) {
+      if (settings.reviewAutoSendOnFinish && settings.reviewUrl.trim() && !String(finished.clientEmail || '').trim()) {
+        toast.message('Evento finalizado. Falta email del cliente para enviar la reseña.');
+      }
+      return finished;
+    }
+    try {
+      const result = await sendEventReviewInviteRequest(dataUserId, finished._id, {
+        reviewUrl: settings.reviewUrl,
+        message: settings.reviewMessage,
+        clientEmail: finished.clientEmail,
+        companyName: currentBusiness?.name || '',
+      });
+      if (result.alreadySent) return result.event || finished;
+      toast.success(`Reseña enviada a ${result.sentTo || finished.clientEmail}`);
+      return result.event || finished;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo enviar la reseña');
+      return finished;
+    }
+  };
+
   const handleAdvance = async (target: EventContractStage) => {
     if (!dataUserId || !event) return;
     if (!canAdvanceTo(event.estado, target)) {
@@ -242,12 +274,21 @@ export function EventsProjectPage() {
     }
     setActing(true);
     try {
-      const updated = await advanceEventStage(dataUserId, event, target);
+      let updated = await advanceEventStage(dataUserId, event, target);
       if (target === 'aceptado') prevEstadoRef.current = 'aceptado';
+      if (target === 'finalizado') {
+        updated = await trySendReviewOnFinish(updated);
+      }
       setEvent(updated);
       if (target === 'contratado') setTab('finanzas');
       if (target === 'planificacion') setTab('planificacion');
-      toast.success(target === 'aceptado' ? 'Presupuesto marcado como aceptado' : 'Fase actualizada');
+      toast.success(
+        target === 'aceptado'
+          ? 'Presupuesto marcado como aceptado'
+          : target === 'finalizado'
+            ? 'Evento finalizado'
+            : 'Fase actualizada',
+      );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Error al avanzar');
     } finally {
@@ -317,15 +358,31 @@ export function EventsProjectPage() {
             </div>
             <p className="text-sm text-gray-500 mt-1">{event.cliente} · {event.fecha ? new Date(event.fecha).toLocaleDateString('es-ES') : 'Sin fecha'}</p>
           </div>
-          <div className="text-right">
-            <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{formatMoneyEs(Number(event.presupuesto) || 0)}</p>
-            <p className="text-xs text-stone-500 mt-1">
-              Cobrado {formatMoneyEs(eventMoney(event).collected)}
-              {' · '}pendiente {formatMoneyEs(eventMoney(event).pending)}
-              {' · '}este paso {currentStageDwellLabel(event)}
-            </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowSettings(true)}
+              className={`${VERTIAL_BTN_SECONDARY} !px-3`}
+              title="Ajustes (reseña, presupuesto…)"
+              aria-label="Ajustes de eventos"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+            <div className="text-right">
+              <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{formatMoneyEs(Number(event.presupuesto) || 0)}</p>
+              <p className="text-xs text-stone-500 mt-1 max-w-xs ml-auto">
+                {formatEventPaymentBreakdown(event)}
+                {' · '}este paso {currentStageDwellLabel(event)}
+              </p>
+            </div>
           </div>
         </header>
+
+        <EventsQuoteSettingsModal
+          open={showSettings}
+          businessId={businessId || ''}
+          onClose={() => setShowSettings(false)}
+        />
 
         <EventsStageMetrics event={event} />
 
@@ -335,7 +392,7 @@ export function EventsProjectPage() {
           onSelectStep={(stage) => void handleSelectStage(stage)}
         />
 
-        {action && event.estado !== 'presupuesto' && event.estado !== 'enviado' && event.estado !== 'aceptado' ? (
+        {action && event.estado !== 'presupuesto' && event.estado !== 'enviado' && event.estado !== 'aceptado' && event.estado !== 'en_curso' ? (
           <button
             type="button"
             disabled={acting}
@@ -345,6 +402,36 @@ export function EventsProjectPage() {
             {acting ? <Loader2 className="w-4 h-4 animate-spin" /> : <action.icon className="w-4 h-4" />}
             {action.label}
           </button>
+        ) : null}
+
+        {event.estado === 'en_curso' && action ? (
+          <div className="rounded-2xl border border-stone-200 bg-white p-4 space-y-3 dark:border-stone-800 dark:bg-stone-950">
+            <EventsStagePaymentCard
+              mode="final"
+              event={event}
+              userId={dataUserId}
+              business={businessIssuer}
+              onEventUpdated={setEvent}
+            />
+            <button
+              type="button"
+              disabled={acting}
+              onClick={() => {
+                const fin = summarizeEventFinancials(event);
+                if (fin.pendiente > 0.01) {
+                  const ok = window.confirm(
+                    `Aún falta ${formatMoneyEs(fin.pendiente)}. ¿Finalizar el evento con saldo pendiente?`,
+                  );
+                  if (!ok) return;
+                }
+                void handleAdvance(action.next);
+              }}
+              className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-[#2563EB] text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50"
+            >
+              {acting ? <Loader2 className="w-4 h-4 animate-spin" /> : <action.icon className="w-4 h-4" />}
+              {action.label}
+            </button>
+          </div>
         ) : null}
 
         <div className="flex gap-1 border-b border-gray-200 dark:border-gray-800">
@@ -540,27 +627,91 @@ export function EventsProjectPage() {
                   <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 dark:border-emerald-800 dark:bg-emerald-950/30">
                     <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-200">Presupuesto aceptado</p>
                     <p className="mt-0.5 text-xs text-emerald-700/90 dark:text-emerald-300/90">
-                      El cliente confirmó. Siguiente: contrato y cobro de la señal.
+                      Registra la señal aquí y pasa a contratado.
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    disabled={acting}
-                    onClick={() => void handleAdvance('contratado')}
-                    className={VERTIAL_BTN_PRIMARY + ' w-full'}
-                  >
-                    {acting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSignature className="w-4 h-4" />}
-                    Continuar: contrato y señal
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTab('finanzas')}
-                    className={`${VERTIAL_BTN_SECONDARY} w-full`}
-                  >
-                    Ir a cobro de señal
-                  </button>
+                  {dataUserId ? (
+                    <EventsStagePaymentCard
+                      mode="deposit"
+                      event={event}
+                      userId={dataUserId}
+                      business={businessIssuer}
+                      onEventUpdated={setEvent}
+                      onDepositDoneAdvance={async (updated) => {
+                        if (updated.estado !== 'aceptado') return;
+                        setActing(true);
+                        try {
+                          const next = await advanceEventStage(dataUserId, updated, 'contratado');
+                          setEvent(next);
+                          toast.success('Contrato / señal: paso a contratado');
+                        } catch (error) {
+                          toast.error(error instanceof Error ? error.message : 'No se pudo avanzar');
+                        } finally {
+                          setActing(false);
+                        }
+                      }}
+                    />
+                  ) : null}
+                  {event.depositPaidAt ? (
+                    <button
+                      type="button"
+                      disabled={acting}
+                      onClick={() => void handleAdvance('contratado')}
+                      className={VERTIAL_BTN_PRIMARY + ' w-full'}
+                    >
+                      {acting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSignature className="w-4 h-4" />}
+                      Continuar a contratado
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={acting}
+                      onClick={() => void handleAdvance('contratado')}
+                      className={`${VERTIAL_BTN_SECONDARY} w-full`}
+                    >
+                      {acting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSignature className="w-4 h-4" />}
+                      Continuar sin registrar señal
+                    </button>
+                  )}
                 </div>
               )}
+
+              {['contratado', 'planificacion'].includes(event.estado) && dataUserId && !event.depositPaidAt ? (
+                <EventsStagePaymentCard
+                  mode="deposit"
+                  event={event}
+                  userId={dataUserId}
+                  business={businessIssuer}
+                  onEventUpdated={setEvent}
+                />
+              ) : null}
+
+              {['contratado', 'planificacion'].includes(event.estado) && event.depositPaidAt ? (
+                <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">
+                  {formatEventPaymentBreakdown(event)}
+                </p>
+              ) : null}
+
+              {event.estado === 'finalizado' && dataUserId ? (
+                <div className="space-y-3">
+                  <EventsStagePaymentCard
+                    mode="final"
+                    event={event}
+                    userId={dataUserId}
+                    business={businessIssuer}
+                    onEventUpdated={setEvent}
+                  />
+                  {event.reviewInviteSentAt ? (
+                    <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">
+                      Reseña enviada el {formatDateTimeEs(event.reviewInviteSentAt)}
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-stone-500">
+                      Si activas la reseña automática en ajustes (engranaje), se envía al finalizar.
+                    </p>
+                  )}
+                </div>
+              ) : null}
 
               {showPlanningTab && (
                 <button type="button" onClick={() => setTab('planificacion')} className="w-full text-sm text-cyan-700 dark:text-cyan-300 font-semibold hover:underline">

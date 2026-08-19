@@ -257,15 +257,13 @@ import { NightclubGuestlist } from './pages/saas/NightclubGuestlist';
 import { NightclubArtists } from './pages/saas/NightclubArtists';
 
 // ── Events ──
-import { EventsCatering } from './pages/saas/EventsCatering';
-import { EventsLogistics } from './pages/saas/EventsLogistics';
-import { EventsVenues } from './pages/saas/EventsVenues';
-import { EventsVendors } from './pages/saas/EventsVendors';
 import { EventsGuests } from './pages/saas/EventsGuests';
-import { EventsServices } from './pages/saas/EventsServices';
+import { EventsServices, RedirectToEventsServicesTab } from './pages/saas/EventsServices';
 import { EventsHub } from './pages/saas/vertical/eventos/EventsHub';
 import { EventsContractWizardPage } from './pages/saas/vertical/eventos/EventsContractWizardPage';
 import { EventsPipelinePage } from './pages/saas/vertical/eventos/EventsPipelinePage';
+import { EventsQuotesPage } from './pages/saas/vertical/eventos/EventsQuotesPage';
+import { EventsRoutePage } from './pages/saas/vertical/eventos/EventsRoutePage';
 import { EventsProjectPage } from './pages/saas/vertical/eventos/EventsProjectPage';
 
 // ── Hair Salon ──
@@ -844,15 +842,17 @@ export const router = createBrowserRouter([
           // Events
           { path: 'vertical/eventos', element: <RequireWorkerPermission permission="sales"><EventsHub /></RequireWorkerPermission> },
           { path: 'vertical/eventos/nueva-contratacion', element: <RequireWorkerPermission permission="sales"><EventsContractWizardPage /></RequireWorkerPermission> },
+          { path: 'vertical/eventos/presupuestos', element: <RequireWorkerPermission permission="sales"><EventsQuotesPage /></RequireWorkerPermission> },
+          { path: 'vertical/eventos/ruta', element: <RequireWorkerPermission permission="sales"><EventsRoutePage /></RequireWorkerPermission> },
           { path: 'vertical/eventos/contrataciones', element: <RequireWorkerPermission permission="sales"><EventsPipelinePage /></RequireWorkerPermission> },
           { path: 'vertical/eventos/:eventId', element: <RequireWorkerPermission permission="sales"><EventsProjectPage /></RequireWorkerPermission> },
           { path: 'events-management', element: <Navigate to="/saas/vertical/eventos/contrataciones" replace /> },
-          { path: 'events-vendors', element: <RequireWorkerPermission permission="sales"><EventsVendors /></RequireWorkerPermission> },
+          { path: 'events-vendors', element: <RequireWorkerPermission permission="sales"><RedirectToEventsServicesTab tab="externos" /></RequireWorkerPermission> },
           { path: 'events-guests', element: <RequireWorkerPermission permission="sales"><EventsGuests /></RequireWorkerPermission> },
-          { path: 'events-venues', element: <RequireWorkerPermission permission="sales"><EventsVenues /></RequireWorkerPermission> },
+          { path: 'events-venues', element: <RequireWorkerPermission permission="sales"><RedirectToEventsServicesTab tab="espacios" /></RequireWorkerPermission> },
           { path: 'events-services', element: <RequireWorkerPermission permission="sales"><EventsServices /></RequireWorkerPermission> },
-          { path: 'events-catering', element: <RequireWorkerPermission permission="sales"><EventsCatering /></RequireWorkerPermission> },
-          { path: 'events-logistics', element: <RequireWorkerPermission permission="sales"><EventsLogistics /></RequireWorkerPermission> },
+          { path: 'events-catering', element: <RequireWorkerPermission permission="sales"><RedirectToEventsServicesTab tab="catering" /></RequireWorkerPermission> },
+          { path: 'events-logistics', element: <RequireWorkerPermission permission="sales"><RedirectToEventsServicesTab tab="logistica" /></RequireWorkerPermission> },
 
           // Hair Salon
           { path: 'salon-appointments', element: <Navigate to="/saas/calendar" replace /> },

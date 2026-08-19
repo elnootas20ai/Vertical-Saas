@@ -36,6 +36,7 @@ import {
   type TpvCategoryTemplateKey,
 } from '../../lib/catalogCustomization';
 import { getDeliveryConfigRequest, listCatalogItemsRequest, updateDeliveryConfigRequest, type CatalogItem } from '../../lib/deliveryApi';
+import { CatalogCoreLoadingState } from './CatalogCoreLoadingState';
 import { notifyDeliveryConfigChanged } from '../../lib/deliverySetup';
 import { applyVertialDefaultsToStoreIngredients, withVertialDefaultBaseCost } from '../../lib/vertialDefaultCosts';
 import { normalizeTenantUserId } from '../../lib/tenantUserId';
@@ -536,17 +537,21 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
     setLoading(true);
     setLoadError(null);
     try {
-      const cfg = await Promise.race([
-        getDeliveryConfigRequest(userId),
-        new Promise<never>((_, reject) => {
-          window.setTimeout(() => reject(new Error('timeout')), 15_000);
-        }),
+      const brandsPromise = businessId
+        ? listBrandsRequest(businessId).catch(() => [])
+        : Promise.resolve([]);
+      const [cfg, catalog, rawBrands] = await Promise.all([
+        Promise.race([
+          getDeliveryConfigRequest(userId),
+          new Promise<never>((_, reject) => {
+            window.setTimeout(() => reject(new Error('timeout')), 15_000);
+          }),
+        ]),
+        listCatalogItemsRequest(userId, 'catalog').catch(() => []),
+        brandsPromise,
       ]);
-      const catalog = await listCatalogItemsRequest(userId, 'catalog').catch(() => []);
       setCatalogItems(catalog);
-      const lineBrands = sortBrandsForDisplay(
-        businessId ? commercialLineBrands(await listBrandsRequest(businessId).catch(() => [])) : [],
-      );
+      const lineBrands = sortBrandsForDisplay(businessId ? commercialLineBrands(rawBrands) : []);
       const brandIds = lineBrands.map((b) => b._id);
       const merged = unifyStoreIngredientsFromConfig(cfg, brandIds);
       const split = explodeStoreIngredientsPerBrand(merged, lineBrands);
@@ -838,12 +843,7 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
   };
 
   if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center py-24">
-        <Loader2 className="w-8 h-8 animate-spin text-[var(--v-blue,#2563eb)] mb-3" />
-        <p className="text-sm text-gray-500">Cargando…</p>
-      </div>
-    );
+    return <CatalogCoreLoadingState kind="ingredients" />;
   }
 
   if (loadError) {

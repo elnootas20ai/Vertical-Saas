@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import {
@@ -14,6 +14,7 @@ import {
   SlidersHorizontal,
   X,
 } from 'lucide-react';
+import { CatalogCoreLoadingState } from './CatalogCoreLoadingState';
 import { useModalClose } from '../../hooks/useModalClose';
 import type { CatalogItem } from '../../lib/deliveryApi';
 import {
@@ -22,12 +23,12 @@ import {
   listCatalogItemsRequest,
   updateCatalogItemRequest,
 } from '../../lib/deliveryApi';
+import { filterStockInventoryItems } from '../../lib/stockInventoryScope';
 import {
   createAdjustmentRequest,
   getMovementsByItemRequest,
   type StockMovement,
 } from '../../lib/stockMovementApi';
-import { filterStockInventoryItems } from '../../lib/stockInventoryScope';
 import { useStockWorkspace } from '../../hooks/useStockWorkspace';
 import { useVerticalCatalog } from '../../hooks/useVerticalCatalog';
 import { useBusiness } from '../../context/BusinessContext';
@@ -605,6 +606,7 @@ export function InventoryPanel() {
     storeWarehouseId,
     stockItems,
     loading,
+    loadDetail,
     reload,
   } = useStockWorkspace();
   const { currentBusiness } = useBusiness();
@@ -623,7 +625,7 @@ export function InventoryPanel() {
   const [localItems, setLocalItems] = useState<CatalogItem[]>([]);
   const [commercialBrands, setCommercialBrands] = useState<InventoryCommercialBrand[]>([]);
   const [syncing, setSyncing] = useState(false);
-  const initialSyncDone = useRef(false);
+  const [syncDetail, setSyncDetail] = useState('');
 
   useEffect(() => {
     setLocalItems(stockItems);
@@ -743,7 +745,7 @@ export function InventoryPanel() {
     await reload();
     if (!dataUserId) return;
     try {
-      const catalog = await listCatalogItemsRequest(dataUserId);
+      const catalog = await listCatalogItemsRequest(dataUserId, 'stock');
       setLocalItems(filterStockInventoryItems(catalog));
     } catch {
       /* reload already updated stockItems */
@@ -754,7 +756,9 @@ export function InventoryPanel() {
     async (silent = false, full = false) => {
       if (!dataUserId) return null;
       setSyncing(true);
+      setSyncDetail(full ? 'Inventario + escandallo + recetas…' : 'Sincronizando artículos de almacén…');
       try {
+        setSyncDetail('Leyendo marcas e ingredientes…');
         const commercialBrands = businessId
           ? await listBrandsRequest(businessId).catch(() => [])
           : [];
@@ -762,6 +766,11 @@ export function InventoryPanel() {
         const brandIds = commercialBrands.map((b) => b._id);
         const storeIngredients = normalizeStoreIngredients(
           unifyStoreIngredientsFromConfig(cfg, brandIds),
+        );
+        setSyncDetail(
+          full
+            ? 'Creando/actualizando stock y recetas (puede tardar)…'
+            : 'Creando/actualizando stock desde carta…',
         );
         const pipeline = await runVertialStockAutomationPipeline(dataUserId, {
           businessType: businessType || 'delivery',
@@ -774,6 +783,7 @@ export function InventoryPanel() {
         });
         const result = pipeline.inventory;
         if (full) {
+          setSyncDetail('Refrescando lista…');
           await refreshAll();
         }
         if (!silent) {
@@ -799,23 +809,15 @@ export function InventoryPanel() {
         return null;
       } finally {
         setSyncing(false);
+        setSyncDetail('');
       }
     },
     [dataUserId, businessId, businessType, refreshAll],
   );
 
-  useEffect(() => {
-    if (!dataUserId || loading || initialSyncDone.current) return;
-    initialSyncDone.current = true;
-    void runInventorySync(true, false);
-  }, [dataUserId, loading, runInventorySync]);
-
   if (loading && scopedItems.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-gray-400">
-        <Loader2 className="w-8 h-8 animate-spin mb-3" />
-        <p className="text-sm font-medium">Cargando inventario…</p>
-      </div>
+      <CatalogCoreLoadingState kind="stock" detail={loadDetail || undefined} />
     );
   }
 
@@ -830,10 +832,18 @@ export function InventoryPanel() {
           { label: 'valor €', value: stats.estimatedValue.toFixed(0), tone: 'indigo' },
         ]}
         banner={
-          <p className="text-stone-600 dark:text-stone-300">
-            Stock de <strong className="text-stone-900 dark:text-white">{storeLabel || 'Almacén'}</strong>
-            {' · '}mismo catálogo; cantidades por tienda.
-          </p>
+          <div className="space-y-1">
+            <p className="text-stone-600 dark:text-stone-300">
+              Stock de <strong className="text-stone-900 dark:text-white">{storeLabel || 'Almacén'}</strong>
+              {' · '}mismo catálogo; cantidades por tienda.
+            </p>
+            {syncing ? (
+              <p className="text-xs font-medium text-amber-800 dark:text-amber-300 flex items-center gap-2">
+                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                {syncDetail || 'Sincronizando inventario…'}
+              </p>
+            ) : null}
+          </div>
         }
         toolbar={
           <SaasTabToolbarRow

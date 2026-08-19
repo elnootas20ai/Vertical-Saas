@@ -64,6 +64,7 @@ function PaymentCell({ event }: { event: EventRecord }) {
     return <span className="text-xs text-stone-400">—</span>;
   }
 
+  const fin = summarizeEventFinancials(event);
   const barClass =
     pay.kind === 'cobrado'
       ? 'bg-emerald-500'
@@ -89,11 +90,11 @@ function PaymentCell({ event }: { event: EventRecord }) {
       <div className="mt-1 h-1.5 rounded-full bg-stone-100 dark:bg-stone-800 overflow-hidden">
         <div className={`h-full rounded-full transition-all ${barClass}`} style={{ width: `${pay.pct}%` }} />
       </div>
-      {pay.pendiente > 0.01 && (
-        <p className="mt-0.5 text-[10px] text-stone-500 text-right tabular-nums">
-          Falta {fmtEuro(pay.pendiente)}
-        </p>
-      )}
+      <p className="mt-0.5 text-[10px] text-stone-500 text-right tabular-nums">
+        {fin.depositoCobrado > 0 ? `Señal ${fmtEuro(fin.depositoCobrado)}` : 'Sin señal'}
+        {fin.cobradoFinal > 0 ? ` · Resto ${fmtEuro(fin.cobradoFinal)}` : ''}
+        {pay.pendiente > 0.01 ? ` · Falta ${fmtEuro(pay.pendiente)}` : ''}
+      </p>
     </div>
   );
 }

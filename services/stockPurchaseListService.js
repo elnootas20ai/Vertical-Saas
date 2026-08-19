@@ -14,8 +14,10 @@ import {
   listCatalogItemsByUser,
   findAccountByUserId,
   logAccountActivity,
+  listPurchaseOrdersByUser,
 } from './couchdb.js';
 import { filterStockInventoryItems } from './stockInventoryScope.js';
+import { nextPurchaseOrderNumber } from './purchaseOrderNumber.js';
 
 const URGENCY_ORDER = { critical: 0, high: 1, normal: 2 };
 
@@ -140,6 +142,7 @@ export async function createPurchaseOrdersFromStockList(req, userId, countId, st
   const countName = stockCount?.name || 'revisión de stock';
   const countRef = countId || stockCount?._id || stockCount?.id || '';
   const createdOrders = [];
+  const usedNumbers = (await listPurchaseOrdersByUser(req, userId)).map((o) => o.orderNumber);
 
   for (const group of purchaseList.supplierGroups) {
     const orderItems = group.items.map((item) => ({
@@ -151,6 +154,8 @@ export async function createPurchaseOrdersFromStockList(req, userId, countId, st
       notes: `Sugerido tras inventario (${countName})`,
     }));
 
+    const orderNumber = nextPurchaseOrderNumber(usedNumbers);
+    usedNumbers.push(orderNumber);
     const doc = buildPurchaseOrderDocument(userId, {
       supplierId: group.supplierId && group.supplierId !== '__no_supplier__' ? group.supplierId : '',
       supplierName: group.supplierName || 'Sin proveedor asignado',
@@ -158,6 +163,7 @@ export async function createPurchaseOrdersFromStockList(req, userId, countId, st
       source: 'stock_count',
       notes: `Generado desde lista de compra del inventario "${countName}". Ref: ${countRef}`,
       items: orderItems,
+      orderNumber,
     });
 
     const result = await putDocument(req, db, doc._id, doc);

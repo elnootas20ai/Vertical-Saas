@@ -156,7 +156,7 @@ export async function getLowStockReportRequest(userId: string): Promise<{ items:
 export async function markOrderReceivedRequest(
   userId: string,
   orderId: string,
-  receivedItems?: Array<{ catalogItemId: string; quantity: number }>,
+  receivedItems?: Array<{ catalogItemId: string; quantity: number; unitCost?: number }>,
 ): Promise<PurchaseOrder> {
   const id = normalizeUserId(userId);
   const result = await request<{ ok: boolean; order: PurchaseOrder }>(

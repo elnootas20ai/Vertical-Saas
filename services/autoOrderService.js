@@ -14,6 +14,7 @@ import {
 } from './couchdb.js';
 import { broadcastToUser } from './sseService.js';
 import { sendPushToUser } from './pushService.js';
+import { nextPurchaseOrderNumber } from './purchaseOrderNumber.js';
 
 const TAG = 'AUTO_ORDER';
 
@@ -298,6 +299,10 @@ export async function generateAutoOrders(req, userId) {
     }, 'normal');
 
     const allCampaignIds = [...new Set(group.items.flatMap((i) => i.campaignIds || []))];
+    const usedNumbers = [
+      ...existingOrders.map((o) => o.orderNumber),
+      ...ordersCreated.map((o) => o.orderNumber),
+    ];
 
     const orderDoc = buildPurchaseOrderDocument(userId, {
       supplierId: group.supplierId,
@@ -310,6 +315,7 @@ export async function generateAutoOrders(req, userId) {
       urgency: maxUrgency,
       campaignIds: allCampaignIds,
       notes: buildAutoNotes(group.items, weekendMultiplier, allCampaignIds, promotions),
+      orderNumber: nextPurchaseOrderNumber(usedNumbers),
     });
 
     const result = await putDocument(req, db, orderDoc._id, orderDoc);

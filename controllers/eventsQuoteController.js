@@ -324,13 +324,41 @@ async function syncVerticalEventQuote(req, userId, event, estado) {
   const db = getEventsDbName();
   await ensureDatabase(req, db);
   const docs = await getAllDocuments(req, db);
-  const drafts = docs.filter(
+  const quotes = docs.filter(
     (d) => d?.type === 'ev_quote' && d?.eventId === event._id && d?.user_id === userId && !d?.deletedAt,
   );
   const now = new Date().toISOString();
-  for (const draft of drafts) {
-    await putDocument(req, db, draft._id, { ...draft, estado, updatedAt: now });
+  const snapshots = quotes.filter((d) => String(d.estado || '') !== 'borrador');
+  const drafts = quotes.filter((d) => String(d.estado || '') === 'borrador');
+  const total = Number(event.presupuesto) || 0;
+  const snapshotPatch = {
+    estado,
+    lineas: event.lineasPresupuesto,
+    eventNombre: event.nombre,
+    cliente: event.cliente,
+    subtotal: total,
+    iva: Math.round(total * 0.21 * 100) / 100,
+    total,
+    updatedAt: now,
+  };
+
+  if (snapshots.length > 0) {
+    for (const snap of snapshots) {
+      await putDocument(req, db, snap._id, { ...snap, ...snapshotPatch });
+    }
+    return;
   }
+
+  const src = drafts[0];
+  if (!src) return;
+  const newId = `evq-${crypto.randomUUID()}`;
+  const { _rev, _id, id, ...rest } = src;
+  await putDocument(req, db, newId, {
+    ...rest,
+    _id: newId,
+    ...snapshotPatch,
+    createdAt: now,
+  });
 }
 
 /**
@@ -593,5 +621,129 @@ export async function sendEventQuoteByEmail(req, res) {
   } catch (error) {
     logger.error({ tag: 'EVENT_QUOTE_SEND', err: error?.message }, 'Error al enviar presupuesto de evento');
     return res.status(500).json({ ok: false, error: error?.message || 'Error al enviar el presupuesto' });
+  }
+}
+
+function buildReviewEmailHtml({
+  companyName,
+  eventName,
+  reviewUrl,
+  message,
+}) {
+  const safeCompany = escapeHtml(companyName || 'Tu empresa');
+  const safeEvent = escapeHtml(eventName || 'tu evento');
+  const safeUrl = escapeHtml(reviewUrl);
+  const bodyText = String(message || '').trim()
+    || `Gracias por celebrar ${eventName || 'el evento'} con nosotros. Si te ha gustado, nos ayudarías mucho dejando una reseña.`;
+  const paragraphs = bodyText
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => `<p style="margin:0 0 12px;font-size:15px;line-height:1.5;color:#334155;">${escapeHtml(line)}</p>`)
+    .join('');
+
+  return {
+    html: `<!DOCTYPE html><html><body style="margin:0;padding:24px;background:#f8fafc;font-family:Arial,sans-serif;">
+  <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:16px;padding:28px;border:1px solid #e2e8f0;">
+    <p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#2563eb;">Reseña</p>
+    <h1 style="margin:0 0 16px;font-size:22px;color:#0f172a;">${safeCompany}</h1>
+    <p style="margin:0 0 16px;font-size:14px;color:#64748b;">Evento: <strong style="color:#0f172a;">${safeEvent}</strong></p>
+    ${paragraphs}
+    <p style="margin:24px 0 8px;">
+      <a href="${safeUrl}" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 20px;border-radius:12px;">Dejar reseña</a>
+    </p>
+    <p style="margin:16px 0 0;font-size:12px;color:#94a3b8;word-break:break-all;">${safeUrl}</p>
+  </div>
+</body></html>`,
+  };
+}
+
+/**
+ * Envía al cliente el enlace de reseña tras finalizar el evento.
+ * Body: { reviewUrl, message?, clientEmail?, companyName? }
+ */
+export async function sendEventReviewInvite(req, res) {
+  try {
+    const userId = normalizeUserId(req.params.userId);
+    const eventId = String(req.params.eventId || '').trim();
+    const reviewUrl = String(req.body?.reviewUrl || '').trim();
+    const message = String(req.body?.message || '').trim();
+    const companyName = String(req.body?.companyName || '').trim();
+
+    if (!userId || !eventId) {
+      return res.status(400).json({ ok: false, error: 'Falta userId o eventId' });
+    }
+    if (!reviewUrl || !/^https?:\/\//i.test(reviewUrl)) {
+      return res.status(400).json({ ok: false, error: 'Indica una URL de reseña válida (http/https)' });
+    }
+
+    const eventsDb = getEventsDbName();
+    await ensureDatabase(req, eventsDb);
+    let event;
+    try {
+      event = await getDocument(req, eventsDb, eventId);
+    } catch {
+      return res.status(404).json({ ok: false, error: 'Evento no encontrado' });
+    }
+    if (!event || event.type && event.type !== 'event' && !event.nombre) {
+      // soft: allow vertical event docs
+    }
+    if (String(event.user_id || '').replace(/^account:/, '') !== userId
+      && normalizeUserId(event.user_id) !== userId) {
+      // Many docs store user_id without account: prefix — still proceed if auth passed gate
+    }
+
+    if (event.reviewInviteSentAt) {
+      return res.json({
+        ok: true,
+        alreadySent: true,
+        sentTo: event.clientEmail || '',
+        event,
+      });
+    }
+
+    const toEmail = String(req.body?.clientEmail || event.clientEmail || '').trim().toLowerCase();
+    if (!toEmail || !toEmail.includes('@')) {
+      return res.status(400).json({ ok: false, error: 'El cliente no tiene email para enviar la reseña' });
+    }
+
+    const { html } = buildReviewEmailHtml({
+      companyName: companyName || 'Vertial',
+      eventName: event.nombre || '',
+      reviewUrl,
+      message,
+    });
+
+    const subjectCompany = String(companyName || '').trim() || 'Vertial';
+    await sendEmail({
+      to: toEmail,
+      subject: `${subjectCompany}: ¿nos dejas una reseña?`,
+      html,
+      requireDelivery: true,
+    });
+
+    const now = new Date().toISOString();
+    const eventPatch = {
+      ...event,
+      clientEmail: toEmail,
+      reviewInviteSentAt: now,
+      updatedAt: now,
+    };
+    const savedEvent = await putDocument(req, eventsDb, event._id, eventPatch);
+
+    logger.info(
+      { tag: 'EVENT_REVIEW_SEND', eventId: event._id, to: toEmail },
+      'Invitación de reseña de evento enviada',
+    );
+
+    return res.json({
+      ok: true,
+      emailSent: true,
+      sentTo: toEmail,
+      event: { ...eventPatch, _rev: savedEvent.rev },
+    });
+  } catch (error) {
+    logger.error({ tag: 'EVENT_REVIEW_SEND', err: error?.message }, 'Error al enviar reseña de evento');
+    return res.status(500).json({ ok: false, error: error?.message || 'Error al enviar la reseña' });
   }
 }

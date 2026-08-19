@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { sendEventQuoteByEmail } from '../controllers/eventsQuoteController.js';
+import { sendEventQuoteByEmail, sendEventReviewInvite } from '../controllers/eventsQuoteController.js';
 import { requireAuthAndEmailVerified } from '../middleware/auth.js';
 import { burstLimiter, planAwareLimiter } from '../middleware/rateLimiter.js';
 
@@ -11,6 +11,14 @@ eventsQuoteRouter.post(
   burstLimiter,
   planAwareLimiter,
   sendEventQuoteByEmail,
+);
+
+eventsQuoteRouter.post(
+  '/:userId/:eventId/send-review',
+  requireAuthAndEmailVerified,
+  burstLimiter,
+  planAwareLimiter,
+  sendEventReviewInvite,
 );
 
 export { eventsQuoteRouter };

@@ -154,10 +154,10 @@ export async function markEventQuoteSent(
 ): Promise<EventRecord> {
   downloadEventQuotePdf(event, business);
   const quotes = await loadEventQuotes(userId, event._id);
-  const draft = quotes.find((q) => q.estado === 'borrador') || quotes[0];
-  if (draft) {
+  const sent = quotes.find((q) => q.estado === 'enviado' || q.estado === 'aceptado');
+  if (sent) {
     const quotesApi = createVerticalApi('events', 'quotes');
-    await quotesApi.update(userId, draft._id, { ...draft, estado: 'enviado' });
+    await quotesApi.update(userId, sent._id, { ...sent, estado: 'enviado' });
   }
   return updateEventRecord(userId, event, {
     quotePdfSentAt: new Date().toISOString(),
@@ -338,6 +338,30 @@ export async function registerEventFinalPayment(
   });
 }
 
+/**
+ * Operativa en un paso: crea factura final si falta y registra el cobro del resto.
+ */
+export async function collectEventFinalBalance(
+  userId: string,
+  event: EventRecord,
+  amount: number,
+  method: string,
+  business?: BusinessIssuer | null,
+): Promise<EventRecord> {
+  const payAmount = Number(amount) || 0;
+  if (payAmount <= 0) {
+    throw new Error('Indica un importe de pago final mayor que 0');
+  }
+
+  let current = event;
+  if (!current.finalInvoiceId) {
+    const created = await createEventFinalInvoice(userId, current, business);
+    current = created.event;
+  }
+
+  return registerEventFinalPayment(userId, current, payAmount, method);
+}
+
 export async function sendEventFinalInvoiceEmail(
   userId: string,
   event: EventRecord,
@@ -345,4 +369,40 @@ export async function sendEventFinalInvoiceEmail(
   if (!event.finalInvoiceId) throw new Error('No hay factura final');
   if (!event.clientEmail) throw new Error('El cliente no tiene email');
   await sendInvoiceByEmail(userId, event.finalInvoiceId);
+}
+
+export async function sendEventReviewInviteRequest(
+  userId: string,
+  eventId: string,
+  options: {
+    reviewUrl: string;
+    message?: string;
+    clientEmail?: string;
+    companyName?: string;
+  },
+): Promise<{ event: EventRecord; sentTo?: string; alreadySent?: boolean }> {
+  const { authFetch, getAuthHeaders } = await import('./authApi');
+  const { getApiBase } = await import('./apiBase');
+  const res = await authFetch(
+    `${getApiBase()}/api/events-quotes/${encodeURIComponent(userId)}/${encodeURIComponent(eventId)}/send-review`,
+    {
+      method: 'POST',
+      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        reviewUrl: options.reviewUrl,
+        message: options.message || '',
+        clientEmail: options.clientEmail || undefined,
+        companyName: options.companyName || '',
+      }),
+    },
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.ok === false) {
+    throw new Error(data.error || 'No se pudo enviar la reseña');
+  }
+  return {
+    event: data.event as EventRecord,
+    sentTo: data.sentTo,
+    alreadySent: Boolean(data.alreadySent),
+  };
 }

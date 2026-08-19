@@ -13,6 +13,7 @@ import {
   findAccountByUserId,
   logAccountActivity,
 } from '../services/couchdb.js';
+import { nextPurchaseOrderNumber } from '../services/purchaseOrderNumber.js';
 import { generateAutoOrders } from '../services/autoOrderService.js';
 import { sendEmail } from '../services/email.js';
 import { recordMovement } from '../services/stockMovementService.js';
@@ -83,7 +84,10 @@ export async function createPurchaseOrder(req, res) {
 
     const db = getCatalogDbName();
     await ensureDatabase(req, db);
-    const doc = buildPurchaseOrderDocument(userId, order);
+    const existingOrders = await listPurchaseOrdersByUser(req, userId);
+    const orderNumber = String(order.orderNumber || '').trim()
+      || nextPurchaseOrderNumber(existingOrders.map((o) => o.orderNumber));
+    const doc = buildPurchaseOrderDocument(userId, { ...order, orderNumber });
     const result = await putDocument(req, db, doc._id, doc);
     const saved = { ...doc, _rev: result.rev };
 
@@ -226,7 +230,12 @@ export async function markOrderReceived(req, res) {
       const received = Array.isArray(receivedItems)
         ? receivedItems.find((r) => r.catalogItemId === item.catalogItemId)
         : null;
-      return { ...item, received: received ? Number(received.quantity || item.quantity) : item.quantity };
+      const nextReceived = received ? Number(received.quantity || item.quantity) : item.quantity;
+      const nextUnitCost =
+        received && received.unitCost != null && Number(received.unitCost) >= 0
+          ? Number(received.unitCost)
+          : Number(item.unitCost || 0);
+      return { ...item, received: nextReceived, unitCost: nextUnitCost };
     });
 
     const allReceived = updatedItems.every((item) => item.received >= item.quantity);
@@ -285,6 +294,44 @@ export async function markOrderReceived(req, res) {
         } catch (err) {
           logger.warn({ tag: 'PO_RECEIVE', err: err?.message }, 'Error actualizando coste medio');
         }
+      }
+
+      // Escandallo: precio de factura → baseCost de ingredientes (mismo nombre).
+      try {
+        const deliveryDb = getDeliveryDbName();
+        const configId = `dlvconf-${userId}`;
+        const cfg = await getDocument(req, deliveryDb, configId).catch(() => null);
+        if (cfg?.type === 'delivery_config' && Array.isArray(cfg.storeIngredients)) {
+          const norm = (v) =>
+            String(v || '')
+              .toLowerCase()
+              .normalize('NFD')
+              .replace(/\p{M}/gu, '')
+              .replace(/\s+/g, ' ')
+              .trim();
+          const costByName = new Map();
+          for (const item of updatedItems) {
+            if (!item.received || !(Number(item.unitCost) > 0)) continue;
+            const key = norm(item.name);
+            if (key) costByName.set(key, Number(item.unitCost));
+          }
+          let changed = false;
+          const nextIngredients = cfg.storeIngredients.map((ing) => {
+            const cost = costByName.get(norm(ing.name));
+            if (cost == null) return ing;
+            changed = true;
+            return { ...ing, baseCost: Math.round(cost * 100) / 100 };
+          });
+          if (changed) {
+            await putDocument(req, deliveryDb, cfg._id, {
+              ...cfg,
+              storeIngredients: nextIngredients,
+              updatedAt: now,
+            });
+          }
+        }
+      } catch (err) {
+        logger.warn({ tag: 'PO_RECEIVE', err: err?.message }, 'Error actualizando escandallo ingredientes');
       }
     }
 
@@ -993,8 +1040,12 @@ export async function createBulkPurchaseOrders(req, res) {
     await ensureDatabase(req, db);
 
     const createdOrders = [];
+    const usedNumbers = (await listPurchaseOrdersByUser(req, userId)).map((o) => o.orderNumber);
     for (const orderData of orderDataList) {
-      const doc = buildPurchaseOrderDocument(userId, orderData);
+      const orderNumber = String(orderData.orderNumber || '').trim()
+        || nextPurchaseOrderNumber(usedNumbers);
+      usedNumbers.push(orderNumber);
+      const doc = buildPurchaseOrderDocument(userId, { ...orderData, orderNumber });
       const result = await putDocument(req, db, doc._id, doc);
       createdOrders.push(sanitizePurchaseOrder({ ...doc, _rev: result.rev }));
     }

@@ -146,6 +146,8 @@ import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import type { BusinessType } from '../../lib/businessApi';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import {
+  ensureTabletCodesForPointsOfSale,
+  listPointsOfSaleRequest,
   pointOfSaleDisplayLabel,
 } from '../../lib/deliveryApi';
 import {
@@ -165,6 +167,7 @@ import { getDeliverySidebarItemLock } from '../../lib/deliveryActivationGates';
 import { useEventsActivationNav } from '../../hooks/useEventsActivationNav';
 import {
   isDeliveryOpsBusinessType,
+  isEventsBusinessType,
   isRestaurantBusinessType,
   isStrictDeliveryBusinessType,
 } from '../../lib/deliveryOpsTypes';
@@ -177,6 +180,8 @@ import { isMenuItemVisibleForVertical } from '../../lib/verticalModuleVisibility
 import { isSidebarItemUnlockedForPlan } from '../../lib/sidebarPlanCatalog';
 import { useEffectivePlanTier } from '../../hooks/useEffectivePlanTier';
 import { saasPathWithBusinessScope } from '../../lib/businessScopeUrl';
+import { EventsPortablePdvModal } from './events/EventsPortablePdvModal';
+import { resolveEventsUserId } from '../../lib/eventsFlow';
 import {
   resolveActiveOpsStoreRowId,
   resolveActiveWorkCenterRowId,
@@ -766,7 +771,10 @@ function SidebarInner({
   // Heladería comparte selector de tienda/PDV del core Delivery.
   const usesOpsStoreSidebar =
     isDeliveryOpsBusinessType(vertical) || isRestaurantVertical || isHeladeriaVertical;
-  const showWorkCentersSidebar = usesOpsStoreSidebar || isCompraventa;
+  /** Eventos: bloque PDV/tiendas entre Home y el vertical (como delivery/bar). */
+  const isEventsVertical = isEventsBusinessType(vertical);
+  const showWorkCentersSidebar =
+    usesOpsStoreSidebar || isCompraventa || isEventsVertical;
   const allowedGroups = vertical
     ? (VERTICAL_GROUPS[vertical] || VERTICAL_GROUPS.carDealership)
     : new Set<string>();
@@ -774,6 +782,7 @@ function SidebarInner({
     ? (VERTICAL_BOTTOM_ITEMS[vertical] || VERTICAL_BOTTOM_ITEMS.carDealership)
     : new Set<string>();
   const [showCompanyDropdown, setShowCompanyDropdown] = useState(false);
+  const [showEventsPortablePdvModal, setShowEventsPortablePdvModal] = useState(false);
   const desktopCompanySelectorRef = useRef<HTMLDivElement>(null);
   const mobileCompanySelectorRef = useRef<HTMLDivElement>(null);
   const companyDropdownPanelRef = useRef<HTMLDivElement>(null);
@@ -814,6 +823,8 @@ function SidebarInner({
   };
 
   const [salesPoints, setSalesPoints] = useState<SalesPoint[]>([]);
+  /** Eventos: código TPV tablet por workCenterId. */
+  const [eventsTabletCodeByWc, setEventsTabletCodeByWc] = useState<Record<string, string>>({});
   const currentBusinessRef = useRef(currentBusiness);
   currentBusinessRef.current = currentBusiness;
   const userRef = useRef(user);
@@ -854,17 +865,43 @@ function SidebarInner({
       const scoped = filterWorkCentersForBusinessScope(sps, businessId, {
         accountBusinessCount,
       });
-      setSalesPoints(
-        scoped.filter(
-          (sp) =>
-            sp.active !== false &&
-            (!isDeliveryBusinessType(vertical) ||
-              sp.centerType === 'punto_de_venta' ||
-              sp.centerType === 'almacen'),
-        ),
+      const filtered = scoped.filter(
+        (sp) =>
+          sp.active !== false &&
+          (!isDeliveryBusinessType(vertical) ||
+            sp.centerType === 'punto_de_venta' ||
+            sp.centerType === 'almacen'),
       );
+      setSalesPoints(filtered);
+
+      if (isEventsBusinessType(vertical)) {
+        try {
+          let pdvs = await listPointsOfSaleRequest(dataUserId, { includeInactive: false });
+          if (businessId) {
+            pdvs = pdvs.filter((p) => {
+              const bid = String(p.businessId || (p as { business_id?: string }).business_id || '')
+                .replace(/^business:/, '')
+                .trim();
+              return !bid || bid === businessId;
+            });
+          }
+          pdvs = await ensureTabletCodesForPointsOfSale(dataUserId, pdvs);
+          const map: Record<string, string> = {};
+          for (const pdv of pdvs) {
+            const wcId = String(pdv.workCenterId || '').trim();
+            const code = String(pdv.terminalCode || '').trim().toUpperCase();
+            if (wcId && code) map[wcId] = code;
+          }
+          setEventsTabletCodeByWc(map);
+        } catch {
+          setEventsTabletCodeByWc({});
+        }
+      } else {
+        setEventsTabletCodeByWc({});
+      }
     } catch {
       setSalesPoints([]);
+      setEventsTabletCodeByWc({});
     }
   }, [accountBusinessCount, isCompraventa, loadCompraventaSidebarStores, vertical]);
 
@@ -897,6 +934,23 @@ function SidebarInner({
 
   const loadCompraventaSidebarStoresRef = useRef(loadCompraventaSidebarStores);
   loadCompraventaSidebarStoresRef.current = loadCompraventaSidebarStores;
+
+  useEffect(() => {
+    if (!isEventsVertical) return;
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const onStoresChanged = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null;
+        void loadSalesPoints();
+      }, 250);
+    };
+    window.addEventListener(DELIVERY_WORK_CENTERS_CHANGED, onStoresChanged);
+    return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      window.removeEventListener(DELIVERY_WORK_CENTERS_CHANGED, onStoresChanged);
+    };
+  }, [isEventsVertical, loadSalesPoints]);
 
   useEffect(() => {
     if (!isCompraventa) return;
@@ -1362,6 +1416,14 @@ function SidebarInner({
       onMobileClose();
       return;
     }
+    if (
+      isEventsVertical
+      && (item.id === 'salesPoints-settings' || item.id === 'salesPoints-add')
+    ) {
+      setShowEventsPortablePdvModal(true);
+      onMobileClose();
+      return;
+    }
     if (item.id.startsWith('sp-')) {
       const rawId = item.id.slice('sp-'.length);
       if (rawId) {
@@ -1577,7 +1639,7 @@ function SidebarInner({
     (item.id === 'catalog-carta' && location.pathname.startsWith('/saas/catalog') && ['catalog', 'escandallo', 'ingredientes', 'tpv-templates'].includes(catalogTab)) ||
     (item.id === 'catalog-stock' && location.pathname.startsWith('/saas/inventory')) ||
     (item.id === 'catalog-stock-tpv' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'stock') ||
-    (item.id === 'catalog-purchases' && location.pathname.startsWith('/saas/catalog') && ['suppliers', 'purchase-orders', 'invoices'].includes(catalogTab)) ||
+    (item.id === 'catalog-purchases' && location.pathname.startsWith('/saas/catalog') && ['suppliers', 'purchase-orders', 'albaranes', 'invoices'].includes(catalogTab)) ||
     (item.id === 'catalog-consumos' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'staff-consumption') ||
     (item.id === 'costing' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'escandallo') ||
     (item.id === 'costing' && location.pathname.startsWith('/saas/costing')) ||
@@ -1669,12 +1731,19 @@ function SidebarInner({
             path: '#',
           };
         })
-      : salesPoints.map((sp) => ({
-        id: `sp-${sp._id}`,
-        label: sp.name,
-        icon: <Store className="w-3.5 h-3.5" />,
-        path: '#',
-      }));
+      : salesPoints.map((sp) => {
+        const terminalCode = isEventsVertical
+          ? (eventsTabletCodeByWc[sp._id] || undefined)
+          : undefined;
+        return {
+          id: `sp-${sp._id}`,
+          label: sp.name,
+          subLabel: isEventsVertical && !terminalCode ? 'Sin código TPV' : undefined,
+          terminalCode,
+          icon: <Store className="w-3.5 h-3.5" />,
+          path: '#',
+        };
+      });
 
   const workCentersSidebarCount =
     usesOpsStoreSidebar ? displayOpsStoreRows.length : salesPoints.length;
@@ -1685,7 +1754,9 @@ function SidebarInner({
       ? [
           {
             id: 'salesPoints-loading',
-            label: t('sidebar.workCenters.loading', 'Cargando tiendas…'),
+            label: isEventsVertical
+              ? 'Cargando PDV…'
+              : t('sidebar.workCenters.loading', 'Cargando tiendas…'),
             icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />,
             path: '#',
             disabled: true,
@@ -1695,7 +1766,9 @@ function SidebarInner({
       ? [
           {
             id: 'salesPoints-settings',
-            label: t('sidebar.workCenters.firstCenter', 'Primer centro'),
+            label: isEventsVertical
+              ? 'Crear PDV portátil'
+              : t('sidebar.workCenters.firstCenter', 'Primer centro'),
             icon: <Plus className="w-5 h-5" />,
             path: workCentersAddPath,
           },
@@ -1704,7 +1777,9 @@ function SidebarInner({
           ...salesPointRows,
           {
             id: 'salesPoints-add',
-            label: t('sidebar.workCenters.newCenter', 'Nuevo centro'),
+            label: isEventsVertical
+              ? 'Nuevo PDV portátil'
+              : t('sidebar.workCenters.newCenter', 'Nuevo centro'),
             icon: <Plus className="w-3.5 h-3.5" />,
             path: workCentersAddPath,
           },
@@ -1712,8 +1787,12 @@ function SidebarInner({
 
   const salesPointsGroup: (SidebarGroup & { items: SidebarItem[] }) = {
     id: 'salesPoints',
-    label: t('sidebar.groups.salesPoints', 'Centros de trabajo'),
-    icon: <Building2 className="w-4 h-4 shrink-0" />,
+    label: isEventsVertical
+      ? 'PDV portátil'
+      : t('sidebar.groups.salesPoints', 'Centros de trabajo'),
+    icon: isEventsVertical
+      ? <Store className="w-4 h-4 shrink-0" />
+      : <Building2 className="w-4 h-4 shrink-0" />,
     itemIds: workCentersSidebarItems.map((i) => i.id),
     items: workCentersSidebarItems,
   };
@@ -2495,6 +2574,18 @@ function SidebarInner({
         isOpen={showHelpModal}
         onClose={() => setShowHelpModal(false)}
       />
+
+      {isEventsVertical ? (
+        <EventsPortablePdvModal
+          open={showEventsPortablePdvModal}
+          userId={resolveEventsUserId(user, currentBusiness)}
+          business={currentBusiness}
+          onClose={() => setShowEventsPortablePdvModal(false)}
+          onCreated={() => {
+            void loadSalesPoints();
+          }}
+        />
+      ) : null}
     </>
   );
 }

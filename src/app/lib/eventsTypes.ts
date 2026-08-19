@@ -86,6 +86,8 @@ export interface EventRecord extends VerticalEntity {
   quotePdfSentAt?: string;
   linkedQuoteId?: string;
   quoteRejectedAt?: string;
+  /** Email de reseña enviado al finalizar. */
+  reviewInviteSentAt?: string;
   /** Checklist de planificación (servicios / equipo / lugar). */
   planningChecklist?: string;
 }

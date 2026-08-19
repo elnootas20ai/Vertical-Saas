@@ -6,10 +6,7 @@ export type EventsSidebarLockFlags = {
 
 /** Planificación operativa: tras la primera contratación. Contrataciones siempre abierta. */
 export const EVENTS_PLANNING_SIDEBAR_IDS = new Set([
-  'events-venues',
-  'events-vendors',
-  'events-catering',
-  'events-logistics',
+  'events-route',
 ]);
 
 export function getEventsSidebarItemLock(

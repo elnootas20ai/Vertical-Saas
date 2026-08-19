@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useSearchParams } from 'react-router-dom';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { createVerticalApi, type VerticalEntity } from '../../lib/verticalApiFactory';
@@ -11,7 +11,7 @@ import {
   type EventServiceUnit,
 } from '../../lib/eventsTypes';
 import {
-  Search, Plus, X, Edit3, Trash2, Sparkles, DollarSign, Tag,
+  Search, X, Edit3, Trash2, Sparkles, DollarSign, Tag,
   CheckCircle, Loader2, ToggleLeft, ToggleRight,
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
@@ -29,6 +29,10 @@ import {
   mapEventServiceUnit,
   parseEventServicePrice,
 } from '../../lib/eventsServicesExcelTemplate';
+import { EventsVenues } from './EventsVenues';
+import { EventsVendors } from './EventsVendors';
+import { EventsCatering } from './EventsCatering';
+import { EventsLogistics } from './EventsLogistics';
 
 interface EventService extends VerticalEntity {
   nombre: string;
@@ -71,11 +75,33 @@ function mapServiceUnit(raw: string): EventServiceUnit {
   return mapEventServiceUnit(raw);
 }
 
-export function EventsServices() {
+const SERVICE_TABS = [
+  { id: 'catalogo', label: 'Catálogo' },
+  { id: 'espacios', label: 'Espacios' },
+  { id: 'externos', label: 'Externos' },
+  { id: 'catering', label: 'Catering' },
+  { id: 'logistica', label: 'Logística' },
+] as const;
+
+export type EventsServicesTabId = (typeof SERVICE_TABS)[number]['id'];
+
+function parseEventsServicesTab(raw: string | null): EventsServicesTabId {
+  if (raw === 'espacios' || raw === 'venues') return 'espacios';
+  if (raw === 'externos' || raw === 'vendors') return 'externos';
+  if (raw === 'catering') return 'catering';
+  if (raw === 'logistica' || raw === 'logistics') return 'logistica';
+  return 'catalogo';
+}
+
+export function RedirectToEventsServicesTab({ tab }: { tab: EventsServicesTabId }) {
+  const [params] = useSearchParams();
+  const next = new URLSearchParams(params);
+  next.set('tab', tab);
+  return <Navigate to={`/saas/events-services?${next.toString()}`} replace />;
+}
+
+function EventsServicesCatalog() {
   const { user } = useAuth();
-  const [searchParams] = useSearchParams();
-  const linkedEventName = searchParams.get('eventName') || '';
-  const linkedEventId = searchParams.get('eventId') || '';
   const api = useMemo(() => createVerticalApi<EventService>('events', 'services'), []);
   const userId = user?.user_id || user?.id || '';
 
@@ -238,19 +264,9 @@ export function EventsServices() {
   const MODULE_IMPORT_FIELDS: ImportFieldDef[] = EVENTS_SERVICES_IMPORT_FIELDS;
 
   return (
-    <Layout title="Servicios y tarifas">
+    <>
       <div className="space-y-6">
-        {linkedEventName && (
-          <div className="rounded-xl border border-cyan-200 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-950/30 px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-sm">
-            <span>Evento: <strong>{linkedEventName}</strong></span>
-            {linkedEventId && (
-              <Link to={`/saas/vertical/eventos/${linkedEventId}`} className="font-semibold text-cyan-700 dark:text-cyan-300 hover:underline">
-                Volver al proyecto
-              </Link>
-            )}
-          </div>
-        )}
-        <p className="text-sm text-gray-500 dark:text-gray-400 -mt-2">
+        <p className="text-sm text-gray-500 dark:text-gray-400">
           Catálogo de servicios disponibles y precios. Se usan al armar presupuestos en nuevas contrataciones.
         </p>
 
@@ -477,6 +493,63 @@ export function EventsServices() {
         skipMappingWhenComplete
         importSheetName={EVENTS_SERVICES_SHEET_NAME}
       />
+    </>
+  );
+}
+
+export function EventsServices() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = parseEventsServicesTab(searchParams.get('tab'));
+  const linkedEventName = searchParams.get('eventName') || '';
+  const linkedEventId = searchParams.get('eventId') || '';
+
+  const setTab = (next: EventsServicesTabId) => {
+    const params = new URLSearchParams(searchParams);
+    if (next === 'catalogo') params.delete('tab');
+    else params.set('tab', next);
+    setSearchParams(params, { replace: true });
+  };
+
+  return (
+    <Layout title="Servicios">
+      <div className="space-y-6">
+        {linkedEventName && (
+          <div className="rounded-xl border border-cyan-200 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-950/30 px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+            <span>Evento: <strong>{linkedEventName}</strong></span>
+            {linkedEventId && (
+              <Link to={`/saas/vertical/eventos/${linkedEventId}`} className="font-semibold text-cyan-700 dark:text-cyan-300 hover:underline">
+                Volver al proyecto
+              </Link>
+            )}
+          </div>
+        )}
+
+        <div
+          className="flex border-b border-stone-200 dark:border-stone-800 overflow-x-auto [&::-webkit-scrollbar]:hidden"
+          style={{ scrollbarWidth: 'none' }}
+        >
+          {SERVICE_TABS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setTab(item.id)}
+              className={`flex items-center gap-2 px-5 py-3.5 text-sm font-semibold whitespace-nowrap border-b-2 transition-colors ${
+                tab === item.id
+                  ? 'vsaas-tab-active'
+                  : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'catalogo' && <EventsServicesCatalog />}
+        {tab === 'espacios' && <EventsVenues embedded />}
+        {tab === 'externos' && <EventsVendors embedded />}
+        {tab === 'catering' && <EventsCatering embedded />}
+        {tab === 'logistica' && <EventsLogistics embedded />}
+      </div>
     </Layout>
   );
 }

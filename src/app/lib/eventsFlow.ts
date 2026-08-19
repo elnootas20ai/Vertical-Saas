@@ -198,8 +198,8 @@ export async function createEventDraft(
   userId: string,
   input: CreateEventDraftInput,
 ): Promise<EventRecord> {
-  const total = computeQuoteTotal(input.lineas);
-  const now = new Date().toISOString();
+  const lineas = await ensureCatalogServicesFromQuoteLines(userId, input.lineas);
+  const total = computeQuoteTotal(lineas);
   const item = await eventsApi.create(userId, {
     nombre: input.nombre.trim(),
     tipo: input.tipo,
@@ -213,7 +213,7 @@ export async function createEventDraft(
     invitados: input.invitados,
     presupuesto: total,
     deposito: Number(input.deposito) || 0,
-    lineasPresupuesto: serializeQuoteLines(input.lineas),
+    lineasPresupuesto: serializeQuoteLines(lineas),
     notas: input.notas || '',
     estado: 'presupuesto',
     furthestEstado: 'presupuesto',
@@ -223,7 +223,7 @@ export async function createEventDraft(
     eventId: item._id,
     eventNombre: item.nombre,
     cliente: item.cliente,
-    lineas: serializeQuoteLines(input.lineas),
+    lineas: serializeQuoteLines(lineas),
     subtotal: total,
     iva: Math.round(total * 0.21 * 100) / 100,
     total,
@@ -268,9 +268,12 @@ export async function saveEventQuoteLines(
   event: EventRecord,
   lines: QuoteLine[],
 ): Promise<EventRecord> {
-  const cleaned = lines
-    .map((line) => patchQuoteLine(line, {}))
-    .filter((line) => String(line.concepto || '').trim());
+  const cleaned = await ensureCatalogServicesFromQuoteLines(
+    userId,
+    lines
+      .map((line) => patchQuoteLine(line, {}))
+      .filter((line) => String(line.concepto || '').trim()),
+  );
   if (cleaned.length === 0) {
     throw new Error('Deja al menos una línea con concepto en el presupuesto');
   }
@@ -282,15 +285,22 @@ export async function saveEventQuoteLines(
 
   try {
     const quotes = await loadEventQuotes(userId, event._id);
-    const linked = quotes[0];
-    if (linked) {
-      await quotesApi.update(userId, linked._id, {
-        ...linked,
-        lineas: serializeQuoteLines(cleaned),
-        subtotal: total,
-        iva: Math.round(total * 0.21 * 100) / 100,
-        total,
-      });
+    const draft = quotes.find((q) => q.estado === 'borrador');
+    const payload = {
+      eventId: event._id,
+      eventNombre: updated.nombre || event.nombre,
+      cliente: updated.cliente || event.cliente,
+      lineas: serializeQuoteLines(cleaned),
+      subtotal: total,
+      iva: Math.round(total * 0.21 * 100) / 100,
+      total,
+      estado: 'borrador' as const,
+      notas: updated.notas || event.notas || '',
+    };
+    if (draft) {
+      await quotesApi.update(userId, draft._id, { ...draft, ...payload });
+    } else {
+      await quotesApi.create(userId, payload);
     }
   } catch {
     /* el envío lee las líneas del evento; el quote vertical es auxiliar */
@@ -351,8 +361,91 @@ export async function jumpToReachedStage(
 }
 
 export async function loadEventQuotes(userId: string, eventId: string): Promise<EventQuoteRecord[]> {
-  const list = await quotesApi.list(userId);
+  const list = await loadAllEventQuotes(userId);
   return list.filter((q) => q.eventId === eventId);
+}
+
+export async function loadAllEventQuotes(userId: string): Promise<EventQuoteRecord[]> {
+  const list = await quotesApi.list(userId);
+  return Array.isArray(list) ? list : [];
+}
+
+export type EventQuoteListKind = 'borrador' | 'enviado' | 'aceptado' | 'rechazado';
+
+export type EventQuoteListRow = {
+  id: string;
+  eventId: string;
+  nombre: string;
+  cliente: string;
+  lugar: string;
+  tipo: EventType;
+  kind: EventQuoteListKind;
+  importe: number;
+  date: string;
+};
+
+export function quoteKindFromEstado(estado: string | undefined, rejected?: boolean): EventQuoteListKind {
+  if (estado === 'enviado') return 'enviado';
+  if (estado === 'aceptado') return 'aceptado';
+  if (estado === 'rechazado' || rejected) return 'rechazado';
+  return 'borrador';
+}
+
+export function buildEventQuoteListRows(
+  events: EventRecord[],
+  quotes: EventQuoteRecord[],
+): EventQuoteListRow[] {
+  const byId = new Map(events.map((e) => [e._id, e]));
+  const rows: EventQuoteListRow[] = [];
+  const quotedEventIds = new Set<string>();
+
+  for (const quote of quotes) {
+    const event = byId.get(quote.eventId);
+    if (event?.estado === 'cancelado') continue;
+    quotedEventIds.add(quote.eventId);
+    const kind = quoteKindFromEstado(quote.estado);
+    rows.push({
+      id: quote._id,
+      eventId: quote.eventId,
+      nombre: String(quote.eventNombre || event?.nombre || 'Presupuesto'),
+      cliente: String(quote.cliente || event?.cliente || ''),
+      lugar: String(event?.lugar || ''),
+      tipo: event ? normalizeEventType(event.tipo) : 'otro',
+      kind,
+      importe: Number(quote.total) || Number(event?.presupuesto) || 0,
+      date: String(
+        kind === 'enviado' ? (event?.quoteSentAt || quote.updatedAt)
+          : kind === 'aceptado' ? (event?.acceptedAt || quote.updatedAt)
+            : kind === 'rechazado' ? (event?.quoteRejectedAt || quote.updatedAt)
+              : (quote.updatedAt || quote.createdAt || event?.updatedAt || ''),
+      ),
+    });
+  }
+
+  for (const event of events) {
+    if (event.estado === 'cancelado') continue;
+    if (quotedEventIds.has(event._id)) continue;
+    if (!['presupuesto', 'enviado', 'aceptado'].includes(event.estado) && !event.quoteRejectedAt) continue;
+    const kind = quoteKindFromEstado(event.estado, Boolean(event.quoteRejectedAt && event.estado === 'presupuesto'));
+    rows.push({
+      id: event._id,
+      eventId: event._id,
+      nombre: event.nombre,
+      cliente: event.cliente,
+      lugar: event.lugar || '',
+      tipo: normalizeEventType(event.tipo),
+      kind,
+      importe: Number(event.presupuesto) || 0,
+      date: String(
+        kind === 'enviado' ? (event.quoteSentAt || event.updatedAt)
+          : kind === 'aceptado' ? (event.acceptedAt || event.updatedAt)
+            : kind === 'rechazado' ? (event.quoteRejectedAt || event.updatedAt)
+              : (event.updatedAt || event.createdAt || ''),
+      ),
+    });
+  }
+
+  return rows;
 }
 
 export async function loadEventServices(userId: string, activeOnly = true): Promise<EventServiceRecord[]> {
@@ -365,6 +458,70 @@ export async function loadEventServices(userId: string, activeOnly = true): Prom
       activo: s.activo !== false,
     }))
     .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+}
+
+function normalizeServiceName(name: string): string {
+  return String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/**
+ * Si en un presupuesto se escribe un servicio que no está en el catálogo,
+ * lo crea en Servicios para que quede en el historial del negocio.
+ */
+export async function ensureCatalogServicesFromQuoteLines(
+  userId: string,
+  lines: QuoteLine[],
+): Promise<QuoteLine[]> {
+  let catalog: EventServiceRecord[] = [];
+  try {
+    catalog = await loadEventServices(userId, false);
+  } catch {
+    return lines;
+  }
+
+  const byId = new Map(catalog.map((s) => [s._id, s]));
+  const byName = new Map(catalog.map((s) => [normalizeServiceName(s.nombre), s]));
+  const next: QuoteLine[] = [];
+
+  for (const line of lines) {
+    const nombre = String(line.concepto || '').trim();
+    if (!nombre) {
+      next.push(line);
+      continue;
+    }
+    if (line.serviceId && byId.has(line.serviceId)) {
+      next.push(line);
+      continue;
+    }
+    const key = normalizeServiceName(nombre);
+    const existing = byName.get(key);
+    if (existing) {
+      next.push({ ...line, serviceId: existing._id });
+      continue;
+    }
+    try {
+      const created = await servicesApi.create(userId, {
+        nombre,
+        categoria: 'otro',
+        precio: Number(line.precioUnitario) || 0,
+        unidad: 'fijo',
+        descripcion: '',
+        activo: true,
+      });
+      const mapped: EventServiceRecord = {
+        ...created,
+        precio: Number(created.precio) || 0,
+        activo: created.activo !== false,
+      };
+      byId.set(mapped._id, mapped);
+      byName.set(key, mapped);
+      next.push({ ...line, serviceId: mapped._id });
+    } catch {
+      next.push(line);
+    }
+  }
+
+  return next;
 }
 
 export function quoteLineFromService(service: EventServiceRecord, invitados: number): QuoteLine {

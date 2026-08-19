@@ -9,6 +9,11 @@ import { useBusiness } from '../../../../context/BusinessContext';
 import { createVerticalApi, type VerticalEntity } from '../../../../lib/verticalApiFactory';
 import { computeQuoteTotal, createEventDraft, loadEventServices, quoteLineFromService, resolveEventsUserId } from '../../../../lib/eventsFlow';
 import { EVENT_TYPE_LABELS, type EventType, type EventServiceRecord, type QuoteLine } from '../../../../lib/eventsTypes';
+import {
+  buildQuoteRulesText,
+  loadEventsQuoteSettings,
+  suggestedDepositFromTotal,
+} from '../../../../lib/eventsQuoteSettings';
 import { useEventsActivationNav } from '../../../../hooks/useEventsActivationNav';
 import { buildActivationTargetUrl } from '../../../../lib/activationGuide';
 import { resolveBusinessScopeId } from '../../../../lib/deliverySetup';
@@ -77,6 +82,24 @@ export function EventsContractWizardPage() {
   const [lineas, setLineas] = useState<QuoteLine[]>([emptyLine()]);
   const [deposito, setDeposito] = useState(0);
   const [notas, setNotas] = useState('');
+  const [depositPercentRule, setDepositPercentRule] = useState(0);
+  const quoteDefaultsAppliedRef = useRef(false);
+
+  useEffect(() => {
+    if (quoteDefaultsAppliedRef.current) return;
+    quoteDefaultsAppliedRef.current = true;
+    const settings = loadEventsQuoteSettings(businessId || '');
+    const rulesText = buildQuoteRulesText(settings);
+    if (rulesText) setNotas(rulesText);
+    setDepositPercentRule(settings.depositPercent > 0 ? settings.depositPercent : 0);
+  }, [businessId]);
+
+  const total = useMemo(() => computeQuoteTotal(lineas), [lineas]);
+
+  useEffect(() => {
+    if (!(depositPercentRule > 0) || !(total > 0)) return;
+    setDeposito(suggestedDepositFromTotal(total, depositPercentRule));
+  }, [total, depositPercentRule]);
 
   useEffect(() => {
     if (!dataUserId) return;
@@ -96,7 +119,6 @@ export function EventsContractWizardPage() {
   }, [eventsNav.loading, eventsNav.hasPricedService, eventsNav.hasClient, clients.length]);
 
   const stepIndex = WIZARD_STEPS.findIndex((s) => s.id === step);
-  const total = useMemo(() => computeQuoteTotal(lineas), [lineas]);
 
   const patchLine = useCallback((id: string, patch: Partial<QuoteLine>) => {
     setLineas((prev) => prev.map((line) => {

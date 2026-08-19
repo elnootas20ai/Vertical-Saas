@@ -10,6 +10,7 @@ import {
   shouldSyncDeliveryOrderIncome,
 } from './deliveryOrderFinanceSync';
 import { notifyDeliveryOpsLive } from './deliveryOpsLive';
+import { invalidateCatalogListCache, listCatalogItemsCached } from './catalogListCache';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -354,6 +355,8 @@ export interface Supplier {
   category: string;
   /** Organizadores de almacén a los que este proveedor suministra (uno o varios). */
   organizerIds: string[];
+  /** Artículos de almacén que este proveedor vende (marcados al alta). */
+  catalogItemIds: string[];
   paymentTerms: string;
   notes: string;
   active: boolean;
@@ -675,14 +678,21 @@ export async function listCatalogItemsRequest(
   options?: { view?: 'tpv' },
 ): Promise<CatalogItem[]> {
   const id = normalizeUserId(userId);
-  const params = new URLSearchParams();
-  if (module) params.set('module', module);
-  if (options?.view) params.set('view', options.view);
-  const qs = params.toString() ? `?${params.toString()}` : '';
-  const payload = await request<{ ok: boolean; items: CatalogItem[] }>(
-    `/api/delivery/catalog/${encodeURIComponent(id)}${qs}`,
+  return listCatalogItemsCached(
+    id,
+    async () => {
+      const params = new URLSearchParams();
+      if (module) params.set('module', module);
+      if (options?.view) params.set('view', options.view);
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      const payload = await request<{ ok: boolean; items: CatalogItem[] }>(
+        `/api/delivery/catalog/${encodeURIComponent(id)}${qs}`,
+      );
+      return payload.items || [];
+    },
+    module,
+    options?.view,
   );
-  return payload.items || [];
 }
 
 export async function createCatalogItemRequest(userId: string, data: Partial<CatalogItem>): Promise<CatalogItem> {
@@ -691,6 +701,7 @@ export async function createCatalogItemRequest(userId: string, data: Partial<Cat
     `/api/delivery/catalog/${encodeURIComponent(id)}`,
     { method: 'POST', body: JSON.stringify({ item: data }) },
   );
+  invalidateCatalogListCache(id);
   if (!result.item) throw new Error('Respuesta inválida del servidor');
   return result.item;
 }
@@ -710,10 +721,12 @@ export async function bulkCreateCatalogItemsRequest(
   signal?: AbortSignal,
 ): Promise<BulkCreateResult> {
   const id = normalizeUserId(userId);
-  return request<BulkCreateResult>(
+  const result = await request<BulkCreateResult>(
     `/api/delivery/catalog/${encodeURIComponent(id)}/bulk`,
     { method: 'POST', body: JSON.stringify({ items }), signal },
   );
+  invalidateCatalogListCache(id);
+  return result;
 }
 
 export interface BulkPatchCatalogResult {
@@ -729,10 +742,12 @@ export async function bulkPatchCatalogItemsRequest(
   items: CatalogItem[],
 ): Promise<BulkPatchCatalogResult> {
   const id = normalizeUserId(userId);
-  return request<BulkPatchCatalogResult>(
+  const result = await request<BulkPatchCatalogResult>(
     `/api/delivery/catalog/${encodeURIComponent(id)}/bulk-patch`,
     { method: 'POST', body: JSON.stringify({ items }) },
   );
+  invalidateCatalogListCache(id);
+  return result;
 }
 
 export interface BulkDeleteCatalogResult {
@@ -747,10 +762,12 @@ export async function bulkDeleteCatalogItemsRequest(
   itemIds: string[],
 ): Promise<BulkDeleteCatalogResult> {
   const id = normalizeUserId(userId);
-  return request<BulkDeleteCatalogResult>(
+  const result = await request<BulkDeleteCatalogResult>(
     `/api/delivery/catalog/${encodeURIComponent(id)}/bulk-delete`,
     { method: 'POST', body: JSON.stringify({ itemIds }) },
   );
+  invalidateCatalogListCache(id);
+  return result;
 }
 
 export interface BulkUpdateStockResult {
@@ -777,10 +794,12 @@ export async function bulkUpdateCatalogStockRequest(
   }>,
 ): Promise<BulkUpdateStockResult> {
   const id = normalizeUserId(userId);
-  return request<BulkUpdateStockResult>(
+  const result = await request<BulkUpdateStockResult>(
     `/api/delivery/catalog/${encodeURIComponent(id)}/bulk-stock`,
     { method: 'POST', body: JSON.stringify({ entries }) },
   );
+  invalidateCatalogListCache(id);
+  return result;
 }
 
 export async function bulkApplyStaffPricesRequest(
@@ -811,6 +830,7 @@ export async function updateCatalogItemRequest(userId: string, item: CatalogItem
     `/api/delivery/catalog/${encodeURIComponent(id)}/${encodeURIComponent(item._id)}`,
     { method: 'PUT', body: JSON.stringify({ item }) },
   );
+  invalidateCatalogListCache(id);
   if (!result.item) throw new Error('Respuesta inválida del servidor');
   return result.item;
 }
@@ -830,6 +850,7 @@ export async function setCatalogItemAvailabilityRequest(
     `/api/delivery/catalog/${encodeURIComponent(id)}/${encodeURIComponent(itemId)}`,
     { method: 'PUT', body: JSON.stringify({ item: { available } }) },
   );
+  invalidateCatalogListCache(id);
   if (!result.item) throw new Error('Respuesta inválida del servidor');
   return result.item;
 }
@@ -840,6 +861,7 @@ export async function deleteCatalogItemRequest(userId: string, itemId: string): 
     `/api/delivery/catalog/${encodeURIComponent(id)}/${encodeURIComponent(itemId)}`,
     { method: 'DELETE' },
   );
+  invalidateCatalogListCache(id);
 }
 
 // ─── Suppliers API ────────────────────────────────────────────────────────────

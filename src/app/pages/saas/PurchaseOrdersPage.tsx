@@ -11,21 +11,34 @@ import {
   Plus,
   Search,
   Send,
+  Sparkles,
   Trash2,
   X,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import type { CatalogItem, Supplier } from '../../lib/deliveryApi';
+import type { StoreIngredient } from '../../lib/catalogCustomization';
 import {
   createPurchaseOrderRequest,
   deletePurchaseOrderRequest,
+  getSuggestionsRequest,
   listPurchaseOrdersRequest,
-  markOrderReceivedRequest,
   updatePurchaseOrderRequest,
   type PurchaseOrder,
   type PurchaseOrderItem,
   type PurchaseOrderStatus,
+  type SuggestionItem,
 } from '../../lib/purchaseOrderApi';
+import {
+  groupStockItemsByOrganizer,
+  groupSuggestionsForVertial,
+  stockItemsForSupplierOrder,
+  suggestionOrderQuantity,
+  type VertialSuggestionGroup,
+} from '../../lib/purchaseSuggestions';
+import type { InventoryCommercialBrand } from '../../lib/inventoryUtils';
+import { formatMoneyEs, formatQtyEs } from '../../lib/formatNumberEs';
+import { nextPurchaseOrderNumber } from '../../lib/purchaseOrderNumber';
 import {
   SaasTabEmpty,
   SaasTabPrimaryButton,
@@ -33,6 +46,7 @@ import {
   SaasTabToolbarRow,
   SaasTabWorkspace,
 } from '../../components/saas/SaasTabWorkspace';
+import { AlbaranCorroborateModal } from '../../components/saas/AlbaranCorroborateModal';
 
 const STATUS_META: Record<PurchaseOrderStatus, { label: string; className: string }> = {
   draft: {
@@ -69,7 +83,11 @@ function formatOrderDate(iso: string): string {
 }
 
 function formatMoney(n: number): string {
-  return `${Number(n || 0).toFixed(2)}€`;
+  return formatMoneyEs(n);
+}
+
+function formatQty(n: number): string {
+  return formatQtyEs(n);
 }
 
 // ─── Modal: nuevo pedido ──────────────────────────────────────────────────────
@@ -85,13 +103,19 @@ type DraftLine = {
 function NewPurchaseOrderModal({
   suppliers,
   catalogItems,
+  storeIngredients = [],
+  commercialBrands = [],
   initialSupplierId = '',
+  nextOrderNumber,
   onClose,
   onCreate,
 }: {
   suppliers: Supplier[];
   catalogItems: CatalogItem[];
+  storeIngredients?: StoreIngredient[];
+  commercialBrands?: InventoryCommercialBrand[];
   initialSupplierId?: string;
+  nextOrderNumber: string;
   onClose: () => void;
   onCreate: (payload: Partial<PurchaseOrder>) => Promise<void>;
 }) {
@@ -107,24 +131,21 @@ function NewPurchaseOrderModal({
   );
   const supplier = activeSuppliers.find((s) => s._id === supplierId) || null;
 
-  const buyableItems = useMemo(
-    () => catalogItems.filter((i) => i.active && i.itemType !== 'service' && i.itemType !== 'combo'),
-    [catalogItems],
+  const supplierStockItems = useMemo(
+    () => stockItemsForSupplierOrder(catalogItems, supplier, storeIngredients, commercialBrands),
+    [catalogItems, supplier, storeIngredients, commercialBrands],
   );
 
-  /** Artículos que ya están vinculados a este proveedor: lo habitual de comprar. */
-  const supplierItems = useMemo(
-    () => (supplierId ? buyableItems.filter((i) => i.supplierId === supplierId) : []),
-    [buyableItems, supplierId],
-  );
-
-  const searchResults = useMemo(() => {
+  const visibleStockItems = useMemo(() => {
     const q = itemSearch.trim().toLowerCase();
-    if (!q) return [];
-    return buyableItems
-      .filter((i) => (i.name || '').toLowerCase().includes(q))
-      .slice(0, 8);
-  }, [buyableItems, itemSearch]);
+    if (!q) return supplierStockItems;
+    return supplierStockItems.filter((i) => (i.name || '').toLowerCase().includes(q));
+  }, [supplierStockItems, itemSearch]);
+
+  const pickerGroups = useMemo(
+    () => groupStockItemsByOrganizer(visibleStockItems, storeIngredients, commercialBrands),
+    [visibleStockItems, storeIngredients, commercialBrands],
+  );
 
   const addItem = (item: CatalogItem) => {
     setLines((prev) => {
@@ -140,11 +161,10 @@ function NewPurchaseOrderModal({
         },
       ];
     });
-    setItemSearch('');
   };
 
-  const addAllSupplierItems = () => {
-    for (const item of supplierItems) addItem(item);
+  const addAllVisible = () => {
+    for (const item of visibleStockItems) addItem(item);
   };
 
   const updateLine = (catalogItemId: string, patch: Partial<DraftLine>) => {
@@ -216,7 +236,12 @@ function NewPurchaseOrderModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="shrink-0 px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3">
-          <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Nuevo pedido a proveedor</h2>
+          <div>
+            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Nuevo pedido a proveedor</h2>
+            <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mt-0.5 font-mono">
+              {nextOrderNumber}
+            </p>
+          </div>
           <button type="button" onClick={onClose} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800">
             <X className="w-5 h-5 text-gray-500" />
           </button>
@@ -244,77 +269,82 @@ function NewPurchaseOrderModal({
             ) : null}
           </div>
 
-          {supplierId && supplierItems.length > 0 ? (
-            <div className="rounded-xl border border-blue-100 dark:border-blue-900/40 bg-blue-50/50 dark:bg-blue-950/20 p-3">
-              <div className="flex items-center justify-between gap-2 mb-2">
-                <p className="text-xs font-bold text-blue-800 dark:text-blue-300">
-                  Lo que sueles comprar a {supplier?.name} ({supplierItems.length})
-                </p>
+          {supplierId && (supplier?.organizerIds?.length ?? 0) > 0 ? (
+            <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
+              Solo artículos de almacén de lo que este proveedor suministra.
+            </p>
+          ) : null}
+
+          <div>
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400">
+                Artículos de almacén
+                {visibleStockItems.length > 0 ? ` (${visibleStockItems.length})` : ''}
+              </label>
+              {visibleStockItems.length > 0 ? (
                 <button
                   type="button"
-                  onClick={addAllSupplierItems}
+                  onClick={addAllVisible}
                   className="text-xs font-semibold text-[var(--v-blue,#2563eb)] hover:underline shrink-0"
                 >
                   Añadir todo
                 </button>
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {supplierItems.slice(0, 12).map((item) => {
-                  const added = lines.some((l) => l.catalogItemId === item._id);
-                  return (
-                    <button
-                      key={item._id}
-                      type="button"
-                      onClick={() => addItem(item)}
-                      disabled={added}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
-                        added
-                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300 cursor-default'
-                          : 'border-gray-200 bg-white text-gray-700 hover:border-blue-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'
-                      }`}
-                    >
-                      {added ? '✓ ' : '+ '}
-                      {item.name}
-                    </button>
-                  );
-                })}
-                {supplierItems.length > 12 ? (
-                  <span className="px-2 py-1 text-xs text-gray-400">+{supplierItems.length - 12} más (usa el buscador)</span>
-                ) : null}
-              </div>
+              ) : null}
             </div>
-          ) : null}
-
-          <div>
-            <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">Añadir artículo</label>
-            <div className="relative">
+            <div className="relative mb-2">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
                 value={itemSearch}
                 onChange={(e) => setItemSearch(e.target.value)}
-                placeholder="Busca en tu catálogo/almacén…"
+                placeholder="Filtrar por nombre…"
                 className="w-full pl-9 pr-3 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm"
               />
             </div>
-            {searchResults.length > 0 ? (
-              <ul className="mt-1 rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-800 overflow-hidden">
-                {searchResults.map((item) => (
-                  <li key={item._id}>
-                    <button
-                      type="button"
-                      onClick={() => addItem(item)}
-                      className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
-                    >
-                      <span className="min-w-0 truncate font-medium text-gray-900 dark:text-gray-100">{item.name}</span>
-                      <span className="text-xs text-gray-400 tabular-nums shrink-0">
-                        coste {formatMoney(Number(item.costPrice || 0))}
-                        {item.supplierName ? ` · ${item.supplierName}` : ''}
-                      </span>
-                    </button>
-                  </li>
+            {pickerGroups.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-4 rounded-xl border border-dashed border-gray-200 dark:border-gray-700">
+                {supplierId && (supplier?.organizerIds?.length ?? 0) === 0
+                  ? 'Este proveedor no tiene organizadores en «Qué suministra». Edítalo y márcalos, o busca tras asignarlos.'
+                  : itemSearch.trim()
+                    ? 'Ningún artículo coincide con el filtro.'
+                    : 'No hay artículos de almacén para este proveedor.'}
+              </p>
+            ) : (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 max-h-64 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800">
+                {pickerGroups.map((group) => (
+                  <div key={group.organizerId}>
+                    <p className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/50 sticky top-0">
+                      {group.organizerLabel}
+                    </p>
+                    <ul>
+                      {group.items.map((item) => {
+                        const added = lines.some((l) => l.catalogItemId === item._id);
+                        return (
+                          <li key={item._id}>
+                            <button
+                              type="button"
+                              onClick={() => addItem(item)}
+                              disabled={added}
+                              className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-60"
+                            >
+                              <span className="min-w-0 truncate font-medium text-gray-900 dark:text-gray-100">
+                                {added ? '✓ ' : '+ '}
+                                {item.name}
+                              </span>
+                              <span className="text-xs text-gray-400 tabular-nums shrink-0">
+                                stock {formatQty(Number(item.stockQuantity || 0))}
+                                {Number(item.minStock) > 0 ? ` / mín. ${formatQty(Number(item.minStock))}` : ''}
+                                {' · '}
+                                {formatMoney(Number(item.costPrice || 0))}
+                              </span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
                 ))}
-              </ul>
-            ) : null}
+              </div>
+            )}
           </div>
 
           {parsedLines.length > 0 ? (
@@ -371,7 +401,7 @@ function NewPurchaseOrderModal({
             </div>
           ) : (
             <p className="text-sm text-gray-400 text-center py-4 rounded-xl border border-dashed border-gray-200 dark:border-gray-700">
-              Añade artículos al pedido con el buscador o los accesos del proveedor.
+              Añade artículos de la lista de almacén.
             </p>
           )}
 
@@ -405,6 +435,179 @@ function NewPurchaseOrderModal({
   );
 }
 
+// ─── Sugerencia de pedido Vertial ─────────────────────────────────────────────
+
+function PurchaseSuggestionsPanel({
+  userId,
+  suppliers,
+  catalogItems,
+  storeIngredients,
+  commercialBrands,
+  onCreateOrder,
+}: {
+  userId: string;
+  suppliers: Supplier[];
+  catalogItems: CatalogItem[];
+  storeIngredients: StoreIngredient[];
+  commercialBrands: InventoryCommercialBrand[];
+  onCreateOrder: (payload: Partial<PurchaseOrder>) => Promise<void>;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [suggestions, setSuggestions] = useState<SuggestionItem[]>([]);
+  const [creatingKey, setCreatingKey] = useState('');
+
+  const groups = useMemo(
+    () =>
+      groupSuggestionsForVertial(
+        suggestions,
+        catalogItems,
+        suppliers,
+        storeIngredients,
+        commercialBrands,
+      ),
+    [suggestions, catalogItems, suppliers, storeIngredients, commercialBrands],
+  );
+
+  const handleGenerate = async () => {
+    if (!userId || loading) return;
+    setLoading(true);
+    try {
+      const result = await getSuggestionsRequest(userId);
+      setSuggestions(result.suggestions || []);
+      setLoaded(true);
+      if ((result.suggestions || []).length === 0) {
+        toast.message('Todo en orden: nada por debajo del stock mínimo ni consumo sin cubrir');
+      }
+    } catch {
+      toast.error('No se pudo calcular la sugerencia de pedido');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateFromGroup = async (group: VertialSuggestionGroup) => {
+    const key = group.supplierId || '__none__';
+    if (creatingKey) return;
+    setCreatingKey(key);
+    try {
+      const items: PurchaseOrderItem[] = group.items.map((s, idx) => {
+        const quantity = suggestionOrderQuantity(s);
+        const unitCost = Number(s.costPrice) || 0;
+        return {
+          id: `poi-${Date.now()}-${idx}`,
+          catalogItemId: s._id,
+          sku: s.sku || '',
+          name: s.name,
+          quantity,
+          unitCost,
+          total: Math.round(quantity * unitCost * 100) / 100,
+          received: 0,
+          notes: '',
+        };
+      });
+      const subtotal = items.reduce((sum, i) => sum + i.total, 0);
+      const taxAmount = Math.round(subtotal * 0.21 * 100) / 100;
+      await onCreateOrder({
+        supplierId: group.supplierId,
+        supplierName: group.supplierName,
+        items,
+        subtotal: Math.round(subtotal * 100) / 100,
+        taxRate: 21,
+        taxAmount,
+        total: Math.round((subtotal + taxAmount) * 100) / 100,
+        status: 'draft',
+        source: 'auto',
+        urgency: 'normal',
+        notes: 'Sugerencia de pedido Vertial',
+      });
+      setSuggestions((prev) => prev.filter((s) => !group.items.some((g) => g._id === s._id)));
+    } catch {
+      toast.error('No se pudo crear el pedido sugerido');
+    } finally {
+      setCreatingKey('');
+    }
+  };
+
+  return (
+    <div className="mb-4 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">
+      <div className="px-4 py-3 flex items-center justify-between gap-3 border-b border-gray-100 dark:border-gray-800">
+        <div className="flex items-center gap-2 min-w-0">
+          <Sparkles className="w-4 h-4 text-teal-600 dark:text-teal-400 shrink-0" />
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-gray-900 dark:text-gray-100">Sugerencia de pedido Vertial</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+              Stock bajo mínimo y consumo de los últimos 30 días, agrupado por proveedor
+            </p>
+          </div>
+        </div>
+        <SaasTabSecondaryButton onClick={() => void handleGenerate()} disabled={loading}>
+          {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+          {loaded ? 'Actualizar sugerencia' : 'Generar sugerencia'}
+        </SaasTabSecondaryButton>
+      </div>
+
+      {loaded && groups.length === 0 ? (
+        <p className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
+          Nada que reponer ahora mismo. Revisa que los artículos tengan stock mínimo configurado.
+        </p>
+      ) : null}
+
+      {groups.length > 0 ? (
+        <div className="divide-y divide-gray-100 dark:divide-gray-800">
+          {groups.map((group) => {
+            const key = group.supplierId || '__none__';
+            const busy = creatingKey === key;
+            const canOrder = group.matchedBy !== 'none';
+            return (
+              <div key={key} className="px-4 py-3">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
+                      {group.supplierName}
+                      {group.matchedBy === 'organizer' ? (
+                        <span className="ml-2 px-1.5 py-0.5 text-[10px] font-medium rounded bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300 border border-sky-200 dark:border-sky-800 align-middle">
+                          por «Qué suministra»
+                        </span>
+                      ) : null}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {group.items.length} artículo{group.items.length !== 1 ? 's' : ''} · coste estimado {formatMoney(group.totalCost)}
+                    </p>
+                  </div>
+                  {canOrder ? (
+                    <SaasTabPrimaryButton onClick={() => void handleCreateFromGroup(group)} disabled={busy || Boolean(creatingKey)}>
+                      {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                      Crear pedido
+                    </SaasTabPrimaryButton>
+                  ) : (
+                    <span className="text-xs text-gray-400 dark:text-gray-500 max-w-[240px] text-right">
+                      Asigna proveedor al artículo o marca «Qué suministra» en un proveedor
+                    </span>
+                  )}
+                </div>
+                <ul className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1">
+                  {group.items.map((item) => (
+                    <li key={item._id} className="flex items-center justify-between gap-2 text-xs">
+                      <span className="truncate text-gray-700 dark:text-gray-300">{item.name}</span>
+                      <span className="shrink-0 tabular-nums text-gray-500 dark:text-gray-400">
+                        {item.stockQuantity}/{item.minStock} →{' '}
+                        <span className="font-semibold text-gray-900 dark:text-gray-100">
+                          pedir {suggestionOrderQuantity(item)}
+                        </span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 // ─── Página ───────────────────────────────────────────────────────────────────
 
 /**
@@ -415,12 +618,16 @@ export function PurchaseOrdersPage({
   dataUserId,
   suppliers = [],
   catalogItems = [],
+  storeIngredients = [],
+  commercialBrands = [],
   onGoToInvoices,
 }: {
   /** Titular del negocio (misma clave que proveedores/facturas/catálogo). */
   dataUserId?: string;
   suppliers?: Supplier[];
   catalogItems?: CatalogItem[];
+  storeIngredients?: StoreIngredient[];
+  commercialBrands?: InventoryCommercialBrand[];
   onGoToInvoices?: () => void;
 }) {
   const { user } = useAuth();
@@ -432,6 +639,7 @@ export function PurchaseOrdersPage({
   const [createSupplierId, setCreateSupplierId] = useState('');
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [cleaningDrafts, setCleaningDrafts] = useState(false);
+  const [corroborateOrder, setCorroborateOrder] = useState<PurchaseOrder | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Llegada desde Proveedores («Pedir»): abre el modal con el proveedor preseleccionado.
@@ -490,6 +698,11 @@ export function PurchaseOrdersPage({
     [orders],
   );
 
+  const nextOrderNumber = useMemo(
+    () => nextPurchaseOrderNumber(orders.map((o) => o.orderNumber)),
+    [orders],
+  );
+
   const handleCreate = async (payload: Partial<PurchaseOrder>) => {
     if (!userId) return;
     const created = await createPurchaseOrderRequest(userId, payload);
@@ -516,22 +729,8 @@ export function PurchaseOrdersPage({
     }
   };
 
-  const handleReceive = async (order: PurchaseOrder) => {
-    if (!userId) return;
-    const lineCount = order.items?.length ?? 0;
-    if (!window.confirm(`¿Marcar como recibido? Se sumará el stock de ${lineCount} línea${lineCount !== 1 ? 's' : ''}.`)) {
-      return;
-    }
-    markBusy(order._id, true);
-    try {
-      const updated = await markOrderReceivedRequest(userId, order._id);
-      setOrders((prev) => prev.map((o) => (o._id === updated._id ? updated : o)));
-      toast.success('Pedido recibido: stock actualizado. Registra la factura cuando llegue.');
-    } catch {
-      toast.error('No se pudo marcar como recibido');
-    } finally {
-      markBusy(order._id, false);
-    }
+  const handleReceive = (order: PurchaseOrder) => {
+    setCorroborateOrder(order);
   };
 
   const handleDelete = async (order: PurchaseOrder) => {
@@ -599,6 +798,16 @@ export function PurchaseOrdersPage({
         />
       }
     >
+      {userId ? (
+        <PurchaseSuggestionsPanel
+          userId={userId}
+          suppliers={suppliers}
+          catalogItems={catalogItems}
+          storeIngredients={storeIngredients}
+          commercialBrands={commercialBrands}
+          onCreateOrder={handleCreate}
+        />
+      ) : null}
       {loading ? (
         <div className="flex items-center justify-center py-12 text-gray-500 dark:text-gray-400 text-sm">
           <Loader2 className="w-5 h-5 animate-spin mr-2" />
@@ -674,7 +883,7 @@ export function PurchaseOrdersPage({
                           className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-emerald-700 border border-emerald-200 dark:text-emerald-400 dark:border-emerald-900"
                         >
                           <PackageCheck className="w-3.5 h-3.5" />
-                          Recibir
+                          Recibir / corroborar
                         </button>
                       ) : null}
                       {order.status === 'received' ? (
@@ -769,7 +978,7 @@ export function PurchaseOrdersPage({
                                 title="Marcar como recibido: suma el stock"
                               >
                                 <PackageCheck className="w-3.5 h-3.5" />
-                                Recibir
+                                Recibir / corroborar
                               </button>
                             ) : null}
                             {order.status === 'received' ? (
@@ -816,12 +1025,27 @@ export function PurchaseOrdersPage({
         <NewPurchaseOrderModal
           suppliers={suppliers}
           catalogItems={catalogItems}
+          storeIngredients={storeIngredients}
+          commercialBrands={commercialBrands}
           initialSupplierId={createSupplierId}
+          nextOrderNumber={nextOrderNumber}
           onClose={() => {
             setShowCreate(false);
             setCreateSupplierId('');
           }}
           onCreate={handleCreate}
+        />
+      ) : null}
+
+      {corroborateOrder && userId ? (
+        <AlbaranCorroborateModal
+          userId={userId}
+          order={corroborateOrder}
+          invoice={null}
+          onClose={() => setCorroborateOrder(null)}
+          onDone={({ order }) => {
+            setOrders((prev) => prev.map((o) => (o._id === order._id ? order : o)));
+          }}
         />
       ) : null}
     </SaasTabWorkspace>

@@ -211,6 +211,7 @@ const es = {
       // Events
       eventsHub: 'Centro de eventos',
       eventsNewContract: 'Nueva contratación',
+      eventsQuotes: 'Presupuestos',
       eventsPipeline: 'Contrataciones',
       eventsServices: 'Servicios',
       eventsManagement: 'Gestión',
@@ -219,6 +220,7 @@ const es = {
       eventsVenues: 'Espacios',
       eventsCatering: 'Catering',
       eventsLogistics: 'Logística',
+      eventsRoute: 'Ruta de eventos',
       // Hair Salon
       salonAppointments: 'Citas',
       salonServices: 'Servicios',
@@ -2134,6 +2136,7 @@ const en = {
       // Events
       eventsHub: 'Events hub',
       eventsNewContract: 'New contract',
+      eventsQuotes: 'Quotes',
       eventsPipeline: 'Contracts',
       eventsServices: 'Services',
       eventsManagement: 'Management',
@@ -2142,6 +2145,7 @@ const en = {
       eventsVenues: 'Venues',
       eventsCatering: 'Catering',
       eventsLogistics: 'Logistics',
+      eventsRoute: 'Event route',
       // Hair Salon
       salonAppointments: 'Appointments',
       salonServices: 'Services',
@@ -4042,6 +4046,7 @@ const pt = {
       // Events
       eventsHub: 'Centro de eventos',
       eventsNewContract: 'Nova contratação',
+      eventsQuotes: 'Orçamentos',
       eventsPipeline: 'Contratações',
       eventsServices: 'Serviços',
       eventsManagement: 'Gestão',
@@ -4050,6 +4055,7 @@ const pt = {
       eventsVenues: 'Espaços',
       eventsCatering: 'Catering',
       eventsLogistics: 'Logística',
+      eventsRoute: 'Rota de eventos',
       // Hair Salon
       salonAppointments: 'Marcações',
       salonServices: 'Serviços',
@@ -5565,6 +5571,7 @@ const fr = {
       // Events
       eventsHub: 'Centre événements',
       eventsNewContract: 'Nouveau contrat',
+      eventsQuotes: 'Devis',
       eventsPipeline: 'Contrats',
       eventsServices: 'Services',
       eventsManagement: 'Gestion',
@@ -5573,6 +5580,7 @@ const fr = {
       eventsVenues: 'Lieux',
       eventsCatering: 'Traiteur',
       eventsLogistics: 'Logistique',
+      eventsRoute: 'Tournée événements',
       // Hair Salon
       salonAppointments: 'Rendez-vous',
       salonServices: 'Services',
@@ -7088,6 +7096,7 @@ const it = {
       // Events
       eventsHub: 'Centro eventi',
       eventsNewContract: 'Nuovo contratto',
+      eventsQuotes: 'Preventivi',
       eventsPipeline: 'Contratti',
       eventsServices: 'Servizi',
       eventsManagement: 'Gestione',
@@ -7096,6 +7105,7 @@ const it = {
       eventsVenues: 'Sedi',
       eventsCatering: 'Catering',
       eventsLogistics: 'Logistica',
+      eventsRoute: 'Percorso eventi',
       // Hair Salon
       salonAppointments: 'Appuntamenti',
       salonServices: 'Servizi',

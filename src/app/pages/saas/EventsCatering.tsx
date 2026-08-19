@@ -69,7 +69,7 @@ const STATUS_CONFIG: Record<CateringStatus, { label: string; bg: string; text: s
 
 const EMPTY_FORM: CateringForm = { evento: '', menu: '', tipo: 'buffet', comensales: 0, precioPorPersona: 0, total: 0, alergiasDietas: '', proveedor: '', estado: 'cotizado' };
 
-export function EventsCatering() {
+export function EventsCatering({ embedded = false }: { embedded?: boolean } = {}) {
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const linkedEventName = searchParams.get('eventName') || '';
@@ -262,10 +262,10 @@ export function EventsCatering() {
     { label: 'Pedidos pendientes', value: stats.pendientes, icon: <ShoppingCart className="w-5 h-5 text-amber-500" />, bg: 'bg-amber-50 dark:bg-amber-900/30' },
   ];
 
-  return (
-    <Layout title="Catering">
+  const inner = (
+    <>
       <div className="space-y-6">
-        {linkedEventName && (
+        {!embedded && linkedEventName && (
           <div className="rounded-xl border border-cyan-200 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-950/30 px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-sm">
             <span>Evento: <strong>{linkedEventName}</strong></span>
             {linkedEventId && (
@@ -453,6 +453,8 @@ export function EventsCatering() {
         fields={MODULE_IMPORT_FIELDS}
         onImport={handleImportEntries}
       />
-    </Layout>
+    </>
   );
+  if (embedded) return inner;
+  return <Layout title="Catering">{inner}</Layout>;
 }

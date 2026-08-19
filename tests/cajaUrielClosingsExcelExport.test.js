@@ -7,6 +7,7 @@ import {
   brandMoneyShares,
   canDownloadUrielCajaExcel,
   sessionToUrielAmounts,
+  splitSessionUrielAmountsByBillingSheet,
   splitUrielAmountsByBrand,
   URIEL_BLACKBURGER_HEADERS,
   URIEL_CAJA_MONEY_HEADERS,
@@ -86,6 +87,96 @@ describe('sessionToUrielAmounts', () => {
     expect(amounts.totalPizza).toBe(7);
     expect(amounts.totalBurger).toBe(2);
     expect(amounts.totalTaco).toBe(1);
+  });
+
+  it('si el total está en marcas y el canal a 0, las marcas cuentan; el no-pagado no', () => {
+    const amounts = sessionToUrielAmounts(closedSession({
+      aggregatorClosingTotals: { glovo: 0, flipdish: 0 },
+      aggregatorClosingCard: { flipdish: 48.2 },
+      aggregatorClosingBrandTotals: {
+        glovo: { 'brand-mm': 80, 'brand-bb': 20 },
+      },
+    }));
+    expect(amounts.glovo).toBe(100);
+    expect(amounts.app).toBe(0);
+  });
+});
+
+describe('splitSessionUrielAmountsByBillingSheet', () => {
+  const sheets = [
+    {
+      id: 'modomio',
+      label: 'MODOMIO',
+      brandIds: ['brand-mm'],
+      unitColumns: [{ key: 'pizza', header: 'TOTAL PIZZA' }],
+    },
+    {
+      id: 'blackburger',
+      label: 'BLACK BURGER',
+      brandIds: ['brand-bb'],
+      unitColumns: [{ key: 'burger', header: 'TOTAL BURGUER' }],
+    },
+  ];
+
+  it('App/Glovo van al total de marca del cierre, no al % de pizzas', () => {
+    const session = closedSession({
+      summary: {
+        salesByMethod: { efectivo: 100, tarjeta: 0, bizum: 0, online: 0, otro: 0 },
+        salesByChannel: {},
+        totalSales: 100,
+      },
+      aggregatorClosingTotals: { glovo: 100 },
+      aggregatorClosingBrandTotals: {
+        glovo: { 'brand-mm': 100 },
+      },
+      productClosingCounts: { pizza: 5, burger: 5, taco: 0 },
+    });
+    const mm = splitSessionUrielAmountsByBillingSheet(session, sheets[0], sheets);
+    const bb = splitSessionUrielAmountsByBillingSheet(session, sheets[1], sheets);
+    expect(mm.efectivo).toBe(50);
+    expect(bb.efectivo).toBe(50);
+    expect(mm.glovo).toBe(100);
+    expect(bb.glovo).toBe(0);
+    expect(mm.total).toBe(150);
+    expect(bb.total).toBe(50);
+  });
+
+  it('sin brandIds en hojas, enlaza por nombre del cierre (MODOMIO / BLACKBURGER)', () => {
+    const legacy = [
+      {
+        id: 'modomio',
+        label: 'MODOMIO',
+        brandIds: [],
+        unitColumns: [{ key: 'pizza', header: 'TOTAL PIZZA' }],
+      },
+      {
+        id: 'blackburger',
+        label: 'BLACK BURGER',
+        brandIds: [],
+        unitColumns: [{ key: 'burger', header: 'TOTAL BURGUER' }],
+      },
+    ];
+    const session = closedSession({
+      summary: {
+        salesByMethod: { efectivo: 100, tarjeta: 0, bizum: 0, online: 0, otro: 0 },
+        salesByChannel: {},
+        totalSales: 100,
+      },
+      closingBrandLabels: {
+        'brand-mm': 'MODOMIO',
+        'brand-bb': 'BLACKBURGER',
+      },
+      aggregatorClosingTotals: { glovo: 100 },
+      aggregatorClosingBrandTotals: {
+        glovo: { 'brand-mm': 70, 'brand-bb': 30 },
+      },
+      productClosingCounts: { pizza: 5, burger: 5, taco: 0 },
+    });
+    const mm = splitSessionUrielAmountsByBillingSheet(session, legacy[0], legacy);
+    const bb = splitSessionUrielAmountsByBillingSheet(session, legacy[1], legacy);
+    expect(mm.glovo).toBe(70);
+    expect(bb.glovo).toBe(30);
+    expect(mm.total + bb.total).toBe(200);
   });
 });
 

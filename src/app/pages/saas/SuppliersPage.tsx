@@ -51,9 +51,12 @@ import { GenericImportModal, type ImportFieldDef } from '../../components/saas/G
 import { SUPPLIERS_HUB } from '../../lib/suppliersHubPaths';
 import { SupplierPaymentTermsField } from '../../components/saas/SupplierPaymentTermsField';
 import {
+  initialSupplierCatalogItemIds,
   labelsForSupplierOrganizerIds,
   SupplierOrganizersField,
 } from '../../components/saas/SupplierOrganizersField';
+import { syncSupplierCatalogItemLinks } from '../../lib/supplierCatalogLinks';
+import type { StoreIngredient } from '../../lib/catalogCustomization';
 import { useBusinessOptional } from '../../context/BusinessContext';
 import { listBrandsRequest, type Brand } from '../../lib/brandsApi';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
@@ -65,14 +68,25 @@ interface CreateSupplierModalProps {
   onCreate: (data: Partial<Supplier>) => Promise<void>;
   editItem?: Supplier | null;
   brands?: Brand[];
+  catalogItems?: CatalogItem[];
+  storeIngredients?: StoreIngredient[];
 }
 
-function CreateSupplierModal({ isOpen, onClose, onCreate, editItem, brands = [] }: CreateSupplierModalProps) {
+function CreateSupplierModal({
+  isOpen,
+  onClose,
+  onCreate,
+  editItem,
+  brands = [],
+  catalogItems = [],
+  storeIngredients = [],
+}: CreateSupplierModalProps) {
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     name: '', cif: '', email: '', phone: '', address: '',
     contactPerson: '', category: '', paymentTerms: '', notes: '',
     organizerIds: [] as string[],
+    catalogItemIds: [] as string[],
   });
 
   useEffect(() => {
@@ -83,14 +97,15 @@ function CreateSupplierModal({ isOpen, onClose, onCreate, editItem, brands = [] 
         contactPerson: editItem.contactPerson || '', category: editItem.category || '',
         paymentTerms: editItem.paymentTerms || '', notes: editItem.notes || '',
         organizerIds: Array.isArray(editItem.organizerIds) ? [...editItem.organizerIds] : [],
+        catalogItemIds: initialSupplierCatalogItemIds(editItem, catalogItems),
       });
     } else {
       setForm({
         name: '', cif: '', email: '', phone: '', address: '', contactPerson: '',
-        category: '', paymentTerms: '', notes: '', organizerIds: [],
+        category: '', paymentTerms: '', notes: '', organizerIds: [], catalogItemIds: [],
       });
     }
-  }, [editItem, isOpen]);
+  }, [editItem, isOpen, catalogItems]);
   useModalClose(isOpen, onClose);
 
   if (!isOpen) return null;
@@ -111,6 +126,7 @@ function CreateSupplierModal({ isOpen, onClose, onCreate, editItem, brands = [] 
         paymentTerms: form.paymentTerms,
         notes: form.notes,
         organizerIds: form.organizerIds,
+        catalogItemIds: form.catalogItemIds,
         active: editItem?.active ?? true,
       });
     } finally {
@@ -123,7 +139,7 @@ function CreateSupplierModal({ isOpen, onClose, onCreate, editItem, brands = [] 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
           <div>
             <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">{editItem ? 'Editar proveedor' : 'Nuevo proveedor'}</h2>
@@ -146,9 +162,12 @@ function CreateSupplierModal({ isOpen, onClose, onCreate, editItem, brands = [] 
             <div><label className={labelClass}>Categoría</label><input className={inputClass} placeholder="Ej: Alimentación, Limpieza..." value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} /></div>
           </div>
           <SupplierOrganizersField
-            value={form.organizerIds}
-            onChange={(organizerIds) => setForm((f) => ({ ...f, organizerIds }))}
+            organizerIds={form.organizerIds}
+            catalogItemIds={form.catalogItemIds}
+            onChange={({ organizerIds, catalogItemIds }) => setForm((f) => ({ ...f, organizerIds, catalogItemIds }))}
             brands={brands}
+            catalogItems={catalogItems}
+            storeIngredients={storeIngredients}
             labelClassName={labelClass}
           />
           <SupplierPaymentTermsField
@@ -314,10 +333,20 @@ export function SuppliersPage() {
     try {
       if (editingSupplier) {
         const updated = await updateSupplierRequest(dataUserId, { ...editingSupplier, ...data } as Supplier);
+        const linked = await syncSupplierCatalogItemLinks(dataUserId, updated, data.catalogItemIds || [], catalogItems);
+        if (linked.length > 0) {
+          const byId = new Map(linked.map((i) => [i._id, i]));
+          setCatalogItems((prev) => prev.map((i) => byId.get(i._id) ?? i));
+        }
         setSuppliers(prev => prev.map(s => s._id === updated._id ? updated : s));
         toast.success('Proveedor actualizado');
       } else {
         const created = await createSupplierRequest(dataUserId, data);
+        const linked = await syncSupplierCatalogItemLinks(dataUserId, created, data.catalogItemIds || [], catalogItems);
+        if (linked.length > 0) {
+          const byId = new Map(linked.map((i) => [i._id, i]));
+          setCatalogItems((prev) => prev.map((i) => byId.get(i._id) ?? i));
+        }
         setSuppliers(prev => [created, ...prev.filter((s) => s._id !== created._id)]);
         toast.success('Proveedor creado');
       }
@@ -616,6 +645,7 @@ export function SuppliersPage() {
         onCreate={handleCreateSupplier}
         editItem={editingSupplier}
         brands={brands}
+        catalogItems={catalogItems}
       />
 
       <AIAddModal
