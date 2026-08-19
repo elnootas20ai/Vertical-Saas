@@ -26,6 +26,39 @@ export function isBusinessOwner(
   return Boolean(uid && owner && uid === owner);
 }
 
+const PURCHASE_DOC_DELETE_ROLES = new Set([
+  'Admin',
+  'Administrador',
+  'Gerente',
+  'GerenteGrupo',
+  'Superadmin',
+]);
+
+/**
+ * Borrar facturas/albaranes de compra: titular de la empresa o admin/gerente.
+ * (Encargado con motivo = fase posterior.)
+ */
+export function canDeletePurchaseDocuments(
+  business:
+    | {
+        owner_user_id?: string;
+        members?: { user_id?: string; role?: string }[];
+      }
+    | null
+    | undefined,
+  user?: { user_id?: string; role?: string } | null,
+): boolean {
+  const uid = String(user?.user_id || '').trim();
+  if (!uid) return false;
+  if (isBusinessOwner(business, uid)) return true;
+  const accountRole = String(user?.role || '').trim();
+  if (PURCHASE_DOC_DELETE_ROLES.has(accountRole)) return true;
+  const memberRole = String(
+    business?.members?.find((m) => String(m.user_id || '').trim() === uid)?.role || '',
+  ).trim();
+  return PURCHASE_DOC_DELETE_ROLES.has(memberRole);
+}
+
 /** Puede expulsar a este miembro (Admin invitado no echa a otros managers). */
 export function canOwnerPrecedenceRemoveMember(
   business: { owner_user_id?: string; members?: { user_id?: string; role?: string }[] } | null | undefined,

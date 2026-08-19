@@ -8,8 +8,25 @@ const PIN_FROM_ENV = String(import.meta.env.VITE_CATALOG_DELETE_PIN ?? '').trim(
 const BULK_PHRASE_NO_PIN = 'BORRADO MASIVO';
 
 export type CatalogDeleteGuardPayload =
-  | { mode: 'single'; itemName: string }
-  | { mode: 'bulk'; count: number; organizerLabel?: string; confirmPhrase?: string };
+  | {
+      mode: 'single';
+      itemName: string;
+      /** Borrado de Carta (venta). */
+      kind?: 'carta' | 'generic';
+      /** Si true, este producto de carta también controla stock / Almacén. */
+      alsoAffectsWarehouse?: boolean;
+    }
+  | {
+      mode: 'bulk';
+      count: number;
+      organizerLabel?: string;
+      confirmPhrase?: string;
+      /** Borrado de Carta (venta). Si no se indica, texto genérico (p. ej. CRM). */
+      kind?: 'carta' | 'generic';
+      /** Productos de carta que también salen en Almacén. */
+      warehouseOverlapCount?: number;
+      cartaOnlyCount?: number;
+    };
 
 function normalizePhrase(s: string) {
   return s.trim().replace(/\s+/g, ' ');
@@ -100,18 +117,43 @@ export function CatalogDeleteGuardModal({
           </button>
         </div>
 
-        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
           {payload.mode === 'single' ? (
-            <>
-              Vas a eliminar <strong className="text-gray-900 dark:text-gray-100">{payload.itemName}</strong>. Esta acción
-              no se puede deshacer.
-            </>
+            payload.kind === 'carta' ? (
+              <>
+                Vas a eliminar de la <strong className="text-gray-900 dark:text-gray-100">Carta</strong>{' '}
+                <strong className="text-gray-900 dark:text-gray-100">{payload.itemName}</strong>. Esta acción
+                no se puede deshacer.
+              </>
+            ) : (
+              <>
+                Vas a eliminar <strong className="text-gray-900 dark:text-gray-100">{payload.itemName}</strong>. Esta acción
+                no se puede deshacer.
+              </>
+            )
           ) : payload.organizerLabel ? (
+            payload.kind === 'carta' ? (
+              <>
+                Vas a eliminar de la <strong className="text-gray-900 dark:text-gray-100">Carta</strong> el
+                organizador{' '}
+                <strong className="text-gray-900 dark:text-gray-100">«{payload.organizerLabel}»</strong> y sus{' '}
+                <strong className="text-gray-900 dark:text-gray-100">{payload.count}</strong> producto
+                {payload.count !== 1 ? 's' : ''}. Esta acción no se puede deshacer.
+              </>
+            ) : (
+              <>
+                Vas a eliminar el organizador{' '}
+                <strong className="text-gray-900 dark:text-gray-100">«{payload.organizerLabel}»</strong> y sus{' '}
+                <strong className="text-gray-900 dark:text-gray-100">{payload.count}</strong> producto
+                {payload.count !== 1 ? 's' : ''}. Esta acción no se puede deshacer.
+              </>
+            )
+          ) : payload.kind === 'carta' ? (
             <>
-              Vas a eliminar el organizador{' '}
-              <strong className="text-gray-900 dark:text-gray-100">«{payload.organizerLabel}»</strong> y sus{' '}
+              Vas a eliminar de la <strong className="text-gray-900 dark:text-gray-100">Carta</strong>{' '}
               <strong className="text-gray-900 dark:text-gray-100">{payload.count}</strong> producto
-              {payload.count !== 1 ? 's' : ''}. Esta acción no se puede deshacer.
+              {payload.count !== 1 ? 's' : ''} de venta. Esto <strong>no</strong> es el borrado del Almacén
+              (artículos de stock puro).
             </>
           ) : (
             <>
@@ -120,6 +162,30 @@ export function CatalogDeleteGuardModal({
             </>
           )}
         </p>
+
+        {payload.mode === 'single' && payload.kind === 'carta' && payload.alsoAffectsWarehouse ? (
+          <div className="mb-4 rounded-xl border-2 border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 px-3 py-2.5 text-sm text-amber-900 dark:text-amber-200">
+            Este producto también controla stock: al borrarlo <strong>saldrá del Almacén</strong> (mismo
+            documento).
+          </div>
+        ) : null}
+
+        {payload.mode === 'bulk' && payload.kind === 'carta' && (payload.warehouseOverlapCount || 0) > 0 ? (
+          <div className="mb-4 rounded-xl border-2 border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 px-3 py-2.5 text-sm text-amber-900 dark:text-amber-200">
+            <p className="font-semibold">Carta ≠ Almacén puro</p>
+            <p className="mt-1 text-xs leading-relaxed">
+              {payload.warehouseOverlapCount} de {payload.count} también controlan stock / aparecen en
+              Almacén: al borrarlos saldrán de ahí. Los otros{' '}
+              {payload.cartaOnlyCount ?? Math.max(0, payload.count - (payload.warehouseOverlapCount || 0))}{' '}
+              son solo Carta.
+            </p>
+          </div>
+        ) : payload.mode === 'bulk' && payload.kind === 'carta' ? (
+          <div className="mb-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 px-3 py-2 text-xs text-gray-600 dark:text-gray-400">
+            Solo Carta (venta). El Almacén se gestiona en su pestaña; aquí no se borran ingredientes de
+            almacén puro.
+          </div>
+        ) : null}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {pinConfigured ? (

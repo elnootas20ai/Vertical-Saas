@@ -9,6 +9,7 @@ import {
   RESTAURANT_OPS_HOME_PATH,
 } from '../../lib/retailOpsPaths';
 import { notifyDeliveryBrandsChanged, notifyDeliveryCatalogChanged, notifyDeliveryConfigChanged, resolveBusinessScopeId, DELIVERY_CONFIG_CHANGED } from '../../lib/deliverySetup';
+import { canDeletePurchaseDocuments } from '../../lib/accountOwnerPrecedence';
 import {
   isDeliveryOpsBusinessType,
   isIceCreamShopBusinessType,
@@ -22,7 +23,7 @@ import { deleteCatalogItemsRelentlessly } from '../../lib/catalogBulkDelete';
 import { resolveCatalogProductImage, resolveCatalogProductPlaceholderUrl } from '../../lib/catalogProductPlaceholders';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import { catalogItemOperatesAtWorkCenter } from '../../lib/pdvScope';
-import { filterStockInventoryItems } from '../../lib/stockInventoryScope';
+import { filterStockInventoryItems, summarizeCatalogDeleteScope, isStockInventoryItem } from '../../lib/stockInventoryScope';
 import { DELIVERY_ACTIVE_STORE_CHANGED } from '../../lib/deliveryOpsPdvSelection';
 import { listWarehousesRequest, type Warehouse } from '../../lib/warehouseApi';
 import { useVerticalCatalog } from '../../hooks/useVerticalCatalog';
@@ -138,7 +139,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
-  DollarSign,
   PackageCheck,
   BarChart3,
   ArrowUpDown,
@@ -324,6 +324,8 @@ interface CreateCatalogItemModalProps {
   catalogItems?: CatalogItem[];
   storeIngredients?: StoreIngredient[];
   brandIngredientSelection?: TpvBrandIngredientSelection;
+  /** Bar/restaurante: el paso 2 no es escandallo (eso va en Escandallo). */
+  isRestaurantCatalog?: boolean;
 }
 
 function CreateCatalogItemModal({
@@ -340,6 +342,7 @@ function CreateCatalogItemModal({
   catalogItems = [],
   storeIngredients = [],
   brandIngredientSelection = {},
+  isRestaurantCatalog = false,
 }: CreateCatalogItemModalProps) {
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
@@ -749,8 +752,24 @@ function CreateCatalogItemModal({
     };
   }, [isOpen, step, editItem?._id]);
 
-  const totalSteps = 3;
+  const showComboBuilder =
+    form.itemType === 'combo' || /combo/i.test(form.category.trim());
+  const isServiceWizard = form.itemType === 'service' && !showComboBuilder;
+  const createStepLabels = isServiceWizard
+    ? ['Producto y precio', 'Foto y publicación']
+    : showComboBuilder
+      ? ['Producto y precio', 'Qué incluye el menú', 'Foto y publicación']
+      : isRestaurantCatalog
+        ? ['Producto y precio', 'Extras (opcional)', 'Foto y publicación']
+        : CREATE_STEP_LABELS;
+  const totalSteps = createStepLabels.length;
   const isEditMode = Boolean(editItem);
+  const isCompositionStep = !isEditMode && !isServiceWizard && step === 2;
+
+  useEffect(() => {
+    if (isEditMode) return;
+    if (step > totalSteps) setStep(totalSteps);
+  }, [isEditMode, step, totalSteps]);
 
   const handleCreateBrand = async () => {
     const name = form.newBrandName.trim();
@@ -1503,13 +1522,10 @@ function CreateCatalogItemModal({
   const inputClass = 'w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100';
   const labelClass = 'block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5';
 
-  const showComboBuilder =
-    form.itemType === 'combo' || /combo/i.test(form.category.trim());
-
   const renderComboBuilderSection = () => {
     if (!showComboBuilder) return null;
     return (
-      <section className="border-t border-gray-200 dark:border-gray-700 pt-6">
+      <section>
         <CatalogComboCompositionEditor
           compact
           comboItems={comboItems}
@@ -1559,7 +1575,7 @@ function CreateCatalogItemModal({
                 </button>
               </div>
               {form.supplements.length === 0 ? (
-                <p className="text-xs text-gray-400">Sin suplementos. Ej: Extra queso 1,50€</p>
+                <p className="text-sm text-stone-400">Ninguno. Ejemplo: Extra queso 1,50 €</p>
               ) : (
                 <div className="space-y-2">
                   {form.supplements.map((row, idx) => (
@@ -1682,7 +1698,7 @@ function CreateCatalogItemModal({
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
                 {editItem
                   ? 'Marca, categoría y precios vinculados a tus líneas comerciales'
-                  : `Paso ${step} de ${totalSteps} — ${CREATE_STEP_LABELS[step - 1]}`}
+                  : `Paso ${step} de ${totalSteps} — ${createStepLabels[step - 1]}`}
               </p>
             </div>
             <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors">
@@ -1890,11 +1906,18 @@ function CreateCatalogItemModal({
               <div>
                 <label className={labelClass}>Tipo de elemento</label>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {[
-                    { value: 'product', label: 'Producto', desc: 'Se vende y puede tener stock' },
-                    { value: 'service', label: 'Servicio', desc: 'No descuenta inventario' },
-                    { value: 'combo', label: 'Combo', desc: 'Paquete o menú compuesto' },
-                  ].map((option) => (
+                  {(isRestaurantCatalog
+                    ? [
+                        { value: 'product', label: 'Producto', desc: 'Plato, tapa o bebida' },
+                        { value: 'service', label: 'Servicio', desc: 'Cubierto u otro cobro, sin stock' },
+                        { value: 'combo', label: 'Combo', desc: 'Menú con varios productos de la carta' },
+                      ]
+                    : [
+                        { value: 'product', label: 'Producto', desc: 'Se vende y puede tener stock' },
+                        { value: 'service', label: 'Servicio', desc: 'No descuenta inventario' },
+                        { value: 'combo', label: 'Combo', desc: 'Paquete o menú compuesto' },
+                      ]
+                  ).map((option) => (
                     <button
                       key={option.value}
                       type="button"
@@ -1929,26 +1952,43 @@ function CreateCatalogItemModal({
                 </div>
               </div>
             </div>
-          ) : step === 2 ? (
+          ) : isCompositionStep ? (
             <div className="space-y-5">
-              {form.itemType === 'service' && !showComboBuilder ? (
-                <div className="flex items-center gap-3 p-4 bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-200 dark:border-blue-800 rounded-xl">
-                  <DollarSign className="w-6 h-6 text-blue-600 shrink-0" />
-                  <p className="text-sm text-blue-800 dark:text-blue-300">
-                    Los servicios no llevan ingredientes ni stock. Pasa al siguiente paso para la foto y la publicación.
-                  </p>
-                </div>
-              ) : showComboBuilder ? (
+              {showComboBuilder ? (
                 <>
+                  <div>
+                    <h3 className="text-base font-bold text-stone-900 dark:text-stone-100">
+                      Qué incluye este menú
+                    </h3>
+                    <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">
+                      Elige los productos de la carta que forman el combo. Luego puedes añadir extras de pago.
+                    </p>
+                  </div>
                   {renderComboBuilderSection()}
+                  {renderSupplementsSection()}
+                </>
+              ) : isRestaurantCatalog || form.buildYourOwn ? (
+                <>
+                  <div>
+                    <h3 className="text-base font-bold text-stone-900 dark:text-stone-100">
+                      Extras de pago
+                    </h3>
+                    <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">
+                      {form.buildYourOwn
+                        ? 'Los ingredientes base ya están en el paso 1. Aquí solo extras de pago (más queso, extra bacon…). Si no hay, pulsa Siguiente.'
+                        : 'Opcional. Si en el TPV se puede pedir un extra (más queso, extra hielo…), añádelo aquí. Si no, pulsa Siguiente. El coste de receta se configura en Escandallo.'}
+                    </p>
+                  </div>
                   {renderSupplementsSection()}
                 </>
               ) : (
                 <>
-                  <div className="flex items-center gap-3 p-4 bg-green-50 dark:bg-green-900/20 border-2 border-green-200 dark:border-green-800 rounded-xl">
-                    <DollarSign className="w-6 h-6 text-green-600 shrink-0" />
-                    <p className="text-sm text-green-800 dark:text-green-300">
-                      Escandallo: el coste se calcula solo al elegir ingredientes con + / −.
+                  <div>
+                    <h3 className="text-base font-bold text-stone-900 dark:text-stone-100">
+                      Ingredientes de este producto
+                    </h3>
+                    <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">
+                      Opcional. Sirve para calcular coste y descontar stock al vender. Si no aplica, pulsa Siguiente.
                     </p>
                   </div>
                   {renderCustomizationSection()}
@@ -1957,6 +1997,11 @@ function CreateCatalogItemModal({
             </div>
           ) : (
             <div className="space-y-5">
+              {isServiceWizard ? (
+                <p className="text-sm text-stone-500 dark:text-stone-400">
+                  Un servicio no lleva receta ni stock. Aquí solo foto, alérgenos y si está a la venta.
+                </p>
+              ) : null}
               <div>
                 <label className={labelClass}>URL de imagen</label>
                 <input className={inputClass} placeholder="https://ejemplo.com/imagen.jpg" value={form.image} onChange={(e) => setForm((f) => ({ ...f, image: e.target.value }))} autoFocus />
@@ -2986,6 +3031,7 @@ export function CatalogPage() {
   const businessId = resolveTpvCatalogBusinessId(scopeBusinessId, businesses);
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
   const pageReady = businessesFetchSettled && Boolean(dataUserId);
+  const canDeletePurchaseDocs = canDeletePurchaseDocuments(currentBusiness, user);
   const catalogDataReady = pageReady && Boolean(businessId);
   const { config: verticalConfig, businessType } = useVerticalCatalog();
   const itemLabelPlural = verticalConfig.itemLabelPlural || 'Productos';
@@ -4029,8 +4075,8 @@ export function CatalogPage() {
     setBulkDeleteConfirmStep(true);
     toast.warning(
       searchCatalog.trim()
-        ? `${deleteCount} producto(s) visibles seleccionados. Pulsa «Estoy seguro» y confirma el borrado.`
-        : `${deleteCount} producto(s) en catálogo (${catalogMenuItems.length} visibles). Pulsa «Estoy seguro» y confirma el borrado.`,
+        ? `Carta: ${deleteCount} producto(s) visibles. Pulsa «Estoy seguro» y confirma. No borra el Almacén puro.`
+        : `Carta: ${deleteCount} producto(s) (${catalogMenuItems.length} visibles). Pulsa «Estoy seguro» y confirma. No borra el Almacén puro.`,
       { duration: 8000 },
     );
   };
@@ -4283,15 +4329,23 @@ export function CatalogPage() {
     }
   };
 
-  const handleDeleteInvoice = async (invoice: PurchaseInvoice) => {
+  const handleDeleteInvoice = async (invoice: PurchaseInvoice, e?: { stopPropagation?: () => void }) => {
+    e?.stopPropagation?.();
     if (!dataUserId) return;
-    if (!confirm(`¿Eliminar factura ${invoice.invoiceNumber}?`)) return;
+    if (!canDeletePurchaseDocuments(currentBusiness, user)) {
+      toast.error('Solo el dueño de la cuenta o un admin puede borrar facturas y albaranes');
+      return;
+    }
+    const isAlbaran = invoiceIsAlbaran(invoice);
+    const label = isAlbaran ? 'albarán' : 'factura';
+    const code = invoice.invoiceNumber || invoice._id;
+    if (!window.confirm(`¿Eliminar ${label} ${code}? Esta acción no se puede deshacer.`)) return;
     try {
       await deletePurchaseInvoiceRequest(dataUserId, invoice._id);
-      setInvoices(prev => prev.filter(i => i._id !== invoice._id));
-      toast.success('Factura eliminada');
-    } catch {
-      toast.error('Error al eliminar la factura');
+      setInvoices((prev) => prev.filter((i) => i._id !== invoice._id));
+      toast.success(isAlbaran ? 'Albarán eliminado' : 'Factura eliminada');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Error al eliminar el ${label}`);
     }
   };
 
@@ -4571,12 +4625,15 @@ export function CatalogPage() {
     active: suppliers.filter(s => s.active).length,
   }), [suppliers]);
 
-  const invoiceKpis = useMemo(() => ({
-    total: invoices.length,
-    pending: invoices.filter(i => i.status === 'pending').length,
-    paid: invoices.filter(i => i.status === 'paid').length,
-    totalAmount: invoices.reduce((s, i) => s + (i.total || 0), 0),
-  }), [invoices]);
+  const invoiceKpis = useMemo(() => {
+    const docs = invoices.filter((i) => !invoiceIsAlbaran(i));
+    return {
+      total: docs.length,
+      pending: docs.filter((i) => i.status === 'pending').length,
+      paid: docs.filter((i) => i.status === 'paid').length,
+      totalAmount: docs.reduce((s, i) => s + (i.total || 0), 0),
+    };
+  }, [invoices]);
 
   const stockTabCount = useMemo(() => {
     const scoped = filterStockInventoryItems(catalogForActiveStore);
@@ -4715,8 +4772,8 @@ export function CatalogPage() {
             </label>
             <span className="text-xs text-gray-600 dark:text-gray-400">
               {selectedCatalogCount === 0
-                ? 'Marca productos para mover o eliminar'
-                : `${selectedCatalogCount} seleccionado${selectedCatalogCount !== 1 ? 's' : ''}`}
+                ? 'Carta: marca productos de venta para mover o eliminar (no es Almacén)'
+                : `${selectedCatalogCount} de Carta seleccionado${selectedCatalogCount !== 1 ? 's' : ''}`}
             </span>
             {bulkDeleteConfirmStep && selectedCatalogCount > 0 ? (
               <span className="text-xs font-medium text-red-700 dark:text-red-300">
@@ -5580,6 +5637,16 @@ export function CatalogPage() {
                           <PackageCheck className="w-3.5 h-3.5" />
                           Almacén
                         </button>
+                        {canDeletePurchaseDocs ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteInvoice(inv)}
+                            className="p-2 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30"
+                            title="Eliminar albarán"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        ) : null}
                       </div>
                     </li>
                   ))}
@@ -5627,6 +5694,16 @@ export function CatalogPage() {
                           <PackageCheck className="w-3.5 h-3.5" />
                           Reparar stock
                         </button>
+                        {canDeletePurchaseDocs ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteInvoice(inv)}
+                            className="p-2 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30"
+                            title="Eliminar albarán"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        ) : null}
                         <span className="text-xs font-medium text-emerald-600 flex items-center gap-1">
                           <PackageCheck className="w-3.5 h-3.5" /> Cargado
                         </span>
@@ -5645,7 +5722,8 @@ export function CatalogPage() {
   // ── Tab: Facturas ───────────────────────────────────────────────────────────
 
   const renderInvoicesTab = () => {
-    const invoicesWithOverdue = invoices.map(inv => {
+    const purchaseInvoices = invoices.filter((inv) => !invoiceIsAlbaran(inv));
+    const invoicesWithOverdue = purchaseInvoices.map(inv => {
       if (inv.status === 'pending' && inv.dueDate && new Date(inv.dueDate) < new Date()) {
         return { ...inv, status: 'overdue' };
       }
@@ -5765,9 +5843,9 @@ export function CatalogPage() {
                         <Edit3 className="w-4 h-4 text-gray-600 dark:text-gray-400" />
                       </button>
                       <button
-                        onClick={() => handleDeleteInvoice(originalInvoice)}
+                        onClick={(e) => void handleDeleteInvoice(originalInvoice, e)}
                         className="p-2 hover:bg-red-100 rounded-lg transition-colors"
-                        title="Eliminar"
+                        title={canDeletePurchaseDocs ? 'Eliminar factura' : 'Solo dueño o admin'}
                       >
                         <Trash2 className="w-4 h-4 text-red-500" />
                       </button>
@@ -5874,7 +5952,7 @@ export function CatalogPage() {
                             <Edit3 className="w-4 h-4 text-gray-600 dark:text-gray-400" />
                           </button>
                           <button
-                            onClick={() => handleDeleteInvoice(originalInvoice)}
+                            onClick={(e) => void handleDeleteInvoice(originalInvoice, e)}
                             className="p-1.5 hover:bg-red-100 rounded-lg transition-colors"
                             title="Eliminar"
                           >
@@ -6154,6 +6232,7 @@ export function CatalogPage() {
         catalogItems={catalogForComboEditor}
         storeIngredients={storeIngredients}
         brandIngredientSelection={brandIngredientSelection}
+        isRestaurantCatalog={isRestaurantCatalog}
       />
 
       {detailItem && (
@@ -6262,13 +6341,24 @@ export function CatalogPage() {
         open={catalogDeleteGuard !== null}
         payload={
           catalogDeleteGuard?.mode === 'single'
-            ? { mode: 'single', itemName: catalogDeleteGuard.item.name }
+            ? {
+                mode: 'single',
+                itemName: catalogDeleteGuard.item.name,
+                kind: 'carta',
+                alsoAffectsWarehouse: isStockInventoryItem(catalogDeleteGuard.item),
+              }
             : catalogDeleteGuard?.mode === 'bulk'
-              ? {
-                  mode: 'bulk',
-                  count: catalogDeleteGuard.items.length,
-                  organizerLabel: catalogDeleteGuard.categoryLabel,
-                }
+              ? (() => {
+                  const scope = summarizeCatalogDeleteScope(catalogDeleteGuard.items);
+                  return {
+                    mode: 'bulk' as const,
+                    kind: 'carta' as const,
+                    count: catalogDeleteGuard.items.length,
+                    organizerLabel: catalogDeleteGuard.categoryLabel,
+                    warehouseOverlapCount: scope.alsoWarehouse,
+                    cartaOnlyCount: scope.cartaOnly,
+                  };
+                })()
               : null
         }
         onClose={() => {

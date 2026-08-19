@@ -10,8 +10,8 @@ import {
   Plus,
   RefreshCw,
   ScanLine,
-  ShoppingCart,
   SlidersHorizontal,
+  Trash2,
   X,
 } from 'lucide-react';
 import { CatalogCoreLoadingState } from './CatalogCoreLoadingState';
@@ -19,6 +19,7 @@ import { useModalClose } from '../../hooks/useModalClose';
 import type { CatalogItem } from '../../lib/deliveryApi';
 import {
   createCatalogItemRequest,
+  deleteCatalogItemRequest,
   getDeliveryConfigRequest,
   listCatalogItemsRequest,
   updateCatalogItemRequest,
@@ -62,8 +63,7 @@ import {
   SaasTabWorkspace,
 } from './SaasTabWorkspace';
 import { Tabs } from './Tabs';
-import { VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
-import { InventoryPurchaseListModal } from './InventoryPurchaseListModal';
+import { VERTIAL_BTN_DANGER, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
 import { InventoryTypeFilterRow } from './InventoryTypeFilterRow';
 import { SAAS__OcrScanModal } from '../design-system/SAAS__OcrScanModal';
 
@@ -404,12 +404,14 @@ function InventoryItemDetailModal({
   userId,
   warehouseId,
   onUpdated,
+  onDeleted,
   onClose,
 }: {
   item: CatalogItem;
   userId: string;
   warehouseId: string;
   onUpdated: () => void;
+  onDeleted: () => void;
   onClose: () => void;
 }) {
   useModalClose(true, onClose);
@@ -420,6 +422,7 @@ function InventoryItemDetailModal({
   const [loadingMovements, setLoadingMovements] = useState(false);
   const [movementMode, setMovementMode] = useState<MovementMode | null>(null);
   const [savingMeta, setSavingMeta] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [minStock, setMinStock] = useState(String(item.minStock ?? 0));
   const [costPrice, setCostPrice] = useState(String(item.costPrice ?? 0));
   const [trackStock, setTrackStock] = useState(item.isStockItem !== false);
@@ -462,6 +465,27 @@ function InventoryItemDetailModal({
       toast.error(err instanceof Error ? err.message : 'No se pudo guardar');
     } finally {
       setSavingMeta(false);
+    }
+  };
+
+  const deleteItem = async () => {
+    if (!userId || !item._id) return;
+    if (
+      !window.confirm(
+        `¿Eliminar «${item.name}» del Almacén? Esta acción no se puede deshacer.`,
+      )
+    ) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      await deleteCatalogItemRequest(userId, item._id);
+      toast.success('Artículo eliminado del Almacén');
+      onDeleted();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo eliminar');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -517,10 +541,19 @@ function InventoryItemDetailModal({
           <button
             type="button"
             onClick={() => void saveMeta()}
-            disabled={savingMeta}
+            disabled={savingMeta || deleting}
             className={`${VERTIAL_BTN_SECONDARY} !min-h-0 mt-2 px-3 py-1.5 text-xs`}
           >
             {savingMeta ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Guardar'}
+          </button>
+          <button
+            type="button"
+            onClick={() => void deleteItem()}
+            disabled={deleting || savingMeta}
+            className={`${VERTIAL_BTN_DANGER} !min-h-0 mt-2 ml-2 px-3 py-1.5 text-xs`}
+          >
+            {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+            Eliminar
           </button>
         </section>
 
@@ -624,7 +657,6 @@ export function InventoryPanel() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
-  const [showPurchaseList, setShowPurchaseList] = useState(false);
   const [showInvoiceOcr, setShowInvoiceOcr] = useState(false);
   const [localItems, setLocalItems] = useState<CatalogItem[]>([]);
   const [commercialBrands, setCommercialBrands] = useState<InventoryCommercialBrand[]>([]);
@@ -876,19 +908,6 @@ export function InventoryPanel() {
                   {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                   Sincronizar
                 </SaasTabSecondaryButton>
-                <SaasTabPrimaryButton
-                  onClick={() => setShowPurchaseList(true)}
-                  disabled={scopedItems.length === 0}
-                  title="Según stock tras ventas: bajo o sin stock"
-                >
-                  <ShoppingCart className="w-4 h-4" />
-                  Qué comprar hoy
-                  {stats.low + stats.out + stats.negative > 0 ? (
-                    <span className="ml-1 inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-white/25 px-1.5 text-[11px] font-bold tabular-nums">
-                      {stats.low + stats.out + stats.negative}
-                    </span>
-                  ) : null}
-                </SaasTabPrimaryButton>
                 <SaasTabSecondaryButton
                   onClick={() => setShowInvoiceOcr(true)}
                   disabled={!dataUserId}
@@ -897,9 +916,9 @@ export function InventoryPanel() {
                   <ScanLine className="w-4 h-4" />
                   Escanear factura
                 </SaasTabSecondaryButton>
-                <SaasTabSecondaryButton onClick={() => setShowAdd(true)}>
+                <SaasTabPrimaryButton onClick={() => setShowAdd(true)}>
                   <Plus className="w-4 h-4" /> Nuevo artículo
-                </SaasTabSecondaryButton>
+                </SaasTabPrimaryButton>
               </>
             }
           />
@@ -1002,22 +1021,13 @@ export function InventoryPanel() {
           userId={dataUserId}
           warehouseId={storeWarehouseId}
           onUpdated={() => void refreshAll()}
+          onDeleted={() => {
+            setSelectedId(null);
+            void refreshAll();
+          }}
           onClose={() => setSelectedId(null)}
         />
       ) : null}
-
-      <InventoryPurchaseListModal
-        isOpen={showPurchaseList}
-        onClose={() => setShowPurchaseList(false)}
-        items={scopedItems}
-        userId={dataUserId}
-        warehouseId={storeWarehouseId}
-        onStockUpdated={() => void refreshAll()}
-        onScanInvoice={() => {
-          setShowPurchaseList(false);
-          setShowInvoiceOcr(true);
-        }}
-      />
 
       <SAAS__OcrScanModal
         isOpen={showInvoiceOcr}
