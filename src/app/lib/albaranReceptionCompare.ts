@@ -72,7 +72,7 @@ export function invoiceIsAlbaran(inv: Pick<PurchaseInvoice, 'documentKind' | 'oc
 
 /**
  * Construye filas de comparación pedido ↔ albarán/factura.
- * Si no hay factura, usa cantidades/precios del pedido (listos para editar al corroborar).
+ * Si no hay factura, usa cantidades/precios del pedido (listos para editar al comprobar).
  */
 export function buildAlbaranCompareRows(
   order: Pick<PurchaseOrder, 'items'>,

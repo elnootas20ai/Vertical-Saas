@@ -17,6 +17,7 @@ import {
   findOcrLogByHash,
   findOcrLogByFingerprint,
   findDuplicatePurchaseInvoice,
+  assignPurchaseInvoiceNumber,
   sanitizeOcrLog,
   sanitizeOcrProposal,
 } from './couchdb.js';
@@ -202,7 +203,14 @@ export async function executeProposal(proposal, userId) {
   switch (dest.action) {
     case 'create_purchase_invoice':
     case 'create_delivery_note': {
-      const invoiceNumber = String(fields.invoiceNumber || fields.documentNumber || proposal.ocrData?.documentNumber || '').trim();
+      const docKind = dest.action === 'create_delivery_note'
+        ? 'albaran'
+        : (proposal.ocrData?.documentType || 'factura_proveedor');
+      const invoiceNumber = await assignPurchaseInvoiceNumber(fakeReq, userId, {
+        invoiceNumber: fields.invoiceNumber || fields.documentNumber || proposal.ocrData?.documentNumber || '',
+        documentKind: docKind,
+        ocrData: proposal.ocrData,
+      });
       if (invoiceNumber && !proposal.forceDuplicate) {
         const dupInv = await findDuplicatePurchaseInvoice(fakeReq, userId, invoiceNumber, fields.supplierId || '', null);
         if (dupInv) {
@@ -214,9 +222,6 @@ export async function executeProposal(proposal, userId) {
       }
       const loadToWarehouse = fields.loadToWarehouse === true
         || String(fields.loadToWarehouse || '').toLowerCase() === 'true';
-      const docKind = dest.action === 'create_delivery_note'
-        ? 'albaran'
-        : (proposal.ocrData?.documentType || 'factura_proveedor');
       createdDoc = buildPurchaseInvoiceDocument(userId, {
         ...fields,
         invoiceNumber,

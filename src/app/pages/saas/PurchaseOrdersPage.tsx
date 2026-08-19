@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import {
   ArrowRight,
   ClipboardList,
+  Eye,
   FileText,
   Loader2,
   PackageCheck,
@@ -16,7 +17,9 @@ import {
   X,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useModalClose } from '../../hooks/useModalClose';
 import type { CatalogItem, Supplier } from '../../lib/deliveryApi';
+import { listPurchaseInvoicesRequest } from '../../lib/deliveryApi';
 import type { StoreIngredient } from '../../lib/catalogCustomization';
 import {
   createPurchaseOrderRequest,
@@ -435,6 +438,149 @@ function NewPurchaseOrderModal({
   );
 }
 
+function PurchaseOrderDetailModal({
+  order,
+  busy,
+  onClose,
+  onSend,
+  onReceive,
+  onGoToInvoices,
+}: {
+  order: PurchaseOrder;
+  busy: boolean;
+  onClose: () => void;
+  onSend: (order: PurchaseOrder) => void;
+  onReceive: (order: PurchaseOrder) => void;
+  onGoToInvoices?: () => void;
+}) {
+  useModalClose(true, onClose);
+  const status = STATUS_META[order.status] ?? STATUS_META.draft;
+  const items = Array.isArray(order.items) ? order.items : [];
+  const canSend = order.status === 'draft';
+  const canReceive = ['sent', 'pending', 'partial'].includes(order.status);
+  const showInvoiceCta = order.status === 'received' && !order.purchaseInvoiceId && onGoToInvoices;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/45 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-hidden flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="shrink-0 px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 truncate">
+              Pedido {order.orderNumber || ''}
+            </h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+              {order.supplierName || 'Sin proveedor'} · {formatOrderDate(order.createdAt)}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${status.className}`}>
+              {status.label}
+            </span>
+            <button type="button" onClick={onClose} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800">
+              <X className="w-5 h-5 text-gray-500" />
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+          {items.length === 0 ? (
+            <p className="text-sm text-gray-500 dark:text-gray-400">Este pedido no tiene líneas.</p>
+          ) : (
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 dark:bg-gray-800/80 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">
+                    <th className="px-3 py-2 text-left">Artículo</th>
+                    <th className="px-3 py-2 text-right">Cant.</th>
+                    <th className="px-3 py-2 text-right">Recibido</th>
+                    <th className="px-3 py-2 text-right">€/ud</th>
+                    <th className="px-3 py-2 text-right">Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                  {items.map((item) => (
+                    <tr key={item.id || item.catalogItemId}>
+                      <td className="px-3 py-2">
+                        <p className="font-medium text-gray-900 dark:text-gray-100">{item.name}</p>
+                        {item.sku ? (
+                          <p className="text-[11px] text-gray-400 font-mono">{item.sku}</p>
+                        ) : null}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-gray-800 dark:text-gray-200">
+                        {formatQty(item.quantity)}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-gray-500">
+                        {formatQty(item.received || 0)}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-gray-800 dark:text-gray-200">
+                        {formatMoney(item.unitCost)}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums font-semibold text-gray-900 dark:text-gray-100">
+                        {formatMoney(item.total)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {order.notes ? (
+            <p className="text-sm text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 rounded-xl px-3 py-2">
+              {order.notes}
+            </p>
+          ) : null}
+
+          <div className="rounded-xl bg-gray-50 dark:bg-gray-800 px-3 py-3 text-sm space-y-1">
+            <div className="flex justify-between text-gray-600 dark:text-gray-400">
+              <span>Subtotal</span>
+              <span className="tabular-nums">{formatMoney(order.subtotal)}</span>
+            </div>
+            <div className="flex justify-between text-gray-600 dark:text-gray-400">
+              <span>IVA ({order.taxRate || 21}%)</span>
+              <span className="tabular-nums">{formatMoney(order.taxAmount)}</span>
+            </div>
+            <div className="flex justify-between font-bold text-gray-900 dark:text-gray-100 pt-1 border-t border-gray-200 dark:border-gray-700">
+              <span>Total</span>
+              <span className="tabular-nums">{formatMoney(order.total)}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="shrink-0 px-5 py-4 border-t border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-end gap-2">
+          <SaasTabSecondaryButton onClick={onClose}>Cerrar</SaasTabSecondaryButton>
+          {busy ? <Loader2 className="w-5 h-5 animate-spin text-gray-400" /> : null}
+          {!busy && canSend ? (
+            <SaasTabPrimaryButton onClick={() => onSend(order)}>
+              <Send className="w-4 h-4" />
+              Enviar
+            </SaasTabPrimaryButton>
+          ) : null}
+          {!busy && canReceive ? (
+            <SaasTabPrimaryButton onClick={() => onReceive(order)}>
+              <PackageCheck className="w-4 h-4" />
+              Recibir / comprobar
+            </SaasTabPrimaryButton>
+          ) : null}
+          {!busy && showInvoiceCta ? (
+            <SaasTabPrimaryButton onClick={onGoToInvoices}>
+              <FileText className="w-4 h-4" />
+              Factura
+            </SaasTabPrimaryButton>
+          ) : null}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 // ─── Sugerencia de pedido Vertial ─────────────────────────────────────────────
 
 function PurchaseSuggestionsPanel({
@@ -634,9 +780,11 @@ export function PurchaseOrdersPage({
   const userId = String(dataUserId || user?.id || '').trim();
 
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
+  const [invoiceNumbers, setInvoiceNumbers] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [createSupplierId, setCreateSupplierId] = useState('');
+  const [viewingOrder, setViewingOrder] = useState<PurchaseOrder | null>(null);
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [cleaningDrafts, setCleaningDrafts] = useState(false);
   const [corroborateOrder, setCorroborateOrder] = useState<PurchaseOrder | null>(null);
@@ -657,10 +805,14 @@ export function PurchaseOrdersPage({
     if (!userId) return;
     setLoading(true);
     try {
-      const list = await listPurchaseOrdersRequest(userId);
+      const [list, invoiceList] = await Promise.all([
+        listPurchaseOrdersRequest(userId),
+        listPurchaseInvoicesRequest(userId).catch(() => []),
+      ]);
       setOrders(
         [...list].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))),
       );
+      setInvoiceNumbers(invoiceList.map((inv) => inv.invoiceNumber).filter(Boolean));
     } catch {
       toast.error('No se pudieron cargar los pedidos');
     } finally {
@@ -721,6 +873,7 @@ export function PurchaseOrdersPage({
         sentVia: order.sentVia || 'manual',
       });
       setOrders((prev) => prev.map((o) => (o._id === updated._id ? updated : o)));
+      setViewingOrder((prev) => (prev && prev._id === updated._id ? updated : prev));
       toast.success('Pedido marcado como enviado');
     } catch {
       toast.error('No se pudo marcar como enviado');
@@ -742,6 +895,7 @@ export function PurchaseOrdersPage({
     try {
       await deletePurchaseOrderRequest(userId, order._id);
       setOrders((prev) => prev.filter((o) => o._id !== order._id));
+      setViewingOrder((prev) => (prev && prev._id === order._id ? null : prev));
       toast.success('Pedido eliminado');
     } catch {
       toast.error('No se pudo eliminar el pedido');
@@ -834,7 +988,11 @@ export function PurchaseOrdersPage({
             const busy = busyIds.has(order._id);
             return (
               <li key={order._id} className="px-3 py-2.5">
-                <div className="flex items-start justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => setViewingOrder(order)}
+                  className="w-full text-left flex items-start justify-between gap-2"
+                >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate">
@@ -851,16 +1009,8 @@ export function PurchaseOrdersPage({
                       {formatMoney(order.total)}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => void handleDelete(order)}
-                    disabled={busy}
-                    className="p-2 rounded-lg text-gray-400 hover:text-red-600 disabled:opacity-40 shrink-0"
-                    title="Eliminar pedido"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
+                  <Eye className="w-4 h-4 text-gray-400 shrink-0 mt-0.5" aria-hidden />
+                </button>
                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                   {busy ? (
                     <Loader2 className="w-4 h-4 animate-spin text-gray-400" />
@@ -883,7 +1033,7 @@ export function PurchaseOrdersPage({
                           className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-emerald-700 border border-emerald-200 dark:text-emerald-400 dark:border-emerald-900"
                         >
                           <PackageCheck className="w-3.5 h-3.5" />
-                          Recibir / corroborar
+                          Recibir / comprobar
                         </button>
                       ) : null}
                       {order.status === 'received' ? (
@@ -904,6 +1054,15 @@ export function PurchaseOrdersPage({
                           </button>
                         ) : null
                       ) : null}
+                      <button
+                        type="button"
+                        onClick={() => void handleDelete(order)}
+                        disabled={busy}
+                        className="p-2 rounded-lg text-gray-400 hover:text-red-600 disabled:opacity-40 shrink-0"
+                        title="Eliminar pedido"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </>
                   )}
                 </div>
@@ -929,7 +1088,11 @@ export function PurchaseOrdersPage({
                 const status = STATUS_META[order.status] ?? STATUS_META.draft;
                 const busy = busyIds.has(order._id);
                 return (
-                  <tr key={order._id} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                  <tr
+                    key={order._id}
+                    className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors cursor-pointer"
+                    onClick={() => setViewingOrder(order)}
+                  >
                     <td className="px-4 py-3">
                       <span className="font-semibold text-sm text-gray-900 dark:text-gray-100">
                         {order.orderNumber || '—'}
@@ -953,12 +1116,20 @@ export function PurchaseOrdersPage({
                     <td className="px-4 py-3 text-right text-sm font-bold text-gray-900 dark:text-gray-100 tabular-nums">
                       {formatMoney(order.total)}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-1">
                         {busy ? (
                           <Loader2 className="w-4 h-4 animate-spin text-gray-400" />
                         ) : (
                           <>
+                            <button
+                              type="button"
+                              onClick={() => setViewingOrder(order)}
+                              className="p-1.5 rounded-lg text-gray-400 hover:text-[var(--v-blue,#2563eb)] hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-colors"
+                              title="Ver pedido"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
                             {order.status === 'draft' ? (
                               <button
                                 type="button"
@@ -978,7 +1149,7 @@ export function PurchaseOrdersPage({
                                 title="Marcar como recibido: suma el stock"
                               >
                                 <PackageCheck className="w-3.5 h-3.5" />
-                                Recibir / corroborar
+                                Recibir / comprobar
                               </button>
                             ) : null}
                             {order.status === 'received' ? (
@@ -1037,14 +1208,37 @@ export function PurchaseOrdersPage({
         />
       ) : null}
 
+      {viewingOrder ? (
+        <PurchaseOrderDetailModal
+          order={viewingOrder}
+          busy={busyIds.has(viewingOrder._id)}
+          onClose={() => setViewingOrder(null)}
+          onSend={(o) => {
+            void handleSend(o);
+          }}
+          onReceive={(o) => {
+            setViewingOrder(null);
+            handleReceive(o);
+          }}
+          onGoToInvoices={onGoToInvoices}
+        />
+      ) : null}
+
       {corroborateOrder && userId ? (
         <AlbaranCorroborateModal
           userId={userId}
           order={corroborateOrder}
           invoice={null}
+          existingInvoiceNumbers={invoiceNumbers}
           onClose={() => setCorroborateOrder(null)}
-          onDone={({ order }) => {
+          onDone={({ order, invoice }) => {
             setOrders((prev) => prev.map((o) => (o._id === order._id ? order : o)));
+            setViewingOrder((prev) => (prev && prev._id === order._id ? order : prev));
+            if (invoice?.invoiceNumber) {
+              setInvoiceNumbers((prev) =>
+                prev.includes(invoice.invoiceNumber) ? prev : [...prev, invoice.invoiceNumber],
+              );
+            }
           }}
         />
       ) : null}

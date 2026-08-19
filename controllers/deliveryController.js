@@ -16,6 +16,7 @@ import {
   buildPurchaseInvoiceDocument,
   sanitizePurchaseInvoice,
   listPurchaseInvoicesByUser,
+  assignPurchaseInvoiceNumber,
   findDuplicatePurchaseInvoice,
   normalizePurchaseInvoiceNumber,
   generateExpenseFromInvoice,
@@ -2617,8 +2618,18 @@ export async function listPurchaseInvoices(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     const invoices = await listPurchaseInvoicesByUser(req, userId);
-    return res.json({ ok: true, invoices: invoices.map(sanitizePurchaseInvoice) });
+    const safe = [];
+    for (const inv of invoices) {
+      try {
+        const sanitized = sanitizePurchaseInvoice(inv);
+        if (sanitized) safe.push(sanitized);
+      } catch (err) {
+        console.error('[listPurchaseInvoices] sanitize failed', inv?._id, err?.message || err);
+      }
+    }
+    return res.json({ ok: true, invoices: safe });
   } catch (error) {
+    console.error('[listPurchaseInvoices]', error?.message || error);
     return res.status(500).json({ ok: false, error: error.message || 'Error al cargar facturas' });
   }
 }
@@ -2633,7 +2644,14 @@ export async function createPurchaseInvoice(req, res) {
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
     const forceDuplicate = Boolean(invoice.forceDuplicate);
-    const invoiceNumber = String(invoice.invoiceNumber || invoice.documentNumber || '').trim();
+    const loadToWarehouse = Boolean(invoice.loadToWarehouse);
+    const documentKind = String(
+      invoice.documentKind || invoice.ocrData?.documentType || 'factura_proveedor',
+    );
+    const invoiceNumber = await assignPurchaseInvoiceNumber(req, userId, {
+      ...invoice,
+      documentKind,
+    });
     if (invoiceNumber && !forceDuplicate) {
       const dup = await findDuplicatePurchaseInvoice(
         req,
@@ -2654,12 +2672,9 @@ export async function createPurchaseInvoice(req, res) {
 
     const db = getCatalogDbName();
     await ensureDatabase(req, db);
-    const loadToWarehouse = Boolean(invoice.loadToWarehouse);
-    const documentKind = String(
-      invoice.documentKind || invoice.ocrData?.documentType || 'factura_proveedor',
-    );
     const doc = buildPurchaseInvoiceDocument(userId, {
       ...invoice,
+      invoiceNumber,
       documentKind,
       flags: {
         ...(invoice.flags || {}),

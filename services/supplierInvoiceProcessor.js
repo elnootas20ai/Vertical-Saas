@@ -13,6 +13,7 @@ import {
   findDuplicatePurchaseInvoice,
   findPurchaseInvoiceByEmailId,
   listPurchaseInvoicesByUser,
+  assignPurchaseInvoiceNumber,
   buildNotificationDocument,
   saveNotification,
   sanitizeNotification,
@@ -338,8 +339,13 @@ async function processSingleEmail(userId, email) {
   if (!email.hasValidAttachments) {
     logger.info({ tag: 'SINV_PROC', from: email.from, subject: email.subject }, 'Email sin adjuntos válidos');
 
+    const invoiceNumber = await assignPurchaseInvoiceNumber(fakeReq, userId, {
+      ...baseData,
+      documentKind: 'factura_proveedor',
+    });
     const doc = buildPurchaseInvoiceDocument(userId, {
       ...baseData,
+      invoiceNumber,
       flags: { noAttachment: true },
     });
 
@@ -371,7 +377,11 @@ async function processSingleEmail(userId, email) {
 
     const matchResult = await ensureSupplierFromOcr(userId, ocrData, email.from);
 
-    const invoiceNumber = ocrData?.documentNumber || '';
+    const invoiceNumber = await assignPurchaseInvoiceNumber(fakeReq, userId, {
+      invoiceNumber: ocrData?.documentNumber || '',
+      documentKind: ocrData?.documentType || 'factura_proveedor',
+      ocrData,
+    });
     let duplicateResult = null;
     if (invoiceNumber) {
       duplicateResult = await findDuplicatePurchaseInvoice(

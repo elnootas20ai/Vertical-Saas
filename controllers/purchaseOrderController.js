@@ -4,6 +4,7 @@ import {
   buildPurchaseOrderDocument,
   sanitizePurchaseOrder,
   listPurchaseOrdersByUser,
+  assignPurchaseInvoiceNumber,
   listCatalogItemsByUser,
   ensureDatabase,
   getDocument,
@@ -479,12 +480,19 @@ export async function receiveWithInvoice(req, res) {
     let invoice = null;
     if (createInvoice && ocrResult) {
       const { buildPurchaseInvoiceDocument, sanitizePurchaseInvoice } = await import('../services/couchdb.js');
+      const docKind = ocrResult.documentType || 'factura_proveedor';
+      const invoiceNumber = await assignPurchaseInvoiceNumber(req, userId, {
+        invoiceNumber: ocrResult.invoiceNumber || ocrResult.documentNumber || '',
+        documentKind: docKind,
+        ocrData: ocrResult,
+      });
       const invoiceData = {
         supplierId: existing.supplierId,
         supplierName: existing.supplierName,
-        invoiceNumber: ocrResult.invoiceNumber || '',
+        invoiceNumber,
         invoiceDate: ocrResult.date || now,
         dueDate: ocrResult.dueDate || '',
+        documentKind: docKind,
         lines: (ocrResult.lines || []).map((l, idx) => ({
           id: `pinvl-${idx}`,
           description: l.name || l.description || '',

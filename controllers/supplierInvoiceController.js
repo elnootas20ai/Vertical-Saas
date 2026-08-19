@@ -3,6 +3,7 @@ import {
   buildPurchaseInvoiceDocument,
   sanitizePurchaseInvoice,
   listPurchaseInvoicesByUser,
+  assignPurchaseInvoiceNumber,
   findDuplicatePurchaseInvoice,
   ensureDatabase,
   getDocument,
@@ -82,7 +83,7 @@ export async function createSupplierInvoice(req, res) {
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
     const forceDuplicate = Boolean(invoice.forceDuplicate);
-    const invoiceNumber = String(invoice.invoiceNumber || '').trim();
+    const invoiceNumber = await assignPurchaseInvoiceNumber(req, userId, invoice);
     if (invoiceNumber && !forceDuplicate) {
       const dup = await findDuplicatePurchaseInvoice(req, userId, invoiceNumber, invoice.supplierId || '', invoice.total);
       if (dup) {
@@ -99,6 +100,7 @@ export async function createSupplierInvoice(req, res) {
     await ensureDatabase(req, db);
     const doc = buildPurchaseInvoiceDocument(userId, {
       ...invoice,
+      invoiceNumber,
       source: invoice.source || 'manual',
       flags: {
         ...(invoice.flags || {}),

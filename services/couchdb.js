@@ -29,6 +29,7 @@ import {
   resolveCatalogItemIsStockItem,
 } from '../shared/catalog/catalogStockGuard.js';
 import { nextPurchaseOrderNumber } from './purchaseOrderNumber.js';
+import { resolvePurchaseInvoiceNumber } from './purchaseDocNumber.js';
 
 export { clientMatchesBusinessScope };
 
@@ -11582,9 +11583,18 @@ export async function listSuppliersByUser(req, userId) {
 export function buildPurchaseInvoiceDocument(userId, data = {}, existing = null) {
   const now = new Date().toISOString();
   const id = existing?._id || `pinv-${uuidv4()}`;
-  const invoiceNumber = String(
-    data.invoiceNumber || data.documentNumber || existing?.invoiceNumber || '',
-  ).trim() || `FC-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+  const documentKind = String(
+    data.documentKind || data.ocrData?.documentType || existing?.documentKind || 'factura_proveedor',
+  );
+  const invoiceNumber = existing
+    ? String(data.invoiceNumber || data.documentNumber || existing.invoiceNumber || '').trim()
+    : resolvePurchaseInvoiceNumber(
+        {
+          invoiceNumber: data.invoiceNumber || data.documentNumber,
+          documentKind,
+        },
+        Array.isArray(data.existingInvoiceNumbers) ? data.existingInvoiceNumbers : [],
+      );
 
   const rawLines = Array.isArray(data.lines) ? data.lines : (existing?.lines || []);
   const lines = rawLines.map((line, idx) => {
@@ -11638,24 +11648,38 @@ export function buildPurchaseInvoiceDocument(userId, data = {}, existing = null)
     workCenterId: String(data.workCenterId || data.costCenterId || existing?.workCenterId || existing?.costCenterId || '').trim(),
     workCenterName: String(data.workCenterName || data.costCenterName || existing?.workCenterName || existing?.costCenterName || '').trim(),
     entryMethod: data.entryMethod || existing?.entryMethod || 'manual',
-    documentKind: String(
-      data.documentKind || data.ocrData?.documentType || existing?.documentKind || 'factura_proveedor',
-    ),
+    documentKind,
     ocrData: data.ocrData || existing?.ocrData || null,
     ocrImageBase64: data.ocrImageBase64 || existing?.ocrImageBase64 || '',
     ocrStockReceivedAt: String(data.ocrStockReceivedAt || existing?.ocrStockReceivedAt || ''),
     ocrStockLinesReceived: Number(data.ocrStockLinesReceived ?? existing?.ocrStockLinesReceived ?? 0) || 0,
     flags: {
-      ...(existing?.flags || {}),
-      ...(data.flags || {}),
+      ...((existing?.flags && typeof existing.flags === 'object' && !Array.isArray(existing.flags))
+        ? existing.flags
+        : {}),
+      ...((data.flags && typeof data.flags === 'object' && !Array.isArray(data.flags))
+        ? data.flags
+        : {}),
     },
     createdAt: existing?.createdAt || now,
     updatedAt: now,
   };
 }
 
+function normalizePurchaseInvoiceStatus(value) {
+  const allowed = ['paid', 'pending', 'overdue', 'draft', 'partial'];
+  return allowed.includes(String(value || '')) ? String(value) : 'pending';
+}
+
 export function sanitizePurchaseInvoice(doc) {
-  if (!doc) return null;
+  if (!doc || typeof doc !== 'object') return null;
+  const flags = doc.flags && typeof doc.flags === 'object' && !Array.isArray(doc.flags)
+    ? doc.flags
+    : {};
+  const statusRaw = String(doc.status || '').trim();
+  const status = ['paid', 'pending', 'overdue', 'draft', 'partial'].includes(statusRaw)
+    ? statusRaw
+    : 'pending';
   return {
     _id: doc._id,
     _rev: doc._rev,
@@ -11670,8 +11694,10 @@ export function sanitizePurchaseInvoice(doc) {
     supplierMatchMethod: doc.supplierMatchMethod || '',
     date: doc.date || '',
     dueDate: doc.dueDate || '',
-    status: normalizePurchaseInvoiceStatus(doc.status),
-    paymentStatus: normalizePaymentStatus(doc.paymentStatus),
+    status: normalizePurchaseInvoiceStatus(status) || status,
+    paymentStatus: typeof normalizePaymentStatus === 'function'
+      ? normalizePaymentStatus(doc.paymentStatus)
+      : (doc.paymentStatus || 'pending'),
     lines: Array.isArray(doc.lines) ? doc.lines : [],
     subtotal: Number(doc.subtotal || 0),
     taxRate: Number(doc.taxRate || 21),
@@ -11705,17 +11731,21 @@ export function sanitizePurchaseInvoice(doc) {
     ocrStockReceivedAt: doc.ocrStockReceivedAt || '',
     ocrStockLinesReceived: Number(doc.ocrStockLinesReceived || 0) || 0,
     flags: {
-      duplicate: Boolean(doc.flags?.duplicate),
-      duplicateOf: doc.flags?.duplicateOf || '',
-      noAttachment: Boolean(doc.flags?.noAttachment),
-      supplierNotFound: Boolean(doc.flags?.supplierNotFound),
-      ocrFailed: Boolean(doc.flags?.ocrFailed),
-      manualReview: Boolean(doc.flags?.manualReview),
-      stockPending: Boolean(doc.flags?.stockPending),
+      duplicate: Boolean(flags.duplicate),
+      duplicateOf: flags.duplicateOf || '',
+      noAttachment: Boolean(flags.noAttachment),
+      supplierNotFound: Boolean(flags.supplierNotFound),
+      ocrFailed: Boolean(flags.ocrFailed),
+      manualReview: Boolean(flags.manualReview),
+      stockPending: Boolean(flags.stockPending),
     },
     reviewNotes: doc.reviewNotes || '',
     reviewedBy: doc.reviewedBy || '',
     reviewedAt: doc.reviewedAt || null,
+    validationStatus: doc.validationStatus || 'pending_validation',
+    validatedAt: doc.validatedAt || '',
+    validatedBy: doc.validatedBy || '',
+    pdfUrl: doc.pdfUrl || '',
     createdAt: doc.createdAt || new Date().toISOString(),
     updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
     deletedAt: doc.deletedAt || null,
@@ -11748,6 +11778,18 @@ export async function listPurchaseInvoicesByUser(req, userId) {
         doc?.type === 'purchase_invoice' && !doc?.deletedAt && (!uid || doc?.user_id === uid),
     )
     .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+}
+
+/** Asigna A-0001 / F-0001 si no hay nº de proveedor. */
+export async function assignPurchaseInvoiceNumber(req, userId, data = {}) {
+  const invoices = await listPurchaseInvoicesByUser(req, userId);
+  return resolvePurchaseInvoiceNumber(
+    {
+      invoiceNumber: data.invoiceNumber || data.documentNumber,
+      documentKind: data.documentKind || data.ocrData?.documentType,
+    },
+    invoices.map((inv) => inv.invoiceNumber),
+  );
 }
 
 /** Normaliza nº de factura/albarán para detectar duplicados (código). */

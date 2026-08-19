@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Plus, Trash2 } from 'lucide-react';
 import {
   listInventoryOrganizerChoices,
@@ -34,8 +34,10 @@ type Props = {
 };
 
 /**
- * Alta de proveedor: eliges un organizador del Excel/almacén (no todos a la vez)
+ * Alta de proveedor: eliges un organizador del Excel/almacén
  * y marcas los productos que ese proveedor te vende.
+ * Seleccionar en el desplegable ya añade el organizador y enseña sus productos.
+ * El + es para añadir otro organizador a la lista.
  */
 export function SupplierOrganizersField({
   organizerIds,
@@ -48,6 +50,7 @@ export function SupplierOrganizersField({
 }: Props) {
   const [pickId, setPickId] = useState('');
   const [openOrganizerId, setOpenOrganizerId] = useState('');
+  const pickRef = useRef<HTMLSelectElement>(null);
 
   const commercialBrands = useMemo(
     () => commercialLineBrands(brands) as InventoryCommercialBrand[],
@@ -74,12 +77,19 @@ export function SupplierOrganizersField({
     [choices, selectedOrgs],
   );
 
+  // Al editar: abrir el primer organizador para ver productos sin un clic extra.
+  useEffect(() => {
+    if (!openOrganizerId && selectedOrgs.length > 0) {
+      setOpenOrganizerId(selectedOrgs[0]);
+    }
+  }, [selectedOrgs, openOrganizerId]);
+
   const emit = (nextOrgs: string[], nextItems: Set<string>) => {
     onChange({ organizerIds: nextOrgs, catalogItemIds: [...nextItems] });
   };
 
-  const addOrganizer = () => {
-    const id = String(pickId || '').trim();
+  const addOrganizer = (rawId: string) => {
+    const id = String(rawId || '').trim();
     if (!id || selectedOrgs.includes(id)) return;
     emit([...selectedOrgs, id], selectedItems);
     setOpenOrganizerId(id);
@@ -102,7 +112,7 @@ export function SupplierOrganizersField({
     emit(selectedOrgs, next);
   };
 
-  const toggleAllInOrganizer = (orgId: string, items: CatalogItem[], allOn: boolean) => {
+  const toggleAllInOrganizer = (_orgId: string, items: CatalogItem[], allOn: boolean) => {
     const next = new Set(selectedItems);
     for (const item of items) {
       if (allOn) next.delete(item._id);
@@ -116,12 +126,17 @@ export function SupplierOrganizersField({
       <div>
         <label className={labelClassName}>Qué te vende</label>
         <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-          Elige un organizador (los del Excel / almacén) y marca solo los productos que este proveedor te lleva. Puedes añadir varios, uno a uno.
+          Elige un organizador: salen sus productos al momento para marcarlos. El + añade otro organizador.
         </p>
         <div className="flex flex-col sm:flex-row gap-2">
           <select
+            ref={pickRef}
             value={pickId}
-            onChange={(e) => setPickId(e.target.value)}
+            onChange={(e) => {
+              const id = e.target.value;
+              setPickId(id);
+              if (id) addOrganizer(id);
+            }}
             className="flex-1 min-h-11 px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 outline-none focus:border-blue-500"
           >
             <option value="">Elegir organizador…</option>
@@ -133,12 +148,19 @@ export function SupplierOrganizersField({
           </select>
           <button
             type="button"
-            onClick={addOrganizer}
-            disabled={!pickId}
+            onClick={() => {
+              if (pickId) {
+                addOrganizer(pickId);
+                return;
+              }
+              pickRef.current?.focus();
+            }}
+            disabled={remaining.length === 0}
             className={VERTIAL_BTN_SECONDARY}
+            title="Añadir otro organizador"
           >
             <Plus className="w-4 h-4" />
-            Añadir
+            Añadir otro
           </button>
         </div>
         {choices.length === 0 ? (

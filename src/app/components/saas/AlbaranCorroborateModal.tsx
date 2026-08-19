@@ -17,6 +17,7 @@ import {
   summarizeCompareIssues,
   type AlbaranCompareRow,
 } from '../../lib/albaranReceptionCompare';
+import { nextPurchaseDocNumber } from '../../lib/purchaseDocNumber';
 import { formatMoneyEs, formatQtyEs } from '../../lib/formatNumberEs';
 import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
 import { useModalClose } from '../../hooks/useModalClose';
@@ -42,12 +43,14 @@ export function AlbaranCorroborateModal({
   userId,
   order,
   invoice,
+  existingInvoiceNumbers = [],
   onClose,
   onDone,
 }: {
   userId: string;
   order: PurchaseOrder;
   invoice?: PurchaseInvoice | null;
+  existingInvoiceNumbers?: Array<string | undefined | null>;
   onClose: () => void;
   onDone: (result: { order: PurchaseOrder; invoice?: PurchaseInvoice | null }) => void;
 }) {
@@ -55,7 +58,7 @@ export function AlbaranCorroborateModal({
   const [rows, setRows] = useState<AlbaranCompareRow[]>(() => buildAlbaranCompareRows(order, invoice));
   const [saving, setSaving] = useState(false);
   const [albaranNumber, setAlbaranNumber] = useState(
-    () => invoice?.invoiceNumber || `ALB-${order.orderNumber || order._id.slice(-6)}`,
+    () => invoice?.invoiceNumber || nextPurchaseDocNumber('albaran', existingInvoiceNumbers),
   );
 
   useEffect(() => {
@@ -115,12 +118,12 @@ export function AlbaranCorroborateModal({
         savedInvoice = await createPurchaseInvoiceRequest(userId, {
           supplierId: order.supplierId,
           supplierName: order.supplierName,
-          invoiceNumber: albaranNumber.trim() || `ALB-${Date.now().toString(36).toUpperCase()}`,
+          invoiceNumber: albaranNumber.trim() || nextPurchaseDocNumber('albaran', existingInvoiceNumbers),
           date: new Date().toISOString().slice(0, 10),
           status: 'pending',
           lines: invoiceLines,
           taxRate: order.taxRate || 21,
-          notes: `Corroborado con pedido ${order.orderNumber || order._id.slice(-8)}`,
+          notes: `Comprobado con pedido ${order.orderNumber || order._id.slice(-8)}`,
           linkedPurchaseOrderId: order._id,
           linkedPurchaseOrderNumber: order.orderNumber || '',
           documentKind: 'albaran',
@@ -131,12 +134,12 @@ export function AlbaranCorroborateModal({
       }
 
       toast.success(
-        `Corroborado: stock + costes de factura actualizados (${receivable.length} línea${receivable.length === 1 ? '' : 's'})`,
+        `Comprobado: stock + costes de factura actualizados (${receivable.length} línea${receivable.length === 1 ? '' : 's'})`,
       );
       onDone({ order: updatedOrder, invoice: savedInvoice });
       onClose();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'No se pudo corroborar la recepción');
+      toast.error(err instanceof Error ? err.message : 'No se pudo comprobar la recepción');
     } finally {
       setSaving(false);
     }
@@ -149,7 +152,7 @@ export function AlbaranCorroborateModal({
         <div className="flex items-start justify-between gap-3 px-4 py-3 border-b border-stone-100 dark:border-stone-800">
           <div className="min-w-0">
             <h2 className="text-base font-bold text-stone-900 dark:text-stone-100">
-              Corroborar albarán
+              Comprobar albarán
             </h2>
             <p className="text-xs text-stone-500 mt-0.5 truncate">
               Pedido {order.orderNumber || '—'} · {order.supplierName || 'Proveedor'}
@@ -187,7 +190,7 @@ export function AlbaranCorroborateModal({
               value={albaranNumber}
               onChange={(e) => setAlbaranNumber(e.target.value)}
               className="w-full rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-950 px-3 py-2 text-sm"
-              placeholder="ALB-001"
+              placeholder="A-0001"
             />
           </div>
         )}
@@ -277,7 +280,7 @@ export function AlbaranCorroborateModal({
           </button>
           <button type="button" onClick={() => void handleConfirm()} className={VERTIAL_BTN_PRIMARY} disabled={saving}>
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-            Confirmar recepción
+            Confirmar pedido
           </button>
         </div>
       </div>

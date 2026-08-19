@@ -3707,9 +3707,9 @@ export function CatalogPage() {
       const data = await listPurchaseInvoicesRequest(dataUserId);
       setInvoices(data);
       invoicesFetchedRef.current = true;
-    } catch {
+    } catch (err) {
       invoicesLoadStartedRef.current = false;
-      toast.error('Error al cargar facturas');
+      toast.error(err instanceof Error ? err.message : 'Error al cargar facturas');
     } finally {
       setInvoicesLoading(false);
     }
@@ -3782,6 +3782,15 @@ export function CatalogPage() {
     return () => window.removeEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStoreChange);
   }, [loadCatalog]);
 
+  // Al abrir el modal de proveedor hace falta el almacén para listar productos del organizador.
+  useEffect(() => {
+    if (!showCreateSupplier || !catalogDataReady) return;
+    if (catalogLoadedRef.current) return;
+    void loadCatalog().then((ok) => {
+      if (ok) catalogLoadedRef.current = true;
+    });
+  }, [showCreateSupplier, catalogDataReady, loadCatalog]);
+
   useEffect(() => {
     if (!pageReady || !dataUserId) return;
     if (activeTab !== 'suppliers' && activeTab !== 'invoices' && activeTab !== 'purchase-orders') return;
@@ -3805,8 +3814,8 @@ export function CatalogPage() {
     try {
       const orders = await listPurchaseOrdersRequest(dataUserId);
       setPurchaseOrders(orders);
-    } catch {
-      toast.error('Error al cargar pedidos de compra');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al cargar pedidos de compra');
     } finally {
       setPurchaseOrdersLoading(false);
     }
@@ -5452,7 +5461,7 @@ export function CatalogPage() {
           { label: 'en espera', value: waitingOrders.length, tone: 'amber' },
           { label: 'albaranes', value: albaranes.length },
           {
-            label: 'pte. corroborar',
+            label: 'pte. comprobar',
             value: pendingAlbaranes.length,
             tone: 'amber',
           },
@@ -5495,7 +5504,7 @@ export function CatalogPage() {
                         className={`${VERTIAL_BTN_PRIMARY} !min-h-0 px-3 py-2 text-xs shrink-0`}
                       >
                         <Clock className="w-3.5 h-3.5" />
-                        Corroborar
+                        Comprobar
                       </button>
                     </li>
                   ))}
@@ -5506,7 +5515,7 @@ export function CatalogPage() {
             {pendingAlbaranes.length > 0 && (
               <section>
                 <h3 className="text-xs font-bold uppercase tracking-wide text-stone-500 mb-2 px-1">
-                  Albarán llegado · por corroborar
+                  Albarán llegado · por comprobar
                 </h3>
                 <ul className="divide-y divide-stone-100 dark:divide-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 overflow-hidden bg-white dark:bg-stone-900">
                   {pendingAlbaranes.map((inv) => (
@@ -5528,7 +5537,7 @@ export function CatalogPage() {
                           onClick={() => openCorroborateForInvoice(inv)}
                           className={`${VERTIAL_BTN_PRIMARY} !min-h-0 px-3 py-2 text-xs`}
                         >
-                          Corroborar
+                          Comprobar
                         </button>
                         <button
                           type="button"
@@ -6111,6 +6120,7 @@ export function CatalogPage() {
           userId={dataUserId}
           order={albaranCorroborate.order}
           invoice={albaranCorroborate.invoice}
+          existingInvoiceNumbers={invoices.map((inv) => inv.invoiceNumber)}
           onClose={() => setAlbaranCorroborate(null)}
           onDone={({ order, invoice }) => {
             setPurchaseOrders((prev) => prev.map((o) => (o._id === order._id ? order : o)));

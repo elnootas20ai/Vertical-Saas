@@ -30,6 +30,7 @@ import {
   type PurchaseOrder,
   type PurchaseOrderItem,
 } from '../../lib/purchaseOrderApi';
+import { nextPurchaseDocNumber } from '../../lib/purchaseDocNumber';
 import {
   listWorkCenters,
   createWorkCenter,
@@ -76,12 +77,14 @@ interface InvoiceModalProps {
   onSupplierCreated: (supplier: Supplier) => void;
   editItem?: PurchaseInvoice | null;
   initialMode?: 'ocr' | 'manual';
+  suggestedInvoiceNumber?: string;
 }
 
 function InvoiceModal({
   isOpen, onClose, onSave, suppliers, catalogItems,
-  purchaseOrders, workCenters, userId, onWorkCenterCreated, onSupplierCreated, editItem,
+  purchaseOrders, workCenters, userId, onWorkCenterCreated,   onSupplierCreated, editItem,
   initialMode = 'ocr',
+  suggestedInvoiceNumber = 'F-0001',
 }: InvoiceModalProps) {
   const [step, setStep] = useState<ModalStep>('ocr-upload');
   const [entryMethod, setEntryMethod] = useState<EntryMethod>('ocr');
@@ -142,7 +145,7 @@ function InvoiceModal({
       const mode = initialMode ?? 'ocr';
       setStep(mode === 'ocr' ? 'ocr-upload' : 'form');
       setEntryMethod(mode);
-      setForm({ invoiceNumber: '', supplierName: '', supplierId: '', date: '', dueDate: '', taxRate: '21', notes: '' });
+      setForm({ invoiceNumber: suggestedInvoiceNumber, supplierName: '', supplierId: '', date: '', dueDate: '', taxRate: '21', notes: '' });
       setLines([{ itemName: '', quantity: '', unitPrice: '' }]);
       setLinkedOrderId('');
       setCostCenterId('');
@@ -156,7 +159,7 @@ function InvoiceModal({
       base64Ref.current = '';
       mimeRef.current = '';
     }
-  }, [editItem, isOpen, initialMode]);
+  }, [editItem, isOpen, initialMode, suggestedInvoiceNumber]);
 
   const supplierOrders = useMemo(() => {
     if (!form.supplierId) return purchaseOrders;
@@ -526,7 +529,7 @@ function InvoiceModal({
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className={labelClass}>Nº Factura</label>
-                <input className={`${inputClass} font-mono`} placeholder="FAC-2025-001" value={form.invoiceNumber} onChange={e => setForm(f => ({ ...f, invoiceNumber: e.target.value }))} autoFocus />
+                <input className={`${inputClass} font-mono`} placeholder={suggestedInvoiceNumber} value={form.invoiceNumber} onChange={e => setForm(f => ({ ...f, invoiceNumber: e.target.value }))} autoFocus />
               </div>
               <div>
                 <label className={labelClass}>Proveedor *</label>
@@ -1510,6 +1513,10 @@ export function SupplierBillingPage() {
         onSupplierCreated={sup => setSuppliers(prev => [...prev, sup])}
         editItem={editingInvoice}
         initialMode={invoiceModalMode}
+        suggestedInvoiceNumber={nextPurchaseDocNumber(
+          'factura_proveedor',
+          invoices.map((inv) => inv.invoiceNumber),
+        )}
       />
     </div>
   );
