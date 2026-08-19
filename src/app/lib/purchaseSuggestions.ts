@@ -90,7 +90,8 @@ export function catalogItemBelongsToSupplier(
   commercialBrands: InventoryCommercialBrand[] = [],
 ): boolean {
   if (!isStockInventoryItem(item)) return false;
-  if (supplierCatalogItemIdSet(supplier).has(item._id)) return true;
+  const marked = supplierCatalogItemIdSet(supplier);
+  if (marked.size > 0) return marked.has(item._id);
   if (item.supplierId && item.supplierId === supplier._id) return true;
   const orgs = supplierOrganizerIdSet(supplier);
   if (orgs.size === 0) return false;

@@ -2,7 +2,7 @@ import type { PurchaseInvoice, PurchaseInvoiceLine } from './deliveryApi';
 import type { PurchaseOrder, PurchaseOrderItem } from './purchaseOrderApi';
 
 /** Estados de pedido que esperan albarán / recepción. */
-export const PURCHASE_ORDER_WAITING_STATUSES = new Set(['pending', 'sent', 'partial']);
+export const PURCHASE_ORDER_WAITING_STATUSES = new Set(['draft', 'pending', 'sent', 'partial']);
 
 export type AlbaranCompareStatus = 'ok' | 'qty_diff' | 'price_diff' | 'both_diff' | 'missing_invoice' | 'extra_invoice';
 

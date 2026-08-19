@@ -139,6 +139,22 @@ function NewPurchaseOrderModal({
     [catalogItems, supplier, storeIngredients, commercialBrands],
   );
 
+  useEffect(() => {
+    if (!supplierId || !supplier) {
+      setLines([]);
+      return;
+    }
+    setLines(
+      supplierStockItems.map((item) => ({
+        catalogItemId: item._id,
+        sku: item.sku || '',
+        name: item.name || '',
+        quantity: String(Number(item.reorderQuantity) > 0 ? item.reorderQuantity : 1),
+        unitCost: String(item.costPrice ?? 0),
+      })),
+    );
+  }, [supplierId, supplier, supplierStockItems]);
+
   const visibleStockItems = useMemo(() => {
     const q = itemSearch.trim().toLowerCase();
     if (!q) return supplierStockItems;
@@ -272,9 +288,9 @@ function NewPurchaseOrderModal({
             ) : null}
           </div>
 
-          {supplierId && (supplier?.organizerIds?.length ?? 0) > 0 ? (
+          {supplierId ? (
             <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
-              Solo artículos de almacén de lo que este proveedor suministra.
+              Pedido cargado con lo marcado en el proveedor. Quita líneas o añade más si hace falta.
             </p>
           ) : null}
 

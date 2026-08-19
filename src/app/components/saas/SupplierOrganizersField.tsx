@@ -13,6 +13,7 @@ import {
   VERTIAL_ACCENT_BORDER,
   VERTIAL_BTN_SECONDARY,
 } from '../../lib/vertialUiTokens';
+import { CatalogUnitChip } from './CatalogUnitChip';
 
 type BrandLike = {
   _id: string;
@@ -231,7 +232,7 @@ export function SupplierOrganizersField({
                                 <button
                                   type="button"
                                   onClick={() => toggleItem(item._id)}
-                                  className="w-full flex items-center gap-2 py-2 text-left text-sm"
+                                  className="w-full flex items-center gap-2 py-2.5 text-left text-sm"
                                 >
                                   <span
                                     className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 ${
@@ -242,9 +243,10 @@ export function SupplierOrganizersField({
                                   >
                                     {on ? <Check className="w-3.5 h-3.5" /> : null}
                                   </span>
-                                  <span className="min-w-0 truncate font-medium text-gray-900 dark:text-gray-100">
+                                  <span className="min-w-0 flex-1 truncate font-medium text-gray-900 dark:text-gray-100">
                                     {item.name}
                                   </span>
+                                  <CatalogUnitChip unit={item.unit} size="sm" />
                                 </button>
                               </li>
                             );

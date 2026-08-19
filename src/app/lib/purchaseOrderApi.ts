@@ -157,14 +157,20 @@ export async function markOrderReceivedRequest(
   userId: string,
   orderId: string,
   receivedItems?: Array<{ catalogItemId: string; quantity: number; unitCost?: number }>,
-): Promise<PurchaseOrder> {
+): Promise<{ order: PurchaseOrder; stockUpdated?: number; stockUnits?: number; stockFailed?: number }> {
   const id = normalizeUserId(userId);
-  const result = await request<{ ok: boolean; order: PurchaseOrder }>(
+  const result = await request<{
+    ok: boolean;
+    order: PurchaseOrder;
+    stockUpdated?: number;
+    stockUnits?: number;
+    stockFailed?: number;
+  }>(
     `/api/purchase-orders/${encodeURIComponent(id)}/${encodeURIComponent(orderId)}/receive`,
     { method: 'POST', body: JSON.stringify({ receivedItems }) },
   );
   if (!result.order) throw new Error('Respuesta inválida del servidor');
-  return result.order;
+  return result;
 }
 
 // ─── Receive with Invoice (OCR) ───────────────────────────────────────────────

@@ -338,7 +338,7 @@ export function SuppliersPage() {
           const byId = new Map(linked.map((i) => [i._id, i]));
           setCatalogItems((prev) => prev.map((i) => byId.get(i._id) ?? i));
         }
-        setSuppliers(prev => prev.map(s => s._id === updated._id ? updated : s));
+        setSuppliers(prev => prev.map(s => s._id === updated._id ? { ...updated, ...data, _id: updated._id } : s));
         toast.success('Proveedor actualizado');
       } else {
         const created = await createSupplierRequest(dataUserId, data);

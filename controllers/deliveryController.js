@@ -2866,14 +2866,15 @@ export async function checkDuplicateInvoice(req, res) {
   }
 }
 
-/** Carga líneas de factura/albarán al almacén (stock). Idempotente. */
+/** Carga líneas de factura/albarán al almacén (stock). Idempotente salvo force. */
 export async function loadPurchaseInvoiceToStock(req, res) {
   try {
     const { userId, invoiceId } = req.params;
+    const force = Boolean(req.body?.force);
     const existing = await ensurePurchaseInvoiceOwner(req, userId, invoiceId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Factura no encontrada' });
 
-    if (existing.ocrStockReceivedAt) {
+    if (existing.ocrStockReceivedAt && !force) {
       return res.json({
         ok: true,
         skipped: true,
@@ -2883,14 +2884,29 @@ export async function loadPurchaseInvoiceToStock(req, res) {
       });
     }
 
+    // force: permite reintentar si se marcó «cargado» sin haber subido stock.
+    let invoiceDoc = existing;
+    if (force && existing.ocrStockReceivedAt) {
+      const db = getCatalogDbName();
+      const cleared = {
+        ...existing,
+        ocrStockReceivedAt: '',
+        ocrStockLinesReceived: 0,
+        flags: { ...(existing.flags || {}), stockPending: true },
+        updatedAt: new Date().toISOString(),
+      };
+      const saved = await putDocument(req, db, cleared._id, cleared);
+      invoiceDoc = { ...cleared, _rev: saved.rev };
+    }
+
     const account = await findAccountByUserId(req, userId);
     const { reconcilePurchaseInvoiceFromOcr } = await import('../services/ocrPurchasePipeline.js');
-    const reconciled = await reconcilePurchaseInvoiceFromOcr(req, userId, existing, {
+    const reconciled = await reconcilePurchaseInvoiceFromOcr(req, userId, invoiceDoc, {
       performedBy: account?.fullName || userId,
       applyStock: true,
       createFinance: false,
       financeSource: 'invoice',
-      entryMethod: existing.entryMethod || 'manual',
+      entryMethod: invoiceDoc.entryMethod || 'manual',
     });
 
     const db = getCatalogDbName();
@@ -2898,7 +2914,8 @@ export async function loadPurchaseInvoiceToStock(req, res) {
     return res.json({
       ok: true,
       skipped: false,
-      invoice: sanitizePurchaseInvoice(fresh || existing),
+      forced: force,
+      invoice: sanitizePurchaseInvoice(fresh || invoiceDoc),
       reconcile: reconciled,
     });
   } catch (error) {

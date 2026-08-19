@@ -252,14 +252,23 @@ export async function markOrderReceived(req, res) {
     if (allReceived || Array.isArray(receivedItems)) {
       const account = await findAccountByUserId(req, userId);
       const warehouseId = req.body.warehouseId || '';
+      const prevByCatalog = new Map(
+        (existing.items || []).map((it) => [String(it.catalogItemId || ''), Number(it.received || 0)]),
+      );
+      let stockUpdated = 0;
+      let stockFailed = 0;
+      let stockUnits = 0;
 
       for (const item of updatedItems) {
-        if (!item.catalogItemId || !item.received) continue;
+        if (!item.catalogItemId) continue;
+        const prevReceived = prevByCatalog.get(String(item.catalogItemId)) || 0;
+        const delta = Number(item.received || 0) - prevReceived;
+        if (delta <= 0) continue;
         try {
           await recordMovement(req, userId, {
             catalogItemId: item.catalogItemId,
             movementType: 'purchase_reception',
-            quantity: Number(item.received || 0),
+            quantity: delta,
             unitCost: Number(item.unitCost || 0),
             warehouseId,
             referenceId: existing._id,
@@ -267,7 +276,10 @@ export async function markOrderReceived(req, res) {
             notes: `Recepción pedido ${existing.orderNumber || existing._id.slice(-8)}`,
             performedBy: account?.fullName || userId,
           });
+          stockUpdated += 1;
+          stockUnits += delta;
         } catch (err) {
+          stockFailed += 1;
           logger.warn({ tag: 'PO_RECEIVE', err: err?.message, catalogItemId: item.catalogItemId }, 'Error registrando movimiento de stock');
         }
       }
@@ -277,11 +289,14 @@ export async function markOrderReceived(req, res) {
         try {
           const catItem = await getDocument(req, db, item.catalogItemId);
           if (catItem && catItem.type === 'catalog_item' && catItem.user_id === userId) {
-            const prevQty = Number(catItem.stockQuantity || 0) - Number(item.received || 0);
+            const prevQty = Number(catItem.stockQuantity || 0) - Math.max(0, Number(item.received || 0) - (prevByCatalog.get(String(item.catalogItemId)) || 0));
             const prevCost = Number(catItem.costPrice || 0);
             let newCostPrice = Number(item.unitCost);
             if (prevQty > 0 && prevCost > 0) {
-              newCostPrice = Math.round(((prevQty * prevCost + Number(item.received) * Number(item.unitCost)) / Number(catItem.stockQuantity || 1)) * 100) / 100;
+              const delta = Math.max(0, Number(item.received || 0) - (prevByCatalog.get(String(item.catalogItemId)) || 0));
+              if (delta > 0) {
+                newCostPrice = Math.round(((prevQty * prevCost + delta * Number(item.unitCost)) / Number(catItem.stockQuantity || 1)) * 100) / 100;
+              }
             }
             const freshDoc = await getDocument(req, db, item.catalogItemId);
             await putDocument(req, db, freshDoc._id, {
@@ -334,9 +349,17 @@ export async function markOrderReceived(req, res) {
       } catch (err) {
         logger.warn({ tag: 'PO_RECEIVE', err: err?.message }, 'Error actualizando escandallo ingredientes');
       }
+
+      return res.json({
+        ok: true,
+        order: sanitizePurchaseOrder({ ...doc, _rev: result.rev }),
+        stockUpdated,
+        stockUnits,
+        stockFailed,
+      });
     }
 
-    return res.json({ ok: true, order: sanitizePurchaseOrder({ ...doc, _rev: result.rev }) });
+    return res.json({ ok: true, order: sanitizePurchaseOrder({ ...doc, _rev: result.rev }), stockUpdated: 0, stockUnits: 0, stockFailed: 0 });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al marcar pedido como recibido' });
   }

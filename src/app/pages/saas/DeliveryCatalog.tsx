@@ -28,6 +28,7 @@ import { listWarehousesRequest, type Warehouse } from '../../lib/warehouseApi';
 import { useVerticalCatalog } from '../../hooks/useVerticalCatalog';
 import { InventoryPanel } from '../../components/saas/InventoryPanel';
 import { CatalogCoreLoadingState } from '../../components/saas/CatalogCoreLoadingState';
+import { CatalogUnitChip, StockQtyWithUnit } from '../../components/saas/CatalogUnitChip';
 import { SupplierPaymentTermsField } from '../../components/saas/SupplierPaymentTermsField';
 import {
   initialSupplierCatalogItemIds,
@@ -38,6 +39,10 @@ import { syncSupplierCatalogItemLinks } from '../../lib/supplierCatalogLinks';
 import { PurchaseOrdersPage } from './PurchaseOrdersPage';
 import { EscandalloPanel } from './CostingPage';
 import { AlbaranCorroborateModal } from '../../components/saas/AlbaranCorroborateModal';
+import { AlbaranEsperaList } from '../../components/saas/AlbaranEsperaList';
+import { purchaseInvoiceFromAlbaranOcr } from '../../lib/albaranOcrDraft';
+import { scanDocument } from '../../lib/ocrApi';
+import { downscaleImageFileToBase64, fileToRawBase64 } from '../../lib/ocrImagePrepare';
 import {
   listPurchaseOrdersRequest,
   type PurchaseOrder,
@@ -2728,7 +2733,7 @@ function StockAdjustModal({ isOpen, onClose, item, onAdjust }: StockAdjustModalP
         <div className="p-6 space-y-4">
           <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-900 rounded-xl">
             <span className="text-sm text-gray-600 dark:text-gray-400">Stock actual</span>
-            <span className="text-2xl font-bold text-gray-900 dark:text-gray-100">{item.stockQuantity} {item.unit}</span>
+            <StockQtyWithUnit quantity={item.stockQuantity} unit={item.unit} />
           </div>
           <div>
             <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
@@ -2745,7 +2750,7 @@ function StockAdjustModal({ isOpen, onClose, item, onAdjust }: StockAdjustModalP
           </div>
           <div className={`flex items-center justify-between p-4 rounded-xl ${newQty < item.minStock ? 'bg-red-50 border-2 border-red-200' : 'bg-green-50 border-2 border-green-200'}`}>
             <span className={`text-sm ${newQty < item.minStock ? 'text-red-600' : 'text-green-600'}`}>Nuevo stock</span>
-            <span className={`text-2xl font-bold ${newQty < item.minStock ? 'text-red-700' : 'text-green-700'}`}>{newQty} {item.unit}</span>
+            <StockQtyWithUnit quantity={newQty} unit={item.unit} low={newQty < item.minStock} />
           </div>
           <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 -mx-6 px-6 -mb-6 pb-6 pt-4 flex gap-3 rounded-b-2xl">
             <button
@@ -2989,6 +2994,8 @@ export function CatalogPage() {
     order: PurchaseOrder;
     invoice?: PurchaseInvoice | null;
   } | null>(null);
+  const [waitingAlbaranOrderId, setWaitingAlbaranOrderId] = useState('');
+  const [albaranOcrBusy, setAlbaranOcrBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [suppliersLoading, setSuppliersLoading] = useState(false);
   const [invoicesLoading, setInvoicesLoading] = useState(false);
@@ -3827,6 +3834,29 @@ export function CatalogPage() {
     void loadPurchaseOrdersForAlbaran();
   }, [pageReady, dataUserId, activeTab, loadPurchaseOrdersForAlbaran]);
 
+  const handleAlbaranOcrFile = async (order: PurchaseOrder, file: File) => {
+    setAlbaranOcrBusy(true);
+    try {
+      const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+      const prepared = isPdf
+        ? { base64: await fileToRawBase64(file), mime: 'application/pdf' }
+        : await downscaleImageFileToBase64(file);
+      const scanRes = await scanDocument(prepared.base64, prepared.mime, { targetModule: 'compras' });
+      if (scanRes.data?.parseError) {
+        throw new Error('No se pudo leer el albarán. Prueba una foto más clara.');
+      }
+      const draft = purchaseInvoiceFromAlbaranOcr(order, scanRes.data, {
+        imageBase64: prepared.mime.startsWith('image/') ? prepared.base64 : '',
+      });
+      setAlbaranCorroborate({ order, invoice: draft });
+      toast.success('Albarán leído. Revisa cantidades y pulsa Confirmar pedido.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo escanear el albarán');
+    } finally {
+      setAlbaranOcrBusy(false);
+    }
+  };
+
   const loadDeliveryOrders = useCallback(async () => {
     if (!dataUserId) return;
     setOrdersLoading(true);
@@ -4172,7 +4202,7 @@ export function CatalogPage() {
           const byId = new Map(linked.map((i) => [i._id, i]));
           setAllCatalogItems((prev) => prev.map((i) => byId.get(i._id) ?? i));
         }
-        setSuppliers(prev => prev.map(s => s._id === updated._id ? updated : s));
+        setSuppliers(prev => prev.map(s => s._id === updated._id ? { ...updated, ...data, _id: updated._id } : s));
         toast.success('Proveedor actualizado');
       } else {
         const created = await createSupplierRequest(dataUserId, data);
@@ -4284,16 +4314,23 @@ export function CatalogPage() {
     }
   };
 
-  const handleLoadInvoiceToWarehouse = async (invoice: PurchaseInvoice) => {
+  const handleLoadInvoiceToWarehouse = async (invoice: PurchaseInvoice, options?: { force?: boolean }) => {
     if (!dataUserId) return;
     try {
-      const result = await loadPurchaseInvoiceStockRequest(dataUserId, invoice._id);
+      const result = await loadPurchaseInvoiceStockRequest(dataUserId, invoice._id, {
+        force: Boolean(options?.force),
+      });
       setInvoices((prev) => prev.map((i) => (i._id === result.invoice._id ? result.invoice : i)));
       if (result.skipped) {
         toast.message('Ya estaba cargado en almacén');
       } else {
         const n = result.reconcile?.stockUpdated || 0;
-        toast.success(n > 0 ? `Cargado al almacén: ${n} artículo(s)` : 'Sin líneas vinculadas a inventario');
+        toast.success(
+          n > 0
+            ? `Cargado al almacén: ${n} artículo(s)`
+            : 'Sin líneas vinculadas a inventario (revisa catalogItemId en las líneas)',
+        );
+        void loadCatalog();
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'No se pudo cargar al almacén');
@@ -4973,16 +5010,23 @@ export function CatalogPage() {
                                     {subtitleParts.join(' · ')}
                                   </span>
                                 )}
-                                <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
-                                  <span className="font-bold text-gray-900 dark:text-gray-100 tabular-nums">
+                                <span className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
+                                  <span className="font-bold text-gray-900 dark:text-gray-100 tabular-nums text-sm">
                                     {item.unitPrice.toFixed(2)}€
                                   </span>
-                                  <span className="text-gray-400 tabular-nums">
-                                    {sales?.totalUnits ?? 0} ud vendidas
+                                  <span className="text-gray-500 dark:text-gray-400 tabular-nums inline-flex items-center gap-1.5">
+                                    <span className="font-semibold text-gray-800 dark:text-gray-200">{sales?.totalUnits ?? 0}</span>
+                                    <CatalogUnitChip unit="ud" size="sm" />
+                                    <span className="text-gray-400">vendidas</span>
                                   </span>
                                   {itemType !== 'service' && (
-                                    <span className={`tabular-nums ${isLowStock ? 'font-semibold text-red-600' : 'text-gray-400'}`}>
-                                      Stock: {item.stockQuantity} {item.unit}
+                                    <span className={`inline-flex items-center gap-1.5 ${isLowStock ? 'text-red-600' : 'text-gray-600 dark:text-gray-300'}`}>
+                                      <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Stock</span>
+                                      <StockQtyWithUnit
+                                        quantity={item.stockQuantity}
+                                        unit={item.unit}
+                                        low={isLowStock}
+                                      />
                                     </span>
                                   )}
                                 </span>
@@ -5124,8 +5168,9 @@ export function CatalogPage() {
                                   <Loader2 className="w-4 h-4 animate-spin text-gray-400" />
                                 ) : (
                                   <div>
-                                    <div className="text-sm font-bold text-gray-900 dark:text-gray-100 tabular-nums">
-                                      {sales?.totalUnits ?? 0} ud
+                                    <div className="text-sm font-bold text-gray-900 dark:text-gray-100 tabular-nums inline-flex items-center gap-1.5">
+                                      <span>{sales?.totalUnits ?? 0}</span>
+                                      <CatalogUnitChip unit="ud" size="sm" />
                                     </div>
                                     <div className="text-xs text-gray-500 dark:text-gray-400 tabular-nums">
                                       {(sales?.totalRevenue ?? 0).toFixed(2)}€
@@ -5143,8 +5188,12 @@ export function CatalogPage() {
                                     title="Clic para ajustar stock"
                                     className="text-left rounded-lg px-1.5 py-0.5 -mx-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                                   >
-                                    <span className={`block text-sm font-bold tabular-nums ${isLowStock ? 'text-red-600' : 'text-gray-900 dark:text-gray-100'}`}>
-                                      {item.stockQuantity} {item.unit}
+                                    <span className={`block ${isLowStock ? '' : ''}`}>
+                                      <StockQtyWithUnit
+                                        quantity={item.stockQuantity}
+                                        unit={item.unit}
+                                        low={isLowStock}
+                                      />
                                     </span>
                                     {isLowStock && (
                                       <span className="text-xs text-red-500 flex items-center gap-1 mt-0.5">
@@ -5254,7 +5303,7 @@ export function CatalogPage() {
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <p className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate">{supplier.name}</p>
+                    <p className="font-semibold text-sm text-gray-900 dark:text-gray-100 break-words">{supplier.name}</p>
                     <span className={`px-2 py-0.5 text-[10px] font-semibold rounded-full border shrink-0 ${
                       supplier.active
                         ? 'bg-green-100 text-green-700 border-green-200'
@@ -5263,11 +5312,11 @@ export function CatalogPage() {
                       {supplier.active ? 'Activo' : 'Inactivo'}
                     </span>
                   </div>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 break-words">
                     {[supplier.contactPerson, supplier.phone, supplier.email].filter(Boolean).join(' · ') || 'Sin datos de contacto'}
                   </p>
                   {(supplier.cif || supplier.category) && (
-                    <p className="text-[11px] text-gray-400 mt-0.5 truncate">
+                    <p className="text-[11px] text-gray-400 mt-0.5 break-words">
                       {[supplier.cif, supplier.category].filter(Boolean).join(' · ')}
                     </p>
                   )}
@@ -5292,92 +5341,67 @@ export function CatalogPage() {
             </li>
           ))}
         </ul>
-        {/* Desktop: tabla completa */}
-        <div className="hidden md:block overflow-x-auto">
-          <table className="w-full min-w-[900px]">
+        {/* Desktop: tabla al ancho, sin scroll a la derecha */}
+        <div className="hidden md:block">
+          <table className="w-full table-fixed">
             <thead>
               <tr className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Nombre</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Le compras</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">CIF</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Email</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Teléfono</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Contacto</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Categoría</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Suministra</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Estado</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Acciones</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase w-[38%]">Proveedor</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase w-[34%]">Suministra</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase w-[12%]">Estado</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase w-[16%]">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
               {suppliers.map(supplier => (
-                <tr key={supplier._id} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
-                  <td className="px-4 py-3">
-                    <div className="font-semibold text-gray-900 dark:text-gray-100 text-sm">{supplier.name}</div>
-                    {supplier.address && (
-                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate max-w-xs">{supplier.address}</div>
-                    )}
+                <tr key={supplier._id} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors align-top">
+                  <td className="px-3 py-3">
+                    <div className="font-semibold text-gray-900 dark:text-gray-100 text-sm break-words">{supplier.name}</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 break-words">
+                      {[supplier.cif, supplier.contactPerson, supplier.phone, supplier.email, supplier.category]
+                        .filter(Boolean)
+                        .join(' · ') || 'Sin datos de contacto'}
+                    </div>
+                    {supplier.address ? (
+                      <div className="text-[11px] text-gray-400 mt-0.5 break-words">{supplier.address}</div>
+                    ) : null}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3">
                     {(() => {
                       const linked = catalogItems.filter((i) => i.supplierId === supplier._id && i.active && !i.deletedAt);
-                      if (linked.length === 0) return <span className="text-gray-400 text-sm">—</span>;
                       const names = linked.map((i) => i.name).filter(Boolean);
-                      return (
-                        <div className="max-w-[220px]">
-                          <span className="text-sm font-bold text-gray-900 dark:text-gray-100 tabular-nums">
-                            {linked.length} artículo{linked.length !== 1 ? 's' : ''}
-                          </span>
-                          <span className="block text-[11px] text-gray-400 dark:text-gray-500 truncate" title={names.join(', ')}>
-                            {names.slice(0, 3).join(', ')}
-                            {names.length > 3 ? '…' : ''}
-                          </span>
-                        </div>
-                      );
-                    })()}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="font-mono text-sm text-gray-700 dark:text-gray-300">{supplier.cif || '—'}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="text-sm text-gray-700 dark:text-gray-300">{supplier.email || '—'}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="text-sm text-gray-700 dark:text-gray-300">{supplier.phone || '—'}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="text-sm text-gray-700 dark:text-gray-300">{supplier.contactPerson || '—'}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    {supplier.category ? (
-                      <span className="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium rounded-lg">
-                        {supplier.category}
-                      </span>
-                    ) : <span className="text-gray-400 text-sm">—</span>}
-                  </td>
-                  <td className="px-4 py-3">
-                    {(() => {
                       const labels = labelsForSupplierOrganizerIds(supplier.organizerIds, brands);
-                      if (labels.length === 0) return <span className="text-gray-400 text-sm">—</span>;
+                      if (linked.length === 0 && labels.length === 0) {
+                        return <span className="text-gray-400 text-sm">—</span>;
+                      }
                       return (
-                        <div className="flex flex-wrap gap-1 max-w-[220px]">
-                          {labels.slice(0, 4).map((label) => (
-                            <span
-                              key={label}
-                              className="px-2 py-0.5 bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300 text-[11px] font-medium rounded-lg border border-sky-200 dark:border-sky-800"
-                            >
-                              {label}
-                            </span>
-                          ))}
-                          {labels.length > 4 ? (
-                            <span className="text-[11px] text-gray-400">+{labels.length - 4}</span>
+                        <div className="space-y-1">
+                          {linked.length > 0 ? (
+                            <p className="text-sm text-gray-900 dark:text-gray-100 break-words">
+                              <span className="font-bold tabular-nums">{linked.length}</span>
+                              {' '}
+                              {linked.length === 1 ? 'artículo' : 'artículos'}
+                              {names.length > 0 ? `: ${names.join(', ')}` : ''}
+                            </p>
+                          ) : null}
+                          {labels.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {labels.map((label) => (
+                                <span
+                                  key={label}
+                                  className="px-2 py-0.5 bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300 text-[11px] font-medium rounded-lg border border-sky-200 dark:border-sky-800"
+                                >
+                                  {label}
+                                </span>
+                              ))}
+                            </div>
                           ) : null}
                         </div>
                       );
                     })()}
                   </td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-1 text-xs font-semibold rounded-full border ${
+                  <td className="px-3 py-3">
+                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full border ${
                       supplier.active
                         ? 'bg-green-100 text-green-700 border-green-200'
                         : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700'
@@ -5385,8 +5409,8 @@ export function CatalogPage() {
                       {supplier.active ? 'Activo' : 'Inactivo'}
                     </span>
                   </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1">
+                  <td className="px-3 py-3">
+                    <div className="flex flex-wrap items-center gap-1">
                       <button
                         onClick={() => setSearchParams({ tab: 'purchase-orders', supplier: supplier._id })}
                         className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold text-[var(--v-blue,#2563eb)] border border-blue-200 hover:bg-blue-50 dark:border-blue-900 dark:hover:bg-blue-950/30 transition-colors"
@@ -5436,6 +5460,11 @@ export function CatalogPage() {
     const pendingAlbaranes = albaranes.filter((a) => !a.ocrStockReceivedAt);
     const loadedAlbaranes = albaranes.filter((a) => a.ocrStockReceivedAt);
 
+    const openInvoice = (inv: PurchaseInvoice) => {
+      setEditingInvoice(inv);
+      setShowCreateInvoice(true);
+    };
+
     const openCorroborateForInvoice = (inv: PurchaseInvoice) => {
       const linked =
         purchaseOrders.find((o) => o._id === inv.linkedPurchaseOrderId) ||
@@ -5447,10 +5476,22 @@ export function CatalogPage() {
         ) ||
         null;
       if (!linked) {
-        toast.message('Sin pedido vinculado: usa «Cargar al almacén» o enlaza un pedido primero');
+        toast.message('Sin pedido vinculado: abre el albarán con Ver o carga stock con «Almacén»');
+        openInvoice(inv);
         return;
       }
       setAlbaranCorroborate({ order: linked, invoice: inv });
+    };
+
+    const repairStock = (inv: PurchaseInvoice) => {
+      if (
+        !window.confirm(
+          '¿Forzar carga al almacén? Úsalo si el albarán dice «Cargado» pero el stock no subió. Si el stock ya entró, se puede duplicar.',
+        )
+      ) {
+        return;
+      }
+      void handleLoadInvoiceToWarehouse(inv, { force: true });
     };
 
     const empty = waitingOrders.length === 0 && albaranes.length === 0;
@@ -5473,43 +5514,19 @@ export function CatalogPage() {
           <SaasTabEmpty
             icon={<Package className="w-10 h-10" />}
             title="Sin albaranes ni pedidos en espera"
-            description="Cuando envíes un pedido de compra aparecerá aquí en espera. Al llegar el albarán, corrobóralo."
+            description="Cuando crees un pedido de compra aparecerá aquí en espera. Ábrelo, escanea el albarán (OCR) y al comprobar queda en histórico."
           />
         ) : (
           <div className="space-y-4 p-3">
             {waitingOrders.length > 0 && (
-              <section>
-                <h3 className="text-xs font-bold uppercase tracking-wide text-amber-700 dark:text-amber-400 mb-2 px-1">
-                  En espera de albarán
-                </h3>
-                <ul className="divide-y divide-stone-100 dark:divide-stone-800 rounded-xl border border-amber-200/80 dark:border-amber-900/50 overflow-hidden bg-amber-50/40 dark:bg-amber-950/20">
-                  {waitingOrders.map((order) => (
-                    <li key={order._id} className="px-4 py-3 flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="font-semibold text-sm text-stone-900 dark:text-stone-100 truncate">
-                          {order.orderNumber || 'Pedido'} · {order.supplierName || 'Proveedor'}
-                        </p>
-                        <p className="text-xs text-stone-500 mt-0.5">
-                          {order.items?.length || 0} línea{(order.items?.length || 0) === 1 ? '' : 's'}
-                          {order.expectedDate
-                            ? ` · esperado ${new Date(order.expectedDate).toLocaleDateString('es-ES')}`
-                            : ''}
-                          {' · '}
-                          {order.status === 'partial' ? 'parcial' : order.status === 'sent' ? 'enviado' : 'pendiente'}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setAlbaranCorroborate({ order, invoice: null })}
-                        className={`${VERTIAL_BTN_PRIMARY} !min-h-0 px-3 py-2 text-xs shrink-0`}
-                      >
-                        <Clock className="w-3.5 h-3.5" />
-                        Comprobar
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </section>
+              <AlbaranEsperaList
+                orders={waitingOrders}
+                selectedId={waitingAlbaranOrderId}
+                ocrBusy={albaranOcrBusy}
+                onSelect={setWaitingAlbaranOrderId}
+                onPickFile={(order, file) => void handleAlbaranOcrFile(order, file)}
+                onComprobar={(order) => setAlbaranCorroborate({ order, invoice: null })}
+              />
             )}
 
             {pendingAlbaranes.length > 0 && (
@@ -5520,7 +5537,11 @@ export function CatalogPage() {
                 <ul className="divide-y divide-stone-100 dark:divide-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 overflow-hidden bg-white dark:bg-stone-900">
                   {pendingAlbaranes.map((inv) => (
                     <li key={inv._id} className="px-4 py-3 flex items-center justify-between gap-3">
-                      <div className="min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => openInvoice(inv)}
+                        className="min-w-0 text-left flex-1"
+                      >
                         <p className="font-semibold text-sm text-stone-900 dark:text-stone-100 truncate">
                           {inv.invoiceNumber || 'Sin código'} · {inv.supplierName || 'Proveedor'}
                         </p>
@@ -5530,8 +5551,15 @@ export function CatalogPage() {
                             ? ` · pedido ${inv.linkedPurchaseOrderNumber}`
                             : ' · sin pedido enlazado'}
                         </p>
-                      </div>
+                      </button>
                       <div className="flex shrink-0 items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openInvoice(inv)}
+                          className={`${VERTIAL_BTN_SECONDARY} !min-h-0 px-3 py-2 text-xs`}
+                        >
+                          Ver
+                        </button>
                         <button
                           type="button"
                           onClick={() => openCorroborateForInvoice(inv)}
@@ -5546,7 +5574,7 @@ export function CatalogPage() {
                           title="Sube stock sin comparación de pedido"
                         >
                           <PackageCheck className="w-3.5 h-3.5" />
-                          Solo almacén
+                          Almacén
                         </button>
                       </div>
                     </li>
@@ -5558,12 +5586,16 @@ export function CatalogPage() {
             {loadedAlbaranes.length > 0 && (
               <section>
                 <h3 className="text-xs font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-400 mb-2 px-1">
-                  Ya en almacén
+                  Histórico
                 </h3>
                 <ul className="divide-y divide-stone-100 dark:divide-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 overflow-hidden bg-white dark:bg-stone-900">
                   {loadedAlbaranes.map((inv) => (
                     <li key={inv._id} className="px-4 py-3 flex items-center justify-between gap-3">
-                      <div className="min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => openInvoice(inv)}
+                        className="min-w-0 text-left flex-1"
+                      >
                         <p className="font-semibold text-sm text-stone-900 dark:text-stone-100 truncate">
                           {inv.invoiceNumber || 'Sin código'} · {inv.supplierName || 'Proveedor'}
                         </p>
@@ -5573,10 +5605,28 @@ export function CatalogPage() {
                             ? ` · pedido ${inv.linkedPurchaseOrderNumber}`
                             : ''}
                         </p>
+                      </button>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openInvoice(inv)}
+                          className={`${VERTIAL_BTN_PRIMARY} !min-h-0 px-3 py-2 text-xs`}
+                        >
+                          Ver
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => repairStock(inv)}
+                          className={`${VERTIAL_BTN_SECONDARY} !min-h-0 px-3 py-2 text-xs`}
+                          title="Si el stock no subió, fuerza la carga al almacén"
+                        >
+                          <PackageCheck className="w-3.5 h-3.5" />
+                          Reparar stock
+                        </button>
+                        <span className="text-xs font-medium text-emerald-600 flex items-center gap-1">
+                          <PackageCheck className="w-3.5 h-3.5" /> Cargado
+                        </span>
                       </div>
-                      <span className="shrink-0 text-xs font-medium text-emerald-600 flex items-center gap-1">
-                        <PackageCheck className="w-3.5 h-3.5" /> Cargado
-                      </span>
                     </li>
                   ))}
                 </ul>
@@ -5943,14 +5993,52 @@ export function CatalogPage() {
     : isHeladeriaCatalog
       ? HELADERIA_OPS_HOME_PATH
       : DELIVERY_OPS_HOME_PATH;
-  const catalogSubtitle = isRestaurantCatalog
-    ? 'Carta · Escandallo · Inventario · Compras · Consumos'
-    : 'Menú · Ingredientes · Inventario · Compras · Consumos';
+
+  const { pageTitle, pageSubtitle } = useMemo(() => {
+    if (activeTab === 'stock') {
+      return {
+        pageTitle: 'Almacén',
+        pageSubtitle: 'Inventario · stock por tienda',
+      };
+    }
+    if (activeTab === 'suppliers' || activeTab === 'purchase-orders' || activeTab === 'albaranes' || activeTab === 'invoices') {
+      const compraSub: Record<string, string> = {
+        suppliers: 'Proveedores',
+        'purchase-orders': 'Pedidos a proveedor',
+        albaranes: 'Albaranes de recepción',
+        invoices: 'Facturas de compra',
+      };
+      return {
+        pageTitle: 'Compras',
+        pageSubtitle: compraSub[activeTab] || 'Proveedores · Pedidos · Albarán · Facturas',
+      };
+    }
+    if (activeTab === 'staff-consumption') {
+      return {
+        pageTitle: 'Equipo',
+        pageSubtitle: 'Consumos de personal',
+      };
+    }
+    // Carta: catalog | ingredientes | escandallo
+    const cartaSub: Record<string, string> = {
+      catalog: isRestaurantCatalog ? 'Carta de sala y barra' : 'Menú y productos TPV',
+      ingredientes: 'Ingredientes del TPV',
+      escandallo: 'Costes y recetas',
+    };
+    return {
+      pageTitle: 'Carta / Catálogo',
+      pageSubtitle:
+        cartaSub[activeTab] ||
+        (isRestaurantCatalog
+          ? 'Carta · Escandallo · Inventario · Compras · Consumos'
+          : 'Menú · Ingredientes · Inventario · Compras · Consumos'),
+    };
+  }, [activeTab, isRestaurantCatalog]);
 
   const catalogBusy = loading && catalogItems.length === 0;
 
   return (
-    <Layout backTo={catalogBackTo} title="Catálogo" subtitle={catalogSubtitle}>
+    <Layout backTo={catalogBackTo} title={pageTitle} subtitle={pageSubtitle}>
       <div className="space-y-3">
         {!pageReady && (
           <CatalogTabLoadingState phase="session" />
@@ -6025,6 +6113,8 @@ export function CatalogPage() {
             dataUserId={dataUserId}
             suppliers={suppliers}
             catalogItems={catalogItems}
+            storeIngredients={storeIngredients}
+            commercialBrands={commercialLines}
             onGoToInvoices={() => setActiveTab('invoices')}
           />
         )}
@@ -6123,6 +6213,8 @@ export function CatalogPage() {
           existingInvoiceNumbers={invoices.map((inv) => inv.invoiceNumber)}
           onClose={() => setAlbaranCorroborate(null)}
           onDone={({ order, invoice }) => {
+            setAlbaranCorroborate(null);
+            setWaitingAlbaranOrderId((id) => (id === order._id ? '' : id));
             setPurchaseOrders((prev) => prev.map((o) => (o._id === order._id ? order : o)));
             if (invoice) {
               setInvoices((prev) => {

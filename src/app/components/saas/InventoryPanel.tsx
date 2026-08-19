@@ -52,6 +52,7 @@ import {
   type InventoryCommercialBrand,
 } from '../../lib/inventoryUtils';
 import { quantityForWarehouse } from '../../lib/warehouseStockQty';
+import { CatalogUnitChip, StockQtyWithUnit } from './CatalogUnitChip';
 import {
   SaasTabEmpty,
   SaasTabPrimaryButton,
@@ -61,6 +62,7 @@ import {
   SaasTabWorkspace,
 } from './SaasTabWorkspace';
 import { Tabs } from './Tabs';
+import { VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
 import { InventoryPurchaseListModal } from './InventoryPurchaseListModal';
 import { InventoryTypeFilterRow } from './InventoryTypeFilterRow';
 import { SAAS__OcrScanModal } from '../design-system/SAAS__OcrScanModal';
@@ -351,15 +353,15 @@ function MovementModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-[210] flex items-center justify-center bg-black/40 p-3" onClick={onClose}>
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-sm p-4" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-lg font-bold text-gray-900 dark:text-white">{title}</h3>
         <p className="text-sm text-gray-500 mt-1 mb-4">{item.name}</p>
         <p className="text-xs text-gray-400 mb-4">
           Stock actual: <strong>{current}</strong> {item.unit || 'ud'}
         </p>
         {mode === 'adjust' ? (
-          <Field label="Stock real (unidades)">
+          <Field label={`Stock real (${item.unit || 'ud'})`}>
             <input
               autoFocus
               type="number"
@@ -371,7 +373,7 @@ function MovementModal({
             />
           </Field>
         ) : (
-          <Field label="Cantidad">
+          <Field label={`Cantidad (${item.unit || 'ud'})`}>
             <input
               autoFocus
               type="number"
@@ -465,109 +467,111 @@ function InventoryItemDetailModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/45 backdrop-blur-sm"
+      className="fixed inset-0 z-[200] flex items-center justify-center p-3 bg-black/45"
       onClick={onClose}
     >
       <div
-        className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-hidden flex flex-col"
+        className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full max-w-md max-h-[85vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-      <div className="shrink-0 px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-start justify-between gap-3">
+      <div className="shrink-0 px-4 py-3 border-b border-gray-100 dark:border-gray-800 flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <h2 className="text-lg font-bold text-gray-900 dark:text-white truncate">{item.name}</h2>
-          <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-            <span className={`inline-flex text-[10px] font-bold uppercase px-2 py-0.5 rounded ${inventoryStatusClass(status)}`}>
+          <h2 className="text-base font-bold text-gray-900 dark:text-white truncate">{item.name}</h2>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
+            <span className={`inline-flex text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${inventoryStatusClass(status)}`}>
               {inventoryStatusLabel(status)}
             </span>
-            <span className="font-semibold tabular-nums">
-              {item.stockQuantity ?? 0} {item.unit || 'ud'}
+            <span className="text-sm font-bold tabular-nums text-gray-900 dark:text-gray-100 inline-flex items-center gap-2">
+              <span>{item.stockQuantity ?? 0}</span>
+              <CatalogUnitChip unit={item.unit} />
             </span>
-            <span className="tabular-nums">
-              Valor {formatInventoryMoney(Number(item.stockQuantity || 0) * Number(item.costPrice || 0))}
+            <span className="text-xs tabular-nums text-gray-500">
+              {formatInventoryMoney(Number(item.stockQuantity || 0) * Number(item.costPrice || 0))}
             </span>
           </div>
         </div>
-        <button type="button" onClick={onClose} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 shrink-0" aria-label="Cerrar">
-          <X className="w-5 h-5 text-gray-500" />
+        <button type="button" onClick={onClose} className="p-1.5 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 shrink-0" aria-label="Cerrar">
+          <X className="w-4 h-4 text-gray-500" />
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-6">
-        <section className="rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/40 p-4">
-          <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 mb-3">Stock y datos</h3>
-          <div className="grid grid-cols-2 gap-3 mb-3">
+      <div className="overflow-y-auto px-4 py-3 space-y-3">
+        <section className="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
+          <div className="grid grid-cols-2 gap-2">
             <Field label="Stock mínimo">
               <input type="number" min="0" step="any" value={minStock} onChange={(e) => setMinStock(e.target.value)} className={inputClass} />
             </Field>
-            <Field label="Coste base (€)">
+            <Field label="Coste (€)">
               <input type="number" min="0" step="any" value={costPrice} onChange={(e) => setCostPrice(e.target.value)} className={inputClass} />
             </Field>
           </div>
-          <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 mb-3">
+          <p className="mt-2 text-sm text-gray-800 dark:text-gray-200">
+            Unidad: <CatalogUnitChip unit={item.unit} />
+            {category ? <span className="text-gray-500"> · {category}</span> : null}
+            {brand ? <span className="text-gray-500"> · {brand}</span> : null}
+          </p>
+          <label className="mt-2 flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
             <input type="checkbox" checked={trackStock} onChange={(e) => setTrackStock(e.target.checked)} className="rounded" />
             Controlar inventario
           </label>
-          <SaasTabSecondaryButton onClick={() => void saveMeta()} disabled={savingMeta}>
-            {savingMeta ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Guardar cambios'}
-          </SaasTabSecondaryButton>
+          <button
+            type="button"
+            onClick={() => void saveMeta()}
+            disabled={savingMeta}
+            className={`${VERTIAL_BTN_SECONDARY} !min-h-0 mt-2 px-3 py-1.5 text-xs`}
+          >
+            {savingMeta ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Guardar'}
+          </button>
         </section>
 
         <section>
-          <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">Operaciones</h3>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-1.5">
             <button type="button" onClick={() => setMovementMode('in')} className={opBtnClass}>
-              <ArrowDownCircle className="w-4 h-4" /> Entrada
+              <ArrowDownCircle className="w-3.5 h-3.5" /> Entrada
             </button>
             <button type="button" onClick={() => setMovementMode('out')} className={opBtnClass}>
-              <ArrowUpCircle className="w-4 h-4" /> Salida
+              <ArrowUpCircle className="w-3.5 h-3.5" /> Salida
             </button>
             <button type="button" onClick={() => setMovementMode('adjust')} className={opBtnClass}>
-              <SlidersHorizontal className="w-4 h-4" /> Ajuste
+              <SlidersHorizontal className="w-3.5 h-3.5" /> Ajuste
             </button>
           </div>
         </section>
 
         <section>
-          <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">Información</h3>
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-            <DetailRow label="Categoría" value={category} />
-            <DetailRow label="Marca" value={brand || '—'} />
-            <DetailRow label="Unidad" value={item.unit || 'ud'} />
-            <DetailRow label="SKU" value={item.sku || '—'} />
-          </dl>
-        </section>
-
-        <section>
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400">Historial</h3>
-            <button type="button" onClick={() => void loadMovements()} className="text-xs text-gray-500 hover:text-gray-800">
+          <div className="flex items-center justify-between mb-1.5">
+            <h3 className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Historial</h3>
+            <button type="button" onClick={() => void loadMovements()} className="p-1 text-gray-400 hover:text-gray-700" aria-label="Actualizar">
               <RefreshCw className="w-3.5 h-3.5" />
             </button>
           </div>
           {loadingMovements ? (
-            <div className="flex justify-center py-8">
-              <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+            <div className="flex justify-center py-4">
+              <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
             </div>
           ) : movements.length === 0 ? (
-            <p className="text-sm text-gray-500">Sin movimientos todavía.</p>
+            <p className="text-xs text-gray-500 py-1">Sin movimientos.</p>
           ) : (
-            <div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
               <table className="w-full text-xs">
                 <thead className="bg-gray-50 dark:bg-gray-900/40 text-gray-500">
                   <tr>
-                    <th className="text-left px-3 py-2">Fecha</th>
-                    <th className="text-left px-3 py-2">Tipo</th>
-                    <th className="text-right px-3 py-2">Cant.</th>
-                    <th className="text-right px-3 py-2">Stock</th>
+                    <th className="text-left px-2 py-1.5 font-semibold">Fecha</th>
+                    <th className="text-left px-2 py-1.5 font-semibold">Tipo</th>
+                    <th className="text-right px-2 py-1.5 font-semibold">Cant.</th>
+                    <th className="text-right px-2 py-1.5 font-semibold">Stock</th>
                   </tr>
                 </thead>
                 <tbody>
                   {movements.map((mov) => (
                     <tr key={mov._id} className="border-t border-gray-100 dark:border-gray-800">
-                      <td className="px-3 py-2 whitespace-nowrap">{formatMovementDate(mov.createdAt)}</td>
-                      <td className="px-3 py-2">{movementTypeLabel(mov.movementType)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{mov.quantity}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-gray-500">
+                      <td className="px-2 py-1.5 whitespace-nowrap">{formatMovementDate(mov.createdAt)}</td>
+                      <td className="px-2 py-1.5">{movementTypeLabel(mov.movementType)}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums font-medium">
+                        {mov.quantity}{' '}
+                        <CatalogUnitChip unit={item.unit} size="sm" />
+                      </td>
+                      <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">
                         {mov.previousStock} → {mov.newStock}
                       </td>
                     </tr>
@@ -962,11 +966,24 @@ export function InventoryPanel() {
                             {inventoryStatusLabel(status)}
                           </span>
                         </div>
-                        <p className="text-xs text-gray-500 mt-1 tabular-nums">
-                          {item.stockQuantity ?? 0} {item.unit || 'ud'}
-                          {Number(item.minStock) > 0 ? ` · mín ${item.minStock}` : ''}
-                          {Number(item.costPrice) > 0 ? ` · ${formatInventoryMoney(Number(item.costPrice))}/u` : ''}
-                        </p>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <StockQtyWithUnit
+                            quantity={item.stockQuantity ?? 0}
+                            unit={item.unit}
+                            low={status === 'low' || status === 'out' || status === 'negative'}
+                          />
+                          {Number(item.minStock) > 0 ? (
+                            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                              mín {item.minStock}
+                            </span>
+                          ) : null}
+                          {Number(item.costPrice) > 0 ? (
+                            <span className="text-xs font-medium text-gray-500 dark:text-gray-400 inline-flex items-center gap-1">
+                              {formatInventoryMoney(Number(item.costPrice))}/
+                              <CatalogUnitChip unit={item.unit} size="sm" />
+                            </span>
+                          ) : null}
+                        </div>
                       </button>
                     </li>
                   );
@@ -1047,15 +1064,6 @@ export function InventoryPanel() {
         commercialBrands={commercialBrands}
         defaultOrganizerId={typeFilter}
       />
-    </>
-  );
-}
-
-function DetailRow({ label, value }: { label: string; value: string }) {
-  return (
-    <>
-      <dt className="text-gray-500">{label}</dt>
-      <dd className="font-medium text-gray-900 dark:text-gray-100">{value}</dd>
     </>
   );
 }

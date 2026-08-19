@@ -944,16 +944,18 @@ export async function checkPurchaseInvoiceDuplicateRequest(
 export async function loadPurchaseInvoiceStockRequest(
   userId: string,
   invoiceId: string,
-): Promise<{ invoice: PurchaseInvoice; skipped?: boolean; reconcile?: { stockUpdated?: number; stockUnits?: number } }> {
+  options?: { force?: boolean },
+): Promise<{ invoice: PurchaseInvoice; skipped?: boolean; forced?: boolean; reconcile?: { stockUpdated?: number; stockUnits?: number } }> {
   const id = normalizeUserId(userId);
   const result = await request<{
     ok: boolean;
     invoice: PurchaseInvoice;
     skipped?: boolean;
+    forced?: boolean;
     reconcile?: { stockUpdated?: number; stockUnits?: number };
   }>(
     `/api/delivery/invoices/${encodeURIComponent(id)}/${encodeURIComponent(invoiceId)}/load-stock`,
-    { method: 'POST', body: JSON.stringify({}) },
+    { method: 'POST', body: JSON.stringify({ force: Boolean(options?.force) }) },
   );
   if (!result.invoice) throw new Error('Respuesta inválida del servidor');
   return result;

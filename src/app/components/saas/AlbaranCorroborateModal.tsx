@@ -92,7 +92,8 @@ export function AlbaranCorroborateModal({
         unitCost: r.receiveUnitCost,
       }));
 
-      const updatedOrder = await markOrderReceivedRequest(userId, order._id, receivedItems);
+      const receiveResult = await markOrderReceivedRequest(userId, order._id, receivedItems);
+      const updatedOrder = receiveResult.order;
 
       let savedInvoice: PurchaseInvoice | null | undefined = invoice || null;
       const invoiceLines = receivable.map((r, idx) => ({
@@ -105,37 +106,49 @@ export function AlbaranCorroborateModal({
         catalogItemName: r.name,
       }));
 
-      if (invoice) {
+      const stockOk = (receiveResult.stockUpdated || 0) > 0 || receivable.every((r) => !r.catalogItemId);
+      if (invoice?._id) {
         savedInvoice = await updatePurchaseInvoiceRequest(userId, {
           ...invoice,
           linkedPurchaseOrderId: order._id,
           linkedPurchaseOrderNumber: order.orderNumber || '',
           lines: invoiceLines,
-          ocrStockReceivedAt: new Date().toISOString(),
+          ocrStockReceivedAt: stockOk ? new Date().toISOString() : '',
           documentKind: invoice.documentKind || 'albaran',
         } as PurchaseInvoice);
       } else {
         savedInvoice = await createPurchaseInvoiceRequest(userId, {
           supplierId: order.supplierId,
           supplierName: order.supplierName,
-          invoiceNumber: albaranNumber.trim() || nextPurchaseDocNumber('albaran', existingInvoiceNumbers),
-          date: new Date().toISOString().slice(0, 10),
+          invoiceNumber:
+            albaranNumber.trim()
+            || invoice?.invoiceNumber
+            || nextPurchaseDocNumber('albaran', existingInvoiceNumbers),
+          date: invoice?.date || new Date().toISOString().slice(0, 10),
           status: 'pending',
           lines: invoiceLines,
-          taxRate: order.taxRate || 21,
-          notes: `Comprobado con pedido ${order.orderNumber || order._id.slice(-8)}`,
+          taxRate: invoice?.taxRate || order.taxRate || 21,
+          notes: invoice?.notes || `Comprobado con pedido ${order.orderNumber || order._id.slice(-8)}`,
           linkedPurchaseOrderId: order._id,
           linkedPurchaseOrderNumber: order.orderNumber || '',
           documentKind: 'albaran',
-          entryMethod: 'manual',
+          entryMethod: invoice?.entryMethod || 'manual',
+          ocrData: invoice?.ocrData,
+          ocrImageBase64: invoice?.ocrImageBase64,
           loadToWarehouse: false,
-          ocrStockReceivedAt: new Date().toISOString(),
+          ocrStockReceivedAt: stockOk ? new Date().toISOString() : '',
         } as Partial<PurchaseInvoice> & { loadToWarehouse?: boolean });
       }
 
-      toast.success(
-        `Comprobado: stock + costes de factura actualizados (${receivable.length} línea${receivable.length === 1 ? '' : 's'})`,
-      );
+      if (!stockOk) {
+        toast.message(
+          'Pedido comprobado, pero el stock no entró. Abre el albarán y pulsa «Cargar al almacén».',
+        );
+      } else {
+        toast.success(
+          `Comprobado: stock actualizado (${receiveResult.stockUpdated || 0} línea${(receiveResult.stockUpdated || 0) === 1 ? '' : 's'})`,
+        );
+      }
       onDone({ order: updatedOrder, invoice: savedInvoice });
       onClose();
     } catch (err) {

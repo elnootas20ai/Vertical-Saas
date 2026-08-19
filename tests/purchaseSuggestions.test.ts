@@ -163,6 +163,30 @@ describe('stockItemsForSupplierOrder', () => {
     expect(items.map((i) => i._id)).toEqual(['box-1']);
   });
 
+  it('si el proveedor tiene productos marcados, solo carga esos', () => {
+    const cola = catalogItem({
+      _id: 'cola',
+      name: 'Cola',
+      module: 'stock',
+      isStockItem: true,
+      stockCategory: 'beverage',
+      customFields: { inventoryOrganizerId: 'beverages' },
+    });
+    const fanta = catalogItem({
+      _id: 'fanta',
+      name: 'Fanta',
+      module: 'stock',
+      isStockItem: true,
+      stockCategory: 'beverage',
+      customFields: { inventoryOrganizerId: 'beverages' },
+    });
+    const items = stockItemsForSupplierOrder(
+      [cola, fanta],
+      supplier({ organizerIds: ['beverages'], catalogItemIds: ['cola'] }),
+    );
+    expect(items.map((i) => i._id)).toEqual(['cola']);
+  });
+
   it('sin proveedor muestra el almacén completo, no la carta', () => {
     const pizza = catalogItem({
       _id: 'pizza-1',
