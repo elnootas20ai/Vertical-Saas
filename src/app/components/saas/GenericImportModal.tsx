@@ -266,7 +266,7 @@ export function GenericImportModal({
       const report =
         typeof raw === 'object' && raw != null && 'report' in raw ? raw.report ?? null : null;
 
-      // 0 importados → fallo real
+      // 0 importados → fallo real: dejar el modal abierto con el informe
       if (count <= 0) {
         if (report) {
           setImportReport(report);
@@ -280,16 +280,16 @@ export function GenericImportModal({
         return;
       }
 
-      // Hay productos guardados: mostrar informe (avisos/errores parciales) sin toast de fallo total
+      // Hay productos guardados → cerrar siempre (el informe vive en la página de Catálogo).
+      // Antes, con avisos, el modal se quedaba en «resultado» y parecía que seguía el importar.
       if (report && (report.errors.length > 0 || report.warnings.length > 0)) {
-        setImportReport(report);
-        setStep('results');
-        setImporting(false);
-        setImportProgress(null);
-        return;
+        toast.success(
+          `${count} entrada(s) importadas. Hay avisos: míralos en el informe de Catálogo.`,
+          { duration: 6000 },
+        );
+      } else {
+        toast.success(`${count} entrada(s) importadas correctamente`);
       }
-
-      toast.success(`${count} entrada(s) importadas correctamente`);
       handleClose();
     } catch (err) {
       if (isImportAbortError(err) || abortController.signal.aborted || importCancelledRef.current) {

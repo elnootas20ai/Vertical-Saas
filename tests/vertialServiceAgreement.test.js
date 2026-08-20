@@ -53,6 +53,9 @@ describe('vertialServiceAgreement', () => {
     assert.match(clauses[0].body, /48216687Q/);
     assert.match(clauses[0].body, /647779812/);
     assert.match(clauses[0].body, /vertial\.noreply@gmail\.com/);
+    assert.match(clauses[0].body, /Prestador del servicio: VERTIAL/);
+    assert.match(clauses[0].body, /Cliente: Maika Hosteleria SL/);
+    assert.equal(/Proveedor|en adelante|poder suficiente|«|»/.test(clauses[0].body), false);
     assert.match(clauses.find((c) => c.id === '14')?.body || '', new RegExp(VERTIAL_SERVICE_AGREEMENT_VERSION));
   });
 

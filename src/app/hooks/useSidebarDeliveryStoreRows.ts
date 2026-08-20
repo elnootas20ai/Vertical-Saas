@@ -41,6 +41,8 @@ export function useSidebarDeliveryStoreRows(enabled: boolean) {
   const activeStore = useActiveStoreScope();
   const [fallbackRows, setFallbackRows] = useState<DeliverySidebarStoreRow[]>([]);
   const [fallbackLoading, setFallbackLoading] = useState(false);
+  /** Tras un probe vacío no depender de activeStore.loading (evita «Cargando tiendas…» eterno). */
+  const [emptyProbeSettled, setEmptyProbeSettled] = useState(false);
   const inflightRef = useRef(false);
   const stableRowsRef = useRef<DeliverySidebarStoreRow[]>([]);
   const stableBusinessIdRef = useRef<string | null>(null);
@@ -72,6 +74,7 @@ export function useSidebarDeliveryStoreRows(enabled: boolean) {
       scopeSyncRequestedRef.current = null;
       stableRowsRef.current = readCachedSidebarRows(businessId, accountBusinessCount);
       setFallbackRows(stableRowsRef.current);
+      setEmptyProbeSettled(false);
     } else {
       const cached = readCachedSidebarRows(businessId, accountBusinessCount);
       if (cached.length > 0) {
@@ -170,6 +173,7 @@ export function useSidebarDeliveryStoreRows(enabled: boolean) {
         inflightRef.current = false;
         // Siempre apagar: si el effect se canceló por re-render, no dejar spinner eterno.
         setFallbackLoading(false);
+        if (!cancelled) setEmptyProbeSettled(true);
       }
     })();
 
@@ -197,7 +201,10 @@ export function useSidebarDeliveryStoreRows(enabled: boolean) {
 
   const waitingForBusinessList = !businessesFetchSettled;
   const waitingForStores =
-    Boolean(businessId) && rows.length === 0 && (activeStore.loading || fallbackLoading);
+    Boolean(businessId)
+    && rows.length === 0
+    && !emptyProbeSettled
+    && (activeStore.loading || fallbackLoading);
   const loading = enabled && rows.length === 0 && (waitingForBusinessList || waitingForStores);
 
   return { rows, loading };

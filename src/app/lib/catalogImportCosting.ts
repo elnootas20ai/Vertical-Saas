@@ -441,17 +441,22 @@ export function inferImportCostingLineKind(
 
   const inferred = fromCategoryAndName();
 
+  // «other» / vacío no es un tipo de cocina: no debe anular la inferencia por categoría
+  // (BeStrong en GALLETITASoreo llegó con deliveryLineKind=other y el escandallo auto no cuadraba).
+  const effectiveBrandKind =
+    brandKind && brandKind !== 'other' ? brandKind : null;
+
   // Marca paraguas bar/restaurante: la categoría manda (Tapas ≠ Principales ≠ Bebidas).
   if (
-    brandKind === 'mixed_restaurant' ||
-    brandKind === 'prepared_meals' ||
-    brandKind === 'tapas_bar'
+    effectiveBrandKind === 'mixed_restaurant' ||
+    effectiveBrandKind === 'prepared_meals' ||
+    effectiveBrandKind === 'tapas_bar'
   ) {
     if (inferred !== 'generic') return inferred;
-    return brandKind;
+    return effectiveBrandKind;
   }
 
-  if (brandKind) return brandKind;
+  if (effectiveBrandKind) return effectiveBrandKind;
   return inferred;
 }
 

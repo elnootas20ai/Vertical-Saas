@@ -26,6 +26,8 @@ export function useRestaurantStoreRows(enabled: boolean) {
   const activeStore = useActiveStoreScope();
   const [fallbackRows, setFallbackRows] = useState<DeliverySidebarStoreRow[]>([]);
   const [fallbackLoading, setFallbackLoading] = useState(false);
+  /** Tras un probe vacío no depender de activeStore.loading (evita «Cargando tiendas…» eterno). */
+  const [emptyProbeSettled, setEmptyProbeSettled] = useState(false);
   const inflightRef = useRef(false);
   const stableRowsRef = useRef<DeliverySidebarStoreRow[]>([]);
   const stableBusinessIdRef = useRef<string | null>(null);
@@ -67,6 +69,7 @@ export function useRestaurantStoreRows(enabled: boolean) {
       stableRowsRef.current = [];
       stableBusinessIdRef.current = null;
       setFallbackRows([]);
+      setEmptyProbeSettled(false);
       return;
     }
     if (stableBusinessIdRef.current !== businessId) {
@@ -74,6 +77,7 @@ export function useRestaurantStoreRows(enabled: boolean) {
       const cached = readRestaurantRetailCache(businessId, currentBusiness, businesses);
       stableRowsRef.current = cached?.rows ?? [];
       setFallbackRows(stableRowsRef.current);
+      setEmptyProbeSettled(false);
     } else {
       const cached = readRestaurantRetailCache(businessId, currentBusiness, businesses);
       if (cached?.rows.length) {
@@ -166,6 +170,7 @@ export function useRestaurantStoreRows(enabled: boolean) {
       } finally {
         inflightRef.current = false;
         setFallbackLoading(false);
+        if (!cancelled) setEmptyProbeSettled(true);
       }
     })();
 
@@ -192,6 +197,7 @@ export function useRestaurantStoreRows(enabled: boolean) {
   const loading =
     enabled
     && rows.length === 0
+    && !emptyProbeSettled
     && (!businessesFetchSettled || activeStore.loading || fallbackLoading);
 
   return { rows, loading };

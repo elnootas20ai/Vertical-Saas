@@ -263,6 +263,8 @@ function ActiveStoreScopeProviderImpl({
   const loadSeqRef = useRef(0);
   const refreshDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasDisplayedStoresRef = useRef(false);
+  /** businessId cuya carga (también vacía) ya terminó — evita spinner eterno al revalidar empresas. */
+  const loadSettledForBusinessIdRef = useRef<string | null>(null);
   const emptyRetryDoneRef = useRef(false);
   const pathnameRef = useRef(location.pathname);
   const retailWorkCentersRef = useRef(retailWorkCenters);
@@ -359,6 +361,7 @@ function ActiveStoreScopeProviderImpl({
       storeBusinessIdRef.current = null;
       emptyRetryDoneRef.current = false;
       hasDisplayedStoresRef.current = false;
+      loadSettledForBusinessIdRef.current = null;
       setPointsOfSale([]);
       setAllPointsOfSale([]);
       setRetailWorkCenters([]);
@@ -384,6 +387,7 @@ function ActiveStoreScopeProviderImpl({
     if (cached && (cached.retailWorkCenters.length > 0 || cached.allPointsOfSale.length > 0)) {
       emptyRetryDoneRef.current = false;
       hasDisplayedStoresRef.current = true;
+      loadSettledForBusinessIdRef.current = businessId;
       setInitialLoading(false);
       applyStores(cached.retailWorkCenters, cached.allPointsOfSale);
       return;
@@ -392,6 +396,7 @@ function ActiveStoreScopeProviderImpl({
     if (businessChanged) {
       emptyRetryDoneRef.current = false;
       hasDisplayedStoresRef.current = false;
+      loadSettledForBusinessIdRef.current = null;
       setPointsOfSale([]);
       setAllPointsOfSale([]);
       setRetailWorkCenters([]);
@@ -402,6 +407,8 @@ function ActiveStoreScopeProviderImpl({
       !hasDisplayedStoresRef.current
       && retailWorkCentersRef.current.length === 0
       && allPointsOfSaleRef.current.length === 0
+      // Cuenta nueva sin PDV: tras el 1.er fetch no reactivar spinner por reload de empresas.
+      && loadSettledForBusinessIdRef.current !== businessId
     ) {
       // Primera carga / sin caché: no apagar el spinner mientras llega el fetch.
       setInitialLoading(true);
@@ -458,6 +465,7 @@ function ActiveStoreScopeProviderImpl({
         )
       ) {
         // Sin fetch: no dejar el spinner eterno (TPV delivery CEO se quedaba en «Tarda más…»).
+        loadSettledForBusinessIdRef.current = bidAtStart;
         setInitialLoading(false);
         return;
       }
@@ -465,7 +473,8 @@ function ActiveStoreScopeProviderImpl({
       const showInitialSpinner =
         !hasDisplayedStoresRef.current
         && retailWorkCentersRef.current.length === 0
-        && allPointsOfSaleRef.current.length === 0;
+        && allPointsOfSaleRef.current.length === 0
+        && loadSettledForBusinessIdRef.current !== bidAtStart;
       if (showInitialSpinner) setInitialLoading(true);
 
       const loadOpts = {
@@ -512,6 +521,7 @@ function ActiveStoreScopeProviderImpl({
         if (timeoutId) clearTimeout(timeoutId);
         // Siempre apagar spinner: early-return o timeout no deben dejar ajustes/sidebar colgados.
         if (seq === loadSeqRef.current) {
+          loadSettledForBusinessIdRef.current = bidAtStart;
           setInitialLoading(false);
         }
       }

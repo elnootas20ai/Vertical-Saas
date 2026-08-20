@@ -2221,12 +2221,15 @@ export function SalesPointsTab() {
             ? `"${created.name}" y PDV ${pointOfSaleDisplayLabel(createdPdv)} guardados`
             : `"${created.name}" creada`,
         );
-        await loadData();
-        if (usesRetailPdvFlow) await activeStore.refresh();
+        // Recarga/scope en segundo plano: el WC+PDV ya están guardados y en estado local.
+        void loadData()
+          .then(() => (usesRetailPdvFlow ? activeStore.refresh() : undefined))
+          .catch(() => {
+            /* UI ya muestra el alta; el sidebar se reintenta al navegar */
+          });
         if (isRestaurant && createdPdv) {
           writeSalaSetupPending(businessIdForWc, createdPdv._id);
           activeStore.setActiveSalesPoint(createdPdv._id);
-          await activeStore.refresh();
           navigate(`/saas/sala/setup?pdv=${encodeURIComponent(createdPdv._id)}`);
         }
       }

@@ -112,6 +112,51 @@ describe('escandallo bar/restaurante Excel', () => {
     expect(items.some((i) => /pan barra/i.test(i.name))).toBe(true);
   });
 
+  it('marca deliveryLineKind=other: categoría Burgers/Bowls no se quedan en none', () => {
+    const brands = [
+      { _id: 'b1', name: 'BeStrong', deliveryLineKind: 'other' },
+      { _id: 'b2', name: 'foodisgood', deliveryLineKind: '' },
+    ];
+    const { items: store } = ensureVertialEscandalloBaseStoreIngredients([], brands);
+
+    expect(inferImportCostingLineKind({ name: 'Fit Burger', category: 'Burgers', brandIds: ['b1'] }, brands)).toBe(
+      'burger_fastfood',
+    );
+    expect(inferImportCostingLineKind({ name: 'Power Bowl', category: 'Bowls', brandIds: ['b2'] }, brands)).not.toBe(
+      'other',
+    );
+
+    const items = [
+      {
+        _id: '1',
+        name: 'Fit Burger',
+        category: 'Burgers',
+        brandIds: ['b1'],
+        unitPrice: 11,
+        costPrice: 0,
+        customFields: { ingredients: 'pan, carne, lechuga' },
+        module: 'catalog',
+        itemType: 'product',
+      },
+      {
+        _id: '2',
+        name: 'Power Bowl',
+        category: 'Bowls',
+        brandIds: ['b2'],
+        unitPrice: 12,
+        costPrice: 0,
+        customFields: {},
+        module: 'catalog',
+        itemType: 'product',
+      },
+    ];
+    const results = applyVertialAutoCostingBatch(items, items, store, brands);
+    for (const r of results) {
+      expect(r.mode, r.item.name).not.toBe('skipped');
+      expect(productCostingStatus(r.item), r.item.name).not.toBe('none');
+    }
+  });
+
   it('marca sin lineKind: Ensaladas/Carnes quedan con coste aprox guardado', () => {
     const brands = [{ _id: 'b1', name: 'Mi Bar' }];
     const { items: store } = ensureVertialEscandalloBaseStoreIngredients([], brands);

@@ -126,6 +126,21 @@ export const BAR_CATEGORY_ESCANDALLO_PRESETS: BarCategoryEscandalloPreset[] = [
     defaultIngredients: ['Pan brioche', 'Carne burger', 'Lechuga', 'Tomate'],
   },
   {
+    categoryPatterns: ['bowls', 'bowl', 'poké', 'poke'],
+    fixedCost: 3.4,
+    defaultIngredients: ['Arroz', 'Pollo', 'Verduras', 'Aceite de oliva'],
+  },
+  {
+    categoryPatterns: ['wraps', 'wrap', 'burritos saludables'],
+    fixedCost: 2.8,
+    defaultIngredients: ['Tortilla', 'Pollo', 'Lechuga', 'Tomate'],
+  },
+  {
+    categoryPatterns: ['combos', 'combo', 'packs', 'pack'],
+    fixedCost: 5.5,
+    defaultIngredients: ['Aceite de oliva', 'Sal'],
+  },
+  {
     categoryPatterns: ['menus', 'menús', 'menu', 'menú'],
     fixedCost: 5.5,
     defaultIngredients: ['Aceite de oliva', 'Sal'],

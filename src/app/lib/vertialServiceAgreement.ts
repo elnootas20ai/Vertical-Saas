@@ -6,7 +6,7 @@
  * Texto de producto; revisión por abogado colegiado recomendada antes de producción.
  */
 
-export const VERTIAL_SERVICE_AGREEMENT_VERSION = 'VERTIAL-SAAS-ES-2026-08.5';
+export const VERTIAL_SERVICE_AGREEMENT_VERSION = 'VERTIAL-SAAS-ES-2026-08.6';
 
 /** Datos del prestador (Vertial). Un solo sitio para actualizarlos. */
 export const VERTIAL_PROVIDER = {
@@ -54,7 +54,7 @@ function formatClientDomicile(party: ServiceAgreementParty): string {
   const parts = [party.address, party.city, party.province]
     .map((v) => String(v || '').trim())
     .filter(Boolean);
-  return parts.length ? parts.join(', ') : '—';
+  return parts.length ? parts.join(', ') : 'sin indicar';
 }
 
 export function buildServiceAgreementParty(input: {
@@ -93,9 +93,11 @@ export function buildServiceAgreementParty(input: {
 }
 
 export function buildServiceAgreementClauses(party: ServiceAgreementParty): ServiceAgreementClause[] {
-  const clientLabel = party.legalName || party.tradeName || 'el Cliente';
-  const nif = party.taxId || '—';
+  const clientLabel = party.legalName || party.tradeName || 'Cliente';
+  const nif = party.taxId || 'sin indicar';
   const domicile = formatClientDomicile(party);
+  const email = party.email || 'sin indicar';
+  const phone = party.phone || 'sin indicar';
   const plan = party.planId || 'el seleccionado en el alta';
   const billingPeriodLabel =
     party.billingMode === 'annual'
@@ -110,12 +112,11 @@ export function buildServiceAgreementClauses(party: ServiceAgreementParty): Serv
       id: '1',
       title: '1. Partes',
       body:
-        `De una parte, D. ${p.ownerName}, con DNI ${p.taxId}, que opera bajo el nombre comercial ` +
-        `${p.name}, con teléfono ${p.phone}, correo ${p.email} y web ${p.web}, en adelante «Vertial» ` +
-        `o el «Proveedor», titular y operador de la plataforma Vertial de software como servicio. ` +
-        `De otra parte, ${clientLabel}, con NIF/CIF ${nif}, domicilio en ${domicile}, correo ` +
-        `${party.email || '—'} y teléfono ${party.phone || '—'}, en adelante el «Cliente». ` +
-        `La persona que firma declara tener poder suficiente para obligar al Cliente.`,
+        `Este contrato se celebra entre las siguientes partes. ` +
+        `Prestador del servicio: VERTIAL, a cargo de ${p.ownerName}, DNI ${p.taxId}. ` +
+        `Teléfono ${p.phone}. Correo ${p.email}. Web ${p.web}. ` +
+        `Cliente: ${clientLabel}, NIF/CIF ${nif}. Domicilio ${domicile}. ` +
+        `Correo ${email}. Teléfono ${phone}.`,
     },
     {
       id: '2',
@@ -220,7 +221,7 @@ export function buildServiceAgreementClauses(party: ServiceAgreementParty): Serv
       id: '11',
       title: '11. Garantías y limitación de responsabilidad',
       body:
-        `El servicio se presta «tal cual» y según disponibilidad. En la máxima medida permitida por la ley, ` +
+        `El servicio se presta tal cual y según disponibilidad. En la máxima medida permitida por la ley, ` +
         `Vertial no responde de daños indirectos, lucro cesante, pérdida de negocio o de datos no imputable ` +
         `a dolo o negligencia grave, ni de decisiones del Cliente basadas en la información de la plataforma, ` +
         `ni de fallos de terceros como conectividad, proveedores cloud, pasarelas de pago o fuerza mayor. ` +
@@ -275,7 +276,7 @@ export function buildServiceAgreementClauses(party: ServiceAgreementParty): Serv
       body:
         `Este contrato se rige por la legislación española. Para cualquier controversia, las partes renuncian ` +
         `a cualquier otro fuero que pudiera corresponderles y se someten a los juzgados y tribunales del ` +
-        `domicilio del Proveedor, salvo que una norma imperativa disponga otra cosa.`,
+        `domicilio de Vertial, salvo que una norma imperativa disponga otra cosa.`,
     },
   ];
 }
