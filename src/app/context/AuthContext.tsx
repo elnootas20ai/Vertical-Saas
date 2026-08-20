@@ -847,7 +847,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         response = await attemptActivate();
       } catch (error) {
         const msg = error instanceof Error ? error.message : '';
-        if (/token expirado|sesión expirada|session expired/i.test(msg)) {
+        if (/verificar tu email/i.test(msg)) {
+          const me = await fetchCurrentUserRequest();
+          if (me.user) setSessionUser(me.user);
+          response = await attemptActivate();
+        } else if (/token expirado|sesión expirada|session expired/i.test(msg)) {
           const refreshed = await refreshCurrentUser();
           if (!refreshed.ok) throw error;
           response = await attemptActivate();

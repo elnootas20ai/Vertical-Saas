@@ -4082,13 +4082,18 @@ export async function getMe(req, res) {
     // Tras verificar en otro dispositivo, el JWT del PC puede quedar desactualizado.
     const jwtVerified = Boolean(req.authUser?.emailVerified);
     const dbVerified = Boolean(account.emailVerified);
+    let accessToken;
+    let refreshToken;
     if (jwtVerified !== dbVerified) {
-      await issueTokens(req, res, account);
+      const issued = await issueTokens(req, res, account);
+      accessToken = issued.accessToken;
+      refreshToken = issued.refreshToken;
     }
 
     return res.json({
       ok: true,
       user: sanitizeAccount(account),
+      ...(accessToken ? { accessToken, refreshToken } : {}),
     });
   } catch (error) {
     console.error('[AUTH] getMe error:', error?.message || error);

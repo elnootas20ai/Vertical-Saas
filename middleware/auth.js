@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import { findAccountByUserId } from '../services/couchdb.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'vertial-dev-secret-change-in-production';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || `${JWT_SECRET}_refresh`;
@@ -132,15 +133,30 @@ export function requireAuth(req, res, next) {
   }
 }
 
-export function requireEmailVerified(req, res, next) {
-  if (!req.authUser?.emailVerified) {
-    return res.status(403).json({
-      ok: false,
-      error: 'Debes verificar tu email antes de continuar',
-      code: 'EMAIL_NOT_VERIFIED',
-    });
+export async function requireEmailVerified(req, res, next) {
+  if (req.authUser?.emailVerified) {
+    return next();
   }
-  return next();
+
+  // JWT puede quedar viejo tras verificar en otro dispositivo; mirar BD.
+  const userId = String(req.authUser?.userId || req.authUser?.user_id || '').trim();
+  if (userId) {
+    try {
+      const account = await findAccountByUserId(req, userId);
+      if (account?.emailVerified && !account.deletedAt) {
+        req.authUser = { ...req.authUser, emailVerified: true };
+        return next();
+      }
+    } catch (err) {
+      console.warn('[requireEmailVerified] no se pudo leer cuenta:', err?.message || err);
+    }
+  }
+
+  return res.status(403).json({
+    ok: false,
+    error: 'Debes verificar tu email antes de continuar',
+    code: 'EMAIL_NOT_VERIFIED',
+  });
 }
 
 /** Autenticación JWT + email verificado (panel y APIs de datos). */

@@ -1535,6 +1535,14 @@ export async function fetchCurrentUserRequest(): Promise<ApiEnvelope<AuthUser>> 
       );
     }
 
+    // /me puede reemitir JWT si emailVerified cambió en BD (p. ej. verificaste en el móvil).
+    if (payload.accessToken) {
+      setAuthTokens({
+        accessToken: payload.accessToken,
+        refreshToken: payload.refreshToken,
+      });
+    }
+
     return payload as ApiEnvelope<AuthUser>;
   };
 

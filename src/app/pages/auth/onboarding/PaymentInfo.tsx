@@ -47,9 +47,9 @@ export function PaymentInfo() {
   useEffect(() => {
     if (iosAccessOnly) return;
     if (isInitializing) return;
-    if (user?.user_id) return;
+    // Sincroniza JWT si se verificó el email en otro dispositivo (evita «verifica el correo» al pagar).
     void refreshCurrentUser().then((result) => {
-      if (!result.ok) {
+      if (!user?.user_id && !result.ok) {
         navigate('/auth/login', { replace: true, state: { from: '/auth/onboarding/payment-info' } });
       }
     });
