@@ -299,6 +299,14 @@ export interface CatalogItem {
   costPrice: number;
   taxRate: number;
   stockQuantity: number;
+  /** Nombres/códigos del proveedor (Makro, etc.) ↔ este artículo. */
+  supplierProductAliases?: Array<{
+    supplierId: string;
+    key: string;
+    label: string;
+    sku?: string;
+    updatedAt?: string;
+  }>;
   /** Stock por almacén/tienda (mismo catálogo, qty separada). */
   warehouseStock?: Array<{
     warehouseId: string;

@@ -10,13 +10,6 @@
 
 export type VertialPlanId = 'basic' | 'normal' | 'pro';
 
-/** Cupos Pro ampliados durante el lanzamiento; el Pro estándar futuro será 1 PDV · 1 empresa. */
-export const PRO_LAUNCH_OFFER = {
-  badge: 'Oferta lanzamiento',
-  footnote:
-    'Incluye 2 marcas, 2 PDV y 2 empresas. El Pro estándar incluirá 1 PDV y 1 empresa.',
-} as const;
-
 export interface VertialPlanDefinition {
   id: VertialPlanId;
   name: string;
@@ -29,7 +22,6 @@ export interface VertialPlanDefinition {
   maxBusinesses: number;
   maxCommercialBrands: number;
   features: string[];
-  launchOffer?: typeof PRO_LAUNCH_OFFER;
 }
 
 export const VERTIAL_PLANS: VertialPlanDefinition[] = [
@@ -81,18 +73,18 @@ export const VERTIAL_PLANS: VertialPlanDefinition[] = [
     priceMonthly: 349,
     priceAnnualMonthly: 279,
     maxUsers: 12,
-    maxLocations: 2,
+    maxLocations: 1,
     maxBusinesses: 2,
     maxCommercialBrands: 2,
-    launchOffer: PRO_LAUNCH_OFFER,
     features: [
       'Todo lo del plan Mediano',
-      'Oferta lanzamiento: 2 empresas · 2 PDV · 2 marcas comerciales',
+      '1 PDV incluido · PDV extra de pago',
+      '2 empresas · 2 marcas comerciales',
       'Hasta 12 trabajadores',
       'Informes completos y KPIs avanzados',
       'Finanzas avanzadas y conciliación bancaria',
       'Integraciones web, API y webhooks',
-      'Multi-empresa / multi-PDV',
+      'Multi-empresa (PDV adicionales contratables)',
       'Alertas negativas (avisan de problemas: caja, dinero, operación)',
       'Soporte prioritario',
     ],

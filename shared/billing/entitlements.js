@@ -5,7 +5,7 @@
 export const POINT_OF_SALE_LIMITS = {
   basic: 1,
   normal: 1,
-  pro: 2,
+  pro: 1,
 };
 
 export const INCLUDED_BUSINESSES = {

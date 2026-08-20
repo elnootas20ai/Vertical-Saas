@@ -41,7 +41,7 @@ export const DEFAULT_PLANS: PlanDefinition[] = VERTIAL_PLANS.map((plan, index) =
   monthlyPrice: plan.priceMonthly,
   features: vertialPlanToPricingFeatures(plan),
   highlight: plan.id === 'normal',
-  badge: plan.launchOffer?.badge ?? (plan.id === 'normal' ? 'Más popular' : undefined),
+  badge: plan.id === 'normal' ? 'Más popular' : undefined,
   order: index,
 }));
 

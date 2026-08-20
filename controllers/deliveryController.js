@@ -2684,6 +2684,17 @@ export async function createPurchaseInvoice(req, res) {
       duplicateWarning: forceDuplicate,
     });
     const saved = await putDocument(req, db, doc._id, doc);
+    try {
+      const { rememberSupplierProductAliasesFromLines } = await import('../services/supplierProductAliasService.js');
+      await rememberSupplierProductAliasesFromLines(
+        req,
+        userId,
+        doc.supplierId || '',
+        doc.lines || [],
+      );
+    } catch (aliasErr) {
+      console.warn('[createPurchaseInvoice] alias remember:', aliasErr?.message || aliasErr);
+    }
     let reconciled = null;
     try {
       const { reconcilePurchaseInvoiceFromOcr } = await import('../services/ocrPurchasePipeline.js');
@@ -2718,6 +2729,17 @@ export async function updatePurchaseInvoice(req, res) {
     const db = getCatalogDbName();
     const doc = buildPurchaseInvoiceDocument(userId, { ...existing, ...invoice }, existing);
     const saved = await putDocument(req, db, doc._id, doc);
+    try {
+      const { rememberSupplierProductAliasesFromLines } = await import('../services/supplierProductAliasService.js');
+      await rememberSupplierProductAliasesFromLines(
+        req,
+        userId,
+        doc.supplierId || '',
+        doc.lines || [],
+      );
+    } catch (aliasErr) {
+      console.warn('[updatePurchaseInvoice] alias remember:', aliasErr?.message || aliasErr);
+    }
     return res.json({ ok: true, invoice: sanitizePurchaseInvoice({ ...doc, _rev: saved.rev }) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al actualizar factura' });

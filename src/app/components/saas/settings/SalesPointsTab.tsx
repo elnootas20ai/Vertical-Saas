@@ -2011,7 +2011,7 @@ export function SalesPointsTab() {
       setProAccessReason(pointOfSaleAccess.needsPointOfSaleAddon ? 'pdv-extra' : 'pro');
       setShowProAccessModal(true);
       toast.error(pointOfSaleAccess.needsPointOfSaleAddon
-        ? 'Tu plan PRO incluye 2 PDV. Añade un PDV extra para crear otro.'
+        ? 'Tu plan PRO incluye 1 PDV. Añade un PDV extra para crear otro.'
         : 'Necesitas PRO para crear un segundo PDV.');
       throw new Error('pdv limit required');
     }

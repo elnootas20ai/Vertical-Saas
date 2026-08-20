@@ -29,8 +29,8 @@ describe('billing entitlements', () => {
   });
 
   it('respeta extras PDV y marcas con suscripción activa', () => {
-    // Pro base = 2 PDV + 1 extra = 3; 2 marcas + 2 extras = 4.
-    expect(getEffectivePointOfSaleLimit(activePro)).toBe(3);
+    // Pro base = 1 PDV + 1 extra = 2; 2 marcas + 2 extras = 4.
+    expect(getEffectivePointOfSaleLimit(activePro)).toBe(2);
     expect(getEffectiveCommercialBrandLimit(activePro)).toBe(4);
   });
 

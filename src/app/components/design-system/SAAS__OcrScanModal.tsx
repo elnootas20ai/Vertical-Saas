@@ -3,12 +3,12 @@ import { X, ScanLine, Upload, FileText, CheckCircle, Loader2, AlertCircle, Eye, 
 import { useModalClose } from '../../hooks/useModalClose';
 import { useCamera } from '../../hooks/useCamera';
 import {
-  scanDocument, processOcr, approveProposal, editProposal,
+  scanDocument, processOcr, approveProposal,
   DOC_TYPE_LABELS, DOC_TYPE_ICONS, DOC_TYPE_COLORS, MODULE_LABELS,
   type OcrResult, type OcrProposal, type OcrEntityMatch, type OcrScanMeta,
   type OcrRouteResult,
 } from '../../lib/ocrApi';
-import { createSupplierRequest } from '../../lib/deliveryApi';
+import { createSupplierRequest, listCatalogItemsRequest, type CatalogItem } from '../../lib/deliveryApi';
 import { openNativeAppSettings } from '../../lib/vertialPrint/localNetworkPermission';
 import { matchVehicleByPlateOrVin } from '../../lib/ocrDocumentSave';
 import { toast } from 'sonner';
@@ -237,6 +237,9 @@ export function SAAS__OcrScanModal({
   const [creatingSupplier, setCreatingSupplier] = useState(false);
   const [linkedSupplier, setLinkedSupplier] = useState<{ _id: string; name: string } | null>(null);
   const [stockMatchDecision, setStockMatchDecision] = useState<'pending' | 'confirmed'>('pending');
+  /** Líneas editables (vínculo manual inventario ↔ texto proveedor). */
+  const [editableLines, setEditableLines] = useState<ProposalLine[] | null>(null);
+  const [stockItems, setStockItems] = useState<CatalogItem[]>([]);
   /** Opción explícita: cargar líneas al almacén al aprobar factura/albarán. */
   const [loadToWarehouse, setLoadToWarehouse] = useState(true);
   const contextVehicleId = String(context?.vehicleId || '').trim();
@@ -278,6 +281,8 @@ export function SAAS__OcrScanModal({
     setError(null); setShowPreview(false);
     setSupplierDecision('pending'); setCreatingSupplier(false); setLinkedSupplier(null);
     setStockMatchDecision('pending');
+    setEditableLines(null);
+    setStockItems([]);
     setOcrMode(defaultOcrMode || 'financial');
     setSelectedVehicleId(String(context?.vehicleId || '').trim());
     base64Ref.current = ''; mimeRef.current = '';
@@ -632,7 +637,11 @@ export function SAAS__OcrScanModal({
       toast.error('Indica si quieres crear el proveedor o continuar sin vincularlo');
       return;
     }
-    const linesForCheck = readProposalField<ProposalLine[]>(proposal, 'lines') || ocrResult?.lines || [];
+    const linesForCheck =
+      editableLines ||
+      readProposalField<ProposalLine[]>(proposal, 'lines') ||
+      ocrResult?.lines ||
+      [];
     const unmatchedStockLines = isComprasPurchaseDoc(ocrResult, targetModule) ? countUnmatchedStockLines(linesForCheck) : 0;
     if (unmatchedStockLines > 0 && stockMatchDecision === 'pending') {
       toast.error('Confirma si quieres continuar sin subir stock en las líneas sin vínculo');
@@ -640,6 +649,7 @@ export function SAAS__OcrScanModal({
     }
     setStep('saving');
     try {
+      const matchedCount = linesForCheck.filter((l) => String((l as ProposalLine).catalogItemId || '').trim()).length;
       const approveFields = {
         ...(linkedSupplier
           ? {
@@ -648,7 +658,19 @@ export function SAAS__OcrScanModal({
             }
           : {}),
         ...(isComprasPurchaseDoc(ocrResult, targetModule)
-          ? { loadToWarehouse: { value: loadToWarehouse, confidence: 100, source: 'user' } }
+          ? {
+              loadToWarehouse: { value: loadToWarehouse, confidence: 100, source: 'user' },
+              lines: { value: linesForCheck, confidence: 100, source: editableLines ? 'user' : 'auto' },
+              catalogMatchSummary: {
+                value: {
+                  totalLines: linesForCheck.length,
+                  matchedLines: matchedCount,
+                  unmatchedLines: linesForCheck.length - matchedCount,
+                },
+                confidence: 100,
+                source: 'user',
+              },
+            }
           : {}),
       };
       const res = await approveProposal(
@@ -701,14 +723,80 @@ export function SAAS__OcrScanModal({
     }
   };
 
+  useEffect(() => {
+    if (!isOpen || step !== 'result' || !userId) return;
+    if (!isComprasPurchaseDoc(ocrResult, targetModule)) return;
+    let cancelled = false;
+    void listCatalogItemsRequest(userId, 'stock')
+      .then((items) => {
+        if (!cancelled) setStockItems(items.filter((i) => i.active !== false && !i.deletedAt));
+      })
+      .catch(() => {
+        if (!cancelled) setStockItems([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, step, userId, ocrResult?.documentType, targetModule]);
+
+  useEffect(() => {
+    if (!proposal) {
+      setEditableLines(null);
+      return;
+    }
+    const lines = readProposalField<ProposalLine[]>(proposal, 'lines');
+    if (Array.isArray(lines) && lines.length > 0) {
+      setEditableLines(lines.map((l) => ({ ...l })));
+    }
+  }, [proposal?._id]);
+
+  const linkLineToStock = useCallback((lineIndex: number, catalogItemId: string) => {
+    setEditableLines((prev) => {
+      const base =
+        prev ||
+        readProposalField<ProposalLine[]>(proposal, 'lines') ||
+        (ocrResult?.lines as ProposalLine[]) ||
+        [];
+      const item = stockItems.find((s) => s._id === catalogItemId);
+      return base.map((line, idx) => {
+        if (idx !== lineIndex) return line;
+        if (!catalogItemId) {
+          return {
+            ...line,
+            catalogItemId: '',
+            catalogItemName: '',
+            matchConfidence: 0,
+            matchMethod: 'none',
+          };
+        }
+        return {
+          ...line,
+          catalogItemId,
+          catalogItemName: item?.name || '',
+          matchConfidence: 1,
+          matchMethod: 'manual',
+        };
+      });
+    });
+    setStockMatchDecision('pending');
+  }, [proposal, ocrResult?.lines, stockItems]);
+
   useModalClose(isOpen, handleClose);
   if (!isOpen) return null;
 
   const docType = ocrResult?.documentType || 'otro';
   const moduleLabel = destinationInfo ? MODULE_LABELS[(destinationInfo as Record<string, string>).module] || (destinationInfo as Record<string, string>).module : '';
   const proposalLines = readProposalField<ProposalLine[]>(proposal, 'lines');
-  const displayLines = (proposalLines && proposalLines.length > 0 ? proposalLines : ocrResult?.lines) || [];
-  const catalogMatchSummary = readProposalField<{ matchedLines: number; totalLines: number }>(proposal, 'catalogMatchSummary');
+  const displayLines = (editableLines
+    || (proposalLines && proposalLines.length > 0 ? proposalLines : null)
+    || ocrResult?.lines
+    || []) as ProposalLine[];
+  const catalogMatchSummary = (() => {
+    const base = readProposalField<{ matchedLines: number; totalLines: number }>(proposal, 'catalogMatchSummary');
+    if (!editableLines) return base;
+    const matched = editableLines.filter((l) => String(l.catalogItemId || '').trim()).length;
+    return { matchedLines: matched, totalLines: editableLines.length };
+  })();
   const isComprasDoc = isComprasPurchaseDoc(ocrResult, targetModule);
   const supplierMatch = entityMatches.find((m) => m.matchType === 'supplier');
   const ocrSupplierName = String(ocrResult?.emitter || readProposalField<string>(proposal, 'supplierName') || '').trim();
@@ -972,8 +1060,8 @@ export function SAAS__OcrScanModal({
                         {unmatchedStockLineCount} línea{unmatchedStockLineCount === 1 ? '' : 's'} sin vínculo al inventario
                       </p>
                       <p className="text-xs text-orange-800 dark:text-orange-200 mt-1">
-                        Esas líneas <strong>no subirán stock</strong> al aprobar. La factura y el pago en Finanzas sí se registrarán.
-                        Revisa los nombres en inventario o confirma para continuar.
+                        Vincula cada línea al artículo de inventario (se recordará para este proveedor).
+                        Sin vínculo, esas líneas <strong>no subirán stock</strong>.
                       </p>
                     </div>
                   </div>
@@ -1156,20 +1244,42 @@ export function SAAS__OcrScanModal({
                       const pl = line as ProposalLine;
                       const label = pl.description || pl.itemName || '';
                       return (
-                        <div key={i} className="px-4 py-2.5 flex items-center justify-between gap-3 text-sm">
-                          <div className="flex-1 min-w-0">
-                            <span className="text-gray-900 dark:text-gray-100">{label}</span>
-                            {pl.catalogItemName ? (
-                              <div className="text-[10px] text-emerald-600 dark:text-emerald-400 truncate mt-0.5">
-                                → {pl.catalogItemName}
-                                {pl.matchConfidence ? ` (${Math.round(pl.matchConfidence * 100)}%)` : ''}
-                              </div>
-                            ) : (
-                              <div className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">Sin vínculo inventario</div>
-                            )}
-                            {line.quantity != null && <span className="text-gray-400 ml-2">&times;{line.quantity}</span>}
+                        <div key={i} className="px-4 py-2.5 flex flex-col gap-1.5 text-sm">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex-1 min-w-0">
+                              <span className="text-gray-900 dark:text-gray-100">{label}</span>
+                              {pl.catalogItemName ? (
+                                <div className="text-[10px] text-emerald-600 dark:text-emerald-400 truncate mt-0.5">
+                                  → {pl.catalogItemName}
+                                  {pl.matchMethod === 'manual'
+                                    ? ' (manual)'
+                                    : pl.matchMethod?.startsWith('supplier_alias')
+                                      ? ' (recordado)'
+                                      : pl.matchConfidence
+                                        ? ` (${Math.round(pl.matchConfidence * 100)}%)`
+                                        : ''}
+                                </div>
+                              ) : (
+                                <div className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">Sin vínculo inventario</div>
+                              )}
+                              {line.quantity != null && <span className="text-gray-400 ml-2">&times;{line.quantity}</span>}
+                            </div>
+                            <span className="font-semibold text-gray-900 dark:text-gray-100 flex-shrink-0">{formatCurrency(line.total, ocrResult?.currency)}</span>
                           </div>
-                          <span className="font-semibold text-gray-900 dark:text-gray-100 flex-shrink-0">{formatCurrency(line.total, ocrResult?.currency)}</span>
+                          {isComprasDoc && stockItems.length > 0 ? (
+                            <select
+                              className="w-full text-xs px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100"
+                              value={String(pl.catalogItemId || '')}
+                              onChange={(e) => linkLineToStock(i, e.target.value)}
+                            >
+                              <option value="">Vincular a inventario…</option>
+                              {stockItems.map((item) => (
+                                <option key={item._id} value={item._id}>
+                                  {item.name}{item.sku ? ` (${item.sku})` : ''}
+                                </option>
+                              ))}
+                            </select>
+                          ) : null}
                         </div>
                       );
                     })}

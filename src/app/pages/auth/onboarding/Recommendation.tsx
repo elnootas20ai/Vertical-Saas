@@ -257,11 +257,6 @@ function RecommendationWebFlow() {
             <CheckCircle className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
             {isRecommendedSelection ? 'Recomendado' : 'Elegido'}
           </span>
-          {selectedPlan.launchOffer ? (
-            <span className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-800 dark:bg-violet-950/50 dark:text-violet-200">
-              {selectedPlan.launchOffer.badge}
-            </span>
-          ) : null}
           {proRequired ? (
             <span className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-800 dark:bg-violet-950/50 dark:text-violet-200">
               Mínimo PRO
@@ -416,11 +411,6 @@ function RecommendationWebFlow() {
                   {isRecommended ? (
                     <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
                       Recomendado
-                    </span>
-                  ) : null}
-                  {plan.launchOffer ? (
-                    <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-800 dark:bg-violet-950/50 dark:text-violet-200">
-                      {plan.launchOffer.badge}
                     </span>
                   ) : null}
                 </div>

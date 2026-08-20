@@ -2894,13 +2894,22 @@ function CreateInvoiceModal({
 
   const computedLines: PurchaseInvoiceLine[] = lines
     .filter((l) => l.itemName.trim())
-    .map((l, i) => ({
-      id: editItem?.lines[i]?.id || `line-${Date.now()}-${i}`,
-      itemName: l.itemName,
-      quantity: Number(l.quantity) || 0,
-      unitPrice: Number(l.unitPrice) || 0,
-      total: (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0),
-    }));
+    .map((l, i) => {
+      const prev = editItem?.lines?.[i];
+      return {
+        id: prev?.id || `line-${Date.now()}-${i}`,
+        itemName: l.itemName,
+        description: l.itemName,
+        quantity: Number(l.quantity) || 0,
+        unitPrice: Number(l.unitPrice) || 0,
+        total: (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0),
+        catalogItemId: String(prev?.catalogItemId || ''),
+        catalogItemName: String(prev?.catalogItemName || ''),
+        sku: String(prev?.sku || ''),
+        matchMethod: String(prev?.matchMethod || ''),
+        matchConfidence: prev?.matchConfidence ?? null,
+      };
+    });
 
   const computedSubtotal = computedLines.reduce((sum, l) => sum + l.total, 0);
   const taxRate = Number(form.taxRate) || 0;

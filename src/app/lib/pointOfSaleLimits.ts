@@ -6,7 +6,7 @@ export type SubscriptionPlanTier = 'basic' | 'normal' | 'pro';
 export const POINT_OF_SALE_LIMITS: Record<SubscriptionPlanTier, number> = {
   basic: 1,
   normal: 1,
-  pro: 2,
+  pro: 1,
 };
 
 export const PLAN_TIER_LABELS: Record<SubscriptionPlanTier, string> = {

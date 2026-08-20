@@ -36,7 +36,6 @@ export interface OnboardingPlanDefinition {
   maxBusinesses: number;
   maxCommercialBrands: number;
   features: string[];
-  launchOffer?: VertialPlanDefinition['launchOffer'];
 }
 
 export interface NeedsOptionDefinition {
@@ -59,7 +58,6 @@ const DEFAULT_PLANS: OnboardingPlanDefinition[] = VERTIAL_PLANS.map((p) => ({
   maxBusinesses: p.maxBusinesses,
   maxCommercialBrands: p.maxCommercialBrands,
   features: p.features,
-  launchOffer: p.launchOffer,
 }));
 
 /** Cartas del paso 4 solo para vertical delivery (8 opciones → 6 claves de módulo). */

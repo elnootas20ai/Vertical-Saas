@@ -2,6 +2,8 @@
  * Empareja líneas OCR de facturas/albaranes con artículos de inventario (stock).
  */
 
+import { scoreSupplierAliasMatch } from '../shared/purchases/supplierProductAlias.js';
+
 function normalizeText(str) {
   return String(str || '')
     .toLowerCase()
@@ -31,10 +33,15 @@ function containsScore(a, b) {
 }
 
 /** Puntuación línea OCR ↔ artículo de catálogo. */
-export function scoreLineToCatalogItem(lineText, catalogItem) {
+export function scoreLineToCatalogItem(lineText, catalogItem, options = {}) {
   const name = catalogItem?.name || '';
   const sku = String(catalogItem?.sku || '').toLowerCase().trim();
   const lineLower = String(lineText || '').toLowerCase().trim();
+  const lineSku = String(options.lineSku || '').trim();
+  const supplierId = String(options.supplierId || '').trim();
+
+  const aliasHit = scoreSupplierAliasMatch(lineText, lineSku, catalogItem, supplierId);
+  if (aliasHit) return aliasHit;
 
   if (sku && sku.length >= 3 && lineLower.includes(sku)) {
     return { score: 0.98, method: 'sku' };
@@ -56,6 +63,7 @@ export function scoreLineToCatalogItem(lineText, catalogItem) {
 export function matchOcrLineToCatalog(line, catalogItems, options = {}) {
   const supplierId = String(options.supplierId || '').trim();
   const lineText = line?.description || line?.name || line?.itemName || '';
+  const lineSku = String(line?.sku || '').trim();
   const minScore = options.minScore ?? 0.35;
 
   let best = null;
@@ -63,7 +71,10 @@ export function matchOcrLineToCatalog(line, catalogItems, options = {}) {
   let bestMethod = 'none';
 
   for (const item of catalogItems || []) {
-    const { score, method } = scoreLineToCatalogItem(lineText, item);
+    const { score, method } = scoreLineToCatalogItem(lineText, item, {
+      supplierId,
+      lineSku,
+    });
     let adjusted = score;
     if (supplierId && item.supplierId === supplierId) adjusted += 0.05;
     if (adjusted > bestScore) {

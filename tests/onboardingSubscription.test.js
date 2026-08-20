@@ -23,7 +23,7 @@ describe('onboarding subscription provisioning', () => {
     expect(sub.selectedPlanId).toBe('pro');
     expect(sub.planName).toBe('Pro');
     expect(sub.status).toBe('pending_payment');
-    expect(sub.extraPointOfSaleSlots).toBe(1);
+    expect(sub.extraPointOfSaleSlots).toBe(2);
     expect(sub.extraCommercialBrandSlots).toBe(0);
     expect(sub.extraBusinessSlots).toBe(0);
     expect(sub.extraWorkerSlots).toBe(0); // Pro incluye 12; userCount 5
@@ -48,8 +48,8 @@ describe('onboarding subscription provisioning', () => {
       businessCount: 5,
       commercialBrandCount: 3,
     });
-    // Pro incluye 2 PDV, 2 empresas y 2 marcas: el resto van como cupos extra.
-    expect(extras.extraPointOfSaleSlots).toBe(2);
+    // Pro incluye 1 PDV, 2 empresas y 2 marcas: el resto van como cupos extra.
+    expect(extras.extraPointOfSaleSlots).toBe(3);
     expect(extras.extraBusinessSlots).toBe(3);
     expect(extras.extraCommercialBrandSlots).toBe(1);
     expect(extras.extraWorkerSlots).toBe(0);

@@ -310,6 +310,17 @@ export async function executeProposal(proposal, userId) {
     let sideEffects = null;
 
     if (dest.action === 'create_purchase_invoice' || dest.action === 'create_delivery_note') {
+      try {
+        const { rememberSupplierProductAliasesFromLines } = await import('./supplierProductAliasService.js');
+        await rememberSupplierProductAliasesFromLines(
+          fakeReq,
+          userId,
+          createdDoc.supplierId || fields.supplierId || '',
+          createdDoc.lines || fields.lines || [],
+        );
+      } catch (aliasErr) {
+        logger.warn({ tag: 'OCR-ALIAS', err: aliasErr?.message }, 'No se pudieron guardar aliases proveedor');
+      }
       sideEffects = await reconcilePurchaseInvoiceFromOcr(fakeReq, userId, createdDoc, {
         performedBy: 'ocr-system',
         applyStock: Boolean(createdDoc.__loadToWarehouse),

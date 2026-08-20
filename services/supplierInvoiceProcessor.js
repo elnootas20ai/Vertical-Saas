@@ -816,6 +816,18 @@ async function processSingleEmail(userId, email, scope = {}) {
     await ensureDatabase(fakeReq, db);
     const saved = await putDocument(fakeReq, db, doc._id, doc);
 
+    try {
+      const { rememberSupplierProductAliasesFromLines } = await import('./supplierProductAliasService.js');
+      await rememberSupplierProductAliasesFromLines(
+        fakeReq,
+        userId,
+        doc.supplierId || '',
+        doc.lines || [],
+      );
+    } catch (aliasErr) {
+      logger.warn({ tag: 'SINV_PROC', err: aliasErr?.message }, 'No se pudieron guardar aliases proveedor');
+    }
+
     if (!ocrFailed) {
       try {
         // Correo: registra finanzas, stock pendiente hasta «Cargar al almacén»

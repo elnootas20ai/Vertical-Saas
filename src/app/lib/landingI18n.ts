@@ -271,8 +271,8 @@ const es: LandingCopy = {
       },
       {
         name: 'Pro',
-        desc: 'Multi-sede, API y soporte prioritario',
-        features: ['Múltiples ubicaciones', 'Usuarios ilimitados', 'Todo lo del Normal', 'API y Webhooks', 'Soporte prioritario', 'Onboarding personalizado'],
+        desc: 'Multi-empresa, API y soporte prioritario',
+        features: ['1 ubicación incluida', 'PDV extra de pago', 'Hasta 12 usuarios', 'Todo lo del Normal', 'API y Webhooks', 'Soporte prioritario'],
         cta: 'Hablar con ventas',
       },
     ],
@@ -510,8 +510,8 @@ const en: LandingCopy = {
       },
       {
         name: 'Pro',
-        desc: 'Multi-site, API and priority support',
-        features: ['Multiple locations', 'Unlimited users', 'Everything in Standard', 'API & Webhooks', 'Priority support', 'Custom onboarding'],
+        desc: 'Multi-company, API and priority support',
+        features: ['1 location included', 'Extra POS add-on', 'Up to 12 users', 'Everything in Standard', 'API & Webhooks', 'Priority support'],
         cta: 'Talk to sales',
       },
     ],

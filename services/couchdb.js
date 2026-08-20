@@ -31,6 +31,7 @@ import {
 } from '../shared/catalog/catalogStockGuard.js';
 import { nextPurchaseOrderNumber } from './purchaseOrderNumber.js';
 import { resolvePurchaseInvoiceNumber } from './purchaseDocNumber.js';
+import { sanitizeSupplierProductAliases } from '../shared/purchases/supplierProductAlias.js';
 
 export { clientMatchesBusinessScope };
 
@@ -11236,6 +11237,11 @@ export function buildCatalogItemDocument(userId, data = {}, existing = null) {
     lastPurchaseDate: String(data.lastPurchaseDate || existing?.lastPurchaseDate || ''),
     customFields: mergeCatalogCustomFields(existing?.customFields, data.customFields),
     business_id: String(data.business_id || data.businessId || existing?.business_id || existing?.businessId || '').trim(),
+    supplierProductAliases: sanitizeSupplierProductAliases(
+      Object.prototype.hasOwnProperty.call(data, 'supplierProductAliases')
+        ? data.supplierProductAliases
+        : existing?.supplierProductAliases,
+    ),
     createdAt: existing?.createdAt || now,
     updatedAt: now,
   };
@@ -11292,6 +11298,7 @@ export function sanitizeCatalogItem(doc) {
     lastPurchaseDate: doc.lastPurchaseDate || '',
     customFields: (doc.customFields && typeof doc.customFields === 'object') ? { ...doc.customFields } : {},
     business_id: String(doc.business_id || doc.businessId || '').trim(),
+    supplierProductAliases: sanitizeSupplierProductAliases(doc.supplierProductAliases),
     createdAt: doc.createdAt || new Date().toISOString(),
     updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
     deletedAt: doc.deletedAt || null,

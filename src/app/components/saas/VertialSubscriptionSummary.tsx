@@ -11,7 +11,6 @@ import {
 import type { AuthUser, BillingSubscription } from '../../lib/authApi';
 import type { PlanDefinition } from '../../lib/planPricingApi';
 import { PLAN_ADDON_CATALOG } from '../../lib/planAddonCatalog';
-import { PRO_LAUNCH_OFFER } from '../../lib/planCatalog';
 import {
   getEffectiveBusinessLimit,
   getEffectiveCommercialBrandLimit,
@@ -141,11 +140,6 @@ export function VertialSubscriptionSummary({
                   day: 'numeric',
                   month: 'long',
                 })}
-              </p>
-            ) : null}
-            {tier === 'pro' ? (
-              <p className="mt-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-900 dark:border-violet-800 dark:bg-violet-950/30 dark:text-violet-100">
-                <span className="font-semibold">{PRO_LAUNCH_OFFER.badge}.</span> {PRO_LAUNCH_OFFER.footnote}
               </p>
             ) : null}
           </div>
