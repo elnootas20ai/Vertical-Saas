@@ -12,8 +12,7 @@ import {
 import { useOnboarding } from '../../../context/OnboardingContext';
 import { useAuth } from '../../../context/AuthContext';
 import {
-  canAccessServiceAgreement,
-  hasSignedServiceAgreement,
+  mustSignServiceAgreement,
 } from '../../../../../shared/onboarding/resumePath.js';
 import {
   VERTIAL_SERVICE_AGREEMENT_VERSION,
@@ -49,15 +48,12 @@ export function ServiceAgreement() {
 
   useEffect(() => {
     if (!user) return;
-    if (!canAccessServiceAgreement(user.subscription)) {
+    // Sin firma pendiente (exentos / clientes antiguos): no quedarse atrapado aquí.
+    if (!mustSignServiceAgreement(user)) {
       navigate(
-        user.onboardingCompleted ? '/saas/subscription' : '/auth/onboarding/confirmation',
+        user.onboardingCompleted ? '/saas/dashboard' : '/auth/onboarding/confirmation',
         { replace: true },
       );
-      return;
-    }
-    if (hasSignedServiceAgreement(user)) {
-      navigate('/saas/dashboard', { replace: true });
     }
   }, [user, navigate]);
 
@@ -231,6 +227,7 @@ export function ServiceAgreement() {
       await updateOnboardingData({
         ...(data as unknown as Record<string, unknown>),
         serviceAgreement: signed,
+        serviceAgreementPending: false,
         completedStep: Math.max(Number(data.completedStep) || 0, 5),
       });
     } catch {

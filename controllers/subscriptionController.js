@@ -30,6 +30,7 @@ import {
   sendGracePeriodNotification,
   sendSuspensionNotification,
 } from '../services/subscriptionLifecycle.js';
+import { withServiceAgreementPendingAfterPayment } from '../../shared/onboarding/resumePath.js';
 import { PLAN_ADDON_CATALOG } from '../shared/billing/planAddons.js';
 import {
   applyAddonToAccount,
@@ -551,7 +552,8 @@ export async function webhookSubscriptionStatus(req, res) {
       ? {}
       : subscriptionPlanFieldsFromMoneiMetadata(metadata);
 
-    const updatedAccount = await saveAccount(req, {
+    const previousStatus = account.subscription?.status;
+    let accountToSave = {
       ...account,
       subscription: {
         ...account.subscription,
@@ -560,9 +562,13 @@ export async function webhookSubscriptionStatus(req, res) {
         ...fromWebhookMeta,
       },
       updatedAt: new Date().toISOString(),
-    });
+    };
+    if (appStatus === 'subscription_active' && previousStatus !== 'subscription_active') {
+      accountToSave = withServiceAgreementPendingAfterPayment(accountToSave);
+    }
 
-    const previousStatus = account.subscription?.status;
+    const updatedAccount = await saveAccount(req, accountToSave);
+
     if (appStatus !== previousStatus) {
       if (appStatus === 'subscription_active') {
         sendPaymentSuccessNotification(updatedAccount).catch(() => null);
@@ -708,17 +714,20 @@ export async function webhookPaymentStatus(req, res) {
           )
         : account.subscription || {};
 
-      const updatedAccount = await saveAccount(req, {
-        ...account,
-        subscription: {
-          ...periodFields,
-          status: 'subscription_active',
-          moneiSubscriptionStatus: 'ACTIVE',
-          lastPaymentAt: now.toISOString(),
-          cancelAtPeriodEnd: false,
-        },
-        updatedAt: now.toISOString(),
-      });
+      const updatedAccount = await saveAccount(
+        req,
+        withServiceAgreementPendingAfterPayment({
+          ...account,
+          subscription: {
+            ...periodFields,
+            status: 'subscription_active',
+            moneiSubscriptionStatus: 'ACTIVE',
+            lastPaymentAt: now.toISOString(),
+            cancelAtPeriodEnd: false,
+          },
+          updatedAt: now.toISOString(),
+        }),
+      );
       sendPaymentSuccessNotification(updatedAccount).catch(() => null);
       void recordSubscriptionPaymentInvoice(req, {
         userId,

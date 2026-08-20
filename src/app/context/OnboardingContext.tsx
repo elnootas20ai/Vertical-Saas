@@ -90,6 +90,8 @@ export interface OnboardingData {
   };
   /** Contrato SaaS firmado en el alta (cláusulas + firma). */
   serviceAgreement?: SignedServiceAgreement | null;
+  /** Tras cobro real: el SaaS pide firma hasta completar el contrato. */
+  serviceAgreementPending?: boolean;
   trial: {
     startDate: number | null;
     endDate: number | null;
@@ -158,6 +160,7 @@ export const initialOnboardingData: OnboardingData = {
     acceptTerms: false,
   },
   serviceAgreement: null,
+  serviceAgreementPending: false,
   trial: {
     startDate: null,
     endDate: null,
@@ -202,6 +205,9 @@ function mergeOnboardingData(partial?: Partial<OnboardingData> | null): Onboardi
     },
     paymentDetails: { ...initialOnboardingData.paymentDetails, ...(p.paymentDetails ?? {}) },
     serviceAgreement: p.serviceAgreement ?? initialOnboardingData.serviceAgreement ?? null,
+    serviceAgreementPending: Boolean(
+      p.serviceAgreementPending ?? initialOnboardingData.serviceAgreementPending,
+    ),
     trial: { ...initialOnboardingData.trial, ...(p.trial ?? {}) },
   };
 }

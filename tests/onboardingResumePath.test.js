@@ -3,6 +3,7 @@ import {
   COMPANY_ONBOARDING_ROUTES,
   canAccessServiceAgreement,
   companyNeedsOnboarding,
+  mustSignServiceAgreement,
   resolveCompanyOnboardingResumePath,
 } from '../shared/onboarding/resumePath.js';
 
@@ -61,5 +62,42 @@ describe('canAccessServiceAgreement', () => {
     expect(canAccessServiceAgreement({ status: 'trial_active' })).toBe(false);
     expect(canAccessServiceAgreement({ status: 'pending_payment' })).toBe(false);
     expect(canAccessServiceAgreement(null)).toBe(false);
+  });
+});
+
+describe('mustSignServiceAgreement', () => {
+  it('no bloquea clientes exentos ni cuentas sin flag pendiente', () => {
+    expect(
+      mustSignServiceAgreement({
+        subscription: { status: 'subscription_active', billingExempt: true },
+        onboardingCompleted: true,
+        onboardingData: {},
+      }),
+    ).toBe(false);
+    expect(
+      mustSignServiceAgreement({
+        subscription: { status: 'subscription_active' },
+        onboardingCompleted: true,
+        onboardingData: {},
+      }),
+    ).toBe(false);
+  });
+
+  it('bloquea solo tras cobro con serviceAgreementPending', () => {
+    expect(
+      mustSignServiceAgreement({
+        subscription: { status: 'subscription_active' },
+        onboardingData: { serviceAgreementPending: true },
+      }),
+    ).toBe(true);
+    expect(
+      mustSignServiceAgreement({
+        subscription: { status: 'subscription_active' },
+        onboardingData: {
+          serviceAgreementPending: true,
+          serviceAgreement: { signatureDataUrl: 'data:image/png;base64,xx' },
+        },
+      }),
+    ).toBe(false);
   });
 });

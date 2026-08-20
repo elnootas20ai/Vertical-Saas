@@ -51,3 +51,32 @@ export function hasSignedServiceAgreement(account) {
   const data = account?.onboardingData;
   return Boolean(data && typeof data === 'object' && data.serviceAgreement?.signatureDataUrl);
 }
+
+/**
+ * ¿Bloquear el SaaS hasta firmar el contrato?
+ * Solo tras cobro real marcado como pendiente de firma.
+ * Nunca a cuentas exentas ni a clientes ya operativos (p. ej. Pau) sin ese flag.
+ */
+export function mustSignServiceAgreement(account) {
+  if (!account) return false;
+  if (hasSignedServiceAgreement(account)) return false;
+  if (!canAccessServiceAgreement(account.subscription)) return false;
+  if (account.subscription?.billingExempt) return false;
+  const data = account.onboardingData;
+  return Boolean(data && typeof data === 'object' && data.serviceAgreementPending === true);
+}
+
+/** Tras cobro: pedir firma. Exentos o ya firmados no se marcan. */
+export function withServiceAgreementPendingAfterPayment(account) {
+  if (!account) return account;
+  const data =
+    account.onboardingData && typeof account.onboardingData === 'object'
+      ? { ...account.onboardingData }
+      : {};
+  if (account.subscription?.billingExempt || data.serviceAgreement?.signatureDataUrl) {
+    data.serviceAgreementPending = false;
+  } else {
+    data.serviceAgreementPending = true;
+  }
+  return { ...account, onboardingData: data };
+}
