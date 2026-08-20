@@ -12,6 +12,7 @@ import {
 import {
   ACCOUNT_AUTH_TOKEN_FIELDS,
   accountMatchesAuthToken,
+  buildEmailVerificationTokenUpdate,
   hashAuthToken,
 } from './accountAuthTokens.js';
 import {
@@ -2020,23 +2021,22 @@ export async function clearLoginOtp(req, account) {
 
 export async function saveEmailVerificationToken(req, account, rawToken) {
   const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const tokenUpdate = buildEmailVerificationTokenUpdate(account, rawToken, expiry);
   return saveAccount(req, {
     ...account,
-    emailVerificationTokenHash: hashToken(rawToken),
-    emailVerificationExpiry: expiry,
-    updatedAt: new Date().toISOString(),
+    ...tokenUpdate,
+    // saveEmailVerificationToken no marca envío hasta que el mail salga de verdad.
+    lastVerificationEmailSentAt: account.lastVerificationEmailSentAt || null,
   });
 }
 
 /** Tras envío real del correo: token + marca de envío en un solo PUT (menos conflictos CouchDB). */
 export async function persistEmailVerificationAfterSend(req, account, rawToken) {
   const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const tokenUpdate = buildEmailVerificationTokenUpdate(account, rawToken, expiry);
   return saveAccount(req, {
     ...account,
-    emailVerificationTokenHash: hashToken(rawToken),
-    emailVerificationExpiry: expiry,
-    lastVerificationEmailSentAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    ...tokenUpdate,
   });
 }
 

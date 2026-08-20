@@ -40,12 +40,28 @@ describe('accountAuthTokens', () => {
     expect(accountMatchesAuthToken(account, raw, ACCOUNT_AUTH_TOKEN_FIELDS.emailVerification)).toBe(false);
   });
 
-  it('accountMatchesAuthToken rechaza cuentas borradas', () => {
+  it('accountMatchesAuthToken acepta token anterior tras reenvío', () => {
+    const oldRaw = 'old-link-token';
+    const newRaw = 'new-link-token';
     const account = {
-      deletedAt: new Date().toISOString(),
-      passwordResetTokenHash: hash,
-      passwordResetExpiry: future,
+      emailVerificationTokenHash: hashAuthToken(newRaw),
+      emailVerificationPrevHashes: [hashAuthToken(oldRaw)],
+      emailVerificationExpiry: future,
     };
-    expect(accountMatchesAuthToken(account, raw, ACCOUNT_AUTH_TOKEN_FIELDS.passwordReset)).toBe(false);
+    expect(accountMatchesAuthToken(account, oldRaw, ACCOUNT_AUTH_TOKEN_FIELDS.emailVerification)).toBe(true);
+    expect(accountMatchesAuthToken(account, newRaw, ACCOUNT_AUTH_TOKEN_FIELDS.emailVerification)).toBe(true);
+  });
+
+  it('buildEmailVerificationTokenUpdate conserva hashes previos', async () => {
+    const { buildEmailVerificationTokenUpdate } = await import('../services/accountAuthTokens.js');
+    const oldHash = hashAuthToken('old');
+    const update = buildEmailVerificationTokenUpdate(
+      { emailVerificationTokenHash: oldHash, emailVerificationPrevHashes: [] },
+      'new',
+      future,
+      future,
+    );
+    expect(update.emailVerificationTokenHash).toBe(hashAuthToken('new'));
+    expect(update.emailVerificationPrevHashes).toContain(oldHash);
   });
 });

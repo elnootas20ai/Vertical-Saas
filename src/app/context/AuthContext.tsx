@@ -1208,17 +1208,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { ok: false, emailVerified: false };
       }
       const next = response.user;
+      let verifiedOut = Boolean(next.emailVerified);
       setUser((prev) => {
+        // Evitar carrera: un /me antiguo (antes de verificar) no debe bajar el flag.
+        const merged =
+          prev?.emailVerified && !next.emailVerified
+            ? { ...next, emailVerified: true }
+            : next;
+        if (merged.emailVerified) verifiedOut = true;
         const prevSub = JSON.stringify(prev?.subscription ?? null);
-        const nextSub = JSON.stringify(next.subscription ?? null);
+        const nextSub = JSON.stringify(merged.subscription ?? null);
         const prevSalesPoint = String(prev?.employment?.salesPointId || '').trim();
-        const nextSalesPoint = String(next.employment?.salesPointId || '').trim();
+        const nextSalesPoint = String(merged.employment?.salesPointId || '').trim();
         const prevLinked = String(prev?.linkedBusinessId || '').trim();
-        const nextLinked = String(next.linkedBusinessId || '').trim();
+        const nextLinked = String(merged.linkedBusinessId || '').trim();
         if (
-          prev?.user_id === next.user_id &&
-          prev.emailVerified === next.emailVerified &&
-          prev.updatedAt === next.updatedAt &&
+          prev?.user_id === merged.user_id &&
+          prev.emailVerified === merged.emailVerified &&
+          prev.updatedAt === merged.updatedAt &&
           prevSub === nextSub &&
           prevSalesPoint === nextSalesPoint &&
           prevLinked === nextLinked
@@ -1227,13 +1234,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         // Normalizado (determinista): persistir el user crudo del servidor
         // metía campos volátiles en localStorage y despertaba a otras pestañas.
-        const normalized = normalizeSessionUser(next);
+        const normalized = normalizeSessionUser(merged);
         persistSession(normalized);
         return normalized;
       });
       setSessionSyncedWithServer(true);
       setIsAuthenticated(true);
-      return { ok: true, emailVerified: Boolean(next.emailVerified) };
+      return { ok: true, emailVerified: verifiedOut };
     } catch {
       return { ok: false, emailVerified: false };
     }

@@ -119,9 +119,12 @@ export function VerifyEmailPending() {
   }, [startCountdown]);
 
   useEffect(() => {
-    if (tokenFromUrl && emailFromUrl) {
-      setVerifyState('loading');
-      verifyEmail(tokenFromUrl, emailFromUrl).then((result) => {
+    if (!(tokenFromUrl && emailFromUrl)) return;
+    let cancelled = false;
+    setVerifyState('loading');
+    verifyEmail(tokenFromUrl, emailFromUrl)
+      .then((result) => {
+        if (cancelled) return;
         if (result.success) {
           clearPendingVerifyEmail();
           broadcastEmailVerified(emailFromUrl);
@@ -129,19 +132,19 @@ export function VerifyEmailPending() {
             pendingRedirectToRef.current = result.redirectTo;
           }
           setVerifyState('success');
-          window.setTimeout(() => {
-            try {
-              window.close();
-            } catch {
-              /* el navegador suele bloquear close si no es ventana abierta por script */
-            }
-          }, 800);
         } else {
           setVerifyState('error');
           setVerifyError(result.error || 'Enlace inválido o expirado');
         }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setVerifyState('error');
+        setVerifyError('No se pudo verificar el email. Prueba de nuevo o solicita otro enlace.');
       });
-    }
+    return () => {
+      cancelled = true;
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tokenFromUrl, emailFromUrl]);
 
@@ -205,38 +208,43 @@ export function VerifyEmailPending() {
     setCheckState('success');
   }, [user?.emailVerified, verifyState]);
 
-  /** Tras verificar en la pestaña de registro: redirección automática (no en la pestaña del correo). */
+  /** Tras verificar: seguir al onboarding (también si el enlace se abrió en esta pestaña). */
   useEffect(() => {
-    if (verifyState === 'success' && openedFromEmailLink) return;
-    if (checkState !== 'success' && !(verifyState === 'success' && !openedFromEmailLink)) return;
+    if (verifyState !== 'success' && checkState !== 'success') return;
     const t = window.setTimeout(() => {
       void goAfterVerify(user?.accountType);
     }, REDIRECT_DELAY_MS);
     return () => window.clearTimeout(t);
-  }, [verifyState, checkState, openedFromEmailLink, user?.accountType, goAfterVerify]);
+  }, [verifyState, checkState, user?.accountType, goAfterVerify]);
 
   const handleCheckVerified = async () => {
     setCheckMessage('');
     setCheckState('checking');
-    const result = await refreshCurrentUser();
-    if (result.emailVerified) {
-      clearPendingVerifyEmail();
-      if (targetEmail) broadcastEmailVerified(targetEmail);
-      setCheckState('success');
-      return;
-    }
-    setCheckState('idle');
-    if (result.sessionInvalid) {
+    try {
+      const result = await refreshCurrentUser();
+      if (result.emailVerified) {
+        clearPendingVerifyEmail();
+        if (targetEmail) broadcastEmailVerified(targetEmail);
+        setCheckState('success');
+        void goAfterVerify(user?.accountType);
+        return;
+      }
+      setCheckState('idle');
+      if (result.sessionInvalid) {
+        setCheckMessage(
+          'Esta sesión ya no es válida (cuenta eliminada o distinta). Regístrate de nuevo con tu email o inicia sesión.',
+        );
+        return;
+      }
       setCheckMessage(
-        'Esta sesión ya no es válida (cuenta eliminada o distinta). Regístrate de nuevo con tu email o inicia sesión.',
+        result.ok
+          ? 'Todavía no está verificado en el servidor. Abre el enlace del correo más reciente (si reenviaste, los enlaces viejos no valen) y vuelve a pulsar aquí.'
+          : 'No se pudo comprobar la sesión. Inténtalo en unos segundos o inicia sesión de nuevo.',
       );
-      return;
+    } catch {
+      setCheckState('idle');
+      setCheckMessage('No se pudo comprobar. Inténtalo en unos segundos.');
     }
-    setCheckMessage(
-      result.ok
-        ? 'Aún no detectamos la verificación. Abre el enlace del correo e inténtalo de nuevo.'
-        : 'No se pudo comprobar. Inténtalo en unos segundos.',
-    );
   };
 
   const handleResend = async () => {
@@ -311,33 +319,7 @@ export function VerifyEmailPending() {
 
 
 
-  if (verifyState === 'success' && openedFromEmailLink) {
-    return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center p-6">
-        <div className="w-full max-w-[420px] text-center">
-          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl shadow-sm px-8 py-10">
-            <div className="flex justify-center mb-8">
-              <VertialLogo size="lg" />
-            </div>
-            <div className="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 dark:bg-blue-950/40">
-              <CheckCircle className="h-8 w-8 text-blue-600 dark:text-blue-400" />
-            </div>
-            <h1 className="text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 mb-2">
-              Correo confirmado
-            </h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
-              Tu email ya está verificado. Vuelve a la pestaña de Vertial en el ordenador donde te
-              registraste (la pantalla «Revisa tu correo») y pulsa{' '}
-              <strong className="text-gray-700 dark:text-gray-200">«Ya he confirmado el email»</strong>.
-              El registro continuará allí. Puedes cerrar esta ventana.
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (checkState === 'success' || (verifyState === 'success' && !openedFromEmailLink)) {
+  if (verifyState === 'success' || checkState === 'success') {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center p-6">
         <div className="w-full max-w-[420px] text-center">
@@ -353,8 +335,15 @@ export function VerifyEmailPending() {
             </h1>
             <p className="text-sm text-gray-500 dark:text-gray-400 flex items-center justify-center gap-2">
               <RefreshCw className="h-4 w-4 animate-spin" />
-              Redirigiendo…
+              Continuando el registro…
             </p>
+            <button
+              type="button"
+              onClick={() => void goAfterVerify(user?.accountType)}
+              className="mt-6 text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400"
+            >
+              Continuar ahora
+            </button>
           </div>
         </div>
       </div>
@@ -446,8 +435,9 @@ export function VerifyEmailPending() {
           <div className="text-center mb-8">
             <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">Revisa tu correo</h1>
             <p className="text-gray-600 dark:text-gray-400 text-sm leading-relaxed">
-              Hemos enviado un enlace de confirmación. Ábrelo para activar tu cuenta y, cuando lo hayas
-              hecho, vuelve a esta pantalla y pulsa «Ya he confirmado el email».
+              Hemos enviado un enlace de confirmación. Ábrelo desde este mismo navegador (o el móvil)
+              y el registro continuará solo. Si reenviaste el correo, usa solo el enlace del email
+              más reciente. Si ya lo confirmaste, pulsa el botón de abajo.
             </p>
             {targetEmail ? (
               <p className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gray-100 dark:bg-gray-700/80 text-sm font-medium text-gray-900 dark:text-gray-100">

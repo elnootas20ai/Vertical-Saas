@@ -3412,30 +3412,45 @@ export async function verifyEmail(req, res) {
       return badRequest(res, 'Token y email son obligatorios');
     }
 
-    const account = await findAccountForEmailVerification(req, String(email), String(token));
+    let account = await findAccountForEmailVerification(req, String(email), String(token));
+
+    // Ya verificado (p. ej. confirmó en el móvil y reabre el enlace en el PC): no bloquear.
+    if (!account) {
+      const byEmail = await findAccountByEmail(req, String(email));
+      if (byEmail?.emailVerified) {
+        account = byEmail;
+      }
+    }
+
     if (!account) {
       return res.status(400).json({ ok: false, error: 'Enlace de verificación inválido o expirado' });
     }
 
-    const savedAccount = await saveAccount(req, {
-      ...account,
-      emailVerified: true,
-      emailVerificationTokenHash: null,
-      emailVerificationExpiry: null,
-      updatedAt: new Date().toISOString(),
-    });
+    const alreadyVerified = Boolean(account.emailVerified);
+    const savedAccount = alreadyVerified
+      ? account
+      : await saveAccount(req, {
+          ...account,
+          emailVerified: true,
+          emailVerificationTokenHash: null,
+          emailVerificationPrevHashes: [],
+          emailVerificationExpiry: null,
+          updatedAt: new Date().toISOString(),
+        });
 
-    await logAccountActivity(req, {
-      actorUserId: savedAccount.user_id,
-      actorName: savedAccount.fullName,
-      targetUserId: savedAccount.user_id,
-      type: 'security',
-      action: 'Email verificado',
-      entityId: savedAccount.user_id,
-      entityLabel: savedAccount.fullName,
-    });
+    if (!alreadyVerified) {
+      await logAccountActivity(req, {
+        actorUserId: savedAccount.user_id,
+        actorName: savedAccount.fullName,
+        targetUserId: savedAccount.user_id,
+        type: 'security',
+        action: 'Email verificado',
+        entityId: savedAccount.user_id,
+        entityLabel: savedAccount.fullName,
+      });
 
-    sendWelcomeEmail(savedAccount).catch(() => null);
+      sendWelcomeEmail(savedAccount).catch(() => null);
+    }
 
     const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
 
@@ -3456,6 +3471,7 @@ export async function verifyEmail(req, res) {
       refreshToken,
       redirectTo,
       pendingInvitationsCount,
+      alreadyVerified,
     });
   } catch (error) {
     return res.status(500).json({
