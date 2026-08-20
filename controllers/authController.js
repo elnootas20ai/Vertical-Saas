@@ -1737,11 +1737,13 @@ async function provisionAccountFromOnboardingSelection(req, account, { billingMo
       const provision = await provisionBusinessFromOnboarding(req, savedAccount);
       if (provision.ok && provision.businessId) {
         const resolvedName = resolveBusinessNameFromOnboarding(savedAccount);
+        const fresh = (await findAccountByUserId(req, savedAccount.user_id)) || savedAccount;
         savedAccount = await saveAccount(req, {
-          ...savedAccount,
-          companyName: resolvedName || savedAccount.companyName,
+          ...fresh,
+          companyName: resolvedName || fresh.companyName,
+          subscription: nextSubscription,
           onboardingData: {
-            ...(savedAccount.onboardingData || {}),
+            ...(fresh.onboardingData || {}),
             businessId: provision.businessId,
             suppressAutoProvision: false,
           },
@@ -1750,6 +1752,7 @@ async function provisionAccountFromOnboardingSelection(req, account, { billingMo
       }
     } catch (provisionErr) {
       console.error('[AUTH] Error provisionando empresa desde onboarding:', provisionErr?.message);
+      savedAccount = (await findAccountByUserId(req, savedAccount.user_id)) || savedAccount;
     }
   }
 
@@ -1767,7 +1770,7 @@ export async function saveBillingCard(req, res) {
         code: ownerGate.code,
       });
     }
-    const account = ownerGate.account;
+    let account = ownerGate.account;
 
     const { cardNumber, cardHolderName, expiryDate, cvv, billingMode, selectedPlanId } = req.body || {};
 
@@ -1787,15 +1790,35 @@ export async function saveBillingCard(req, res) {
       selectedPlanId,
     });
 
-    const savedCard = await saveCard(req, existingCard ? { ...existingCard, ...baseCard, updatedAt: new Date().toISOString() } : baseCard);
+    const savedCard = await saveCard(
+      req,
+      existingCard
+        ? {
+            ...existingCard,
+            ...baseCard,
+            _rev: existingCard._rev,
+            createdAt: existingCard.createdAt || baseCard.createdAt,
+            updatedAt: new Date().toISOString(),
+          }
+        : baseCard,
+    );
 
-    const accountAfterProvision = await provisionAccountFromOnboardingSelection(req, account, {
-      billingMode,
-      selectedPlanId,
-    });
+    // Releer cuenta: /me u onboarding pueden haber cambiado el _rev mientras se guardaba la tarjeta.
+    const freshBeforeProvision = (await findAccountByUserId(req, userId)) || account;
+    let accountAfterProvision = freshBeforeProvision;
+    try {
+      accountAfterProvision = await provisionAccountFromOnboardingSelection(req, freshBeforeProvision, {
+        billingMode,
+        selectedPlanId,
+      });
+    } catch (provisionErr) {
+      console.error('[AUTH] provision tras tarjeta (no bloquea el pago):', provisionErr?.message);
+      accountAfterProvision = (await findAccountByUserId(req, userId)) || freshBeforeProvision;
+    }
 
+    const latest = (await findAccountByUserId(req, userId)) || accountAfterProvision;
     const savedAccount = await saveAccount(req, {
-      ...accountAfterProvision,
+      ...latest,
       paymentSummary: {
         cardId: savedCard._id,
         lastFourDigits: savedCard.lastFourDigits,
@@ -1804,6 +1827,9 @@ export async function saveBillingCard(req, res) {
         billingMode: savedCard.billingMode,
         selectedPlanId: savedCard.selectedPlanId,
       },
+      subscription: accountAfterProvision.subscription || latest.subscription,
+      onboardingData: accountAfterProvision.onboardingData || latest.onboardingData,
+      companyName: accountAfterProvision.companyName || latest.companyName,
       updatedAt: new Date().toISOString(),
     });
 
@@ -1813,6 +1839,7 @@ export async function saveBillingCard(req, res) {
       card: sanitizeCard(savedCard),
     });
   } catch (error) {
+    console.error('[AUTH] saveBillingCard error:', error?.message || error);
     return res.status(500).json({
       ok: false,
       error: error instanceof Error ? error.message : 'Error al guardar la tarjeta',

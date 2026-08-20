@@ -2513,8 +2513,34 @@ export async function saveAccount(req, account) {
   const docs = await getAllDocuments(req, ACCOUNTS_DB);
   assertAccountEmailUnique(docs, account.email, account.user_id);
 
-  const result = await putDocument(req, ACCOUNTS_DB, account._id, account);
-  return { ...account, _rev: result.rev };
+  let doc = account;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const result = await putDocument(req, ACCOUNTS_DB, doc._id, doc);
+      return { ...doc, _rev: result.rev };
+    } catch (err) {
+      const isConflict =
+        Number(err?.statusCode) === 409 || /conflict/i.test(String(err?.message || ''));
+      if (!isConflict || attempt >= 2) throw err;
+      const fresh = await getDocument(req, ACCOUNTS_DB, account._id);
+      if (!fresh?._rev) throw err;
+      // Reaplicar el cambio sobre el _rev fresco; conservar campos volátiles de sesión.
+      doc = {
+        ...fresh,
+        ...account,
+        _id: fresh._id,
+        _rev: fresh._rev,
+        sessions: fresh.sessions,
+        refreshTokenHash: fresh.refreshTokenHash,
+        refreshTokenExpiry: fresh.refreshTokenExpiry,
+        recentActivity: Array.isArray(account.recentActivity)
+          ? account.recentActivity
+          : fresh.recentActivity,
+        updatedAt: new Date().toISOString(),
+      };
+    }
+  }
+  throw new Error('No se pudo guardar la cuenta tras conflictos');
 }
 
 export async function appendActivityToAccount(req, userId, activity) {
@@ -2616,8 +2642,25 @@ export async function saveCard(req, card) {
   }
 
   await ensureDatabase(req, CARDS_DB);
-  const result = await putDocument(req, CARDS_DB, card._id, card);
-  return { ...card, _rev: result.rev };
+  let doc = card;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const result = await putDocument(req, CARDS_DB, doc._id, doc);
+      return { ...doc, _rev: result.rev };
+    } catch (err) {
+      const isConflict =
+        Number(err?.statusCode) === 409 || /conflict/i.test(String(err?.message || ''));
+      if (!isConflict || attempt >= 2) throw err;
+      const fresh = await getDocument(req, CARDS_DB, card._id);
+      doc = {
+        ...card,
+        ...(fresh?._rev ? { _rev: fresh._rev, createdAt: fresh.createdAt || card.createdAt } : {}),
+        _id: card._id,
+        updatedAt: new Date().toISOString(),
+      };
+    }
+  }
+  throw new Error('No se pudo guardar la tarjeta tras conflictos');
 }
 
 // ─── D-01: Mango Indexes ──────────────────────────────────────────────────────
