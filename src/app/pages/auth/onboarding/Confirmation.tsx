@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router';
-import { CheckCircle, Calendar, CreditCard, ArrowRight, Loader2 } from 'lucide-react';
+import { CheckCircle, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ACCESO__Button } from '../../../components/design-system/ACCESO__Button';
 import { VertialLogo } from '../../../components/VertialLogo';
@@ -13,12 +13,12 @@ import { isRestaurantBusinessType } from '../../../lib/deliveryOpsTypes';
 
 const RESTAURANT_BRAND = 'Vertial Bar/restaurante';
 
+/** Pasos de preparación: el destino es el pago, no el dashboard. */
 const stepKeys = [
-  { id: 1, key: 'workspace', duration: 1000 },
-  { id: 2, key: 'plan', duration: 1000 },
-  { id: 3, key: 'trial', duration: 1000 },
-  { id: 4, key: 'payment', duration: 800 },
-  { id: 5, key: 'dashboard', duration: 800 },
+  { id: 1, key: 'workspace', duration: 700 },
+  { id: 2, key: 'plan', duration: 700 },
+  { id: 3, key: 'trial', duration: 700 },
+  { id: 4, key: 'payment', duration: 700 },
 ] as const;
 
 export function Confirmation() {
@@ -28,7 +28,7 @@ export function Confirmation() {
   const { t } = useTranslation();
   const [currentStep, setCurrentStep] = useState(0);
   const [completedSteps, setCompletedSteps] = useState<number[]>([]);
-  const [countdown, setCountdown] = useState(10);
+  const [countdown, setCountdown] = useState(5);
   const [saveReady, setSaveReady] = useState(false);
   const completionStarted = useRef(false);
 
@@ -54,21 +54,17 @@ export function Confirmation() {
     if (isDelivery) {
       return {
         headingTitle: tradeName
-          ? `¡${tradeName} ya está en Vertial Delivery!`
-          : '¡Tu espacio en Vertial Delivery está listo!',
-        headingSubtitle: tradeName
-          ? `Estamos activando el panel de ${tradeName}: plan y acceso a locales, caja y pedidos.`
-          : 'Estamos activando tu plan y el acceso a locales, caja y pedidos.',
+          ? `¡${tradeName} casi listo en Vertial Delivery!`
+          : '¡Casi listo en Vertial Delivery!',
+        headingSubtitle: 'Siguiente paso: completar el pago para activar locales, caja y pedidos.',
       };
     }
     if (isRestaurant) {
       return {
         headingTitle: tradeName
-          ? `¡${tradeName} ya está en ${RESTAURANT_BRAND}!`
-          : `¡Tu espacio en ${RESTAURANT_BRAND} está listo!`,
-        headingSubtitle: tradeName
-          ? `Estamos activando bar/restaurante para ${tradeName}: plan, TPV y operativa de sala.`
-          : 'Estamos activando tu bar/restaurante: plan, TPV y operativa de sala.',
+          ? `¡${tradeName} casi listo en ${RESTAURANT_BRAND}!`
+          : `¡Casi listo en ${RESTAURANT_BRAND}!`,
+        headingSubtitle: 'Siguiente paso: completar el pago para activar TPV y operativa de sala.',
       };
     }
     return {
@@ -84,7 +80,7 @@ export function Confirmation() {
       setCurrentStep(prev => prev + 1);
     }, steps[currentStep].duration);
     return () => clearTimeout(timer);
-  }, [currentStep]);
+  }, [currentStep, steps]);
 
   useEffect(() => {
     if (currentStep < steps.length) return;
@@ -94,12 +90,10 @@ export function Confirmation() {
     let countdownTimer: number | undefined;
     let finalTimer: number | undefined;
 
-    const goToPaywall = () => {
-      // Cliente nuevo: paywall de transferencia (no dashboard con spinner/race a Gate).
+    const goToPayment = () => {
       navigate('/saas/subscription', { replace: true });
     };
 
-    // Esperar a que updateProfile provisione la empresa antes de salir.
     void updateOnboardingData(data as unknown as Record<string, unknown>)
       .catch((error) => {
         console.error('Error saving onboarding:', error);
@@ -116,7 +110,7 @@ export function Confirmation() {
           });
         }, 1000);
 
-        finalTimer = window.setTimeout(goToPaywall, 10000);
+        finalTimer = window.setTimeout(goToPayment, 5000);
       });
 
     return () => {
@@ -136,8 +130,8 @@ export function Confirmation() {
           <div className="mb-5 flex justify-center">
             <VertialLogo size="lg" />
           </div>
-          <p className="mb-3 inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold uppercase tracking-wide text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
-            Configuración completada
+          <p className="mb-3 inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-xs font-bold uppercase tracking-wide text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+            Pendiente de pago
           </p>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-3">
             {headingTitle}
@@ -191,8 +185,8 @@ export function Confirmation() {
           </div>
 
           {currentStep >= steps.length && (
-            <div className="mt-6 rounded-xl border border-green-200 bg-green-50 p-4 dark:border-green-900/50 dark:bg-green-950/30">
-              <p className="text-center font-medium text-green-800 dark:text-green-200">
+            <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-950/30">
+              <p className="text-center font-medium text-amber-900 dark:text-amber-100">
                 {t('onboarding.confirmation.redirect', { countdown })}
               </p>
             </div>

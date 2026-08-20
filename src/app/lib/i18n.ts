@@ -573,17 +573,17 @@ const es = {
     // ── Onboarding Confirmation ───────────────────────────────────────────────
     onboarding: {
       confirmation: {
-        title: '¡Tu cuenta está lista!',
-        subtitle: 'Configurando tu compraventa',
-        redirect: '✅ ¡Todo listo! Redirigiendo al dashboard en {{countdown}}s...',
-        goNow: 'Ir al dashboard ahora →',
-        wait: 'Esto solo tomará unos segundos',
+        title: '¡Datos listos! Siguiente: el pago',
+        subtitle: 'Antes del dashboard debes completar el pago de tu plan',
+        redirect: 'Redirigiendo al pago en {{countdown}}s…',
+        goNow: 'Ir al pago ahora →',
+        wait: 'El acceso al panel se abre cuando el pago esté confirmado',
         steps: {
-          workspace: 'Creando tu espacio de trabajo',
+          workspace: 'Guardando tu espacio de trabajo',
           plan: 'Configurando tu plan',
-          trial: 'Activando tu cuenta',
-          payment: 'Configurando método de pago',
-          dashboard: 'Preparando tu dashboard',
+          trial: 'Preparando tu cuenta',
+          payment: 'Abriendo el pago de la suscripción',
+          dashboard: 'El dashboard se activará tras el pago',
         },
       },
     },
@@ -2497,17 +2497,17 @@ const en = {
     // ── Onboarding Confirmation ───────────────────────────────────────────────
     onboarding: {
       confirmation: {
-        title: 'Your account is ready!',
-        subtitle: 'Setting up your dealership',
-        redirect: '✅ All done! Redirecting to dashboard in {{countdown}}s...',
-        goNow: 'Go to dashboard now →',
-        wait: 'This will only take a moment',
+        title: 'Data ready! Next: payment',
+        subtitle: 'You must complete payment before accessing the dashboard',
+        redirect: 'Redirecting to payment in {{countdown}}s…',
+        goNow: 'Go to payment now →',
+        wait: 'Dashboard access opens when payment is confirmed',
         steps: {
-          workspace: 'Creating your workspace',
+          workspace: 'Saving your workspace',
           plan: 'Configuring your plan',
-          trial: 'Activating your account',
-          payment: 'Setting up payment method',
-          dashboard: 'Preparing your dashboard',
+          trial: 'Preparing your account',
+          payment: 'Opening subscription payment',
+          dashboard: 'Dashboard activates after payment',
         },
       },
     },

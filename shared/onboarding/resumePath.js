@@ -13,7 +13,7 @@ const PAYMENT_STEP_INDEX = COMPANY_ONBOARDING_ROUTES.length - 1;
 /**
  * Retoma el onboarding en el siguiente paso pendiente.
  * Si no hay progreso, empieza en tipo de negocio.
- * Tras el pago → confirmación (el contrato NO forma parte del alta gratis).
+ * Tras el paso de pago → confirmación (puente al paywall; el dashboard solo tras cobrar).
  */
 export function resolveCompanyOnboardingResumePath(account) {
   const data = account?.onboardingData && typeof account.onboardingData === 'object'

@@ -67,8 +67,12 @@ describe('vertialServiceAgreement', () => {
     assert.match(pricing?.body || '', /por anticipado/);
     assert.match(pricing?.body || '', /día 1 y el día 5/);
     const changes = clauses.find((c) => c.id === '6');
-    assert.match(changes?.body || '', /treinta \(30\) días/);
+    assert.match(changes?.body || '', /30 días naturales/);
     const term = clauses.find((c) => c.id === '13');
-    assert.match(term?.body || '', /dos \(2\) meses/);
+    assert.match(term?.body || '', /2 meses/);
+    // Sin ruido tipográfico: no "siete (7)" ni listas (i)/(ii).
+    const joined = clauses.map((c) => c.body).join('\n');
+    assert.equal(/\(\d+\)/.test(joined), false);
+    assert.equal(/\(i\)|\(ii\)|\(iii\)/.test(joined), false);
   });
 });

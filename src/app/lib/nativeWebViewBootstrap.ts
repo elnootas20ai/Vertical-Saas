@@ -146,9 +146,13 @@ export function registerPwaServiceWorker(): void {
   });
 
   // Nuevo SW (update) con skipWaiting + clients.claim → controllerchange.
-  // Antes: recargábamos siempre → en algunas entradas directas se notaba un 2º load a los 4–5 s.
-  // Ahora: como mucho UNA recarga por stamp de build (localStorage), no en cada visita.
+  // Tras un F5/deploy el claim suele llegar a los 1–5 s: un reload ahí se siente
+  // como «doble recarga». Si la página acaba de cargar, el HTML/JS ya vienen de red
+  // (index no se precachea); solo marcamos el stamp y no recargamos.
+  // Si el SW cambia con la pestaña ya abierta un rato, sí recargamos una vez por build.
   const SW_RELOAD_STAMP_KEY = 'vertial:sw-reloaded-for-stamp';
+  const SW_RELOAD_GRACE_MS = 12_000;
+  const pageLoadedAt = Date.now();
   const bundleStamp = () =>
     String(import.meta.env.VITE_BUILD_STAMP || import.meta.env.VITE_APP_VERSION || '0');
 
@@ -166,6 +170,9 @@ export function registerPwaServiceWorker(): void {
       localStorage.setItem(SW_RELOAD_STAMP_KEY, stamp);
     } catch {
       /* private mode: mejor no recargar en bucle */
+      return;
+    }
+    if (Date.now() - pageLoadedAt < SW_RELOAD_GRACE_MS) {
       return;
     }
     refreshing = true;

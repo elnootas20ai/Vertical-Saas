@@ -30,8 +30,15 @@ const STEP_INDEX = 5;
 
 export function PaymentInfo() {
   const navigate = useNavigate();
-  const { user, isInitializing, refreshCurrentUser, saveBillingCard, activateOnboardingTrialWithoutCard, logout } =
-    useAuth();
+  const {
+    user,
+    isInitializing,
+    refreshCurrentUser,
+    saveBillingCard,
+    activateOnboardingTrialWithoutCard,
+    updateOnboardingData,
+    logout,
+  } = useAuth();
   const { data, updateData, initializeTrial, advanceStep } = useOnboarding();
   useOnboardingStepGate(STEP_INDEX);
   const [skipMonei, setSkipMonei] = useState(false);
@@ -78,11 +85,28 @@ export function PaymentInfo() {
   const [submitError, setSubmitError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const finishPaymentStep = useCallback(() => {
+  /** Tras tarjeta/activación → paywall real. El dashboard solo cuando el pago esté activo. */
+  const finishPaymentStep = useCallback(async () => {
     initializeTrial();
     advanceStep(STEP_INDEX);
-    navigate('/auth/onboarding/confirmation');
-  }, [advanceStep, initializeTrial, navigate]);
+    const now = Date.now();
+    const payload = {
+      ...data,
+      completedStep: STEP_INDEX,
+      trial: {
+        startDate: data.trial?.startDate || now,
+        endDate: data.trial?.endDate || now + 14 * 24 * 60 * 60 * 1000,
+      },
+    };
+    try {
+      await updateOnboardingData(payload as unknown as Record<string, unknown>);
+    } catch (error) {
+      console.error('Error saving onboarding before payment:', error);
+      navigate('/auth/onboarding/confirmation', { replace: true });
+      return;
+    }
+    navigate('/saas/subscription', { replace: true });
+  }, [advanceStep, data, initializeTrial, navigate, updateOnboardingData]);
 
   const orderSummary = useMemo(() => {
     const billingMode = data.subscriptionSelection.billingMode;
@@ -210,12 +234,12 @@ export function PaymentInfo() {
         billingMode: data.subscriptionSelection.billingMode,
         selectedPlanId: orderSummary.selectedPlanId,
       });
-      setIsSubmitting(false);
       if (!result.success) {
+        setIsSubmitting(false);
         setSubmitError(result.error || 'No se pudo iniciar la prueba. Inténtalo de nuevo.');
         return;
       }
-      finishPaymentStep();
+      await finishPaymentStep();
       return;
     }
 
@@ -234,9 +258,8 @@ export function PaymentInfo() {
       selectedPlanId: orderSummary.selectedPlanId,
     });
 
-    setIsSubmitting(false);
-
     if (!result.success) {
+      setIsSubmitting(false);
       const msg = result.error || 'No se pudo guardar la tarjeta';
       if (/verificar tu email/i.test(msg) || /sesión|session|token/i.test(msg)) {
         setSubmitError(msg);
@@ -246,7 +269,7 @@ export function PaymentInfo() {
       return;
     }
 
-    finishPaymentStep();
+    await finishPaymentStep();
   };
 
   const handleBack = () => {
