@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router';
-import { useOnboarding, ONBOARDING_ROUTES } from '../../context/OnboardingContext';
+import { useOnboarding, ONBOARDING_ROUTES } from '../context/OnboardingContext';
 
 /**
  * Evita saltos al paso 1 mientras carga el progreso (local/servidor).
