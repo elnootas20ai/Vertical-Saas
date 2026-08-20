@@ -889,7 +889,7 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
     ? `Crear un nuevo punto de venta (${pointsOfSale.length}/${pointOfSaleAccess.includedPointOfSaleLimit})`
     : pointOfSaleAccess.needsPointOfSaleAddon
       ? `Tu plan PRO incluye ${pointOfSaleAccess.includedPointOfSaleLimit} PDV. Ampliación: ${formatAddonPriceShort('extra_pdv')}.`
-      : `Tu plan ${pointOfSaleAccess.planLabel} incluye ${pointOfSaleAccess.includedPointOfSaleLimit} PDV. Sube a PRO para crear más.`;
+      : `Tu plan ${pointOfSaleAccess.planLabel} incluye ${pointOfSaleAccess.includedPointOfSaleLimit} PDV. Con PRO + ampliación puedes añadir más.`;
 
   const bodyScrollRef = useRef<HTMLDivElement>(null);
   const terminalSectionRef = useRef<HTMLDivElement>(null);

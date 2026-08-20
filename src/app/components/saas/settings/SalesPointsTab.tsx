@@ -2012,7 +2012,7 @@ export function SalesPointsTab() {
       setShowProAccessModal(true);
       toast.error(pointOfSaleAccess.needsPointOfSaleAddon
         ? 'Tu plan PRO incluye 1 PDV. Añade un PDV extra para crear otro.'
-        : 'Necesitas PRO para crear un segundo PDV.');
+        : 'Con Básico/Mediano solo hay 1 PDV. Pasa a PRO y contrata un PDV extra.');
       throw new Error('pdv limit required');
     }
     saveInProgressRef.current = true;
@@ -2772,8 +2772,8 @@ export function SalesPointsTab() {
                 </h4>
                 <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
                   {proAccessReason === 'pdv-extra'
-                    ? `Tu plan PRO incluye ${pointOfSaleAccess.includedPointOfSaleLimit} puntos de venta. Para crear otro PDV contrata la ampliación (${formatAddonPriceShort('extra_pdv')}).`
-                    : `El plan ${pointOfSaleAccess.planLabel} incluye ${pointOfSaleAccess.includedPointOfSaleLimit} centro de trabajo. Tanto Básico como Normal solo permiten 1 PDV; para crear otro local, almacén u oficina necesitas activar PRO.`}
+                    ? `Tu plan PRO incluye ${pointOfSaleAccess.includedPointOfSaleLimit} punto de venta. Para crear otro PDV contrata la ampliación (${formatAddonPriceShort('extra_pdv')}).`
+                    : `El plan ${pointOfSaleAccess.planLabel} incluye ${pointOfSaleAccess.includedPointOfSaleLimit} PDV. Para otro local necesitas PRO y, si ya lo tienes, la ampliación de PDV.`}
                 </p>
               </div>
             </div>

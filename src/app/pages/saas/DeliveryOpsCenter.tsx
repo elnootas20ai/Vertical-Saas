@@ -181,7 +181,7 @@ function FiltersBar({
     ? `Crear un nuevo punto de venta (${pdvs.length}/${pointOfSaleAccess.includedPointOfSaleLimit})`
     : pointOfSaleAccess.needsPointOfSaleAddon
       ? `Tu plan PRO incluye ${pointOfSaleAccess.includedPointOfSaleLimit} PDV. Ampliación: ${formatAddonPriceShort('extra_pdv')}.`
-      : `Tu plan ${pointOfSaleAccess.planLabel} incluye ${pointOfSaleAccess.includedPointOfSaleLimit} PDV. Sube a PRO para crear más.`;
+      : `Tu plan ${pointOfSaleAccess.planLabel} incluye ${pointOfSaleAccess.includedPointOfSaleLimit} PDV. Con PRO + ampliación puedes añadir más.`;
 
   const addPdvButtonClass =
     'px-3 py-2 rounded-lg text-sm font-semibold border transition-colors inline-flex items-center gap-1.5 shrink-0 ' +

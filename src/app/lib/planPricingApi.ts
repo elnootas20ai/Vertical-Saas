@@ -78,6 +78,22 @@ async function ensureDb() {
   await ensureCouchDb(CONFIG_DB, () => req(`/api/couch/db/${encodeURIComponent(CONFIG_DB)}`, { method: 'PUT' }));
 }
 
+function mergePlansWithCatalogDefaults(plans: PlanDefinition[]): PlanDefinition[] {
+  return (plans || []).map((plan) => {
+    const def = DEFAULT_PLANS.find((d) => d.id === plan.id);
+    if (!def) return plan;
+    // Catálogo = fuente de verdad de cupos/textos (evita Couch con «2 PDV» de la oferta vieja).
+    return {
+      ...plan,
+      name: def.name,
+      features: def.features,
+      badge: plan.badge ?? def.badge,
+      highlight: plan.highlight ?? def.highlight,
+      order: Number.isFinite(plan.order) ? plan.order : def.order,
+    };
+  });
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export async function getPlanPricingConfig(): Promise<PlanPricingConfig> {
@@ -87,7 +103,10 @@ export async function getPlanPricingConfig(): Promise<PlanPricingConfig> {
       `/api/couch/doc/${encodeURIComponent(CONFIG_DB)}/${encodeURIComponent(CONFIG_DOC_ID)}`,
     );
     if (doc && doc.type === 'plan_pricing_config' && Array.isArray(doc.plans)) {
-      return doc;
+      return {
+        ...doc,
+        plans: mergePlansWithCatalogDefaults(doc.plans),
+      };
     }
   } catch {
     // doc doesn't exist yet
