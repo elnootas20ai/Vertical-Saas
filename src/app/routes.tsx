@@ -170,7 +170,6 @@ import { CleaningReviews } from './pages/saas/CleaningReviews';
 import { CleaningIncidents } from './pages/saas/CleaningIncidents';
 import { WorkerMaterials } from './pages/saas/worker/WorkerMaterials';
 import { Chat } from './pages/saas/Chat';
-import { SupplierBillingPage } from './pages/saas/SupplierBillingPage';
 import { SupplierInvoiceEmailPage } from './pages/saas/SupplierInvoiceEmailPage';
 import { ClientBillingPage } from './pages/saas/ClientBillingPage';
 import { IncomeExpensesPage } from './pages/saas/IncomeExpensesPage';
@@ -697,16 +696,16 @@ export const router = createBrowserRouter([
               children: [
                 { index: true, element: <SuppliersPage /> },
                 { path: 'ordenes-compra', element: <Navigate to="/saas/catalog?tab=purchase-orders" replace /> },
-                { path: 'facturas', element: <SupplierBillingPage /> },
+                { path: 'facturas', element: <Navigate to="/saas/catalog?tab=invoices" replace /> },
               ],
             },
             { path: 'correo-facturas', element: <Navigate to="/saas/correo-facturas" replace /> },
             { path: ':supplierId', element: <SupplierDetailPage /> },
           ]},
-          { path: 'orders', element: <Navigate to="/saas/suppliers/facturas" replace /> },
+          { path: 'orders', element: <Navigate to="/saas/catalog?tab=invoices" replace /> },
           { path: 'purchase-orders', element: <Navigate to="/saas/catalog?tab=purchase-orders" replace /> },
           { path: 'compras-stock', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><ComprasStockPage /></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
-          { path: 'supplier-billing', element: <Navigate to="/saas/suppliers/facturas" replace /> },
+          { path: 'supplier-billing', element: <Navigate to="/saas/catalog?tab=invoices" replace /> },
           { path: 'finanzas/facturacion-clientes', element: <RequireBusinessOwner><ClientBillingPage /></RequireBusinessOwner> },
           { path: 'client-billing', element: <RequireBusinessOwner><ClientBillingPage /></RequireBusinessOwner> },
           { path: 'costing', element: <Navigate to="/saas/catalog?tab=escandallo" replace /> },

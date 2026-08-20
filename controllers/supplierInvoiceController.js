@@ -409,7 +409,16 @@ export async function pollNow(req, res) {
     const summary = await processIncomingEmails(userId);
     return res.json({ ok: true, summary });
   } catch (error) {
-    return res.status(500).json({ ok: false, error: error.message || 'Error al ejecutar polling' });
+    const raw = String(error?.message || error || 'Error al ejecutar polling');
+    let friendly = raw;
+    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|aborted/i.test(raw)) {
+      friendly = 'La sincronización tardó demasiado. Marca como leídos los correos viejos (deja solo facturas nuevas) y reintenta.';
+    } else if (/authentication|invalid credentials|login failed|auth/i.test(raw)) {
+      friendly = 'No se pudo entrar al correo. Revisa la contraseña de aplicación y vuelve a guardar.';
+    } else if (/IMAP no configurado/i.test(raw)) {
+      friendly = 'IMAP incompleto. Guarda correo, servidor y contraseña de aplicación.';
+    }
+    return res.status(500).json({ ok: false, error: friendly });
   }
 }
 
@@ -489,6 +498,8 @@ export async function getConfig(req, res) {
       ok: true,
       config: {
         enabled: Boolean(config.enabled),
+        imapSyncFrom: config.imapSyncFrom || '',
+        imapCursorUid: Number(config.imapCursorUid || 0),
         imapHost: config.imapHost || '',
         imapPort: Number(config.imapPort || 993),
         imapUser: config.imapUser || '',
@@ -541,6 +552,7 @@ export async function updateConfig(req, res) {
     }
 
     const existing = account.supplierInvoiceConfig || {};
+    const enablingNow = config.enabled === true && existing.enabled !== true;
     const updated = {
       enabled: config.enabled !== undefined ? Boolean(config.enabled) : existing.enabled,
       imapHost: config.imapHost !== undefined ? String(config.imapHost).trim() : existing.imapHost,
@@ -550,6 +562,11 @@ export async function updateConfig(req, res) {
         ? String(config.imapPassword).replace(/\s+/g, '').trim()
         : existing.imapPassword,
       imapTls: config.imapTls !== undefined ? Boolean(config.imapTls) : existing.imapTls,
+      // Desde conexión en adelante (no histórico). Se puede reiniciar con resetSyncFrom.
+      imapSyncFrom: config.resetSyncFrom
+        ? new Date().toISOString()
+        : (existing.imapSyncFrom || (enablingNow || config.enabled ? existing.imapSyncFrom || new Date().toISOString() : existing.imapSyncFrom)),
+      imapCursorUid: config.resetSyncFrom ? 0 : (existing.imapCursorUid || 0),
       pollIntervalMinutes: config.pollIntervalMinutes !== undefined
         ? Math.max(1, Number(config.pollIntervalMinutes))
         : existing.pollIntervalMinutes,

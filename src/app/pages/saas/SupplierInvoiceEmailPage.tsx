@@ -5,7 +5,6 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
-  Copy,
   ExternalLink,
   Mail,
   RefreshCw,
@@ -77,7 +76,6 @@ export function SupplierInvoiceEmailPage() {
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
 
   const [invoiceEmailData, setInvoiceEmailData] = useState<InvoiceEmailConfig | null>(null);
-  const [copied, setCopied] = useState(false);
   const [imapDraft, setImapDraft] = useState<Partial<SupplierInvoiceEmailConfig>>({});
   const [imapLoading, setImapLoading] = useState(false);
   const [imapSaving, setImapSaving] = useState(false);
@@ -87,7 +85,6 @@ export function SupplierInvoiceEmailPage() {
   const [lastTestOk, setLastTestOk] = useState(false);
   const [provider, setProvider] = useState<MailProvider>('gmail');
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [showForwardAlt, setShowForwardAlt] = useState(false);
   const [showDonts, setShowDonts] = useState(false);
 
   useEffect(() => {
@@ -153,14 +150,6 @@ export function SupplierInvoiceEmailPage() {
     && String(imapDraft.imapUser || '').trim()
     && (imapDraft.enabled || lastTestOk),
   );
-
-  const handleCopyEmail = useCallback(() => {
-    navigator.clipboard.writeText(receptionEmail).then(() => {
-      setCopied(true);
-      toast.success('Correo copiado');
-      setTimeout(() => setCopied(false), 2000);
-    });
-  }, [receptionEmail]);
 
   const ensureReceptionEnabled = useCallback(async () => {
     if (!bizId) return;
@@ -258,9 +247,30 @@ export function SupplierInvoiceEmailPage() {
     setPollSummary(null);
     try {
       const summary = await pollSupplierInvoicesNow(dataUserId);
-      const msg = `${summary.processed} emails · ${summary.created} facturas nuevas · ${summary.alerts} avisos`;
-      setPollSummary(msg);
-      toast.success(msg);
+      const processed = Number(summary.processed) || 0;
+      const created = Number(summary.created) || 0;
+      const alerts = Number(summary.alerts) || 0;
+      if (summary.baselined || summary.message) {
+        const msg = String(summary.message || 'Punto de partida listo. Envía un correo nuevo y sincroniza.');
+        setPollSummary(msg);
+        toast.message(msg, { duration: 9000 });
+        return;
+      }
+      let msg = `${processed} emails · ${created} facturas nuevas · ${alerts} avisos`;
+      if (processed === 0) {
+        msg =
+          '0 emails nuevos desde que conectaste. Envía ahora un correo con PDF a este buzón y vuelve a sincronizar.';
+        setPollSummary(msg);
+        toast.message(msg, { duration: 8000 });
+      } else if (created === 0) {
+        msg =
+          `${processed} emails revisados, 0 facturas creadas. Había adjunto pero no se pudo leer el importe (PDF escaneado/protegido o sin texto).`;
+        setPollSummary(msg);
+        toast.warning(msg, { duration: 7000 });
+      } else {
+        setPollSummary(msg);
+        toast.success(msg);
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al sincronizar correo');
     } finally {
@@ -574,40 +584,6 @@ export function SupplierInvoiceEmailPage() {
               </button>
             </div>
           )}
-        </section>
-
-        <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm dark:border-stone-800 dark:bg-stone-900 sm:p-6">
-          <button
-            type="button"
-            onClick={() => setShowForwardAlt((v) => !v)}
-            className="flex w-full items-center justify-between gap-2 text-left"
-          >
-            <div>
-              <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100">
-                Alternativa: reenviar a una dirección Vertial
-              </h3>
-              <p className="text-xs text-stone-500 dark:text-stone-400">
-                Solo si no quieres conectar tu buzón. No es el camino principal.
-              </p>
-            </div>
-            {showForwardAlt ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
-          </button>
-          {showForwardAlt ? (
-            <div className="mt-4 space-y-3">
-              <p className="text-sm text-stone-600 dark:text-stone-400">
-                Puedes reenviar facturas PDF a esta dirección exclusiva de tu empresa.
-              </p>
-              <div className="flex flex-col gap-2 rounded-xl bg-stone-50 p-3 dark:bg-stone-950/50 sm:flex-row sm:items-center">
-                <p className="min-w-0 flex-1 truncate font-mono text-sm font-semibold text-stone-900 dark:text-stone-100">
-                  {receptionEmail}
-                </p>
-                <button type="button" onClick={handleCopyEmail} className={VERTIAL_BTN_SECONDARY}>
-                  <Copy className="h-4 w-4" />
-                  {copied ? '¡Copiado!' : 'Copiar'}
-                </button>
-              </div>
-            </div>
-          ) : null}
         </section>
       </div>
     </Layout>

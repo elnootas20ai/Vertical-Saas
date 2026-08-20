@@ -11616,15 +11616,17 @@ export function buildPurchaseInvoiceDocument(userId, data = {}, existing = null)
   const rawLines = Array.isArray(data.lines) ? data.lines : (existing?.lines || []);
   const lines = rawLines.map((line, idx) => {
     const description = String(line.description || line.itemName || '').trim();
-    const quantity = Number(line.quantity || 0);
+    const quantity = Number(line.quantity || 0) || 1;
     const unitPrice = Number(line.unitPrice || line.unitCost || 0);
-    const total = Number(line.total || 0) || quantity * unitPrice;
+    const lineTotalRaw = Number(line.total ?? line.lineTotal ?? line.amount ?? 0);
+    const total = lineTotalRaw || quantity * unitPrice;
+    const resolvedUnit = unitPrice || (quantity > 0 ? total / quantity : 0);
     return {
       id: line.id || `pinvl-${idx}`,
       description,
       itemName: line.itemName || description,
       quantity,
-      unitPrice,
+      unitPrice: Math.round(resolvedUnit * 100) / 100,
       total: Math.round(total * 100) / 100,
       catalogItemId: String(line.catalogItemId || ''),
       catalogItemName: String(line.catalogItemName || ''),
@@ -11632,10 +11634,37 @@ export function buildPurchaseInvoiceDocument(userId, data = {}, existing = null)
       matchConfidence: line.matchConfidence ?? null,
       matchMethod: String(line.matchMethod || ''),
     };
-  });
-  const subtotal = lines.reduce((s, l) => s + Number(l.total || 0), 0);
-  const taxRate = Number(data.taxRate ?? existing?.taxRate ?? 21);
-  const taxAmount = subtotal * (taxRate / 100);
+  }).filter((l) => l.description || l.total > 0);
+
+  const computedSubtotal = lines.reduce((s, l) => s + Number(l.total || 0), 0);
+  const taxRate = Number(data.taxRate ?? data.ocrData?.taxRate ?? existing?.taxRate ?? 21);
+  const ocrTotal = Number(data.total ?? data.ocrData?.total ?? 0);
+  const ocrSubtotal = Number(data.subtotal ?? data.ocrData?.subtotal ?? 0);
+  const ocrTaxAmount = Number(data.taxAmount ?? data.ocrData?.taxAmount ?? NaN);
+
+  let subtotal = computedSubtotal;
+  let taxAmount = Number.isFinite(ocrTaxAmount) && computedSubtotal <= 0
+    ? ocrTaxAmount
+    : subtotal * (taxRate / 100);
+  let total = subtotal + taxAmount;
+
+  // OCR a veces da total/cabecera pero líneas vacías o a 0 → no dejar 0,00 €
+  if (computedSubtotal <= 0 && (ocrTotal > 0 || ocrSubtotal > 0)) {
+    if (ocrSubtotal > 0) {
+      subtotal = ocrSubtotal;
+      taxAmount = Number.isFinite(ocrTaxAmount)
+        ? ocrTaxAmount
+        : (ocrTotal > ocrSubtotal ? ocrTotal - ocrSubtotal : subtotal * (taxRate / 100));
+      total = ocrTotal > 0 ? ocrTotal : subtotal + taxAmount;
+    } else {
+      total = ocrTotal;
+      subtotal = Number((ocrTotal / (1 + taxRate / 100)).toFixed(2));
+      taxAmount = Number((ocrTotal - subtotal).toFixed(2));
+    }
+  } else if (computedSubtotal > 0 && ocrTotal > 0 && Math.abs(ocrTotal - total) > 0.05) {
+    // Preferir total del documento OCR si las líneas no cuadran
+    total = ocrTotal;
+  }
 
   return {
     _id: id,
@@ -11650,10 +11679,10 @@ export function buildPurchaseInvoiceDocument(userId, data = {}, existing = null)
     dueDate: String(data.dueDate || ''),
     status: String(data.status || 'pending'),
     lines,
-    subtotal,
+    subtotal: Math.round(subtotal * 100) / 100,
     taxRate,
-    taxAmount,
-    total: subtotal + taxAmount,
+    taxAmount: Math.round(taxAmount * 100) / 100,
+    total: Math.round(total * 100) / 100,
     notes: String(data.notes || ''),
     paidAt: String(data.paidAt || existing?.paidAt || ''),
     linkedPurchaseOrderId: data.linkedPurchaseOrderId || existing?.linkedPurchaseOrderId || '',
@@ -11666,6 +11695,14 @@ export function buildPurchaseInvoiceDocument(userId, data = {}, existing = null)
     workCenterName: String(data.workCenterName || data.costCenterName || existing?.workCenterName || existing?.costCenterName || '').trim(),
     entryMethod: data.entryMethod || existing?.entryMethod || 'manual',
     documentKind,
+    source: data.source || existing?.source || (data.entryMethod === 'email' ? 'email' : 'manual'),
+    sourceEmailId: String(data.sourceEmailId || existing?.sourceEmailId || ''),
+    sourceEmailFrom: String(data.sourceEmailFrom || existing?.sourceEmailFrom || ''),
+    sourceEmailSubject: String(data.sourceEmailSubject || existing?.sourceEmailSubject || ''),
+    sourceEmailDate: String(data.sourceEmailDate || existing?.sourceEmailDate || ''),
+    attachments: Array.isArray(data.attachments)
+      ? data.attachments
+      : (Array.isArray(existing?.attachments) ? existing.attachments : []),
     ocrData: data.ocrData || existing?.ocrData || null,
     ocrImageBase64: data.ocrImageBase64 || existing?.ocrImageBase64 || '',
     ocrStockReceivedAt: String(data.ocrStockReceivedAt || existing?.ocrStockReceivedAt || ''),

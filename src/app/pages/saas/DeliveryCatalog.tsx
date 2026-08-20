@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { Fragment, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { isDeliveryBrandActivationComplete, isDefaultBrandNamePlaceholder, isDefaultCommercialBrand, resolveBrandSetupContext, sortBrandsForDisplay } from '../../lib/brandUtils';
@@ -157,9 +157,11 @@ import {
   Upload,
   Download,
   Loader2,
+  RefreshCw,
   ArrowRight,
   ArrowRightLeft,
   Wallet,
+  Mail,
   ChevronDown,
   ChevronRight,
   Zap,
@@ -188,6 +190,7 @@ import { useActivationFocus } from '../../hooks/useActivationFocus';
 import { ActivationFieldWrap } from '../../components/saas/ActivationGuideUi';
 import { StaffConsumptionTabPanel } from '../../components/saas/StaffConsumptionTabPanel';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { pollSupplierInvoicesNow } from '../../lib/supplierInvoiceApi';
 import { createMovementFromInvoice, listFinanceMovements } from '../../lib/financeApi';
 import {
   isCatalogTpvConfigurable,
@@ -237,10 +240,23 @@ import {
 } from '../../lib/catalogItemMove';
 
 const INVOICE_STATUS_CONFIG: Record<string, { label: string; badgeClass: string }> = {
-  pending: { label: 'Pendiente', badgeClass: 'bg-amber-100 text-amber-700 border-amber-200' },
-  paid: { label: 'Pagada', badgeClass: 'bg-green-100 text-green-700 border-green-200' },
-  overdue: { label: 'Vencida', badgeClass: 'bg-red-100 text-red-700 border-red-200' },
+  pending_validation: { label: 'Pte. validar', badgeClass: 'bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400 dark:border-yellow-800' },
+  pending: { label: 'Pte. validar', badgeClass: 'bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400 dark:border-yellow-800' },
+  validated: { label: 'Validada', badgeClass: 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-800' },
+  pending_payment: { label: 'Pte. pago', badgeClass: 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-800' },
+  paid: { label: 'Pagada', badgeClass: 'bg-green-100 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800' },
+  overdue: { label: 'Vencida', badgeClass: 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800' },
 };
+
+function invoiceDisplayStatus(inv: PurchaseInvoice): string {
+  const vs = inv.validationStatus || (inv.status === 'paid' ? 'paid' : inv.status === 'overdue' ? 'overdue' : 'pending_validation');
+  if ((vs === 'validated' || vs === 'pending_payment' || vs === 'pending') && inv.dueDate && new Date(inv.dueDate) < new Date() && vs !== 'paid') {
+    return 'overdue';
+  }
+  if (inv.status === 'overdue') return 'overdue';
+  if (inv.status === 'paid') return 'paid';
+  return vs || inv.status || 'pending_validation';
+}
 
 // ─── Create Catalog Item Wizard (7 steps) ────────────────────────────────────
 
@@ -3405,6 +3421,7 @@ export function CatalogPage() {
   const [loading, setLoading] = useState(true);
   const [suppliersLoading, setSuppliersLoading] = useState(false);
   const [invoicesLoading, setInvoicesLoading] = useState(false);
+  const [syncingEmailInvoices, setSyncingEmailInvoices] = useState(false);
   const [invoiceFinanceLinks, setInvoiceFinanceLinks] = useState<Set<string>>(new Set());
   const suppliersFetchedRef = useRef(false);
   const invoicesFetchedRef = useRef(false);
@@ -4082,6 +4099,41 @@ export function CatalogPage() {
       // no bloquea la pestaña de facturas
     }
   }, [dataUserId, businessId]);
+
+  const syncInvoicesFromEmail = useCallback(async () => {
+    if (!dataUserId) {
+      toast.error('Selecciona una empresa');
+      return;
+    }
+    setSyncingEmailInvoices(true);
+    try {
+      const summary = await pollSupplierInvoicesNow(dataUserId);
+      if (summary.baselined || summary.message) {
+        toast.message(
+          String(summary.message || 'Punto de partida del correo listo. Envía un PDF nuevo y sincroniza.'),
+          { duration: 9000 },
+        );
+      } else if ((summary.created || 0) > 0) {
+        toast.success(`${summary.created} factura(s) desde correo · ${summary.processed || 0} email(s)`);
+      } else if ((summary.duplicates || 0) > 0) {
+        toast.warning(
+          `Correo revisado: ${summary.duplicates} PDF(s) ya estaban dados de alta (mismo nº de factura).`,
+        );
+      } else if ((summary.processed || 0) > 0) {
+        toast.warning(
+          `${summary.processed} email(s) revisados, 0 facturas nuevas (PDF sin importe legible o ya procesados)`,
+        );
+      } else {
+        toast.message('0 emails nuevos desde que conectaste el correo.');
+      }
+      await loadInvoices();
+      await loadInvoiceFinanceLinks();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al sincronizar correo');
+    } finally {
+      setSyncingEmailInvoices(false);
+    }
+  }, [dataUserId, loadInvoices, loadInvoiceFinanceLinks]);
 
   useEffect(() => {
     if (activeTab === 'invoices' && dataUserId) {
@@ -4930,10 +4982,14 @@ export function CatalogPage() {
 
   const invoiceKpis = useMemo(() => {
     const docs = invoices.filter((i) => !invoiceIsAlbaran(i));
+    const isPending = (i: PurchaseInvoice) => {
+      const d = invoiceDisplayStatus(i);
+      return d === 'pending' || d === 'pending_validation' || d === 'pending_payment' || d === 'validated' || d === 'overdue';
+    };
     return {
       total: docs.length,
-      pending: docs.filter((i) => i.status === 'pending').length,
-      paid: docs.filter((i) => i.status === 'paid').length,
+      pending: docs.filter(isPending).length,
+      paid: docs.filter((i) => invoiceDisplayStatus(i) === 'paid').length,
       totalAmount: docs.reduce((s, i) => s + (i.total || 0), 0),
     };
   }, [invoices]);
@@ -6037,12 +6093,230 @@ export function CatalogPage() {
 
   const renderInvoicesTab = () => {
     const purchaseInvoices = invoices.filter((inv) => !invoiceIsAlbaran(inv));
-    const invoicesWithOverdue = purchaseInvoices.map(inv => {
-      if (inv.status === 'pending' && inv.dueDate && new Date(inv.dueDate) < new Date()) {
-        return { ...inv, status: 'overdue' };
+    const invoicesWithDisplay = purchaseInvoices.map((inv) => ({
+      ...inv,
+      displayStatus: invoiceDisplayStatus(inv),
+    }));
+    const footerBase = invoicesWithDisplay.reduce((s, i) => s + (i.subtotal || 0), 0);
+    const footerIva = invoicesWithDisplay.reduce((s, i) => s + (i.taxAmount || 0), 0);
+    const footerTotal = invoicesWithDisplay.reduce((s, i) => s + (i.total || 0), 0);
+
+    type InvRow = (typeof invoicesWithDisplay)[number];
+    type InvGroup = {
+      key: string;
+      kind: 'email-batch' | 'single';
+      label: string;
+      subject: string;
+      items: InvRow[];
+    };
+
+    const invoiceGroups = (() => {
+      const byEmail = new Map<string, InvRow[]>();
+      const loose: InvRow[] = [];
+      for (const row of invoicesWithDisplay) {
+        const emailId = String(row.sourceEmailId || '').trim();
+        if (emailId) {
+          const list = byEmail.get(emailId) || [];
+          list.push(row);
+          byEmail.set(emailId, list);
+        } else {
+          loose.push(row);
+        }
       }
-      return inv;
-    });
+      const groups: InvGroup[] = [];
+      for (const [emailId, items] of byEmail) {
+        items.sort((a, b) =>
+          String(a.invoiceNumber || '').localeCompare(String(b.invoiceNumber || ''), 'es'),
+        );
+        if (items.length >= 2) {
+          groups.push({
+            key: emailId,
+            kind: 'email-batch',
+            label: `${items.length} facturas · mismo correo`,
+            subject: String(items[0].sourceEmailSubject || '').trim(),
+            items,
+          });
+        } else {
+          loose.push(...items);
+        }
+      }
+      for (const item of loose) {
+        groups.push({
+          key: item._id,
+          kind: 'single',
+          label: '',
+          subject: '',
+          items: [item],
+        });
+      }
+      groups.sort((a, b) => {
+        const da = a.items.reduce((m, i) => Math.max(m, Date.parse(String(i.createdAt || i.date || 0)) || 0), 0);
+        const db = b.items.reduce((m, i) => Math.max(m, Date.parse(String(i.createdAt || i.date || 0)) || 0), 0);
+        return db - da;
+      });
+      return groups;
+    })();
+
+    const renderInvoiceActions = (originalInvoice: PurchaseInvoice, compact: boolean) => {
+      const pad = compact ? 'p-1.5' : 'p-2';
+      return (
+        <div className="flex items-center shrink-0 gap-0.5">
+          {!originalInvoice.ocrStockReceivedAt && (
+            <button
+              onClick={() => handleLoadInvoiceToWarehouse(originalInvoice)}
+              className={`${pad} hover:bg-emerald-100 rounded-lg transition-colors`}
+              title="Cargar al almacén"
+            >
+              <PackageCheck className="w-4 h-4 text-emerald-600" />
+            </button>
+          )}
+          {!invoiceFinanceLinks.has(originalInvoice._id) && (
+            <button
+              onClick={() => handleLinkInvoiceToFinance(originalInvoice)}
+              className={`${pad} hover:bg-violet-100 rounded-lg transition-colors`}
+              title="Registrar pago en finanzas"
+            >
+              <Wallet className="w-4 h-4 text-violet-600" />
+            </button>
+          )}
+          {originalInvoice.status !== 'paid' ? (
+            <button
+              onClick={() => handleToggleInvoiceStatus(originalInvoice)}
+              className={`${pad} hover:bg-green-100 rounded-lg transition-colors`}
+              title="Marcar como pagada"
+            >
+              <CheckCircle2 className="w-4 h-4 text-green-600" />
+            </button>
+          ) : (
+            <button
+              onClick={() => handleToggleInvoiceStatus(originalInvoice)}
+              className={`${pad} hover:bg-amber-100 rounded-lg transition-colors`}
+              title="Marcar como pendiente"
+            >
+              <Clock className="w-4 h-4 text-amber-600" />
+            </button>
+          )}
+          <button
+            onClick={() => { setEditingInvoice(originalInvoice); setShowCreateInvoice(true); }}
+            className={`${pad} hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors`}
+            title="Editar"
+          >
+            <Edit3 className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+          </button>
+          <button
+            onClick={(e) => void handleDeleteInvoice(originalInvoice, e)}
+            className={`${pad} hover:bg-red-100 rounded-lg transition-colors`}
+            title={canDeletePurchaseDocs ? 'Eliminar factura' : 'Solo dueño o admin'}
+          >
+            <Trash2 className="w-4 h-4 text-red-500" />
+          </button>
+        </div>
+      );
+    };
+
+    const renderMobileInvoiceCard = (invoice: InvRow) => {
+      const statusCfg = INVOICE_STATUS_CONFIG[invoice.displayStatus] || INVOICE_STATUS_CONFIG.pending;
+      const originalInvoice = invoices.find((i) => i._id === invoice._id)!;
+      return (
+        <div key={invoice._id} className="px-3 py-2.5">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="font-mono text-sm font-bold text-gray-900 dark:text-gray-100 truncate">
+                  {invoice.invoiceNumber || '—'}
+                </p>
+                <span className={`px-2 py-0.5 text-[10px] font-semibold rounded-full border shrink-0 ${statusCfg.badgeClass}`}>
+                  {statusCfg.label}
+                </span>
+              </div>
+              {Array.isArray(originalInvoice.attachments) && originalInvoice.attachments[0]?.filename && (
+                <p className="text-[10px] text-gray-400 mt-0.5 truncate">
+                  {originalInvoice.attachments[0].filename}
+                </p>
+              )}
+              <p className="text-xs font-semibold text-gray-800 dark:text-gray-200 mt-0.5 truncate">
+                {invoice.supplierName}
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
+                {invoice.date ? new Date(invoice.date).toLocaleDateString('es-ES') : '—'}
+                {invoice.dueDate ? ` · vence ${new Date(invoice.dueDate).toLocaleDateString('es-ES')}` : ''}
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 tabular-nums">
+                Base {(invoice.subtotal || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })}€
+                {' · '}
+                IVA {(invoice.taxAmount || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })}€
+                {invoice.taxRate != null ? ` (${invoice.taxRate}%)` : ''}
+              </p>
+              <p className="text-sm font-bold text-gray-900 dark:text-gray-100 mt-0.5 tabular-nums">
+                {(invoice.total || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })}€
+              </p>
+            </div>
+            {renderInvoiceActions(originalInvoice, false)}
+          </div>
+        </div>
+      );
+    };
+
+    const renderDesktopInvoiceRow = (invoice: InvRow, grouped: boolean) => {
+      const statusCfg = INVOICE_STATUS_CONFIG[invoice.displayStatus] || INVOICE_STATUS_CONFIG.pending;
+      const originalInvoice = invoices.find((i) => i._id === invoice._id)!;
+      return (
+        <tr
+          key={invoice._id}
+          className={`hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors ${
+            grouped ? 'bg-teal-50/40 dark:bg-teal-950/20' : ''
+          }`}
+        >
+          <td className={`px-3 py-3 ${grouped ? 'border-l-2 border-teal-500/70 dark:border-teal-400/50' : ''}`}>
+            <div className="font-mono text-sm font-bold text-gray-900 dark:text-gray-100">
+              {invoice.invoiceNumber || '—'}
+            </div>
+            {Array.isArray(originalInvoice.attachments) && originalInvoice.attachments[0]?.filename && (
+              <div className="text-[10px] text-gray-400 mt-0.5 truncate max-w-[180px]" title={originalInvoice.attachments[0].filename}>
+                {originalInvoice.attachments[0].filename}
+              </div>
+            )}
+            {invoice.dueDate && (
+              <div className={`text-[10px] mt-0.5 ${invoice.displayStatus === 'overdue' ? 'text-red-600 font-semibold' : 'text-gray-400'}`}>
+                Vence {new Date(invoice.dueDate).toLocaleDateString('es-ES')}
+              </div>
+            )}
+          </td>
+          <td className="px-3 py-3">
+            <div className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate max-w-[160px]">{invoice.supplierName}</div>
+          </td>
+          <td className="px-3 py-3">
+            <span className="text-sm text-gray-700 dark:text-gray-300">
+              {invoice.date ? new Date(invoice.date).toLocaleDateString('es-ES') : '—'}
+            </span>
+          </td>
+          <td className="px-3 py-3">
+            <span className={`px-2 py-1 text-xs font-semibold rounded-full border ${statusCfg.badgeClass}`}>
+              {statusCfg.label}
+            </span>
+          </td>
+          <td className="px-3 py-3 text-right">
+            <span className="text-sm text-gray-600 dark:text-gray-400 tabular-nums">
+              {(invoice.subtotal || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })}€
+            </span>
+          </td>
+          <td className="px-3 py-3 text-right">
+            <span className="text-sm text-gray-600 dark:text-gray-400 tabular-nums">
+              {(invoice.taxAmount || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })}€
+            </span>
+            <span className="text-[10px] text-gray-400 ml-0.5">({invoice.taxRate || 0}%)</span>
+          </td>
+          <td className="px-3 py-3 text-right">
+            <span className="font-bold text-sm text-gray-900 dark:text-gray-100 tabular-nums">
+              {(invoice.total || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })}€
+            </span>
+          </td>
+          <td className="px-3 py-3">
+            {renderInvoiceActions(originalInvoice, true)}
+          </td>
+        </tr>
+      );
+    };
 
     return (
       <SaasTabWorkspace
@@ -6058,17 +6332,31 @@ export function CatalogPage() {
         toolbar={
           <SaasTabToolbarRow
             right={
-              <SaasTabPrimaryButton onClick={() => { setEditingInvoice(null); setShowCreateInvoice(true); }}>
-                <Plus className="w-3.5 h-3.5" />
-                Nueva factura
-              </SaasTabPrimaryButton>
+              <div className="flex flex-wrap items-center gap-2">
+                <SaasTabSecondaryButton
+                  onClick={() => void syncInvoicesFromEmail()}
+                  disabled={syncingEmailInvoices || !dataUserId}
+                  title="Leer facturas nuevas del correo conectado"
+                >
+                  {syncingEmailInvoices ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  )}
+                  Sincronizar
+                </SaasTabSecondaryButton>
+                <SaasTabPrimaryButton onClick={() => { setEditingInvoice(null); setShowCreateInvoice(true); }}>
+                  <Plus className="w-3.5 h-3.5" />
+                  Nueva factura
+                </SaasTabPrimaryButton>
+              </div>
             }
           />
         }
       >
         {invoicesLoading ? (
           <CatalogCoreLoadingState kind="suppliers" message="Cargando facturas de compra…" compact />
-        ) : invoicesWithOverdue.length === 0 ? (
+        ) : invoicesWithDisplay.length === 0 ? (
           <SaasTabEmpty
             icon={<FileText className="w-10 h-10" />}
             title="Sin facturas de compra"
@@ -6082,202 +6370,88 @@ export function CatalogPage() {
           />
         ) : (
           <>
-          {/* Móvil: tarjetas de factura */}
-          <ul className="md:hidden divide-y divide-gray-100 dark:divide-gray-800">
-            {invoicesWithOverdue.map(invoice => {
-              const statusCfg = INVOICE_STATUS_CONFIG[invoice.status] || INVOICE_STATUS_CONFIG.pending;
-              const originalInvoice = invoices.find(i => i._id === invoice._id)!;
-              return (
-                <li key={invoice._id} className="px-3 py-2.5">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate">
-                          {invoice.supplierName}
-                        </p>
-                        <span className={`px-2 py-0.5 text-[10px] font-semibold rounded-full border shrink-0 ${statusCfg.badgeClass}`}>
-                          {statusCfg.label}
-                        </span>
-                      </div>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
-                        {invoice.invoiceNumber ? `${invoice.invoiceNumber} · ` : ''}
-                        {invoice.date ? new Date(invoice.date).toLocaleDateString('es-ES') : '—'}
-                        {invoice.dueDate ? ` · vence ${new Date(invoice.dueDate).toLocaleDateString('es-ES')}` : ''}
-                      </p>
-                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100 mt-0.5 tabular-nums">
-                        {(invoice.total || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })}€
-                        {invoice.lines.length > 0 && (
-                          <span className="ml-1.5 text-xs font-normal text-gray-400">
-                            {invoice.lines.length} línea{invoice.lines.length !== 1 ? 's' : ''}
-                          </span>
-                        )}
-                      </p>
+          <div className="md:hidden space-y-3 px-1">
+            {invoiceGroups.map((group) => (
+              group.kind === 'email-batch' ? (
+                <section
+                  key={group.key}
+                  className="rounded-xl border border-teal-200 dark:border-teal-800/60 bg-teal-50/50 dark:bg-teal-950/20 overflow-hidden"
+                >
+                  <header className="px-3 py-2 flex items-start gap-2 border-b border-teal-200/80 dark:border-teal-800/50 bg-teal-100/60 dark:bg-teal-900/30">
+                    <Mail className="w-3.5 h-3.5 text-teal-700 dark:text-teal-300 mt-0.5 shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-teal-900 dark:text-teal-100">{group.label}</p>
+                      {group.subject ? (
+                        <p className="text-[10px] text-teal-700/80 dark:text-teal-300/80 truncate mt-0.5">{group.subject}</p>
+                      ) : null}
                     </div>
-                    <div className="flex items-center shrink-0">
-                      {!originalInvoice.ocrStockReceivedAt && (
-                        <button
-                          onClick={() => handleLoadInvoiceToWarehouse(originalInvoice)}
-                          className="p-2 hover:bg-emerald-100 rounded-lg transition-colors"
-                          title="Cargar al almacén"
-                        >
-                          <PackageCheck className="w-4 h-4 text-emerald-600" />
-                        </button>
-                      )}
-                      {!invoiceFinanceLinks.has(originalInvoice._id) && (
-                        <button
-                          onClick={() => handleLinkInvoiceToFinance(originalInvoice)}
-                          className="p-2 hover:bg-violet-100 rounded-lg transition-colors"
-                          title="Registrar pago en finanzas"
-                        >
-                          <Wallet className="w-4 h-4 text-violet-600" />
-                        </button>
-                      )}
-                      {originalInvoice.status !== 'paid' ? (
-                        <button
-                          onClick={() => handleToggleInvoiceStatus(originalInvoice)}
-                          className="p-2 hover:bg-green-100 rounded-lg transition-colors"
-                          title="Marcar como pagada"
-                        >
-                          <CheckCircle2 className="w-4 h-4 text-green-600" />
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => handleToggleInvoiceStatus(originalInvoice)}
-                          className="p-2 hover:bg-amber-100 rounded-lg transition-colors"
-                          title="Marcar como pendiente"
-                        >
-                          <Clock className="w-4 h-4 text-amber-600" />
-                        </button>
-                      )}
-                      <button
-                        onClick={() => { setEditingInvoice(originalInvoice); setShowCreateInvoice(true); }}
-                        className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                        title="Editar"
-                      >
-                        <Edit3 className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-                      </button>
-                      <button
-                        onClick={(e) => void handleDeleteInvoice(originalInvoice, e)}
-                        className="p-2 hover:bg-red-100 rounded-lg transition-colors"
-                        title={canDeletePurchaseDocs ? 'Eliminar factura' : 'Solo dueño o admin'}
-                      >
-                        <Trash2 className="w-4 h-4 text-red-500" />
-                      </button>
-                    </div>
+                  </header>
+                  <div className="divide-y divide-teal-100 dark:divide-teal-900/40">
+                    {group.items.map((invoice) => renderMobileInvoiceCard(invoice))}
                   </div>
-                </li>
-              );
-            })}
-          </ul>
-          {/* Desktop: tabla completa */}
+                </section>
+              ) : (
+                <div
+                  key={group.key}
+                  className="rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 overflow-hidden"
+                >
+                  {group.items.map((invoice) => renderMobileInvoiceCard(invoice))}
+                </div>
+              )
+            ))}
+          </div>
+
           <div className="hidden md:block overflow-x-auto">
-            <table className="w-full min-w-[900px]">
+            <table className="w-full min-w-[1100px]">
               <thead>
                 <tr className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Nº Factura</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Proveedor</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Fecha</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Vencimiento</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Estado</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Total</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Acciones</th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Factura</th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Proveedor</th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Fecha</th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Estado</th>
+                  <th className="px-3 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Base</th>
+                  <th className="px-3 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">IVA</th>
+                  <th className="px-3 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Total</th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Acciones</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {invoicesWithOverdue.map(invoice => {
-                  const statusCfg = INVOICE_STATUS_CONFIG[invoice.status] || INVOICE_STATUS_CONFIG.pending;
-                  const originalInvoice = invoices.find(i => i._id === invoice._id)!;
-                  return (
-                    <tr key={invoice._id} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
-                      <td className="px-4 py-3">
-                        <div className="font-mono text-sm font-bold text-gray-900 dark:text-gray-100">
-                          {invoice.invoiceNumber || '—'}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{invoice.supplierName}</div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="text-sm text-gray-700 dark:text-gray-300">
-                          {invoice.date ? new Date(invoice.date).toLocaleDateString('es-ES') : '—'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`text-sm ${invoice.status === 'overdue' ? 'text-red-600 font-semibold' : 'text-gray-700 dark:text-gray-300'}`}>
-                          {invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString('es-ES') : '—'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`px-2 py-1 text-xs font-semibold rounded-full border ${statusCfg.badgeClass}`}>
-                          {statusCfg.label}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="font-bold text-gray-900 dark:text-gray-100 text-sm">
-                          {(invoice.total || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })}€
-                        </div>
-                        {invoice.lines.length > 0 && (
-                          <div className="text-xs text-gray-500 dark:text-gray-400">{invoice.lines.length} línea{invoice.lines.length !== 1 ? 's' : ''}</div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1">
-                          {!originalInvoice.ocrStockReceivedAt && (
-                            <button
-                              onClick={() => handleLoadInvoiceToWarehouse(originalInvoice)}
-                              className="p-1.5 hover:bg-emerald-100 rounded-lg transition-colors"
-                              title="Cargar al almacén"
-                            >
-                              <PackageCheck className="w-4 h-4 text-emerald-600" />
-                            </button>
-                          )}
-                          {!invoiceFinanceLinks.has(originalInvoice._id) && (
-                            <button
-                              onClick={() => handleLinkInvoiceToFinance(originalInvoice)}
-                              className="p-1.5 hover:bg-violet-100 rounded-lg transition-colors"
-                              title="Registrar pago en finanzas"
-                            >
-                              <Wallet className="w-4 h-4 text-violet-600" />
-                            </button>
-                          )}
-                          {originalInvoice.status !== 'paid' && (
-                            <button
-                              onClick={() => handleToggleInvoiceStatus(originalInvoice)}
-                              className="p-1.5 hover:bg-green-100 rounded-lg transition-colors"
-                              title="Marcar como pagada"
-                            >
-                              <CheckCircle2 className="w-4 h-4 text-green-600" />
-                            </button>
-                          )}
-                          {originalInvoice.status === 'paid' && (
-                            <button
-                              onClick={() => handleToggleInvoiceStatus(originalInvoice)}
-                              className="p-1.5 hover:bg-amber-100 rounded-lg transition-colors"
-                              title="Marcar como pendiente"
-                            >
-                              <Clock className="w-4 h-4 text-amber-600" />
-                            </button>
-                          )}
-                          <button
-                            onClick={() => { setEditingInvoice(originalInvoice); setShowCreateInvoice(true); }}
-                            className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                            title="Editar"
-                          >
-                            <Edit3 className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-                          </button>
-                          <button
-                            onClick={(e) => void handleDeleteInvoice(originalInvoice, e)}
-                            className="p-1.5 hover:bg-red-100 rounded-lg transition-colors"
-                            title="Eliminar"
-                          >
-                            <Trash2 className="w-4 h-4 text-red-500" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
+              <tbody>
+                {invoiceGroups.map((group) => (
+                  <Fragment key={group.key}>
+                    {group.kind === 'email-batch' && (
+                      <tr className="bg-teal-100/70 dark:bg-teal-900/40 border-t border-teal-200 dark:border-teal-800">
+                        <td colSpan={8} className="px-3 py-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Mail className="w-3.5 h-3.5 text-teal-700 dark:text-teal-300 shrink-0" />
+                            <span className="text-xs font-semibold text-teal-900 dark:text-teal-100">{group.label}</span>
+                            {group.subject ? (
+                              <span className="text-[11px] text-teal-700/80 dark:text-teal-300/70 truncate">· {group.subject}</span>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    {group.items.map((invoice) => renderDesktopInvoiceRow(invoice, group.kind === 'email-batch'))}
+                  </Fragment>
+                ))}
               </tbody>
+              <tfoot>
+                <tr className="bg-gray-50 dark:bg-gray-900 border-t-2 border-gray-200 dark:border-gray-700">
+                  <td colSpan={4} className="px-3 py-3 text-sm font-bold text-gray-700 dark:text-gray-300">
+                    Total ({invoicesWithDisplay.length} factura{invoicesWithDisplay.length !== 1 ? 's' : ''})
+                  </td>
+                  <td className="px-3 py-3 text-right text-sm font-bold text-gray-700 dark:text-gray-300 tabular-nums">
+                    {footerBase.toLocaleString('es-ES', { minimumFractionDigits: 2 })}€
+                  </td>
+                  <td className="px-3 py-3 text-right text-sm font-bold text-gray-700 dark:text-gray-300 tabular-nums">
+                    {footerIva.toLocaleString('es-ES', { minimumFractionDigits: 2 })}€
+                  </td>
+                  <td className="px-3 py-3 text-right text-sm font-bold text-gray-900 dark:text-gray-100 tabular-nums">
+                    {footerTotal.toLocaleString('es-ES', { minimumFractionDigits: 2 })}€
+                  </td>
+                  <td />
+                </tr>
+              </tfoot>
             </table>
           </div>
           </>

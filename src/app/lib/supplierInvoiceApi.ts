@@ -39,7 +39,10 @@ export interface EmailPollSummary {
   processed: number;
   created: number;
   alerts: number;
-  errors: number;
+  duplicates?: number;
+  errors?: number;
+  baselined?: boolean;
+  message?: string;
 }
 
 export async function getSupplierInvoiceEmailConfig(userId: string): Promise<SupplierInvoiceEmailConfig> {

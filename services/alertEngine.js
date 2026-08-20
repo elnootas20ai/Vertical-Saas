@@ -395,7 +395,7 @@ async function checkOverdueInvoices(ctx, invoices, config) {
       ...ctx, dedupKey: `overdueinv-${inv._id}`, level: daysLate > 30 ? 'alert' : 'warning',
       category: 'overdue_purchase', source: 'finanzas', title: 'Factura de compra vencida',
       message: `Factura ${inv.invoiceNumber} de ${inv.supplierName || 'proveedor'} venció hace ${daysLate} días. Importe: ${inv.total?.toFixed(2) || '0.00'} €.`,
-      entityId: inv._id, entityType: 'purchase_invoice', route: '/saas/suppliers/facturas',
+      entityId: inv._id, entityType: 'purchase_invoice', route: '/saas/catalog?tab=invoices',
       metadata: { invoiceNumber: inv.invoiceNumber, supplierName: inv.supplierName, total: inv.total, daysLate },
     }));
   }
@@ -418,7 +418,7 @@ async function checkSupplierInvoiceEmailAlerts(ctx, invoices, config) {
           category: 'supplier_invoice_pending', source: 'facturas_proveedor',
           title: 'Factura de proveedor pendiente de revisar',
           message: `La factura ${inv.invoiceNumber || '(sin número)'} de ${inv.supplierName || inv.sourceEmailFrom || 'desconocido'} lleva ${days} días sin revisar.`,
-          entityId: inv._id, entityType: 'purchase_invoice', route: `/saas/suppliers/facturas?invoiceId=${inv._id}`,
+          entityId: inv._id, entityType: 'purchase_invoice', route: `/saas/catalog?tab=invoices&invoiceId=${inv._id}`,
           metadata: { invoiceNumber: inv.invoiceNumber, supplierName: inv.supplierName, from: inv.sourceEmailFrom, days },
         }));
       }
@@ -433,7 +433,7 @@ async function checkSupplierInvoiceEmailAlerts(ctx, invoices, config) {
         category: 'supplier_invoice_unknown', source: 'facturas_proveedor',
         title: 'Factura de proveedor no identificado',
         message: `Se recibió factura desde ${inv.sourceEmailFrom || 'email desconocido'} pero no se encontró proveedor registrado. Asigna manualmente.`,
-        entityId: inv._id, entityType: 'purchase_invoice', route: `/saas/suppliers/facturas?invoiceId=${inv._id}`,
+        entityId: inv._id, entityType: 'purchase_invoice', route: `/saas/catalog?tab=invoices&invoiceId=${inv._id}`,
         metadata: { from: inv.sourceEmailFrom, emitter: inv.ocrData?.emitter, cif: inv.supplierCif },
       }));
     }
@@ -447,7 +447,7 @@ async function checkSupplierInvoiceEmailAlerts(ctx, invoices, config) {
         category: 'supplier_invoice_duplicate', source: 'facturas_proveedor',
         title: 'Posible factura duplicada',
         message: `La factura ${inv.invoiceNumber} de ${inv.supplierName || 'proveedor'} por ${inv.total?.toFixed(2) || '0.00'}€ podría estar duplicada.`,
-        entityId: inv._id, entityType: 'purchase_invoice', route: `/saas/suppliers/facturas?invoiceId=${inv._id}`,
+        entityId: inv._id, entityType: 'purchase_invoice', route: `/saas/catalog?tab=invoices&invoiceId=${inv._id}`,
         metadata: { invoiceNumber: inv.invoiceNumber, supplierName: inv.supplierName, total: inv.total, duplicateOf: inv.flags?.duplicateOf },
       }));
     }
@@ -464,7 +464,7 @@ async function checkSupplierInvoiceEmailAlerts(ctx, invoices, config) {
         category: 'supplier_invoice_overdue', source: 'facturas_proveedor',
         title: 'Factura de proveedor vencida',
         message: `La factura ${inv.invoiceNumber} de ${inv.supplierName} por ${inv.total?.toFixed(2) || '0.00'}€ venció hace ${daysLate} días.`,
-        entityId: inv._id, entityType: 'purchase_invoice', route: `/saas/suppliers/facturas?invoiceId=${inv._id}`,
+        entityId: inv._id, entityType: 'purchase_invoice', route: `/saas/catalog?tab=invoices&invoiceId=${inv._id}`,
         metadata: { invoiceNumber: inv.invoiceNumber, supplierName: inv.supplierName, total: inv.total, dueDate: inv.dueDate, daysLate },
       }));
     }

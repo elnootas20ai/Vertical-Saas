@@ -429,7 +429,7 @@ export function SupplierDetailPage() {
                     const displayStatus = isOverdue(inv) ? 'overdue' : inv.status;
                     const statusCfg = INV_STATUS[displayStatus] || INV_STATUS.pending;
                     return (
-                      <div key={inv._id} onClick={() => navigate('/saas/suppliers/facturas')} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-900 rounded-lg cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+                      <div key={inv._id} onClick={() => navigate('/saas/catalog?tab=invoices')} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-900 rounded-lg cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
                         <div>
                           <span className="font-mono text-sm font-bold text-gray-900 dark:text-gray-100">{inv.invoiceNumber || '—'}</span>
                           <span className="text-xs text-gray-400 ml-2">{inv.date ? new Date(inv.date).toLocaleDateString('es-ES') : ''}</span>
@@ -494,7 +494,7 @@ export function SupplierDetailPage() {
                 <button onClick={() => navigate('/saas/suppliers/ordenes-compra')} className="px-3 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors flex items-center gap-1.5">
                   <ClipboardList className="w-3.5 h-3.5" /> Pedidos de compra <ExternalLink className="w-3 h-3" />
                 </button>
-                <button onClick={() => navigate('/saas/suppliers/facturas')} className="px-3 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors flex items-center gap-1.5">
+                <button onClick={() => navigate('/saas/catalog?tab=invoices')} className="px-3 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors flex items-center gap-1.5">
                   <Receipt className="w-3.5 h-3.5" /> Facturación <ExternalLink className="w-3 h-3" />
                 </button>
                 <button onClick={() => navigate('/saas/catalog')} className="px-3 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors flex items-center gap-1.5">
@@ -590,7 +590,7 @@ export function SupplierDetailPage() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-bold text-gray-900 dark:text-gray-100">Histórico de facturas</h3>
-              <button onClick={() => navigate('/saas/suppliers/facturas')} className="px-4 py-2 bg-gray-900 hover:bg-black dark:bg-gray-100 dark:hover:bg-white dark:text-gray-900 text-white rounded-xl text-sm font-medium flex items-center gap-2 transition-colors">
+              <button onClick={() => navigate('/saas/catalog?tab=invoices')} className="px-4 py-2 bg-gray-900 hover:bg-black dark:bg-gray-100 dark:hover:bg-white dark:text-gray-900 text-white rounded-xl text-sm font-medium flex items-center gap-2 transition-colors">
                 <Receipt className="w-4 h-4" /> Ir a facturación
               </button>
             </div>
@@ -637,7 +637,7 @@ export function SupplierDetailPage() {
                         const displayStatus = isOverdue(inv) ? 'overdue' : inv.status;
                         const statusCfg = INV_STATUS[displayStatus] || INV_STATUS.pending;
                         return (
-                          <tr key={inv._id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer" onClick={() => navigate('/saas/suppliers/facturas')}>
+                          <tr key={inv._id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer" onClick={() => navigate('/saas/catalog?tab=invoices')}>
                             <td className="px-4 py-3"><span className="font-mono text-sm font-bold text-gray-900 dark:text-gray-100">{inv.invoiceNumber || '—'}</span></td>
                             <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{inv.date ? new Date(inv.date).toLocaleDateString('es-ES') : '—'}</td>
                             <td className="px-4 py-3">

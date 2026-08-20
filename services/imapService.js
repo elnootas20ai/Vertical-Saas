@@ -2,8 +2,43 @@ import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import logger from './logger.js';
 
-const ALLOWED_MIME_TYPES = (process.env.SUPPLIER_INVOICE_ALLOWED_MIME_TYPES || 'application/pdf,image/png,image/jpeg,image/webp').split(',').map((s) => s.trim());
+const ALLOWED_MIME_TYPES = (process.env.SUPPLIER_INVOICE_ALLOWED_MIME_TYPES || 'application/pdf,image/png,image/jpeg,image/jpg,image/webp').split(',').map((s) => s.trim().toLowerCase());
 const MAX_ATTACHMENT_SIZE = Number(process.env.SUPPLIER_INVOICE_MAX_ATTACHMENT_SIZE_MB || 25) * 1024 * 1024;
+/** Por sync: evita 500/timeouts si el inbox tiene cientos/miles de no leídos. */
+const MAX_EMAILS_PER_FETCH = Math.max(1, Number(process.env.SUPPLIER_INVOICE_MAX_EMAILS_PER_FETCH || 10));
+
+function normalizeAttachmentMime(contentType, filename, content) {
+  const raw = String(contentType || '').split(';')[0].trim().toLowerCase();
+  const name = String(filename || '').toLowerCase();
+  const buf = Buffer.isBuffer(content) ? content : null;
+  const head = buf && buf.length >= 5 ? buf.subarray(0, 5).toString('utf8') : '';
+  const isPdfMagic = head.startsWith('%PDF');
+  if (raw === 'application/pdf' || raw === 'application/x-pdf' || name.endsWith('.pdf') || isPdfMagic) {
+    return 'application/pdf';
+  }
+  if (raw === 'image/jpg') return 'image/jpeg';
+  if (raw === 'image/png' || name.endsWith('.png')) return 'image/png';
+  if (raw === 'image/jpeg' || name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
+  if (raw === 'image/webp' || name.endsWith('.webp')) return 'image/webp';
+  // Gmail a menudo manda PDF como octet-stream
+  if ((raw === 'application/octet-stream' || raw === 'binary/octet-stream' || !raw) && (name.endsWith('.pdf') || isPdfMagic)) {
+    return 'application/pdf';
+  }
+  return raw;
+}
+
+function isAllowedInvoiceAttachment(att) {
+  const mime = normalizeAttachmentMime(att.contentType, att.filename, att.content);
+  if (!ALLOWED_MIME_TYPES.includes(mime)) return false;
+  if (att.size > MAX_ATTACHMENT_SIZE) {
+    logger.warn(
+      { tag: 'IMAP', filename: att.filename, size: att.size, max: MAX_ATTACHMENT_SIZE },
+      'Adjunto demasiado grande, ignorado',
+    );
+    return false;
+  }
+  return true;
+}
 
 function getImapConfig(overrides = {}) {
   return {
@@ -88,16 +123,50 @@ export async function connectAndFetchNewEmails(overrides = {}) {
     const lock = await client.getMailboxLock('INBOX');
 
     try {
-      const unseenMessages = await client.search({ seen: false });
-      if (!unseenMessages || unseenMessages.length === 0) {
+      const sinceUid = Number(overrides.sinceUid || 0);
+      const sinceDateRaw = overrides.sinceDate || overrides.since || null;
+      const sinceDate = sinceDateRaw ? new Date(sinceDateRaw) : null;
+      const sinceOk = sinceDate && !Number.isNaN(sinceDate.getTime());
+
+      let candidateUids = [];
+      if (sinceUid > 0) {
+        // Solo UIDs nuevos desde que se conectó / último cursor
+        candidateUids = await client.search({ uid: `${sinceUid + 1}:*` }, { uid: true });
+      } else if (sinceOk) {
+        // IMAP SINCE es por día; luego filtramos por fecha exacta en JS
+        candidateUids = await client.search({ since: sinceDate }, { uid: true });
+      } else {
+        // Sin cursor: no tragarse el histórico — solo no leídos de los últimos 2 días
+        const recent = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+        candidateUids = await client.search({ seen: false, since: recent }, { uid: true });
+      }
+
+      if (sinceUid > 0) {
+        candidateUids = (candidateUids || []).filter((u) => Number(u) > sinceUid);
+      }
+      if (!candidateUids || candidateUids.length === 0) {
         lock.release();
         await client.logout();
         return results;
       }
 
-      logger.info({ tag: 'IMAP', count: unseenMessages.length }, 'Emails no leídos encontrados');
+      const sorted = [...candidateUids].sort((a, b) => Number(b) - Number(a));
+      const batch = sorted.slice(0, MAX_EMAILS_PER_FETCH);
+      logger.info(
+        {
+          tag: 'IMAP',
+          candidates: candidateUids.length,
+          batch: batch.length,
+          max: MAX_EMAILS_PER_FETCH,
+          sinceUid: sinceUid || null,
+          sinceDate: sinceOk ? sinceDate.toISOString() : null,
+        },
+        'Emails candidatos a facturas',
+      );
 
-      for (const uid of unseenMessages) {
+      let maxSeenUid = sinceUid > 0 ? sinceUid : 0;
+
+      for (const uid of batch) {
         try {
           const raw = await client.download(uid, undefined, { uid: true });
           if (!raw?.content) continue;
@@ -109,22 +178,40 @@ export async function connectAndFetchNewEmails(overrides = {}) {
           const buffer = Buffer.concat(chunks);
           const parsed = await simpleParser(buffer);
 
+          const msgDate = parsed.date ? new Date(parsed.date) : null;
+          if (sinceOk && msgDate && !Number.isNaN(msgDate.getTime()) && msgDate < sinceDate) {
+            // Anterior al momento de conexión — ignorar
+            maxSeenUid = Math.max(maxSeenUid, Number(uid) || 0);
+            continue;
+          }
+
           const fromAddr = parsed.from?.value?.[0]?.address || '';
           const fromName = parsed.from?.value?.[0]?.name || '';
 
-          const validAttachments = (parsed.attachments || []).filter((att) => {
-            if (!ALLOWED_MIME_TYPES.includes(att.contentType)) return false;
-            if (att.size > MAX_ATTACHMENT_SIZE) {
-              logger.warn({ tag: 'IMAP', filename: att.filename, size: att.size, max: MAX_ATTACHMENT_SIZE }, 'Adjunto demasiado grande, ignorado');
-              return false;
+          const validAttachments = (parsed.attachments || []).filter((att) => isAllowedInvoiceAttachment(att)).map((att) => {
+            const mimeType = normalizeAttachmentMime(att.contentType, att.filename, att.content);
+            return {
+              filename: att.filename || `adjunto-${Date.now()}${mimeType === 'application/pdf' ? '.pdf' : ''}`,
+              mimeType,
+              content: att.content,
+              size: att.size,
+            };
+          });
+
+          if (validAttachments.length === 0 && Array.isArray(parsed.attachments)) {
+            for (const att of parsed.attachments) {
+              const mimeType = normalizeAttachmentMime(att.contentType, att.filename, att.content);
+              if (mimeType === 'application/pdf' || mimeType.startsWith('image/')) {
+                if (att.size > MAX_ATTACHMENT_SIZE) continue;
+                validAttachments.push({
+                  filename: att.filename || `factura-${Date.now()}.pdf`,
+                  mimeType,
+                  content: att.content,
+                  size: att.size,
+                });
+              }
             }
-            return true;
-          }).map((att) => ({
-            filename: att.filename || `adjunto-${Date.now()}`,
-            mimeType: att.contentType,
-            content: att.content,
-            size: att.size,
-          }));
+          }
 
           results.push({
             messageId: parsed.messageId || `uid-${uid}`,
@@ -139,11 +226,14 @@ export async function connectAndFetchNewEmails(overrides = {}) {
             uid,
           });
 
-          await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
+          maxSeenUid = Math.max(maxSeenUid, Number(uid) || 0);
+          // No marcamos Seen aquí: el histórico del cliente no se toca; dedup por messageId
         } catch (msgErr) {
           logger.warn({ tag: 'IMAP', uid, err: msgErr.message }, 'Error procesando email individual');
         }
       }
+
+      results._imapCursorUid = maxSeenUid;
     } finally {
       lock.release();
     }

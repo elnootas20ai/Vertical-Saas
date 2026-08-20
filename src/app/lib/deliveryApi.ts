@@ -422,8 +422,13 @@ export interface PurchaseInvoice {
   costCenterName?: string;
   ocrData?: OcrData;
   ocrImageBase64?: string;
-  entryMethod?: 'ocr' | 'manual';
+  entryMethod?: 'ocr' | 'manual' | 'email';
   documentKind?: string;
+  sourceEmailId?: string;
+  sourceEmailFrom?: string;
+  sourceEmailSubject?: string;
+  sourceEmailDate?: string;
+  attachments?: { filename?: string; mimeType?: string; size?: number; couchAttachmentId?: string }[];
   ocrStockReceivedAt?: string;
   ocrStockLinesReceived?: number;
   flags?: {

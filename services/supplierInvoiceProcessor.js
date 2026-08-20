@@ -11,7 +11,6 @@ import {
   sanitizePurchaseInvoice,
   listSuppliersByUser,
   findDuplicatePurchaseInvoice,
-  findPurchaseInvoiceByEmailId,
   listPurchaseInvoicesByUser,
   assignPurchaseInvoiceNumber,
   buildNotificationDocument,
@@ -27,6 +26,7 @@ import {
 import { broadcastToUser } from './sseService.js';
 import { sendPushToUser } from './pushService.js';
 import { enrichOcrLinesForUser, reconcilePurchaseInvoiceFromOcr } from './ocrPurchasePipeline.js';
+import { parseSupplierInvoicePdfBuffer } from './supplierInvoicePdfParse.js';
 
 const fakeReq = { headers: {} };
 
@@ -53,6 +53,10 @@ async function buildImapOverridesForUser(userId) {
       user,
       pass,
       tls: c.imapTls !== false,
+      sinceUid: Number(c.imapCursorUid || 0) || 0,
+      sinceDate: c.imapSyncFrom || null,
+      _accountId: account._id,
+      _userId: userId,
     };
   } catch (err) {
     logger.warn({ tag: 'SINV_PROC', userId, err: err.message }, 'No se pudo leer cuenta para IMAP');
@@ -60,59 +64,58 @@ async function buildImapOverridesForUser(userId) {
   }
 }
 
-// ─── OCR interno (reutiliza la misma lógica de /api/ocr/scan) ────────────────
-
-async function convertPdfToImageBase64(pdfBase64) {
-  const { execSync } = await import('node:child_process');
-  const tmpDir = os.tmpdir();
-  const id = `ocr-email-${Date.now()}`;
-  const pdfPath = path.join(tmpDir, `${id}.pdf`);
-  const outPrefix = path.join(tmpDir, id);
-
-  fs.writeFileSync(pdfPath, Buffer.from(pdfBase64, 'base64'));
+async function persistImapCursor(accountId, cursorUid, syncFrom) {
+  if (!accountId) return;
   try {
-    execSync(`pdftoppm -png -r 300 -singlefile "${pdfPath}" "${outPrefix}"`, { timeout: 15000 });
-    const pngPath = `${outPrefix}.png`;
-    if (!fs.existsSync(pngPath)) throw new Error('pdftoppm no generó imagen');
-    const pngBuffer = fs.readFileSync(pngPath);
-    fs.unlinkSync(pngPath);
-    return pngBuffer.toString('base64');
-  } finally {
-    try { fs.unlinkSync(pdfPath); } catch { /* noop */ }
+    const { ACCOUNTS_DB } = await import('./couchdb.js');
+    await ensureDatabase(fakeReq, ACCOUNTS_DB);
+    const accountDoc = await getDocument(fakeReq, ACCOUNTS_DB, accountId);
+    if (!accountDoc) return;
+    const cfg = { ...(accountDoc.supplierInvoiceConfig || {}) };
+    if (cursorUid != null && Number(cursorUid) > Number(cfg.imapCursorUid || 0)) {
+      cfg.imapCursorUid = Number(cursorUid);
+    }
+    if (syncFrom && !cfg.imapSyncFrom) cfg.imapSyncFrom = syncFrom;
+    accountDoc.supplierInvoiceConfig = cfg;
+    await putDocument(fakeReq, ACCOUNTS_DB, accountDoc._id, accountDoc);
+  } catch (err) {
+    logger.warn({ tag: 'SINV_PROC', err: err.message }, 'No se pudo guardar cursor IMAP');
   }
 }
 
-async function runOcrOnBuffer(buffer, mimeType) {
-  const openAiApiKey = process.env.OPENAI_API_KEY || process.env.VITE_OPENAI_KEY || '';
-  const openAiBaseUrl = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, '');
-
-  if (!openAiApiKey) {
-    throw new Error('Falta OPENAI_API_KEY para OCR');
+/** Primera conexión: fija cursor al final del inbox para no leer el histórico. */
+async function ensureImapCursorBaseline(overrides) {
+  if (Number(overrides.sinceUid) > 0) return { ...overrides, _justBaselined: false };
+  const { ImapFlow } = await import('imapflow');
+  const client = new ImapFlow({
+    host: overrides.host,
+    port: Number(overrides.port || 993),
+    secure: overrides.tls !== false,
+    auth: { user: overrides.user, pass: overrides.pass },
+    logger: false,
+  });
+  await client.connect();
+  const lock = await client.getMailboxLock('INBOX');
+  let cursor = 0;
+  try {
+    const uidNext = Number(client.mailbox?.uidNext || 1);
+    cursor = Math.max(0, uidNext - 1);
+  } finally {
+    lock.release();
+    try { await client.logout(); } catch { /* ignore */ }
   }
+  const syncFrom = new Date().toISOString();
+  await persistImapCursor(overrides._accountId, cursor, syncFrom);
+  logger.info(
+    { tag: 'SINV_PROC', cursor, syncFrom },
+    'Cursor IMAP inicializado: solo se procesará correo nuevo a partir de ahora',
+  );
+  return { ...overrides, sinceUid: cursor, sinceDate: syncFrom, _justBaselined: true };
+}
 
-  let base64 = buffer.toString('base64');
-  let detectedMime = mimeType || 'image/png';
+// ─── OCR interno (reutiliza la misma lógica de /api/ocr/scan) ────────────────
 
-  if (mimeType === 'application/pdf' || base64.substring(0, 10).startsWith('JVBE')) {
-    base64 = await convertPdfToImageBase64(base64);
-    detectedMime = 'image/png';
-  }
-
-  const dataUrl = `data:${detectedMime};base64,${base64}`;
-
-  const response = await fetch(`${openAiBaseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${openAiApiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'gpt-4o',
-      max_tokens: 3000,
-      messages: [
-        {
-          role: 'system',
-          content: `Eres un experto en OCR de facturas de proveedor. Analiza la imagen y extrae toda la información.
+const OCR_JSON_SYSTEM = `Eres un experto en OCR de facturas de proveedor. Extrae toda la información.
 Responde SOLO con JSON válido, sin markdown ni texto adicional.
 {
   "documentType": "factura_proveedor",
@@ -136,16 +139,81 @@ Responde SOLO con JSON válido, sin markdown ni texto adicional.
   "confidenceScore": 85,
   "notes": "Observaciones relevantes"
 }
-Si algún campo no se puede determinar, usa null.`,
-        },
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: 'Analiza esta factura de proveedor y extrae toda la información financiera.' },
-            { type: 'image_url', image_url: { url: dataUrl, detail: 'high' } },
-          ],
-        },
-      ],
+Si algún campo no se puede determinar, usa null.`;
+
+function parseOcrJsonContent(rawContent) {
+  try {
+    const cleaned = String(rawContent || '')
+      .replace(/```json\n?/gi, '')
+      .replace(/```\n?/g, '')
+      .trim();
+    return JSON.parse(cleaned);
+  } catch {
+    return { raw: rawContent, parseError: true };
+  }
+}
+
+async function convertPdfToImageBase64(pdfBase64) {
+  const { execSync } = await import('node:child_process');
+  const tmpDir = os.tmpdir();
+  const id = `ocr-email-${Date.now()}`;
+  const pdfPath = path.join(tmpDir, `${id}.pdf`);
+  const outPrefix = path.join(tmpDir, id);
+
+  fs.writeFileSync(pdfPath, Buffer.from(pdfBase64, 'base64'));
+  try {
+    execSync(`pdftoppm -png -r 200 -singlefile "${pdfPath}" "${outPrefix}"`, { timeout: 20000 });
+    const pngPath = `${outPrefix}.png`;
+    if (!fs.existsSync(pngPath)) throw new Error('pdftoppm no generó imagen');
+    const pngBuffer = fs.readFileSync(pngPath);
+    fs.unlinkSync(pngPath);
+    return pngBuffer.toString('base64');
+  } finally {
+    try { fs.unlinkSync(pdfPath); } catch { /* noop */ }
+  }
+}
+
+/** Fallback Windows/VPS sin poppler: texto embebido del PDF → GPT. */
+async function extractPdfText(buffer) {
+  const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const data = Buffer.isBuffer(buffer)
+    ? new Uint8Array(buffer)
+    : buffer instanceof Uint8Array
+      ? buffer
+      : new Uint8Array(buffer || []);
+  const loadingTask = getDocument({ data, useSystemFonts: true, disableWorker: true });
+  const pdf = await loadingTask.promise;
+  const maxPages = Math.min(pdf.numPages || 1, 4);
+  const parts = [];
+  for (let pageNum = 1; pageNum <= maxPages; pageNum += 1) {
+    const page = await pdf.getPage(pageNum);
+    const content = await page.getTextContent();
+    const line = (content.items || [])
+      .map((it) => (typeof it?.str === 'string' ? it.str : ''))
+      .filter(Boolean)
+      .join(' ');
+    if (line.trim()) parts.push(line.trim());
+  }
+  return parts.join('\n').trim();
+}
+
+async function callOpenAiOcr(messages) {
+  const openAiApiKey = process.env.OPENAI_API_KEY || process.env.VITE_OPENAI_KEY || '';
+  const openAiBaseUrl = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, '');
+  if (!openAiApiKey) {
+    throw new Error('Falta OPENAI_API_KEY para OCR');
+  }
+
+  const response = await fetch(`${openAiBaseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${openAiApiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'gpt-4o',
+      max_tokens: 3000,
+      messages,
     }),
   });
 
@@ -155,14 +223,106 @@ Si algún campo no se puede determinar, usa null.`,
   }
 
   const payload = await response.json();
-  const rawContent = payload.choices?.[0]?.message?.content || '{}';
+  return parseOcrJsonContent(payload.choices?.[0]?.message?.content || '{}');
+}
 
-  try {
-    const cleaned = rawContent.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-    return JSON.parse(cleaned);
-  } catch {
-    return { raw: rawContent, parseError: true };
+async function runOcrOnBuffer(buffer, mimeType) {
+  const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || []);
+  const headAscii = buf.subarray(0, 5).toString('utf8');
+  const isPdf =
+    String(mimeType || '').includes('pdf')
+    || headAscii.startsWith('%PDF')
+    || buf.toString('base64').substring(0, 10).startsWith('JVBE');
+
+  if (isPdf) {
+    // 1) Parser local (sin OpenAI) — PDF con texto
+    try {
+      const local = await parseSupplierInvoicePdfBuffer(buf);
+      const usable =
+        !local.parseError
+        && (
+          Number(local.total) > 0
+          || String(local.documentNumber || '').trim()
+          || String(local.emitterCIF || '').trim()
+        );
+      if (usable) {
+        logger.info(
+          {
+            tag: 'SINV_PROC',
+            method: 'pdf_text_rules',
+            total: local.total,
+            documentNumber: local.documentNumber,
+            confidenceScore: local.confidenceScore,
+          },
+          'Factura PDF parseada en local (sin OpenAI)',
+        );
+        return local;
+      }
+      logger.warn(
+        { tag: 'SINV_PROC', confidenceScore: local.confidenceScore },
+        'Parser PDF local con poca confianza; se intenta OpenAI si hay clave',
+      );
+    } catch (localErr) {
+      logger.warn({ tag: 'SINV_PROC', err: localErr.message, code: localErr.code }, 'Parser PDF local falló');
+      if (localErr.code === 'PDF_NO_TEXT') {
+        // Escaneo: intentar imagen+OpenAI si hay poppler/clave
+      } else {
+        // seguir a OpenAI si hay
+      }
+    }
+
+    // 2) OpenAI opcional (si la clave funciona)
+    const openAiApiKey = process.env.OPENAI_API_KEY || process.env.VITE_OPENAI_KEY || '';
+    if (!openAiApiKey) {
+      throw new Error(
+        'PDF no parseado en local y no hay OPENAI_API_KEY. Usa un PDF con texto seleccionable o configura OpenAI.',
+      );
+    }
+    try {
+      const pngBase64 = await convertPdfToImageBase64(buf.toString('base64'));
+      return await callOpenAiOcr([
+        { role: 'system', content: OCR_JSON_SYSTEM },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Analiza esta factura de proveedor y extrae toda la información financiera.' },
+            { type: 'image_url', image_url: { url: `data:image/png;base64,${pngBase64}`, detail: 'high' } },
+          ],
+        },
+      ]);
+    } catch (imgErr) {
+      logger.warn({ tag: 'SINV_PROC', err: imgErr.message }, 'PDF→imagen/OpenAI falló; texto→OpenAI');
+    }
+    const text = await extractPdfText(buf);
+    if (!text || text.length < 20) {
+      throw new Error('No se pudo leer el PDF (sin texto y sin OCR de imagen).');
+    }
+    return callOpenAiOcr([
+      { role: 'system', content: OCR_JSON_SYSTEM },
+      {
+        role: 'user',
+        content: `Analiza este texto extraído de una factura PDF y responde con el JSON pedido:\n\n${text.slice(0, 12000)}`,
+      },
+    ]);
   }
+
+  // Imágenes: OpenAI si hay clave
+  const openAiApiKey = process.env.OPENAI_API_KEY || process.env.VITE_OPENAI_KEY || '';
+  if (!openAiApiKey) {
+    throw new Error('Las fotos/imágenes requieren OPENAI_API_KEY (o envía la factura en PDF con texto).');
+  }
+  const detectedMime = mimeType || 'image/png';
+  const dataUrl = `data:${detectedMime};base64,${buf.toString('base64')}`;
+  return callOpenAiOcr([
+    { role: 'system', content: OCR_JSON_SYSTEM },
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Analiza esta factura de proveedor y extrae toda la información financiera.' },
+        { type: 'image_url', image_url: { url: dataUrl, detail: 'high' } },
+      ],
+    },
+  ]);
 }
 
 function suggestNextSupplierCodeFromDocs(suppliers) {
@@ -329,15 +489,44 @@ async function saveAttachment(invoiceId, filename, buffer, mimeType) {
 
 // ─── Procesar un solo email ──────────────────────────────────────────────────
 
-async function processSingleEmail(userId, email) {
-  const result = { created: false, invoiceId: null, alerts: [] };
 
-  // Verificar si ya se procesó este email
-  const existing = await findPurchaseInvoiceByEmailId(fakeReq, userId, email.messageId);
-  if (existing) {
-    logger.info({ tag: 'SINV_PROC', messageId: email.messageId }, 'Email ya procesado, ignorando');
-    return result;
+function parseInvoiceHintsFromSubject(subject) {
+  const raw = String(subject || '');
+  const out = { documentNumber: null, date: null };
+  const num =
+    raw.match(/factura\s*(?:n[ºo.]?\s*)?([A-Z0-9][A-Z0-9\-\/]{4,})/i)
+    || raw.match(/\b(?:fac|inv)[-\s]?([A-Z0-9][A-Z0-9\-\/]{4,})/i)
+    || raw.match(/\b(\d{8,})\b/);
+  if (num?.[1]) out.documentNumber = String(num[1]).trim();
+  const dateM = raw.match(/fecha(?:\s+de)?\s+(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4})/i);
+  if (dateM?.[1]) {
+    const parts = dateM[1].split(/[\/\-.]/);
+    if (parts.length === 3) {
+      let d = Number(parts[0]);
+      let mo = Number(parts[1]);
+      let y = Number(parts[2]);
+      if (y < 100) y += 2000;
+      if (d > 0 && mo > 0 && mo <= 12) {
+        out.date = y + '-' + String(mo).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+      }
+    }
   }
+  return out;
+}
+
+async function processSingleEmail(userId, email) {
+  const result = { created: false, invoiceId: null, alerts: [], createdCount: 0 };
+
+  // Facturas ya creadas desde este mismo correo (1 email puede traer N PDFs)
+  const alreadyFromEmail = (await listPurchaseInvoicesByUser(fakeReq, userId))
+    .filter((inv) => inv.sourceEmailId && email.messageId && inv.sourceEmailId === email.messageId);
+  const doneFilenames = new Set(
+    alreadyFromEmail.flatMap((inv) =>
+      (Array.isArray(inv.attachments) ? inv.attachments : [])
+        .map((a) => String(a.filename || '').toLowerCase())
+        .filter(Boolean),
+    ),
+  );
 
   const baseData = {
     source: 'email',
@@ -349,32 +538,27 @@ async function processSingleEmail(userId, email) {
     status: 'pending_review',
   };
 
-  // Sin adjuntos válidos
+  // Sin adjuntos válidos: no crear factura fantasma (antes llenaba Compras de F-000x a 0 €).
   if (!email.hasValidAttachments) {
-    logger.info({ tag: 'SINV_PROC', from: email.from, subject: email.subject }, 'Email sin adjuntos válidos');
-
-    const invoiceNumber = await assignPurchaseInvoiceNumber(fakeReq, userId, {
-      ...baseData,
-      documentKind: 'factura_proveedor',
+    logger.info({ tag: 'SINV_PROC', from: email.from, subject: email.subject }, 'Email sin adjuntos válidos — se ignora');
+    result.alerts.push({
+      type: 'no_attachment',
+      data: { from: email.from, subject: email.subject, invoiceId: '' },
     });
-    const doc = buildPurchaseInvoiceDocument(userId, {
-      ...baseData,
-      invoiceNumber,
-      flags: { noAttachment: true },
-    });
-
-    const db = getCatalogDbName();
-    await ensureDatabase(fakeReq, db);
-    await putDocument(fakeReq, db, doc._id, doc);
-
-    result.created = true;
-    result.invoiceId = doc._id;
-    result.alerts.push({ type: 'no_attachment', data: { from: email.from, subject: email.subject, invoiceId: doc._id } });
     return result;
   }
 
   // Procesar cada adjunto como posible factura
   for (const attachment of email.attachments) {
+    const fnameKey = String(attachment.filename || '').toLowerCase();
+    if (fnameKey && doneFilenames.has(fnameKey)) {
+      logger.info(
+        { tag: 'SINV_PROC', messageId: email.messageId, filename: attachment.filename },
+        'Adjunto ya importado en este correo — se omite',
+      );
+      continue;
+    }
+
     let ocrData = null;
     let ocrFailed = false;
 
@@ -387,6 +571,55 @@ async function processSingleEmail(userId, email) {
     } catch (err) {
       ocrFailed = true;
       logger.error({ tag: 'SINV_PROC', filename: attachment.filename, err: err.message }, 'OCR falló');
+    }
+
+    // Pistas del asunto (ej. IONOS: "Tu factura 311100758596 con fecha de 05/08/2026")
+    const subjectHints = parseInvoiceHintsFromSubject(email.subject || '');
+    if (ocrData && typeof ocrData === 'object') {
+      if (!ocrData.documentNumber && subjectHints.documentNumber) {
+        ocrData.documentNumber = subjectHints.documentNumber;
+      }
+      if (!ocrData.date && subjectHints.date) ocrData.date = subjectHints.date;
+    } else if (subjectHints.documentNumber || subjectHints.date) {
+      ocrData = {
+        documentType: 'factura_proveedor',
+        documentNumber: subjectHints.documentNumber,
+        date: subjectHints.date,
+        total: null,
+        lines: [],
+        confidenceScore: 25,
+        notes: 'Datos parciales desde asunto del email',
+        parseMethod: 'email_subject',
+      };
+    }
+
+    const hasUsefulOcr =
+      Number(ocrData?.total) > 0
+      || Number(ocrData?.subtotal) > 0
+      || (Array.isArray(ocrData?.lines) && ocrData.lines.some((l) => Number(l?.total) > 0 || Number(l?.unitPrice) > 0));
+
+    // Sin importe no creamos (evita F-000x a 0,00 €). Asunto solo no basta.
+    if (!hasUsefulOcr) {
+      logger.warn(
+        {
+          tag: 'SINV_PROC',
+          from: email.from,
+          subject: email.subject,
+          filename: attachment.filename,
+          ocrFailed,
+        },
+        'Adjunto sin datos de factura usables — no se crea documento',
+      );
+      result.alerts.push({
+        type: 'ocr_failed',
+        data: {
+          invoiceId: '',
+          from: email.from,
+          filename: attachment.filename,
+          subject: email.subject,
+        },
+      });
+      continue;
     }
 
     const matchResult = await ensureSupplierFromOcr(userId, ocrData, email.from);
@@ -446,6 +679,9 @@ async function processSingleEmail(userId, email) {
       lines: enrichedLines.length > 0 ? enrichedLines : (ocrData?.lines || []),
       taxRate: ocrData?.taxRate ?? 21,
       currency: ocrData?.currency || 'EUR',
+      subtotal: Number(ocrData?.subtotal ?? 0) || undefined,
+      taxAmount: Number(ocrData?.taxAmount ?? 0) || undefined,
+      total: Number(ocrData?.total ?? 0) || undefined,
       ...proposal,
       ocrData,
       ocrConfidence: ocrData?.confidenceScore ? (ocrData.confidenceScore >= 70 ? 'high' : 'low') : '',
@@ -492,7 +728,9 @@ async function processSingleEmail(userId, email) {
     }
 
     result.created = true;
+    result.createdCount = (result.createdCount || 0) + 1;
     result.invoiceId = doc._id;
+    if (fnameKey) doneFilenames.add(fnameKey);
 
     if (!matchResult.matched) {
       result.alerts.push({ type: 'unknown_supplier', data: { invoiceId: doc._id, from: email.from, emitter: ocrData?.emitter, cif: ocrData?.emitterCIF } });
@@ -518,7 +756,7 @@ async function emitRealtimeAlert(userId, { title, message, level, route, invoice
       message,
       entityId: invoiceId || '',
       entityType: 'purchase_invoice',
-      route: route || '/saas/suppliers/facturas',
+      route: route || '/saas/catalog?tab=invoices',
       metadata: metadata || {},
     });
     notification._id = `alert:supplier_invoice:${dedupKey}`;
@@ -541,9 +779,9 @@ async function emitRealtimeAlert(userId, { title, message, level, route, invoice
 // ─── Función principal ───────────────────────────────────────────────────────
 
 export async function processIncomingEmails(userId, imapOverrides) {
-  const summary = { processed: 0, created: 0, alerts: 0, errors: 0, allAlerts: [] };
+  const summary = { processed: 0, created: 0, alerts: 0, duplicates: 0, errors: 0, allAlerts: [] };
 
-  const resolvedImap =
+  let resolvedImap =
     imapOverrides !== undefined ? imapOverrides : await buildImapOverridesForUser(userId);
 
   if (!isImapConfigured(resolvedImap)) {
@@ -551,9 +789,29 @@ export async function processIncomingEmails(userId, imapOverrides) {
     return summary;
   }
 
+  try {
+    // Si no hay cursor, marcamos el final del inbox y NO leemos el histórico (14k, etc.)
+    resolvedImap = await ensureImapCursorBaseline(resolvedImap);
+    if (resolvedImap._justBaselined) {
+      summary.baselined = true;
+      summary.message =
+        'Punto de partida listo. Los correos antiguos no se leen. Envía ahora un correo nuevo con PDF y vuelve a sincronizar.';
+      logger.info({ tag: 'SINV_PROC', userId }, summary.message);
+      return summary;
+    }
+  } catch (err) {
+    logger.error({ tag: 'SINV_PROC', err: err.message }, 'No se pudo inicializar cursor IMAP');
+    summary.errors++;
+    return summary;
+  }
+
   let emails;
   try {
     emails = await connectAndFetchNewEmails(resolvedImap);
+    const cursorUid = Number(emails?._imapCursorUid || 0);
+    if (cursorUid > 0) {
+      await persistImapCursor(resolvedImap._accountId, cursorUid, resolvedImap.sinceDate || null);
+    }
   } catch (err) {
     logger.error({ tag: 'SINV_PROC', err: err.message }, 'Error obteniendo emails');
     summary.errors++;
@@ -561,7 +819,7 @@ export async function processIncomingEmails(userId, imapOverrides) {
   }
 
   if (!emails || emails.length === 0) {
-    logger.debug({ tag: 'SINV_PROC' }, 'No hay emails nuevos');
+    logger.debug({ tag: 'SINV_PROC' }, 'No hay emails nuevos desde la conexión');
     return summary;
   }
 
@@ -571,35 +829,36 @@ export async function processIncomingEmails(userId, imapOverrides) {
     summary.processed++;
     try {
       const result = await processSingleEmail(userId, email);
-      if (result.created) summary.created++;
+      if (result.created) summary.created += Math.max(1, Number(result.createdCount || 1));
       summary.alerts += result.alerts.length;
       summary.allAlerts.push(...result.alerts);
 
       for (const alert of result.alerts) {
         if (alert.type === 'duplicate') {
+          const dupKey = String(alert.data.invoiceNumber || alert.data.invoiceId || '');
+          if (dupKey && summary._dupAlerted?.has(dupKey)) continue;
+          if (!summary._dupAlerted) summary._dupAlerted = new Set();
+          if (dupKey) summary._dupAlerted.add(dupKey);
+          summary.duplicates = (summary.duplicates || 0) + 1;
+          const totalLabel = Number(alert.data.total || 0).toFixed(2);
           await emitRealtimeAlert(userId, {
             title: 'Posible factura duplicada',
-            message: `La factura ${alert.data.invoiceNumber} de ${alert.data.supplierName} por ${alert.data.total?.toFixed(2) || '0.00'}€ podría estar duplicada.`,
+            message: `La factura ${alert.data.invoiceNumber} de ${alert.data.supplierName || 'proveedor'} por ${totalLabel}€ podría estar duplicada.`,
             level: 'warning',
             invoiceId: alert.data.invoiceId,
-            route: `/saas/suppliers/facturas?invoiceId=${alert.data.invoiceId}`,
+            route: `/saas/catalog?tab=invoices&invoiceId=${alert.data.invoiceId}`,
             metadata: alert.data,
           });
         } else if (alert.type === 'no_attachment') {
-          await emitRealtimeAlert(userId, {
-            title: 'Email recibido sin factura adjunta',
-            message: `Email de ${alert.data.from} con asunto "${alert.data.subject}" sin PDF o imagen adjunta.`,
-            level: 'info',
-            invoiceId: alert.data.invoiceId,
-            metadata: alert.data,
-          });
+          // No spamear el centro de alertas por cada mail sin PDF (solo queda en el resumen del sync).
+          continue;
         } else if (alert.type === 'unknown_supplier') {
           await emitRealtimeAlert(userId, {
             title: 'Proveedor no identificado',
             message: `Factura desde ${alert.data.from} — no se encontró proveedor registrado${alert.data.cif ? ` con CIF ${alert.data.cif}` : ''}.`,
             level: 'warning',
             invoiceId: alert.data.invoiceId,
-            route: `/saas/suppliers/facturas?invoiceId=${alert.data.invoiceId}`,
+            route: `/saas/catalog?tab=invoices&invoiceId=${alert.data.invoiceId}`,
             metadata: alert.data,
           });
         } else if (alert.type === 'ocr_failed') {
@@ -608,7 +867,7 @@ export async function processIncomingEmails(userId, imapOverrides) {
             message: `No se pudo extraer datos de ${alert.data.filename} (email de ${alert.data.from}). Requiere revisión manual.`,
             level: 'warning',
             invoiceId: alert.data.invoiceId,
-            route: `/saas/suppliers/facturas?invoiceId=${alert.data.invoiceId}`,
+            route: `/saas/catalog?tab=invoices&invoiceId=${alert.data.invoiceId}`,
             metadata: alert.data,
           });
         }
@@ -619,8 +878,16 @@ export async function processIncomingEmails(userId, imapOverrides) {
     }
   }
 
-  logger.info({ tag: 'SINV_PROC', ...summary }, 'Procesamiento de emails completado');
+  logger.info({
+    tag: 'SINV_PROC',
+    processed: summary.processed,
+    created: summary.created,
+    alerts: summary.alerts,
+    duplicates: summary.duplicates || 0,
+    errors: summary.errors,
+  }, 'Procesamiento de emails completado');
+  delete summary._dupAlerted;
   return summary;
 }
 
-export { runOcrOnBuffer, matchSupplier, saveAttachment };
+export { runOcrOnBuffer, matchSupplier, saveAttachment, processSingleEmail };
