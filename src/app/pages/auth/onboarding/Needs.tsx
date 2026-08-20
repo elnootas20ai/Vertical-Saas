@@ -20,7 +20,8 @@ import {
   OnboardingStepHeading,
   OnboardingStepShell,
 } from '../../../components/auth/onboarding/OnboardingStepShell';
-import { useOnboarding, ONBOARDING_ROUTES } from '../../../context/OnboardingContext';
+import { useOnboarding } from '../../../context/OnboardingContext';
+import { useOnboardingStepGate } from '../../../hooks/useOnboardingStepGate';
 import {
   deliveryNeedsToModules,
   emptyRestaurantNeeds,
@@ -69,12 +70,7 @@ export function Needs() {
   const navigate = useNavigate();
   const { data, updateData, advanceStep } = useOnboarding();
   const isDeliveryOps = usesDeliveryNeedsOnboarding(data.businessType);
-
-  useEffect(() => {
-    if (data.completedStep < STEP_INDEX - 1) {
-      navigate(ONBOARDING_ROUTES[data.completedStep + 1], { replace: true });
-    }
-  }, [data.completedStep, navigate]);
+  useOnboardingStepGate(STEP_INDEX);
 
   const [needs, setNeeds] = useState({
     inventory: data.requestedModules.inventory,

@@ -622,6 +622,7 @@ const VERTICAL_GROUP_ITEM_OVERRIDES: Partial<Record<BusinessType, Record<string,
       'caja',
       'reservas',
       'lista-espera',
+      'web-config',
     ],
   },
   events: {
@@ -1181,7 +1182,9 @@ function SidebarInner({
             ? 'TPV sala'
             : isRestaurantVertical && item.id === 'cocina'
               ? 'Cocina'
-              : t(`nav.${item.navKey}`),
+              : isRestaurantVertical && item.id === 'web-config'
+                ? 'Pág. web'
+                : t(`nav.${item.navKey}`),
       };
       let resolved: SidebarItem;
       if (eventsNav.isEvents && !item.disabled) {

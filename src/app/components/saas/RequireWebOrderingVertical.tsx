@@ -4,7 +4,7 @@ import { useBusinessOptional } from '../../context/BusinessContext';
 import { isWebOrderingModuleEnabled } from '../../lib/verticalModuleVisibility';
 import { AuthRouteLoading } from '../AuthRouteLoading';
 
-/** Bloquea tienda web / pedidos online en verticales que no lo usan (p. ej. bar/restaurante). */
+/** Bloquea tienda web / pedidos online solo si el vertical lo desactiva en visibilidad. */
 export function RequireWebOrderingVertical({ children }: { children: React.ReactNode }) {
   const businessCtx = useBusinessOptional();
   const navigate = useNavigate();

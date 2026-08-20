@@ -23,7 +23,7 @@ const stepKeys = [
 
 export function Confirmation() {
   const navigate = useNavigate();
-  const { data } = useOnboarding();
+  const { data, isProgressReady } = useOnboarding();
   const { updateOnboardingData } = useAuth();
   const { t } = useTranslation();
   const [currentStep, setCurrentStep] = useState(0);
@@ -33,10 +33,16 @@ export function Confirmation() {
   const completionStarted = useRef(false);
 
   useEffect(() => {
-    if (data.completedStep < 5) {
-      navigate(ONBOARDING_ROUTES[data.completedStep + 1], { replace: true });
+    if (!isProgressReady) return;
+    if (data.completedStep < 6) {
+      const next = Math.max(0, Math.min(data.completedStep + 1, ONBOARDING_ROUTES.length - 1));
+      navigate(ONBOARDING_ROUTES[next], { replace: true });
+      return;
     }
-  }, [data.completedStep, navigate]);
+    if (!data.serviceAgreement?.signatureDataUrl) {
+      navigate('/auth/onboarding/contrato', { replace: true });
+    }
+  }, [isProgressReady, data.completedStep, data.serviceAgreement?.signatureDataUrl, navigate]);
 
   const steps = stepKeys.map(s => ({
     ...s,

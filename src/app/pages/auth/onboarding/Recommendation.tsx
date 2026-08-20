@@ -7,7 +7,8 @@ import {
   OnboardingStepHeading,
   OnboardingStepShell,
 } from '../../../components/auth/onboarding/OnboardingStepShell';
-import { useOnboarding, ONBOARDING_ROUTES } from '../../../context/OnboardingContext';
+import { useOnboarding } from '../../../context/OnboardingContext';
+import { useOnboardingStepGate } from '../../../hooks/useOnboardingStepGate';
 import { useAuth } from '../../../context/AuthContext';
 import { isIosCustomerAccessOnlyApp } from '../../../lib/appStoreCompliance';
 import { IosCustomerAccessOnlyScreen } from '../../../components/saas/IosCustomerAccessOnlyScreen';
@@ -74,6 +75,7 @@ export function Recommendation() {
 function RecommendationWebFlow() {
   const navigate = useNavigate();
   const { data, updateData, advanceStep } = useOnboarding();
+  useOnboardingStepGate(STEP_INDEX);
   const [billingMode, setBillingMode] = useState<'monthly' | 'annual'>(data.subscriptionSelection.billingMode);
   const [showComparison, setShowComparison] = useState(false);
 
@@ -119,12 +121,6 @@ function RecommendationWebFlow() {
     () => plans.find((p) => p.id === selectedPlanId) ?? recommendation.plan,
     [plans, selectedPlanId, recommendation.plan],
   );
-
-  useEffect(() => {
-    if (data.completedStep < STEP_INDEX - 1) {
-      navigate(ONBOARDING_ROUTES[data.completedStep + 1], { replace: true });
-    }
-  }, [data.completedStep, navigate]);
 
   const selectedLabels = useMemo(() => {
     if (isDeliveryBusinessType(data.businessType) && data.deliveryNeeds) {

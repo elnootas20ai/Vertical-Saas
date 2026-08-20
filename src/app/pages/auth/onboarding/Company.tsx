@@ -11,7 +11,8 @@ import {
   OnboardingStepShell,
 } from '../../../components/auth/onboarding/OnboardingStepShell';
 import type { OnboardingVerificationDocument } from '../../../lib/onboardingCompanyVerification';
-import { useOnboarding, ONBOARDING_ROUTES } from '../../../context/OnboardingContext';
+import { useOnboarding } from '../../../context/OnboardingContext';
+import { useOnboardingStepGate } from '../../../hooks/useOnboardingStepGate';
 import { getNifOrCifError, getNifOrCifErrorWhileTyping } from '../../../lib/dniCifValidator';
 
 const STEP_INDEX = 1;
@@ -19,6 +20,7 @@ const STEP_INDEX = 1;
 export function Company() {
   const navigate = useNavigate();
   const { data, updateData, advanceStep } = useOnboarding();
+  useOnboardingStepGate(STEP_INDEX);
   const [formData, setFormData] = useState(data.companyProfile);
   const [taxIdError, setTaxIdError] = useState<string | null>(null);
 
@@ -29,12 +31,6 @@ export function Company() {
       verificationNote: data.companyProfile.verificationNote ?? '',
     });
   }, [data.companyProfile]);
-
-  useEffect(() => {
-    if (data.completedStep < STEP_INDEX - 1) {
-      navigate(ONBOARDING_ROUTES[data.completedStep + 1], { replace: true });
-    }
-  }, [data.completedStep, navigate]);
 
   useEffect(() => {
     if (data.businessType === 'carDealership') return;

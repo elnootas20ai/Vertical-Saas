@@ -27,4 +27,4 @@ Bar/restaurante se monta **de nuevo**, independiente de Delivery.
 3. Cocina (`/saas/cocina`) muestra esas comandas (nueva → preparación → lista).
 4. **No** entra Delivery ni el KDS de delivery.
 
-Sidebar restaurant debe incluir: Sala, **TPV sala**, Cocina, Caja, Reservas, Lista de espera.
+Sidebar restaurant debe incluir: Sala, **TPV sala**, Cocina, Caja, Reservas, Lista de espera, **Pág. web**.

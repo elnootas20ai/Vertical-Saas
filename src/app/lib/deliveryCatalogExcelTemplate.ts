@@ -29,7 +29,21 @@ export const DELIVERY_CATALOG_IMPORT_COLUMNS = [
 
 export const DELIVERY_CATALOG_CORE_COLUMNS = DELIVERY_CATALOG_IMPORT_COLUMNS;
 
-export const DELIVERY_CATALOG_IMPORT_LABELS: Record<(typeof DELIVERY_CATALOG_IMPORT_COLUMNS)[number], string> = {
+/** Opcionales: van en la plantilla para que se vean; el import las usa si vienen rellenas. */
+export const DELIVERY_CATALOG_OPTIONAL_COLUMNS = [
+  'tipo_menu',
+  'taxRate',
+  'allergens',
+  'formato',
+  'stock',
+  'minStock',
+  'unit',
+] as const;
+
+export const DELIVERY_CATALOG_IMPORT_LABELS: Record<
+  (typeof DELIVERY_CATALOG_IMPORT_COLUMNS)[number] | (typeof DELIVERY_CATALOG_OPTIONAL_COLUMNS)[number],
+  string
+> = {
   name: 'nombre',
   sku: 'codigo',
   category: 'categoria',
@@ -37,15 +51,23 @@ export const DELIVERY_CATALOG_IMPORT_LABELS: Record<(typeof DELIVERY_CATALOG_IMP
   price: 'precio',
   ingredients: 'ingredientes',
   description: 'descripcion',
+  tipo_menu: 'tipo_menu',
+  taxRate: 'iva',
+  allergens: 'alergenos',
+  formato: 'formato',
+  stock: 'stock',
+  minStock: 'stock_minimo',
+  unit: 'unidad',
 };
 
-/** Cabeceras exactas de la hoja «catalogo» (no cambiar: el import las auto-detecta). */
-export const DELIVERY_CATALOG_TEMPLATE_HEADERS = DELIVERY_CATALOG_IMPORT_COLUMNS.map(
-  (key) => DELIVERY_CATALOG_IMPORT_LABELS[key],
-);
+/** Cabeceras exactas de la hoja «catalogo» (core + opcionales). No renombrar. */
+export const DELIVERY_CATALOG_TEMPLATE_HEADERS = [
+  ...DELIVERY_CATALOG_IMPORT_COLUMNS.map((key) => DELIVERY_CATALOG_IMPORT_LABELS[key]),
+  ...DELIVERY_CATALOG_OPTIONAL_COLUMNS.map((key) => DELIVERY_CATALOG_IMPORT_LABELS[key]),
+];
 
 /** Versión de la plantilla (solo cambiar si hay migración acordada). */
-export const DELIVERY_CATALOG_TEMPLATE_VERSION = 4;
+export const DELIVERY_CATALOG_TEMPLATE_VERSION = 5;
 
 export const DELIVERY_CATALOG_TEMPLATE_FILENAME = 'plantilla_catalogo_tpv.xlsx';
 export const HELADERIA_CATALOG_TEMPLATE_FILENAME = 'plantilla_catalogo_heladeria.xlsx';
@@ -87,8 +109,18 @@ export const RESTAURANT_CATALOG_CATEGORIES = [
 /** Categorías de almacén en la plantilla bar (no van al TPV). */
 export const RESTAURANT_WAREHOUSE_CATEGORIES = ['Envases', 'Limpieza', 'Varios'] as const;
 
-/** Columnas extra de la plantilla heladería (tras el core oficial). */
+/** @deprecated Incluidas en DELIVERY_CATALOG_OPTIONAL_COLUMNS / plantilla v5. */
 export const HELADERIA_CATALOG_EXTRA_HEADERS = ['alergenos', 'formato'] as const;
+
+const CATALOG_OPTIONAL_IMPORT_FIELDS: ImportFieldDef[] = [
+  { key: 'tipo_menu', label: 'tipo_menu', example: 'estandar' },
+  { key: 'taxRate', label: 'iva', example: '10' },
+  { key: 'allergens', label: 'alergenos', example: 'leche, gluten' },
+  { key: 'formato', label: 'formato', example: '2 bolas / 500ml' },
+  { key: 'stock', label: 'stock', example: '20' },
+  { key: 'minStock', label: 'stock_minimo', example: '5' },
+  { key: 'unit', label: 'unidad', example: 'ud' },
+];
 
 export const DELIVERY_CATALOG_IMPORT_FIELDS: ImportFieldDef[] = [
   { key: 'name', label: 'nombre', required: true, example: 'Pizza Margarita' },
@@ -98,11 +130,7 @@ export const DELIVERY_CATALOG_IMPORT_FIELDS: ImportFieldDef[] = [
   { key: 'price', label: 'precio', required: true, example: '9.50' },
   { key: 'ingredients', label: 'ingredientes', example: 'Tomate, Mozzarella, Albahaca' },
   { key: 'description', label: 'descripcion', example: '' },
-  // Opcionales (no van en la plantilla base; se mapean si el Excel las trae)
-  { key: 'tipo_menu', label: 'tipo_menu', example: 'estandar' },
-  { key: 'taxRate', label: 'iva', example: '10' },
-  { key: 'allergens', label: 'alergenos', example: 'leche, frutos secos' },
-  { key: 'formato', label: 'formato', example: '2 bolas' },
+  ...CATALOG_OPTIONAL_IMPORT_FIELDS,
 ];
 
 export const HELADERIA_CATALOG_IMPORT_FIELDS: ImportFieldDef[] = [
@@ -113,9 +141,13 @@ export const HELADERIA_CATALOG_IMPORT_FIELDS: ImportFieldDef[] = [
   { key: 'price', label: 'precio', required: true, example: '2.80' },
   { key: 'ingredients', label: 'ingredientes', example: 'Leche, nata, vainilla' },
   { key: 'description', label: 'descripcion', example: 'Helado artesano' },
-  { key: 'allergens', label: 'alergenos', example: 'leche' },
-  { key: 'formato', label: 'formato', example: 'bola / tarrina 500ml' },
-  { key: 'taxRate', label: 'iva', example: '10' },
+  ...CATALOG_OPTIONAL_IMPORT_FIELDS.map((f) =>
+    f.key === 'allergens'
+      ? { ...f, example: 'leche' }
+      : f.key === 'formato'
+        ? { ...f, example: 'bola / tarrina 500ml' }
+        : f,
+  ),
 ];
 
 /** Campos del modal de import — bar/restaurante (sin ejemplos delivery ni locales concretos). */
@@ -127,9 +159,9 @@ export const RESTAURANT_CATALOG_IMPORT_FIELDS: ImportFieldDef[] = [
   { key: 'price', label: 'precio', required: true, example: '4.50' },
   { key: 'ingredients', label: 'ingredientes', example: 'Patata, Aceite, Pimentón' },
   { key: 'description', label: 'descripcion', example: '' },
-  { key: 'tipo_menu', label: 'tipo_menu', example: 'estandar' },
-  { key: 'taxRate', label: 'iva', example: '10' },
-  { key: 'allergens', label: 'alergenos', example: 'gluten' },
+  ...CATALOG_OPTIONAL_IMPORT_FIELDS.map((f) =>
+    f.key === 'allergens' ? { ...f, example: 'gluten' } : f,
+  ),
 ];
 
 /** Sinónimos de cabecera para auto-mapeo (plantilla oficial + exportaciones habituales). */
@@ -145,6 +177,9 @@ export const DELIVERY_CATALOG_HEADER_ALIASES: Record<string, string[]> = {
   taxRate: ['iva', 'tax', 'taxrate', 'vat', 'impuesto', 'tipo iva', '% iva'],
   allergens: ['alergenos', 'alérgenos', 'allergens', 'alergeno', 'alérgeno', 'alergias'],
   formato: ['formato', 'format', 'tamano', 'tamaño', 'size', 'presentacion', 'presentación'],
+  stock: ['stock', 'stock_actual', 'stock actual', 'cantidad', 'existencia', 'qty', 'quantity'],
+  minStock: ['stock_minimo', 'stock minimo', 'min_stock', 'minstock', 'stock min', 'minimo'],
+  unit: ['unidad', 'unit', 'ud', 'uom', 'medida'],
 };
 
 export type DeliveryCatalogImportIssue = {
@@ -213,11 +248,17 @@ export function catalogImportFieldsForVertical(vertical?: string | null): Import
   return DELIVERY_CATALOG_IMPORT_FIELDS;
 }
 
-export function catalogTemplateHeadersForVertical(vertical?: string | null): string[] {
-  if (isHeladeriaCatalogVertical(vertical)) {
-    return [...DELIVERY_CATALOG_TEMPLATE_HEADERS, ...HELADERIA_CATALOG_EXTRA_HEADERS];
-  }
+export function catalogTemplateHeadersForVertical(_vertical?: string | null): string[] {
+  // Misma plantilla para todas las verticales: core + opcionales visibles.
   return [...DELIVERY_CATALOG_TEMPLATE_HEADERS];
+}
+
+/** Rellena celdas vacías hasta el nº de columnas de la plantilla. */
+export function padCatalogTemplateRow(cells: Array<string | number | null | undefined>, vertical?: string | null): string[] {
+  const n = catalogTemplateHeadersForVertical(vertical).length;
+  const out = cells.map((c) => (c == null ? '' : String(c)));
+  while (out.length < n) out.push('');
+  return out.slice(0, n);
 }
 
 /** Categorías TPV de una línea (las de la marca o las típicas del tipo de negocio). */
@@ -341,26 +382,32 @@ export function buildDeliveryCatalogSampleRows(
               : isComplemento
                 ? (3.0).toFixed(2)
                 : (9.5 + i * 0.5).toFixed(2);
-      rows.push([
-        exampleProductName(cat, lineName, i),
-        `${prefix}-${String(skuN++).padStart(3, '0')}`,
-        cat,
-        lineName,
-        price,
-        ingredients,
-        i === 0 ? `Ejemplo · borra y pon tus productos · linea=${lineName}` : '',
-      ]);
+      rows.push(
+        padCatalogTemplateRow([
+          exampleProductName(cat, lineName, i),
+          `${prefix}-${String(skuN++).padStart(3, '0')}`,
+          cat,
+          lineName,
+          price,
+          ingredients,
+          i === 0 ? `Ejemplo · borra y pon tus productos · linea=${lineName}` : '',
+        ], vertical),
+      );
     });
 
-    rows.push([
-      `Menú ${lineName}`,
-      `${prefix}-M01`,
-      'Combos',
-      lineName,
-      restaurant ? '12.90' : '14.90',
-      '',
-      'Menú TPV · borra o duplica · tipo_menu opcional: estandar, duo, familiar',
-    ]);
+    rows.push(
+      padCatalogTemplateRow([
+        `Menú ${lineName}`,
+        `${prefix}-M01`,
+        'Combos',
+        lineName,
+        restaurant ? '12.90' : '14.90',
+        '',
+        'Menú TPV · borra o duplica',
+        'estandar',
+        '10',
+      ], vertical),
+    );
   }
 
   const sharedExamples: Array<[string, string, string, string]> = [
@@ -369,35 +416,37 @@ export function buildDeliveryCatalogSampleRows(
     ['Tiramisú', 'POS-001', 'Postres', 'Borra esta fila · linea vacía'],
   ];
   for (const [name, sku, cat, note] of sharedExamples) {
-    rows.push([
-      name,
-      sku,
-      cat,
-      '',
-      cat === 'Bebidas' ? '2.50' : cat === 'Complementos' ? '3.00' : '4.50',
-      '',
-      note,
-    ]);
+    rows.push(
+      padCatalogTemplateRow([
+        name,
+        sku,
+        cat,
+        '',
+        cat === 'Bebidas' ? '2.50' : cat === 'Complementos' ? '3.00' : '4.50',
+        '',
+        note,
+      ], vertical),
+    );
   }
 
   if (lines.length === 0) {
     if (restaurant) {
       return [
-        ['Patatas bravas', 'TAP-001', 'Tapas', '', '4.50', 'Patata, Aceite, Pimentón', 'Ejemplo · crea tu marca en Ajustes y ponla en linea'],
-        ['Bocadillo mixto', 'BOC-001', 'Bocadillos', '', '5.50', 'Pan barra, Jamón serrano, Queso', ''],
-        ['Caña', 'BEB-001', 'Bebidas', '', '1.80', '', 'linea vacía en bebidas'],
-        ['Patatas fritas', 'COM-001', 'Complementos', '', '3.00', '', ''],
-        ['Tarta de queso', 'POS-001', 'Postres', '', '4.50', '', ''],
-        ['Papel higiénico', 'ALM-001', 'Limpieza', '', '0', '', 'Almacén · no sale en TPV'],
-        ['Vasos de plástico', 'ALM-002', 'Envases', '', '0', '', 'Almacén · packaging'],
-        ['Guantes desechables', 'ALM-003', 'Varios', '', '0', '', 'Almacén · consumible'],
+        padCatalogTemplateRow(['Patatas bravas', 'TAP-001', 'Tapas', '', '4.50', 'Patata, Aceite, Pimentón', 'Ejemplo · crea tu marca en Ajustes y ponla en linea', '', '10', 'gluten'], vertical),
+        padCatalogTemplateRow(['Bocadillo mixto', 'BOC-001', 'Bocadillos', '', '5.50', 'Pan barra, Jamón serrano, Queso', '', '', '10', 'gluten'], vertical),
+        padCatalogTemplateRow(['Caña', 'BEB-001', 'Bebidas', '', '1.80', '', 'linea vacía en bebidas', '', '10'], vertical),
+        padCatalogTemplateRow(['Patatas fritas', 'COM-001', 'Complementos', '', '3.00', '', '', '', '10'], vertical),
+        padCatalogTemplateRow(['Tarta de queso', 'POS-001', 'Postres', '', '4.50', '', '', '', '10', 'leche'], vertical),
+        padCatalogTemplateRow(['Papel higiénico', 'ALM-001', 'Limpieza', '', '0', '', 'Almacén · no sale en TPV', '', '21', '', '', '24', '5', 'ud'], vertical),
+        padCatalogTemplateRow(['Vasos de plástico', 'ALM-002', 'Envases', '', '0', '', 'Almacén · packaging', '', '21', '', '', '100', '20', 'ud'], vertical),
+        padCatalogTemplateRow(['Guantes desechables', 'ALM-003', 'Varios', '', '0', '', 'Almacén · consumible', '', '21', '', '', '50', '10', 'ud'], vertical),
       ];
     }
     return [
-      ['Pizza Margarita', 'PIZ-001', 'Pizzas', '', '9.50', 'Tomate, Mozzarella', 'Ejemplo · crea tu marca en Ajustes y ponla en linea'],
-      ['Agua 50cl', 'BEB-001', 'Bebidas', '', '1.80', '', 'linea vacía'],
-      ['Patatas fritas', 'COM-001', 'Complementos', '', '3.00', '', ''],
-      ['Tarta de queso', 'POS-001', 'Postres', '', '4.50', '', ''],
+      padCatalogTemplateRow(['Pizza Margarita', 'PIZ-001', 'Pizzas', '', '9.50', 'Tomate, Mozzarella', 'Ejemplo · crea tu marca en Ajustes y ponla en linea', '', '10'], vertical),
+      padCatalogTemplateRow(['Agua 50cl', 'BEB-001', 'Bebidas', '', '1.80', '', 'linea vacía', '', '10'], vertical),
+      padCatalogTemplateRow(['Patatas fritas', 'COM-001', 'Complementos', '', '3.00', '', '', '', '10'], vertical),
+      padCatalogTemplateRow(['Tarta de queso', 'POS-001', 'Postres', '', '4.50', '', '', '', '10'], vertical),
     ];
   }
 
@@ -517,17 +566,18 @@ function instructionLines(
       `PLANTILLA HELADERÍA v${DELIVERY_CATALOG_TEMPLATE_VERSION} — Catálogo + TPV`,
       `${DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS} filas vacías en «catalogo» (desde fila 2). Si necesitas más, inserta filas en Excel; las vacías no se importan.`,
       '',
-      'HOJA A IMPORTAR: «catalogo» (la primera). Las demás hojas son solo ayuda.',
+      'HOJA A IMPORTAR: «catalogo» (la primera).',
+      'HOJA «columnas»: qué es OBLIGATORIO y qué es OPCIONAL (léela primero).',
+      'Las demás hojas son solo ayuda (no se importan).',
       '',
       'COLUMNAS fila 1 (NO renombrar):',
       `  ${headers.join(' | ')}`,
       '',
       'RELLENA desde la fila 2. Las filas vacías no se importan.',
       '',
-      'OBLIGATORIO por producto:',
-      '  · nombre — sabor o producto en TPV (ej. Vainilla Madagascar)',
-      '  · categoria — Sabores, Tarrinas, Conos, Batidos, Toppings, Encargos, Bebidas…',
-      '  · precio — número (2.80)',
+      'OBLIGATORIO: nombre · categoria · precio',
+      'RECOMENDADO: codigo · linea · ingredientes · descripcion',
+      'OPCIONAL (ya en el Excel): tipo_menu · iva · alergenos · formato · stock · stock_minimo · unidad',
       '',
       'HELADERÍA:',
       '  · Sabores — bola / sabor a granel (precio por bola o unidad)',
@@ -535,16 +585,15 @@ function instructionLines(
       '  · Batidos — milkshakes y cremosos',
       '  · Toppings — salsas, toppings, extras',
       '  · Encargos — tartas, encargos anticipados, packs fiesta',
-      '  · alergenos — leche, frutos secos, soja, gluten… (separados por coma)',
-      '  · formato — bola, 2 bolas, tarrina 500ml, encargo 8 raciones…',
-      '  · IVA: se aplica 10% al importar (puedes poner columna iva si hace falta)',
+      '  · Usa alergenos y formato cuando puedas',
+      '  · IVA vacío → 10% al importar',
       '',
       'RECOMENDADO:',
       '  · codigo — HEL-VAI-01 (mismo código = actualiza sin duplicar)',
       '  · linea — pestaña TPV: ' + namesText,
       '  · ingredientes — Leche, nata, vainilla… (escandallo / coste)',
       '',
-      'Consulta «referencia_tpv» y «valores_validos» para tus líneas y categorías.',
+      'Consulta «columnas», «referencia_tpv» y «valores_validos».',
     ];
   }
 
@@ -553,7 +602,9 @@ function instructionLines(
       `PLANTILLA BAR / RESTAURANTE v${DELIVERY_CATALOG_TEMPLATE_VERSION} — Catálogo + TPV`,
       `${DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS} filas vacías en «catalogo» (desde fila 2). Si necesitas más, inserta filas en Excel; las vacías no se importan.`,
       '',
-      'HOJA A IMPORTAR: «catalogo» (la primera). Las demás hojas son solo ayuda.',
+      'HOJA A IMPORTAR: «catalogo» (la primera).',
+      'HOJA «columnas»: qué es OBLIGATORIO y qué es OPCIONAL (léela primero).',
+      'Las demás hojas son solo ayuda (no se importan).',
       '',
       'COLUMNAS fila 1 (NO renombrar):',
       `  ${headers.join(' | ')}`,
@@ -561,10 +612,9 @@ function instructionLines(
       'RELLENA desde la fila 2. Las filas vacías no se importan.',
       'Lo que pongas en el Excel es lo que se monta en el TPV (categorías y productos).',
       '',
-      'OBLIGATORIO por producto:',
-      '  · nombre — nombre en TPV (ej. Patatas bravas)',
-      '  · categoria — Tapas, Raciones, Bocadillos, Pinchos, Bebidas, Postres…',
-      '  · precio — número (4.50)',
+      'OBLIGATORIO: nombre · categoria · precio',
+      'RECOMENDADO: codigo · linea · ingredientes · descripcion',
+      'OPCIONAL (ya en el Excel): tipo_menu · iva · alergenos · formato · stock · stock_minimo · unidad',
       '',
       'BAR / TAPAS / RESTAURANTE:',
       '  · categorias carta (TPV): Tapas, Raciones, Bocadillos, Pinchos, Complementos, Bebidas, Postres',
@@ -572,21 +622,22 @@ function instructionLines(
       '      · Envases — packaging, vasos, servilletas, papel de baño, bolsas…',
       '      · Limpieza — detergente, lejía, bayetas…',
       '      · Varios — otros consumibles de local',
-      '  · en almacén: deja linea vacía y precio 0 (o vacío). Van a Catálogo → Inventario',
+      '  · en almacén: deja linea vacía y precio 0 (o vacío). Rellena stock / stock_minimo / unidad si quieres',
       '  · NO uses categorías de delivery (Pizzas, Burgers, Tacos) salvo que las vendas de verdad',
       '  · ingredientes — Patata, Aceite, Jamón, Pan barra… (escandallo; solo carta)',
-      '  · IVA: se aplica 10% al importar (puedes añadir columna iva si hace falta)',
+      '  · IVA vacío → 10% al importar',
       '',
       'MENÚS / COMBOS (categoria = Combos):',
       '  · linea = nombre exacto de tu Marca en Ajustes (hoja valores_validos)',
       '  · ingredientes vacío (el cliente elige en TPV)',
+      '  · tipo_menu opcional: estandar | duo | familiar | con_postre',
       '',
       'RECOMENDADO:',
       '  · codigo — TAP-001 (mismo código = actualiza sin duplicar)',
       '  · linea — pestaña TPV / marca: ' + namesText,
       '  · linea VACÍA en Bebidas, Complementos, Postres y en Envases/Limpieza/Varios',
       '',
-      'Consulta «referencia_tpv», «valores_validos» y «ejemplos» (no importes la hoja ejemplos).',
+      'Consulta «columnas», «referencia_tpv», «valores_validos» y «ejemplos» (no importes ejemplos).',
     ];
   }
 
@@ -594,36 +645,99 @@ function instructionLines(
     `PLANTILLA OFICIAL v${DELIVERY_CATALOG_TEMPLATE_VERSION} — Catálogo + TPV`,
     `${DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS} filas vacías en «catalogo» (desde fila 2). Si necesitas más, inserta filas en Excel; las vacías no se importan.`,
     '',
-    'HOJA A IMPORTAR: «catalogo» (la primera). Las demás hojas son solo ayuda.',
+    'HOJA A IMPORTAR: «catalogo» (la primera).',
+    'HOJA «columnas»: qué es OBLIGATORIO y qué es OPCIONAL (léela primero).',
+    'Las demás hojas son solo ayuda (no se importan).',
     '',
     'COLUMNAS fila 1 (NO renombrar):',
     `  ${headers.join(' | ')}`,
     '',
     'RELLENA desde la fila 2. Las filas vacías no se importan.',
     '',
-    'OBLIGATORIO por producto:',
-    '  · nombre — nombre en TPV',
-    '  · categoria — Pizzas, Burgers, Bebidas…',
-    '  · precio — número (14.50)',
+    'OBLIGATORIO: nombre · categoria · precio',
+    'RECOMENDADO: codigo · linea · ingredientes · descripcion',
+    'OPCIONAL (ya en el Excel): tipo_menu · iva · alergenos · formato · stock · stock_minimo · unidad',
     '',
     'DELIVERY:',
     '  · categorias habituales: Pizzas, Burgers, Tacos, Complementos, Bebidas, Postres',
     '  · ingredientes — Tomate, Mozzarella, Jamón… (escandallo / coste)',
-    '  · IVA: se aplica 10% al importar (puedes añadir columna iva si hace falta)',
+    '  · IVA vacío → 10% al importar',
     '',
     'MENÚS / COMBOS (categoria = Combos):',
     '  · linea obligatoria (nombre de tu Marca en Ajustes)',
     '  · ingredientes vacío (el cliente elige plato + bebida en TPV)',
-    '  · opcional: columna tipo_menu → estandar | duo | familiar | con_postre',
+    '  · tipo_menu opcional: estandar | duo | familiar | con_postre',
     '',
     'RECOMENDADO:',
-    '  · codigo — referencia única por producto (PIZ-001). Opcional. Mismo código = actualiza sin duplicar',
+    '  · codigo — referencia única por producto (PIZ-001). Mismo código = actualiza sin duplicar',
     '  · linea — pestaña TPV: ' + namesText,
     '  · linea VACÍA en Bebidas, Complementos y Postres',
     '  · ingredientes — pizzas/burgers: Tomate, Mozzarella, Jamón…',
     '',
-    'Consulta «referencia_tpv» y «valores_validos» para tus líneas y categorías.',
+    'Consulta «columnas», «referencia_tpv» y «valores_validos».',
   ];
+}
+
+/** Hoja «columnas»: obligatorio vs opcional, para que se entienda sin leer código. */
+export function buildCatalogColumnLegendRows(vertical?: string | null): string[][] {
+  const fields = catalogImportFieldsForVertical(vertical);
+  const rows: string[][] = [
+    ['columna', 'obligatorio', 'para_que', 'ejemplo'],
+  ];
+  for (const f of fields) {
+    const required = f.required === true;
+    rows.push([
+      f.label,
+      required ? 'SI — obligatorio' : 'NO — opcional',
+      legendPurposeForField(f.key, vertical),
+      String(f.example ?? ''),
+    ]);
+  }
+  rows.push([]);
+  rows.push([
+    'NOTA',
+    '',
+    'No renombres las cabeceras de «catalogo». Si no usas una opcional, déjala vacía.',
+    '',
+  ]);
+  return rows;
+}
+
+function legendPurposeForField(key: string, vertical?: string | null): string {
+  switch (key) {
+    case 'name':
+      return 'Nombre del producto en TPV / carta';
+    case 'sku':
+      return 'Código interno. Mismo código = actualiza el producto (no duplica)';
+    case 'category':
+      return isRestaurantCatalogVertical(vertical)
+        ? 'Categoría TPV o almacén (Envases/Limpieza/Varios no salen en TPV)'
+        : 'Categoría / pestaña del TPV';
+    case 'linea':
+      return 'Marca comercial exacta (Ajustes → Marca). Vacía en Bebidas/Complementos/Postres';
+    case 'price':
+      return 'Precio de venta. Número (9.50). En almacén puedes poner 0';
+    case 'ingredients':
+      return 'Ingredientes separados por coma (escandallo). Vacío en Combos';
+    case 'description':
+      return 'Descripción o notas del producto';
+    case 'tipo_menu':
+      return 'Solo si categoria = Combos: estandar, duo, familiar, con_postre';
+    case 'taxRate':
+      return '% IVA. Si vacío se aplica 10% al importar';
+    case 'allergens':
+      return 'Alérgenos separados por coma (leche, gluten…)';
+    case 'formato':
+      return 'Presentación (bola, 500ml, ración…). Muy útil en heladería';
+    case 'stock':
+      return 'Cantidad inicial en almacén (si la rellenas, el producto lleva stock)';
+    case 'minStock':
+      return 'Stock mínimo para aviso de bajo stock';
+    case 'unit':
+      return 'Unidad de medida: ud, kg, L… (por defecto ud)';
+    default:
+      return '';
+  }
 }
 
 export function isOfficialCatalogTemplateHeaders(headers: string[]): boolean {
@@ -651,14 +765,16 @@ export function buildDeliveryCatalogImportWorkbook(
   const lastCol = String.fromCharCode('A'.charCodeAt(0) + Math.max(colCount - 1, 0));
 
   const catalogSheet = XLSX.utils.aoa_to_sheet(catalogRows);
-  catalogSheet['!cols'] = isHeladeriaCatalogVertical(vertical)
-    ? [
-        { wch: 28 }, { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 10 },
-        { wch: 32 }, { wch: 28 }, { wch: 22 }, { wch: 18 },
-      ]
-    : [{ wch: 28 }, { wch: 14 }, { wch: 18 }, { wch: 16 }, { wch: 10 }, { wch: 36 }, { wch: 42 }];
+  catalogSheet['!cols'] = [
+    { wch: 28 }, { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 10 },
+    { wch: 28 }, { wch: 22 }, { wch: 12 }, { wch: 8 }, { wch: 16 },
+    { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 10 },
+  ];
   catalogSheet['!autofilter'] = { ref: `A1:${lastCol}1` };
   catalogSheet['!freeze'] = { xSplit: 0, ySplit: 1, topLeftCell: 'A2', activePane: 'bottomLeft', state: 'frozen' };
+
+  const columnsSheet = XLSX.utils.aoa_to_sheet(buildCatalogColumnLegendRows(vertical));
+  columnsSheet['!cols'] = [{ wch: 14 }, { wch: 18 }, { wch: 72 }, { wch: 28 }];
 
   const referenceSheet = XLSX.utils.aoa_to_sheet(buildCatalogReferenceRows(organizers, vertical));
   referenceSheet['!cols'] = [{ wch: 22 }, { wch: 18 }, { wch: 28 }, { wch: 22 }];
@@ -671,6 +787,7 @@ export function buildDeliveryCatalogImportWorkbook(
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, catalogSheet, 'catalogo');
+  XLSX.utils.book_append_sheet(wb, columnsSheet, 'columnas');
   XLSX.utils.book_append_sheet(wb, referenceSheet, 'referencia_tpv');
   XLSX.utils.book_append_sheet(wb, validSheet, 'valores_validos');
   if (isRestaurantCatalogVertical(vertical)) {
@@ -679,7 +796,7 @@ export function buildDeliveryCatalogImportWorkbook(
       ...buildDeliveryCatalogSampleRows(organizers, vertical),
     ];
     const exampleSheet = XLSX.utils.aoa_to_sheet(exampleRows);
-    exampleSheet['!cols'] = [{ wch: 24 }, { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 8 }, { wch: 28 }, { wch: 36 }];
+    exampleSheet['!cols'] = catalogSheet['!cols'];
     XLSX.utils.book_append_sheet(wb, exampleSheet, 'ejemplos');
   }
   XLSX.utils.book_append_sheet(wb, helpSheet, 'instrucciones');

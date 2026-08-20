@@ -7,6 +7,7 @@ describe('restaurant menu visibility', () => {
     expect(isMenuItemVisibleForVertical('delivery-ops', 'restaurant')).toBe(false);
     expect(isMenuItemVisibleForVertical('sala', 'restaurant')).toBe(true);
     expect(isMenuItemVisibleForVertical('lista-espera', 'restaurant')).toBe(true);
+    expect(isMenuItemVisibleForVertical('web-config', 'restaurant')).toBe(true);
     expect(isMenuItemVisibleForVertical('promotions', 'restaurant')).toBe(true);
   });
 

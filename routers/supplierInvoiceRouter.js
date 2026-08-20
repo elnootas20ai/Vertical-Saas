@@ -13,12 +13,14 @@ import {
   rescanInvoice,
   getConfig,
   updateConfig,
+  listPdvEmailConfigs,
   testImap,
 } from '../controllers/supplierInvoiceController.js';
 
 const supplierInvoiceRouter = Router();
 
 supplierInvoiceRouter.get('/stats/:userId', supplierInvoiceStats);
+supplierInvoiceRouter.get('/config/:userId/pdvs', listPdvEmailConfigs);
 supplierInvoiceRouter.get('/config/:userId', getConfig);
 supplierInvoiceRouter.put('/config/:userId', updateConfig);
 supplierInvoiceRouter.post('/test-imap', testImap);

@@ -1,5 +1,4 @@
 import type { BusinessType } from './businessApi';
-import { isRestaurantBusinessType } from './deliveryOpsTypes';
 
 /**
  * Módulos del menú ocultos por vertical (config, no borrado del core).
@@ -11,7 +10,6 @@ export const VERTICAL_HIDDEN_MENU_ITEMS: Partial<Record<BusinessType, readonly s
     'delivery-ops',
     'delivery-clients',
     'web-orders',
-    'web-config',
     'delivery-integrations',
     'delivery-kitchen',
     'delivery-reparto',
@@ -62,11 +60,11 @@ export const VERTICAL_HIDDEN_MENU_ITEMS: Partial<Record<BusinessType, readonly s
   realEstate: ['catalog', 'catalog-stock', 'costing', 'suppliers', 'compras-stock'],
 };
 
-/** Tienda web / pedidos online — no aplica a bar/restaurante (solo sala, reservas y caja). */
+/** Tienda web / pedidos online (menú + ruta). Restaurante también: entrada «Pág. web». */
 export function isWebOrderingModuleEnabled(
-  businessType: BusinessType | string | null | undefined,
+  _businessType: BusinessType | string | null | undefined,
 ): boolean {
-  return !isRestaurantBusinessType(businessType);
+  return true;
 }
 export function isMenuItemVisibleForVertical(
   itemId: string,

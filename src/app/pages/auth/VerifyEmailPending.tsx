@@ -11,6 +11,10 @@ import {
   setPendingVerifyEmail,
 } from '../../lib/onboardingLocalKeys';
 import { WORKER_DEFAULT_LANDING_PATH } from '../../lib/workerProfileCompletion';
+import {
+  companyNeedsOnboarding,
+  resolveCompanyOnboardingResumePath,
+} from '../../../../shared/onboarding/resumePath.js';
 
 const RESEND_COOLDOWN_KEY = 'emailVerifResendAt';
 const COOLDOWN_SECONDS = 60;
@@ -70,6 +74,12 @@ export function VerifyEmailPending() {
       if (redirectScheduledRef.current) return;
       redirectScheduledRef.current = true;
 
+      // Empresa sin alta completa: nunca ir a paywall/Gate aunque el backend mande eso.
+      if (user && companyNeedsOnboarding(user)) {
+        navigate(resolveCompanyOnboardingResumePath(user), { replace: true });
+        return;
+      }
+
       let path = pendingRedirectToRef.current || '';
       if (!path) {
         try {
@@ -82,11 +92,11 @@ export function VerifyEmailPending() {
         }
       }
       if (!path) {
-        path = fallbackPostVerifyPath(accountType);
+        path = fallbackPostVerifyPath(accountType || user?.accountType);
       }
       navigate(path, { replace: true });
     },
-    [navigate, listMyInvitations],
+    [navigate, listMyInvitations, user],
   );
 
   const startCountdown = useCallback((seconds: number) => {

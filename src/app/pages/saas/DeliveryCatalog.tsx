@@ -190,7 +190,7 @@ import { useActivationFocus } from '../../hooks/useActivationFocus';
 import { ActivationFieldWrap } from '../../components/saas/ActivationGuideUi';
 import { StaffConsumptionTabPanel } from '../../components/saas/StaffConsumptionTabPanel';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
-import { pollSupplierInvoicesNow } from '../../lib/supplierInvoiceApi';
+import { pollSupplierInvoicesNow, listSupplierInvoicePdvEmailConfigs } from '../../lib/supplierInvoiceApi';
 import { createMovementFromInvoice, listFinanceMovements } from '../../lib/financeApi';
 import {
   isCatalogTpvConfigurable,
@@ -2717,6 +2717,44 @@ function isAlbaranInvoice(inv: PurchaseInvoice): boolean {
   );
 }
 
+/** Líneas del documento o, si vienen vacías (OCR/correo), las del OCR. */
+function invoiceFormLinesFromDoc(inv: PurchaseInvoice): { itemName: string; quantity: string; unitPrice: string }[] {
+  const raw =
+    Array.isArray(inv.lines) && inv.lines.length > 0
+      ? inv.lines
+      : Array.isArray(inv.ocrData?.lines)
+        ? inv.ocrData!.lines!
+        : [];
+  const mapped = raw
+    .map((l) => {
+      const itemName = String(
+        (l as { itemName?: string }).itemName ||
+          (l as { catalogItemName?: string }).catalogItemName ||
+          (l as { description?: string }).description ||
+          '',
+      ).trim();
+      const quantity = Number((l as { quantity?: number | null }).quantity ?? 0);
+      const unitPrice = Number((l as { unitPrice?: number | null }).unitPrice ?? 0);
+      const total = Number((l as { total?: number | null }).total ?? 0);
+      const qty = quantity > 0 ? quantity : total > 0 && unitPrice > 0 ? 1 : quantity || 1;
+      const price =
+        unitPrice > 0
+          ? unitPrice
+          : qty > 0 && total > 0
+            ? total / qty
+            : total > 0
+              ? total
+              : 0;
+      return {
+        itemName,
+        quantity: String(qty || ''),
+        unitPrice: price ? String(Math.round(price * 100) / 100) : '',
+      };
+    })
+    .filter((l) => l.itemName || Number(l.unitPrice) > 0 || Number(l.quantity) > 0);
+  return mapped.length > 0 ? mapped : [{ itemName: '', quantity: '', unitPrice: '' }];
+}
+
 function CreateInvoiceModal({
   isOpen,
   onClose,
@@ -2742,6 +2780,12 @@ function CreateInvoiceModal({
     { itemName: '', quantity: '', unitPrice: '' },
   ]);
   const [linkedAlbaranId, setLinkedAlbaranId] = useState('');
+  /** Totales guardados del doc (OCR/lista) por si las líneas van vacías. */
+  const [storedTotals, setStoredTotals] = useState<{
+    subtotal: number;
+    taxAmount: number;
+    total: number;
+  } | null>(null);
 
   useEffect(() => {
     if (editItem) {
@@ -2751,18 +2795,15 @@ function CreateInvoiceModal({
         supplierId: editItem.supplierId || '',
         date: editItem.date ? editItem.date.slice(0, 10) : '',
         dueDate: editItem.dueDate ? editItem.dueDate.slice(0, 10) : '',
-        taxRate: String(editItem.taxRate ?? 21),
+        taxRate: String(editItem.taxRate ?? editItem.ocrData?.taxRate ?? 21),
         notes: editItem.notes || '',
       });
-      setLines(
-        editItem.lines.length > 0
-          ? editItem.lines.map((l) => ({
-              itemName: l.itemName,
-              quantity: String(l.quantity),
-              unitPrice: String(l.unitPrice),
-            }))
-          : [{ itemName: '', quantity: '', unitPrice: '' }],
-      );
+      setLines(invoiceFormLinesFromDoc(editItem));
+      setStoredTotals({
+        subtotal: Number(editItem.subtotal || editItem.ocrData?.subtotal || 0),
+        taxAmount: Number(editItem.taxAmount || editItem.ocrData?.taxAmount || 0),
+        total: Number(editItem.total || editItem.ocrData?.total || 0),
+      });
       setLinkedAlbaranId(editItem._id || '');
     } else {
       setForm({
@@ -2775,6 +2816,7 @@ function CreateInvoiceModal({
         notes: '',
       });
       setLines([{ itemName: '', quantity: '', unitPrice: '' }]);
+      setStoredTotals(null);
       setLinkedAlbaranId('');
     }
   }, [editItem, isOpen]);
@@ -2789,18 +2831,15 @@ function CreateInvoiceModal({
       supplierId: inv.supplierId || '',
       date: inv.date ? inv.date.slice(0, 10) : '',
       dueDate: inv.dueDate ? inv.dueDate.slice(0, 10) : '',
-      taxRate: String(inv.taxRate ?? 21),
+      taxRate: String(inv.taxRate ?? inv.ocrData?.taxRate ?? 21),
       notes: inv.notes || '',
     });
-    setLines(
-      inv.lines?.length
-        ? inv.lines.map((l) => ({
-            itemName: l.itemName || l.catalogItemName || '',
-            quantity: String(l.quantity ?? ''),
-            unitPrice: String(l.unitPrice ?? ''),
-          }))
-        : [{ itemName: '', quantity: '', unitPrice: '' }],
-    );
+    setLines(invoiceFormLinesFromDoc(inv));
+    setStoredTotals({
+      subtotal: Number(inv.subtotal || inv.ocrData?.subtotal || 0),
+      taxAmount: Number(inv.taxAmount || inv.ocrData?.taxAmount || 0),
+      total: Number(inv.total || inv.ocrData?.total || 0),
+    });
     setLinkedAlbaranId(inv._id);
   };
 
@@ -2849,6 +2888,7 @@ function CreateInvoiceModal({
   };
 
   const updateLine = (idx: number, field: string, value: string) => {
+    setStoredTotals(null);
     setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, [field]: value } : l)));
   };
 
@@ -2862,10 +2902,21 @@ function CreateInvoiceModal({
       total: (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0),
     }));
 
-  const subtotal = computedLines.reduce((sum, l) => sum + l.total, 0);
+  const computedSubtotal = computedLines.reduce((sum, l) => sum + l.total, 0);
   const taxRate = Number(form.taxRate) || 0;
-  const taxAmount = subtotal * (taxRate / 100);
-  const total = subtotal + taxAmount;
+  const useStored =
+    computedSubtotal <= 0 &&
+    storedTotals != null &&
+    (storedTotals.total > 0 || storedTotals.subtotal > 0);
+  const subtotal = useStored ? storedTotals!.subtotal : computedSubtotal;
+  const taxAmount = useStored
+    ? storedTotals!.taxAmount
+    : subtotal * (taxRate / 100);
+  const total = useStored ? storedTotals!.total : subtotal + taxAmount;
+
+  const supplierInList = Boolean(
+    form.supplierId && suppliers.some((s) => s._id === form.supplierId),
+  );
 
   const handleSelectSupplier = (supplierId: string) => {
     const supplier = suppliers.find((s) => s._id === supplierId);
@@ -2886,7 +2937,13 @@ function CreateInvoiceModal({
       toast.error('Selecciona un proveedor');
       return;
     }
-    if (computedLines.length === 0) {
+    const linesToSave =
+      computedLines.length > 0
+        ? computedLines
+        : Array.isArray(editItem?.lines) && editItem.lines.length > 0
+          ? editItem.lines
+          : [];
+    if (linesToSave.length === 0 && !(useStored && total > 0)) {
       toast.error('Añade al menos una línea');
       return;
     }
@@ -2899,7 +2956,7 @@ function CreateInvoiceModal({
         supplierId: form.supplierId,
         date: form.date || new Date().toISOString().slice(0, 10),
         dueDate: form.dueDate,
-        lines: computedLines,
+        lines: linesToSave,
         subtotal,
         taxRate,
         taxAmount,
@@ -2970,16 +3027,32 @@ function CreateInvoiceModal({
             <div>
               <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Proveedor *</label>
               {suppliers.length > 0 ? (
-                <select
-                  className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  value={form.supplierId}
-                  onChange={(e) => handleSelectSupplier(e.target.value)}
-                >
-                  <option value="">Seleccionar proveedor</option>
-                  {suppliers.filter((sup) => sup.active).map((sup) => (
-                    <option key={sup._id} value={sup._id}>{sup.name}</option>
-                  ))}
-                </select>
+                <>
+                  <select
+                    className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                    value={supplierInList ? form.supplierId : ''}
+                    onChange={(e) => handleSelectSupplier(e.target.value)}
+                  >
+                    <option value="">
+                      {form.supplierName && !supplierInList
+                        ? form.supplierName
+                        : 'Seleccionar proveedor'}
+                    </option>
+                    {form.supplierName && !supplierInList ? (
+                      <option value="" disabled>
+                        {form.supplierName} (del documento)
+                      </option>
+                    ) : null}
+                    {suppliers.filter((sup) => sup.active).map((sup) => (
+                      <option key={sup._id} value={sup._id}>{sup.name}</option>
+                    ))}
+                  </select>
+                  {form.supplierName && !supplierInList ? (
+                    <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                      Proveedor del documento: {form.supplierName}. Elige uno de la lista para enlazarlo.
+                    </p>
+                  ) : null}
+                </>
               ) : (
                 <input
                   className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
@@ -3422,6 +3495,9 @@ export function CatalogPage() {
   const [suppliersLoading, setSuppliersLoading] = useState(false);
   const [invoicesLoading, setInvoicesLoading] = useState(false);
   const [syncingEmailInvoices, setSyncingEmailInvoices] = useState(false);
+  /** Correo de facturas conectado en algún PDV → auto-lectura en esta pestaña. */
+  const [invoiceEmailConnected, setInvoiceEmailConnected] = useState(false);
+  const emailAutoSyncBusyRef = useRef(false);
   const [invoiceFinanceLinks, setInvoiceFinanceLinks] = useState<Set<string>>(new Set());
   const suppliersFetchedRef = useRef(false);
   const invoicesFetchedRef = useRef(false);
@@ -4070,18 +4146,19 @@ export function CatalogPage() {
     }
   }, [dataUserId]);
 
-  const loadInvoices = useCallback(async () => {
+  const loadInvoices = useCallback(async (opts?: { silent?: boolean }) => {
     if (!dataUserId) return;
-    setInvoicesLoading(true);
+    const silent = opts?.silent === true;
+    if (!silent) setInvoicesLoading(true);
     try {
       const data = await listPurchaseInvoicesRequest(dataUserId);
       setInvoices(data);
       invoicesFetchedRef.current = true;
     } catch (err) {
       invoicesLoadStartedRef.current = false;
-      toast.error(err instanceof Error ? err.message : 'Error al cargar facturas');
+      if (!silent) toast.error(err instanceof Error ? err.message : 'Error al cargar facturas');
     } finally {
-      setInvoicesLoading(false);
+      if (!silent) setInvoicesLoading(false);
     }
   }, [dataUserId]);
 
@@ -4100,40 +4177,98 @@ export function CatalogPage() {
     }
   }, [dataUserId, businessId]);
 
-  const syncInvoicesFromEmail = useCallback(async () => {
+  const syncInvoicesFromEmail = useCallback(async (opts?: { silent?: boolean }) => {
     if (!dataUserId) {
-      toast.error('Selecciona una empresa');
+      if (!opts?.silent) toast.error('Selecciona una empresa');
       return;
     }
+    const silent = opts?.silent === true;
     setSyncingEmailInvoices(true);
     try {
       const summary = await pollSupplierInvoicesNow(dataUserId);
-      if (summary.baselined || summary.message) {
-        toast.message(
-          String(summary.message || 'Punto de partida del correo listo. Envía un PDF nuevo y sincroniza.'),
-          { duration: 9000 },
-        );
+      if (!silent) {
+        if (summary.baselined || summary.message) {
+          toast.message(
+            String(summary.message || 'Punto de partida del correo listo. Envía un PDF nuevo y sincroniza.'),
+            { duration: 9000 },
+          );
+        } else if ((summary.created || 0) > 0) {
+          toast.success(`${summary.created} factura(s) desde correo · ${summary.processed || 0} email(s)`);
+        } else if ((summary.duplicates || 0) > 0) {
+          toast.warning(
+            `Correo revisado: ${summary.duplicates} PDF(s) ya estaban dados de alta (mismo nº de factura).`,
+          );
+        } else if ((summary.processed || 0) > 0) {
+          toast.warning(
+            `${summary.processed} email(s) revisados, 0 facturas nuevas (PDF sin importe legible o ya procesados)`,
+          );
+        } else {
+          toast.message('0 emails nuevos desde que conectaste el correo.');
+        }
       } else if ((summary.created || 0) > 0) {
-        toast.success(`${summary.created} factura(s) desde correo · ${summary.processed || 0} email(s)`);
-      } else if ((summary.duplicates || 0) > 0) {
-        toast.warning(
-          `Correo revisado: ${summary.duplicates} PDF(s) ya estaban dados de alta (mismo nº de factura).`,
-        );
-      } else if ((summary.processed || 0) > 0) {
-        toast.warning(
-          `${summary.processed} email(s) revisados, 0 facturas nuevas (PDF sin importe legible o ya procesados)`,
-        );
-      } else {
-        toast.message('0 emails nuevos desde que conectaste el correo.');
+        toast.success(`${summary.created} factura(s) nuevas desde el correo`);
+      } else if (summary.message && /No hay correo/i.test(String(summary.message))) {
+        // Auto: no spamear; el badge «Correo activo» ya indica el estado.
       }
-      await loadInvoices();
+      await loadInvoices({ silent: true });
       await loadInvoiceFinanceLinks();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Error al sincronizar correo');
+      if (!silent) toast.error(err instanceof Error ? err.message : 'Error al sincronizar correo');
     } finally {
       setSyncingEmailInvoices(false);
     }
   }, [dataUserId, loadInvoices, loadInvoiceFinanceLinks]);
+
+  // Si hay correo de facturas conectado, mientras estás en Facturas se lee solo cada minuto.
+  useEffect(() => {
+    if (activeTab !== 'invoices' || !dataUserId) {
+      setInvoiceEmailConnected(false);
+      return;
+    }
+    let cancelled = false;
+    const refreshConnected = async () => {
+      try {
+        const { pdvs, legacyAccount } = await listSupplierInvoicePdvEmailConfigs(dataUserId);
+        if (cancelled) return;
+        const connected =
+          (Array.isArray(pdvs) && pdvs.some((p) => p.connected || p.enabled))
+          || Boolean(legacyAccount?.connected || legacyAccount?.config?.enabled);
+        setInvoiceEmailConnected(connected);
+        return connected;
+      } catch {
+        if (!cancelled) setInvoiceEmailConnected(false);
+        return false;
+      }
+    };
+
+    const runAuto = async () => {
+      if (cancelled || emailAutoSyncBusyRef.current) return;
+      emailAutoSyncBusyRef.current = true;
+      try {
+        const connected = await refreshConnected();
+        if (cancelled || !connected) return;
+        // Poll puede tardar (IMAP); la lista ya se carga en paralelo.
+        await syncInvoicesFromEmail({ silent: true });
+      } catch {
+        /* silencioso: reintento en el siguiente ciclo */
+      } finally {
+        emailAutoSyncBusyRef.current = false;
+      }
+    };
+
+    // Primero pintar la lista; el correo a los ~1.5s para no competir con el load inicial.
+    const bootId = window.setTimeout(() => {
+      void runAuto();
+    }, 1_500);
+    const id = window.setInterval(() => {
+      void runAuto();
+    }, 60_000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(bootId);
+      window.clearInterval(id);
+    };
+  }, [activeTab, dataUserId, syncInvoicesFromEmail]);
 
   useEffect(() => {
     if (activeTab === 'invoices' && dataUserId) {
@@ -6333,6 +6468,12 @@ export function CatalogPage() {
           <SaasTabToolbarRow
             right={
               <div className="flex flex-wrap items-center gap-2">
+                {invoiceEmailConnected ? (
+                  <span className="text-[11px] text-teal-700 dark:text-teal-300 font-medium tabular-nums">
+                    Correo activo · auto cada 1 min
+                    {syncingEmailInvoices ? ' · leyendo…' : ''}
+                  </span>
+                ) : null}
                 <SaasTabSecondaryButton
                   onClick={() => void syncInvoicesFromEmail()}
                   disabled={syncingEmailInvoices || !dataUserId}
@@ -6694,7 +6835,7 @@ export function CatalogPage() {
         {activeTab === 'albaranes' && renderAlbaranesTab()}
 
         {activeTab === 'invoices' && (
-          (invoicesLoading || suppliersLoading) && invoices.length === 0
+          invoicesLoading && invoices.length === 0
             ? <CatalogTabLoadingState phase="invoices" />
             : renderInvoicesTab()
         )}

@@ -14,6 +14,8 @@ import {
   getFinanceDbName,
   buildFinanceDocument,
   sanitizeFinance,
+  listPointsOfSaleByUser,
+  getDeliveryDbName,
 } from '../services/couchdb.js';
 import { applyQueryOptions } from '../middleware/queryOptions.js';
 import { testImapConnection } from '../services/imapService.js';
@@ -21,6 +23,77 @@ import { processIncomingEmails, runOcrOnBuffer } from '../services/supplierInvoi
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
+}
+
+function publicInvoiceEmailConfig(config = {}) {
+  return {
+    enabled: Boolean(config.enabled),
+    imapSyncFrom: config.imapSyncFrom || '',
+    imapCursorUid: Number(config.imapCursorUid || 0),
+    imapHost: config.imapHost || '',
+    imapPort: Number(config.imapPort || 993),
+    imapUser: config.imapUser || '',
+    imapPassword: config.imapPassword ? '••••••••' : '',
+    imapTls: config.imapTls !== false,
+    pollIntervalMinutes: Number(config.pollIntervalMinutes || 5),
+    autoCreateFinance: Boolean(config.autoCreateFinance),
+    defaultCategory: config.defaultCategory || 'proveedores',
+    defaultPaymentTermsDays: Number(config.defaultPaymentTermsDays || 30),
+    maxAttachmentSizeMb: Number(config.maxAttachmentSizeMb || 25),
+    alertConfig: {
+      duplicateEnabled: config.alertConfig?.duplicateEnabled !== false,
+      noAttachmentEnabled: config.alertConfig?.noAttachmentEnabled !== false,
+      unknownSupplierEnabled: config.alertConfig?.unknownSupplierEnabled !== false,
+      ocrFailedEnabled: config.alertConfig?.ocrFailedEnabled !== false,
+      overdueEnabled: config.alertConfig?.overdueEnabled !== false,
+    },
+  };
+}
+
+function mergeInvoiceEmailConfig(existing = {}, config = {}) {
+  const enablingNow = config.enabled === true && existing.enabled !== true;
+  return {
+    enabled: config.enabled !== undefined ? Boolean(config.enabled) : existing.enabled,
+    imapHost: config.imapHost !== undefined ? String(config.imapHost).trim() : existing.imapHost,
+    imapPort: config.imapPort !== undefined ? Number(config.imapPort) : existing.imapPort,
+    imapUser: config.imapUser !== undefined ? String(config.imapUser).trim() : existing.imapUser,
+    imapPassword: config.imapPassword && config.imapPassword !== '••••••••'
+      ? String(config.imapPassword).replace(/\s+/g, '').trim()
+      : existing.imapPassword,
+    imapTls: config.imapTls !== undefined ? Boolean(config.imapTls) : existing.imapTls,
+    imapSyncFrom: config.resetSyncFrom
+      ? new Date().toISOString()
+      : (existing.imapSyncFrom || (enablingNow || config.enabled ? existing.imapSyncFrom || new Date().toISOString() : existing.imapSyncFrom)),
+    imapCursorUid: config.resetSyncFrom ? 0 : (existing.imapCursorUid || 0),
+    pollIntervalMinutes: config.pollIntervalMinutes !== undefined
+      ? Math.max(1, Number(config.pollIntervalMinutes))
+      : existing.pollIntervalMinutes,
+    autoCreateFinance: config.autoCreateFinance !== undefined ? Boolean(config.autoCreateFinance) : existing.autoCreateFinance,
+    defaultCategory: config.defaultCategory || existing.defaultCategory || 'proveedores',
+    defaultPaymentTermsDays: config.defaultPaymentTermsDays !== undefined
+      ? Number(config.defaultPaymentTermsDays)
+      : existing.defaultPaymentTermsDays,
+    maxAttachmentSizeMb: config.maxAttachmentSizeMb !== undefined
+      ? Number(config.maxAttachmentSizeMb)
+      : existing.maxAttachmentSizeMb,
+    alertConfig: {
+      ...(existing.alertConfig || {}),
+      ...(config.alertConfig || {}),
+    },
+  };
+}
+
+async function loadOwnedPdv(req, userId, pdvId) {
+  const id = String(pdvId || '').trim();
+  if (!id) return null;
+  const db = getDeliveryDbName();
+  await ensureDatabase(req, db);
+  const doc = await getDocument(req, db, id);
+  if (!doc || doc.type !== 'point_of_sale' || doc.deletedAt) return null;
+  // Misma regla que el resto del TPV (no solo user_id exacto).
+  const { pdvDocMatchesUser } = await import('../services/couchdb.js');
+  if (!pdvDocMatchesUser(doc, userId)) return null;
+  return doc;
 }
 
 async function ensureInvoiceOwner(req, userId, invoiceId) {
@@ -406,7 +479,8 @@ export async function pollNow(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
-    const summary = await processIncomingEmails(userId);
+    const pdvId = String(req.body?.pdvId || req.query?.pdvId || '').trim();
+    const summary = await processIncomingEmails(userId, undefined, pdvId ? { pdvId } : {});
     return res.json({ ok: true, summary });
   } catch (error) {
     const raw = String(error?.message || error || 'Error al ejecutar polling');
@@ -485,6 +559,51 @@ export async function rescanInvoice(req, res) {
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 
+/** Resumen por PDV: conectado / no, sin contraseña. */
+export async function listPdvEmailConfigs(req, res) {
+  try {
+    const { userId } = req.params;
+    if (!userId) return badRequest(res, 'Falta userId');
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    const pdvs = await listPointsOfSaleByUser(req, userId);
+    const items = (pdvs || [])
+      .filter((p) => p && !p.deletedAt && p.active !== false)
+      .map((p) => {
+        const cfg = p.supplierInvoiceConfig || {};
+        const host = String(cfg.imapHost || '').trim();
+        const user = String(cfg.imapUser || '').trim();
+        const connected = Boolean(cfg.enabled && host && user && cfg.imapPassword);
+        return {
+          pdvId: p._id,
+          name: p.name || '',
+          code: p.code || '',
+          workCenterId: p.workCenterId || '',
+          businessId: p.businessId || p.business_id || '',
+          connected,
+          enabled: Boolean(cfg.enabled),
+          imapUser: user,
+          imapHost: host,
+        };
+      });
+
+    const legacy = publicInvoiceEmailConfig(account.supplierInvoiceConfig || {});
+    const legacyConnected = Boolean(
+      legacy.enabled && legacy.imapHost && legacy.imapUser && account.supplierInvoiceConfig?.imapPassword,
+    );
+
+    return res.json({
+      ok: true,
+      pdvs: items,
+      legacyAccount: { connected: legacyConnected, config: legacy },
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al listar configs PDV' });
+  }
+}
+
 export async function getConfig(req, res) {
   try {
     const { userId } = req.params;
@@ -493,31 +612,21 @@ export async function getConfig(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
-    const config = account.supplierInvoiceConfig || {};
+    const pdvId = String(req.query?.pdvId || '').trim();
+    if (pdvId) {
+      const pdv = await loadOwnedPdv(req, userId, pdvId);
+      if (!pdv) return res.status(404).json({ ok: false, error: 'PDV no encontrado' });
+      return res.json({
+        ok: true,
+        pdvId,
+        config: publicInvoiceEmailConfig(pdv.supplierInvoiceConfig || {}),
+      });
+    }
+
+    // Legado: config a nivel cuenta
     return res.json({
       ok: true,
-      config: {
-        enabled: Boolean(config.enabled),
-        imapSyncFrom: config.imapSyncFrom || '',
-        imapCursorUid: Number(config.imapCursorUid || 0),
-        imapHost: config.imapHost || '',
-        imapPort: Number(config.imapPort || 993),
-        imapUser: config.imapUser || '',
-        imapPassword: config.imapPassword ? '••••••••' : '',
-        imapTls: config.imapTls !== false,
-        pollIntervalMinutes: Number(config.pollIntervalMinutes || 5),
-        autoCreateFinance: Boolean(config.autoCreateFinance),
-        defaultCategory: config.defaultCategory || 'proveedores',
-        defaultPaymentTermsDays: Number(config.defaultPaymentTermsDays || 30),
-        maxAttachmentSizeMb: Number(config.maxAttachmentSizeMb || 25),
-        alertConfig: {
-          duplicateEnabled: config.alertConfig?.duplicateEnabled !== false,
-          noAttachmentEnabled: config.alertConfig?.noAttachmentEnabled !== false,
-          unknownSupplierEnabled: config.alertConfig?.unknownSupplierEnabled !== false,
-          ocrFailedEnabled: config.alertConfig?.ocrFailedEnabled !== false,
-          overdueEnabled: config.alertConfig?.overdueEnabled !== false,
-        },
-      },
+      config: publicInvoiceEmailConfig(account.supplierInvoiceConfig || {}),
     });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al obtener configuración' });
@@ -527,63 +636,75 @@ export async function getConfig(req, res) {
 export async function updateConfig(req, res) {
   try {
     const { userId } = req.params;
-    const { config } = req.body || {};
+    const { config, pdvId: bodyPdvId } = req.body || {};
     if (!userId) return badRequest(res, 'Falta userId');
     if (!config || typeof config !== 'object') return badRequest(res, 'Falta el objeto config');
 
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
-    if (config.enabled && !config.imapHost && !account.supplierInvoiceConfig?.imapHost) {
+    const pdvId = String(bodyPdvId || req.query?.pdvId || '').trim();
+
+    if (config.enabled) {
       const { isImapConfigured } = await import('../services/imapService.js');
-      const draftHost = config.imapHost !== undefined ? String(config.imapHost).trim() : '';
-      const draftUser = config.imapUser !== undefined ? String(config.imapUser).trim() : '';
-      const draftPass = config.imapPassword && config.imapPassword !== '••••••••'
+      let existingPass = '';
+      let draftHost = config.imapHost !== undefined ? String(config.imapHost).trim() : '';
+      let draftUser = config.imapUser !== undefined ? String(config.imapUser).trim() : '';
+      let draftPass = config.imapPassword && config.imapPassword !== '••••••••'
         ? String(config.imapPassword)
-        : String(account.supplierInvoiceConfig?.imapPassword || '');
-      const hasAccountImap = Boolean(
-        (draftHost || account.supplierInvoiceConfig?.imapHost)
-        && (draftUser || account.supplierInvoiceConfig?.imapUser)
-        && (draftPass || account.supplierInvoiceConfig?.imapPassword),
-      );
-      if (!hasAccountImap && !isImapConfigured({})) {
+        : '';
+
+      if (pdvId) {
+        const pdv = await loadOwnedPdv(req, userId, pdvId);
+        if (!pdv) return res.status(404).json({ ok: false, error: 'PDV no encontrado' });
+        existingPass = String(pdv.supplierInvoiceConfig?.imapPassword || '');
+        if (!draftHost) draftHost = String(pdv.supplierInvoiceConfig?.imapHost || '').trim();
+        if (!draftUser) draftUser = String(pdv.supplierInvoiceConfig?.imapUser || '').trim();
+        if (!draftPass) draftPass = existingPass;
+      } else {
+        existingPass = String(account.supplierInvoiceConfig?.imapPassword || '');
+        if (!draftHost) draftHost = String(account.supplierInvoiceConfig?.imapHost || '').trim();
+        if (!draftUser) draftUser = String(account.supplierInvoiceConfig?.imapUser || '').trim();
+        if (!draftPass) draftPass = existingPass;
+      }
+
+      const hasImap = Boolean(draftHost && draftUser && draftPass);
+      if (!hasImap && !isImapConfigured({})) {
         return badRequest(res, 'Configura servidor IMAP o las variables SUPPLIER_INVOICE_IMAP_* en el servidor');
       }
     }
 
-    const existing = account.supplierInvoiceConfig || {};
-    const enablingNow = config.enabled === true && existing.enabled !== true;
-    const updated = {
-      enabled: config.enabled !== undefined ? Boolean(config.enabled) : existing.enabled,
-      imapHost: config.imapHost !== undefined ? String(config.imapHost).trim() : existing.imapHost,
-      imapPort: config.imapPort !== undefined ? Number(config.imapPort) : existing.imapPort,
-      imapUser: config.imapUser !== undefined ? String(config.imapUser).trim() : existing.imapUser,
-      imapPassword: config.imapPassword && config.imapPassword !== '••••••••'
-        ? String(config.imapPassword).replace(/\s+/g, '').trim()
-        : existing.imapPassword,
-      imapTls: config.imapTls !== undefined ? Boolean(config.imapTls) : existing.imapTls,
-      // Desde conexión en adelante (no histórico). Se puede reiniciar con resetSyncFrom.
-      imapSyncFrom: config.resetSyncFrom
-        ? new Date().toISOString()
-        : (existing.imapSyncFrom || (enablingNow || config.enabled ? existing.imapSyncFrom || new Date().toISOString() : existing.imapSyncFrom)),
-      imapCursorUid: config.resetSyncFrom ? 0 : (existing.imapCursorUid || 0),
-      pollIntervalMinutes: config.pollIntervalMinutes !== undefined
-        ? Math.max(1, Number(config.pollIntervalMinutes))
-        : existing.pollIntervalMinutes,
-      autoCreateFinance: config.autoCreateFinance !== undefined ? Boolean(config.autoCreateFinance) : existing.autoCreateFinance,
-      defaultCategory: config.defaultCategory || existing.defaultCategory || 'proveedores',
-      defaultPaymentTermsDays: config.defaultPaymentTermsDays !== undefined
-        ? Number(config.defaultPaymentTermsDays)
-        : existing.defaultPaymentTermsDays,
-      maxAttachmentSizeMb: config.maxAttachmentSizeMb !== undefined
-        ? Number(config.maxAttachmentSizeMb)
-        : existing.maxAttachmentSizeMb,
-      alertConfig: {
-        ...(existing.alertConfig || {}),
-        ...(config.alertConfig || {}),
-      },
-    };
+    if (pdvId) {
+      const pdv = await loadOwnedPdv(req, userId, pdvId);
+      if (!pdv) return res.status(404).json({ ok: false, error: 'PDV no encontrado' });
+      const existing = pdv.supplierInvoiceConfig || {};
+      const updated = mergeInvoiceEmailConfig(existing, config);
+      const db = getDeliveryDbName();
+      pdv.supplierInvoiceConfig = updated;
+      pdv.updatedAt = new Date().toISOString();
+      await putDocument(req, db, pdv._id, pdv);
 
+      await logAccountActivity(req, {
+        actorUserId: userId,
+        actorName: account.fullName,
+        targetUserId: userId,
+        type: 'supplier_invoice_config',
+        action: `Actualizó correo de facturas del PDV ${pdv.name || pdvId}`,
+        entityId: pdv._id,
+        entityLabel: 'Configuración IMAP PDV',
+        metadata: { enabled: updated.enabled, pdvId },
+      });
+
+      return res.json({
+        ok: true,
+        pdvId,
+        config: publicInvoiceEmailConfig(updated),
+      });
+    }
+
+    // Legado cuenta
+    const existing = account.supplierInvoiceConfig || {};
+    const updated = mergeInvoiceEmailConfig(existing, config);
     const { ACCOUNTS_DB } = await import('../services/couchdb.js');
     await ensureDatabase(req, ACCOUNTS_DB);
     const accountDoc = await getDocument(req, ACCOUNTS_DB, account._id);
@@ -603,7 +724,7 @@ export async function updateConfig(req, res) {
 
     return res.json({
       ok: true,
-      config: { ...updated, imapPassword: updated.imapPassword ? '••••••••' : '' },
+      config: publicInvoiceEmailConfig(updated),
     });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al guardar configuración' });
@@ -623,22 +744,33 @@ export async function testImap(req, res) {
       tls: body.tls,
     };
 
-    // Tras guardar, el front solo tiene la máscara ••••••••. Si no envían pass real,
-    // reutilizamos la guardada en la cuenta (o pedimos que la vuelvan a escribir).
     const passBlank =
       !String(overrides.pass || '').trim()
       || String(overrides.pass) === '••••••••';
     const userId = String(body.userId || req.params?.userId || '').trim();
+    const pdvId = String(body.pdvId || '').trim();
     if (passBlank && userId) {
-      const account = await findAccountByUserId(req, userId);
-      const saved = account?.supplierInvoiceConfig || {};
-      overrides = {
-        host: overrides.host || saved.imapHost,
-        port: overrides.port || saved.imapPort || 993,
-        user: overrides.user || saved.imapUser,
-        pass: saved.imapPassword || '',
-        tls: overrides.tls !== undefined ? overrides.tls : saved.imapTls !== false,
-      };
+      if (pdvId) {
+        const pdv = await loadOwnedPdv(req, userId, pdvId);
+        const saved = pdv?.supplierInvoiceConfig || {};
+        overrides = {
+          host: overrides.host || saved.imapHost,
+          port: overrides.port || saved.imapPort || 993,
+          user: overrides.user || saved.imapUser,
+          pass: saved.imapPassword || '',
+          tls: overrides.tls !== undefined ? overrides.tls : saved.imapTls !== false,
+        };
+      } else {
+        const account = await findAccountByUserId(req, userId);
+        const saved = account?.supplierInvoiceConfig || {};
+        overrides = {
+          host: overrides.host || saved.imapHost,
+          port: overrides.port || saved.imapPort || 993,
+          user: overrides.user || saved.imapUser,
+          pass: saved.imapPassword || '',
+          tls: overrides.tls !== undefined ? overrides.tls : saved.imapTls !== false,
+        };
+      }
     }
 
     const passClean = String(overrides.pass || '').replace(/\s+/g, '').trim();

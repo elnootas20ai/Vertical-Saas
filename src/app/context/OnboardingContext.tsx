@@ -3,6 +3,7 @@ import { getOnboardingProgressRequest, saveOnboardingProgressRequest } from '../
 import type { OnboardingVerificationDocument } from '../lib/onboardingCompanyVerification';
 import type { DeliveryNeedsSelection } from '../lib/onboardingPlanRecommendation';
 import type { RestaurantFormat } from '../verticals/restaurant/restaurantFormat';
+import type { SignedServiceAgreement } from '../lib/vertialServiceAgreement';
 import {
   ONBOARDING_DATA_LEGACY_KEY,
   ONBOARDING_RESET_EVENT,
@@ -16,6 +17,7 @@ export const ONBOARDING_STEPS = [
   'Operativa',
   'Precio',
   'Pago',
+  'Contrato',
 ] as const;
 
 export const ONBOARDING_ROUTES = [
@@ -25,6 +27,7 @@ export const ONBOARDING_ROUTES = [
   '/auth/onboarding/needs',
   '/auth/onboarding/recommendation',
   '/auth/onboarding/payment-info',
+  '/auth/onboarding/contrato',
 ] as const;
 
 export interface OnboardingData {
@@ -84,6 +87,8 @@ export interface OnboardingData {
     cvv: string;
     acceptTerms: boolean;
   };
+  /** Contrato SaaS firmado en el alta (cláusulas + firma). */
+  serviceAgreement?: SignedServiceAgreement | null;
   trial: {
     startDate: number | null;
     endDate: number | null;
@@ -92,6 +97,8 @@ export interface OnboardingData {
 
 interface OnboardingContextType {
   data: OnboardingData;
+  /** false hasta cargar progreso de localStorage/servidor para el userId actual */
+  isProgressReady: boolean;
   updateData: <K extends keyof OnboardingData>(section: K, value: OnboardingData[K]) => void;
   resetData: () => void;
   initializeTrial: () => void;
@@ -149,6 +156,7 @@ export const initialOnboardingData: OnboardingData = {
     cvv: '',
     acceptTerms: false,
   },
+  serviceAgreement: null,
   trial: {
     startDate: null,
     endDate: null,
@@ -192,6 +200,7 @@ function mergeOnboardingData(partial?: Partial<OnboardingData> | null): Onboardi
       ...(p.subscriptionSelection ?? {}),
     },
     paymentDetails: { ...initialOnboardingData.paymentDetails, ...(p.paymentDetails ?? {}) },
+    serviceAgreement: p.serviceAgreement ?? initialOnboardingData.serviceAgreement ?? null,
     trial: { ...initialOnboardingData.trial, ...(p.trial ?? {}) },
   };
 }
@@ -199,6 +208,7 @@ function mergeOnboardingData(partial?: Partial<OnboardingData> | null): Onboardi
 export function OnboardingProvider({ children }: { children: ReactNode }) {
   const [data, setData] = useState<OnboardingData>(initialOnboardingData);
   const [userId, setUserId] = useState<string | null>(null);
+  const [isProgressReady, setIsProgressReady] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadedForUserRef = useRef<string | null>(null);
 
@@ -230,6 +240,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
       const uid = String(detail?.userId || userId || '').trim() || null;
       loadedForUserRef.current = uid;
       applyFreshDraft(uid);
+      setIsProgressReady(Boolean(uid));
     };
     window.addEventListener(ONBOARDING_RESET_EVENT, onReset);
     return () => window.removeEventListener(ONBOARDING_RESET_EVENT, onReset);
@@ -238,9 +249,15 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!userId) {
       loadedForUserRef.current = null;
+      setIsProgressReady(false);
       return;
     }
-    if (loadedForUserRef.current === userId) return;
+    if (loadedForUserRef.current === userId) {
+      setIsProgressReady(true);
+      return;
+    }
+
+    setIsProgressReady(false);
 
     const legacy = parseStoredOnboarding(localStorage.getItem(ONBOARDING_DATA_LEGACY_KEY));
     if (legacy) {
@@ -248,6 +265,10 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     }
 
     const local = parseStoredOnboarding(localStorage.getItem(onboardingDataStorageKey(userId)));
+    // Hidratar ya desde local para que un F5 no cree completedStep=-1 y te tire al paso 1.
+    if (local && (local.companyProfile?.tradeName || local.completedStep >= 0)) {
+      setData(mergeOnboardingData(local));
+    }
 
     getOnboardingProgressRequest(userId)
       .then((response) => {
@@ -266,7 +287,6 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
           setData(initialOnboardingData);
           localStorage.removeItem(onboardingDataStorageKey(userId));
         }
-        loadedForUserRef.current = userId;
       })
       .catch(() => {
         if (local && (local.companyProfile?.tradeName || local.completedStep >= 0)) {
@@ -274,7 +294,10 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
         } else {
           setData(initialOnboardingData);
         }
+      })
+      .finally(() => {
         loadedForUserRef.current = userId;
+        setIsProgressReady(true);
       });
   }, [userId, persistLocal]);
 
@@ -317,6 +340,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
   const resetData = () => {
     applyFreshDraft(userId);
     loadedForUserRef.current = userId;
+    setIsProgressReady(Boolean(userId));
   };
 
   const initializeTrial = () => {
@@ -348,6 +372,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     <OnboardingContext.Provider
       value={{
         data,
+        isProgressReady,
         updateData,
         resetData,
         initializeTrial,

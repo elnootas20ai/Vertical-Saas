@@ -5,6 +5,7 @@ export type OnboardingVisualKey =
   | 'needs'
   | 'recommendation'
   | 'payment'
+  | 'contract'
   | 'register-company'
   | 'login-company'
   | 'register-user'
@@ -120,6 +121,14 @@ export const ONBOARDING_VISUALS: Record<OnboardingVisualKey, OnboardingVisual> =
     subtitle: 'Activa tu cuenta y el plan elegido. Pago seguro y cifrado.',
     highlights: ['Cifrado bancario', 'Cancela cuando quieras', 'Sin permanencia'],
   },
+  contract: {
+    image: '',
+    gradientTheme: 'indigo',
+    badge: 'Configuración · Paso 7',
+    title: 'Contrato de servicio',
+    subtitle: 'Revisa las cláusulas con los datos de tu empresa y firma para activar Vertial.',
+    highlights: ['Datos precargados', 'Firma digital', 'Evidencia guardada'],
+  },
   'register-company': {
     image: HERO_PHOTOS.coworking,
     gradientTheme: 'ocean',
@@ -169,6 +178,7 @@ const STEP_VISUAL_KEYS: OnboardingVisualKey[] = [
   'needs',
   'recommendation',
   'payment',
+  'contract',
 ];
 
 export function getOnboardingVisualForStep(stepIndex: number): OnboardingVisual {

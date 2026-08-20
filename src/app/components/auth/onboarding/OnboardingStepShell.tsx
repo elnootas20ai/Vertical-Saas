@@ -4,7 +4,7 @@ import { ACCESO__Stepper } from '../../design-system/ACCESO__Stepper';
 import { VertialLogo } from '../../VertialLogo';
 import { AccesoCompactHero } from '../AccesoCompactHero';
 import { OnboardingHeroPanel } from './OnboardingHeroPanel';
-import { ONBOARDING_ROUTES, ONBOARDING_STEPS } from '../../../context/OnboardingContext';
+import { ONBOARDING_ROUTES, ONBOARDING_STEPS, useOnboarding } from '../../../context/OnboardingContext';
 import { getOnboardingVisualKeyForStep } from '../../../lib/onboardingVisuals';
 
 type Props = {
@@ -22,7 +22,12 @@ export function OnboardingStepShell({
   footer,
 }: Props) {
   const navigate = useNavigate();
+  const { data, isProgressReady } = useOnboarding();
   const visualKey = getOnboardingVisualKeyForStep(stepIndex);
+  const maxReachableStep = Math.min(
+    Math.max(0, data.completedStep + 1),
+    ONBOARDING_ROUTES.length - 1,
+  );
 
   return (
     <div className="h-dvh max-h-dvh min-h-0 overflow-hidden bg-gray-50 dark:bg-gray-900 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(320px,42%)]">
@@ -40,7 +45,10 @@ export function OnboardingStepShell({
               currentStep={stepIndex}
               compact
               onStepClick={(i) => {
-                if (i !== stepIndex) navigate(ONBOARDING_ROUTES[i]);
+                if (!isProgressReady) return;
+                if (i === stepIndex) return;
+                if (i > maxReachableStep) return;
+                navigate(ONBOARDING_ROUTES[i]);
               }}
             />
           </div>

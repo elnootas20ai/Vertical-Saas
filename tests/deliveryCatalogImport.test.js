@@ -298,7 +298,7 @@ describe('deliveryCatalogExcelTemplate', () => {
       { _id: 'a', name: 'modomio', active: true, catalogCategories: ['Pizzas', 'Combos'] },
       { _id: 'b', name: 'blackburger', active: true, catalogCategories: ['Burgers', 'Sides'] },
     ]);
-    expect(wb.SheetNames).toEqual(['catalogo', 'referencia_tpv', 'valores_validos', 'instrucciones']);
+    expect(wb.SheetNames).toEqual(['catalogo', 'columnas', 'referencia_tpv', 'valores_validos', 'instrucciones']);
     const data = XLSX.utils.sheet_to_json(wb.Sheets.catalogo, { header: 1, defval: '' });
     expect(data[0]).toEqual(DELIVERY_CATALOG_TEMPLATE_HEADERS);
     expect(data.length).toBe(1 + DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS);
@@ -320,6 +320,7 @@ describe('deliveryCatalogExcelTemplate', () => {
     );
     expect(wb.SheetNames).toEqual([
       'catalogo',
+      'columnas',
       'referencia_tpv',
       'valores_validos',
       'ejemplos',

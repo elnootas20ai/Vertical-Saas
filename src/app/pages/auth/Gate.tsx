@@ -44,6 +44,10 @@ import {
   resolveRestaurantFormat,
   type RestaurantFormat,
 } from '../../verticals/restaurant/restaurantFormat';
+import {
+  companyNeedsOnboarding,
+  resolveCompanyOnboardingResumePath,
+} from '../../../../shared/onboarding/resumePath.js';
 
 const BUSINESS_TYPE_OPTIONS: Array<{ value: BusinessType; label: string }> = [
   { value: 'carDealership', label: 'Compraventa' },
@@ -179,6 +183,10 @@ export function Gate() {
 
   useEffect(() => {
     if (!user) return;
+    if (companyNeedsOnboarding(user)) {
+      navigate(resolveCompanyOnboardingResumePath(user), { replace: true });
+      return;
+    }
     // Worker sin empresa enlazada → invitaciones / alta (sin Gate de empresas).
     if (user.accountType === 'user' && !user.linkedBusinessId) {
       navigate('/saas/invitations', { replace: true });

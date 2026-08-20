@@ -27,6 +27,7 @@ import { Structure } from './pages/auth/onboarding/Structure';
 import { Needs } from './pages/auth/onboarding/Needs';
 import { Recommendation } from './pages/auth/onboarding/Recommendation';
 import { PaymentInfo } from './pages/auth/onboarding/PaymentInfo';
+import { ServiceAgreement } from './pages/auth/onboarding/ServiceAgreement';
 import { Confirmation } from './pages/auth/onboarding/Confirmation';
 import { Gate } from './pages/auth/Gate';
 import { RequireEmailVerified } from './components/RequireEmailVerified';
@@ -582,6 +583,14 @@ export const router = createBrowserRouter([
         element: (
           <RequireEmailVerified>
             <PaymentInfo />
+          </RequireEmailVerified>
+        ),
+      },
+      {
+        path: 'auth/onboarding/contrato',
+        element: (
+          <RequireEmailVerified>
+            <ServiceAgreement />
           </RequireEmailVerified>
         ),
       },

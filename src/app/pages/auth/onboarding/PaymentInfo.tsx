@@ -8,7 +8,8 @@ import {
   OnboardingStepShell,
   OnboardingContentCard,
 } from '../../../components/auth/onboarding/OnboardingStepShell';
-import { useOnboarding, ONBOARDING_ROUTES } from '../../../context/OnboardingContext';
+import { useOnboarding } from '../../../context/OnboardingContext';
+import { useOnboardingStepGate } from '../../../hooks/useOnboardingStepGate';
 import {
   calculateOnboardingPricing,
   getPlansForBusinessType,
@@ -32,6 +33,7 @@ export function PaymentInfo() {
   const { user, isInitializing, refreshCurrentUser, saveBillingCard, activateOnboardingTrialWithoutCard, logout } =
     useAuth();
   const { data, updateData, initializeTrial, advanceStep } = useOnboarding();
+  useOnboardingStepGate(STEP_INDEX);
   const [skipMonei, setSkipMonei] = useState(false);
   const iosAccessOnly = isIosCustomerAccessOnlyApp();
 
@@ -52,13 +54,6 @@ export function PaymentInfo() {
       }
     });
   }, [iosAccessOnly, isInitializing, user?.user_id, refreshCurrentUser, navigate]);
-
-  useEffect(() => {
-    if (iosAccessOnly) return;
-    if (data.completedStep < STEP_INDEX - 1) {
-      navigate(ONBOARDING_ROUTES[data.completedStep + 1], { replace: true });
-    }
-  }, [iosAccessOnly, data.completedStep, navigate]);
 
   const [formData, setFormData] = useState({
     cardNumber: data.paymentDetails.cardNumber,
@@ -86,7 +81,7 @@ export function PaymentInfo() {
   const finishPaymentStep = useCallback(() => {
     initializeTrial();
     advanceStep(STEP_INDEX);
-    navigate('/auth/onboarding/confirmation');
+    navigate('/auth/onboarding/contrato');
   }, [advanceStep, initializeTrial, navigate]);
 
   const orderSummary = useMemo(() => {

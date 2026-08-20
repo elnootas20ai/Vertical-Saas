@@ -22,6 +22,8 @@ import {
   couchRequest,
   getDocument,
   findAccountByUserId,
+  listPointsOfSaleByUser,
+  getDeliveryDbName,
 } from './couchdb.js';
 import { broadcastToUser } from './sseService.js';
 import { sendPushToUser } from './pushService.js';
@@ -30,43 +32,135 @@ import { parseSupplierInvoicePdfBuffer } from './supplierInvoicePdfParse.js';
 
 const fakeReq = { headers: {} };
 
-/** Credenciales IMAP guardadas en la cuenta (supplierInvoiceConfig); si no hay módulo habilitado o datos incompletos, {} y se usa solo .env */
+function imapConfigReady(c) {
+  if (!c?.enabled) return false;
+  const host = String(c.imapHost || '').trim();
+  const user = String(c.imapUser || '').trim();
+  const pass = String(c.imapPassword || '').replace(/\s+/g, '').trim();
+  return Boolean(host && user && pass);
+}
+
+function overridesFromImapConfig(c, meta = {}) {
+  if (!imapConfigReady(c)) return null;
+  return {
+    host: String(c.imapHost || '').trim(),
+    port: Number(c.imapPort || 993),
+    user: String(c.imapUser || '').trim(),
+    pass: String(c.imapPassword || '').replace(/\s+/g, '').trim(),
+    tls: c.imapTls !== false,
+    sinceUid: Number(c.imapCursorUid || 0) || 0,
+    sinceDate: c.imapSyncFrom || null,
+    ...meta,
+  };
+}
+
+/** Credenciales IMAP de la cuenta (legado, sin PDV). */
 async function buildImapOverridesForUser(userId) {
   if (!userId) return {};
   try {
     const account = await findAccountByUserId(fakeReq, userId);
     const c = account?.supplierInvoiceConfig;
-    if (!c?.enabled) return {};
-    const host = String(c.imapHost || '').trim();
-    const user = String(c.imapUser || '').trim();
-    const pass = String(c.imapPassword || '').replace(/\s+/g, '').trim();
-    if (!host || !user || !pass) {
-      logger.warn(
-        { tag: 'SINV_PROC', userId },
-        'Facturas por email activadas en cuenta pero IMAP incompleto — se usarán variables SUPPLIER_INVOICE_IMAP_* si existen',
-      );
+    if (!imapConfigReady(c)) {
+      if (c?.enabled) {
+        logger.warn(
+          { tag: 'SINV_PROC', userId },
+          'Facturas por email activadas en cuenta pero IMAP incompleto — se usarán variables SUPPLIER_INVOICE_IMAP_* si existen',
+        );
+      }
       return {};
     }
-    return {
-      host,
-      port: Number(c.imapPort || 993),
-      user,
-      pass,
-      tls: c.imapTls !== false,
-      sinceUid: Number(c.imapCursorUid || 0) || 0,
-      sinceDate: c.imapSyncFrom || null,
+    return overridesFromImapConfig(c, {
       _accountId: account._id,
       _userId: userId,
-    };
+      _scope: 'account',
+    }) || {};
   } catch (err) {
     logger.warn({ tag: 'SINV_PROC', userId, err: err.message }, 'No se pudo leer cuenta para IMAP');
     return {};
   }
 }
 
-async function persistImapCursor(accountId, cursorUid, syncFrom) {
-  if (!accountId) return;
+async function buildImapOverridesForPdv(userId, pdvId) {
+  if (!userId || !pdvId) return {};
   try {
+    const db = getDeliveryDbName();
+    await ensureDatabase(fakeReq, db);
+    const pdv = await getDocument(fakeReq, db, pdvId);
+    if (!pdv || pdv.type !== 'point_of_sale' || pdv.deletedAt) return {};
+    const { pdvDocMatchesUser } = await import('./couchdb.js');
+    if (!pdvDocMatchesUser(pdv, userId)) return {};
+    const c = pdv.supplierInvoiceConfig;
+    return (
+      overridesFromImapConfig(c, {
+        _pdvId: pdv._id,
+        _userId: userId,
+        _scope: 'pdv',
+        _workCenterId: String(pdv.workCenterId || '').trim(),
+        _businessId: String(pdv.businessId || pdv.business_id || '').trim(),
+        _pdvName: String(pdv.name || '').trim(),
+      }) || {}
+    );
+  } catch (err) {
+    logger.warn({ tag: 'SINV_PROC', userId, pdvId, err: err.message }, 'No se pudo leer PDV para IMAP');
+    return {};
+  }
+}
+
+/** Todos los buzones a sondear: PDVs con IMAP + legado de cuenta si no hay PDV con el mismo usuario IMAP. */
+export async function listSupplierInvoiceImapTargets(userId) {
+  const targets = [];
+  const seenUsers = new Set();
+  try {
+    const pdvs = await listPointsOfSaleByUser(fakeReq, userId);
+    for (const pdv of pdvs) {
+      if (!pdv || pdv.active === false || pdv.deletedAt) continue;
+      const c = pdv.supplierInvoiceConfig;
+      if (!imapConfigReady(c)) continue;
+      const ov = overridesFromImapConfig(c, {
+        _pdvId: pdv._id,
+        _userId: userId,
+        _scope: 'pdv',
+        _workCenterId: String(pdv.workCenterId || '').trim(),
+        _businessId: String(pdv.businessId || pdv.business_id || '').trim(),
+        _pdvName: String(pdv.name || '').trim(),
+      });
+      if (!ov) continue;
+      seenUsers.add(String(ov.user || '').toLowerCase());
+      targets.push(ov);
+    }
+  } catch (err) {
+    logger.warn({ tag: 'SINV_PROC', userId, err: err.message }, 'No se pudieron listar PDVs IMAP');
+  }
+
+  const accountOv = await buildImapOverridesForUser(userId);
+  if (accountOv?.host && accountOv?.user) {
+    const key = String(accountOv.user || '').toLowerCase();
+    if (!seenUsers.has(key)) targets.push(accountOv);
+  }
+  return targets;
+}
+
+async function persistImapCursor(overrides, cursorUid, syncFrom) {
+  const pdvId = overrides?._pdvId;
+  const accountId = overrides?._accountId;
+  if (!pdvId && !accountId) return;
+  try {
+    if (pdvId) {
+      const db = getDeliveryDbName();
+      await ensureDatabase(fakeReq, db);
+      const pdvDoc = await getDocument(fakeReq, db, pdvId);
+      if (!pdvDoc || pdvDoc.type !== 'point_of_sale') return;
+      const cfg = { ...(pdvDoc.supplierInvoiceConfig || {}) };
+      if (cursorUid != null && Number(cursorUid) > Number(cfg.imapCursorUid || 0)) {
+        cfg.imapCursorUid = Number(cursorUid);
+      }
+      if (syncFrom && !cfg.imapSyncFrom) cfg.imapSyncFrom = syncFrom;
+      pdvDoc.supplierInvoiceConfig = cfg;
+      pdvDoc.updatedAt = new Date().toISOString();
+      await putDocument(fakeReq, db, pdvDoc._id, pdvDoc);
+      return;
+    }
+
     const { ACCOUNTS_DB } = await import('./couchdb.js');
     await ensureDatabase(fakeReq, ACCOUNTS_DB);
     const accountDoc = await getDocument(fakeReq, ACCOUNTS_DB, accountId);
@@ -105,9 +199,9 @@ async function ensureImapCursorBaseline(overrides) {
     try { await client.logout(); } catch { /* ignore */ }
   }
   const syncFrom = new Date().toISOString();
-  await persistImapCursor(overrides._accountId, cursor, syncFrom);
+  await persistImapCursor(overrides, cursor, syncFrom);
   logger.info(
-    { tag: 'SINV_PROC', cursor, syncFrom },
+    { tag: 'SINV_PROC', cursor, syncFrom, pdvId: overrides._pdvId || null },
     'Cursor IMAP inicializado: solo se procesará correo nuevo a partir de ahora',
   );
   return { ...overrides, sinceUid: cursor, sinceDate: syncFrom, _justBaselined: true };
@@ -514,7 +608,7 @@ function parseInvoiceHintsFromSubject(subject) {
   return out;
 }
 
-async function processSingleEmail(userId, email) {
+async function processSingleEmail(userId, email, scope = {}) {
   const result = { created: false, invoiceId: null, alerts: [], createdCount: 0 };
 
   // Facturas ya creadas desde este mismo correo (1 email puede traer N PDFs)
@@ -528,6 +622,11 @@ async function processSingleEmail(userId, email) {
     ),
   );
 
+  const workCenterId = String(scope.workCenterId || '').trim();
+  const businessId = String(scope.businessId || '').trim();
+  const pdvName = String(scope.pdvName || '').trim();
+  const pdvId = String(scope.pdvId || '').trim();
+
   const baseData = {
     source: 'email',
     sourceEmailId: email.messageId,
@@ -536,6 +635,16 @@ async function processSingleEmail(userId, email) {
     sourceEmailDate: email.date,
     entryMethod: 'email',
     status: 'pending_review',
+    ...(workCenterId
+      ? {
+          workCenterId,
+          costCenterId: workCenterId,
+          workCenterName: pdvName,
+          costCenterName: pdvName,
+        }
+      : {}),
+    ...(businessId ? { businessId, business_id: businessId } : {}),
+    ...(pdvId ? { sourcePdvId: pdvId } : {}),
   };
 
   // Sin adjuntos válidos: no crear factura fantasma (antes llenaba Compras de F-000x a 0 €).
@@ -778,25 +887,24 @@ async function emitRealtimeAlert(userId, { title, message, level, route, invoice
 
 // ─── Función principal ───────────────────────────────────────────────────────
 
-export async function processIncomingEmails(userId, imapOverrides) {
+async function processIncomingEmailsForTarget(userId, resolvedImap) {
   const summary = { processed: 0, created: 0, alerts: 0, duplicates: 0, errors: 0, allAlerts: [] };
 
-  let resolvedImap =
-    imapOverrides !== undefined ? imapOverrides : await buildImapOverridesForUser(userId);
-
   if (!isImapConfigured(resolvedImap)) {
-    logger.debug({ tag: 'SINV_PROC', userId }, 'IMAP no configurado (.env ni cuenta), saltando procesamiento');
     return summary;
   }
 
+  let imap = resolvedImap;
   try {
-    // Si no hay cursor, marcamos el final del inbox y NO leemos el histórico (14k, etc.)
-    resolvedImap = await ensureImapCursorBaseline(resolvedImap);
-    if (resolvedImap._justBaselined) {
+    imap = await ensureImapCursorBaseline(imap);
+    if (imap._justBaselined) {
       summary.baselined = true;
       summary.message =
         'Punto de partida listo. Los correos antiguos no se leen. Envía ahora un correo nuevo con PDF y vuelve a sincronizar.';
-      logger.info({ tag: 'SINV_PROC', userId }, summary.message);
+      logger.info(
+        { tag: 'SINV_PROC', userId, pdvId: imap._pdvId || null },
+        summary.message,
+      );
       return summary;
     }
   } catch (err) {
@@ -807,10 +915,10 @@ export async function processIncomingEmails(userId, imapOverrides) {
 
   let emails;
   try {
-    emails = await connectAndFetchNewEmails(resolvedImap);
+    emails = await connectAndFetchNewEmails(imap);
     const cursorUid = Number(emails?._imapCursorUid || 0);
     if (cursorUid > 0) {
-      await persistImapCursor(resolvedImap._accountId, cursorUid, resolvedImap.sinceDate || null);
+      await persistImapCursor(imap, cursorUid, imap.sinceDate || null);
     }
   } catch (err) {
     logger.error({ tag: 'SINV_PROC', err: err.message }, 'Error obteniendo emails');
@@ -819,16 +927,26 @@ export async function processIncomingEmails(userId, imapOverrides) {
   }
 
   if (!emails || emails.length === 0) {
-    logger.debug({ tag: 'SINV_PROC' }, 'No hay emails nuevos desde la conexión');
+    logger.debug({ tag: 'SINV_PROC', pdvId: imap._pdvId || null }, 'No hay emails nuevos desde la conexión');
     return summary;
   }
 
-  logger.info({ tag: 'SINV_PROC', count: emails.length }, 'Procesando emails entrantes');
+  logger.info(
+    { tag: 'SINV_PROC', count: emails.length, pdvId: imap._pdvId || null },
+    'Procesando emails entrantes',
+  );
+
+  const emailScope = {
+    pdvId: imap._pdvId || '',
+    workCenterId: imap._workCenterId || '',
+    businessId: imap._businessId || '',
+    pdvName: imap._pdvName || '',
+  };
 
   for (const email of emails) {
     summary.processed++;
     try {
-      const result = await processSingleEmail(userId, email);
+      const result = await processSingleEmail(userId, email, emailScope);
       if (result.created) summary.created += Math.max(1, Number(result.createdCount || 1));
       summary.alerts += result.alerts.length;
       summary.allAlerts.push(...result.alerts);
@@ -850,7 +968,6 @@ export async function processIncomingEmails(userId, imapOverrides) {
             metadata: alert.data,
           });
         } else if (alert.type === 'no_attachment') {
-          // No spamear el centro de alertas por cada mail sin PDF (solo queda en el resumen del sync).
           continue;
         } else if (alert.type === 'unknown_supplier') {
           await emitRealtimeAlert(userId, {
@@ -878,6 +995,69 @@ export async function processIncomingEmails(userId, imapOverrides) {
     }
   }
 
+  delete summary._dupAlerted;
+  return summary;
+}
+
+function mergeEmailPollSummaries(into, part) {
+  into.processed += Number(part.processed || 0);
+  into.created += Number(part.created || 0);
+  into.alerts += Number(part.alerts || 0);
+  into.duplicates = (into.duplicates || 0) + Number(part.duplicates || 0);
+  into.errors += Number(part.errors || 0);
+  if (Array.isArray(part.allAlerts)) into.allAlerts.push(...part.allAlerts);
+  if (part.baselined) {
+    into.baselined = true;
+    into.message = part.message || into.message;
+  }
+  return into;
+}
+
+/**
+ * @param {string} userId
+ * @param {object} [imapOverrides] — si se pasa, solo ese buzón (tests / legado)
+ * @param {{ pdvId?: string }} [options] — si pdvId, solo ese PDV
+ */
+export async function processIncomingEmails(userId, imapOverrides, options = {}) {
+  const summary = { processed: 0, created: 0, alerts: 0, duplicates: 0, errors: 0, allAlerts: [] };
+  const pdvId = String(options?.pdvId || '').trim();
+
+  let targets = [];
+  if (imapOverrides !== undefined) {
+    targets = [imapOverrides];
+  } else if (pdvId) {
+    const ov = await buildImapOverridesForPdv(userId, pdvId);
+    targets = [ov];
+  } else {
+    targets = await listSupplierInvoiceImapTargets(userId);
+    if (targets.length === 0) {
+      // Solo .env global (sin cuenta/PDV)
+      const envOnly = {};
+      if (isImapConfigured(envOnly)) targets = [envOnly];
+    }
+  }
+
+  const usable = targets.filter((t) => isImapConfigured(t));
+  if (usable.length === 0) {
+    logger.debug({ tag: 'SINV_PROC', userId, pdvId: pdvId || null }, 'IMAP no configurado, saltando');
+    summary.message =
+      'No hay correo de facturas guardado y activado. En Ajustes → Facturas por email: Probar conexión (guarda solo) o Guardar y activar.';
+    return summary;
+  }
+
+  for (const target of usable) {
+    try {
+      const part = await processIncomingEmailsForTarget(userId, target);
+      mergeEmailPollSummaries(summary, part);
+    } catch (err) {
+      summary.errors++;
+      logger.warn(
+        { tag: 'SINV_PROC', userId, pdvId: target._pdvId || null, err: err.message },
+        'Error en buzón IMAP',
+      );
+    }
+  }
+
   logger.info({
     tag: 'SINV_PROC',
     processed: summary.processed,
@@ -885,9 +1065,10 @@ export async function processIncomingEmails(userId, imapOverrides) {
     alerts: summary.alerts,
     duplicates: summary.duplicates || 0,
     errors: summary.errors,
+    targets: usable.length,
   }, 'Procesamiento de emails completado');
-  delete summary._dupAlerted;
+
   return summary;
 }
 
-export { runOcrOnBuffer, matchSupplier, saveAttachment, processSingleEmail };
+export { runOcrOnBuffer, matchSupplier, saveAttachment, processSingleEmail, buildImapOverridesForPdv };

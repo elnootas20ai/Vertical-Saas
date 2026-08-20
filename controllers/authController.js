@@ -134,6 +134,10 @@ import logger from '../services/logger.js';
 import { invalidateDb } from '../services/cache.js';
 import { buildSubscriptionFromOnboarding } from '../shared/billing/onboardingSubscription.js';
 import { shouldBlockSubscriptionAccess } from '../shared/billing/subscriptionAccess.js';
+import {
+  companyNeedsOnboarding,
+  resolveCompanyOnboardingResumePath,
+} from '../shared/onboarding/resumePath.js';
 import { isSkipMoneiSubscription } from '../shared/billing/skipMonei.js';
 import {
   provisionBusinessFromOnboarding,
@@ -318,6 +322,11 @@ function resolvePostLoginRedirect(account, { pendingInvitationsCount = 0 } = {})
       return WORKER_PAYROLL_SETUP_PATH;
     }
     return resolveWorkerSessionEntryPath(account);
+  }
+
+  // Alta incompleta: nunca saltar a paywall/Gate (pending_payment bloquearía el onboarding).
+  if (companyNeedsOnboarding(account)) {
+    return resolveCompanyOnboardingResumePath(account);
   }
 
   // Empresa sin licencia activa → pantalla de transferencia (no Gate/dashboard).

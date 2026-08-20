@@ -9,6 +9,10 @@ import {
 } from '../../lib/subscriptionApi';
 import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
 import { IosCustomerAccessOnlyScreen } from '../../components/saas/IosCustomerAccessOnlyScreen';
+import {
+  companyNeedsOnboarding,
+  resolveCompanyOnboardingResumePath,
+} from '../../../../shared/onboarding/resumePath.js';
 
 export function SubscriptionPaymentPage() {
   const navigate = useNavigate();
@@ -21,6 +25,12 @@ export function SubscriptionPaymentPage() {
   const [copied, setCopied] = useState<string | null>(null);
   const iosAccessOnly = isIosCustomerAccessOnlyApp();
 
+  useEffect(() => {
+    if (!user) return;
+    if (companyNeedsOnboarding(user)) {
+      navigate(resolveCompanyOnboardingResumePath(user), { replace: true });
+    }
+  }, [user, navigate]);
   useEffect(() => {
     if (iosAccessOnly) return;
     let cancelled = false;

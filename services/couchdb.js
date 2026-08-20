@@ -7109,6 +7109,25 @@ export function buildPointOfSaleDocument(userId, data = {}, existing = null) {
       ? (Array.isArray(existing.tpvAllowedDevices) ? existing.tpvAllowedDevices : [])
       : undefined;
 
+  const hasInvoiceCfg = Object.prototype.hasOwnProperty.call(data, 'supplierInvoiceConfig');
+  let supplierInvoiceConfig = hasInvoiceCfg
+    ? data.supplierInvoiceConfig
+    : existing?.supplierInvoiceConfig;
+  // Si el cliente manda la máscara ••••••••, conservar la contraseña real ya guardada.
+  if (
+    supplierInvoiceConfig
+    && typeof supplierInvoiceConfig === 'object'
+    && String(supplierInvoiceConfig.imapPassword || '') === '••••••••'
+    && existing?.supplierInvoiceConfig
+    && typeof existing.supplierInvoiceConfig === 'object'
+  ) {
+    supplierInvoiceConfig = {
+      ...existing.supplierInvoiceConfig,
+      ...supplierInvoiceConfig,
+      imapPassword: existing.supplierInvoiceConfig.imapPassword || '',
+    };
+  }
+
   return {
     _id: id,
     _rev: existing?._rev,
@@ -7124,6 +7143,7 @@ export function buildPointOfSaleDocument(userId, data = {}, existing = null) {
     terminals,
     ...resolvePrinterConfigField(data, existing),
     ...(tpvAllowedDevices !== undefined ? { tpvAllowedDevices } : {}),
+    ...(supplierInvoiceConfig !== undefined ? { supplierInvoiceConfig } : {}),
     active: data.active !== undefined ? Boolean(data.active) : (existing?.active !== false),
     createdAt: existing?.createdAt || now,
     updatedAt: now,
@@ -7159,6 +7179,14 @@ export function sanitizePointOfSale(doc) {
     ...(doc.printerConfig ? { printerConfig: sanitizePrinterConfig(doc.printerConfig) } : {}),
     ...(Object.prototype.hasOwnProperty.call(doc, 'tpvAllowedDevices')
       ? { tpvAllowedDevices: Array.isArray(doc.tpvAllowedDevices) ? doc.tpvAllowedDevices : [] }
+      : {}),
+    ...(doc.supplierInvoiceConfig && typeof doc.supplierInvoiceConfig === 'object'
+      ? {
+          supplierInvoiceConfig: {
+            ...doc.supplierInvoiceConfig,
+            imapPassword: doc.supplierInvoiceConfig.imapPassword ? '••••••••' : '',
+          },
+        }
       : {}),
     active: doc.active !== false,
     createdAt: doc.createdAt || new Date().toISOString(),

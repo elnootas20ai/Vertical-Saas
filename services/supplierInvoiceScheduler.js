@@ -1,6 +1,6 @@
 import logger from './logger.js';
 import { isImapConfigured } from './imapService.js';
-import { processIncomingEmails } from './supplierInvoiceProcessor.js';
+import { processIncomingEmails, listSupplierInvoiceImapTargets } from './supplierInvoiceProcessor.js';
 import { ACCOUNTS_DB, ensureDatabase, getAllDocuments } from './couchdb.js';
 import { shouldRunBackgroundEngine } from './engineIdleGate.js';
 
@@ -37,13 +37,19 @@ async function anyAccountHasEnabledImap() {
   try {
     await ensureDatabase(fakeReq, ACCOUNTS_DB);
     const accounts = await getAllDocuments(fakeReq, ACCOUNTS_DB);
-    return accounts.some((a) => (
-      a
-      && a.type === 'account'
-      && !a.deletedAt
-      && a.active !== false
-      && accountImapReadyForPolling(a.supplierInvoiceConfig)
-    ));
+    for (const a of accounts) {
+      if (!a || a.type !== 'account' || a.deletedAt || a.active === false) continue;
+      if (accountImapReadyForPolling(a.supplierInvoiceConfig)) return true;
+      const userId = a.userId || a._id;
+      if (!userId) continue;
+      try {
+        const targets = await listSupplierInvoiceImapTargets(userId);
+        if (targets.length > 0) return true;
+      } catch {
+        /* next */
+      }
+    }
+    return false;
   } catch {
     return false;
   }
@@ -86,33 +92,39 @@ export async function startSupplierInvoicePolling() {
     return;
   }
 
-  let imapReady = isImapConfigured();
-  if (!imapReady) {
-    imapReady = await anyAccountHasEnabledImap();
+  // Siempre arranca el intervalo. Si al boot no hay IMAP, se reintenta en cada ciclo
+  // (si no, conectar el correo después del deploy deja el automático muerto hasta reiniciar).
+  logger.info({ tag: 'SINV_SCHED', intervalMs: POLL_INTERVAL_MS }, 'Iniciando polling de facturas proveedor por email');
+
+  const tick = async () => {
+    let imapReady = isImapConfigured();
     if (!imapReady) {
-      logger.info(
+      try {
+        imapReady = await anyAccountHasEnabledImap();
+      } catch (err) {
+        logger.warn({ tag: 'SINV_SCHED', err: err?.message || String(err) }, 'No se pudo comprobar IMAP por cuenta');
+        return;
+      }
+    }
+    if (!imapReady) {
+      logger.debug(
         { tag: 'SINV_SCHED' },
-        'IMAP no configurado en .env ni ninguna cuenta con facturas por email habilitadas — polling desactivado',
+        'Sin buzones IMAP listos todavía — se reintentará en el próximo ciclo',
       );
       return;
     }
-    logger.info(
-      { tag: 'SINV_SCHED' },
-      'Polling activo usando credenciales por cuenta (sin SUPPLIER_INVOICE_IMAP_* en entorno)',
-    );
-  }
-
-  logger.info({ tag: 'SINV_SCHED', intervalMs: POLL_INTERVAL_MS }, 'Iniciando polling de facturas proveedor por email');
+    if (!shouldRunBackgroundEngine('supplier_invoice_poll')) return;
+    await runPollCycle();
+  };
 
   setTimeout(() => {
-    runPollCycle().catch((err) =>
+    tick().catch((err) =>
       logger.error({ tag: 'SINV_SCHED', err: err.message }, 'Error en primera ejecución'),
     );
   }, STARTUP_DELAY_MS);
 
   intervalId = setInterval(() => {
-    if (!shouldRunBackgroundEngine('supplier_invoice_poll')) return;
-    runPollCycle().catch((err) =>
+    tick().catch((err) =>
       logger.error({ tag: 'SINV_SCHED', err: err.message }, 'Error en ciclo periódico'),
     );
   }, POLL_INTERVAL_MS);

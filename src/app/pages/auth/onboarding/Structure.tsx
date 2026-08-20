@@ -6,7 +6,8 @@ import {
   OnboardingStepHeading,
   OnboardingStepShell,
 } from '../../../components/auth/onboarding/OnboardingStepShell';
-import { useOnboarding, ONBOARDING_ROUTES } from '../../../context/OnboardingContext';
+import { useOnboarding } from '../../../context/OnboardingContext';
+import { useOnboardingStepGate } from '../../../hooks/useOnboardingStepGate';
 
 const STEP_INDEX = 2;
 
@@ -134,12 +135,7 @@ function MetricCard({ icon, label, hint, children }: MetricCardProps) {
 export function Structure() {
   const navigate = useNavigate();
   const { data, updateData, advanceStep } = useOnboarding();
-
-  useEffect(() => {
-    if (data.completedStep < STEP_INDEX - 1) {
-      navigate(ONBOARDING_ROUTES[data.completedStep + 1], { replace: true });
-    }
-  }, [data.completedStep, navigate]);
+  useOnboardingStepGate(STEP_INDEX);
 
   const [formData, setFormData] = useState({
     userCount: data.businessMetrics.userCount,
