@@ -46,6 +46,7 @@ import {
   suggestBillingSheetsFromBrands,
   syncBillingSheetsWithBrands,
 } from '../../lib/brandBillingConfig';
+import { enrichSessionsWithClosingBrandTpv } from '../../lib/cajaExcelBrandTpvEnrich';
 import { RegisterClosingDetailPanel } from '../../components/saas/RegisterClosingDetailPanel';
 import { CajaCashMovementsList } from '../../components/saas/caja/CajaCashMovementsList';
 import { calcTpvExpectedCash, buildTpvRegisterSummary } from '../../lib/tpvCajaMath';
@@ -1019,6 +1020,8 @@ export function CajaPage() {
       const yearMonth = selectedDate.slice(0, 7);
 
       let billingSheets = null as ReturnType<typeof suggestBillingSheetsFromBrands> | null;
+      let billingConfig = null as Awaited<ReturnType<typeof getBrandBillingConfigRequest>> | null;
+      let brandsForExcel: Awaited<ReturnType<typeof listBrandsRequest>> = [];
       const businessId = String(currentBusiness?.business_id || currentBusiness?.id || currentBusiness?._id || '').trim();
       if (businessId) {
         try {
@@ -1026,6 +1029,8 @@ export function CajaPage() {
             getBrandBillingConfigRequest(businessId),
             listBrandsRequest(businessId),
           ]);
+          billingConfig = cfg;
+          brandsForExcel = brands;
           if (cfg.sheets.length > 0) {
             // Une tacos con la hoja burger si estaban en hojas separadas.
             billingSheets = syncBillingSheetsWithBrands(cfg.sheets, brands);
@@ -1071,8 +1076,20 @@ export function CajaPage() {
       }
       const scopedExport = Array.from(byId.values());
 
+      toast.loading('Ajustando efectivo/Visa por marca (Caja 1)…', { id: toastId });
+      const enrichedExport = await enrichSessionsWithClosingBrandTpv(scopedExport, dataUserId, {
+        brands: brandsForExcel,
+        billingSheets,
+        billingConfig,
+        onProgress: (done, total) => {
+          if (total > 3) {
+            toast.loading(`Ajustando efectivo/Visa por marca… ${done}/${total}`, { id: toastId });
+          }
+        },
+      });
+
       toast.loading('Generando archivo Excel…', { id: toastId });
-      const { rows, fileName, sheetNames, yearMonth: exportedMonth, historyRange: usedRange } = await downloadCajaClosings(scopedExport, {
+      const { rows, fileName, sheetNames, yearMonth: exportedMonth, historyRange: usedRange } = await downloadCajaClosings(enrichedExport, {
         pointOfSaleId: pdvId || undefined,
         pointOfSaleName: pdv ? pointOfSaleDisplayLabel(pdv) : undefined,
         pointsOfSale: pointsOfSale.map((p) => ({

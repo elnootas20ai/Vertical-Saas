@@ -1506,24 +1506,51 @@ function brandsFromClosedSession(
     ...(session.closingBrandLabels || {}),
     ...brandLabels,
   };
-  const byBrand: Record<string, number> = {};
+  const byId = new Map<string, ClosingBrandLine>();
+  const ensure = (brandId: string) => {
+    let row = byId.get(brandId);
+    if (!row) {
+      row = {
+        brandId,
+        name: displayBrandName(brandId, labels),
+        caja1: 0,
+        caja2: 0,
+        total: 0,
+      };
+      byId.set(brandId, row);
+    }
+    return row;
+  };
+
+  // Caja 1 = misma foto que dashboard/resumen al cerrar (efectivo + tarjeta por marca).
+  for (const [brandId, pay] of Object.entries(session.closingBrandTpvTotals || {})) {
+    const id = String(brandId || '').trim();
+    if (!id || !pay || typeof pay !== 'object') continue;
+    const caja1 = Math.round(
+      ((Number(pay.efectivo) || 0) + (Number(pay.tarjeta) || 0)) * 100,
+    ) / 100;
+    if (caja1 <= 0) continue;
+    const row = ensure(id);
+    row.caja1 = Math.round((row.caja1 + caja1) * 100) / 100;
+  }
+
   for (const perBrand of Object.values(session.aggregatorClosingBrandTotals || {})) {
     if (!perBrand || typeof perBrand !== 'object') continue;
     for (const [brandId, raw] of Object.entries(perBrand)) {
       const n = Number(raw) || 0;
       if (n <= 0) continue;
-      byBrand[brandId] = Math.round(((byBrand[brandId] || 0) + n) * 100) / 100;
+      const row = ensure(brandId);
+      row.caja2 = Math.round((row.caja2 + n) * 100) / 100;
     }
   }
-  return Object.entries(byBrand)
-    .map(([brandId, caja2]) => ({
-      brandId,
-      name: displayBrandName(brandId, labels),
-      caja1: 0,
-      caja2,
-      total: caja2,
+
+  return [...byId.values()]
+    .map((r) => ({
+      ...r,
+      total: Math.round((r.caja1 + r.caja2) * 100) / 100,
     }))
-    .filter((r) => r.total > 0);
+    .filter((r) => r.total > 0)
+    .sort((a, b) => a.name.localeCompare(b.name, 'es'));
 }
 
 /** Si el snapshot de apps no trae marcas, arma channel→brand desde filas ya calculadas. */
@@ -1752,6 +1779,8 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
       unpaidCashByBrandByChannel?: Record<string, Record<string, number>>;
       unpaidCardByBrandByChannel?: Record<string, Record<string, number>>;
       closingBrandLabels?: Record<string, string>;
+      /** Caja 1 efectivo/tarjeta por marca (Excel = finales de caja). */
+      brandTpvTotals?: Record<string, { efectivo: number; tarjeta: number }>;
     },
     nextDayInitialCash?: number,
   ) => void;
@@ -3613,6 +3642,17 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                         unpaidCashByBrandByChannel: appsSnapshot?.unpaidCashByBrandByChannel,
                         unpaidCardByBrandByChannel: appsSnapshot?.unpaidCardByBrandByChannel,
                         closingBrandLabels: labelMap,
+                        brandTpvTotals: Object.fromEntries(
+                          brandBilling.rows
+                            .filter((r) => (Number(r.revenueEfectivo) || 0) > 0 || (Number(r.revenueTarjeta) || 0) > 0)
+                            .map((r) => [
+                              r.brandId,
+                              {
+                                efectivo: Math.round((Number(r.revenueEfectivo) || 0) * 100) / 100,
+                                tarjeta: Math.round((Number(r.revenueTarjeta) || 0) * 100) / 100,
+                              },
+                            ]),
+                        ),
                       },
                       nextDayInitialAmount,
                     );
@@ -6388,6 +6428,7 @@ export function TpvRegisterGate({
       unpaidCashByBrandByChannel?: Record<string, Record<string, number>>;
       unpaidCardByBrandByChannel?: Record<string, Record<string, number>>;
       closingBrandLabels?: Record<string, string>;
+      brandTpvTotals?: Record<string, { efectivo: number; tarjeta: number }>;
     },
     nextDayInitialCash?: number,
   ) => {
@@ -6433,6 +6474,7 @@ export function TpvRegisterGate({
     const unpaidCashByBrandByChannel = appsClosingExtras?.unpaidCashByBrandByChannel;
     const unpaidCardByBrandByChannel = appsClosingExtras?.unpaidCardByBrandByChannel;
     const closingBrandLabels = appsClosingExtras?.closingBrandLabels;
+    const brandTpvTotals = appsClosingExtras?.brandTpvTotals;
     const hasBrandTotals = Boolean(
       brandTotalsByChannel
       && Object.values(brandTotalsByChannel).some((m) => m && Object.keys(m).length > 0),
@@ -6447,6 +6489,12 @@ export function TpvRegisterGate({
     );
     const hasClosingLabels = Boolean(
       closingBrandLabels && Object.keys(closingBrandLabels).length > 0,
+    );
+    const hasBrandTpvTotals = Boolean(
+      brandTpvTotals
+      && Object.values(brandTpvTotals).some(
+        (p) => p && (Number(p.efectivo) > 0 || Number(p.tarjeta) > 0),
+      ),
     );
     // P/B/T: siempre persistir lo declarado en el cierre (aunque sea 0).
     const productCountsToSave: NonNullable<TpvRegisterSession['productClosingCounts']> = {
@@ -6485,6 +6533,7 @@ export function TpvRegisterGate({
         ? { aggregatorClosingUnpaidCardByBrand: unpaidCardByBrandByChannel }
         : {}),
       ...(hasClosingLabels ? { closingBrandLabels } : {}),
+      ...(hasBrandTpvTotals ? { closingBrandTpvTotals: brandTpvTotals } : {}),
       closingValidationStatus: autoValidated ? 'validated' : 'pending',
       ...(autoValidated
         ? {

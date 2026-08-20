@@ -109,6 +109,8 @@ async function syncRegisterSession(
             ?? remote.aggregatorClosingUnpaidCardByBrand,
           closingBrandLabels:
             localSession.closingBrandLabels ?? remote.closingBrandLabels,
+          closingBrandTpvTotals:
+            localSession.closingBrandTpvTotals ?? remote.closingBrandTpvTotals,
           productClosingCounts:
             localSession.productClosingCounts ?? remote.productClosingCounts,
         }

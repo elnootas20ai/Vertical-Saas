@@ -2281,6 +2281,13 @@ export interface TpvRegisterSession {
   aggregatorClosingUnpaidCardByBrand?: Record<string, Record<string, number>>;
 
   /**
+   * Caja 1 (tienda/TPV) por marca al cerrar: efectivo + tarjeta reales.
+   * brandId → { efectivo, tarjeta }. El Excel de marcas usa esto en lugar
+   * de repartir EFECTIVO/TPV solo por conteo de pizzas/burgers/tacos.
+   */
+  closingBrandTpvTotals?: Record<string, { efectivo: number; tarjeta: number }>;
+
+  /**
    * Nombres de marca capturados al cerrar (brandId → nombre).
    * Evita ver `brand-uuid` en PC si el catálogo no carga o cambió.
    */

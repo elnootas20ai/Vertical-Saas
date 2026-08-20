@@ -7821,6 +7821,24 @@ function sanitizeProductClosingCounts(raw) {
   };
 }
 
+/** Caja 1 por marca: brandId → { efectivo, tarjeta }. */
+function sanitizeClosingBrandTpvTotals(raw) {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const out = {};
+  for (const [brandId, pay] of Object.entries(raw)) {
+    const id = String(brandId || '').trim();
+    if (!id || !pay || typeof pay !== 'object') continue;
+    const efectivo = Math.round((Number(pay.efectivo) || 0) * 100) / 100;
+    const tarjeta = Math.round((Number(pay.tarjeta) || 0) * 100) / 100;
+    if (efectivo <= 0 && tarjeta <= 0) continue;
+    out[id] = {
+      efectivo: Math.max(0, efectivo),
+      tarjeta: Math.max(0, tarjeta),
+    };
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 export function buildTpvRegisterSessionDocument(userId, data = {}, existing = null) {
   const now = new Date().toISOString();
   const id = existing?._id || `tpvreg-${uuidv4()}`;
@@ -7964,6 +7982,11 @@ export function buildTpvRegisterSessionDocument(userId, data = {}, existing = nu
       data.aggregatorClosingUnpaidCardByBrand
       || existing?.aggregatorClosingUnpaidCardByBrand
       || undefined,
+    /** Caja 1 (efectivo/tarjeta) por marca — Excel de facturación. */
+    closingBrandTpvTotals:
+      sanitizeClosingBrandTpvTotals(
+        data.closingBrandTpvTotals ?? existing?.closingBrandTpvTotals,
+      ) || undefined,
     /** Nombres de marca al cerrar (para resumen PC/tablet sin depender del catálogo). */
     closingBrandLabels:
       (data.closingBrandLabels && typeof data.closingBrandLabels === 'object'
@@ -8059,6 +8082,7 @@ export function sanitizeTpvRegisterSession(doc, opts = {}) {
     aggregatorClosingBrandTotals: doc.aggregatorClosingBrandTotals || undefined,
     aggregatorClosingUnpaidCashByBrand: doc.aggregatorClosingUnpaidCashByBrand || undefined,
     aggregatorClosingUnpaidCardByBrand: doc.aggregatorClosingUnpaidCardByBrand || undefined,
+    closingBrandTpvTotals: sanitizeClosingBrandTpvTotals(doc.closingBrandTpvTotals) || undefined,
     closingBrandLabels:
       doc.closingBrandLabels && typeof doc.closingBrandLabels === 'object'
         ? doc.closingBrandLabels

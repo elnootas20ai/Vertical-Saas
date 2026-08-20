@@ -141,6 +141,50 @@ describe('splitSessionCajaAmountsByBillingSheet', () => {
     expect(bb.total).toBe(50);
   });
 
+  it('efectivo/tarjeta usan Caja 1 por marca, no el % de pizzas/burgers', () => {
+    const session = closedSession({
+      summary: {
+        salesByMethod: { efectivo: 100, tarjeta: 200, bizum: 0, online: 0, otro: 0 },
+        salesByChannel: {},
+        totalSales: 300,
+      },
+      closingBrandTpvTotals: {
+        'brand-mm': { efectivo: 90, tarjeta: 150 },
+        'brand-bb': { efectivo: 10, tarjeta: 50 },
+      },
+      productClosingCounts: { pizza: 9, burger: 1, taco: 0 },
+    });
+    const mm = splitSessionCajaAmountsByBillingSheet(session, sheets[0], sheets);
+    const bb = splitSessionCajaAmountsByBillingSheet(session, sheets[1], sheets);
+    // Por unidades sería 90/10; Caja 1 real (dashboard) es 90+150 / 10+50
+    expect(mm.efectivo).toBe(90);
+    expect(mm.tpv).toBe(150);
+    expect(bb.efectivo).toBe(10);
+    expect(bb.tpv).toBe(50);
+    expect(mm.total + bb.total).toBe(300);
+  });
+
+  it('X (Bizum/otro) sigue el reparto de dinero Vertial, no el % de unidades', () => {
+    const session = closedSession({
+      summary: {
+        salesByMethod: { efectivo: 80, tarjeta: 20, bizum: 50, online: 0, otro: 0 },
+        salesByChannel: {},
+        totalSales: 150,
+      },
+      closingBrandTpvTotals: {
+        'brand-mm': { efectivo: 80, tarjeta: 20 },
+        'brand-bb': { efectivo: 0, tarjeta: 0 },
+      },
+      // Unidades dirían 50/50; el dinero Vertial es 100% Modomio
+      productClosingCounts: { pizza: 1, burger: 1, taco: 0 },
+    });
+    const mm = splitSessionCajaAmountsByBillingSheet(session, sheets[0], sheets);
+    const bb = splitSessionCajaAmountsByBillingSheet(session, sheets[1], sheets);
+    expect(mm.x).toBe(50);
+    expect(bb.x).toBe(0);
+    expect(mm.total + bb.total).toBe(150);
+  });
+
   it('sin brandIds en hojas, enlaza por nombre del cierre (MODOMIO / BLACKBURGER)', () => {
     const legacy = [
       {
