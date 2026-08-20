@@ -30,7 +30,7 @@ import {
   sendGracePeriodNotification,
   sendSuspensionNotification,
 } from '../services/subscriptionLifecycle.js';
-import { withServiceAgreementPendingAfterPayment } from '../../shared/onboarding/resumePath.js';
+import { withServiceAgreementPendingAfterPayment } from '../shared/onboarding/resumePath.js';
 import { PLAN_ADDON_CATALOG } from '../shared/billing/planAddons.js';
 import {
   applyAddonToAccount,
