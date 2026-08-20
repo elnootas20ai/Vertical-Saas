@@ -45,10 +45,30 @@ describe('vertialServiceAgreement', () => {
       signerName: 'Ana',
     });
     const clauses = buildServiceAgreementClauses(party);
-    assert.ok(clauses.length >= 10);
+    assert.ok(clauses.length >= 12);
     assert.equal(clauses[0].id, '1');
     assert.match(clauses[0].body, /Maika Hosteleria SL/);
     assert.match(clauses[0].body, /B87654321/);
-    assert.match(clauses.find((c) => c.id === '11')?.body || '', new RegExp(VERTIAL_SERVICE_AGREEMENT_VERSION));
+    assert.match(clauses[0].body, /Uriel Arnau Ruiz/);
+    assert.match(clauses[0].body, /48216687Q/);
+    assert.match(clauses[0].body, /647779812/);
+    assert.match(clauses[0].body, /vertial\.noreply@gmail\.com/);
+    assert.match(clauses.find((c) => c.id === '14')?.body || '', new RegExp(VERTIAL_SERVICE_AGREEMENT_VERSION));
+  });
+
+  it('incluye periodo de cobro y modificación de condiciones', () => {
+    const party = buildServiceAgreementParty({
+      companyProfile: { tradeName: 'Demo', taxId: 'B11111111' },
+      billingMode: 'annual',
+    });
+    const clauses = buildServiceAgreementClauses(party);
+    const pricing = clauses.find((c) => c.id === '4');
+    assert.match(pricing?.body || '', /anual/);
+    assert.match(pricing?.body || '', /por anticipado/);
+    assert.match(pricing?.body || '', /día 1 y el día 5/);
+    const changes = clauses.find((c) => c.id === '6');
+    assert.match(changes?.body || '', /treinta \(30\) días/);
+    const term = clauses.find((c) => c.id === '13');
+    assert.match(term?.body || '', /dos \(2\) meses/);
   });
 });

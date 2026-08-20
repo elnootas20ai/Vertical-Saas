@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   COMPANY_ONBOARDING_ROUTES,
+  canAccessServiceAgreement,
   companyNeedsOnboarding,
   resolveCompanyOnboardingResumePath,
 } from '../shared/onboarding/resumePath.js';
@@ -20,15 +21,19 @@ describe('resolveCompanyOnboardingResumePath', () => {
     expect(
       resolveCompanyOnboardingResumePath({ onboardingData: { completedStep: 4 } }),
     ).toBe('/auth/onboarding/payment-info');
-    expect(
-      resolveCompanyOnboardingResumePath({ onboardingData: { completedStep: 5 } }),
-    ).toBe('/auth/onboarding/contrato');
   });
 
-  it('no se pasa del último paso', () => {
+  it('tras el pago va a confirmación (sin contrato en el alta gratis)', () => {
+    expect(
+      resolveCompanyOnboardingResumePath({ onboardingData: { completedStep: 5 } }),
+    ).toBe('/auth/onboarding/confirmation');
     expect(
       resolveCompanyOnboardingResumePath({ onboardingData: { completedStep: 99 } }),
-    ).toBe(COMPANY_ONBOARDING_ROUTES[COMPANY_ONBOARDING_ROUTES.length - 1]);
+    ).toBe('/auth/onboarding/confirmation');
+  });
+
+  it('el contrato no está en las rutas del alta', () => {
+    expect(COMPANY_ONBOARDING_ROUTES).not.toContain('/auth/onboarding/contrato');
   });
 });
 
@@ -47,5 +52,14 @@ describe('companyNeedsOnboarding', () => {
         invitedBy: 'owner-1',
       }),
     ).toBe(false);
+  });
+});
+
+describe('canAccessServiceAgreement', () => {
+  it('solo con suscripción activa (pago real)', () => {
+    expect(canAccessServiceAgreement({ status: 'subscription_active' })).toBe(true);
+    expect(canAccessServiceAgreement({ status: 'trial_active' })).toBe(false);
+    expect(canAccessServiceAgreement({ status: 'pending_payment' })).toBe(false);
+    expect(canAccessServiceAgreement(null)).toBe(false);
   });
 });

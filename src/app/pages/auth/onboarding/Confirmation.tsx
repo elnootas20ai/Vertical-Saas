@@ -34,15 +34,12 @@ export function Confirmation() {
 
   useEffect(() => {
     if (!isProgressReady) return;
-    if (data.completedStep < 6) {
+    // Alta: el pago es el último paso del flujo; el contrato solo tras cobrar de verdad.
+    if (data.completedStep < 5) {
       const next = Math.max(0, Math.min(data.completedStep + 1, ONBOARDING_ROUTES.length - 1));
       navigate(ONBOARDING_ROUTES[next], { replace: true });
-      return;
     }
-    if (!data.serviceAgreement?.signatureDataUrl) {
-      navigate('/auth/onboarding/contrato', { replace: true });
-    }
-  }, [isProgressReady, data.completedStep, data.serviceAgreement?.signatureDataUrl, navigate]);
+  }, [isProgressReady, data.completedStep, navigate]);
 
   const steps = stepKeys.map(s => ({
     ...s,

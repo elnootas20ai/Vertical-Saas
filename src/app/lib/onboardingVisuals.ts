@@ -178,7 +178,6 @@ const STEP_VISUAL_KEYS: OnboardingVisualKey[] = [
   'needs',
   'recommendation',
   'payment',
-  'contract',
 ];
 
 export function getOnboardingVisualForStep(stepIndex: number): OnboardingVisual {

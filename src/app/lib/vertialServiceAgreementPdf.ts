@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf';
 import {
+  VERTIAL_PROVIDER,
   VERTIAL_SERVICE_AGREEMENT_VERSION,
   formatAgreementDateEs,
   type ServiceAgreementClause,
@@ -81,6 +82,27 @@ export function downloadVertialServiceAgreementPdf(input: {
   doc.setFontSize(12);
   doc.text('Contrato de servicio Vertial', margin, y);
   y += 8;
+
+  // Provider box
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(margin, y, contentW, 16, 2, 2, 'FD');
+  y += 6;
+  doc.setFontSize(8);
+  doc.setTextColor(100, 116, 139);
+  doc.text('PRESTADOR DEL SERVICIO', margin + 3, y);
+  y += 5;
+  doc.setFontSize(9);
+  doc.setTextColor(30, 41, 59);
+  doc.setFont('helvetica', 'bold');
+  doc.text(VERTIAL_PROVIDER.name, margin + 3, y);
+  doc.setFont('helvetica', 'normal');
+  doc.text(
+    `${VERTIAL_PROVIDER.ownerName} · DNI ${VERTIAL_PROVIDER.taxId} · Tel. ${VERTIAL_PROVIDER.phone} · ${VERTIAL_PROVIDER.email}`,
+    margin + 3 + doc.getTextWidth(VERTIAL_PROVIDER.name) + 4,
+    y,
+  );
+  y += 9;
 
   // Party box
   doc.setFillColor(248, 250, 252);

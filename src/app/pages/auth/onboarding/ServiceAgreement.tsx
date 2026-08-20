@@ -10,8 +10,11 @@ import {
   OnboardingStepShell,
 } from '../../../components/auth/onboarding/OnboardingStepShell';
 import { useOnboarding } from '../../../context/OnboardingContext';
-import { useOnboardingStepGate } from '../../../hooks/useOnboardingStepGate';
 import { useAuth } from '../../../context/AuthContext';
+import {
+  canAccessServiceAgreement,
+  hasSignedServiceAgreement,
+} from '../../../../../shared/onboarding/resumePath.js';
 import {
   VERTIAL_SERVICE_AGREEMENT_VERSION,
   buildServiceAgreementClauses,
@@ -24,13 +27,13 @@ import {
   downloadVertialServiceAgreementPdf,
 } from '../../../lib/vertialServiceAgreementPdf';
 
-const STEP_INDEX = 6;
+/** Visual de pago: el contrato ya no es un paso del alta gratis. */
+const SHELL_VISUAL_STEP = 5;
 
 export function ServiceAgreement() {
   const navigate = useNavigate();
-  const { user } = useAuth();
-  const { data, updateData, advanceStep } = useOnboarding();
-  useOnboardingStepGate(STEP_INDEX);
+  const { user, updateOnboardingData } = useAuth();
+  const { data, updateData } = useOnboarding();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
   const [hasStroke, setHasStroke] = useState(Boolean(data.serviceAgreement?.signatureDataUrl));
@@ -43,6 +46,20 @@ export function ServiceAgreement() {
   );
   const [error, setError] = useState('');
   const [pdfBusy, setPdfBusy] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    if (!canAccessServiceAgreement(user.subscription)) {
+      navigate(
+        user.onboardingCompleted ? '/saas/subscription' : '/auth/onboarding/confirmation',
+        { replace: true },
+      );
+      return;
+    }
+    if (hasSignedServiceAgreement(user)) {
+      navigate('/saas/dashboard', { replace: true });
+    }
+  }, [user, navigate]);
 
   const party = useMemo(
     () =>
@@ -185,10 +202,10 @@ export function ServiceAgreement() {
   };
 
   const handleBack = () => {
-    navigate('/auth/onboarding/payment-info');
+    navigate(user?.onboardingCompleted ? '/saas/dashboard' : '/saas/subscription');
   };
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     setError('');
     const name = signerName.trim();
     if (!name) {
@@ -208,15 +225,24 @@ export function ServiceAgreement() {
     try {
       downloadSignedServiceAgreementPdf(signed);
     } catch {
-      /* no bloquear el alta si falla la descarga */
+      /* no bloquear si falla la descarga */
     }
-    advanceStep(STEP_INDEX);
-    navigate('/auth/onboarding/confirmation');
+    try {
+      await updateOnboardingData({
+        ...(data as unknown as Record<string, unknown>),
+        serviceAgreement: signed,
+        completedStep: Math.max(Number(data.completedStep) || 0, 5),
+      });
+    } catch {
+      /* local ya tiene la firma */
+    }
+    navigate('/saas/dashboard', { replace: true });
   };
 
   return (
     <OnboardingStepShell
-      stepIndex={STEP_INDEX}
+      stepIndex={SHELL_VISUAL_STEP}
+      showStepper={false}
       maxWidth="max-w-3xl"
       footer={
         <div className="flex flex-col gap-2 sm:flex-row sm:justify-between sm:items-center">
@@ -233,7 +259,7 @@ export function ServiceAgreement() {
               <Download className="h-4 w-4" />
               Descargar PDF
             </ACCESO__Button>
-            <ACCESO__Button type="button" onClick={handleContinue} variant="primary">
+            <ACCESO__Button type="button" onClick={() => void handleContinue()} variant="primary">
               Firmar y continuar →
             </ACCESO__Button>
           </div>
@@ -242,8 +268,8 @@ export function ServiceAgreement() {
     >
       <OnboardingStepHeading
         title="Contrato de servicio Vertial"
-        subtitle="Revisa el contrato con los datos de tu empresa y fírmalo para activar la cuenta."
-        stepLabel={`Paso ${STEP_INDEX + 1}`}
+        subtitle="Disponible tras el pago. Revisa el contrato con los datos de tu empresa y fírmalo."
+        stepLabel="Contrato · Suscripción activa"
       />
 
       <OnboardingContentCard>

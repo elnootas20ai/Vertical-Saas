@@ -137,7 +137,7 @@ export function registerPwaServiceWorker(): void {
     navigator.serviceWorker
       .register('/sw.js', { scope: '/' })
       .then((registration) => {
-        // Forzar búsqueda de SW nuevo en cada carga (no esperar 24h).
+        // Buscar SW nuevo tras deploy (no esperar 24h).
         void registration.update();
       })
       .catch(() => {
@@ -145,8 +145,13 @@ export function registerPwaServiceWorker(): void {
       });
   });
 
-  // Nuevo SW (update) con skipWaiting + clients.claim → una recarga.
-  // No recargar en el primer install (controller era null).
+  // Nuevo SW (update) con skipWaiting + clients.claim → controllerchange.
+  // Antes: recargábamos siempre → en algunas entradas directas se notaba un 2º load a los 4–5 s.
+  // Ahora: como mucho UNA recarga por stamp de build (localStorage), no en cada visita.
+  const SW_RELOAD_STAMP_KEY = 'vertial:sw-reloaded-for-stamp';
+  const bundleStamp = () =>
+    String(import.meta.env.VITE_BUILD_STAMP || import.meta.env.VITE_APP_VERSION || '0');
+
   let refreshing = false;
   let hadController = Boolean(navigator.serviceWorker.controller);
   navigator.serviceWorker.addEventListener('controllerchange', () => {
@@ -155,6 +160,14 @@ export function registerPwaServiceWorker(): void {
       return;
     }
     if (refreshing) return;
+    const stamp = bundleStamp();
+    try {
+      if (localStorage.getItem(SW_RELOAD_STAMP_KEY) === stamp) return;
+      localStorage.setItem(SW_RELOAD_STAMP_KEY, stamp);
+    } catch {
+      /* private mode: mejor no recargar en bucle */
+      return;
+    }
     refreshing = true;
     window.location.reload();
   });

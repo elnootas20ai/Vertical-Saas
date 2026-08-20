@@ -12,6 +12,8 @@ type Props = {
   maxWidth?: string;
   children: ReactNode;
   footer: ReactNode;
+  /** false = pantalla post-pago (contrato) sin barra de pasos del alta gratis */
+  showStepper?: boolean;
 };
 
 /** Pantalla completa: formulario centrado + hero lateral desde lg (~1024px). */
@@ -20,6 +22,7 @@ export function OnboardingStepShell({
   maxWidth = 'max-w-3xl',
   children,
   footer,
+  showStepper = true,
 }: Props) {
   const navigate = useNavigate();
   const { data, isProgressReady } = useOnboarding();
@@ -37,9 +40,10 @@ export function OnboardingStepShell({
             <div className="flex items-center justify-between gap-3">
               <VertialLogo size="md" />
               <span className="hidden text-xs font-medium text-gray-500 dark:text-gray-400 sm:inline">
-                Configuración de empresa
+                {showStepper ? 'Configuración de empresa' : 'Contrato de servicio'}
               </span>
             </div>
+            {showStepper ? (
             <ACCESO__Stepper
               steps={[...ONBOARDING_STEPS]}
               currentStep={stepIndex}
@@ -51,6 +55,7 @@ export function OnboardingStepShell({
                 navigate(ONBOARDING_ROUTES[i]);
               }}
             />
+            ) : null}
           </div>
         </header>
 

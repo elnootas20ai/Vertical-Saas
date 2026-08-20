@@ -17,7 +17,6 @@ export const ONBOARDING_STEPS = [
   'Operativa',
   'Precio',
   'Pago',
-  'Contrato',
 ] as const;
 
 export const ONBOARDING_ROUTES = [
@@ -27,8 +26,10 @@ export const ONBOARDING_ROUTES = [
   '/auth/onboarding/needs',
   '/auth/onboarding/recommendation',
   '/auth/onboarding/payment-info',
-  '/auth/onboarding/contrato',
 ] as const;
+
+/** Índice del paso Pago (último del alta antes de confirmación). */
+export const ONBOARDING_PAYMENT_STEP_INDEX = 5;
 
 export interface OnboardingData {
   completedStep: number;

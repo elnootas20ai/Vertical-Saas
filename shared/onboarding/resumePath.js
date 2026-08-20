@@ -6,12 +6,14 @@ export const COMPANY_ONBOARDING_ROUTES = [
   '/auth/onboarding/needs',
   '/auth/onboarding/recommendation',
   '/auth/onboarding/payment-info',
-  '/auth/onboarding/contrato',
 ];
+
+const PAYMENT_STEP_INDEX = COMPANY_ONBOARDING_ROUTES.length - 1;
 
 /**
  * Retoma el onboarding en el siguiente paso pendiente.
  * Si no hay progreso, empieza en tipo de negocio.
+ * Tras el pago → confirmación (el contrato NO forma parte del alta gratis).
  */
 export function resolveCompanyOnboardingResumePath(account) {
   const data = account?.onboardingData && typeof account.onboardingData === 'object'
@@ -21,7 +23,10 @@ export function resolveCompanyOnboardingResumePath(account) {
   if (!Number.isFinite(completed) || completed < 0) {
     return COMPANY_ONBOARDING_ROUTES[0];
   }
-  const next = Math.min(Math.floor(completed) + 1, COMPANY_ONBOARDING_ROUTES.length - 1);
+  if (Math.floor(completed) >= PAYMENT_STEP_INDEX) {
+    return '/auth/onboarding/confirmation';
+  }
+  const next = Math.min(Math.floor(completed) + 1, PAYMENT_STEP_INDEX);
   return COMPANY_ONBOARDING_ROUTES[Math.max(0, next)];
 }
 
@@ -31,4 +36,18 @@ export function companyNeedsOnboarding(account) {
   if (account.accountType === 'user') return false;
   if (String(account.invitedBy || '').trim()) return false;
   return !Boolean(account.onboardingCompleted);
+}
+
+/**
+ * Contrato SaaS solo tras pago real (no trial ni pending).
+ * Quien prueba sin pagar no debe ver el contrato.
+ */
+export function canAccessServiceAgreement(subscription) {
+  const status = String(subscription?.status || '').trim();
+  return status === 'subscription_active';
+}
+
+export function hasSignedServiceAgreement(account) {
+  const data = account?.onboardingData;
+  return Boolean(data && typeof data === 'object' && data.serviceAgreement?.signatureDataUrl);
 }

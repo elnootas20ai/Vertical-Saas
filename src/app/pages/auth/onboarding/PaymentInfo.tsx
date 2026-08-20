@@ -81,7 +81,7 @@ export function PaymentInfo() {
   const finishPaymentStep = useCallback(() => {
     initializeTrial();
     advanceStep(STEP_INDEX);
-    navigate('/auth/onboarding/contrato');
+    navigate('/auth/onboarding/confirmation');
   }, [advanceStep, initializeTrial, navigate]);
 
   const orderSummary = useMemo(() => {

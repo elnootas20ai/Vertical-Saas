@@ -23,6 +23,10 @@ import { SetupProgressProvider } from '../context/SetupProgressContext';
 import { ScrapyardProvider } from '../context/ScrapyardContext';
 
 import { useAuth } from '../context/AuthContext';
+import {
+  canAccessServiceAgreement,
+  hasSignedServiceAgreement,
+} from '../../../shared/onboarding/resumePath.js';
 import { usePushDeepLinkNavigate } from '../hooks/usePushDeepLinkNavigate';
 import {
   isTpvTabletAllowedPath,
@@ -177,6 +181,26 @@ function SaasContent() {
     }
 
   }, [isInitializing, isAuthenticated, user, navigate, location.pathname, tpvTabletSaasSession]);
+
+  // Tras pago real: pedir firma del contrato (no se muestra en el alta gratis / trial).
+  useEffect(() => {
+    if (isInitializing || !isAuthenticated || !user) return;
+    if (tpvTabletSaasSession || location.pathname.startsWith('/saas/worker/tpv')) return;
+    if (user.accountType === 'user' || String((user as { invitedBy?: string }).invitedBy || '').trim()) {
+      return;
+    }
+    if (!canAccessServiceAgreement(user.subscription)) return;
+    if (hasSignedServiceAgreement(user)) return;
+    if (location.pathname.startsWith('/auth/onboarding/contrato')) return;
+    navigate('/auth/onboarding/contrato', { replace: true });
+  }, [
+    isInitializing,
+    isAuthenticated,
+    user,
+    navigate,
+    location.pathname,
+    tpvTabletSaasSession,
+  ]);
 
 
 
