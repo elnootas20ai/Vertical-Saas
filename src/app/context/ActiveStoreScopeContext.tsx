@@ -760,14 +760,13 @@ function ActiveStoreScopeProviderImpl({
     (pdvId: string) => {
       if (!businessId || !dataUserId || !pdvId.trim()) return;
       const id = pdvId.trim();
-      const pool = allPointsOfSale.length > 0 ? allPointsOfSale : pointsOfSale;
-      // Lista vacía (refresh): igual guardar la elección del usuario.
-      if (pool.length > 0 && !pool.some((p) => p._id === id && p.active !== false)) return;
+      // Siempre guardar la elección del sidebar (también si el PDV está inactive
+      // o el pool aún no lo tiene: antes el click en test1 / Badalona fallaba en silencio).
       writeOpsSelectedPdvId(businessType, businessId, dataUserId, id);
       notifyOpsActiveStoreChanged(businessType);
       bump();
     },
-    [businessId, dataUserId, businessType, pointsOfSale, allPointsOfSale, bump],
+    [businessId, dataUserId, businessType, bump],
   );
 
   const setActiveWorkCenterPreference = useCallback(

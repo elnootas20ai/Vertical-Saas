@@ -1461,7 +1461,16 @@ function SidebarInner({
           return;
         }
         if (usesOpsStoreSidebar) {
-          handleNavigate(isRestaurantVertical ? '/saas/restaurant-ops' : '/saas/delivery-ops');
+          // En TPV: solo cambiar tienda (no echar a Ops). El gate escucha el evento.
+          const onDeliveryTpv =
+            location.pathname.startsWith('/saas/vertical/delivery/tpv')
+            || location.pathname.startsWith('/saas/caja/tpv');
+          const onRestaurantTpv =
+            location.pathname.startsWith('/saas/vertical/restaurant/tpv')
+            || location.pathname.startsWith('/saas/restaurant-tpv');
+          if (!(onDeliveryTpv || onRestaurantTpv)) {
+            handleNavigate(isRestaurantVertical ? '/saas/restaurant-ops' : '/saas/delivery-ops');
+          }
           onMobileClose();
           return;
         }
@@ -2204,8 +2213,6 @@ function SidebarInner({
                               ) : null}
                               {isSalesPointSubItem && item.terminalCode ? (
                                 <span
-                                  role="button"
-                                  tabIndex={0}
                                   title="Copiar código TPV"
                                   onClick={(e) => {
                                     e.preventDefault();
@@ -2217,13 +2224,7 @@ function SidebarInner({
                                       () => toast.error('No se pudo copiar'),
                                     );
                                   }}
-                                  onKeyDown={(e) => {
-                                    if (e.key !== 'Enter' && e.key !== ' ') return;
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    (e.currentTarget as HTMLElement).click();
-                                  }}
-                                  className={`inline-flex max-w-full items-center gap-1 rounded px-1 py-0.5 font-mono text-[10px] leading-none tracking-widest transition-colors ${
+                                  className={`inline-flex max-w-full items-center gap-1 rounded px-1 py-0.5 font-mono text-[10px] leading-none tracking-widest transition-colors cursor-pointer ${
                                     isActive
                                       ? 'bg-blue-100/80 text-blue-800 hover:bg-blue-200/80 dark:bg-blue-900/40 dark:text-blue-200 dark:hover:bg-blue-900/60'
                                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'

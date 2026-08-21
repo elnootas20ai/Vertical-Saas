@@ -38,6 +38,8 @@ import {
   listSessionsRequest,
   listUsersRequest,
   loadStoredTokens,
+  installCrossTabAuthGuard,
+  bumpAuthSessionEpoch,
   loginRequest,
   logoutRequest,
   AuthRequestError,
@@ -317,7 +319,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
 
-    // S-01: Ya no se cargan tokens de localStorage — las cookies httpOnly se envían automáticamente
+    // S-01: cookies httpOnly + Bearer en localStorage (tablet). Guard cross-tab evita
+    // que un refresh zombie de otra cuenta (p. ej. María) pise la sesión admin.
+    installCrossTabAuthGuard();
     loadStoredTokens();
 
     setOnUnauthorized(() => {
@@ -464,6 +468,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const prevId = String(user?.user_id || user?.id || '').trim();
         const nextId = String(parsed.user_id || parsed.id || '').trim();
         if (prevId && nextId && prevId !== nextId) {
+          // Cambio de cuenta en otra pestaña: matar refresh en vuelo + alinear tokens.
+          bumpAuthSessionEpoch();
+          loadStoredTokens();
           clearVertialClientCaches([SESSION_USER_STORAGE_KEY]);
         }
         // Pintar ya lo de la otra pestaña. El /me NO usa setSessionUser:

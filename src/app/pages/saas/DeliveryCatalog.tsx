@@ -3364,8 +3364,8 @@ type CatalogNavTab = { id: string; label: string; count?: number };
 type CatalogNavGroup = { id: string; label: string; tabs: CatalogNavTab[] };
 
 /**
- * Nav agrupada del catálogo TPV: misma mecánica que las tabs planas (?tab=…),
- * una sección a la vez (Carta | Almacén | Compras | Equipo) para no cruzar módulos.
+ * Nav agrupada del catálogo TPV: misma mecánica que las tabs planas (?tab=…).
+ * Muestra todas las secciones (Carta · Almacén · Compras · Equipo) con separadores.
  */
 function CatalogModuleNav({
   groups,
@@ -6689,15 +6689,6 @@ export function CatalogPage() {
     invoiceKpis.pending,
   ]);
 
-  /** Nav solo del bloque actual: en Facturas no se cruza Carta/Equipo. */
-  const sectionNavGroups = useMemo(() => {
-    const comprasTabs = new Set(['suppliers', 'purchase-orders', 'albaranes', 'invoices']);
-    if (comprasTabs.has(activeTab)) return navGroups.filter((g) => g.id === 'compras');
-    if (activeTab === 'stock') return navGroups.filter((g) => g.id === 'almacen');
-    if (activeTab === 'staff-consumption') return navGroups.filter((g) => g.id === 'equipo');
-    return navGroups.filter((g) => g.id === 'carta');
-  }, [navGroups, activeTab]);
-
   const brandSetupCtx = useMemo(
     () =>
       resolveBrandSetupContext(
@@ -6828,7 +6819,7 @@ export function CatalogPage() {
           />
         )}
 
-        <CatalogModuleNav groups={sectionNavGroups} activeTab={activeTab} onChange={setActiveTab} />
+        <CatalogModuleNav groups={navGroups} activeTab={activeTab} onChange={setActiveTab} />
 
         {activeTab === 'catalog' && (
           catalogBusy ? <CatalogTabLoadingState phase="catalog" /> : renderCatalogTab()

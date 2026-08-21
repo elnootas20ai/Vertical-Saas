@@ -395,6 +395,9 @@ let _onUnauthorized: (() => void) | null = null;
 
 const TOKEN_STORAGE_KEY = 'vertial_access_token';
 const REFRESH_STORAGE_KEY = 'vertial_refresh_token';
+/** Señal cross-tab: otra pestaña cambió de cuenta (evita refresh zombie con tokens viejos en memoria). */
+const AUTH_TAB_SIGNAL_KEY = 'vertial_auth_tab_signal';
+const AUTH_TAB_CHANNEL = 'vertial_auth_tab';
 
 function readBrowserStorage(key: string): string | null {
   try {
@@ -407,6 +410,81 @@ function readBrowserStorage(key: string): string | null {
 
 let _inMemoryToken: string | null = readBrowserStorage(TOKEN_STORAGE_KEY);
 let _inMemoryRefreshToken: string | null = readBrowserStorage(REFRESH_STORAGE_KEY);
+
+/** Sube en logout / cambio de cuenta: invalida refreshes en vuelo. */
+let _authSessionEpoch = 0;
+
+export function bumpAuthSessionEpoch(): number {
+  _authSessionEpoch += 1;
+  return _authSessionEpoch;
+}
+
+/**
+ * localStorage es la fuente de verdad entre pestañas.
+ * La memoria de una pestaña puede quedarse con el refresh de María mientras otra
+ * ya hizo login admin → ese refresh zombie pisaba cookies + tokens de admin.
+ */
+export function loadStoredTokens(): { accessToken: string | null; refreshToken: string | null } {
+  _inMemoryToken = localStorage.getItem(TOKEN_STORAGE_KEY);
+  _inMemoryRefreshToken = localStorage.getItem(REFRESH_STORAGE_KEY);
+  return { accessToken: _inMemoryToken, refreshToken: _inMemoryRefreshToken };
+}
+
+function broadcastAuthTabSignal(reason: string) {
+  const stamp = `${Date.now()}:${reason}`;
+  try {
+    localStorage.setItem(AUTH_TAB_SIGNAL_KEY, stamp);
+  } catch {
+    /* ignore quota */
+  }
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      const channel = new BroadcastChannel(AUTH_TAB_CHANNEL);
+      channel.postMessage({ type: 'auth-account-switch', reason, stamp });
+      channel.close();
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Otras pestañas: invalidar refresh en vuelo y alinear memoria con localStorage. */
+function adoptTokensFromOtherTab() {
+  bumpAuthSessionEpoch();
+  loadStoredTokens();
+}
+
+let _crossTabAuthGuardInstalled = false;
+
+/** Escucha cambios de tokens/cuenta en otras pestañas del mismo origen. */
+export function installCrossTabAuthGuard() {
+  if (_crossTabAuthGuardInstalled || typeof window === 'undefined') return;
+  _crossTabAuthGuardInstalled = true;
+
+  window.addEventListener('storage', (event) => {
+    if (
+      event.key === TOKEN_STORAGE_KEY
+      || event.key === REFRESH_STORAGE_KEY
+      || event.key === AUTH_TAB_SIGNAL_KEY
+    ) {
+      adoptTokensFromOtherTab();
+    }
+  });
+
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      const channel = new BroadcastChannel(AUTH_TAB_CHANNEL);
+      channel.addEventListener('message', (event: MessageEvent) => {
+        const data = event.data as { type?: string } | null;
+        if (data?.type === 'auth-account-switch') {
+          adoptTokensFromOtherTab();
+        }
+      });
+    }
+  } catch {
+    /* ignore */
+  }
+}
 
 export function cacheAccessToken(token: string | null) {
   _inMemoryToken = token;
@@ -427,31 +505,18 @@ function cacheRefreshToken(token: string | null) {
 }
 
 export function getAuthHeaders(): Record<string, string> {
-  if (!_inMemoryToken) {
-    _inMemoryToken = localStorage.getItem(TOKEN_STORAGE_KEY);
-  }
+  // Siempre alinear con localStorage: otra pestaña puede haber cambiado de cuenta.
+  loadStoredTokens();
   return _inMemoryToken ? { Authorization: `Bearer ${_inMemoryToken}` } : {};
 }
 
-export function loadStoredTokens(): { accessToken: string | null; refreshToken: string | null } {
-  _inMemoryToken = localStorage.getItem(TOKEN_STORAGE_KEY);
-  _inMemoryRefreshToken = localStorage.getItem(REFRESH_STORAGE_KEY);
-  return { accessToken: _inMemoryToken, refreshToken: _inMemoryRefreshToken };
-}
-
 export function setAuthTokens(tokens: { accessToken: string; refreshToken?: string }) {
+  bumpAuthSessionEpoch();
   cacheAccessToken(tokens.accessToken);
   if (tokens.refreshToken) {
     cacheRefreshToken(tokens.refreshToken);
   }
-}
-
-/** Sube en logout / cambio de cuenta: invalida refreshes en vuelo. */
-let _authSessionEpoch = 0;
-
-export function bumpAuthSessionEpoch(): number {
-  _authSessionEpoch += 1;
-  return _authSessionEpoch;
+  broadcastAuthTabSignal('set-tokens');
 }
 
 export function clearAuthTokens() {
@@ -460,6 +525,7 @@ export function clearAuthTokens() {
   _inMemoryRefreshToken = null;
   localStorage.removeItem(TOKEN_STORAGE_KEY);
   localStorage.removeItem(REFRESH_STORAGE_KEY);
+  broadcastAuthTabSignal('clear-tokens');
 }
 
 export function setOnUnauthorized(callback: () => void) {
@@ -506,6 +572,7 @@ export function getAccessTokenSecondsLeft(): number | null {
  * Seguro llamar en paralelo: usa el mismo lock que tryRefreshToken.
  */
 export async function ensureFreshAccessToken(minSecondsLeft = 120): Promise<RefreshOutcome | 'ok'> {
+  loadStoredTokens();
   const left = getAccessTokenSecondsLeft();
   if (left == null) {
     // Sin exp legible: intentar refresh si hay refresh token guardado.
@@ -554,12 +621,9 @@ async function tryRefreshToken(): Promise<RefreshOutcome> {
   _refreshPromise = (async () => {
     const epochAtStart = _authSessionEpoch;
     try {
-      if (!_inMemoryRefreshToken) {
-        _inMemoryRefreshToken = localStorage.getItem(REFRESH_STORAGE_KEY);
-      }
-      if (!_inMemoryToken) {
-        _inMemoryToken = localStorage.getItem(TOKEN_STORAGE_KEY);
-      }
+      // Siempre leer localStorage (otra pestaña pudo cambiar de cuenta).
+      loadStoredTokens();
+      const refreshUsed = _inMemoryRefreshToken;
 
       const runOnce = async (credentials: RequestCredentials): Promise<{
         status: number;
@@ -584,6 +648,13 @@ async function tryRefreshToken(): Promise<RefreshOutcome> {
       const applyOk = (payload: ApiEnvelope<AuthUser>) => {
         // Login/logout durante el refresh: no reinstalar tokens de la cuenta vieja.
         if (epochAtStart !== _authSessionEpoch) {
+          loadStoredTokens();
+          return 'rejected' as const;
+        }
+        // Otra pestaña ya escribió otro refresh en localStorage: no pisar su cuenta.
+        const currentLsRefresh = localStorage.getItem(REFRESH_STORAGE_KEY);
+        if (currentLsRefresh && refreshUsed && currentLsRefresh !== refreshUsed) {
+          loadStoredTokens();
           return 'rejected' as const;
         }
         if (payload.accessToken) {
@@ -644,9 +715,8 @@ export async function authFetch(
     await ensureFreshAccessToken(90);
   }
 
-  if (!_inMemoryToken) {
-    _inMemoryToken = localStorage.getItem(TOKEN_STORAGE_KEY);
-  }
+  // Alinear con localStorage (otra pestaña pudo cambiar de cuenta).
+  loadStoredTokens();
   const headers = new Headers(init?.headers || {});
   if (_inMemoryToken && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${_inMemoryToken}`);

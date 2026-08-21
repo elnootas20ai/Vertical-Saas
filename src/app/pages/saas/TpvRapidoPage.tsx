@@ -102,6 +102,7 @@ import {
 } from '../../components/saas/TpvRegisterGate';
 import { hasTpvOpenRegisterLatch } from '../../lib/tpvCajaScope';
 import { readTpvTabletBinding } from '../../lib/tpvTabletSession';
+import { isInvitedWorkerUser } from '../../lib/pdvScope';
 import {
   resolveTpvRegisterScope,
   shouldAutoSwitchToDeliveryBusiness,
@@ -439,6 +440,9 @@ function TpvRapidoCeoBoard() {
     () => resolveBusinessDataUserId(user, currentBusiness),
     [user, currentBusiness],
   );
+  /** Selector multi-tienda: solo CEO web (no trabajador invitado ni tablet). */
+  const isCeoStorePickerUser =
+    !isInvitedWorkerUser(user) && !readTpvTabletBinding();
 
   const [selectedPdvId, setSelectedPdvId] = useState<string | null>(null);
   const [forceStorePicker, setForceStorePicker] = useState(false);
@@ -446,6 +450,8 @@ function TpvRapidoCeoBoard() {
   const [ceoBootstrapSettled, setCeoBootstrapSettled] = useState(false);
   const ceoBootstrapDoneRef = useRef(false);
   const ceoBootstrapInflightRef = useRef(false);
+  /** Una vez por montaje: con varias tiendas, elegir TPV antes de Abrir/Continuar. */
+  const ceoEntryPickerDoneRef = useRef(false);
   const [stockOpen, setStockOpen] = useState(() => consumeTpvStockReviewLaunch());
   const lastSyncedStorePdvRef = useRef<string | null>(null);
   /** PDVs recuperados por bootstrap aunque ActiveStoreScope aún esté vacío. */
@@ -454,6 +460,7 @@ function TpvRapidoCeoBoard() {
   useEffect(() => {
     ceoBootstrapDoneRef.current = false;
     ceoBootstrapInflightRef.current = false;
+    ceoEntryPickerDoneRef.current = false;
     setCeoBootstrapSettled(false);
     setBootstrapPdvs([]);
   }, [businessId]);
@@ -558,6 +565,17 @@ function TpvRapidoCeoBoard() {
     return bootstrapPdvs.filter((p) => p.active !== false);
   }, [pointsOfSale, bootstrapPdvs]);
 
+  // CEO + varias tiendas: primero elegir cuál abrir; luego OpeningScreen (Continuar / Abrir).
+  // Solo CEO web — trabajador/tablet entran directo a su tienda (código / asignación).
+  useEffect(() => {
+    if (!isCeoStorePickerUser) return;
+    if (ceoEntryPickerDoneRef.current) return;
+    if (activePdvs.length <= 1) return;
+    ceoEntryPickerDoneRef.current = true;
+    setSelectedPdvId(null);
+    setForceStorePicker(true);
+  }, [isCeoStorePickerUser, activePdvs.length]);
+
   const resolvedInitialPdvId = useMemo(() => {
     if (forceStorePicker || !businessId || !dataUserId || activePdvs.length === 0) return null;
     const saved = readDeliveryOpsSelectedPdvId(businessId, dataUserId);
@@ -604,7 +622,7 @@ function TpvRapidoCeoBoard() {
     return () => window.clearTimeout(timer);
   }, [awaitingPdvResolution]);
 
-  // Tras timeout: entrar con la tienda guardada o abrir el selector (no pantalla muerta).
+  // Tras timeout: entrar con la tienda guardada (coercida al listado) o abrir el selector.
   useEffect(() => {
     if (!pdvWaitTimedOut || forceStorePicker || effectivePdvId) return;
     if (!businessId || !dataUserId) {
@@ -612,12 +630,21 @@ function TpvRapidoCeoBoard() {
       return;
     }
     const saved = readDeliveryOpsSelectedPdvId(businessId, dataUserId);
-    if (saved) {
-      setSelectedPdvId(saved);
+    const coerced = coerceSelectedPdvId(activePdvs, saved || activeSalesPointId);
+    if (coerced) {
+      setSelectedPdvId(coerced);
       return;
     }
     setForceStorePicker(true);
-  }, [pdvWaitTimedOut, forceStorePicker, effectivePdvId, businessId, dataUserId]);
+  }, [
+    pdvWaitTimedOut,
+    forceStorePicker,
+    effectivePdvId,
+    businessId,
+    dataUserId,
+    activePdvs,
+    activeSalesPointId,
+  ]);
 
   useEffect(() => {
     lastSyncedStorePdvRef.current = null;
@@ -647,13 +674,13 @@ function TpvRapidoCeoBoard() {
     } catch { /* ignore */ }
     const pdvId = coerceSelectedPdvId(
       activePdvs,
-      readDeliveryOpsSelectedPdvId(businessId, dataUserId) || activeSalesPointId,
+      activeSalesPointId || readDeliveryOpsSelectedPdvId(businessId, dataUserId),
     );
     if (!pdvId) return;
+    // Solo rellenar si aún no hay tienda en el TPV (no pisar una elección hecha aquí).
     setSelectedPdvId((prev) => (prev === pdvId ? prev : (prev || pdvId)));
     if (lastSyncedStorePdvRef.current === pdvId && activeSalesPointId === pdvId) return;
     if (activeSalesPointId !== pdvId) {
-      // Solo auto-sync si aún no hay tienda fija en el TPV.
       if (selectedPdvId) return;
       lastSyncedStorePdvRef.current = pdvId;
       setActiveSalesPoint(pdvId);
@@ -672,7 +699,7 @@ function TpvRapidoCeoBoard() {
 
   useEffect(() => {
     const onStore = () => {
-      if (forceStorePicker || !businessId || !dataUserId) return;
+      if (!businessId || !dataUserId) return;
       // No cambiar tienda mientras hay un pedido en curso (desmontaría el gate → Abrir caja).
       try {
         if (sessionStorage.getItem('vertial.tpv.orderFlowLock') === '1') return;
@@ -681,16 +708,14 @@ function TpvRapidoCeoBoard() {
       const pdvId = coerceSelectedPdvId(activePdvs, saved || activeSalesPointId);
       // No borrar la tienda si el listado PDV aún no cargó (evita desmontar el gate a mitad de pedido).
       if (!pdvId) return;
-      setSelectedPdvId((prev) => {
-        if (prev && prev === pdvId) return prev;
-        // Si ya hay tienda operativa, no saltar a otra por un evento de fondo.
-        if (prev && pdvId !== prev) return prev;
-        return pdvId;
-      });
+      // Clic sidebar (también con el picker abierto): esa tienda y entrar.
+      setSelectedPdvId(pdvId);
+      lastSyncedStorePdvRef.current = pdvId;
+      setForceStorePicker(false);
     };
     window.addEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStore);
     return () => window.removeEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStore);
-  }, [forceStorePicker, businessId, dataUserId, activePdvs, activeSalesPointId]);
+  }, [businessId, dataUserId, activePdvs, activeSalesPointId]);
 
   useEffect(() => {
     if (!effectivePdvId || !dataUserId || !tpvCatalogBusinessId || businesses.length === 0) return;
@@ -730,13 +755,32 @@ function TpvRapidoCeoBoard() {
   );
 
   const handleChangeStore = useCallback(() => {
+    if (!isCeoStorePickerUser) return;
     if (businessId && dataUserId) {
       writeDeliveryOpsSelectedPdvId(businessId, dataUserId, null);
       notifyDeliveryActiveStoreChanged();
     }
     setForceStorePicker(true);
     setSelectedPdvId(null);
-  }, [businessId, dataUserId]);
+  }, [isCeoStorePickerUser, businessId, dataUserId]);
+
+  // Con PDVs listos y sin picker: fijar tienda en el mismo ciclo (no spinner eterno).
+  useEffect(() => {
+    if (forceStorePicker || effectivePdvId || activePdvs.length === 0) return;
+    if (!businessId || !dataUserId) return;
+    const saved = readDeliveryOpsSelectedPdvId(businessId, dataUserId);
+    const pdvId = coerceSelectedPdvId(activePdvs, selectedPdvId || saved || activeSalesPointId);
+    if (!pdvId) return;
+    setSelectedPdvId(pdvId);
+  }, [
+    forceStorePicker,
+    effectivePdvId,
+    activePdvs,
+    businessId,
+    dataUserId,
+    selectedPdvId,
+    activeSalesPointId,
+  ]);
 
   if (noStoresConfigured) {
     return (
@@ -780,7 +824,7 @@ function TpvRapidoCeoBoard() {
     );
   }
 
-  if (!effectivePdvId || forceStorePicker) {
+  if (isCeoStorePickerUser && (!effectivePdvId || forceStorePicker)) {
     return (
       <CeoTpvStorePicker
         storeName={currentBusiness?.name}
@@ -790,6 +834,15 @@ function TpvRapidoCeoBoard() {
         onSelect={handleSelectStore}
         onBack={() => navigate(tpvExitPath, { replace: true })}
       />
+    );
+  }
+
+  if (!effectivePdvId) {
+    return (
+      <div className="flex h-[100svh] min-h-[100svh] flex-col items-center justify-center gap-3 bg-gray-50 p-6 text-center dark:bg-gray-950">
+        <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+        <p className="text-sm text-gray-500 dark:text-gray-400">Preparando tienda…</p>
+      </div>
     );
   }
 

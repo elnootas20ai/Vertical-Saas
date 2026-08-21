@@ -104,6 +104,7 @@ import { resolvePreferenceToPdvId, pickDefaultActivePdvId } from '../../lib/deli
 import {
   readOpsSelectedPdvId,
   writeOpsSelectedPdvId,
+  notifyOpsActiveStoreChanged,
 } from '../../lib/opsPdvPreference';
 import { resolveBusinessScopeId, repairMissingRetailDeliveryPdvs } from '../../lib/deliverySetup';
 import {
@@ -184,6 +185,7 @@ import { useModalClose } from '../../hooks/useModalClose';
 import {
   VERTIAL_BTN_PRIMARY,
   VERTIAL_BTN_SECONDARY,
+  VERTIAL_BTN_DANGER,
   VERTIAL_CASH_BG,
   VERTIAL_CASH_BORDER,
   VERTIAL_CASH_TEXT,
@@ -485,11 +487,14 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
     return workerOptions.length === 1 ? workerOptions[0].id : '';
   });
   const [vacationBlockedById, setVacationBlockedById] = useState<Record<string, string>>({});
+  /** Popup al pulsar Abrir caja: confirmar arqueo o avisar al CEO. */
+  const [openCashConfirm, setOpenCashConfirm] = useState<'ask' | 'ceo-alert' | null>(null);
   const salaLaunchRef = useRef<string | null>(consumeSalaTpvLaunch());
   const lastRestrictedPdvRef = useRef('');
   const onOpeningPdvChangeRef = useRef(onOpeningPdvChange);
   onOpeningPdvChangeRef.current = onOpeningPdvChange;
   const total = calcDenominationTotal(counts);
+  useModalClose(Boolean(openCashConfirm), () => setOpenCashConfirm(null));
   const storeRows = useMemo(
     () => buildDeliverySidebarStoreRows(workCenters, pointsOfSale).filter((r) => !r.inactive),
     [workCenters, pointsOfSale],
@@ -567,8 +572,9 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
     const pdvId = selectedPdv?._id || restrictedToPdvId || '';
     const opens = (registerSessions || []).filter((s) => isTpvRegisterSessionOpen(s));
     if (pdvId) {
-      const open = pickNewestOpenRegisterSessionForStore(opens, pdvId, pointsOfSale);
-      if (open) return open;
+      // Tienda ya elegida (sidebar / tablet): solo cajas de ESA tienda.
+      // No caer a otra abierta (p. ej. test1) si Badalona no tiene caja.
+      return pickNewestOpenRegisterSessionForStore(opens, pdvId, pointsOfSale);
     }
     // CEO sin tienda elegida aún: una sola abierta → esa (para el botón Continuar).
     if (opens.length === 1) return opens[0];
@@ -799,9 +805,31 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
     onOpeningPdvChange?.(pdvId);
   };
 
-  const handleSubmit = () => {
+  const requestOpenCash = () => {
     // Solo openingBusy bloquea. parentLoading (refresco de sesiones) tragaba el
     // primer click de «Abrir caja» en silencio y había que pulsar dos veces.
+    if (openingBusy) {
+      toast.info('Abriendo caja…', { id: 'tpv-opening-busy', duration: 1500 });
+      return;
+    }
+    if (existingOpenForStore) {
+      toast.info('Ya hay caja abierta. Usa Continuar en esta caja.', { id: 'tpv-use-enter-banner', duration: 2500 });
+      return;
+    }
+    const wName = effectiveWorkerName();
+    const pdvId = selectedPdv?._id || restrictedToPdvId || '';
+    if (selectedWorkerId && vacationBlockedById[selectedWorkerId]) {
+      toast.error(vacationBlockedById[selectedWorkerId]);
+      return;
+    }
+    if (!canOpen || !wName || !pdvId) {
+      toast.error(openBlockedReason || 'Completa tienda y trabajador para abrir');
+      return;
+    }
+    setOpenCashConfirm('ask');
+  };
+
+  const performOpenCash = () => {
     if (openingBusy) {
       toast.info('Abriendo caja…', { id: 'tpv-opening-busy', duration: 1500 });
       return;
@@ -823,6 +851,7 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
       toast.error(openBlockedReason || 'Completa tienda y trabajador para abrir');
       return;
     }
+    setOpenCashConfirm(null);
     onOpen({
       workerId: selectedWorkerId || undefined,
       workerName: wName,
@@ -930,7 +959,7 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
     const who = [
       staleOpenForStore.workerName || 'Equipo',
       staleOpenForStore.terminalName || '',
-      displayStoreName || '',
+      displayStoreName || staleOpenForStore.pointOfSaleName || '',
     ].filter(Boolean).join(' · ');
     return (
       <div className="rounded-xl border border-amber-200 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/30 p-3 space-y-2">
@@ -962,7 +991,7 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
     const who = [
       existingOpenForStore.workerName || 'Equipo',
       existingOpenForStore.terminalName || '',
-      displayStoreName || '',
+      displayStoreName || existingOpenForStore.pointOfSaleName || '',
     ].filter(Boolean).join(' · ');
     return (
       <div className="h-full min-h-0 bg-stone-50 dark:bg-stone-950 flex items-center justify-center p-4">
@@ -994,6 +1023,16 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
             )}
             Continuar en esta caja
           </button>
+          {isManagerView && onClearStorePick ? (
+            <button
+              type="button"
+              onClick={onClearStorePick}
+              disabled={parentLoading || openingBusy}
+              className={`w-full ${VERTIAL_BTN_SECONDARY}`}
+            >
+              Otra tienda
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={goBack}
@@ -1008,7 +1047,7 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
 
   return (
     <div className="h-full min-h-0 bg-stone-50 dark:bg-stone-950 flex items-stretch sm:items-center justify-center p-2 sm:p-3 overflow-hidden">
-      <div className="bg-white dark:bg-stone-900 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-lg w-full max-w-4xl h-full sm:h-auto sm:max-h-[min(88svh,680px)] min-h-0 flex flex-col overflow-hidden">
+      <div className="relative bg-white dark:bg-stone-900 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-lg w-full max-w-4xl h-full sm:h-auto sm:max-h-[min(88svh,680px)] min-h-0 flex flex-col overflow-hidden">
         {/* Header — una sola línea clara */}
         {staleOpenBanner ? (
           <div className="shrink-0 px-3 sm:px-4 pt-3">
@@ -1276,7 +1315,7 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
             ) : null}
             <button
               type="button"
-              onClick={handleSubmit}
+              onClick={requestOpenCash}
               disabled={!canOpen || openActionBusy || Boolean(existingOpenForStore)}
               className={`w-full py-2.5 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-1.5 ${
                 canOpen && !openActionBusy && !existingOpenForStore
@@ -1293,6 +1332,104 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
             </button>
           </div>
         </div>
+
+        {openCashConfirm ? (
+          <div
+            className="absolute inset-0 z-20 flex items-end sm:items-center justify-center bg-black/45 p-3"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="confirm-open-cash-title"
+            onClick={() => setOpenCashConfirm(null)}
+          >
+            <div
+              className="w-full sm:max-w-md rounded-2xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 shadow-xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {openCashConfirm === 'ask' ? (
+                <>
+                  <div className="px-4 py-3 bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-800 flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/50 flex items-center justify-center shrink-0">
+                      <AlertTriangle className="w-5 h-5 text-amber-700 dark:text-amber-300" />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 id="confirm-open-cash-title" className="text-sm font-bold text-amber-950 dark:text-amber-100">
+                        ¿Has revisado cuánto dinero hay?
+                      </h3>
+                      <p className="text-[11px] text-amber-800 dark:text-amber-200 mt-1 leading-snug">
+                        Vas a abrir con{' '}
+                        <strong className="tabular-nums">{total.toFixed(2)}€</strong>
+                        . Confirma que el cajón cuadra.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="p-3 flex flex-col gap-2">
+                    <button
+                      type="button"
+                      onClick={performOpenCash}
+                      disabled={openingBusy}
+                      className={`${VERTIAL_BTN_PRIMARY} !min-h-11 w-full`}
+                    >
+                      Sí, está bien — abrir
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOpenCashConfirm('ceo-alert')}
+                      className={`${VERTIAL_BTN_DANGER} !min-h-11 w-full`}
+                    >
+                      No, no hay tanto
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOpenCashConfirm(null)}
+                      className={`${VERTIAL_BTN_SECONDARY} !min-h-11 w-full`}
+                    >
+                      Volver a contar
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="px-4 py-3 bg-rose-50 dark:bg-rose-950/40 border-b border-rose-200 dark:border-rose-800 flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-rose-100 dark:bg-rose-900/50 flex items-center justify-center shrink-0">
+                      <AlertTriangle className="w-5 h-5 text-rose-700 dark:text-rose-300" />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 id="confirm-open-cash-title" className="text-sm font-bold text-rose-950 dark:text-rose-100">
+                        Alerta: el CEO tiene que revisar
+                      </h3>
+                      <p className="text-[11px] text-rose-800 dark:text-rose-200 mt-1 leading-snug">
+                        No abras la caja con un importe que no cuadra. Avisa al responsable y
+                        cuenta de nuevo cuando lo confirme.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="p-3 flex flex-col gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        toast.warning(
+                          `Cajón no cuadra (${total.toFixed(2)}€). Aviso: el CEO debe revisar antes de abrir.`,
+                          { id: 'tpv-open-cash-ceo-alert', duration: 6000 },
+                        );
+                        setOpenCashConfirm(null);
+                      }}
+                      className={`${VERTIAL_BTN_PRIMARY} !min-h-11 w-full`}
+                    >
+                      Entendido — no abrir
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOpenCashConfirm('ask')}
+                      className={`${VERTIAL_BTN_SECONDARY} !min-h-11 w-full`}
+                    >
+                      Volver
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -1809,6 +1946,12 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   const [nextDayInitialSlot, setNextDayInitialSlot] = useState(
     () => savedDraft?.nextDayInitialSlot || '',
   );
+  /** Calculadora billetes/monedas del fondo que queda (independiente del conteo del cajón). */
+  const [fondoCounts, setFondoCounts] = useState<CashDenominationCount>(() => {
+    const parsed = parseAggregatorAmount(savedDraft?.nextDayInitialSlot || '');
+    if (parsed == null || parsed < 0) return {};
+    return buildDenominationFromAmount(parsed);
+  });
   /**
    * P/B/T solo se restauran del borrador si el usuario los editó a mano.
    * Si no, empiezan vacíos y el sistema los rellena al cargar pedidos (nunca se congelan a media jornada).
@@ -2115,7 +2258,20 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   }, [nextDayInitialReady]);
 
   const handleNextDayInitialChange = useCallback((value: string) => {
-    setNextDayInitialSlot(formatMoneyAsYouType(value, true));
+    const formatted = formatMoneyAsYouType(value, true);
+    setNextDayInitialSlot(formatted);
+    const parsed = parseAggregatorAmount(formatted);
+    if (parsed == null) {
+      if (!String(formatted || '').trim()) setFondoCounts({});
+      return;
+    }
+    setFondoCounts(buildDenominationFromAmount(parsed));
+  }, []);
+
+  const handleFondoCountsChange = useCallback((next: CashDenominationCount) => {
+    setFondoCounts(next);
+    const total = calcDenominationTotal(next);
+    setNextDayInitialSlot(total.toFixed(2));
   }, []);
 
   const nextDayFondoCardClass = nextDayInitialReady
@@ -2734,7 +2890,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
               })()}
 
               <div className={`shrink-0 rounded-2xl border px-3 py-3 space-y-2 ${nextDayFondoCardClass}`}>
-                <label className="block cursor-text">
+                <div>
                   <span className={`text-[11px] font-bold flex items-center gap-1.5 ${
                     nextDayFondoHighlight && !nextDayInitialReady
                       ? 'text-amber-900 dark:text-amber-100'
@@ -2750,6 +2906,10 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                   <p className="mt-0.5 text-[10px] text-stone-500 dark:text-stone-400 leading-snug">
                     ¿Cuánto efectivo dejas en el cajón? Ese importe será el fondo al abrir.
                   </p>
+                </div>
+                <CashCountGrid compact counts={fondoCounts} onChange={handleFondoCountsChange} />
+                <label className="block cursor-text">
+                  <span className="sr-only">Importe del fondo</span>
                   <input
                     ref={nextDayInitialInputRef}
                     type="text"
@@ -2757,7 +2917,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                     placeholder="Ej. 100,00"
                     value={nextDayInitialSlot}
                     onChange={(e) => handleNextDayInitialChange(e.target.value)}
-                    className={`mt-1.5 w-full min-h-14 px-3 py-2 text-3xl font-black tabular-nums tracking-tight border rounded-xl bg-white dark:bg-stone-950 focus:outline-none focus:ring-2 ${nextDayFondoInputClass}`}
+                    className={`w-full min-h-14 px-3 py-2 text-3xl font-black tabular-nums tracking-tight border rounded-xl bg-white dark:bg-stone-950 focus:outline-none focus:ring-2 ${nextDayFondoInputClass}`}
                   />
                 </label>
                 {nextDayInitialReady ? (
@@ -2789,7 +2949,10 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 {countedTotal > 0 ? (
                   <button
                     type="button"
-                    onClick={() => setNextDayInitialSlot(countedTotal.toFixed(2))}
+                    onClick={() => {
+                      setNextDayInitialSlot(countedTotal.toFixed(2));
+                      setFondoCounts(buildDenominationFromAmount(countedTotal));
+                    }}
                     className="text-[11px] font-semibold text-blue-700 dark:text-blue-300 underline"
                   >
                     Usar el contado ({formatMoneyEs(countedTotal)})
@@ -3378,7 +3541,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
               ) : null}
 
               <div className={`shrink-0 rounded-2xl border px-3 py-3 space-y-2 ${nextDayFondoCardClass}`}>
-                <label className="block cursor-text">
+                <div>
                   <span className={`text-[11px] font-bold flex items-center gap-1.5 ${
                     nextDayFondoHighlight && !nextDayInitialReady
                       ? 'text-amber-900 dark:text-amber-100'
@@ -3394,6 +3557,10 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                   <p className="mt-0.5 text-[10px] text-stone-500 dark:text-stone-400 leading-snug">
                     ¿Cuánto efectivo dejas en el cajón? Ese importe será el fondo al abrir.
                   </p>
+                </div>
+                <CashCountGrid compact counts={fondoCounts} onChange={handleFondoCountsChange} />
+                <label className="block cursor-text">
+                  <span className="sr-only">Importe del fondo</span>
                   <input
                     ref={nextDayInitialInputRef}
                     type="text"
@@ -3401,7 +3568,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                     placeholder="Ej. 100,00"
                     value={nextDayInitialSlot}
                     onChange={(e) => handleNextDayInitialChange(e.target.value)}
-                    className={`mt-1.5 w-full min-h-14 px-3 py-2 text-3xl font-black tabular-nums tracking-tight border rounded-xl bg-white dark:bg-stone-950 focus:outline-none focus:ring-2 ${nextDayFondoInputClass}`}
+                    className={`w-full min-h-14 px-3 py-2 text-3xl font-black tabular-nums tracking-tight border rounded-xl bg-white dark:bg-stone-950 focus:outline-none focus:ring-2 ${nextDayFondoInputClass}`}
                   />
                 </label>
                 {nextDayInitialReady ? (
@@ -3433,7 +3600,10 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 {countedTotal > 0 ? (
                   <button
                     type="button"
-                    onClick={() => setNextDayInitialSlot(countedTotal.toFixed(2))}
+                    onClick={() => {
+                      setNextDayInitialSlot(countedTotal.toFixed(2));
+                      setFondoCounts(buildDenominationFromAmount(countedTotal));
+                    }}
                     className="text-[11px] font-bold text-[#2563EB] underline"
                   >
                     Usar el contado ({formatMoneyEs(countedTotal)})
@@ -5421,17 +5591,31 @@ export function TpvRegisterGate({
     isTabletSession || isWorkerUser || orderFlowActive || isRestaurantVerticalChrome,
   );
 
-  const activeSession = useMemo(() => {
-    const pickId = isTabletSession
-      ? tabletRestrictedPdvId
-      : isWorkerUser
-        ? workerAssignedPdvId
-        : managerPdvPickId;
+  /**
+   * Tienda operativa del gate: tablet / trabajador / CEO.
+   * Incluye `initialManagerPdvId` en el mismo render (sin esperar al useLayoutEffect
+   * de managerPdvPickId) para que Continuar/Abrir no carguen con tienda vacía o ajena.
+   */
+  const resolvedStorePickId = useMemo(() => {
+    if (isTabletSession) return tabletRestrictedPdvId;
+    if (isWorkerUser) return workerAssignedPdvId;
+    const fromProp = String(initialManagerPdvId || '').trim();
+    if (fromProp) return fromProp;
+    return managerPdvPickId;
+  }, [
+    isTabletSession,
+    tabletRestrictedPdvId,
+    isWorkerUser,
+    workerAssignedPdvId,
+    initialManagerPdvId,
+    managerPdvPickId,
+  ]);
 
+  const activeSession = useMemo(() => {
     const { session, nextSticky } = resolveActiveTpvRegisterSession({
       sessions,
       sticky: stickyOpenSessionRef.current,
-      pickId,
+      pickId: resolvedStorePickId,
       pointsOfSale,
       holdStickyWhileOpen,
     });
@@ -5440,11 +5624,7 @@ export function TpvRegisterGate({
     return session;
   }, [
     sessions,
-    isTabletSession,
-    tabletRestrictedPdvId,
-    isWorkerUser,
-    workerAssignedPdvId,
-    managerPdvPickId,
+    resolvedStorePickId,
     pointsOfSale,
     holdStickyWhileOpen,
   ]);
@@ -5524,7 +5704,7 @@ export function TpvRegisterGate({
 
   const activeStoreScope = useMemo(() => {
     const rawId = String(
-      activeSession?.pointOfSaleId || tabletRestrictedPdvId || managerPdvPickId || '',
+      activeSession?.pointOfSaleId || resolvedStorePickId || '',
     ).trim();
     const pdv =
       pointsOfSale.find((p) => p._id === rawId)
@@ -5537,8 +5717,7 @@ export function TpvRegisterGate({
     return { pdvId, workCenterId };
   }, [
     activeSession?.pointOfSaleId,
-    tabletRestrictedPdvId,
-    managerPdvPickId,
+    resolvedStorePickId,
     pointsOfSale,
     tabletBinding?.workCenterId,
   ]);
@@ -5574,7 +5753,7 @@ export function TpvRegisterGate({
     // Si el manager elige otra tienda en el panel de impresora, esa manda
     // (si no, con caja abierta en la 1ª nunca podías guardar/probar la 2ª).
     const preferredId = String(
-      managerPdvPickId || activeSession?.pointOfSaleId || tabletRestrictedPdvId || '',
+      resolvedStorePickId || activeSession?.pointOfSaleId || '',
     ).trim();
     const pdv =
       printerStores.find((p) => p._id === preferredId)
@@ -5608,8 +5787,7 @@ export function TpvRegisterGate({
     dataUserId,
     activeSession?.pointOfSaleId,
     activeSession?.terminalId,
-    tabletRestrictedPdvId,
-    managerPdvPickId,
+    resolvedStorePickId,
     pointsOfSale,
     printerStores,
     handlePrinterStoreSelect,
@@ -5628,12 +5806,14 @@ export function TpvRegisterGate({
   const handleOpeningPdvChange = useCallback((pdvId: string) => {
     const id = String(pdvId || '').trim();
     if (!id) return;
-    setManagerPdvPickId((prev) => (prev === id ? prev : id));
+    skipManagerAutoPdvRef.current = true;
+    setManagerPdvPickId(id);
     const bid = resolveBusinessScopeId(currentBusiness);
     if (bid && dataUserId) {
       writeOpsSelectedPdvId(currentBusiness?.businessType, bid, dataUserId, id);
+      notifyOpsActiveStoreChanged(currentBusiness?.businessType);
     }
-  }, [currentBusiness?.business_id, currentBusiness?.id, dataUserId]);
+  }, [currentBusiness?.business_id, currentBusiness?.id, currentBusiness?.businessType, dataUserId]);
 
   const refreshClockedInWorkers = useCallback(async (options?: { silent?: boolean }) => {
     if (!businessId) {
@@ -7455,8 +7635,7 @@ export function TpvRegisterGate({
       );
     }
 
-    const openingRestrictedPdvId = tabletRestrictedPdvId
-      || (isWorkerUser ? workerAssignedPdvId : managerPdvPickId)
+    const openingRestrictedPdvId = resolvedStorePickId
       || (needsResumeAck ? String(boardSession?.pointOfSaleId || '').trim() : '')
       || null;
 
