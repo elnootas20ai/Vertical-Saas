@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import {
   ArrowRight, Check, Users, Handshake, TrendingUp, Shield,
@@ -84,6 +84,7 @@ export function AffiliatePage() {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [openFaq, setOpenFaq] = useState<number | null>(null);
   const [sameAsPhone, setSameAsPhone] = useState(true);
+  const submittingRef = useRef(false);
 
   const [form, setForm] = useState<FormData>({
     name: '', email: '', phone: '', whatsapp: '',
@@ -133,9 +134,12 @@ export function AffiliatePage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingRef.current || formState === 'loading' || formState === 'success') return;
     if (!validate()) return;
+    submittingRef.current = true;
     setFormState('loading');
     setErrorMsg('');
+    let succeeded = false;
     try {
       const payload = { ...form, whatsapp: sameAsPhone ? form.phone : form.whatsapp };
       const res = await fetch(`${API_BASE}/api/affiliate/request`, {
@@ -143,12 +147,27 @@ export function AffiliatePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
-      if (data.ok) setFormState('success');
-      else { setFormState('error'); setErrorMsg(data.error || 'No se pudo enviar la solicitud.'); }
+      const data = await res.json().catch(() => ({}));
+      if (data.ok) {
+        succeeded = true;
+        setFormState('success');
+        return;
+      }
+      const errRaw = data.error;
+      const errMsg = typeof errRaw === 'string'
+        ? errRaw
+        : (errRaw?.message || 'No se pudo enviar la solicitud.');
+      setFormState('error');
+      setErrorMsg(errMsg);
     } catch {
       setFormState('error');
       setErrorMsg('Error de conexión. Inténtalo de nuevo.');
+    } finally {
+      if (!succeeded) {
+        window.setTimeout(() => {
+          submittingRef.current = false;
+        }, 2500);
+      }
     }
   };
 
@@ -171,9 +190,12 @@ export function AffiliatePage() {
               className="px-8 py-3.5 bg-white text-slate-900 font-bold rounded-xl hover:bg-blue-50 transition-all shadow-xl">
               Volver al inicio
             </button>
-            <button onClick={() => setFormState('idle')}
-              className="px-8 py-3 text-blue-300 font-medium hover:text-white transition-colors text-sm">
-              Enviar otra solicitud
+            <button
+              type="button"
+              onClick={() => navigate(AUTH_PATHS.affiliatePortal)}
+              className="px-8 py-3 text-blue-300 font-medium hover:text-white transition-colors text-sm"
+            >
+              Ir al panel de afiliado
             </button>
           </div>
         </div>

@@ -399,6 +399,23 @@ export const apiLimiter = rateLimit({
   message: { ok: false, success: false, error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Demasiadas peticiones. Inténtalo en un momento.' } },
 });
 
+/** Solicitud pública de afiliado: máximo 3 intentos / 15 min por IP. */
+export const affiliateRequestLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: getClientIp,
+  message: {
+    ok: false,
+    success: false,
+    error: {
+      code: 'RATE_LIMIT_EXCEEDED',
+      message: 'Has enviado demasiadas solicitudes. Espera unos minutos e inténtalo de nuevo.',
+    },
+  },
+});
+
 /**
  * Middleware dinámico que selecciona el limiter correcto según el plan del usuario.
  * Requiere que requireAuth haya corrido antes (req.authUser disponible).

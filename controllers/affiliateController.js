@@ -104,13 +104,12 @@ async function findAffiliateByLinkedAccount(req, accountUserId) {
 async function linkAffiliateToVertialAccount(req, affiliate, account) {
   if (!affiliate?._id || !account?.user_id) return affiliate;
   const now = new Date().toISOString();
-  const linkedAffiliate = {
+  const linkedAffiliate = await putAffiliateDocument(req, affiliate._id, {
     ...affiliate,
     linkedAccountUserId: account.user_id,
     portalAccessMode: 'account',
     updatedAt: now,
-  };
-  await putDocument(req, AFFILIATES_DB, affiliate._id, linkedAffiliate);
+  });
 
   const needsAccountUpdate =
     account.affiliateId !== affiliate._id
@@ -288,6 +287,19 @@ async function resolvePlatformAffiliateOwnerUserId(req) {
   }
 }
 
+async function putAffiliateDocument(req, affiliateId, doc) {
+  const result = await putDocument(req, AFFILIATES_DB, affiliateId, {
+    ...doc,
+    _id: affiliateId,
+  });
+  const nextRev = result?.rev || result?._rev || doc?._rev;
+  return {
+    ...doc,
+    _id: affiliateId,
+    ...(nextRev ? { _rev: nextRev } : {}),
+  };
+}
+
 async function applyAffiliateStatusChange(
   req,
   affiliateId,
@@ -325,7 +337,7 @@ async function applyAffiliateStatusChange(
   if (status === 'accepted' && !doc.referralCode) {
     doc.referralCode = generateReferralCode();
   }
-  await putDocument(req, AFFILIATES_DB, affiliateId, doc);
+  doc = await putAffiliateDocument(req, affiliateId, doc);
 
   if (status === 'accepted') {
     doc = await syncAffiliateAccountLink(req, doc);
@@ -352,14 +364,20 @@ async function applyAffiliateStatusChange(
         });
       }
       statusEmailSent = true;
-      const stamped = {
-        ...doc,
-        statusEmailSentAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      await putDocument(req, AFFILIATES_DB, affiliateId, stamped);
+      try {
+        const fresh = await getDocument(req, AFFILIATES_DB, affiliateId);
+        if (fresh && !fresh.deletedAt) {
+          doc = await putAffiliateDocument(req, affiliateId, {
+            ...fresh,
+            statusEmailSentAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      } catch (stampErr) {
+        logger.warn({ tag: 'AFFILIATE', affiliateId, stampErr }, 'Estado OK pero no se selló statusEmailSentAt');
+      }
       return {
-        doc: stamped,
+        doc,
         previousStatus,
         statusEmailSent,
         statusEmailError: null,
@@ -417,8 +435,32 @@ export async function submitAffiliateRequest(req, res) {
     return res.status(400).json({ ok: false, error: 'Una o más verticales seleccionadas no son válidas.' });
   }
 
+  const emailNorm = String(email).trim().toLowerCase();
+
   try {
     await ensureAffiliatesDb(req);
+    const all = await getAllDocuments(req, AFFILIATES_DB);
+    const sameEmail = all.filter(
+      (d) => d.type === 'affiliate'
+        && !d.deletedAt
+        && String(d.email || '').trim().toLowerCase() === emailNorm,
+    );
+    const pending = sameEmail.find((d) => d.status === 'pending');
+    if (pending) {
+      // Idempotente: no crear otra fila si ya hay solicitud pendiente.
+      return res.json({
+        ok: true,
+        alreadySubmitted: true,
+        message: 'Ya tenemos tu solicitud. Nuestro equipo la está revisando.',
+      });
+    }
+    const accepted = sameEmail.find((d) => d.status === 'accepted');
+    if (accepted) {
+      return res.status(409).json({
+        ok: false,
+        error: 'Este email ya es afiliado. Accede al panel con tu cuenta o código.',
+      });
+    }
 
     const now = new Date().toISOString();
     const id = `aff-${uuidv4()}`;
@@ -453,20 +495,34 @@ export async function submitAffiliateRequest(req, res) {
 
     await putDocument(req, AFFILIATES_DB, id, doc);
 
-    logger.info({ tag: 'AFFILIATE', email, verticals, affiliateCode }, 'Solicitud de afiliado recibida');
+    logger.info({ tag: 'AFFILIATE', email: emailNorm, verticals, affiliateCode }, 'Solicitud de afiliado recibida');
 
-    const emailMeta = await sendAffiliateRequestEmails({
-      ...payload,
-      affiliateCode,
-      affiliateId: id,
-    });
-    if (emailMeta.adminNotifiedAt || emailMeta.applicantNotifiedAt) {
-      await putDocument(req, AFFILIATES_DB, id, {
-        ...doc,
-        adminNotifiedAt: emailMeta.adminNotifiedAt,
-        applicantNotifiedAt: emailMeta.applicantNotifiedAt,
-        updatedAt: new Date().toISOString(),
+    let emailMeta = { adminNotifiedAt: null, applicantNotifiedAt: null };
+    try {
+      emailMeta = await sendAffiliateRequestEmails({
+        ...payload,
+        affiliateCode,
+        affiliateId: id,
       });
+    } catch (emailErr) {
+      // La solicitud ya está guardada: un fallo de correo no debe tumbar el alta.
+      logger.warn({ tag: 'AFFILIATE', emailErr, affiliateId: id }, 'Fallo envío emails de solicitud (solicitud OK)');
+    }
+
+    if (emailMeta.adminNotifiedAt || emailMeta.applicantNotifiedAt) {
+      try {
+        const fresh = await getDocument(req, AFFILIATES_DB, id);
+        if (fresh && !fresh.deletedAt) {
+          await putDocument(req, AFFILIATES_DB, id, {
+            ...fresh,
+            adminNotifiedAt: emailMeta.adminNotifiedAt || fresh.adminNotifiedAt || null,
+            applicantNotifiedAt: emailMeta.applicantNotifiedAt || fresh.applicantNotifiedAt || null,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      } catch (stampErr) {
+        logger.warn({ tag: 'AFFILIATE', stampErr, affiliateId: id }, 'No se pudo sellar timestamps de email');
+      }
     }
 
     return res.json({
@@ -501,9 +557,12 @@ export async function portalLogin(req, res) {
     }
 
     if (!affiliate.referralCode) {
-      affiliate.referralCode = generateReferralCode();
-      affiliate.updatedAt = new Date().toISOString();
-      await putDocument(req, AFFILIATES_DB, affiliate._id, affiliate);
+      const updated = await putAffiliateDocument(req, affiliate._id, {
+        ...affiliate,
+        referralCode: generateReferralCode(),
+        updatedAt: new Date().toISOString(),
+      });
+      Object.assign(affiliate, updated);
     }
 
     const linked = await syncAffiliateAccountLink(req, affiliate);
@@ -557,9 +616,11 @@ export async function portalLoginWithAccount(req, res) {
     affiliate = await linkAffiliateToVertialAccount(req, affiliate, account);
 
     if (!affiliate.referralCode) {
-      affiliate.referralCode = generateReferralCode();
-      affiliate.updatedAt = new Date().toISOString();
-      await putDocument(req, AFFILIATES_DB, affiliate._id, affiliate);
+      affiliate = await putAffiliateDocument(req, affiliate._id, {
+        ...affiliate,
+        referralCode: generateReferralCode(),
+        updatedAt: new Date().toISOString(),
+      });
     }
 
     return res.json({
@@ -1758,8 +1819,39 @@ export async function portalReferredAccounts(req, res) {
 async function sendAffiliateRequestEmails(payload) {
   const now = new Date().toISOString();
   const meta = { adminNotifiedAt: null, applicantNotifiedAt: null };
-  const adminEmail = getAffiliateContactEmail();
-  const adminHtml = buildAffiliateRequestEmail(payload);
+  let adminEmail = 'vertial.noreply@gmail.com';
+  let adminHtml = '';
+  const adminUrl = adminAffiliateRequestsUrl();
+  try {
+    adminEmail = getAffiliateContactEmail();
+    adminHtml = buildAffiliateRequestEmail(payload);
+  } catch (buildErr) {
+    logger.warn({ tag: 'AFFILIATE', buildErr }, 'No se pudo construir email admin de solicitud');
+    adminHtml = `
+      <p>Nueva solicitud de afiliado.</p>
+      <p><strong>${escapeHtml(payload.name || '')}</strong> · ${escapeHtml(payload.email || '')} · ${escapeHtml(payload.phone || '')}</p>
+      <p><a href="${escapeHtml(adminUrl)}">Abrir solicitudes en Admin Vertial</a></p>
+    `;
+  }
+
+  // Aviso al buzón admin (ALERTS_ADMIN_EMAIL): así Uriel lo ve aunque AFFILIATE_EMAIL falle.
+  try {
+    await sendAdminAlert({
+      key: `affiliate_request_${String(payload.email || '').toLowerCase()}`,
+      subject: `Nueva solicitud de afiliado: ${payload.name}`,
+      html: `${adminHtml}
+        <p style="margin:20px 0 0;">
+          <a href="${escapeHtml(adminUrl)}"
+             style="display:inline-block;background:#111827;color:#fff;padding:12px 18px;border-radius:10px;text-decoration:none;font-weight:700;">
+            Abrir Admin · Solicitudes afiliados
+          </a>
+        </p>`,
+      cooldownMs: 60_000,
+    });
+    meta.adminNotifiedAt = now;
+  } catch (alertErr) {
+    logger.warn({ tag: 'AFFILIATE', alertErr }, 'Fallo alerta admin de solicitud de afiliado');
+  }
 
   try {
     await sendEmail({
@@ -1772,17 +1864,6 @@ async function sendAffiliateRequestEmails(payload) {
     logger.info({ tag: 'AFFILIATE', to: adminEmail }, 'Email de solicitud enviado al admin');
   } catch (emailErr) {
     logger.warn({ tag: 'AFFILIATE', emailErr, to: adminEmail }, 'Fallo email admin de solicitud de afiliado');
-    try {
-      await sendAdminAlert({
-        key: `affiliate_request_${payload.email}`,
-        subject: `Nueva solicitud de afiliado: ${payload.name}`,
-        html: adminHtml,
-        cooldownMs: 60_000,
-      });
-      meta.adminNotifiedAt = now;
-    } catch (alertErr) {
-      logger.warn({ tag: 'AFFILIATE', alertErr }, 'Fallo alerta admin de solicitud de afiliado');
-    }
   }
 
   try {

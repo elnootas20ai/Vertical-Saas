@@ -34,13 +34,13 @@ import {
   deleteCommissionAdmin,
 } from '../controllers/affiliateController.js';
 import { requireAuthAndEmailVerified } from '../middleware/auth.js';
-import { apiLimiter } from '../middleware/rateLimiter.js';
+import { apiLimiter, affiliateRequestLimiter } from '../middleware/rateLimiter.js';
 
 export const affiliateRouter = Router();
 
 // ── Public ─────────────────────────────────────────────────────────────────────
 affiliateRouter.get('/verticals', getVerticals);
-affiliateRouter.post('/request', apiLimiter, submitAffiliateRequest);
+affiliateRouter.post('/request', affiliateRequestLimiter, apiLimiter, submitAffiliateRequest);
 affiliateRouter.get('/email-action', apiLimiter, handleAffiliateEmailAction);
 affiliateRouter.get('/referral/:code/validate', validateReferralCode);
 

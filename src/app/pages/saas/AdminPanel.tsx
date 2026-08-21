@@ -118,6 +118,7 @@ import {
   clearAffiliateRequests,
   fetchAffiliateKycAdmin,
   updateAffiliateKycStatus,
+  fetchAffiliateRequestCounts,
   type Affiliate,
   type AffiliateStatus,
 } from '../../lib/affiliatesApi';
@@ -3898,6 +3899,7 @@ export function AdminPanel() {
   const [activeTab, setActiveTab] = useState<TabId>('clients');
   const [auditUsers, setAuditUsers] = useState<AuthUser[]>([]);
   const [paymentSentBadge, setPaymentSentBadge] = useState(0);
+  const [affiliatePendingBadge, setAffiliatePendingBadge] = useState(0);
 
   const openClientDetail = useCallback((account: AuthUser) => {
     const id = String(account.user_id || '').trim();
@@ -3930,6 +3932,19 @@ export function AdminPanel() {
       });
     return () => { cancelled = true; };
   }, [listUsers, activeTab]);
+
+  useEffect(() => {
+    if (!adminUserId) return;
+    let cancelled = false;
+    fetchAffiliateRequestCounts(adminUserId)
+      .then((summary) => {
+        if (!cancelled) setAffiliatePendingBadge(Number(summary.pending) || 0);
+      })
+      .catch(() => {
+        if (!cancelled) setAffiliatePendingBadge(0);
+      });
+    return () => { cancelled = true; };
+  }, [adminUserId, activeTab]);
 
   useEffect(() => {
     if (activeTab === 'audit') {
@@ -3973,6 +3988,11 @@ export function AdminPanel() {
                 {tab.id === 'clients' && paymentSentBadge > 0 && (
                   <span className="absolute -top-0.5 -right-0.5 min-w-[1.15rem] h-[1.15rem] px-1 rounded-full bg-violet-600 text-white text-[10px] font-bold leading-[1.15rem] text-center">
                     {paymentSentBadge > 9 ? '9+' : paymentSentBadge}
+                  </span>
+                )}
+                {tab.id === 'affiliate_requests' && affiliatePendingBadge > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[1.15rem] h-[1.15rem] px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold leading-[1.15rem] text-center">
+                    {affiliatePendingBadge > 9 ? '9+' : affiliatePendingBadge}
                   </span>
                 )}
               </button>
