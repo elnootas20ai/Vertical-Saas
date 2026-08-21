@@ -565,7 +565,7 @@ function TpvRapidoCeoBoard() {
     return bootstrapPdvs.filter((p) => p.active !== false);
   }, [pointsOfSale, bootstrapPdvs]);
 
-  // CEO + varias tiendas: primero elegir cuál abrir; luego OpeningScreen (Continuar / Abrir).
+  // CEO + varias tiendas: primero elegir cuál abrir; luego OpeningScreen de ESA tienda.
   // Solo CEO web — trabajador/tablet entran directo a su tienda (código / asignación).
   useEffect(() => {
     if (!isCeoStorePickerUser) return;
@@ -856,6 +856,7 @@ function TpvRapidoCeoBoard() {
         <StoreHoursStatusBanner workCenter={activeStoreHoursWorkCenter} compact className="shrink-0" />
         <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
           <TpvRegisterGate
+            key={effectivePdvId}
             fillParent
             initialManagerPdvId={effectivePdvId}
             onManagerStoreCleared={handleChangeStore}

@@ -670,6 +670,44 @@ export function SAAS__OcrScanModal({
                 confidence: 100,
                 source: 'user',
               },
+              ...(String(context?.workCenterId || context?.costCenterId || '').trim()
+                ? {
+                    workCenterId: {
+                      value: String(context?.workCenterId || context?.costCenterId || '').trim(),
+                      confidence: 100,
+                      source: 'user',
+                    },
+                    workCenterName: {
+                      value: String(context?.workCenterName || context?.costCenterName || '').trim(),
+                      confidence: 100,
+                      source: 'user',
+                    },
+                    costCenterId: {
+                      value: String(context?.workCenterId || context?.costCenterId || '').trim(),
+                      confidence: 100,
+                      source: 'user',
+                    },
+                    costCenterName: {
+                      value: String(context?.workCenterName || context?.costCenterName || '').trim(),
+                      confidence: 100,
+                      source: 'user',
+                    },
+                  }
+                : {}),
+              ...(String(context?.businessId || '').trim()
+                ? {
+                    businessId: {
+                      value: String(context?.businessId || '').trim(),
+                      confidence: 100,
+                      source: 'user',
+                    },
+                    businessName: {
+                      value: String(context?.businessName || '').trim(),
+                      confidence: 100,
+                      source: 'user',
+                    },
+                  }
+                : {}),
             }
           : {}),
       };

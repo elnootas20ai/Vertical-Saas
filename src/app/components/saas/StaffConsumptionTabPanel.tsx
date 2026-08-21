@@ -1,16 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
-import { History, Settings, UtensilsCrossed } from 'lucide-react';
+import { History, Package, Settings, UtensilsCrossed } from 'lucide-react';
 import type { AuthUser } from '../../lib/authApi';
 import type { CatalogItem } from '../../lib/deliveryApi';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
+import { VERTIAL_SURFACE } from '../../lib/vertialUiTokens';
 import { StaffConsumptionsTab } from './StaffConsumptionsTab';
 import { StaffConsumptionSettingsTab } from './StaffConsumptionSettingsTab';
+import { StaffConsumptionProductsTab } from './StaffConsumptionProductsTab';
 
-type StaffSection = 'history' | 'settings';
+type StaffSection = 'history' | 'products' | 'settings';
 
 const SECTION_TABS: { id: StaffSection; label: string; icon: typeof History }[] = [
   { id: 'history', label: 'Historial', icon: History },
+  { id: 'products', label: 'Productos', icon: Package },
   { id: 'settings', label: 'Configuración', icon: Settings },
 ];
 
@@ -29,7 +32,7 @@ export function StaffConsumptionTabPanel({
 }: StaffConsumptionTabPanelProps) {
   const { listUsers } = useAuth();
   const { currentBusiness } = useBusiness();
-  const [section, setSection] = useState<StaffSection>('history');
+  const [section, setSection] = useState<StaffSection>('products');
   const [members, setMembers] = useState<AuthUser[]>([]);
 
   useEffect(() => {
@@ -64,32 +67,31 @@ export function StaffConsumptionTabPanel({
   const memberCount = orderedMembers.length;
 
   return (
-    <div className="space-y-5">
-      <div className="rounded-2xl border-2 border-violet-300 dark:border-violet-700 bg-gradient-to-br from-violet-100 via-violet-50/90 to-white dark:from-violet-950/60 dark:via-violet-950/35 dark:to-gray-900 shadow-md shadow-violet-200/40 dark:shadow-violet-950/30 overflow-hidden">
-        <div className="p-5 sm:p-6 border-b border-violet-200/80 dark:border-violet-800/80">
-          <div className="flex items-start gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-violet-600 dark:bg-violet-500 flex items-center justify-center shrink-0 shadow-sm">
-              <UtensilsCrossed className="w-6 h-6 text-white" />
+    <div className="space-y-4">
+      <div className={`${VERTIAL_SURFACE} overflow-hidden`}>
+        <div className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#2563EB]/10">
+              <UtensilsCrossed className="h-4 w-4 text-[#2563EB]" />
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex flex-wrap items-center gap-2 mb-1">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Consumos de equipo</h2>
-                {memberCount > 0 && (
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-violet-600/15 text-violet-800 dark:text-violet-200 border border-violet-300/60 dark:border-violet-600/50">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-sm font-bold text-stone-900 dark:text-stone-100">
+                  Consumos de equipo
+                </h2>
+                {memberCount > 0 ? (
+                  <span className="rounded-md bg-stone-100 px-1.5 py-0.5 text-[10px] font-semibold text-stone-600 dark:bg-stone-800 dark:text-stone-300">
                     {memberCount} en equipo
                   </span>
-                )}
+                ) : null}
               </div>
-              <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
-                Registro de lo que consume el personal desde el TPV (precio empleado).
-                {memberCount > 0 ? ' Vinculado con los trabajadores del negocio.' : ' Activa el TPV en Configuración para empezar a registrar.'}
+              <p className="truncate text-[11px] text-stone-500">
+                Precio empleado en TPV · por organizador o producto
               </p>
             </div>
           </div>
-        </div>
 
-        <div className="px-4 sm:px-5 py-3 bg-violet-200/30 dark:bg-violet-950/40">
-          <div className="flex gap-2 overflow-x-auto pb-0.5 [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
+          <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto sm:justify-end">
             {SECTION_TABS.map(({ id, label, icon: Icon }) => {
               const active = section === id;
               return (
@@ -97,13 +99,13 @@ export function StaffConsumptionTabPanel({
                   key={id}
                   type="button"
                   onClick={() => setSection(id)}
-                  className={`inline-flex items-center gap-2 px-4 py-2.5 min-h-[44px] rounded-xl text-sm font-semibold border transition-all shrink-0 ${
+                  className={`inline-flex min-h-9 items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-colors shrink-0 ${
                     active
-                      ? 'bg-violet-700 dark:bg-violet-500 text-white border-violet-700 dark:border-violet-500 shadow-sm scale-[1.02]'
-                      : 'bg-white/90 dark:bg-gray-900/80 border-violet-200 dark:border-violet-800 text-violet-900 dark:text-violet-100 hover:bg-white dark:hover:bg-gray-900 hover:border-violet-300'
+                      ? 'border-[#2563EB] bg-[#2563EB] text-white'
+                      : 'border-stone-200 bg-white text-stone-700 hover:border-blue-200 hover:bg-blue-50/60 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200'
                   }`}
                 >
-                  <Icon className="w-4 h-4" />
+                  <Icon className="h-3.5 w-3.5" />
                   {label}
                 </button>
               );
@@ -112,20 +114,25 @@ export function StaffConsumptionTabPanel({
         </div>
       </div>
 
-      {section === 'history' && (
-        <StaffConsumptionsTab
-          members={orderedMembers}
-          currentUser={currentUser}
-        />
-      )}
+      {section === 'history' ? (
+        <StaffConsumptionsTab members={orderedMembers} currentUser={currentUser} />
+      ) : null}
 
-      {section === 'settings' && (
+      {section === 'products' ? (
+        <StaffConsumptionProductsTab
+          userId={userId}
+          catalogItems={catalogItems}
+          onCatalogUpdated={onCatalogUpdated}
+        />
+      ) : null}
+
+      {section === 'settings' ? (
         <StaffConsumptionSettingsTab
           userId={userId}
           catalogItems={catalogItems}
           onCatalogUpdated={onCatalogUpdated}
         />
-      )}
+      ) : null}
     </div>
   );
 }

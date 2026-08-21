@@ -170,7 +170,9 @@ import {
   Globe,
   ArrowLeft,
   ImagePlus,
+  ScanLine,
 } from 'lucide-react';
+import { SAAS__OcrScanModal } from '../../components/design-system/SAAS__OcrScanModal';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 import { CatalogImportReportPanel } from '../../components/saas/CatalogImportReportPanel';
@@ -3603,6 +3605,9 @@ export function CatalogPage() {
   // Invoice state
   const [showCreateInvoice, setShowCreateInvoice] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<PurchaseInvoice | null>(null);
+  const [showInvoiceOcr, setShowInvoiceOcr] = useState(false);
+  const [showInvoiceOcrStorePicker, setShowInvoiceOcrStorePicker] = useState(false);
+  const [invoiceOcrWorkCenter, setInvoiceOcrWorkCenter] = useState<{ id: string; name: string } | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [catalogImportReport, setCatalogImportReport] = useState<CatalogImportReport | null>(null);
   const [imageZipMap, setImageZipMap] = useState<Record<string, string>>({});
@@ -4816,6 +4821,39 @@ export function CatalogPage() {
       toast.error('Error al eliminar el proveedor');
     }
   };
+
+  // ── OCR factura directa (proveedor + artículos + stock) ─────────────────────
+
+  const invoiceOcrStores = useMemo(
+    () =>
+      activeStore.retailWorkCenters
+        .filter((wc) => wc.active !== false)
+        .map((wc) => ({ id: wc._id, name: wc.name || 'Tienda' })),
+    [activeStore.retailWorkCenters],
+  );
+
+  const openInvoiceOcrFlow = useCallback(() => {
+    if (!dataUserId) {
+      toast.error('Sesión no válida. Recarga e inicia sesión de nuevo.');
+      return;
+    }
+    if (invoiceOcrStores.length === 0) {
+      toast.error('No hay tiendas. Crea una tienda antes de escanear facturas.');
+      return;
+    }
+    if (invoiceOcrStores.length === 1) {
+      setInvoiceOcrWorkCenter(invoiceOcrStores[0]);
+      setShowInvoiceOcr(true);
+      return;
+    }
+    setShowInvoiceOcrStorePicker(true);
+  }, [dataUserId, invoiceOcrStores]);
+
+  const confirmInvoiceOcrStore = useCallback((store: { id: string; name: string }) => {
+    setInvoiceOcrWorkCenter(store);
+    setShowInvoiceOcrStorePicker(false);
+    setShowInvoiceOcr(true);
+  }, []);
 
   // ── CRUD: Invoices ──────────────────────────────────────────────────────────
 
@@ -6515,6 +6553,14 @@ export function CatalogPage() {
                   )}
                   Sincronizar
                 </SaasTabSecondaryButton>
+                <SaasTabSecondaryButton
+                  onClick={() => openInvoiceOcrFlow()}
+                  disabled={!dataUserId}
+                  title="Escanear factura con OCR: proveedor, artículos y stock"
+                >
+                  <ScanLine className="w-3.5 h-3.5" />
+                  Escanear factura
+                </SaasTabSecondaryButton>
                 <SaasTabPrimaryButton onClick={() => { setEditingInvoice(null); setShowCreateInvoice(true); }}>
                   <Plus className="w-3.5 h-3.5" />
                   Nueva factura
@@ -6532,10 +6578,20 @@ export function CatalogPage() {
             title="Sin facturas de compra"
             description="Registra la primera factura de proveedor"
             action={
-              <SaasTabPrimaryButton onClick={() => { setEditingInvoice(null); setShowCreateInvoice(true); }}>
-                <Plus className="w-3.5 h-3.5" />
-                Nueva factura
-              </SaasTabPrimaryButton>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <SaasTabSecondaryButton
+                  onClick={() => openInvoiceOcrFlow()}
+                  disabled={!dataUserId}
+                  title="Escanear factura con OCR: proveedor, artículos y stock"
+                >
+                  <ScanLine className="w-3.5 h-3.5" />
+                  Escanear factura
+                </SaasTabSecondaryButton>
+                <SaasTabPrimaryButton onClick={() => { setEditingInvoice(null); setShowCreateInvoice(true); }}>
+                  <Plus className="w-3.5 h-3.5" />
+                  Nueva factura
+                </SaasTabPrimaryButton>
+              </div>
             }
           />
         ) : (
@@ -6930,6 +6986,103 @@ export function CatalogPage() {
         catalogItems={catalogItems}
         storeIngredients={storeIngredients}
         existingSuppliers={suppliers}
+      />
+
+      {showInvoiceOcrStorePicker ? (
+        <div className="fixed inset-0 z-[70] flex items-end justify-center sm:items-center p-0 sm:p-4">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/40"
+            aria-label="Cerrar"
+            onClick={() => setShowInvoiceOcrStorePicker(false)}
+          />
+          <div className="relative w-full max-w-md rounded-t-2xl sm:rounded-2xl border border-stone-200 bg-white shadow-xl dark:border-stone-700 dark:bg-stone-900 p-4 sm:p-5">
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <div>
+                <h3 className="text-base font-bold text-stone-900 dark:text-stone-100">¿A qué tienda aplica?</h3>
+                <p className="text-xs text-stone-500 mt-1">
+                  El stock y el gasto de esta factura se asignan a esa tienda.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowInvoiceOcrStorePicker(false)}
+                className="p-2 rounded-xl hover:bg-stone-100 dark:hover:bg-stone-800"
+              >
+                <X className="w-4 h-4 text-stone-500" />
+              </button>
+            </div>
+            <ul className="space-y-2 max-h-[50vh] overflow-y-auto">
+              {invoiceOcrStores.map((store) => (
+                <li key={store.id}>
+                  <button
+                    type="button"
+                    onClick={() => confirmInvoiceOcrStore(store)}
+                    className="w-full text-left px-3 py-3 rounded-xl border border-stone-200 dark:border-stone-700 hover:border-blue-500 hover:bg-blue-50/60 dark:hover:bg-blue-950/30 transition-colors"
+                  >
+                    <span className="font-semibold text-sm text-stone-900 dark:text-stone-100">{store.name}</span>
+                    {store.id === activeWorkCenterId ? (
+                      <span className="ml-2 text-[10px] uppercase tracking-wide text-blue-600 dark:text-blue-300 font-bold">
+                        Activa
+                      </span>
+                    ) : null}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      ) : null}
+
+      <SAAS__OcrScanModal
+        isOpen={showInvoiceOcr}
+        onClose={() => {
+          setShowInvoiceOcr(false);
+          setInvoiceOcrWorkCenter(null);
+        }}
+        userId={dataUserId}
+        targetModule="compras"
+        context={{
+          workCenterId: invoiceOcrWorkCenter?.id || activeWorkCenterId || '',
+          workCenterName: invoiceOcrWorkCenter?.name || activeWorkCenterName || '',
+          costCenterId: invoiceOcrWorkCenter?.id || activeWorkCenterId || '',
+          costCenterName: invoiceOcrWorkCenter?.name || activeWorkCenterName || '',
+          businessId: businessId || '',
+          businessName: currentBusiness?.name || '',
+        }}
+        onDocumentCreated={async (payload) => {
+          setShowInvoiceOcr(false);
+          setInvoiceOcrWorkCenter(null);
+          await loadInvoices({ silent: true });
+          void loadCatalog();
+          const fx = payload?.sideEffects as {
+            stockUpdated?: number;
+            matchedLines?: number;
+            totalLines?: number;
+            financeMovementId?: string;
+          } | undefined;
+          const unmatched =
+            fx?.totalLines != null && fx?.matchedLines != null
+              ? Math.max(0, fx.totalLines - fx.matchedLines)
+              : 0;
+          if (fx?.stockUpdated && fx.stockUpdated > 0) {
+            if (unmatched > 0) {
+              toast.warning(
+                `Factura guardada: ${fx.stockUpdated} artículo(s) en stock. ${unmatched} línea(s) sin vínculo — no subieron stock.`,
+              );
+            } else {
+              toast.success(
+                `Factura procesada: ${fx.stockUpdated} artículo(s) en stock y gasto en Finanzas`,
+              );
+            }
+          } else if (fx?.financeMovementId) {
+            toast.warning(
+              'Factura y gasto en Finanzas registrados, pero ninguna línea subió stock. Revisa el vínculo de artículos.',
+            );
+          } else {
+            toast.success('Factura procesada. Revisa Facturas, Finanzas e Inventario.');
+          }
+        }}
       />
 
       <CreateInvoiceModal

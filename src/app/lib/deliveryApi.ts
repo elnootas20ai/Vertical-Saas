@@ -824,22 +824,30 @@ export async function bulkUpdateCatalogStockRequest(
 
 export async function bulkApplyStaffPricesRequest(
   userId: string,
-  data: { discountPercent: number; categories?: string[]; enabled?: boolean },
-): Promise<{ updated: number; discountPercent: number; config: DeliveryConfig }> {
+  data: {
+    discountPercent?: number;
+    fixedStaffPrice?: number;
+    categories?: string[];
+    enabled?: boolean;
+  },
+): Promise<{ updated: number; discountPercent: number; fixedStaffPrice?: number; config: DeliveryConfig }> {
   const id = normalizeUserId(userId);
   const result = await request<{
     ok: boolean;
     updated: number;
     discountPercent: number;
+    fixedStaffPrice?: number;
     config: DeliveryConfig;
     error?: string;
   }>(
     `/api/delivery/catalog/${encodeURIComponent(id)}/bulk-staff-prices`,
     { method: 'POST', body: JSON.stringify(data) },
   );
+  invalidateCatalogListCache(id);
   return {
     updated: result.updated || 0,
-    discountPercent: result.discountPercent || data.discountPercent,
+    discountPercent: result.discountPercent ?? data.discountPercent ?? 0,
+    fixedStaffPrice: result.fixedStaffPrice,
     config: result.config,
   };
 }
@@ -2484,6 +2492,8 @@ export interface StaffConsumptionConfig {
   pricingMode: StaffConsumptionPricingMode;
   defaultDiscountPercent: number;
   eligibleCategories: string[];
+  /** Productos excluidos del consumo de equipo (aunque su organizador esté activo). */
+  excludedCatalogItemIds?: string[];
 }
 
 export type StaffConsumptionPaymentMode = 'cash_now' | 'payroll_deduction';

@@ -16,12 +16,29 @@ describe('resolveStaffUnitPrice', () => {
     expect(resolveStaffUnitPrice({ unitPrice: 10 }, { pricingMode: 'staff_price_field' })).toBe(10);
   });
 
-  it('applies percent discount', () => {
-    expect(resolveStaffUnitPrice(item, { pricingMode: 'percent_discount', defaultDiscountPercent: 20 })).toBe(8);
+  it('prefers explicit staffPrice over percent discount (TPV / organizador)', () => {
+    expect(resolveStaffUnitPrice(item, { pricingMode: 'percent_discount', defaultDiscountPercent: 20 })).toBe(6);
   });
 
-  it('uses public price in same_as_public mode', () => {
-    expect(resolveStaffUnitPrice(item, { pricingMode: 'same_as_public' })).toBe(10);
+  it('applies percent discount when staffPrice is not set', () => {
+    expect(
+      resolveStaffUnitPrice(
+        { unitPrice: 10 },
+        { pricingMode: 'percent_discount', defaultDiscountPercent: 20 },
+      ),
+    ).toBe(8);
+  });
+
+  it('prefers explicit staffPrice over same_as_public', () => {
+    expect(resolveStaffUnitPrice(item, { pricingMode: 'same_as_public' })).toBe(6);
+  });
+
+  it('uses public price in same_as_public when staffPrice missing', () => {
+    expect(resolveStaffUnitPrice({ unitPrice: 10 }, { pricingMode: 'same_as_public' })).toBe(10);
+  });
+
+  it('allows zero staffPrice when explicitly set', () => {
+    expect(resolveStaffUnitPrice({ unitPrice: 10, staffPrice: 0 }, { pricingMode: 'staff_price_field' })).toBe(0);
   });
 });
 
@@ -46,5 +63,25 @@ describe('isCatalogItemEligibleForStaffConsumption', () => {
     const cfg = { enabled: true, eligibleCategories: ['Bebidas'] };
     expect(isCatalogItemEligibleForStaffConsumption({ category: 'Bebidas', active: true, available: true }, cfg)).toBe(true);
     expect(isCatalogItemEligibleForStaffConsumption({ category: 'Comida', active: true, available: true }, cfg)).toBe(false);
+  });
+
+  it('excludes catalog items by id', () => {
+    const cfg = {
+      enabled: true,
+      eligibleCategories: [],
+      excludedCatalogItemIds: ['item-1'],
+    };
+    expect(
+      isCatalogItemEligibleForStaffConsumption(
+        { _id: 'item-1', category: 'Bebidas', active: true, available: true },
+        cfg,
+      ),
+    ).toBe(false);
+    expect(
+      isCatalogItemEligibleForStaffConsumption(
+        { _id: 'item-2', category: 'Bebidas', active: true, available: true },
+        cfg,
+      ),
+    ).toBe(true);
   });
 });

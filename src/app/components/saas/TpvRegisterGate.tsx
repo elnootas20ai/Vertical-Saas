@@ -439,6 +439,11 @@ interface OpeningData {
   counts: CashDenominationCount;
 }
 
+/**
+ * Entrada canónica a caja del TPV Delivery (CEO web, tablet por código, trabajador).
+ * Misma UI: Fichaje | Quién abre | efectivo / fondo | Abrir caja.
+ * Si ya hay caja abierta en ESA tienda → Continuar (misma familia de pantalla).
+ */
 function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading, openingBusy = false, pointsOfSale, workCenters, workerOptions, registerSessions, restrictedToPdvId, onClearStorePick, isManagerView = false, tabletStoreLabel, onOpeningPdvChange, restaurantOpening = false, clockInBusinessId = '', clockInOwnerUserId = '', onClockInChanged, resumeAfterClose = null }: {
   onOpen: (data: OpeningData) => void;
   /** Entrar en una caja ya abierta (aviso proactivo; no al martillar Abrir). */
@@ -522,10 +527,40 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
 
   const hasStores = allActivePdvs.length > 0 || storeRows.some((r) => r.needsPdv);
   const pointOfSaleAccess = usePointOfSaleAccess(Math.max(allActivePdvs.length, storeRows.length));
-  const selectedPdv = pointsOfSale.find(p => p._id === selectedPdvId)
-    || (restrictedToPdvId
-      ? pointsOfSale.find((p) => p._id === restrictedToPdvId)
-      : undefined);
+  // PDV operativo: listado real, o stub si el pick (Badalona/tablet) aún no hidrató —
+  // misma OpeningScreen siempre; no otra UI vacía.
+  const selectedPdv = useMemo(() => {
+    const fromList =
+      pointsOfSale.find((p) => p._id === selectedPdvId)
+      || (restrictedToPdvId
+        ? pointsOfSale.find((p) => p._id === restrictedToPdvId)
+        : undefined);
+    if (fromList) return fromList;
+    const stubId = String(restrictedToPdvId || selectedPdvId || '').trim();
+    if (!stubId) return undefined;
+    const label = String(tabletStoreLabel || '').trim() || 'Tienda';
+    return {
+      _id: stubId,
+      id: stubId,
+      type: 'point_of_sale' as const,
+      user_id: '',
+      workCenterId: stubId,
+      name: label,
+      code: '',
+      address: '',
+      terminals: [
+        {
+          id: `tpv-${stubId}`,
+          name: 'TPV-1',
+          code: 'TPV-1',
+          active: true,
+        },
+      ],
+      active: true,
+      createdAt: '',
+      updatedAt: '',
+    } as PointOfSale;
+  }, [pointsOfSale, selectedPdvId, restrictedToPdvId, tabletStoreLabel]);
   // Misma regla que sala/ensurePdvHasDefaultTerminal: active undefined = activo.
   const availableTerminals = selectedPdv?.terminals.filter((t) => t.active !== false) || [];
   const selectedTerminal = availableTerminals.find(t => t.id === selectedTerminalId);
@@ -562,23 +597,19 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
   }, [registerSessions, selectedPdv, restrictedToPdvId, selectedTerminal, pointsOfSale]);
 
   const previousCloseCash = previousCloseHint?.amount ?? null;
-  const previousCloseIsNextDayInitial = previousCloseHint?.isNextDayInitial === true;
   const previousCloseLabel = previousCloseHint?.label || '';
-  /** Solo si el cierre dejó fondo explícito. Si no hay / no se detecta → conteo libre y se puede abrir. */
-  const openingCashLocked = previousCloseIsNextDayInitial && previousCloseCash != null;
+  /** Misma UX en todas las tiendas: importe de apertura (fondo / último cierre / 0), sin teclado de billetes. */
+  const openingCashAmount =
+    previousCloseCash != null && Number.isFinite(previousCloseCash) && previousCloseCash >= 0
+      ? previousCloseCash
+      : 0;
 
-  /** Caja abierta en esta tienda (incluye antiguas >18 h). */
+  /** Caja abierta en esta tienda (incluye antiguas >18 h). Nunca cruzar con otra tienda. */
   const openSessionForStore = useMemo(() => {
-    const pdvId = selectedPdv?._id || restrictedToPdvId || '';
+    const pdvId = String(selectedPdv?._id || restrictedToPdvId || '').trim();
+    if (!pdvId) return null;
     const opens = (registerSessions || []).filter((s) => isTpvRegisterSessionOpen(s));
-    if (pdvId) {
-      // Tienda ya elegida (sidebar / tablet): solo cajas de ESA tienda.
-      // No caer a otra abierta (p. ej. test1) si Badalona no tiene caja.
-      return pickNewestOpenRegisterSessionForStore(opens, pdvId, pointsOfSale);
-    }
-    // CEO sin tienda elegida aún: una sola abierta → esa (para el botón Continuar).
-    if (opens.length === 1) return opens[0];
-    return null;
+    return pickNewestOpenRegisterSessionForStore(opens, pdvId, pointsOfSale);
   }, [registerSessions, selectedPdv, restrictedToPdvId, pointsOfSale]);
 
   /** Turno vivo reciente: pantalla «Continuar» (sin pedir fondo otra vez). */
@@ -593,21 +624,9 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
     return openSessionForStore;
   }, [openSessionForStore]);
 
-  const didPrefillFromPreviousCloseRef = useRef(false);
   useEffect(() => {
-    didPrefillFromPreviousCloseRef.current = false;
-  }, [selectedPdvId, selectedTerminalId, previousCloseCash]);
-
-  useEffect(() => {
-    if (previousCloseCash == null) return;
-    if (openingCashLocked) {
-      setCounts(buildDenominationFromAmount(previousCloseCash));
-      return;
-    }
-    if (didPrefillFromPreviousCloseRef.current) return;
-    didPrefillFromPreviousCloseRef.current = true;
-    setCounts(buildDenominationFromAmount(previousCloseCash));
-  }, [previousCloseCash, selectedPdvId, selectedTerminalId, openingCashLocked]);
+    setCounts(buildDenominationFromAmount(openingCashAmount));
+  }, [openingCashAmount, selectedPdvId, selectedTerminalId]);
 
   // Tras «Abrir otra»: si el trabajador llega tarde al listado, engancharlo.
   useEffect(() => {
@@ -986,72 +1005,56 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
     );
   })() : null;
 
-  // Caja ya abierta (turno reciente): un solo CTA claro (sin pedir fondo otra vez).
-  if (existingOpenForStore) {
+  /** Misma OpeningScreen siempre: si hay caja abierta de ESTA tienda, banner Continuar (no otra pantalla). */
+  const liveOpenBanner = existingOpenForStore ? (() => {
     const who = [
       existingOpenForStore.workerName || 'Equipo',
       existingOpenForStore.terminalName || '',
       displayStoreName || existingOpenForStore.pointOfSaleName || '',
     ].filter(Boolean).join(' · ');
     return (
-      <div className="h-full min-h-0 bg-stone-50 dark:bg-stone-950 flex items-center justify-center p-4">
-        <div className="bg-white dark:bg-stone-900 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-lg w-full max-w-md p-6 space-y-5">
-          <div className="text-center space-y-2">
-            <div className="mx-auto w-14 h-14 rounded-2xl bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
-              <Unlock className="w-7 h-7 text-emerald-600" />
-            </div>
-            <h1 className="text-lg font-bold text-stone-900 dark:text-stone-100">
-              Caja abierta
-            </h1>
-            <p className="text-sm text-stone-500 dark:text-stone-400">
-              {who}
-            </p>
-            <p className="text-xs text-stone-500 dark:text-stone-400">
-              Saliste sin cerrar. Continúa en la misma caja — no hace falta contar el fondo.
-            </p>
-          </div>
+      <div className="rounded-xl border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50 dark:bg-emerald-950/30 p-3 space-y-2">
+        <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">
+          Caja abierta
+        </p>
+        <p className="text-xs text-emerald-800/90 dark:text-emerald-200/80">
+          {who || 'Saliste sin cerrar.'} Continúa en la misma caja — no hace falta contar el fondo.
+        </p>
+        <button
+          type="button"
+          onClick={() => onContinueExistingOpen?.(existingOpenForStore)}
+          disabled={parentLoading || openingBusy || !onContinueExistingOpen}
+          className={`w-full ${VERTIAL_BTN_PRIMARY} min-h-10 text-sm`}
+        >
+          {(parentLoading || openingBusy) ? (
+            <RefreshCw className="w-4 h-4 animate-spin" />
+          ) : (
+            <LogIn className="w-4 h-4" />
+          )}
+          Continuar en esta caja
+        </button>
+        {isManagerView && onClearStorePick ? (
           <button
             type="button"
-            onClick={() => onContinueExistingOpen?.(existingOpenForStore)}
-            disabled={parentLoading || openingBusy || !onContinueExistingOpen}
-            className={`w-full ${VERTIAL_BTN_PRIMARY} min-h-12 text-base`}
-          >
-            {(parentLoading || openingBusy) ? (
-              <RefreshCw className="w-5 h-5 animate-spin" />
-            ) : (
-              <LogIn className="w-5 h-5" />
-            )}
-            Continuar en esta caja
-          </button>
-          {isManagerView && onClearStorePick ? (
-            <button
-              type="button"
-              onClick={onClearStorePick}
-              disabled={parentLoading || openingBusy}
-              className={`w-full ${VERTIAL_BTN_SECONDARY}`}
-            >
-              Otra tienda
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={goBack}
+            onClick={onClearStorePick}
+            disabled={parentLoading || openingBusy}
             className={`w-full ${VERTIAL_BTN_SECONDARY}`}
           >
-            Volver
+            Otra tienda
           </button>
-        </div>
+        ) : null}
       </div>
     );
-  }
+  })() : null;
 
   return (
     <div className="h-full min-h-0 bg-stone-50 dark:bg-stone-950 flex items-stretch sm:items-center justify-center p-2 sm:p-3 overflow-hidden">
       <div className="relative bg-white dark:bg-stone-900 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-lg w-full max-w-4xl h-full sm:h-auto sm:max-h-[min(88svh,680px)] min-h-0 flex flex-col overflow-hidden">
         {/* Header — una sola línea clara */}
-        {staleOpenBanner ? (
-          <div className="shrink-0 px-3 sm:px-4 pt-3">
-            {staleOpenBanner}
+        {(liveOpenBanner || staleOpenBanner) ? (
+          <div className="shrink-0 px-3 sm:px-4 pt-3 space-y-2">
+            {liveOpenBanner}
+            {!liveOpenBanner ? staleOpenBanner : null}
           </div>
         ) : null}
         <div className="shrink-0 border-b border-stone-200 dark:border-stone-800 flex items-center gap-2.5 px-3 sm:px-4 py-2.5">
@@ -1250,51 +1253,28 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
 
                 <div className="flex items-center justify-between gap-2 shrink-0">
                   <label className="text-[10px] font-bold text-stone-500 uppercase tracking-wider">
-                    {openingCashLocked ? 'Fondo de apertura *' : 'Efectivo en cajón *'}
+                    Fondo de apertura *
                   </label>
                   <span className="text-[11px] font-bold text-stone-900 dark:text-stone-100 tabular-nums">
-                    {total.toFixed(2)}€
+                    {openingCashAmount.toFixed(2)}€
                   </span>
                 </div>
 
-                {openingCashLocked ? (
-                  <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30 px-3 py-3 shrink-0 space-y-1">
-                    <p className="text-[11px] font-bold text-amber-900 dark:text-amber-100">
-                      Fondo dejado{previousCloseLabel ? ` · ${previousCloseLabel}` : ''}
-                    </p>
-                    <p className="text-3xl font-black tabular-nums text-amber-950 dark:text-amber-50">
-                      {previousCloseCash!.toFixed(2)}€
-                    </p>
-                    <p className="text-[10px] text-amber-800/80 dark:text-amber-200/70">
-                      Se abre con este importe.
-                    </p>
-                  </div>
-                ) : (
-                  <>
-                    {previousCloseCash != null ? (
-                      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30 px-2.5 py-2 shrink-0">
-                        <p className="text-[11px] text-amber-900 dark:text-amber-100 min-w-0 flex-1">
-                          Último cierre{previousCloseLabel ? ` (${previousCloseLabel})` : ''}:{' '}
-                          <strong className="tabular-nums">{previousCloseCash.toFixed(2)}€</strong>
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => setCounts(buildDenominationFromAmount(previousCloseCash))}
-                          className="shrink-0 px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold"
-                        >
-                          Usar
-                        </button>
-                      </div>
-                    ) : (
-                      <p className="text-[11px] text-stone-500 shrink-0">
-                        Sin fondo dejado detectado. Cuenta el cajón (0 € si está vacío) y abre.
-                      </p>
-                    )}
-                    <div className="flex-1 min-h-0 overflow-y-auto">
-                      <CashCountGrid counts={counts} onChange={setCounts} compact />
-                    </div>
-                  </>
-                )}
+                <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30 px-3 py-3 shrink-0 space-y-1">
+                  <p className="text-[11px] font-bold text-amber-900 dark:text-amber-100">
+                    {previousCloseCash != null
+                      ? `Fondo dejado${previousCloseLabel ? ` · ${previousCloseLabel}` : ''}`
+                      : 'Fondo de apertura'}
+                  </p>
+                  <p className="text-3xl font-black tabular-nums text-amber-950 dark:text-amber-50">
+                    {openingCashAmount.toFixed(2)}€
+                  </p>
+                  <p className="text-[10px] text-amber-800/80 dark:text-amber-200/70">
+                    {previousCloseCash != null
+                      ? 'Se abre con este importe.'
+                      : 'Sin fondo dejado. Se abre con 0,00 €.'}
+                  </p>
+                </div>
               </div>
         </div>
 
@@ -1327,7 +1307,7 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
               {openingBusy
                 ? 'Abriendo…'
                 : existingOpenForStore
-                  ? 'Usa Entrar arriba'
+                  ? 'Usa Continuar arriba'
                   : `Abrir caja — ${total.toFixed(2)}€`}
             </button>
           </div>
@@ -5383,6 +5363,10 @@ export function TpvRegisterGate({
   userRef.current = user;
   const dataUserIdRef = useRef(dataUserId);
   dataUserIdRef.current = dataUserId;
+  const initialManagerPdvIdRef = useRef(initialManagerPdvId);
+  initialManagerPdvIdRef.current = initialManagerPdvId;
+  const managerPdvPickIdRef = useRef(managerPdvPickId);
+  managerPdvPickIdRef.current = managerPdvPickId;
   const tabletBindingRef = useRef(tabletBinding);
   tabletBindingRef.current = tabletBinding;
   const scopeBusinessIdRef = useRef(scopeBusinessId);
@@ -6136,12 +6120,12 @@ export function TpvRegisterGate({
           );
         }
 
-        // UI libre: si hay sesión open, el gate entra; si no, OpeningScreen.
+        // UI libre → OpeningScreen (core entrada delivery: fichaje + abrir / continuar).
+        // Tablet: no cortar aquí; sigue cargando tiendas reales en segundo plano
+        // para que Badalona/test1 tengan la misma apertura que el CEO.
         if (seq === loadSeqRef.current) setLoading(false);
 
-        // 2) Tiendas / códigos tablet en segundo plano (no bloquean «Recuperando caja…»).
-        if (tabletFastPath) return;
-
+        // 2) Tiendas / códigos tablet (tablet ya mostró OpeningScreen; esto hidrata PDV real).
         const bizList = businessesRef.current;
         const knownBusinessIds = bizList.map((b) => b.business_id).filter(Boolean);
         const cachedPdvs = pointsOfSaleRef.current;
@@ -6150,10 +6134,13 @@ export function TpvRegisterGate({
             p.active !== false
             && !(Array.isArray(p.terminals) && p.terminals.some((t) => t.active !== false)),
         );
-        const needFreshStores = !hasDisplayedStoresRef.current || cachedMissingTerminal;
+        const needFreshStores =
+          !tabletFastPath
+          && (!hasDisplayedStoresRef.current || cachedMissingTerminal);
+        const needTabletHydrate = tabletFastPath;
 
         let storeState: Awaited<ReturnType<typeof loadRetailStoresForBusiness>>;
-        if (needFreshStores) {
+        if (needFreshStores || needTabletHydrate) {
           let state = await loadRetailStoresForBusiness(authUser, biz ?? null, bizList, {
             ...loadOpts,
             knownBusinessIds,
@@ -6196,7 +6183,7 @@ export function TpvRegisterGate({
             (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
         );
 
-        if (workerUser) {
+        if (workerUser && !isTabletSessionRef.current) {
           const salesPointRef = resolveEffectiveSalesPointRef({
             employmentSalesPointId: authUser?.employment?.salesPointId,
             workCenters: scopedWorkCenters,
@@ -6209,6 +6196,34 @@ export function TpvRegisterGate({
           );
           scopedPdvs = scoped.pointsOfSale;
           scopedWorkCenters = scoped.workCenters;
+        }
+
+        // Código tablet delivery: solo la tienda del código (misma OpeningScreen por código).
+        if (isTabletSessionRef.current && tabletPdvId) {
+          scopedPdvs = scopedPdvs.filter(
+            (p) => p._id === tabletPdvId || String(p.workCenterId || '').trim() === tabletPdvId,
+          );
+          if (scopedPdvs.length === 0) {
+            scopedPdvs = mergeTabletBindingPdv([], tabletBindingRef.current);
+          }
+        } else {
+          // CEO: si el pick (Badalona) no entró en el scope, reinyectarlo desde el fetch completo.
+          const pickId = String(
+            initialManagerPdvIdRef.current || managerPdvPickIdRef.current || '',
+          ).trim();
+          if (
+            pickId
+            && !scopedPdvs.some(
+              (p) => p._id === pickId || String(p.workCenterId || '').trim() === pickId,
+            )
+          ) {
+            const fromAll = storeState.pointsOfSale.find(
+              (p) =>
+                p.active !== false
+                && (p._id === pickId || String(p.workCenterId || '').trim() === pickId),
+            );
+            if (fromAll) scopedPdvs = [...scopedPdvs, fromAll];
+          }
         }
 
         if (scopedPdvs.length > 0 || scopedWorkCenters.length > 0) {
@@ -6282,14 +6297,29 @@ export function TpvRegisterGate({
     return () => window.clearTimeout(timer);
   }, [loading]);
 
-  // Tras el primer load: hold corto por si llega una sesión open un tick tarde.
-  // NO rearmar el hold tras haber mostrado Abrir caja (poll 30s / SSE / pick):
-  // eso intercambiaba OpeningScreen ↔ «Recuperando caja…» sin parar.
+  // Hold de recuperación al montar / cambiar empresa.
   useEffect(() => {
     openingScreenUnlockedRef.current = false;
     setOpeningScreenUnlocked(false);
     setOpeningRecoverHold(true);
   }, [scopeBusinessId, dataUserId]);
+
+  // Cambio real de tienda (test1 → Badalona): limpiar sticky/ack.
+  // No disparar en el primer set del pick (null → id) ni si el pick parpadea
+  // al mismo valor: eso devolvía a Continuar a mitad de pedido en tablet/iOS.
+  const prevStorePickRef = useRef<string | null>(null);
+  useEffect(() => {
+    const pick = String(resolvedStorePickId || '').trim() || null;
+    const prev = prevStorePickRef.current;
+    if (prev === pick) return;
+    prevStorePickRef.current = pick;
+    if (!prev || !pick) return;
+    stickyOpenSessionRef.current = null;
+    setAckedOpenSessionId(null);
+    openingScreenUnlockedRef.current = false;
+    setOpeningScreenUnlocked(false);
+    setOpeningRecoverHold(true);
+  }, [resolvedStorePickId]);
 
   useEffect(() => {
     if (isTpvRegisterSessionOpen(activeSession)) {
@@ -7643,9 +7673,19 @@ export function TpvRegisterGate({
     // poderes de gerente (cambiar tienda / volver a cuenta).
     const tabletEntryLocked = Boolean(isTabletSession || tabletBinding);
 
+    const openingStoreLabel =
+      tabletBinding?.pdvName
+      || pointsOfSale.find((p) => p._id === openingRestrictedPdvId)?.name
+      || workCenters.find((w) => w._id === openingRestrictedPdvId)?.name
+      || undefined;
+
     const openingScreen = (
       <OpeningScreen
-        key={openingResume ? `resume-${openingResume.key}` : 'opening'}
+        key={
+          openingResume
+            ? `resume-${openingResume.key}-${openingRestrictedPdvId || 'none'}`
+            : `opening-${openingRestrictedPdvId || 'none'}`
+        }
         onOpen={handleOpen}
         onContinueExistingOpen={handleContinueExistingOpen}
         loading={loading}
@@ -7655,7 +7695,7 @@ export function TpvRegisterGate({
         workerOptions={openingWorkerOptions}
         registerSessions={sessions}
         isManagerView={!isWorkerUser && !tabletEntryLocked}
-        tabletStoreLabel={tabletBinding?.pdvName}
+        tabletStoreLabel={openingStoreLabel}
         restrictedToPdvId={openingRestrictedPdvId}
         restaurantOpening={isRestaurantVerticalChrome}
         onOpeningPdvChange={handleOpeningPdvChange}

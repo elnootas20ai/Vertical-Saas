@@ -2165,11 +2165,19 @@ export async function bulkPatchCatalogItems(req, res) {
 export async function bulkApplyStaffPrices(req, res) {
   try {
     const { userId } = req.params;
-    const { discountPercent, categories, enabled } = req.body || {};
+    const { discountPercent, categories, enabled, fixedStaffPrice } = req.body || {};
     if (!userId) return badRequest(res, 'Falta userId');
 
-    const pct = Math.max(0, Math.min(100, Number(discountPercent)));
-    if (!Number.isFinite(pct)) return badRequest(res, 'discountPercent inválido');
+    const hasFixed = fixedStaffPrice !== undefined && fixedStaffPrice !== null && fixedStaffPrice !== '';
+    const fixedPrice = hasFixed ? Math.round(Math.max(0, Number(fixedStaffPrice)) * 100) / 100 : null;
+    if (hasFixed && !Number.isFinite(fixedPrice)) {
+      return badRequest(res, 'fixedStaffPrice inválido');
+    }
+
+    const pct = Math.max(0, Math.min(100, Number(discountPercent) || 0));
+    if (!hasFixed && !Number.isFinite(Number(discountPercent))) {
+      return badRequest(res, 'discountPercent inválido');
+    }
 
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
@@ -2195,7 +2203,9 @@ export async function bulkApplyStaffPrices(req, res) {
     }
 
     const docs = toUpdate.map((existing) => {
-      const staffPrice = resolveStaffUnitPrice(existing, staffCfg);
+      const staffPrice = hasFixed
+        ? fixedPrice
+        : resolveStaffUnitPrice(existing, staffCfg);
       return buildCatalogItemDocument(userId, { ...existing, staffPrice }, existing);
     });
 
@@ -2216,14 +2226,40 @@ export async function bulkApplyStaffPrices(req, res) {
     let configExisting;
     try { configExisting = await getDocument(req, deliveryDb, configId); } catch { configExisting = null; }
     if (!configExisting || configExisting.type !== 'delivery_config') configExisting = null;
+    const prevEligible = Array.isArray(configExisting?.staffConsumption?.eligibleCategories)
+      ? configExisting.staffConsumption.eligibleCategories
+      : [];
+    // Precio fijo por organizador: mantener elegibles y añadir la categoría aplicada
+    // para que el producto salga en el TPV si había filtro previo.
+    let nextEligible = prevEligible;
+    if (hasFixed) {
+      if (categoryFilter.length > 0 && prevEligible.length > 0) {
+        const fold = new Set(prevEligible.map((c) => String(c).trim().toLowerCase()));
+        const merged = [...prevEligible];
+        for (const c of categories || []) {
+          const label = String(c || '').trim();
+          if (!label) continue;
+          if (!fold.has(label.toLowerCase())) {
+            fold.add(label.toLowerCase());
+            merged.push(label);
+          }
+        }
+        nextEligible = merged;
+      }
+      // Si no había filtro, sigue sin filtro (todos los organizadores).
+    } else if (Array.isArray(categories)) {
+      nextEligible = categories.map((c) => String(c || '').trim()).filter(Boolean);
+    }
     const configDoc = buildDeliveryConfigDocument(userId, {
       staffConsumption: {
         enabled: enabled !== false,
-        pricingMode: 'staff_price_field',
-        defaultDiscountPercent: pct,
-        eligibleCategories: Array.isArray(categories)
-          ? categories.map((c) => String(c || '').trim()).filter(Boolean)
-          : (configExisting?.staffConsumption?.eligibleCategories || []),
+        // Precio fijo por organizador → staff_price_field.
+        // Aplicar % masivo → percent_discount (fallback si un producto aún no tiene staffPrice).
+        pricingMode: hasFixed ? 'staff_price_field' : 'percent_discount',
+        defaultDiscountPercent: hasFixed
+          ? Number(configExisting?.staffConsumption?.defaultDiscountPercent || 0)
+          : pct,
+        eligibleCategories: nextEligible,
       },
     }, configExisting);
     const configSaved = await putDocument(req, deliveryDb, configDoc._id, configDoc);
@@ -2233,6 +2269,7 @@ export async function bulkApplyStaffPrices(req, res) {
       updated: updated.length,
       errors: errors.length,
       discountPercent: pct,
+      fixedStaffPrice: hasFixed ? fixedPrice : undefined,
       config: sanitizeDeliveryConfig({ ...configDoc, _rev: configSaved.rev }),
       items: updated,
       errorDetails: errors.length > 0 ? errors : undefined,
@@ -4510,6 +4547,13 @@ export async function createStaffConsumption(req, res) {
     const category = String(catalogItem.category || '').trim();
     if (eligible.length > 0 && !eligible.some((c) => String(c).trim().toLowerCase() === category.toLowerCase())) {
       return badRequest(res, 'Este producto no está habilitado para consumo de equipo');
+    }
+    const excluded = Array.isArray(staffCfg.excludedCatalogItemIds)
+      ? staffCfg.excludedCatalogItemIds.map((id) => String(id || '').trim()).filter(Boolean)
+      : [];
+    const catalogId = String(catalogItem._id || catalogItem.id || '').trim();
+    if (catalogId && excluded.includes(catalogId)) {
+      return badRequest(res, 'Este producto está desactivado para consumo de equipo');
     }
 
     const unitPrice = resolveStaffUnitPrice(catalogItem, staffCfg);

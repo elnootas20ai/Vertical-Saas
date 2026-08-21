@@ -6455,6 +6455,7 @@ const DEFAULT_DELIVERY_CONFIG = {
     pricingMode: 'staff_price_field',
     defaultDiscountPercent: 0,
     eligibleCategories: [],
+    excludedCatalogItemIds: [],
   },
   tpvDeliveryFee: 0,
 };
@@ -6692,19 +6693,28 @@ export function sanitizeStaffConsumptionConfig(raw) {
     eligibleCategories: Array.isArray(base.eligibleCategories)
       ? base.eligibleCategories.map((c) => String(c || '').trim()).filter(Boolean)
       : [],
+    excludedCatalogItemIds: Array.isArray(base.excludedCatalogItemIds)
+      ? [...new Set(base.excludedCatalogItemIds.map((id) => String(id || '').trim()).filter(Boolean))]
+      : [],
   };
 }
 
 export function resolveStaffUnitPrice(catalogItem, staffConsumptionConfig) {
   const publicPrice = Number(catalogItem?.unitPrice || 0);
+  // Precio empleado explícito en el producto manda (TPV + cobro en caja).
+  const rawStaff = catalogItem?.staffPrice;
+  if (rawStaff !== undefined && rawStaff !== null && rawStaff !== '') {
+    const staffPrice = Number(rawStaff);
+    if (Number.isFinite(staffPrice) && staffPrice >= 0) {
+      return Math.round(staffPrice * 100) / 100;
+    }
+  }
   const cfg = sanitizeStaffConsumptionConfig(staffConsumptionConfig);
   if (cfg.pricingMode === 'same_as_public') return Math.round(publicPrice * 100) / 100;
   if (cfg.pricingMode === 'percent_discount') {
     const pct = Number(cfg.defaultDiscountPercent || 0);
     return Math.round(publicPrice * (1 - pct / 100) * 100) / 100;
   }
-  const staffPrice = Number(catalogItem?.staffPrice);
-  if (Number.isFinite(staffPrice) && staffPrice > 0) return Math.round(staffPrice * 100) / 100;
   return Math.round(publicPrice * 100) / 100;
 }
 

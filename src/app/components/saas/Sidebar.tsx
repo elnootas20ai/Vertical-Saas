@@ -267,6 +267,7 @@ const menuItemDefs = [
   { id: 'catalog-carta',    navKey: 'cartaTpv',        icon: <BookOpen className="w-5 h-5" />,    path: '/saas/catalog?tab=catalog' },
   { id: 'catalog-stock-tpv', navKey: 'almacenTpv',     icon: <Boxes className="w-5 h-5" />,       path: '/saas/catalog?tab=stock' },
   { id: 'catalog-purchases', navKey: 'catalogPurchases', icon: <ShoppingCart className="w-5 h-5" />, path: '/saas/catalog?tab=suppliers' },
+  { id: 'catalog-invoices', navKey: 'catalogInvoices', icon: <Receipt className="w-5 h-5" />, path: '/saas/catalog?tab=invoices' },
   { id: 'catalog-consumos', navKey: 'staffConsumption', icon: <UtensilsCrossed className="w-5 h-5" />, path: '/saas/catalog?tab=staff-consumption' },
   { id: 'costing',          navKey: 'costing',         icon: <Calculator className="w-5 h-5" />,  path: '/saas/catalog?tab=escandallo' },
   { id: 'suppliers',        navKey: 'suppliers',       icon: <Factory className="w-5 h-5" />,     path: '/saas/suppliers' },
@@ -632,6 +633,7 @@ const VERTICAL_GROUP_ITEM_OVERRIDES: Partial<Record<BusinessType, Record<string,
       'catalog-carta',
       'catalog-stock-tpv',
       'catalog-purchases',
+      'catalog-invoices',
       'catalog-invoice-email',
     ],
   },
@@ -1259,19 +1261,21 @@ function SidebarInner({
     let itemIds = override ? [...override] : [...g.itemIds];
     if (g.id === 'catalogProviders') {
       if (usesDeliverySidebarCore || isRestaurantVertical || isEventsVertical) {
-        // TPV: Carta · Almacén · Compras · Consumos · Correo facturas (abajo).
+        // TPV: Carta · Almacén · Compras · Facturas · Consumo equipo · Correo facturas (abajo).
         // Eventos: misma carta TPV, sin consumos de staff.
         itemIds = isEventsVertical
           ? [
               'catalog-carta',
               'catalog-stock-tpv',
               'catalog-purchases',
+              'catalog-invoices',
               'catalog-invoice-email',
             ]
           : [
               'catalog-carta',
               'catalog-stock-tpv',
               'catalog-purchases',
+              'catalog-invoices',
               'catalog-consumos',
               'catalog-invoice-email',
             ];
@@ -1496,7 +1500,7 @@ function SidebarInner({
     'dashboard', 'alertas', 'reports', 'team', 'team-schedules', 'hr-requests', 'horarios-vacaciones', 'commissions', 'payroll', 'gestoria',
     'finance', 'income-expenses', 'ebitda', 'taxes', 'verifactu', 'bank-reconciliation',
     'client-billing', 'costing', 'billing',
-    'suppliers', 'compras-stock', 'catalog-purchases', 'catalog-invoice-email',
+    'suppliers', 'compras-stock', 'catalog-purchases', 'catalog-invoices', 'catalog-invoice-email',
     'configuracion', 'settings', 'admin', 'gdpr',
     'pipeline', 'sales-metrics', 'operations', 'affiliates',
     // 'delivery-clients' apunta a /saas/delivery-ops?panel=clients (también owner-only).
@@ -1680,7 +1684,8 @@ function SidebarInner({
     (item.id === 'catalog-carta' && location.pathname.startsWith('/saas/catalog') && ['catalog', 'escandallo', 'ingredientes', 'tpv-templates'].includes(catalogTab)) ||
     (item.id === 'catalog-stock' && location.pathname.startsWith('/saas/inventory')) ||
     (item.id === 'catalog-stock-tpv' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'stock') ||
-    (item.id === 'catalog-purchases' && location.pathname.startsWith('/saas/catalog') && ['suppliers', 'purchase-orders', 'albaranes', 'invoices'].includes(catalogTab)) ||
+    (item.id === 'catalog-purchases' && location.pathname.startsWith('/saas/catalog') && ['suppliers', 'purchase-orders', 'albaranes'].includes(catalogTab)) ||
+    (item.id === 'catalog-invoices' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'invoices') ||
     (item.id === 'catalog-consumos' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'staff-consumption') ||
     (item.id === 'costing' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'escandallo') ||
     (item.id === 'costing' && location.pathname.startsWith('/saas/costing')) ||

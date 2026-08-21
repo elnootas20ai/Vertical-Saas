@@ -33,6 +33,7 @@ import {
   dismissBannerForRestOfLocalDay,
   isBannerDismissedForLocalToday,
 } from '../../lib/dayBannerDismiss';
+import { DashboardReservedBlankSlots } from './DashboardReservedBlankSlots';
 
 interface LayoutProps {
   children: ReactNode;
@@ -344,6 +345,7 @@ function SaasAppShellInner({ children }: { children: ReactNode }) {
             <WorkerProfileCompletionBanner />
             <ActivationPageCoach />
             {children}
+            {isDashboard ? <DashboardReservedBlankSlots /> : null}
           </ErrorBoundary>
         </main>
       </div>

@@ -6,7 +6,7 @@ import type { BusinessType } from '../../../lib/businessApi';
 import { TpvRegisterGate } from '../../../components/saas/TpvRegisterGate';
 import { TpvOfflineBanner } from '../../../components/saas/TpvOfflineBanner';
 import { WorkerTpvBottomBar } from '../../../components/saas/WorkerTpvBottomBar';
-import { isTpvTabletBound, resolveTpvTabletWorkerPath } from '../../../lib/tpvTabletSession';
+import { isTpvTabletBound, readTpvTabletBinding, resolveTpvTabletWorkerPath } from '../../../lib/tpvTabletSession';
 import { consumeTpvStockReviewLaunch, TPV_OPEN_STOCK_REVIEW_EVENT } from '../../../lib/tpvStockReview';
 import { WorkerTpvDelivery } from './WorkerTpvDelivery';
 import { WorkerTpvSales } from './WorkerTpvSales';
@@ -102,8 +102,18 @@ const VERTICAL_INFO: Partial<Record<BusinessType, { label: string; icon: React.R
   butcherShop: { label: 'Carnicería', icon: <Beef className="w-6 h-6" /> },
 };
 
-function WorkerTpvShell({ children, restaurantMode = false }: { children: ReactNode; restaurantMode?: boolean }) {
+function WorkerTpvShell({
+  children,
+  restaurantMode = false,
+  initialManagerPdvId = null,
+}: {
+  children: ReactNode;
+  restaurantMode?: boolean;
+  /** PDV del código tablet / tienda fijada — misma OpeningScreen que CEO. */
+  initialManagerPdvId?: string | null;
+}) {
   const [stockOpen, setStockOpen] = useState(() => consumeTpvStockReviewLaunch());
+  const gatePdvId = String(initialManagerPdvId || '').trim() || null;
 
   useEffect(() => {
     const onOpen = () => setStockOpen(true);
@@ -125,7 +135,11 @@ function WorkerTpvShell({ children, restaurantMode = false }: { children: ReactN
       >
         <TpvOfflineBanner />
         <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-          <TpvRegisterGate fillParent>
+          <TpvRegisterGate
+            key={gatePdvId || 'worker-tpv'}
+            fillParent
+            initialManagerPdvId={gatePdvId}
+          >
             {stockOpen ? (
               <WorkerTpvStockReview onBack={() => setStockOpen(false)} />
             ) : (
@@ -139,8 +153,10 @@ function WorkerTpvShell({ children, restaurantMode = false }: { children: ReactN
 }
 
 export function WorkerTpvDeliveryRoute() {
+  const binding = isTpvTabletBound() ? readTpvTabletBinding() : null;
+  const tabletPdvId = String(binding?.pdvId || '').trim() || null;
   return (
-    <WorkerTpvShell restaurantMode={false}>
+    <WorkerTpvShell restaurantMode={false} initialManagerPdvId={tabletPdvId}>
       <WorkerTpvDelivery />
     </WorkerTpvShell>
   );

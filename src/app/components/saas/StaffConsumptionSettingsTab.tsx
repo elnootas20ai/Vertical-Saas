@@ -64,6 +64,7 @@ export function StaffConsumptionSettingsTab({
   const [applying, setApplying] = useState(false);
   const [deliveryConfig, setDeliveryConfig] = useState<DeliveryConfig | null>(null);
   const [enabled, setEnabled] = useState(true);
+  const [percentDiscountEnabled, setPercentDiscountEnabled] = useState(false);
   const [globalDiscountPercent, setGlobalDiscountPercent] = useState('20');
   const [eligibleCategories, setEligibleCategories] = useState<string[]>([]);
 
@@ -115,6 +116,7 @@ export function StaffConsumptionSettingsTab({
         setDeliveryConfig(cfg);
         const staff = normalizeStaffConsumptionConfig(cfg.staffConsumption);
         setEnabled(staff.enabled);
+        setPercentDiscountEnabled(staff.pricingMode === 'percent_discount');
         setGlobalDiscountPercent(String(staff.defaultDiscountPercent || 0));
         setEligibleCategories(staff.eligibleCategories);
       })
@@ -130,11 +132,16 @@ export function StaffConsumptionSettingsTab({
 
   const buildStaffPayload = () => {
     const pct = Math.max(0, Math.min(100, Number(globalDiscountPercent) || 0));
+    const prev = normalizeStaffConsumptionConfig(deliveryConfig?.staffConsumption);
     return {
       enabled,
-      pricingMode: 'percent_discount' as const,
+      // 1) staffPrice del producto (Productos) manda.
+      // 2) Si no hay staffPrice y el % está activado → percent_discount.
+      // 3) Si el % está off → precio público.
+      pricingMode: percentDiscountEnabled ? ('percent_discount' as const) : ('staff_price_field' as const),
       defaultDiscountPercent: pct,
       eligibleCategories,
+      excludedCatalogItemIds: prev.excludedCatalogItemIds,
     };
   };
 
@@ -157,6 +164,10 @@ export function StaffConsumptionSettingsTab({
 
   const handleApplyToCatalog = async () => {
     if (!userId || !deliveryConfig) return;
+    if (!percentDiscountEnabled) {
+      toast.error('Activa el descuento % para poder aplicarlo');
+      return;
+    }
     const pct = Math.max(0, Math.min(100, Number(globalDiscountPercent) || 0));
     if (!Number.isFinite(pct)) {
       toast.error('Indica un porcentaje válido');
@@ -180,6 +191,7 @@ export function StaffConsumptionSettingsTab({
       setDeliveryConfig(result.config);
       const staff = normalizeStaffConsumptionConfig(result.config.staffConsumption);
       setEnabled(staff.enabled);
+      setPercentDiscountEnabled(staff.pricingMode === 'percent_discount');
       setGlobalDiscountPercent(String(staff.defaultDiscountPercent || 0));
       setEligibleCategories(staff.eligibleCategories);
       onCatalogUpdated?.();
@@ -203,14 +215,15 @@ export function StaffConsumptionSettingsTab({
 
   return (
     <div className="max-w-3xl space-y-5">
-      <div className="rounded-2xl border border-violet-200 dark:border-violet-900 bg-violet-50 dark:bg-violet-950/20 p-5">
+      <div className="rounded-2xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-900/40 p-4">
         <div className="flex items-start gap-3">
-          <UtensilsCrossed className="w-6 h-6 text-violet-600 shrink-0 mt-0.5" />
+          <UtensilsCrossed className="w-5 h-5 text-[#2563EB] shrink-0 mt-0.5" />
           <div>
-            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Consumos de equipo</h2>
+            <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">Configuración general</h2>
             <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-              Configura qué puede consumir el personal y a qué precio. Solo afecta al TPV de trabajadores;
-              los clientes siguen viendo el precio público de carta.
+              Aquí: encender el TPV y un descuento % masivo. Los precios fijos y activar/desactivar
+              producto a producto se hacen en la pestaña <strong>Productos</strong> (tienen prioridad
+              en el TPV si el producto ya tiene precio empleado).
             </p>
           </div>
         </div>
@@ -299,9 +312,40 @@ export function StaffConsumptionSettingsTab({
         step={3}
         icon={CircleDollarSign}
         title="Precio para empleados"
-        description="Descuento sobre el precio público. Puedes guardar la regla o escribir el precio empleado en cada producto del catálogo."
+        description="Primero el precio fijo de Productos. Si no hay, y el % está activado, se aplica este descuento."
       >
-        <div className="flex flex-col sm:flex-row sm:items-end gap-4">
+        <label className="flex items-center justify-between gap-4 p-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/30">
+          <div>
+            <p className="font-semibold text-gray-900 dark:text-gray-100">Usar descuento %</p>
+            <p className="text-sm text-gray-500 mt-0.5">
+              {percentDiscountEnabled
+                ? 'Activo: si el producto no tiene precio empleado, se aplica el %.'
+                : 'Desactivado: solo cuentan los precios de la pestaña Productos (o el precio público).'}
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={percentDiscountEnabled}
+            onClick={() => setPercentDiscountEnabled((v) => !v)}
+            className={`w-11 h-6 rounded-full relative shrink-0 ${
+              percentDiscountEnabled ? 'bg-violet-600' : 'bg-gray-300 dark:bg-gray-600'
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                percentDiscountEnabled ? 'translate-x-5' : 'translate-x-0.5'
+              }`}
+            />
+          </button>
+        </label>
+
+        <div
+          className={`flex flex-col sm:flex-row sm:items-end gap-4 ${
+            percentDiscountEnabled ? '' : 'pointer-events-none opacity-50'
+          }`}
+          aria-disabled={!percentDiscountEnabled}
+        >
           <div className="flex-1">
             <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">
               Descuento sobre precio público
@@ -315,8 +359,11 @@ export function StaffConsumptionSettingsTab({
                   max={100}
                   step={1}
                   value={globalDiscountPercent}
+                  disabled={!percentDiscountEnabled}
+                  readOnly={!percentDiscountEnabled}
+                  tabIndex={percentDiscountEnabled ? 0 : -1}
                   onChange={(e) => setGlobalDiscountPercent(e.target.value)}
-                  className="w-full pl-10 pr-3 py-3 text-2xl font-bold rounded-xl border-2 border-violet-200 dark:border-violet-800 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                  className="w-full pl-10 pr-3 py-3 text-2xl font-bold rounded-xl border-2 border-violet-200 dark:border-violet-800 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 disabled:cursor-not-allowed"
                 />
               </div>
               <span className="text-2xl font-bold text-gray-400 pb-1">%</span>
@@ -341,7 +388,11 @@ export function StaffConsumptionSettingsTab({
           )}
         </div>
 
-        <div className="rounded-xl border border-dashed border-violet-200 dark:border-violet-800 bg-violet-50/40 dark:bg-violet-950/10 p-4 space-y-3">
+        <div
+          className={`rounded-xl border border-dashed border-violet-200 dark:border-violet-800 bg-violet-50/40 dark:bg-violet-950/10 p-4 space-y-3 ${
+            percentDiscountEnabled ? '' : 'pointer-events-none opacity-50'
+          }`}
+        >
           <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
             Opcional: fijar precio empleado en el catálogo
           </p>
@@ -352,7 +403,7 @@ export function StaffConsumptionSettingsTab({
           <button
             type="button"
             onClick={() => void handleApplyToCatalog()}
-            disabled={applying || applyTargetCount === 0}
+            disabled={!percentDiscountEnabled || applying || applyTargetCount === 0}
             className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white font-bold text-sm"
           >
             {applying ? (
@@ -383,7 +434,10 @@ export function StaffConsumptionSettingsTab({
             Productos en tablet: <strong className="text-gray-900 dark:text-gray-100">{tpvProductCount}</strong>
           </li>
           <li>
-            Descuento referencia: <strong className="text-gray-900 dark:text-gray-100">{globalDiscountPercent || 0} %</strong>
+            Descuento %:{' '}
+            <strong className="text-gray-900 dark:text-gray-100">
+              {percentDiscountEnabled ? `${globalDiscountPercent || 0} % (activo)` : 'desactivado'}
+            </strong>
           </li>
         </ul>
         <button

@@ -5,6 +5,7 @@ export const DEFAULT_STAFF_CONSUMPTION_CONFIG: StaffConsumptionConfig = {
   pricingMode: 'staff_price_field',
   defaultDiscountPercent: 0,
   eligibleCategories: [],
+  excludedCatalogItemIds: [],
 };
 
 export function normalizeStaffConsumptionConfig(
@@ -16,6 +17,9 @@ export function normalizeStaffConsumptionConfig(
     eligibleCategories: Array.isArray(raw?.eligibleCategories)
       ? raw!.eligibleCategories.map((c) => String(c || '').trim()).filter(Boolean)
       : [],
+    excludedCatalogItemIds: Array.isArray(raw?.excludedCatalogItemIds)
+      ? [...new Set(raw!.excludedCatalogItemIds.map((id) => String(id || '').trim()).filter(Boolean))]
+      : [],
   };
 }
 
@@ -24,24 +28,32 @@ export function resolveStaffUnitPrice(
   config?: Partial<StaffConsumptionConfig> | null,
 ): number {
   const publicPrice = Number(item.unitPrice || 0);
+  // Precio empleado explícito (organizador / producto) manda siempre en el TPV.
+  const rawStaff = item.staffPrice;
+  if (rawStaff !== undefined && rawStaff !== null && rawStaff !== '') {
+    const staffPrice = Number(rawStaff);
+    if (Number.isFinite(staffPrice) && staffPrice >= 0) {
+      return roundMoney(staffPrice);
+    }
+  }
   const cfg = normalizeStaffConsumptionConfig(config);
   if (cfg.pricingMode === 'same_as_public') return roundMoney(publicPrice);
   if (cfg.pricingMode === 'percent_discount') {
     const pct = Math.max(0, Math.min(100, Number(cfg.defaultDiscountPercent || 0)));
     return roundMoney(publicPrice * (1 - pct / 100));
   }
-  const staffPrice = Number(item.staffPrice);
-  if (Number.isFinite(staffPrice) && staffPrice > 0) return roundMoney(staffPrice);
   return roundMoney(publicPrice);
 }
 
 export function isCatalogItemEligibleForStaffConsumption(
-  item: Pick<CatalogItem, 'category' | 'active' | 'available'>,
+  item: Pick<CatalogItem, '_id' | 'id' | 'category' | 'active' | 'available'>,
   config?: Partial<StaffConsumptionConfig> | null,
 ): boolean {
   if (item.active === false || item.available === false) return false;
   const cfg = normalizeStaffConsumptionConfig(config);
   if (!cfg.enabled) return false;
+  const itemId = String(item._id || item.id || '').trim();
+  if (itemId && cfg.excludedCatalogItemIds.some((id) => id === itemId)) return false;
   const category = String(item.category || '').trim();
   if (!cfg.eligibleCategories.length) return true;
   const folded = category.toLowerCase();
