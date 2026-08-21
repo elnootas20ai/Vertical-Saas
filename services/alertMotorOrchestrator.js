@@ -6,7 +6,6 @@
 import logger from './logger.js';
 import { runAlertEngine } from './alertEngine.js';
 import { runDeliveryAlerts } from './deliveryAlertEngine.js';
-import { runCleaningAlerts } from './cleaningAlertEngine.js';
 import { runButcherAlertEngine } from './butcherAlertEngine.js';
 import { runConstructionAlertEngine } from './constructionAlertEngine.js';
 import { runEventsAlertEngine } from './eventsAlertEngine.js';
@@ -15,10 +14,10 @@ const TAG = 'ALERT_ORCHESTRATOR';
 
 export async function runAllAlertMotors() {
   const start = Date.now();
+  // runCleaningAlerts desactivado: barría DBs enteras y saturaba el proceso Node.
   const results = await Promise.allSettled([
     runAlertEngine(),
     runDeliveryAlerts(),
-    runCleaningAlerts(),
     runButcherAlertEngine(),
     runConstructionAlertEngine(),
     runEventsAlertEngine(),

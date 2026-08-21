@@ -653,19 +653,9 @@ async function runForBusiness(business) {
 }
 
 export async function runCleaningAlerts() {
-  const ms = Date.now(); cycleCount++;
-  if (cycleCount % 30 === 0) cleanCaches();
-  try {
-    const businesses = await getAllBusinesses();
-    if (!businesses.length) return;
-    let total = 0;
-    for (const b of businesses) {
-      try { total += await runForBusiness(b); }
-      catch (e) { logger.warn({ tag: TAG, businessId: b._id, err: e?.message }, 'Error alertas limpieza'); }
-    }
-    const elapsed = Date.now() - ms;
-    if (total > 0 || elapsed > 10_000) logger.info({ tag: TAG, businesses: businesses.length, alerts: total, ms: elapsed, cycle: cycleCount }, 'Ciclo alertas limpieza');
-  } catch (e) { logger.error({ tag: TAG, err: e?.message }, 'Error motor alertas limpieza'); }
+  // Desactivado: cada ciclo hacía getAllDocuments de varias DBs por business y
+  // llenaba la RAM del backend (ciclos de minutos). No reactivar sin OK.
+  return;
 }
 
 export async function getCleaningAlertSummary(userId) {
@@ -773,14 +763,7 @@ export async function triggerReactiveCleaningAlert(userId, eventType, payload) {
 let engineTimer = null;
 
 export function startCleaningAlertEngine() {
-  logger.info({ tag: TAG }, `Motor alertas limpieza — inicio en ${STARTUP_DELAY_MS / 1000}s, ciclo: ${DEFAULT_INTERVAL_MS / 1000}s`);
-  setTimeout(() => {
-    runCleaningAlerts().catch(() => null);
-    engineTimer = setInterval(() => {
-      if (!shouldRunBackgroundEngine('cleaning_alerts')) return;
-      runCleaningAlerts().catch(() => null);
-    }, DEFAULT_INTERVAL_MS);
-  }, STARTUP_DELAY_MS);
+  logger.info({ tag: TAG }, 'Motor alertas limpieza DESACTIVADO (no arranca ciclo)');
 }
 
 export function stopCleaningAlertEngine() {

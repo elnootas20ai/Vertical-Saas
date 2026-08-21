@@ -153,7 +153,7 @@ import { startAlertEngine } from './services/alertEngine.js';
 import { startButcherAlertEngine } from './services/butcherAlertEngine.js';
 import { startConstructionAlertEngine } from './services/constructionAlertEngine.js';
 import { startDeliveryAlertEngine } from './services/deliveryAlertEngine.js';
-import { startCleaningAlertEngine } from './services/cleaningAlertEngine.js';
+// cleaningAlertEngine desactivado (saturaba RAM)
 import { startEventsAlertEngine } from './services/eventsAlertEngine.js';
 import { markSystemActivity, shouldRunBackgroundEngine } from './services/engineIdleGate.js';
 import { startSupplierInvoicePolling } from './services/supplierInvoiceScheduler.js';
@@ -3319,8 +3319,9 @@ if (backgroundEnginesEnabled) {
   // ALDV-02: Motor alertas delivery — eventos + barrido seguridad 15 min (umbrales CEO)
   startDeliveryAlertEngine();
 
-  // ALLP-03: Motor alertas limpieza — ciclo rápido 120s independiente
-  startCleaningAlertEngine();
+  // ALLP-03: Motor alertas limpieza — DESACTIVADO (saturaba RAM: getAllDocuments
+  // de cleaning/clockins/finance/invoices/catalog por cada business cada 120s).
+  // startCleaningAlertEngine();
 
   // CARN-ALR: Motor alertas carniceria — principal 30 min + bascula 5 min
   startButcherAlertEngine();
