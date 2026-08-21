@@ -42,6 +42,7 @@ export const affiliateRouter = Router();
 affiliateRouter.get('/verticals', getVerticals);
 affiliateRouter.post('/request', affiliateRequestLimiter, apiLimiter, submitAffiliateRequest);
 affiliateRouter.get('/email-action', apiLimiter, handleAffiliateEmailAction);
+affiliateRouter.post('/email-action', apiLimiter, handleAffiliateEmailAction);
 affiliateRouter.get('/referral/:code/validate', validateReferralCode);
 
 // ── Portal (affiliate accesses with their code) ───────────────────────────────

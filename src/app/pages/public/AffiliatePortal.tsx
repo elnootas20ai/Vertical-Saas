@@ -45,7 +45,8 @@ import { shouldHideBusinessOrganizationRegistrationOnIos } from '../../lib/appSt
 
 function LoginScreen({ onLogin }: { onLogin: (code: string) => void }) {
   const navigate = useNavigate();
-  const [mode, setMode] = useState<'account' | 'code'>('account');
+  // Mundo afiliado: por defecto código (independiente del SaaS trabajador/empresa).
+  const [mode, setMode] = useState<'account' | 'code'>('code');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
@@ -99,26 +100,26 @@ function LoginScreen({ onLogin }: { onLogin: (code: string) => void }) {
           </div>
           <h1 className="text-2xl font-black text-white mb-2">Panel de Afiliado</h1>
           <p className="text-blue-200/70 min-h-[2.75rem] flex items-center justify-center px-2 text-sm leading-relaxed">
-            {mode === 'account'
-              ? 'Entra con tu email y contraseña de Vertial'
-              : 'Acceso alternativo con código de afiliado'}
+            {mode === 'code'
+              ? 'Entra con tu código de afiliado (mundo aparte del SaaS)'
+              : 'Opcional: email y contraseña solo en este panel de afiliado'}
           </p>
         </div>
 
         <div className="flex rounded-xl bg-white/10 p-1 mb-4">
           <button
             type="button"
-            onClick={() => { setMode('account'); setError(''); }}
-            className={`flex-1 py-2.5 text-sm font-semibold rounded-lg transition-colors duration-200 ${mode === 'account' ? 'bg-white text-slate-900 shadow-sm' : 'text-blue-100 hover:text-white'}`}
-          >
-            Email y contraseña
-          </button>
-          <button
-            type="button"
             onClick={() => { setMode('code'); setError(''); }}
             className={`flex-1 py-2.5 text-sm font-semibold rounded-lg transition-colors duration-200 ${mode === 'code' ? 'bg-white text-slate-900 shadow-sm' : 'text-blue-100 hover:text-white'}`}
           >
             Código
+          </button>
+          <button
+            type="button"
+            onClick={() => { setMode('account'); setError(''); }}
+            className={`flex-1 py-2.5 text-sm font-semibold rounded-lg transition-colors duration-200 ${mode === 'account' ? 'bg-white text-slate-900 shadow-sm' : 'text-blue-100 hover:text-white'}`}
+          >
+            Email y contraseña
           </button>
         </div>
 

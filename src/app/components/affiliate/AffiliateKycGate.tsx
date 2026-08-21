@@ -15,6 +15,7 @@ import {
   AFFILIATE_KYC_MAX_BYTES,
   formatKycFileSize,
   labelForKycDocKind,
+  prepareAffiliateKycUploadFile,
   readFileAsDataUrl,
   type AffiliateKycDocKind,
   type AffiliateKycDocument,
@@ -25,6 +26,7 @@ type DocUpload = {
   kind: AffiliateKycDocKind;
   file: File | null;
   previewName?: string;
+  compressing?: boolean;
 };
 
 interface AffiliateKycGateProps {
@@ -91,11 +93,22 @@ export function AffiliateKycGate({
       setDocs((prev) => prev.map((d) => (d.kind === kind ? { kind, file: null } : d)));
       return;
     }
-    if (file.size > AFFILIATE_KYC_MAX_BYTES) {
-      setUploadError(`"${file.name}" supera ${formatKycFileSize(AFFILIATE_KYC_MAX_BYTES)}`);
-      return;
+    setDocs((prev) =>
+      prev.map((d) => (d.kind === kind ? { kind, file: null, previewName: 'Comprimiendo foto…', compressing: true } : d)),
+    );
+    try {
+      const prepared = await prepareAffiliateKycUploadFile(file);
+      const label =
+        prepared.size < file.size
+          ? `${prepared.name} (${formatKycFileSize(prepared.size)}, comprimida)`
+          : `${prepared.name} (${formatKycFileSize(prepared.size)})`;
+      setDocs((prev) =>
+        prev.map((d) => (d.kind === kind ? { kind, file: prepared, previewName: label } : d)),
+      );
+    } catch (err) {
+      setDocs((prev) => prev.map((d) => (d.kind === kind ? { kind, file: null } : d)));
+      setUploadError(err instanceof Error ? err.message : 'No se pudo procesar la foto');
     }
-    setDocs((prev) => prev.map((d) => (d.kind === kind ? { kind, file, previewName: file.name } : d)));
   };
 
   const validate = () => {
@@ -232,7 +245,9 @@ export function AffiliateKycGate({
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="text-sm font-semibold text-slate-800">{spec.label}</p>
-                      <p className="text-xs text-slate-500 mt-0.5">{spec.hint} · Máx. {formatKycFileSize(AFFILIATE_KYC_MAX_BYTES)}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {spec.hint} · Las fotos grandes se comprimen solas (límite {formatKycFileSize(AFFILIATE_KYC_MAX_BYTES)})
+                      </p>
                     </div>
                     {entry?.file ? (
                       <button
@@ -249,6 +264,7 @@ export function AffiliateKycGate({
                     <input
                       type="file"
                       accept={AFFILIATE_KYC_ACCEPT}
+                      capture="environment"
                       className="hidden"
                       onChange={(e) => {
                         const file = e.target.files?.[0] || null;
@@ -256,7 +272,12 @@ export function AffiliateKycGate({
                         e.target.value = '';
                       }}
                     />
-                    {entry?.file ? (
+                    {entry?.compressing ? (
+                      <>
+                        <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />
+                        <span className="text-sm font-medium text-blue-700">Comprimiendo foto…</span>
+                      </>
+                    ) : entry?.file ? (
                       <>
                         <Check className="w-4 h-4 text-emerald-600" />
                         <span className="text-sm font-medium text-emerald-700">{entry.previewName}</span>

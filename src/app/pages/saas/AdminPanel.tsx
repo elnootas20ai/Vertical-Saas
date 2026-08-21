@@ -3539,11 +3539,7 @@ function AffiliateRequestsTab({ userId }: { userId: string }) {
             : `Afiliado aceptado (email no enviado). ${accessHint}`,
         );
       } else if (status === 'rejected') {
-        toast.success(
-          statusEmailSent
-            ? 'Solicitud rechazada. Se notificó al solicitante por email.'
-            : 'Solicitud rechazada (email no enviado).',
-        );
+        toast.success('Solicitud rechazada. No se envía correo al afiliado.');
       }
       if (statusEmailError) {
         toast.error(`Correo no enviado: ${statusEmailError}`);

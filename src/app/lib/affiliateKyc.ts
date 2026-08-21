@@ -33,7 +33,10 @@ export type AffiliateKycData = {
 };
 
 export const AFFILIATE_KYC_MAX_BYTES = 2 * 1024 * 1024;
-export const AFFILIATE_KYC_ACCEPT = '.pdf,image/jpeg,image/png,image/webp';
+export const AFFILIATE_KYC_ACCEPT = 'image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp,.pdf,application/pdf';
+
+/** Lado máximo al comprimir fotos de DNI (móvil suele mandar 8–12 MP). */
+const KYC_IMAGE_MAX_SIDE = 1600;
 
 export const AFFILIATE_KYC_DOC_KINDS: {
   value: AffiliateKycDocKind;
@@ -55,6 +58,92 @@ export function readFileAsDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
     reader.readAsDataURL(file);
   });
+}
+
+function loadImageFromFile(file: File): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('No se pudo leer la imagen'));
+    };
+    img.src = url;
+  });
+}
+
+function canvasToJpegBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) reject(new Error('No se pudo comprimir la imagen'));
+        else resolve(blob);
+      },
+      'image/jpeg',
+      quality,
+    );
+  });
+}
+
+/**
+ * Fotos de móvil suelen superar 2 MB. Las reescalamos y bajamos calidad JPEG
+ * hasta quedar bajo el límite (PDF se deja tal cual si ya cabe).
+ */
+export async function prepareAffiliateKycUploadFile(file: File): Promise<File> {
+  if (file.size <= AFFILIATE_KYC_MAX_BYTES) return file;
+
+  const isPdf =
+    file.type === 'application/pdf'
+    || /\.pdf$/i.test(file.name);
+  if (isPdf) {
+    throw new Error(
+      `El PDF supera ${formatKycFileSize(AFFILIATE_KYC_MAX_BYTES)}. Usa una foto o un PDF más ligero.`,
+    );
+  }
+
+  const isImage =
+    /^image\/(jpeg|jpg|png|webp|heic|heif)$/i.test(file.type)
+    || /\.(jpe?g|png|webp)$/i.test(file.name);
+  if (!isImage) {
+    throw new Error('Formato no válido. Usa foto JPG/PNG o PDF.');
+  }
+
+  const img = await loadImageFromFile(file);
+  let { width, height } = img;
+  let maxSide = KYC_IMAGE_MAX_SIDE;
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const scale = Math.min(1, maxSide / Math.max(width, height, 1));
+    const w = Math.max(1, Math.round(width * scale));
+    const h = Math.max(1, Math.round(height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('No se pudo comprimir la imagen');
+    ctx.drawImage(img, 0, 0, w, h);
+
+    const qualities = [0.72, 0.6, 0.48, 0.36];
+    for (const q of qualities) {
+      const blob = await canvasToJpegBlob(canvas, q);
+      if (blob.size <= AFFILIATE_KYC_MAX_BYTES) {
+        const base = file.name.replace(/\.[^.]+$/, '') || 'dni';
+        return new File([blob], `${base}.jpg`, {
+          type: 'image/jpeg',
+          lastModified: Date.now(),
+        });
+      }
+    }
+    maxSide = Math.round(maxSide * 0.75);
+  }
+
+  throw new Error(
+    `No se pudo comprimir la foto por debajo de ${formatKycFileSize(AFFILIATE_KYC_MAX_BYTES)}. Prueba otra foto más cercana al documento.`,
+  );
 }
 
 export function formatKycFileSize(bytes: number): string {

@@ -345,23 +345,26 @@ async function applyAffiliateStatusChange(
 
   let statusEmailSent = false;
   let statusEmailError = null;
-  if (
-    sendStatusEmail
-    && (status === 'accepted' || status === 'rejected')
-  ) {
+  // Solo al aceptar: bienvenida al afiliado. Al rechazar: sin correo (evita avisos raros / “verificación”).
+  if (sendStatusEmail && status === 'accepted') {
     try {
-      if (status === 'accepted') {
-        await sendEmail({
-          to: doc.email,
-          subject: '¡Tu solicitud de afiliado ha sido aceptada! · Vertial',
-          html: buildAffiliateAcceptedEmail(doc),
-        });
-      } else {
-        await sendEmail({
-          to: doc.email,
-          subject: 'Actualización sobre tu solicitud de afiliación · Vertial',
-          html: buildAffiliateRejectedEmail(doc),
-        });
+      const html = buildAffiliateAcceptedEmail(doc);
+      const subject = `Tu código de afiliado ${doc.affiliateCode || ''} · Vertial`;
+      const recipients = new Set(
+        [doc.email].map((e) => String(e || '').trim().toLowerCase()).filter(Boolean),
+      );
+      const linkedUid = String(doc.linkedAccountUserId || '').trim();
+      if (linkedUid) {
+        try {
+          const linkedAcc = await findAccountByUserId(req, linkedUid);
+          const linkedEmail = String(linkedAcc?.email || '').trim().toLowerCase();
+          if (linkedEmail) recipients.add(linkedEmail);
+        } catch {
+          /* ignore */
+        }
+      }
+      for (const to of recipients) {
+        await sendEmail({ to, subject, html });
       }
       statusEmailSent = true;
       try {
@@ -1119,8 +1122,13 @@ export async function updateAffiliateAdmin(req, res) {
   }
 }
 
+/**
+ * GET: solo muestra confirmación (los scanners de Gmail no deben aceptar/rechazar solos).
+ * POST: aplica el cambio de estado.
+ */
 export async function handleAffiliateEmailAction(req, res) {
-  const verified = verifyAffiliateEmailActionToken(req.query.token);
+  const token = String(req.method === 'POST' ? (req.body?.token || req.query?.token) : req.query?.token || '').trim();
+  const verified = verifyAffiliateEmailActionToken(token);
   if (!verified) {
     return res.status(400).send(buildAffiliateEmailActionResultHtml({
       ok: false,
@@ -1154,10 +1162,23 @@ export async function handleAffiliateEmailAction(req, res) {
     }
 
     const nextStatus = verified.action === 'accept' ? 'accepted' : 'rejected';
+    const isPost = String(req.method || '').toUpperCase() === 'POST';
+
+    // GET: pantalla de confirmación (evita prefetch que acepta y rechaza a la vez).
+    if (!isPost) {
+      return res.send(buildAffiliateEmailActionConfirmHtml({
+        token,
+        action: verified.action,
+        affiliate,
+        adminUrl: adminAffiliateRequestsUrl(),
+      }));
+    }
+
     const ownerUserId = await resolvePlatformAffiliateOwnerUserId(req);
     const result = await applyAffiliateStatusChange(req, verified.affiliateId, nextStatus, {
       ownerUserId,
-      sendStatusEmail: true,
+      // Solo aceptación avisa al afiliado; rechazo sin correo.
+      sendStatusEmail: nextStatus === 'accepted',
     });
 
     if (nextStatus === 'accepted') {
@@ -1171,8 +1192,8 @@ export async function handleAffiliateEmailAction(req, res) {
         adminUrl: adminAffiliateRequestsUrl(),
         statusLabel: 'Aceptado',
         emailNote: result.statusEmailSent
-          ? 'Correo enviado al solicitante.'
-          : (result.statusEmailError || 'No se pudo enviar el correo al solicitante.'),
+          ? 'Correo de bienvenida enviado al afiliado.'
+          : (result.statusEmailError || 'No se pudo enviar el correo al afiliado.'),
       }));
     }
 
@@ -1181,13 +1202,11 @@ export async function handleAffiliateEmailAction(req, res) {
       title: result.unchanged ? 'Solicitud ya rechazada' : 'Solicitud rechazada',
       message: result.unchanged
         ? `${affiliate.name} ya estaba marcado como rechazado.`
-        : `Has rechazado la solicitud de ${result.doc.name}.`,
+        : `Has rechazado la solicitud de ${result.doc.name}. No se ha enviado correo al solicitante.`,
       affiliate: result.doc,
       adminUrl: adminAffiliateRequestsUrl(),
       statusLabel: 'Rechazado',
-      emailNote: result.statusEmailSent
-        ? 'Se notificó al solicitante por email.'
-        : (result.statusEmailError || null),
+      emailNote: 'Al rechazar no se envía correo al afiliado.',
     }));
   } catch (err) {
     logger.error({ tag: 'AFFILIATE', err }, 'Error en acción de email de afiliado');
@@ -1955,7 +1974,7 @@ function buildAffiliateRequestEmail({ name, email, phone, whatsapp, company, web
               </tr>
             </table>
           </td></tr></table>
-          <p style="margin:14px 0 0;color:#9ca3af;font-size:11px;line-height:1.5;">Los enlaces de acción caducan a los 7 días. Al aceptar, el solicitante recibe su código por email automáticamente.</p>
+          <p style="margin:14px 0 0;color:#9ca3af;font-size:11px;line-height:1.5;">Los enlaces abren una pantalla de confirmación (no cambian el estado al abrir el correo). Caducan a los 7 días. Al aceptar, el afiliado recibe el email de bienvenida; al rechazar no se le envía correo.</p>
         </td></tr>`
     : '';
 
@@ -2035,42 +2054,10 @@ function buildAffiliateApplicantConfirmationEmail({ name, verticals }) {
 
 function buildAffiliateAcceptedEmail(affiliate) {
   const portalUrl = affiliatePortalUrl();
-  const hasLinkedAccount = Boolean(affiliate.linkedAccountUserId || affiliate.portalAccessMode === 'account');
-  const accessBlock = hasLinkedAccount
-    ? `<p style="color:#555;margin:0 0 16px;line-height:1.6;">
-         Accede a tu panel con el <strong>mismo email y contraseña</strong> que usas en Vertial:
-       </p>
-       <table cellpadding="0" cellspacing="0" style="margin:0 auto 24px;"><tr><td style="background:#111;border-radius:8px;">
-         <a href="${escapeHtml(portalUrl)}"
-            style="display:inline-block;background:#111;color:#fff;padding:14px 28px;text-decoration:none;border-radius:8px;font-weight:600;font-size:15px;">
-           Entrar al panel de afiliado
-         </a>
-       </td></tr></table>
-       <p style="color:#6b7280;margin:0 0 16px;font-size:13px;line-height:1.5;">
-         Tu código de referido para nuevos clientes sigue siendo
-         <strong style="font-family:monospace;">${escapeHtml(affiliate.referralCode || '—')}</strong>
-         (no lo uses para entrar al panel).
-       </p>`
-    : `<p style="color:#555;margin:0 0 16px;line-height:1.6;">
-         Tu solicitud ha sido <strong>aceptada</strong>. Para activar tu acceso:
-       </p>
-       <ol style="color:#555;margin:0 0 16px;padding-left:20px;line-height:1.7;font-size:14px;">
-         <li>Regístrate en Vertial con este email: <strong>${escapeHtml(affiliate.email)}</strong></li>
-         <li>Entra al panel de afiliado con ese email y contraseña</li>
-       </ol>
-       <table cellpadding="0" cellspacing="0" style="margin:0 auto 16px;"><tr><td style="background:#2563eb;border-radius:8px;">
-         <a href="${escapeHtml(`${getPublicSiteUrl()}/auth/register`)}"
-            style="display:inline-block;background:#2563eb;color:#fff;padding:12px 24px;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px;">
-           Crear cuenta Vertial
-         </a>
-       </td></tr></table>
-       <p style="color:#555;margin:0 0 8px;line-height:1.6;font-size:14px;">
-         Código de panel (alternativo): <strong style="font-family:monospace;letter-spacing:1px;">${escapeHtml(affiliate.affiliateCode || '')}</strong>
-       </p>
-       <p style="color:#555;margin:0 0 16px;line-height:1.6;font-size:14px;">
-         Código de referido para clientes: <strong style="font-family:monospace;">${escapeHtml(affiliate.referralCode || '—')}</strong>
-       </p>`;
+  const affiliateCode = String(affiliate.affiliateCode || '').trim();
+  const referralCode = String(affiliate.referralCode || '—').trim();
 
+  // Mundo afiliado ≠ mundo SaaS (trabajador/empresa): siempre panel + código bien visible.
   return `
 <!DOCTYPE html>
 <html lang="es">
@@ -2083,8 +2070,36 @@ function buildAffiliateAcceptedEmail(affiliate) {
           <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial · Afiliado aceptado</span>
         </td></tr>
         <tr><td style="padding:32px;">
-          <h2 style="margin:0 0 16px;color:#111;font-size:22px;">¡Bienvenido, ${escapeHtml(affiliate.name)}!</h2>
-          ${accessBlock}
+          <h2 style="margin:0 0 12px;color:#111;font-size:22px;">¡Bienvenido, ${escapeHtml(affiliate.name)}!</h2>
+          <p style="color:#555;margin:0 0 20px;line-height:1.6;">
+            Tu solicitud ha sido <strong>aceptada</strong>. Guarda este correo: aquí tienes tu
+            <strong>código de afiliado</strong> para entrar al panel (espacio aparte del SaaS de trabajador/empresa).
+          </p>
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;background:#052e16;border-radius:12px;">
+            <tr><td style="padding:20px 24px;text-align:center;">
+              <p style="margin:0 0 8px;color:#86efac;font-size:13px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;">
+                Tu código de afiliado
+              </p>
+              <p style="margin:0;font-size:28px;font-weight:800;letter-spacing:3px;font-family:ui-monospace,Menlo,monospace;color:#fff;">
+                ${escapeHtml(affiliateCode || '—')}
+              </p>
+            </td></tr>
+          </table>
+          <table cellpadding="0" cellspacing="0" style="margin:0 auto 20px;"><tr><td style="background:#111;border-radius:8px;">
+            <a href="${escapeHtml(portalUrl)}"
+               style="display:inline-block;background:#111;color:#fff;padding:14px 28px;text-decoration:none;border-radius:8px;font-weight:600;font-size:15px;">
+              Abrir panel de afiliado
+            </a>
+          </td></tr></table>
+          <p style="color:#6b7280;margin:0 0 16px;font-size:13px;line-height:1.5;">
+            En <strong>${escapeHtml(portalUrl.replace(/^https?:\/\//, ''))}</strong> elige la pestaña
+            <strong>Código</strong> y pega <strong style="font-family:monospace;">${escapeHtml(affiliateCode || '—')}</strong>.
+            También puedes entrar con el email y contraseña de tu cuenta Vertial en ese mismo panel.
+          </p>
+          <p style="color:#555;margin:0 0 8px;line-height:1.6;font-size:14px;">
+            Código de referido para tus clientes:
+            <strong style="font-family:monospace;">${escapeHtml(referralCode)}</strong>
+          </p>
           <p style="color:#555;margin:0;line-height:1.6;font-size:14px;">
             Comisión base: <strong>${Number(affiliate.commissionRate) || DEFAULT_AFFILIATE_COMMISSION_RATE}%</strong>
           </p>
@@ -2131,6 +2146,49 @@ function buildAffiliateRejectedEmail(affiliate) {
         </td></tr>
         <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
           <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Programa de afiliados</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
+function buildAffiliateEmailActionConfirmHtml({ token, action, affiliate, adminUrl }) {
+  const isAccept = action === 'accept';
+  const accent = isAccept ? '#16a34a' : '#dc2626';
+  const title = isAccept ? 'Confirmar aceptación' : 'Confirmar rechazo';
+  const message = isAccept
+    ? `¿Aceptar a ${affiliate.name} como afiliado? Recibirá el email de bienvenida.`
+    : `¿Rechazar la solicitud de ${affiliate.name}? No se enviará correo al solicitante.`;
+  const buttonLabel = isAccept ? 'Sí, aceptar' : 'Sí, rechazar';
+  const actionUrl = `${getPublicSiteUrl().replace(/\/+$/, '')}/api/affiliate/email-action`;
+
+  return `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${escapeHtml(title)}</title></head>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
+        <tr><td style="background:${accent};padding:24px 28px;">
+          <span style="color:#fff;font-size:20px;font-weight:bold;">Vertial · Afiliados</span>
+        </td></tr>
+        <tr><td style="padding:28px;text-align:center;">
+          <h1 style="margin:0 0 12px;color:#111;font-size:24px;">${escapeHtml(title)}</h1>
+          <p style="margin:0 0 8px;color:#555;font-size:15px;line-height:1.6;">${escapeHtml(message)}</p>
+          <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:16px;margin:20px 0;text-align:left;">
+            <p style="margin:0;font-size:16px;font-weight:700;color:#111;">${escapeHtml(affiliate.name)}</p>
+            <p style="margin:6px 0 0;font-size:13px;color:#374151;">${escapeHtml(affiliate.email)}</p>
+          </div>
+          <form method="POST" action="${escapeHtml(actionUrl)}" style="margin:0;">
+            <input type="hidden" name="token" value="${escapeHtml(token)}" />
+            <button type="submit"
+              style="display:inline-block;background:${accent};color:#fff;border:0;padding:14px 28px;border-radius:10px;font-weight:700;font-size:15px;cursor:pointer;">
+              ${escapeHtml(buttonLabel)}
+            </button>
+          </form>
+          ${adminUrl ? `<p style="margin:20px 0 0;"><a href="${escapeHtml(adminUrl)}" style="color:#2563eb;font-size:14px;">Cancelar · ir al panel admin</a></p>` : ''}
         </td></tr>
       </table>
     </td></tr>
