@@ -125,6 +125,10 @@ describe('splitSessionCajaAmountsByBillingSheet', () => {
         salesByChannel: {},
         totalSales: 100,
       },
+      closingBrandTpvTotals: {
+        'brand-mm': { efectivo: 50, tarjeta: 0 },
+        'brand-bb': { efectivo: 50, tarjeta: 0 },
+      },
       aggregatorClosingTotals: { glovo: 100 },
       aggregatorClosingBrandTotals: {
         glovo: { 'brand-mm': 100 },
@@ -139,6 +143,25 @@ describe('splitSessionCajaAmountsByBillingSheet', () => {
     expect(bb.glovo).toBe(0);
     expect(mm.total).toBe(150);
     expect(bb.total).toBe(50);
+  });
+
+  it('sin Caja 1 por marca: EFECTIVO/TPV/X a 0 (igual que el cierre)', () => {
+    const session = closedSession({
+      summary: {
+        salesByMethod: { efectivo: 100, tarjeta: 40, bizum: 10, online: 0, otro: 0 },
+        salesByChannel: {},
+        totalSales: 150,
+      },
+      productClosingCounts: { pizza: 9, burger: 1, taco: 0 },
+    });
+    const mm = splitSessionCajaAmountsByBillingSheet(session, sheets[0], sheets);
+    const bb = splitSessionCajaAmountsByBillingSheet(session, sheets[1], sheets);
+    expect(mm.efectivo).toBe(0);
+    expect(mm.tpv).toBe(0);
+    expect(mm.x).toBe(0);
+    expect(bb.efectivo).toBe(0);
+    expect(bb.tpv).toBe(0);
+    expect(bb.x).toBe(0);
   });
 
   it('efectivo/tarjeta usan Caja 1 por marca, no el % de pizzas/burgers', () => {
@@ -162,6 +185,68 @@ describe('splitSessionCajaAmountsByBillingSheet', () => {
     expect(bb.efectivo).toBe(10);
     expect(bb.tpv).toBe(50);
     expect(mm.total + bb.total).toBe(300);
+  });
+
+  it('enlaza Caja 1 por nombre aunque brandIds de hoja estén vacíos (Modomio Pizza → MODOMIO)', () => {
+    const legacy = [
+      {
+        id: 'modomio',
+        label: 'MODOMIO',
+        brandIds: [],
+        unitColumns: [{ key: 'pizza', header: 'TOTAL PIZZA' }],
+      },
+      {
+        id: 'blackburger',
+        label: 'BLACK BURGER',
+        brandIds: [],
+        unitColumns: [{ key: 'burger', header: 'TOTAL BURGUER' }],
+      },
+    ];
+    const session = closedSession({
+      summary: {
+        salesByMethod: { efectivo: 100, tarjeta: 200, bizum: 0, online: 0, otro: 0 },
+        salesByChannel: {},
+        totalSales: 300,
+      },
+      closingBrandLabels: {
+        'uuid-mm': 'Modomio Pizza',
+        'uuid-bb': 'Black Burger Badalona',
+      },
+      closingBrandTpvTotals: {
+        'uuid-mm': { efectivo: 80, tarjeta: 180 },
+        'uuid-bb': { efectivo: 20, tarjeta: 20 },
+      },
+      // Unidades dirían casi todo a Modomio; Caja 1 manda
+      productClosingCounts: { pizza: 9, burger: 1, taco: 0 },
+    });
+    const mm = splitSessionCajaAmountsByBillingSheet(session, legacy[0], legacy);
+    const bb = splitSessionCajaAmountsByBillingSheet(session, legacy[1], legacy);
+    expect(mm.tpv).toBe(180);
+    expect(bb.tpv).toBe(20);
+    expect(mm.efectivo).toBe(80);
+    expect(bb.efectivo).toBe(20);
+    expect(mm.total + bb.total).toBe(300);
+  });
+
+  it('resto de tarjeta del cierre sigue el peso de Caja 1, no el % de pizzas', () => {
+    const session = closedSession({
+      summary: {
+        salesByMethod: { efectivo: 100, tarjeta: 110, bizum: 0, online: 0, otro: 0 },
+        salesByChannel: {},
+        totalSales: 210,
+      },
+      closingBrandTpvTotals: {
+        // Suma tarjeta 100; quedan 10 € del cierre → van al peso Caja 1 (90/10), no al 50/50 de uds
+        'brand-mm': { efectivo: 90, tarjeta: 90 },
+        'brand-bb': { efectivo: 10, tarjeta: 10 },
+      },
+      productClosingCounts: { pizza: 1, burger: 1, taco: 0 },
+    });
+    const mm = splitSessionCajaAmountsByBillingSheet(session, sheets[0], sheets);
+    const bb = splitSessionCajaAmountsByBillingSheet(session, sheets[1], sheets);
+    expect(mm.tpv).toBe(99); // 90 + 10*0.9
+    expect(bb.tpv).toBe(11); // 10 + 10*0.1
+    expect(mm.total + bb.total).toBe(210);
   });
 
   it('X (Bizum/otro) sigue el reparto de dinero Vertial, no el % de unidades', () => {
@@ -209,6 +294,10 @@ describe('splitSessionCajaAmountsByBillingSheet', () => {
       closingBrandLabels: {
         'brand-mm': 'MODOMIO',
         'brand-bb': 'BLACKBURGER',
+      },
+      closingBrandTpvTotals: {
+        'brand-mm': { efectivo: 100, tarjeta: 0 },
+        'brand-bb': { efectivo: 0, tarjeta: 0 },
       },
       aggregatorClosingTotals: { glovo: 100 },
       aggregatorClosingBrandTotals: {
@@ -351,6 +440,11 @@ describe('buildCajaMonthSheet', () => {
           salesByChannel: {},
           totalSales: 100,
         },
+        closingBrandLabels: { 'brand-mm': 'MODOMIO', 'brand-bb': 'BLACK BURGER' },
+        closingBrandTpvTotals: {
+          'brand-mm': { efectivo: 70, tarjeta: 0 },
+          'brand-bb': { efectivo: 30, tarjeta: 0 },
+        },
         productClosingCounts: { pizza: 7, burger: 2, taco: 1 },
       }),
       closedSession({
@@ -361,6 +455,10 @@ describe('buildCajaMonthSheet', () => {
           salesByMethod: { efectivo: 50, tarjeta: 0, bizum: 0, online: 0, otro: 0 },
           salesByChannel: {},
           totalSales: 50,
+        },
+        closingBrandLabels: { 'brand-mm': 'MODOMIO' },
+        closingBrandTpvTotals: {
+          'brand-mm': { efectivo: 50, tarjeta: 0 },
         },
         productClosingCounts: { pizza: 5, burger: 0, taco: 0 },
       }),
@@ -379,7 +477,7 @@ describe('buildCajaMonthSheet', () => {
     const modo = buildCajaSheetAoa(sheet, 'modomio');
     expect(modo[0][0]).toContain('MODOMIO');
     expect(modo[2]).toEqual([...MODOMIO_HEADERS]);
-    // Día 1 · 70 € pizzas; celdas a 0 en blanco
+    // Día 1 · Caja 1 del cierre (70 Modomio / 30 BB)
     expect(modo[3]).toEqual([1, 70, '', '', '', '', '', '', 70, 7]);
     expect(modo[5]).toEqual(['TOTAL MES', 70, '', '', '', '', '', '', 70, 7]);
 
@@ -484,6 +582,8 @@ describe('buildCajaMonthSheet', () => {
           salesByChannel: {},
           totalSales: 70,
         },
+        closingBrandLabels: { 'brand-mm': 'MODOMIO' },
+        closingBrandTpvTotals: { 'brand-mm': { efectivo: 70, tarjeta: 0 } },
         productClosingCounts: { pizza: 7, burger: 0, taco: 0 },
       }),
       closedSession({
@@ -598,6 +698,8 @@ describe('buildCajaMonthSheet', () => {
           salesByChannel: {},
           totalSales: 25,
         },
+        closingBrandLabels: { 'brand-mm': 'MODOMIO' },
+        closingBrandTpvTotals: { 'brand-mm': { efectivo: 25, tarjeta: 0 } },
         productClosingCounts: { pizza: 2, burger: 0, taco: 0 },
       }),
     ];

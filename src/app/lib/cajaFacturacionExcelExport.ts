@@ -16,9 +16,9 @@
  * Dinero por hoja marca:
  *   · Apps (App/Uber/Just Eat/Glovo) = totales por marca del cierre (Caja 2).
  *     El no-pagado es solo cajón; no entra en el Excel.
- *   · TPV efectivo/tarjeta = desglose Caja 1 por marca (`closingBrandTpvTotals`)
- *     si existe; si no, proporción de unidades P/B/T.
- *   · X (Bizum + otro) = proporción de unidades (no hay desglose por marca).
+ *   · EFECTIVO / TPV / X = Caja 1 del cierre (`closingBrandTpvTotals`).
+ *     Si no hay desglose por marca escrito → 0 (igual que el cierre).
+ *   · Apps = totales por marca del cierre (Caja 2).
  * TPV = tarjeta. X = Bizum + otro. App = Flipdish + app propia.
  *
  * Sin config → fallback 2 marcas: MODOMIO (pizza) + BLACK BURGER (burger + tacos).
@@ -461,7 +461,29 @@ function closingBrandLabel(
   return '';
 }
 
-/** Marca del cierre → hoja Excel (por brandIds, id de hoja o nombre MODOMIO/BB). */
+/** Pista de comida desde nombre de marca → hoja con esa columna de uds. */
+function foodUnitHintFromBrandName(nameFold: string): 'pizza' | 'burger' | 'taco' | null {
+  if (!nameFold) return null;
+  if (/taco/.test(nameFold)) return 'taco';
+  if (/burger|hamburg|black/.test(nameFold)) return 'burger';
+  if (/pizza|modomio|calzone/.test(nameFold)) return 'pizza';
+  return null;
+}
+
+function sheetIdByFoodUnit(
+  unit: 'pizza' | 'burger' | 'taco',
+  sheets: BrandBillingSheet[],
+): string | null {
+  for (const sheet of sheets) {
+    const keys = new Set((sheet.unitColumns || []).map((c) => c.key));
+    if (keys.has(unit)) return sheet.id;
+    // Tacos viven en la hoja burger (legacy BLACK BURGER).
+    if (unit === 'taco' && keys.has('burger')) return sheet.id;
+  }
+  return null;
+}
+
+/** Marca del cierre → hoja Excel (brandIds, id, nombre, o pista pizza/burger). */
 function sheetIdForClosingBrand(
   brandId: string,
   sheets: BrandBillingSheet[],
@@ -481,10 +503,21 @@ function sheetIdForClosingBrand(
     }
   }
   const nameFold = compactExcelName(closingBrandLabel(brandId, labels));
-  if (!nameFold) return null;
-  for (const sheet of sheets) {
-    const sheetFold = compactExcelName(sheet.label || sheet.id);
-    if (sheetFold && sheetFold === nameFold) return sheet.id;
+  if (nameFold) {
+    for (const sheet of sheets) {
+      const sheetFold = compactExcelName(sheet.label || sheet.id);
+      if (!sheetFold) continue;
+      if (sheetFold === nameFold) return sheet.id;
+      // "Modomio Pizza" ↔ hoja MODOMIO
+      if (sheetFold.length >= 4 && (nameFold.includes(sheetFold) || sheetFold.includes(nameFold))) {
+        return sheet.id;
+      }
+    }
+    const food = foodUnitHintFromBrandName(nameFold);
+    if (food) {
+      const byFood = sheetIdByFoodUnit(food, sheets);
+      if (byFood) return byFood;
+    }
   }
   return null;
 }
@@ -575,24 +608,10 @@ function sessionHasDeclaredBrandTpvTotals(session: TpvRegisterSession): boolean 
   return false;
 }
 
-function canMapClosingBrandTpvToSheets(
-  session: TpvRegisterSession,
-  sheets: BrandBillingSheet[],
-): boolean {
-  if (!sessionHasDeclaredBrandTpvTotals(session) || sheets.length === 0) return false;
-  const labels = session.closingBrandLabels || {};
-  for (const [brandId, pay] of Object.entries(session.closingBrandTpvTotals || {})) {
-    if (!pay || typeof pay !== 'object') continue;
-    if (Number(pay.efectivo) <= 0 && Number(pay.tarjeta) <= 0) continue;
-    if (sheetIdForClosingBrand(brandId, sheets, labels)) return true;
-  }
-  return false;
-}
-
 /**
  * Efectivo/tarjeta/X del cierre → hoja de marca.
- * Misma fuente que el resumen/dashboard (Caja 1 por marca).
- * Sin declaración → null (caller usa proporción de unidades).
+ * Fuente: Caja 1 del cierre (`closingBrandTpvTotals`). Sin % de pizzas.
+ * Sin declaración → null (solo entonces el caller reparte por uds).
  */
 function tpvAmountsForBillingSheet(
   session: TpvRegisterSession,
@@ -600,10 +619,8 @@ function tpvAmountsForBillingSheet(
   billingSheet: BrandBillingSheet,
   allSheets: BrandBillingSheet[],
 ): Pick<CajaDayAmounts, 'efectivo' | 'tpv' | 'x'> | null {
-  if (!canMapClosingBrandTpvToSheets(session, allSheets)) return null;
+  if (!sessionHasDeclaredBrandTpvTotals(session) || allSheets.length === 0) return null;
   const labels = session.closingBrandLabels || {};
-  const shares = sheetMoneyShares(countsFromAmounts(amounts), allSheets);
-  const share = shares[billingSheet.id] ?? 0;
   const attributedEf: Record<string, number> = {};
   const attributedTj: Record<string, number> = {};
   let sumEf = 0;
@@ -625,22 +642,33 @@ function tpvAmountsForBillingSheet(
     }
   }
   if (sumEf <= 0 && sumTj <= 0) return null;
+
+  // Resto vs total del cierre: peso del dinero ya atribuido (regla del cierre), no pizzas.
+  const sheetIds = allSheets.map((s) => s.id);
+  const weightOf = (id: string) => round2((attributedEf[id] || 0) + (attributedTj[id] || 0));
+  const weightTotal = round2(sheetIds.reduce((s, id) => s + weightOf(id), 0));
+  const equalShare = allSheets.length > 0 ? 1 / allSheets.length : 0;
+  const moneyShare = (id: string) => (weightTotal > 0 ? weightOf(id) / weightTotal : equalShare);
+
+  const addEf = round2(Math.max(0, round2(amounts.efectivo - sumEf)));
+  const addTj = round2(Math.max(0, round2(amounts.tpv - sumTj)));
+  const share = moneyShare(billingSheet.id);
+
   let efectivo = attributedEf[billingSheet.id] || 0;
   let tpv = attributedTj[billingSheet.id] || 0;
-  const leftoverEf = round2(amounts.efectivo - sumEf);
-  const leftoverTj = round2(amounts.tpv - sumTj);
-  if (leftoverEf >= 0.01) efectivo = round2(efectivo + leftoverEf * share);
-  if (leftoverTj >= 0.01) tpv = round2(tpv + leftoverTj * share);
+  if (addEf >= 0.01) efectivo = round2(efectivo + addEf * share);
+  if (addTj >= 0.01) tpv = round2(tpv + addTj * share);
 
-  // X (Bizum/otro): misma proporción de dinero Vertial de la marca, no % de pizzas.
   const brandMoney = round2(efectivo + tpv);
   const allBrandMoney = round2(
-    Object.keys(attributedEf)
-      .concat(Object.keys(attributedTj))
-      .filter((id, i, arr) => arr.indexOf(id) === i)
-      .reduce((s, id) => s + (attributedEf[id] || 0) + (attributedTj[id] || 0), 0)
-      + Math.max(0, leftoverEf)
-      + Math.max(0, leftoverTj),
+    sheetIds.reduce((s, id) => {
+      let ef = attributedEf[id] || 0;
+      let tj = attributedTj[id] || 0;
+      const sh = moneyShare(id);
+      if (addEf >= 0.01) ef = round2(ef + addEf * sh);
+      if (addTj >= 0.01) tj = round2(tj + addTj * sh);
+      return s + ef + tj;
+    }, 0),
   );
   const xShare = allBrandMoney > 0 ? brandMoney / allBrandMoney : share;
   const x = round2(amounts.x * xShare);
@@ -648,7 +676,7 @@ function tpvAmountsForBillingSheet(
   return { efectivo: round2(efectivo), tpv: round2(tpv), x };
 }
 
-/** Parte un cierre a una hoja: misma lógica que resumen/dashboard al cerrar. */
+/** Parte un cierre a una hoja: dinero = Caja 1 del cierre; uds = conteo del cierre. */
 export function splitSessionCajaAmountsByBillingSheet(
   session: TpvRegisterSession,
   billingSheet: BrandBillingSheet,
@@ -658,9 +686,12 @@ export function splitSessionCajaAmountsByBillingSheet(
   const unitSplit = splitCajaAmountsByBillingSheet(amounts, billingSheet, allSheets);
   const tpvBrand = tpvAmountsForBillingSheet(session, amounts, billingSheet, allSheets);
   const apps = appsAmountsForBillingSheet(session, amounts, billingSheet, allSheets);
-  const efectivo = tpvBrand ? tpvBrand.efectivo : unitSplit.efectivo;
-  const tpv = tpvBrand ? tpvBrand.tpv : unitSplit.tpv;
-  const x = tpvBrand ? tpvBrand.x : unitSplit.x;
+
+  // Sin desglose Caja 1 por marca → 0 (igual que el cierre: no hay nada escrito).
+  const efectivo = tpvBrand ? tpvBrand.efectivo : 0;
+  const tpv = tpvBrand ? tpvBrand.tpv : 0;
+  const x = tpvBrand ? tpvBrand.x : 0;
+
   const app = apps ? apps.app : unitSplit.app;
   const uber = apps ? apps.uber : unitSplit.uber;
   const justEat = apps ? apps.justEat : unitSplit.justEat;
