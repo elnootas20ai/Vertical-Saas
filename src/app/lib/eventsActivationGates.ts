@@ -26,7 +26,7 @@ export function getEventsSidebarItemLock(
   if (EVENTS_PLANNING_SIDEBAR_IDS.has(itemId) && !flags.hasEvent) {
     return {
       disabled: true,
-      title: 'La planificación (invitados, catering, logística…) se habilita tras la primera contratación.',
+      title: 'La planificación (ruta, catering, logística…) se habilita tras la primera contratación.',
     };
   }
 

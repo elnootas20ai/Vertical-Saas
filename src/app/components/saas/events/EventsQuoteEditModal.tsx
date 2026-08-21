@@ -443,7 +443,7 @@ export function EventsEditModal({
                   />
                 </label>
                 <label className="space-y-1">
-                  <span className="text-xs font-semibold text-gray-500">Nº de invitados</span>
+                  <span className="text-xs font-semibold text-gray-500">Nº de personas</span>
                   <input
                     className={inputClass}
                     type="number"
@@ -524,7 +524,7 @@ export function EventsEditModal({
                   </select>
                   {Number(form.invitados) > 0 && (
                     <span className="block text-[11px] text-gray-500">
-                      Los servicios «por persona» usan {formatQtyEs(form.invitados)} invitados.
+                      Los servicios «por persona» usan {formatQtyEs(form.invitados)} personas.
                     </span>
                   )}
                 </label>

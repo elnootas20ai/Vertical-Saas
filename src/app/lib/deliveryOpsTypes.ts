@@ -96,6 +96,7 @@ export function usesTpvCatalogOpsBusinessType(businessType?: string | null): boo
     isDeliveryOpsBusinessType(businessType)
     || isRestaurantBusinessType(businessType)
     || isIceCreamShopBusinessType(businessType)
+    || isEventsBusinessType(businessType)
   );
 }
 

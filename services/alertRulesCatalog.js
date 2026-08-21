@@ -240,6 +240,13 @@ export const ALL_ALERT_RULE_DEFINITIONS = [
   r('cv_vehicle_stagnant', 'compraventa', 'verticales', 'Vehículo estancado', 'Vehículo en stock demasiado tiempo sin vender', { urgency: 'medium' }),
   r('cv_low_avg_margin', 'compraventa', 'verticales', 'Margen bajo compraventa', 'Margen medio de ventas por debajo del objetivo', { urgency: 'medium' }),
 
+  // ─── Eventos ───────────────────────────────────────────────────────────────
+  r('events_quote_accepted', 'eventos', 'verticales', 'Presupuesto aceptado', 'Cliente acepta o se marca el presupuesto como aceptado', { channels: ['inApp', 'push'], urgency: 'low' }),
+  r('events_fully_paid', 'eventos', 'verticales', 'Evento cobrado al completo', 'El evento queda sin pendiente de cobro', { channels: ['inApp', 'push'], urgency: 'low' }),
+  r('events_cash_pending_close', 'eventos', 'pdvs', 'Caja de evento sin cerrar', 'PDV de evento con caja abierta tras el límite o demasiadas horas', { ...pushEmail, urgency: 'high' }),
+  r('events_cash_discrepancy', 'eventos', 'pdvs', 'Descuadre caja evento', 'Diferencia al cerrar caja de un PDV de evento', { ...pushEmail, urgency: 'critical' }),
+  r('events_register_closed_ok', 'eventos', 'pdvs', 'Caja evento cerrada OK', 'Cierre TPV de evento sin descuadre', { channels: ['inApp'], urgency: 'low' }),
+
   // ─── Sistema / seguridad ───────────────────────────────────────────────────
   r('user_login_new', 'seguridad', 'sistema', 'Nuevo inicio de sesión', 'Acceso desde dispositivo o ubicación nueva', { channels: ['email', 'inApp'], urgency: 'high' }),
   r('user_role_changed', 'seguridad', 'sistema', 'Cambio de rol', 'Se modificó el rol o permisos de un usuario', { channels: ['email', 'inApp'], urgency: 'high' }),
@@ -279,6 +286,8 @@ export const MANAGER_FOCUS_ENABLED_RULE_IDS = [
   'delivery_cash_discrepancy',
   'delivery_register_closed_discrepancy',
   'delivery_register_next_day_initial_over',
+  'events_cash_pending_close',
+  'events_cash_discrepancy',
 ];
 
 /** Reglas visibles en ajustes Delivery (mismo pack; el resto se oculta). */

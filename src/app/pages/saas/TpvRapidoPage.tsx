@@ -51,6 +51,7 @@ import { businessTicketInfoFrom, formatTicketCustomerAddress, formatTicketCustom
 import { OrderTicketButtons } from '../../components/delivery/OrderTicketButtons';
 import { fetchClientPromotionsRequest, type ClientPromotion } from '../../lib/clientPromotionsApi';
 import { useTpvCatalog } from '../../hooks/useTpvCatalog';
+import { useEventPortableTpvAllowlist } from '../../hooks/useEventPortableTpvAllowlist';
 import { prefetchTpvCatalog } from '../../lib/tpvCatalogCache';
 import { TpvProductPicker } from '../../components/saas/tpv/TpvProductPicker';
 import { TpvItemCustomizeModal } from '../../components/saas/tpv/TpvItemCustomizeModal';
@@ -1281,9 +1282,11 @@ export function TpvRapidoOrderFlow({
     return register.clockedInWorkers.find((w) => w.id === effectiveOrderTakerId) || null;
   }, [register, effectiveOrderTakerId, user?.fullName]);
 
+  const eventCatalogAllowlist = useEventPortableTpvAllowlist();
   const { catalog, brands, loadingCatalog } = useTpvCatalog(userId, tpvCatalogBusinessId, {
     businesses,
     accountBusinessCount: businesses.length,
+    catalogItemIdAllowlist: eventCatalogAllowlist,
   });
 
   useEffect(() => {

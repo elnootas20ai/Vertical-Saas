@@ -272,6 +272,14 @@ export function resolveWorkerSessionEntryPath(
     return '/saas/user-dashboard';
   }
   if (needsWorkerPayrollSetup(user)) return WORKER_PAYROLL_SETUP_PATH;
+  // 2º Admin / gestores: panel SaaS, no «Mi trabajo».
+  if (isManagerRole(user.role)) {
+    const landing = String(user.landingPage || '').trim();
+    if (landing.startsWith('/saas/') && !isEphemeralWorkerSetupPath(landing) && !landing.startsWith('/saas/worker')) {
+      return normalizeWorkerLandingPage(landing);
+    }
+    return '/saas/dashboard';
+  }
   const landing = String(user.landingPage || '').trim();
   if (landing.startsWith('/saas/') && !isEphemeralWorkerSetupPath(landing)) {
     return normalizeWorkerLandingPage(landing);
@@ -347,6 +355,13 @@ export function resolveRedirectAfterInvitationAccept(
 ): string {
   if (needsWorkerPayrollSetup(account)) {
     return WORKER_PAYROLL_SETUP_PATH;
+  }
+  if (isManagerRole(account.role)) {
+    const landing = String(account.landingPage || '').trim();
+    if (landing.startsWith('/saas/') && !isEphemeralWorkerSetupPath(landing) && !landing.startsWith('/saas/worker')) {
+      return normalizeWorkerLandingPage(landing);
+    }
+    return '/saas/dashboard';
   }
   const landing = String(account.landingPage || '').trim();
   if (landing.startsWith('/saas/') && landing !== WORKER_IDENTITY_SETUP_PATH && landing !== WORKER_PAYROLL_SETUP_PATH) {

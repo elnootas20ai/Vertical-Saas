@@ -87,6 +87,34 @@ export async function recordWaste(req, res) {
       notes: `Merma: ${waste.wasteType} — ${waste.notes || ''}`,
     });
 
+    try {
+      const { notifyMermaRegisteredCeo } = await import('../services/mermaNotifications.js');
+      const qty = Math.abs(Number(waste.quantity) || 0);
+      const explicitBase = Number(
+        waste.baseQuantity ?? waste.producedQuantity ?? waste.totalUnits ?? waste.baseQty,
+      );
+      const stockBase = Number(catItem.stockQuantity);
+      const baseQuantity = Number.isFinite(explicitBase) && explicitBase > 0
+        ? explicitBase
+        : (Number.isFinite(stockBase) && stockBase > 0 ? stockBase : 0);
+
+      await notifyMermaRegisteredCeo(req, {
+        dataUserId: userId,
+        businessId: waste.businessId || waste.business_id || '',
+        wasteId: doc._id,
+        productName: catItem.name || waste.catalogItemName || 'Producto',
+        quantity: qty,
+        unit: String(waste.unit || catItem.unit || 'ud'),
+        baseQuantity,
+        estimatedCost,
+        wasteTypeLabel: String(waste.wasteType || ''),
+        reportedByName: String(waste.reportedByName || ''),
+        route: '/saas/catalog',
+      });
+    } catch {
+      /* best-effort */
+    }
+
     return res.status(201).json({ ok: true, record: sanitizeWasteRecord({ ...doc, _rev: saved.rev }) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Error al registrar merma' });

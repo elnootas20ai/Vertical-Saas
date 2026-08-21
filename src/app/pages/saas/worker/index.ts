@@ -21,3 +21,4 @@ export {
 export { WorkerConstructionReport } from './WorkerConstructionReport';
 export { WorkerStockReviewPage } from './WorkerStockReviewPage';
 export { WorkerEventsOps } from './WorkerEventsOps';
+export { WorkerEventDayPage } from './WorkerEventDayPage';

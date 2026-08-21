@@ -194,13 +194,13 @@ export function Gate() {
     }
     // Worker invitado a una empresa → su zona. Administrador/RRHH usa el panel como el CEO.
     if (isWorkerUser) {
-      if (canUseCeoAdminPanel(user)) {
+      if (canUseCeoAdminPanel(user, businesses)) {
         navigate('/saas/dashboard', { replace: true });
         return;
       }
       navigate(resolveWorkerSessionEntryPath(user), { replace: true });
     }
-  }, [user, isWorkerUser, navigate]);
+  }, [user, isWorkerUser, navigate, businesses]);
 
   // Cliente empresa pendiente de pago: Gate no aplica; ir al paywall.
   useEffect(() => {

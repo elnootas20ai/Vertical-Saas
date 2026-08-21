@@ -34,16 +34,18 @@ describe('businessHoursUtils', () => {
     expect(hasValidBusinessHoursConfig(cfg)).toBe(false);
   });
 
-  it('getBusinessHoursIssue detecta misma hora apertura y cierre', () => {
+  it('getBusinessHoursIssue acepta turno nocturno (cierra al día siguiente)', () => {
+    const cfg = normalizeBusinessHoursConfig(DEFAULT_BUSINESS_HOURS_CONFIG);
+    cfg.schedule.friday = { open: true, from: '20:00', to: '06:00' };
+    cfg.schedule.saturday = { open: true, from: '20:00', to: '06:00' };
+    expect(getBusinessHoursIssue(cfg)).toBeNull();
+    expect(hasValidBusinessHoursConfig(cfg)).toBe(true);
+  });
+
+  it('getBusinessHoursIssue rechaza misma hora apertura y cierre', () => {
     const cfg = normalizeBusinessHoursConfig(DEFAULT_BUSINESS_HOURS_CONFIG);
     cfg.schedule.monday = { open: true, from: '09:00', to: '09:00' };
     expect(getBusinessHoursIssue(cfg)).toMatch(/Lunes/i);
-  });
-
-  it('getBusinessHoursIssue detecta apertura después del cierre', () => {
-    const cfg = normalizeBusinessHoursConfig(DEFAULT_BUSINESS_HOURS_CONFIG);
-    cfg.schedule.monday = { open: true, from: '18:00', to: '10:00' };
-    expect(getBusinessHoursIssue(cfg)).toMatch(/antes del cierre/i);
   });
 
   it('acepta horario distinto por día (partido L–V / finde)', () => {

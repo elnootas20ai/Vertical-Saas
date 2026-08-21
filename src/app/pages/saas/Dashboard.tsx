@@ -521,13 +521,14 @@ function DashboardPage() {
   }
 
   // App / iPhone: home compacto en verticales genéricos.
-  // Delivery y bar/restaurante: dashboard completo (KPIs + gráficas).
+  // Delivery, bar/restaurante y eventos: dashboard completo del vertical.
   if ((isMobile || isVertialNativeApp()) && !isPortfolioView) {
     const isDelivery =
       vertical === 'delivery' || isDeliveryBusinessType(currentBusiness?.businessType);
     const isRestaurant =
       vertical === 'restaurant' || isRestaurantBusinessType(currentBusiness?.businessType);
-    if (!isDelivery && !isRestaurant) {
+    const isEvents = vertical === 'events';
+    if (!isDelivery && !isRestaurant && !isEvents) {
       return <CeoMobileHome />;
     }
   }

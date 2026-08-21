@@ -365,7 +365,7 @@ export function EventsHub() {
         <section className="grid gap-3 sm:grid-cols-3">
           {[
             { label: 'Contrataciones', path: '/saas/vertical/eventos/contrataciones', hint: 'Pipeline completo por fase' },
-            { label: 'Servicios', path: '/saas/events-services', hint: 'Catálogo, espacios, externos, catering y logística' },
+            { label: 'Servicios', path: '/saas/events-services', hint: 'Contratación, productos de cobro, espacios y más' },
             { label: 'Ruta de eventos', path: '/saas/vertical/eventos/ruta', hint: 'Eventos, alta y control' },
           ].map((item) => (
             <Link

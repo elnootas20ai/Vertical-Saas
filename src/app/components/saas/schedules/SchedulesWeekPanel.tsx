@@ -16,6 +16,13 @@ export interface WeekMember {
   role: string;
 }
 
+/** Asignación visual a evento (origen: centro de eventos / planificación). */
+export type WeekMemberEventAssignment = {
+  eventId: string;
+  eventName: string;
+  eventDate?: string;
+};
+
 interface Props {
   members: WeekMember[];
   schedules: ScheduleTemplate[];
@@ -39,6 +46,8 @@ interface Props {
   onBulkAssign?: () => void;
   onAutoAssign?: () => void;
   hasRules?: boolean;
+  /** Solo vertical eventos: nombre del evento al lado del trabajador. */
+  memberEventById?: Record<string, WeekMemberEventAssignment | null>;
 }
 
 function isoLocal(d: Date): string {
@@ -105,6 +114,7 @@ export function SchedulesWeekPanel({
   onBulkAssign,
   onAutoAssign,
   hasRules,
+  memberEventById,
 }: Props) {
   const formatDate = (d: Date) => d.toLocaleDateString(lang, { day: 'numeric', month: 'short' });
   const isToday = (date: Date) => {
@@ -271,6 +281,18 @@ export function SchedulesWeekPanel({
                         </div>
                         <div className="min-w-0">
                           <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{member.fullName}</p>
+                          {memberEventById && (
+                            <p
+                              className={`text-[11px] mt-0.5 truncate ${
+                                memberEventById[member.user_id]?.eventName
+                                  ? 'font-medium text-cyan-700 dark:text-cyan-300'
+                                  : 'text-gray-400 dark:text-gray-500'
+                              }`}
+                              title={memberEventById[member.user_id]?.eventName || 'Sin evento'}
+                            >
+                              {memberEventById[member.user_id]?.eventName || 'Sin evento'}
+                            </p>
+                          )}
                           <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                             <span className={`inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-medium ${ROLE_BADGE[member.role] || ROLE_BADGE.Usuario}`}>
                               {member.role}
@@ -328,6 +350,9 @@ export function SchedulesWeekPanel({
                               <span className="font-semibold text-gray-900 dark:text-white">{shift.start}</span>
                               <span className="text-gray-400 mx-0.5">–</span>
                               <span className="font-semibold text-gray-900 dark:text-white">{shift.end}</span>
+                              {shift.end && shift.start && shift.end < shift.start ? (
+                                <span className="ml-0.5 text-[9px] font-semibold text-amber-600 dark:text-amber-400">+1</span>
+                              ) : null}
                             </div>
                           ) : (
                             <span className="text-xs text-gray-300 dark:text-gray-600">—</span>

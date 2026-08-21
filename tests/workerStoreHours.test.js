@@ -97,10 +97,55 @@ describe('workerStoreHours', () => {
     expect(today.openForClockIn).toBe(true);
   });
 
+  it('turno nocturno: noche del día de inicio y madrugada del siguiente sin solape', () => {
+    const overnight = {
+      timezone: 'Europe/Madrid',
+      schedule: {
+        monday: { open: false, from: '20:00', to: '06:00' },
+        tuesday: { open: false, from: '20:00', to: '06:00' },
+        wednesday: { open: false, from: '20:00', to: '06:00' },
+        thursday: { open: false, from: '20:00', to: '06:00' },
+        friday: { open: true, from: '20:00', to: '06:00' },
+        saturday: { open: true, from: '20:00', to: '06:00' },
+        sunday: { open: false, from: '20:00', to: '06:00' },
+      },
+      holidays: [],
+      lunchBreak: { enabled: false, from: '14:00', to: '16:00' },
+    };
+    const wc = mockWorkCenter(overnight);
+
+    // Viernes 22:00 → abierto (noche de viernes)
+    const friNight = formatStoreHoursToday(wc, new Date('2026-06-05T22:00:00'));
+    expect(friNight.status).toBe('open');
+    expect(friNight.dayKey).toBe('friday');
+    expect(friNight.label).toBe('20:00 – 06:00 (+1)');
+
+    // Sábado 03:00 → sigue el viernes (no pisa el sábado)
+    const satDawn = formatStoreHoursToday(wc, new Date('2026-06-06T03:00:00'));
+    expect(satDawn.status).toBe('open');
+    expect(satDawn.dayKey).toBe('friday');
+    expect(satDawn.from).toBe('20:00');
+    expect(satDawn.to).toBe('06:00');
+
+    // Sábado 12:00 → fuera (aún no empieza el nocturno del sábado)
+    const satNoon = formatStoreHoursToday(wc, new Date('2026-06-06T12:00:00'));
+    expect(satNoon.status).toBe('outside_hours');
+    expect(satNoon.storeOpenNow).toBe(false);
+
+    // Sábado 22:00 → abierto (noche de sábado)
+    const satNight = formatStoreHoursToday(wc, new Date('2026-06-06T22:00:00'));
+    expect(satNight.status).toBe('open');
+    expect(satNight.dayKey).toBe('saturday');
+
+    // Viernes 03:00 → cerrado (esa madrugada sería del jueves, que está cerrado)
+    const friDawn = formatStoreHoursToday(wc, new Date('2026-06-05T03:00:00'));
+    expect(friDawn.storeOpenNow).toBe(false);
+  });
+
   it('sin horario de tienda no bloquea fichaje ni dice Cerrado', () => {
     const today = formatStoreHoursToday(mockWorkCenter(undefined), new Date('2026-06-01T12:00:00'));
     expect(today.status).toBe('no_schedule');
-    expect(today.headline).toBe('Horario de tienda no definido');
+    expect(today.headline).toBe('Sin horario de apertura');
     expect(today.openForClockIn).toBe(true);
     expect(today.storeOpenNow).toBe(false);
   });

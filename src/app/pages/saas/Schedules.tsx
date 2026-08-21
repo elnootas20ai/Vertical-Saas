@@ -1237,6 +1237,13 @@ function DayEditor({ weekly, dayLabels, onChange }: {
     <div className="space-y-3">
       {WEEKDAYS.map(day => {
         const shift = weekly[day];
+        const overnight = Boolean(
+          shift.enabled
+          && shift.start
+          && shift.end
+          && shift.start !== shift.end
+          && String(shift.end) < String(shift.start),
+        );
         return (
           <div key={day} className={`flex items-center gap-4 p-3 rounded-xl transition-colors ${shift.enabled ? 'bg-gray-50 dark:bg-gray-700/30' : 'bg-gray-50/50 dark:bg-gray-800/30 opacity-60'}`}>
             <label className="flex items-center gap-3 w-28 shrink-0 cursor-pointer">
@@ -1252,6 +1259,11 @@ function DayEditor({ weekly, dayLabels, onChange }: {
               <div className="flex items-center gap-2 flex-wrap">
                 <TimeInput label="Entrada" value={shift.start} onChange={v => onChange(day, 'start', v)} />
                 <TimeInput label="Salida" value={shift.end} onChange={v => onChange(day, 'end', v)} />
+                {overnight ? (
+                  <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-300 whitespace-nowrap">
+                    +1 día
+                  </span>
+                ) : null}
                 <span className="text-xs text-gray-400 mx-1">|</span>
                 <TimeInput label="Ini. pausa" value={shift.breakStart} onChange={v => onChange(day, 'breakStart', v)} />
                 <TimeInput label="Fin pausa" value={shift.breakEnd} onChange={v => onChange(day, 'breakEnd', v)} />

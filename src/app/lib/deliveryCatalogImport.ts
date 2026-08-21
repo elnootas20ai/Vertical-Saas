@@ -680,6 +680,34 @@ export async function mapImportEntryToCatalogItem(
     }
   }
 
+  // Coste: aceptar "coste" / "costPrice" en formato ES.
+  {
+    const costRaw = String(entry.costPrice || entry.coste || '').trim();
+    if (costRaw) {
+      const cost = parseImportPrice(costRaw);
+      if (Number.isFinite(cost) && cost >= 0) item.costPrice = cost;
+    }
+  }
+
+  // % merma esperada → customFields.mermaPct (eventos / carta).
+  {
+    const mermaRaw = String(entry.mermaPct || entry.merma_pct || entry.merma || '').trim();
+    if (mermaRaw) {
+      const merma = Number(String(mermaRaw).replace('%', '').replace(',', '.'));
+      if (Number.isFinite(merma) && merma >= 0) {
+        item.customFields = {
+          ...(item.customFields || {}),
+          mermaPct: Math.min(100, merma),
+        };
+      }
+    }
+  }
+
+  // Eventos: sin marcas comerciales — el TPV no usa pestañas de línea.
+  if (String(options.vertical || '').trim() === 'events') {
+    item.brandIds = [];
+  }
+
   const formatoRaw = warehouseMeta
     ? ''
     : String(entry.formato || entry.format || entry.tamano || entry.tamaño || '').trim();

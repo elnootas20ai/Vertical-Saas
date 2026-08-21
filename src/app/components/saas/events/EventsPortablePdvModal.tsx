@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Check, Copy, Loader2, X } from 'lucide-react';
 import { useModalClose } from '../../../hooks/useModalClose';
-import { createWorkCenter } from '../../../lib/workCentersApi';
+import { createWorkCenter, type EventsPdvKind } from '../../../lib/workCentersApi';
 import {
   ensureDeliveryPdvForWorkCenter,
   ensureTabletCodesForPointsOfSale,
@@ -31,14 +31,24 @@ type Props = {
   business: { business_id?: string; id?: string; name?: string } | null;
   onClose: () => void;
   onCreated?: (pdv: PointOfSale) => void;
+  /** Prefill: fijo o temporal. */
+  defaultKind?: EventsPdvKind;
 };
 
-export function EventsPortablePdvModal({ open, userId, business, onClose, onCreated }: Props) {
+export function EventsPortablePdvModal({
+  open,
+  userId,
+  business,
+  onClose,
+  onCreated,
+  defaultKind = 'fixed',
+}: Props) {
   useModalClose(open, onClose);
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
   const [postalCode, setPostalCode] = useState('');
+  const [kind, setKind] = useState<EventsPdvKind>(defaultKind);
   const [saving, setSaving] = useState(false);
   const [createdCode, setCreatedCode] = useState('');
   const [createdName, setCreatedName] = useState('');
@@ -49,10 +59,11 @@ export function EventsPortablePdvModal({ open, userId, business, onClose, onCrea
     setAddress('');
     setCity('');
     setPostalCode('');
+    setKind(defaultKind);
     setSaving(false);
     setCreatedCode('');
     setCreatedName('');
-  }, [open]);
+  }, [open, defaultKind]);
 
   if (!open) return null;
 
@@ -85,6 +96,7 @@ export function EventsPortablePdvModal({ open, userId, business, onClose, onCrea
         postalCode: postalCode.trim(),
         expectedStaffCount: 1,
         businessId: businessId || undefined,
+        eventsPdvKind: kind,
       });
 
       let pdv = await ensureDeliveryPdvForWorkCenter(userId, wc, {
@@ -105,7 +117,7 @@ export function EventsPortablePdvModal({ open, userId, business, onClose, onCrea
       setCreatedCode(code);
       notifyDeliveryWorkCentersChanged(businessId);
       onCreated?.(pdv);
-      toast.success('PDV portátil creado');
+      toast.success(kind === 'fixed' ? 'PDV fijo creado' : 'PDV temporal creado');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'No se pudo crear el PDV');
     } finally {
@@ -138,7 +150,7 @@ export function EventsPortablePdvModal({ open, userId, business, onClose, onCrea
             <p className="text-xs text-stone-500 mt-0.5">
               {createdCode
                 ? 'Usa este código en la tablet TPV'
-                : 'Nombre y dirección. Al crear verás el código TPV.'}
+                : 'Elige fijo o temporal. Al crear verás el código TPV.'}
             </p>
           </div>
           <button
@@ -171,6 +183,33 @@ export function EventsPortablePdvModal({ open, userId, business, onClose, onCrea
             </div>
           ) : (
             <>
+              <div className="space-y-1.5">
+                <span className="text-xs font-medium text-stone-500">Tipo</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setKind('fixed')}
+                    className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors ${
+                      kind === 'fixed'
+                        ? 'border-[#2563EB] bg-blue-50 text-[#2563EB] dark:bg-blue-950/40'
+                        : 'border-stone-200 text-stone-600 dark:border-stone-700 dark:text-stone-300'
+                    }`}
+                  >
+                    Evento fijo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setKind('temporary')}
+                    className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors ${
+                      kind === 'temporary'
+                        ? 'border-[#2563EB] bg-blue-50 text-[#2563EB] dark:bg-blue-950/40'
+                        : 'border-stone-200 text-stone-600 dark:border-stone-700 dark:text-stone-300'
+                    }`}
+                  >
+                    Temporal
+                  </button>
+                </div>
+              </div>
               <label className="block space-y-1">
                 <span className="text-xs font-medium text-stone-500">Nombre del PDV</span>
                 <input
@@ -219,14 +258,14 @@ export function EventsPortablePdvModal({ open, userId, business, onClose, onCrea
             </button>
           ) : (
             <>
-              <button type="button" onClick={onClose} className={`${VERTIAL_BTN_SECONDARY} flex-1`}>
+              <button type="button" onClick={onClose} className={`${VERTIAL_BTN_SECONDARY} flex-1`} disabled={saving}>
                 Cancelar
               </button>
               <button
                 type="button"
-                disabled={saving}
                 onClick={() => void handleCreate()}
                 className={`${VERTIAL_BTN_PRIMARY} flex-1`}
+                disabled={saving}
               >
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                 Crear

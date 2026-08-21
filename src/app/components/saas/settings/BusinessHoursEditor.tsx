@@ -10,6 +10,7 @@ import {
   DEFAULT_BUSINESS_HOURS_CONFIG,
   getBusinessHoursIssue,
   getBusinessHoursPresetSchedule,
+  isOvernightScheduleWindow,
   normalizeScheduleTimeValue,
   patchScheduleDays,
   SCHEDULE_DAY_LABELS_ES,
@@ -239,40 +240,48 @@ function TimeRangeRow({
   large?: boolean;
   dense?: boolean;
 }) {
+  const overnight = isOvernightScheduleWindow(from, to);
   return (
-    <div
-      className={`flex flex-wrap items-end ${
-        dense ? 'items-center gap-1.5' : large ? 'gap-x-4 gap-y-3' : 'gap-x-3 gap-y-2'
-      }`}
-    >
-      <TimeField
-        value={from}
-        onChange={onFrom}
-        disabled={disabled}
-        label="Apertura"
-        fallback="09:00"
-        large={large}
-        dense={dense}
-        hideLabel={dense}
-      />
-      <span
-        className={`select-none font-semibold leading-none text-stone-300 dark:text-stone-600 ${
-          dense ? 'text-sm' : large ? 'mb-3 text-xl' : 'mb-2.5 text-base'
+    <div className="space-y-1">
+      <div
+        className={`flex flex-wrap items-end ${
+          dense ? 'items-center gap-1.5' : large ? 'gap-x-4 gap-y-3' : 'gap-x-3 gap-y-2'
         }`}
-        aria-hidden
       >
-        –
-      </span>
-      <TimeField
-        value={to}
-        onChange={onTo}
-        disabled={disabled}
-        label="Cierre"
-        fallback="19:00"
-        large={large}
-        dense={dense}
-        hideLabel={dense}
-      />
+        <TimeField
+          value={from}
+          onChange={onFrom}
+          disabled={disabled}
+          label="Apertura"
+          fallback="09:00"
+          large={large}
+          dense={dense}
+          hideLabel={dense}
+        />
+        <span
+          className={`select-none font-semibold leading-none text-stone-300 dark:text-stone-600 ${
+            dense ? 'text-sm' : large ? 'mb-3 text-xl' : 'mb-2.5 text-base'
+          }`}
+          aria-hidden
+        >
+          –
+        </span>
+        <TimeField
+          value={to}
+          onChange={onTo}
+          disabled={disabled}
+          label="Cierre"
+          fallback="19:00"
+          large={large}
+          dense={dense}
+          hideLabel={dense}
+        />
+      </div>
+      {overnight ? (
+        <p className="text-[11px] font-medium text-amber-700 dark:text-amber-300">
+          Cruza medianoche → cierra al día siguiente
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -287,7 +296,7 @@ function StoreHoursBanner({ storeLabel }: { storeLabel?: string }) {
         </span>
         {' — '}
         es la base de los turnos de trabajadores, plantillas de horario y fichaje.
-        Configúralo bien: el resto parte de aquí.
+        Puedes poner franjas que cruzan medianoche (p. ej. 20:00–06:00): cuentan en el día de apertura.
       </p>
     </div>
   );

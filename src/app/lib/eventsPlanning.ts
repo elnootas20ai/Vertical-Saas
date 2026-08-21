@@ -2,7 +2,6 @@ import { createVerticalApi } from './verticalApiFactory';
 import type { EventRecord } from './eventsTypes';
 
 export type EventPlanningSnapshot = {
-  guests: { total: number; confirmed: number; pending: number; rejected: number };
   logistics: { total: number; pending: number; inProgress: number; completed: number };
   catering: { total: number; confirmed: number };
   vendors: { total: number };
@@ -23,19 +22,16 @@ export async function loadEventPlanningSnapshot(
   userId: string,
   event: EventRecord,
 ): Promise<EventPlanningSnapshot> {
-  const guestsApi = createVerticalApi<{ evento?: string; eventId?: string; confirmacion?: string }>('events', 'guests');
   const logisticsApi = createVerticalApi<{ evento?: string; eventId?: string; estado?: string }>('events', 'logistics');
   const cateringApi = createVerticalApi<{ evento?: string; eventId?: string; estado?: string }>('events', 'catering');
   const vendorsApi = createVerticalApi<{ evento?: string; eventId?: string }>('events', 'vendors');
 
-  const [guests, logistics, catering, vendors] = await Promise.all([
-    guestsApi.list(userId).catch(() => []),
+  const [logistics, catering, vendors] = await Promise.all([
     logisticsApi.list(userId).catch(() => []),
     cateringApi.list(userId).catch(() => []),
     vendorsApi.list(userId).catch(() => []),
   ]);
 
-  const g = guests.filter((x) => matchesEvent(x, event));
   const l = logistics.filter((x) => matchesEvent(x, event));
   const c = catering.filter((x) => matchesEvent(x, event));
   const v = vendors.filter((x) => matchesEvent(x, event));
@@ -43,24 +39,16 @@ export async function loadEventPlanningSnapshot(
   const logisticsCompleted = l.filter((t) => t.estado === 'completado').length;
   const logisticsPending = l.filter((t) => t.estado === 'pendiente' || t.estado === 'bloqueado').length;
   const logisticsInProgress = l.filter((t) => t.estado === 'en_proceso').length;
-
-  const guestConfirmed = g.filter((x) => x.confirmacion === 'confirmado').length;
-  const guestPending = g.filter((x) => x.confirmacion === 'pendiente').length;
-  const guestRejected = g.filter((x) => x.confirmacion === 'rechazado').length;
-
   const cateringConfirmed = c.filter((x) => x.estado === 'confirmado').length;
 
   const checkpoints = [
-    g.length > 0,
     l.length > 0,
     c.length > 0 || v.length > 0,
     l.length === 0 || logisticsCompleted >= Math.ceil(l.length * 0.6),
-    guestConfirmed > 0 || g.length === 0,
   ];
-  const readinessPct = Math.round((checkpoints.filter(Boolean).length / checkpoints.length) * 100);
+  const readinessPct = Math.round((checkpoints.filter(Boolean).length / Math.max(1, checkpoints.length)) * 100);
 
   return {
-    guests: { total: g.length, confirmed: guestConfirmed, pending: guestPending, rejected: guestRejected },
     logistics: {
       total: l.length,
       pending: logisticsPending,
@@ -80,25 +68,26 @@ export function filterEventsForToday(events: EventRecord[]): EventRecord[] {
 
 export function filterEventsThisWeek(events: EventRecord[]): EventRecord[] {
   const now = new Date();
-  const start = new Date(now);
-  start.setHours(0, 0, 0, 0);
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const end = new Date(start);
   end.setDate(end.getDate() + 7);
+  const startIso = start.toISOString().slice(0, 10);
+  const endIso = end.toISOString().slice(0, 10);
   return events.filter((e) => {
-    const d = Date.parse(String(e.fecha || ''));
-    return !Number.isNaN(d) && d >= start.getTime() && d < end.getTime();
+    const day = String(e.fecha || '').slice(0, 10);
+    return day >= startIso && day <= endIso;
   });
 }
 
 export type WorkerLogisticsTask = {
   _id: string;
-  evento: string;
   tarea: string;
-  responsable: string;
-  fechaLimite: string;
-  estado: string;
-  prioridad: string;
+  evento: string;
   eventId?: string;
+  fechaLimite?: string;
+  prioridad?: string;
+  estado?: string;
+  responsable?: string;
 };
 
 export async function loadWorkerLogisticsTasks(
@@ -106,10 +95,12 @@ export async function loadWorkerLogisticsTasks(
   workerName: string,
 ): Promise<WorkerLogisticsTask[]> {
   const logisticsApi = createVerticalApi<WorkerLogisticsTask>('events', 'logistics');
-  const list = await logisticsApi.list(userId).catch(() => []);
-  const name = workerName.trim().toLowerCase();
-  return list
-    .filter((t) => t.estado !== 'completado')
-    .filter((t) => !name || String(t.responsable || '').trim().toLowerCase().includes(name))
-    .sort((a, b) => String(a.fechaLimite || '').localeCompare(String(b.fechaLimite || '')));
+  const all = await logisticsApi.list(userId).catch(() => [] as WorkerLogisticsTask[]);
+  const name = String(workerName || '').trim().toLowerCase();
+  if (!name) return all.filter((t) => t.estado !== 'completado');
+  return all.filter((t) => {
+    if (t.estado === 'completado') return false;
+    const resp = String(t.responsable || '').trim().toLowerCase();
+    return !resp || resp.includes(name) || name.includes(resp);
+  });
 }

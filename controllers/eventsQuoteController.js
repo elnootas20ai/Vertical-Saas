@@ -422,6 +422,19 @@ export async function syncEventFromLinkedQuote(req, quote, action) {
 
   await syncVerticalEventQuote(req, userId, saved, action === 'accepted' ? 'aceptado' : 'rechazado');
 
+  if (action === 'accepted') {
+    try {
+      const { ensureDayOpsOnEventDoc } = await import('../shared/events/eventDayOpsSeed.js');
+      const { event: withDay, changed } = ensureDayOpsOnEventDoc(saved);
+      if (changed) {
+        const result = await putDocument(req, db, withDay._id, withDay);
+        saved = { ...withDay, _rev: result.rev };
+      }
+    } catch (err) {
+      logger.warn({ tag: 'EVENT_DAY_OPS', err: err?.message, eventId: saved?._id }, 'No se pudo sembrar Día D al aceptar');
+    }
+  }
+
   return saved;
 }
 
@@ -745,5 +758,112 @@ export async function sendEventReviewInvite(req, res) {
   } catch (error) {
     logger.error({ tag: 'EVENT_REVIEW_SEND', err: error?.message }, 'Error al enviar reseña de evento');
     return res.status(500).json({ ok: false, error: error?.message || 'Error al enviar la reseña' });
+  }
+}
+
+/**
+ * POST /api/events-quotes/:userId/:eventId/notify-accepted
+ * Actor autenticado (titular/miembro) → aviso push + campana solo al CEO.
+ */
+export async function notifyEventAcceptedHttp(req, res) {
+  try {
+    const userId = normalizeUserId(req.params.userId);
+    const eventId = String(req.params.eventId || '').trim();
+    const authUserId = normalizeUserId(req.authUser?.userId || req.authUser?.user_id || req.user?.userId || req.user?.id);
+
+    if (!userId || !eventId) {
+      return res.status(400).json({ ok: false, error: 'Falta userId o eventId' });
+    }
+    if (!authUserId) {
+      return res.status(401).json({ ok: false, error: 'No autenticado' });
+    }
+
+    const {
+      loadEventForNotify,
+      canActorTriggerEventsNotify,
+      notifyEventQuoteAcceptedCeo,
+    } = await import('../services/eventsNotifications.js');
+
+    const event = await loadEventForNotify(req, eventId);
+    if (!event) {
+      return res.status(404).json({ ok: false, error: 'Evento no encontrado' });
+    }
+    if (normalizeUserId(event.user_id) !== userId) {
+      return res.status(403).json({ ok: false, error: 'Sin permiso sobre este evento' });
+    }
+
+    const allowed = await canActorTriggerEventsNotify(req, {
+      authUserId,
+      event,
+      dataUserId: userId,
+    });
+    if (!allowed) {
+      return res.status(403).json({ ok: false, error: 'Sin permiso para notificar' });
+    }
+
+    const notification = await notifyEventQuoteAcceptedCeo(req, {
+      event,
+      dataUserId: userId,
+      source: 'manual',
+    });
+
+    return res.json({ ok: true, notification: notification || null });
+  } catch (error) {
+    logger.error({ tag: 'EVENT_NOTIFY_ACCEPTED', err: error?.message }, 'Error notificando aceptación');
+    return res.status(500).json({ ok: false, error: error?.message || 'Error al notificar' });
+  }
+}
+
+/**
+ * POST /api/events-quotes/:userId/:eventId/notify-fully-paid
+ * Body opcional: { cobradoTotal }
+ */
+export async function notifyEventFullyPaidHttp(req, res) {
+  try {
+    const userId = normalizeUserId(req.params.userId);
+    const eventId = String(req.params.eventId || '').trim();
+    const authUserId = normalizeUserId(req.authUser?.userId || req.authUser?.user_id || req.user?.userId || req.user?.id);
+    const cobradoTotal = Number(req.body?.cobradoTotal);
+
+    if (!userId || !eventId) {
+      return res.status(400).json({ ok: false, error: 'Falta userId o eventId' });
+    }
+    if (!authUserId) {
+      return res.status(401).json({ ok: false, error: 'No autenticado' });
+    }
+
+    const {
+      loadEventForNotify,
+      canActorTriggerEventsNotify,
+      notifyEventFullyPaidCeo,
+    } = await import('../services/eventsNotifications.js');
+
+    const event = await loadEventForNotify(req, eventId);
+    if (!event) {
+      return res.status(404).json({ ok: false, error: 'Evento no encontrado' });
+    }
+    if (normalizeUserId(event.user_id) !== userId) {
+      return res.status(403).json({ ok: false, error: 'Sin permiso sobre este evento' });
+    }
+
+    const allowed = await canActorTriggerEventsNotify(req, {
+      authUserId,
+      event,
+      dataUserId: userId,
+    });
+    if (!allowed) {
+      return res.status(403).json({ ok: false, error: 'Sin permiso para notificar' });
+    }
+
+    const notification = await notifyEventFullyPaidCeo(req, {
+      event,
+      dataUserId: userId,
+      cobradoTotal: Number.isFinite(cobradoTotal) ? cobradoTotal : 0,
+    });
+
+    return res.json({ ok: true, notification: notification || null });
+  } catch (error) {
+    logger.error({ tag: 'EVENT_NOTIFY_PAID', err: error?.message }, 'Error notificando cobro completo');
+    return res.status(500).json({ ok: false, error: error?.message || 'Error al notificar' });
   }
 }

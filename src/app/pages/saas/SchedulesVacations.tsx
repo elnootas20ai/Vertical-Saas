@@ -44,7 +44,17 @@ import { SchedulesControlPanel } from '../../components/saas/schedules/Schedules
 import { mergeBusinessMembers } from '../../lib/schedulesDisplay';
 import { canManageTeam, TEAM_MANAGER_ROLES } from '../../lib/teamManagerAccess';
 import { isBusinessOwner } from '../../lib/accountOwnerPrecedence';
-import { formatDateRangeEs } from '../../lib/formatDateEs';
+import { formatDateEs, formatDateRangeEs } from '../../lib/formatDateEs';
+import { isEventsBusinessType } from '../../lib/deliveryOpsTypes';
+import type { EventRecord } from '../../lib/eventsTypes';
+import {
+  assignWorkerToEventPlanning,
+  findWorkerAssignedEvent,
+  listAssignableEvents,
+  loadEvents,
+  resolveEventsUserId,
+} from '../../lib/eventsFlow';
+import type { WeekMemberEventAssignment } from '../../components/saas/schedules/SchedulesWeekPanel';
 
 type Tab = 'calendar' | 'vacations' | 'control' | 'config';
 type ConfigSubTab = 'holidays' | 'blocks' | 'templates' | 'rules';
@@ -54,6 +64,11 @@ export function SchedulesVacations() {
   const { user, listUsers } = useAuth();
   const { currentBusiness, businesses } = useBusiness();
   const businessId = currentBusiness?.business_id || '';
+  const isEventsBiz = isEventsBusinessType(currentBusiness?.businessType);
+  const eventsUserId = useMemo(
+    () => resolveEventsUserId(user, currentBusiness),
+    [user, currentBusiness],
+  );
   const myBusinessMember = useMemo(
     () => currentBusiness?.members?.find((m) => m.user_id === user?.user_id),
     [currentBusiness?.members, user?.user_id],
@@ -95,7 +110,9 @@ export function SchedulesVacations() {
   const [editWeekly, setEditWeekly] = useState<Record<Weekday, DayShift>>(defaultWeekly());
   const [editWorkCenterId, setEditWorkCenterId] = useState('');
   const [editWorkCenterName, setEditWorkCenterName] = useState('');
+  const [editEventId, setEditEventId] = useState('');
   const [editWarnings, setEditWarnings] = useState<ScheduleWarning[]>([]);
+  const [eventsList, setEventsList] = useState<EventRecord[]>([]);
 
   const [showTemplateModal, setShowTemplateModal] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<ShiftTemplate | null>(null);
@@ -157,7 +174,7 @@ export function SchedulesVacations() {
     // silent: no pantalla completa de carga (si no, el modal de editar horario se desmonta y se queda bugeado).
     if (!silent) setLoading(true);
     try {
-      const [scheds, memberList, tmpls, rls, vacs, vs, hols, blks] = await Promise.all([
+      const [scheds, memberList, tmpls, rls, vacs, vs, hols, blks, evs] = await Promise.all([
         listSchedules(businessId, currentWeekStart),
         listUsers(businessId).catch(() => []),
         canManage ? listShiftTemplates(businessId) : Promise.resolve([]),
@@ -167,6 +184,9 @@ export function SchedulesVacations() {
         getSettings(businessId),
         listCompanyHolidays(businessId, currentYear),
         listBlocks(businessId, { from: currentWeekStart, to: weekEnd }),
+        isEventsBiz && eventsUserId
+          ? loadEvents(eventsUserId).catch(() => [] as EventRecord[])
+          : Promise.resolve([] as EventRecord[]),
       ]);
       setSchedules(scheds);
       setMembers(
@@ -176,8 +196,9 @@ export function SchedulesVacations() {
         ),
       );
       setTemplates(tmpls); setRules(rls); setVacations(vacs); setVacSettings(vs); setHolidays(hols); setBlocks(blks);
+      setEventsList(evs);
     } catch (e: any) { setError(e.message); } finally { if (!silent) setLoading(false); }
-  }, [businessId, canManage, currentWeekStart, weekEnd, currentYear, currentBusiness?.members]);
+  }, [businessId, canManage, currentWeekStart, weekEnd, currentYear, currentBusiness?.members, isEventsBiz, eventsUserId]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -241,6 +262,26 @@ export function SchedulesVacations() {
     return list;
   }, [members, canManage, user?.user_id, filterWorkCenter]);
 
+  const assignableEvents = useMemo(
+    () => (isEventsBiz ? listAssignableEvents(eventsList) : []),
+    [isEventsBiz, eventsList],
+  );
+
+  const memberEventById = useMemo(() => {
+    if (!isEventsBiz) return undefined;
+    const map: Record<string, WeekMemberEventAssignment | null> = {};
+    for (const m of visibleMembers) {
+      const ev = findWorkerAssignedEvent(eventsList, m.user_id, {
+        weekStart: currentWeekStart,
+        weekEnd,
+      });
+      map[m.user_id] = ev
+        ? { eventId: ev._id, eventName: ev.nombre || 'Evento', eventDate: ev.fecha }
+        : null;
+    }
+    return map;
+  }, [isEventsBiz, visibleMembers, eventsList, currentWeekStart, weekEnd]);
+
   const totalTeamHours = schedules.reduce((s, sc) => s + sc.weeklyHours, 0);
   const membersOnLeave = new Set(
     vacations
@@ -284,6 +325,15 @@ export function SchedulesVacations() {
         : null;
     setEditWorkCenterId(existing?.work_center_id || preferredWc || '');
     setEditWorkCenterName(existing?.work_center_name || wc?.name || '');
+    if (isEventsBiz) {
+      const assigned = findWorkerAssignedEvent(eventsList, memberId, {
+        weekStart: currentWeekStart,
+        weekEnd,
+      });
+      setEditEventId(assigned?._id || '');
+    } else {
+      setEditEventId('');
+    }
     setEditingMemberId(memberId);
     setEditWarnings([]);
     setError('');
@@ -338,6 +388,15 @@ export function SchedulesVacations() {
         editWorkCenterId || undefined,
         editWorkCenterName || undefined,
       );
+      if (isEventsBiz && eventsUserId) {
+        const nextEvents = await assignWorkerToEventPlanning(
+          eventsUserId,
+          eventsList,
+          { id: memberId, name: member?.fullName || memberId },
+          editEventId || null,
+        );
+        setEventsList(nextEvents);
+      }
       setSchedules((prev) => {
         const next = prev.filter((s) => {
           if (s._id === saved._id) return false;
@@ -346,7 +405,7 @@ export function SchedulesVacations() {
         });
         return [...next, saved];
       });
-      flash('Horario guardado');
+      flash(isEventsBiz ? 'Horario y evento guardados' : 'Horario guardado');
       setEditingMemberId(null);
       await loadData({ silent: true });
     } catch (e: any) {
@@ -580,6 +639,7 @@ export function SchedulesVacations() {
               onBulkAssign={canManage && templates.length > 0 ? openBulkModal : undefined}
               onAutoAssign={canManage && rules.filter(r => r.active).length > 0 ? handleAutoAssign : undefined}
               hasRules={rules.filter(r => r.active).length > 0}
+              memberEventById={memberEventById}
             />
           </>
         )}
@@ -732,6 +792,27 @@ export function SchedulesVacations() {
         {editingMemberId && <Modal onClose={() => setEditingMemberId(null)} title="Editar horario" subtitle={`${members.find(m => m.user_id === editingMemberId)?.fullName || ''} — Semana ${currentWeekStart}`}>
           {error && <AlertBanner type="error" message={error} />}
           {editWarnings.length > 0 && <div className="mb-4 space-y-1">{editWarnings.map((w, i) => <AlertBanner key={i} type="warning" message={`${dayLabels[w.day]}: ${w.detail}`} />)}</div>}
+          {isEventsBiz && (
+            <div className="mb-4">
+              <label className="text-xs font-medium text-gray-500 block mb-1.5">Evento al que va</label>
+              <select
+                value={editEventId}
+                onChange={(e) => setEditEventId(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 outline-none focus:border-amber-500"
+              >
+                <option value="">Sin evento</option>
+                {assignableEvents.map((ev) => (
+                  <option key={ev._id} value={ev._id}>
+                    {ev.nombre || 'Evento'}
+                    {ev.fecha ? ` · ${formatDateEs(ev.fecha)}` : ''}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1.5 text-[11px] text-gray-400">
+                Misma asignación que en Centro de eventos → Planificación.
+              </p>
+            </div>
+          )}
           {templates.length > 0 && <div className="mb-4"><label className="text-xs font-medium text-gray-500 block mb-1.5">Aplicar plantilla</label><div className="flex flex-wrap gap-2">{templates.map(t => <button key={t._id} onClick={() => setEditWeekly({ ...t.weekly })} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-gray-200 dark:border-gray-600 rounded-lg hover:border-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: t.color }} />{t.name}</button>)}</div></div>}
           <DayEditor weekly={editWeekly} dayLabels={dayLabels} onChange={(day, field, value) => setEditWeekly(p => ({ ...p, [day]: { ...p[day], [field]: value } }))} />
           <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between rounded-b-2xl -mx-6 mt-4">
@@ -842,10 +923,13 @@ function Modal({ onClose, title, subtitle, children }: { onClose: () => void; ti
 }
 
 function DayEditor({ weekly, dayLabels, onChange }: { weekly: Record<Weekday, DayShift>; dayLabels: Record<Weekday, string>; onChange: (day: Weekday, field: keyof DayShift, value: any) => void }) {
-  return <div className="space-y-3">{WEEKDAYS.map(day => { const s = weekly[day]; return (
+  return <div className="space-y-3">{WEEKDAYS.map(day => {
+    const s = weekly[day];
+    const overnight = Boolean(s.enabled && s.start && s.end && s.start !== s.end && String(s.end) < String(s.start));
+    return (
     <div key={day} className={`flex items-center gap-4 p-3 rounded-xl ${s.enabled ? 'bg-gray-50 dark:bg-gray-700/30' : 'bg-gray-50/50 dark:bg-gray-800/30 opacity-60'}`}>
       <label className="flex items-center gap-3 w-28 shrink-0 cursor-pointer"><input type="checkbox" checked={s.enabled} onChange={e => onChange(day, 'enabled', e.target.checked)} className="w-4 h-4 rounded border-gray-300 text-amber-600" /><span className="text-sm font-semibold text-gray-700 dark:text-gray-300">{dayLabels[day]}</span></label>
-      {s.enabled && <div className="flex items-center gap-2 flex-wrap"><TInput label="Entrada" value={s.start} onChange={v => onChange(day, 'start', v)} /><TInput label="Salida" value={s.end} onChange={v => onChange(day, 'end', v)} /><span className="text-xs text-gray-400 mx-1">|</span><TInput label="Ini. pausa" value={s.breakStart} onChange={v => onChange(day, 'breakStart', v)} /><TInput label="Fin pausa" value={s.breakEnd} onChange={v => onChange(day, 'breakEnd', v)} /></div>}
+      {s.enabled && <div className="flex items-center gap-2 flex-wrap"><TInput label="Entrada" value={s.start} onChange={v => onChange(day, 'start', v)} /><TInput label="Salida" value={s.end} onChange={v => onChange(day, 'end', v)} />{overnight ? <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-300 whitespace-nowrap">+1 día</span> : null}<span className="text-xs text-gray-400 mx-1">|</span><TInput label="Ini. pausa" value={s.breakStart} onChange={v => onChange(day, 'breakStart', v)} /><TInput label="Fin pausa" value={s.breakEnd} onChange={v => onChange(day, 'breakEnd', v)} /></div>}
     </div>
   ); })}</div>;
 }

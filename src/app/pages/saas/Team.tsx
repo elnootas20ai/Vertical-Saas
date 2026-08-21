@@ -2570,7 +2570,7 @@ function MemberDrawer({
                     return;
                   }
                   if (!canDeleteMember) {
-                    setFeedback('Solo el propietario puede expulsar a un Admin u otro rol de administración.');
+                    setFeedback('Solo el propietario puede expulsar a un Admin o Administrador.');
                     return;
                   }
                   setShowConfirmDelete(true);

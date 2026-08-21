@@ -22,7 +22,8 @@ export type AlertSource =
   | 'finanzas' | 'stock' | 'equipo' | 'documentacion'
   | 'verticales' | 'delivery' | 'construccion' | 'limpieza'
   | 'ocr' | 'conciliacion' | 'crm' | 'taller' | 'carniceria'
-  | 'compraventa' | 'adquisiciones' | 'desguaces' | 'sistema';
+  | 'compraventa' | 'adquisiciones' | 'desguaces' | 'sistema'
+  | 'eventos';
 
 export interface AlertRecord {
   id: string;

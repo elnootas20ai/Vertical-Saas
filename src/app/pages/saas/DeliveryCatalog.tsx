@@ -8,10 +8,12 @@ import {
   HELADERIA_OPS_HOME_PATH,
   RESTAURANT_OPS_HOME_PATH,
 } from '../../lib/retailOpsPaths';
-import { notifyDeliveryBrandsChanged, notifyDeliveryCatalogChanged, notifyDeliveryConfigChanged, resolveBusinessScopeId, DELIVERY_CONFIG_CHANGED } from '../../lib/deliverySetup';
+import { notifyDeliveryBrandsChanged, notifyDeliveryCatalogChanged, notifyDeliveryConfigChanged, resolveBusinessScopeId, normalizeBusinessScopeId, DELIVERY_CONFIG_CHANGED } from '../../lib/deliverySetup';
+import { formatMoneyEs } from '../../lib/formatNumberEs';
 import { canDeletePurchaseDocuments } from '../../lib/accountOwnerPrecedence';
 import {
   isDeliveryOpsBusinessType,
+  isEventsBusinessType,
   isIceCreamShopBusinessType,
   isRestaurantBusinessType,
   usesTpvCatalogOpsBusinessType,
@@ -94,8 +96,8 @@ import {
 } from '../../lib/deliveryCatalogImport';
 import { commercialLineBrands, isWarehouseImportCategory, organizerBrandsForCatalogTemplate } from '../../lib/deliveryCatalogImportLogic';
 import {
-  DELIVERY_CATALOG_HEADER_ALIASES,
   catalogImportFieldsForVertical,
+  catalogHeaderAliasesForVertical,
   catalogTemplateFilenameForVertical,
   downloadDeliveryCatalogImportTemplate,
   partitionDeliveryCatalogImportEntries,
@@ -3363,7 +3365,7 @@ type CatalogNavGroup = { id: string; label: string; tabs: CatalogNavTab[] };
 
 /**
  * Nav agrupada del catálogo TPV: misma mecánica que las tabs planas (?tab=…),
- * pero contando la historia del módulo: Carta → Almacén → Compras → Equipo.
+ * una sección a la vez (Carta | Almacén | Compras | Equipo) para no cruzar módulos.
  */
 function CatalogModuleNav({
   groups,
@@ -3439,13 +3441,16 @@ export function CatalogPage() {
   const isDeliveryOps = isDeliveryOpsBusinessType(currentBusiness?.businessType);
   const isRestaurantCatalog = isRestaurantBusinessType(currentBusiness?.businessType);
   const isHeladeriaCatalog = isIceCreamShopBusinessType(currentBusiness?.businessType);
-  /** Misma UI/flujo de catálogo TPV (delivery, bar/restaurante y heladería). */
-  const usesTpvCatalogUi = isDeliveryOps || isRestaurantCatalog || isHeladeriaCatalog;
-  const catalogVertical = isRestaurantCatalog
-    ? 'restaurant'
-    : isHeladeriaCatalog
-      ? 'iceCreamShop'
-      : 'delivery';
+  const isEventsCatalog = isEventsBusinessType(currentBusiness?.businessType);
+  /** Misma UI/flujo de catálogo TPV (delivery, bar/restaurante, heladería y eventos). */
+  const usesTpvCatalogUi = isDeliveryOps || isRestaurantCatalog || isHeladeriaCatalog || isEventsCatalog;
+  const catalogVertical = isEventsCatalog
+    ? 'events'
+    : isRestaurantCatalog
+      ? 'restaurant'
+      : isHeladeriaCatalog
+        ? 'iceCreamShop'
+        : 'delivery';
   const catalogImportTemplateFilename = catalogTemplateFilenameForVertical(catalogVertical);
   const retailStoreCount = useMemo(
     () => activeStore.retailWorkCenters.filter((wc) => wc.active !== false).length,
@@ -3492,6 +3497,19 @@ export function CatalogPage() {
   );
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [invoices, setInvoices] = useState<PurchaseInvoice[]>([]);
+  /** Solo facturas/albaranes de la empresa activa (no mezclar otras verticales/empresas). */
+  const scopedInvoices = useMemo(() => {
+    const bid = normalizeBusinessScopeId(businessId);
+    if (!bid) return invoices;
+    return invoices.filter((inv) => {
+      const invBid = normalizeBusinessScopeId(
+        String(inv.businessId || (inv as { business_id?: string }).business_id || ''),
+      );
+      // Legacy sin empresa: solo si la cuenta tiene una sola empresa.
+      if (!invBid) return accountBusinessCount <= 1;
+      return invBid === bid;
+    });
+  }, [invoices, businessId, accountBusinessCount]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [purchaseOrdersLoading, setPurchaseOrdersLoading] = useState(false);
   const [albaranCorroborate, setAlbaranCorroborate] = useState<{
@@ -3613,13 +3631,15 @@ export function CatalogPage() {
       vertical: catalogVertical,
     });
     toast.success(
-      isHeladeriaCatalog
-        ? 'Plantilla catálogo heladería'
-        : isRestaurantCatalog
-          ? 'Plantilla catálogo bar/restaurante'
-          : 'Plantilla catálogo',
+      isEventsCatalog
+        ? 'Plantilla productos TPV eventos (sin marcas)'
+        : isHeladeriaCatalog
+          ? 'Plantilla catálogo heladería'
+          : isRestaurantCatalog
+            ? 'Plantilla catálogo bar/restaurante'
+            : 'Plantilla catálogo',
     );
-  }, [templateOrganizerLines, catalogImportTemplateFilename, catalogVertical, isHeladeriaCatalog, isRestaurantCatalog]);
+  }, [templateOrganizerLines, catalogImportTemplateFilename, catalogVertical, isHeladeriaCatalog, isRestaurantCatalog, isEventsCatalog]);
 
   const handleImportEntries = async (
     entries: Record<string, string>[],
@@ -5125,7 +5145,7 @@ export function CatalogPage() {
   }), [suppliers]);
 
   const invoiceKpis = useMemo(() => {
-    const docs = invoices.filter((i) => !invoiceIsAlbaran(i));
+    const docs = scopedInvoices.filter((i) => !invoiceIsAlbaran(i));
     const isPending = (i: PurchaseInvoice) => {
       const d = invoiceDisplayStatus(i);
       return d === 'pending' || d === 'pending_validation' || d === 'pending_payment' || d === 'validated' || d === 'overdue';
@@ -5134,9 +5154,9 @@ export function CatalogPage() {
       total: docs.length,
       pending: docs.filter(isPending).length,
       paid: docs.filter((i) => invoiceDisplayStatus(i) === 'paid').length,
-      totalAmount: docs.reduce((s, i) => s + (i.total || 0), 0),
+      totalAmount: docs.reduce((s, i) => s + (Number(i.total) || 0), 0),
     };
-  }, [invoices]);
+  }, [scopedInvoices]);
 
   const stockTabCount = useMemo(() => {
     const scoped = filterStockInventoryItems(catalogForActiveStore);
@@ -6023,7 +6043,7 @@ export function CatalogPage() {
   // ── Tab: Albarán ────────────────────────────────────────────────────────────
 
   const renderAlbaranesTab = () => {
-    const albaranes = invoices.filter((inv) => invoiceIsAlbaran(inv));
+    const albaranes = scopedInvoices.filter((inv) => invoiceIsAlbaran(inv));
     const linkedReceivedIds = new Set(
       albaranes
         .filter((a) => a.ocrStockReceivedAt && a.linkedPurchaseOrderId)
@@ -6236,7 +6256,7 @@ export function CatalogPage() {
   // ── Tab: Facturas ───────────────────────────────────────────────────────────
 
   const renderInvoicesTab = () => {
-    const purchaseInvoices = invoices.filter((inv) => !invoiceIsAlbaran(inv));
+    const purchaseInvoices = scopedInvoices.filter((inv) => !invoiceIsAlbaran(inv));
     const invoicesWithDisplay = purchaseInvoices.map((inv) => ({
       ...inv,
       displayStatus: invoiceDisplayStatus(inv),
@@ -6360,7 +6380,7 @@ export function CatalogPage() {
 
     const renderMobileInvoiceCard = (invoice: InvRow) => {
       const statusCfg = INVOICE_STATUS_CONFIG[invoice.displayStatus] || INVOICE_STATUS_CONFIG.pending;
-      const originalInvoice = invoices.find((i) => i._id === invoice._id)!;
+      const originalInvoice = scopedInvoices.find((i) => i._id === invoice._id)!;
       return (
         <div key={invoice._id} className="px-3 py-2.5">
           <div className="flex items-start justify-between gap-2">
@@ -6403,7 +6423,7 @@ export function CatalogPage() {
 
     const renderDesktopInvoiceRow = (invoice: InvRow, grouped: boolean) => {
       const statusCfg = INVOICE_STATUS_CONFIG[invoice.displayStatus] || INVOICE_STATUS_CONFIG.pending;
-      const originalInvoice = invoices.find((i) => i._id === invoice._id)!;
+      const originalInvoice = scopedInvoices.find((i) => i._id === invoice._id)!;
       return (
         <tr
           key={invoice._id}
@@ -6469,8 +6489,8 @@ export function CatalogPage() {
           { label: 'pendientes', value: invoiceKpis.pending, tone: 'amber' },
           { label: 'pagadas', value: invoiceKpis.paid, tone: 'emerald' },
           {
-            label: 'importe €',
-            value: invoiceKpis.totalAmount.toLocaleString('es-ES', { maximumFractionDigits: 0 }),
+            label: 'importe',
+            value: formatMoneyEs(invoiceKpis.totalAmount),
           },
         ]}
         toolbar={
@@ -6669,6 +6689,15 @@ export function CatalogPage() {
     invoiceKpis.pending,
   ]);
 
+  /** Nav solo del bloque actual: en Facturas no se cruza Carta/Equipo. */
+  const sectionNavGroups = useMemo(() => {
+    const comprasTabs = new Set(['suppliers', 'purchase-orders', 'albaranes', 'invoices']);
+    if (comprasTabs.has(activeTab)) return navGroups.filter((g) => g.id === 'compras');
+    if (activeTab === 'stock') return navGroups.filter((g) => g.id === 'almacen');
+    if (activeTab === 'staff-consumption') return navGroups.filter((g) => g.id === 'equipo');
+    return navGroups.filter((g) => g.id === 'carta');
+  }, [navGroups, activeTab]);
+
   const brandSetupCtx = useMemo(
     () =>
       resolveBrandSetupContext(
@@ -6799,7 +6828,7 @@ export function CatalogPage() {
           />
         )}
 
-        <CatalogModuleNav groups={navGroups} activeTab={activeTab} onChange={setActiveTab} />
+        <CatalogModuleNav groups={sectionNavGroups} activeTab={activeTab} onChange={setActiveTab} />
 
         {activeTab === 'catalog' && (
           catalogBusy ? <CatalogTabLoadingState phase="catalog" /> : renderCatalogTab()
@@ -6844,7 +6873,7 @@ export function CatalogPage() {
         {activeTab === 'albaranes' && renderAlbaranesTab()}
 
         {activeTab === 'invoices' && (
-          invoicesLoading && invoices.length === 0
+          invoicesLoading && scopedInvoices.length === 0
             ? <CatalogTabLoadingState phase="invoices" />
             : renderInvoicesTab()
         )}
@@ -6917,7 +6946,7 @@ export function CatalogPage() {
         onClose={() => { setShowCreateInvoice(false); setEditingInvoice(null); }}
         onCreate={handleCreateInvoice}
         suppliers={suppliers}
-        invoices={invoices}
+        invoices={scopedInvoices}
         editItem={editingInvoice}
         onReloadInvoices={async () => {
           if (!dataUserId) return [];
@@ -6934,7 +6963,7 @@ export function CatalogPage() {
           userId={dataUserId}
           order={albaranCorroborate.order}
           invoice={albaranCorroborate.invoice}
-          existingInvoiceNumbers={invoices.map((inv) => inv.invoiceNumber)}
+          existingInvoiceNumbers={scopedInvoices.map((inv) => inv.invoiceNumber)}
           onClose={() => setAlbaranCorroborate(null)}
           onDone={({ order, invoice }) => {
             setAlbaranCorroborate(null);
@@ -7019,8 +7048,9 @@ export function CatalogPage() {
         fields={MODULE_IMPORT_FIELDS}
         onImport={handleImportEntries}
         onDownloadTemplate={handleDownloadCatalogTemplate}
-        headerAliases={DELIVERY_CATALOG_HEADER_ALIASES}
+        headerAliases={catalogHeaderAliasesForVertical(catalogVertical)}
         skipMappingWhenComplete
+        importSheetName={isEventsCatalog ? 'productos' : 'catalogo'}
         extraFileUpload={{
           label: 'ZIP de fotos propias (opcional)',
           helpText:
@@ -7035,7 +7065,6 @@ export function CatalogPage() {
           onDownloadSampleZip: handleDownloadSampleZip,
           onFileSelected: (file) => handleZipFileSelected(file),
         }}
-      />
-    </Layout>
+      />    </Layout>
   );
 }

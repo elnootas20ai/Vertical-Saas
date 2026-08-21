@@ -27,6 +27,17 @@ export type QuoteLine = {
   precioUnitario: number;
   total: number;
   serviceId?: string;
+  /** Producto de Carta TPV (cantidad en unidades). */
+  catalogItemId?: string;
+};
+
+/** Extra a llevar en la hoja de rutas (además del presupuesto). */
+export type EventRouteStockLine = {
+  id: string;
+  name: string;
+  qty: number;
+  catalogItemId?: string;
+  unit?: string;
 };
 
 export type EventServiceCategory =
@@ -90,6 +101,25 @@ export interface EventRecord extends VerticalEntity {
   reviewInviteSentAt?: string;
   /** Checklist de planificación (servicios / equipo / lugar). */
   planningChecklist?: string;
+  /** Carga extra a llevar (JSON EventRouteStockLine[]) — hoja de rutas. */
+  routeExtraStock?: string;
+  /** Mando Día D: timeline, checks de carga, equipo, transporte (JSON EventDayOps). */
+  dayOps?: string;
+  /** PDV temporal auto (TPV tablet del evento). */
+  portableWorkCenterId?: string;
+  portablePdvId?: string;
+  portableTerminalCode?: string;
+  portableWarehouseId?: string;
+  /** Primera vez que se generó el TPV portátil del evento. */
+  portableTpvAt?: string;
+  /** Cobro final registrado. */
+  finalPaidAt?: string;
+  /** Momento en que el pendiente del evento quedó a 0. */
+  fullyPaidAt?: string;
+  /** Cancelación de la contratación. */
+  cancelledAt?: string;
+  /** Cantidades ya sembradas en el almacén TPV (JSON Record<catalogItemId, qty>). */
+  portableTpvSeededQty?: string;
 }
 
 export interface EventQuoteRecord extends VerticalEntity {
@@ -115,7 +145,7 @@ export const EVENT_CONTRACT_STAGES: Array<{
   { id: 'enviado', label: 'Enviado', hint: 'Cliente recibe propuesta', order: 2 },
   { id: 'aceptado', label: 'Aceptado', hint: 'Cliente confirma', order: 3 },
   { id: 'contratado', label: 'Contratado', hint: 'Señal / contrato firmado', order: 4 },
-  { id: 'planificacion', label: 'Planificación', hint: 'Catering, logística, invitados', order: 5 },
+  { id: 'planificacion', label: 'Planificación', hint: 'Catering, logística, material', order: 5 },
   { id: 'en_curso', label: 'En curso', hint: 'Día del evento', order: 6 },
   { id: 'finalizado', label: 'Finalizado', hint: 'Cierre operativo', order: 7 },
   { id: 'cancelado', label: 'Cancelado', hint: 'No se realiza', order: 99 },

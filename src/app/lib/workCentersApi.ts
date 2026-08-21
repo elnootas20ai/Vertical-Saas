@@ -9,6 +9,8 @@ const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env |
 
 export type WorkCenterType = 'oficina' | 'punto_de_venta' | 'almacen' | 'custom';
 export type OwnershipType = 'propiedad' | 'alquiler';
+/** Eventos: PDV portátil fijo (kit permanente) o temporal (un evento / campaña). */
+export type EventsPdvKind = 'fixed' | 'temporary';
 
 export const WORK_CENTER_TYPE_LABELS: Record<WorkCenterType, string> = {
   oficina: 'Centro de trabajo (Oficinas)',
@@ -66,6 +68,10 @@ export interface WorkCenter {
   notes?: string;
   /** Horario de apertura del local (delivery / PDV). */
   openingHours?: BusinessHoursConfig;
+  /** Solo vertical eventos: fijo arriba / temporal abajo en TPV evento. */
+  eventsPdvKind?: EventsPdvKind;
+  /** Evento dueño del PDV temporal (carga TPV = productos de ese evento). */
+  linkedEventId?: string;
   active: boolean;
   deletedAt?: string | null;
   createdAt: string;
@@ -259,6 +265,11 @@ function normalizeWorkCenter(value: unknown): WorkCenter | null {
       doc.openingHours && typeof doc.openingHours === 'object'
         ? (doc.openingHours as BusinessHoursConfig)
         : undefined,
+    eventsPdvKind: doc.eventsPdvKind === 'temporary' ? 'temporary' : doc.eventsPdvKind === 'fixed' ? 'fixed' : undefined,
+    linkedEventId: (() => {
+      const id = String((doc as { linkedEventId?: string }).linkedEventId || '').trim();
+      return id || undefined;
+    })(),
     active: doc.active !== false,
     deletedAt: (doc as { deletedAt?: string | null }).deletedAt || null,
     createdAt: String(doc.createdAt || new Date().toISOString()),

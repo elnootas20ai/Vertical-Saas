@@ -18,6 +18,9 @@ export const RESTAURANT_CEO_TPV_PATH = '/saas/caja/tpv';
 /** TPV gerente heladería. */
 export const HELADERIA_CEO_TPV_PATH = '/saas/vertical/heladeria/tpv';
 
+/** TPV gerente eventos (mismo motor TpvRapido, sin cambiar de cuenta). */
+export const EVENTS_CEO_TPV_PATH = '/saas/vertical/eventos/operar';
+
 /** Caja gerente delivery. */
 export const DELIVERY_CAJA_PATH = '/saas/vertical/delivery/caja';
 
@@ -36,6 +39,7 @@ export function resolveRetailOpsHomePath(businessType?: string | null): string {
 export function resolveRetailCeoTpvPath(businessType?: string | null): string {
   if (isRestaurantBusinessType(businessType)) return RESTAURANT_CEO_TPV_PATH;
   if (isIceCreamShopBusinessType(businessType)) return HELADERIA_CEO_TPV_PATH;
+  if (String(businessType || '').trim() === 'events') return EVENTS_CEO_TPV_PATH;
   return DELIVERY_CEO_TPV_PATH;
 }
 
@@ -67,6 +71,7 @@ export function resolveTpvCeoExitPath(
   if (pathname.startsWith('/saas/vertical/delivery')) return DELIVERY_OPS_HOME_PATH;
   if (pathname.startsWith('/saas/vertical/heladeria')) return HELADERIA_OPS_HOME_PATH;
   if (pathname.startsWith('/saas/heladeria-')) return HELADERIA_OPS_HOME_PATH;
+  if (pathname.startsWith('/saas/vertical/eventos')) return '/saas/vertical/eventos/tpv';
   return resolveRetailOpsHomePath(businessType);
 }
 

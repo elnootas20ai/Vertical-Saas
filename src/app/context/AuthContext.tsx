@@ -553,9 +553,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     otpHint?: string;
   }> => {
     try {
+      // Cambio de cuenta (p. ej. trabajador → urieladmin+OTP): cortar keepalive y
+      // revocar cookies ANTES de borrar tokens locales. Si no, un refresh en vuelo
+      // reinstala la sesión del trabajador encima del login admin.
+      stopAuthSessionKeepalive();
+      try {
+        await logoutRequest();
+      } catch {
+        /* guest / sin sesión previa */
+      }
       clearVertialClientCaches();
+      persistSession(null);
+      setUser(null);
+      setIsAuthenticated(false);
+      clearAuthTokens();
+
       const response = await loginRequest(email, password);
       if ((response as { requiresLoginCode?: boolean }).requiresLoginCode) {
+        // Sin sesión React ni cookies: el OTP no debe competir con otra cuenta.
+        stopAuthSessionKeepalive();
+        persistSession(null);
+        setUser(null);
+        setIsAuthenticated(false);
+        clearAuthTokens();
         return {
           success: false,
           code: 'REQUIRES_LOGIN_CODE',
@@ -668,14 +688,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     const { clearAllDeliveryPdvSessionFlags } = await import('../lib/deliverySetup');
     clearAllDeliveryPdvSessionFlags();
-    clearVertialClientCaches();
     stopAuthSessionKeepalive();
+    // Revocar cookie httpOnly mientras aún hay refresh local / cookie.
+    try {
+      await logoutRequest();
+    } catch {
+      /* ignore */
+    }
+    clearVertialClientCaches();
     setUser(null);
     setIsAuthenticated(false);
     persistSession(null);
     clearAuthTokens();
-    // S-01: El backend lee el token de la cookie httpOnly y la limpia
-    logoutRequest().catch(() => {});
   };
 
   const recoverPassword = async (email: string): Promise<{ success: boolean; error?: string }> => {
@@ -717,7 +741,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     code: string,
   ): Promise<{ success: boolean; redirectTo?: string; error?: string }> => {
     try {
+      stopAuthSessionKeepalive();
       clearVertialClientCaches();
+      clearAuthTokens();
       const response = await verifyLoginCodeRequest(email, code);
       if (!response.user) {
         return { success: false, error: 'No se recibió usuario desde el backend' };

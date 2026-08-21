@@ -1,5 +1,10 @@
 import { Router } from 'express';
-import { sendEventQuoteByEmail, sendEventReviewInvite } from '../controllers/eventsQuoteController.js';
+import {
+  sendEventQuoteByEmail,
+  sendEventReviewInvite,
+  notifyEventAcceptedHttp,
+  notifyEventFullyPaidHttp,
+} from '../controllers/eventsQuoteController.js';
 import { requireAuthAndEmailVerified } from '../middleware/auth.js';
 import { burstLimiter, planAwareLimiter } from '../middleware/rateLimiter.js';
 
@@ -19,6 +24,22 @@ eventsQuoteRouter.post(
   burstLimiter,
   planAwareLimiter,
   sendEventReviewInvite,
+);
+
+eventsQuoteRouter.post(
+  '/:userId/:eventId/notify-accepted',
+  requireAuthAndEmailVerified,
+  burstLimiter,
+  planAwareLimiter,
+  notifyEventAcceptedHttp,
+);
+
+eventsQuoteRouter.post(
+  '/:userId/:eventId/notify-fully-paid',
+  requireAuthAndEmailVerified,
+  burstLimiter,
+  planAwareLimiter,
+  notifyEventFullyPaidHttp,
 );
 
 export { eventsQuoteRouter };

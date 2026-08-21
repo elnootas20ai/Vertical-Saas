@@ -89,7 +89,16 @@ export function isWorkerAccount(
   user?: Pick<AuthUser, 'accountType' | 'invitedBy'> | null,
 ): boolean {
   if (!user) return false;
+  // Titular empresa / CEO: nunca tratar como trabajador (aunque invitedBy/linked queden sucios).
+  if (user.accountType === 'company') return false;
   return user.accountType === 'user' || Boolean(String(user.invitedBy || '').trim());
+}
+
+/** Titular CEO / empresa (no trabajador invitado). */
+export function isCompanyAccount(
+  user?: Pick<AuthUser, 'accountType'> | null,
+): boolean {
+  return Boolean(user && user.accountType === 'company');
 }
 
 export interface AccountPermissionValue {
@@ -437,7 +446,16 @@ export function setAuthTokens(tokens: { accessToken: string; refreshToken?: stri
   }
 }
 
+/** Sube en logout / cambio de cuenta: invalida refreshes en vuelo. */
+let _authSessionEpoch = 0;
+
+export function bumpAuthSessionEpoch(): number {
+  _authSessionEpoch += 1;
+  return _authSessionEpoch;
+}
+
 export function clearAuthTokens() {
+  bumpAuthSessionEpoch();
   _inMemoryToken = null;
   _inMemoryRefreshToken = null;
   localStorage.removeItem(TOKEN_STORAGE_KEY);
@@ -534,6 +552,7 @@ async function tryRefreshToken(): Promise<RefreshOutcome> {
   if (_refreshPromise) return _refreshPromise;
 
   _refreshPromise = (async () => {
+    const epochAtStart = _authSessionEpoch;
     try {
       if (!_inMemoryRefreshToken) {
         _inMemoryRefreshToken = localStorage.getItem(REFRESH_STORAGE_KEY);
@@ -563,6 +582,10 @@ async function tryRefreshToken(): Promise<RefreshOutcome> {
       };
 
       const applyOk = (payload: ApiEnvelope<AuthUser>) => {
+        // Login/logout durante el refresh: no reinstalar tokens de la cuenta vieja.
+        if (epochAtStart !== _authSessionEpoch) {
+          return 'rejected' as const;
+        }
         if (payload.accessToken) {
           setAuthTokens({
             accessToken: payload.accessToken,

@@ -16,14 +16,34 @@ import { emitGlobalAlert, emitPositiveAlert } from './alertEmitter.js';
 import logger from './logger.js';
 
 const DELIVERY_CAJA_ROUTE = '/saas/vertical/delivery/caja';
+const EVENTS_TPV_ROUTE = '/saas/vertical/eventos/tpv';
 
 function bareId(value) {
   return String(value || '').replace(/^business:/, '').trim();
 }
 
 function isManagerRole(role) {
-  const r = String(role || '').toLowerCase();
-  return r === 'admin' || r === 'owner' || r === 'gerente' || r === 'manager' || r === 'encargado';
+  const r = String(role || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  return (
+    r === 'admin'
+    || r === 'administrador'
+    || r === 'owner'
+    || r === 'gerente'
+    || r === 'gerentogrupo'
+    || r === 'manager'
+    || r === 'encargado'
+    || r === 'gestor'
+    || r === 'superadmin'
+  );
+}
+
+function resolveCajaRoute(business) {
+  return String(business?.businessType || '').trim() === 'events'
+    ? EVENTS_TPV_ROUTE
+    : DELIVERY_CAJA_ROUTE;
 }
 
 /**
@@ -93,6 +113,11 @@ export async function notifyTpvRegisterClosed({ req, dataUserId, actorUserId, se
     }
 
     const business = await findBusinessById(req, businessId).catch(() => null);
+    const isEvents = String(business?.businessType || '').trim() === 'events';
+    const cajaRoute = resolveCajaRoute(business);
+    const source = isEvents ? 'eventos' : 'delivery';
+    const okCategory = isEvents ? 'events_register_closed_ok' : 'tpv_register_closed_ok';
+    const badRule = isEvents ? 'events_cash_discrepancy' : 'delivery_register_closed_discrepancy';
 
     const store = String(session.pointOfSaleName || session.terminalName || 'TPV').trim();
     const worker = String(session.workerName || 'Equipo').trim();
@@ -109,13 +134,13 @@ export async function notifyTpvRegisterClosed({ req, dataUserId, actorUserId, se
       await emitPositiveAlert({
         userIds: list,
         businessId,
-        category: 'tpv_register_closed_ok',
-        source: 'delivery',
+        category: okCategory,
+        source,
         title: 'Caja cerrada correctamente',
         message: `${worker} cerró ${store} sin descuadre.`,
         entityId: session._id,
         entityType: 'tpv_register_session',
-        route: DELIVERY_CAJA_ROUTE,
+        route: cajaRoute,
         dedupKey: `tpv-close-ok-${session._id}`,
         metadata: {
           difference: 0,
@@ -133,16 +158,16 @@ export async function notifyTpvRegisterClosed({ req, dataUserId, actorUserId, se
     await emitGlobalAlert({
       businessId,
       userId: business?.owner_user_id || dataUserId,
-      source: 'delivery',
-      ruleId: 'delivery_register_closed_discrepancy',
-      category: 'delivery_register_closed_discrepancy',
+      source,
+      ruleId: badRule,
+      category: badRule,
       priority: 'critical',
       level: 'warning',
       title: `Caja cerrada con descuadre · ${formatDiff(diff)}`,
       message: `${worker} cerró ${store}. Diferencia: ${formatDiff(diff)}.`,
       entityId: session._id,
       entityType: 'tpv_register_session',
-      route: DELIVERY_CAJA_ROUTE,
+      route: cajaRoute,
       metadata: {
         difference: diff,
         pointOfSaleId: session.pointOfSaleId,

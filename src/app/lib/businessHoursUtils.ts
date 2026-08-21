@@ -135,6 +135,16 @@ export function scheduleTimeToMinutes(value: string | null | undefined): number 
   return Number(m[1]) * 60 + Number(m[2]);
 }
 
+/** true si la franja cruza medianoche (cierre al día siguiente), p. ej. 20:00–06:00. */
+export function isOvernightScheduleWindow(
+  from: string | null | undefined,
+  to: string | null | undefined,
+): boolean {
+  const fromMin = scheduleTimeToMinutes(from);
+  const toMin = scheduleTimeToMinutes(to);
+  return fromMin >= 0 && toMin >= 0 && fromMin > toMin;
+}
+
 /** Primera tienda activa con horario válido (opcionalmente preferida). */
 export function pickStoreOpeningHours(
   workCenters: WorkCenter[],
@@ -200,9 +210,7 @@ export function getBusinessHoursIssue(hours: BusinessHoursConfig | null | undefi
     if (fromMin === toMin) {
       return `${SCHEDULE_DAY_LABELS_ES[day]}: apertura y cierre no pueden ser la misma hora.`;
     }
-    if (fromMin > toMin) {
-      return `${SCHEDULE_DAY_LABELS_ES[day]}: la apertura debe ser antes del cierre.`;
-    }
+    // from > to = turno nocturno (p. ej. 20:00 → 06:00 del día siguiente). Válido.
   }
   if (countOpenScheduleDays(hours.schedule) === 0) {
     return 'Activa al menos un día abierto con su horario (L–D).';

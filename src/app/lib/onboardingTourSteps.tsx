@@ -685,7 +685,7 @@ const EVENTS_TOUR_STEPS: OnboardingTourStep[] = [
     icon: <PartyPopper className="w-7 h-7 text-white" />,
     iconBg: 'bg-gradient-to-br from-orange-500 to-amber-600',
     title: 'Planifica y cierra eventos',
-    description: 'Invitados, catering, logística y espacios se gestionan tras la contratación. El cierre es por fase, no por caja TPV.',
+    description: 'Catering, logística y espacios se gestionan tras la contratación. El cierre es por fase, no por caja TPV.',
     hint: 'Hub de eventos → pipeline → detalle del proyecto.',
     route: '/saas/vertical/eventos',
     checklist: ['Pipeline operativo', 'Planificación y cierre por evento'],

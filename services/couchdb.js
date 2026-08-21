@@ -1691,7 +1691,7 @@ const VALID_ALERT_STATUSES = ['new', 'seen', 'resolved'];
 const VALID_SOURCES = [
   'finanzas', 'stock', 'equipo', 'documentacion', 'verticales', 'delivery',
   'construccion', 'limpieza', 'ocr', 'conciliacion', 'crm', 'taller', 'carniceria',
-  'compraventa', 'adquisiciones', 'desguaces', 'sistema',
+  'compraventa', 'adquisiciones', 'desguaces', 'sistema', 'eventos',
 ];
 
 const LEVEL_PRIORITY_MAP = { alert: 'high', warning: 'medium', info: 'low', success: 'low' };
@@ -1707,6 +1707,9 @@ const CATEGORY_SOURCE_MAP = {
   invoice_pending_validation: 'ocr', bank_unreconciled: 'conciliacion',
   purchase_order_delayed: 'stock', booking_no_show: 'verticales',
   lead_new: 'crm', lead_stale: 'crm',
+  events_quote_accepted: 'eventos', events_fully_paid: 'eventos',
+  events_cash_pending_close: 'eventos', events_cash_discrepancy: 'eventos',
+  events_register_closed_ok: 'eventos', merma_registered: 'eventos',
 };
 
 export function buildNotificationDocument({
@@ -2307,7 +2310,7 @@ export function sanitizeAccount(account) {
     role: account.role || 'Admin',
     status: account.status || 'active',
     inviteStatus: account.inviteStatus || (account.status === 'pending' ? 'pending' : 'accepted'),
-    invitedBy: account.invitedBy || '',
+    invitedBy: accountType === 'company' ? '' : (account.invitedBy || ''),
     companyName: account.companyName || '',
     provider: account.provider || 'email',
     createdAt: account.createdAt,
@@ -2338,8 +2341,14 @@ export function sanitizeAccount(account) {
     googleScopes: account.googleScopes || null,
     googleProfile: account.googleProfile || null,
     appleId: account.appleId || null,
-    landingPage: account.landingPage || (accountType === 'user' ? WORKER_DEFAULT_LANDING_PATH : '/saas/dashboard'),
-    linkedBusinessId: account.linkedBusinessId || '',
+    landingPage:
+      accountType === 'company'
+        ? (account.landingPage && String(account.landingPage).startsWith('/saas/worker')
+          ? '/saas/dashboard'
+          : (account.landingPage || '/saas/dashboard'))
+        : (account.landingPage || WORKER_DEFAULT_LANDING_PATH),
+    // Empresa/CEO nunca va ligada como trabajador (campo sucio no debe filtrarse al cliente).
+    linkedBusinessId: accountType === 'company' ? '' : (account.linkedBusinessId || ''),
     username: account.username || '',
     referralCode: account.referralCode || '',
     referredByAffiliateId: account.referredByAffiliateId || '',
@@ -12247,6 +12256,8 @@ export async function listWarehousesByUser(req, userId) {
 
 export async function listBusinessesByUser(req, userId) {
   if (!userId) return [];
+  const uid = String(userId || '').replace(/^account:/, '').trim();
+  if (!uid) return [];
   await ensureDatabase(req, BUSINESSES_DB);
   const docs = await getAllDocuments(req, BUSINESSES_DB);
   return docs
@@ -12254,8 +12265,11 @@ export async function listBusinessesByUser(req, userId) {
       (doc) =>
         doc?.type === 'business' &&
         !doc?.deletedAt &&
-        (doc.owner_user_id === userId ||
-          (Array.isArray(doc.members) && doc.members.some((m) => m.user_id === userId))),
+        (String(doc.owner_user_id || '').replace(/^account:/, '').trim() === uid ||
+          (Array.isArray(doc.members) &&
+            doc.members.some(
+              (m) => String(m?.user_id || '').replace(/^account:/, '').trim() === uid,
+            ))),
     )
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
 }

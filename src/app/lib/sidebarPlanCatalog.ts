@@ -22,6 +22,9 @@ export const SIDEBAR_PLAN_CATALOG: Record<string, SidebarPlanEntry> = {
   'catalog-stock': { minPlan: 'basic' },
   team: { minPlan: 'basic' },
   clockins: { minPlan: 'basic' },
+  /** Operativa RRHH del día a día (pares de fichaje / equipo). */
+  'horarios-vacaciones': { minPlan: 'basic' },
+  'hr-requests': { minPlan: 'basic' },
   tpv: { minPlan: 'basic' },
   'tpv-rapido': { minPlan: 'basic' },
   'tpv-locales': { minPlan: 'basic' },
@@ -44,7 +47,7 @@ export const SIDEBAR_PLAN_CATALOG: Record<string, SidebarPlanEntry> = {
   settings: { minPlan: 'basic' },
   configuracion: { minPlan: 'basic' },
 
-  // ── Mediano: finanzas, informes, RRHH ampliado ──
+  // ── Mediano: finanzas, informes (RRHH operativo va en basic) ──
   quotes: { minPlan: 'normal' },
   promotions: { minPlan: 'normal' },
   finance: { minPlan: 'normal' },
@@ -54,11 +57,10 @@ export const SIDEBAR_PLAN_CATALOG: Record<string, SidebarPlanEntry> = {
   verifactu: { minPlan: 'normal' },
   reports: { minPlan: 'normal' },
   'sales-metrics': { minPlan: 'normal' },
-  commissions: { minPlan: 'normal' },
-  payroll: { minPlan: 'normal' },
-  gestoria: { minPlan: 'normal' },
-  'horarios-vacaciones': { minPlan: 'normal' },
-  'hr-requests': { minPlan: 'normal' },
+  /** RRHH completo: mismo menú para titular e invitado Admin/Gestor/Encargado. */
+  commissions: { minPlan: 'basic' },
+  payroll: { minPlan: 'basic' },
+  gestoria: { minPlan: 'basic' },
   suppliers: { minPlan: 'normal' },
   'catalog-invoice-email': { minPlan: 'normal' },
   costing: { minPlan: 'normal' },
@@ -87,6 +89,12 @@ export const SIDEBAR_PLAN_ALWAYS_VISIBLE = new Set([
   'configuracion',
   'chat',
   'team',
+  'clockins',
+  'horarios-vacaciones',
+  'hr-requests',
+  'payroll',
+  'gestoria',
+  'commissions',
 ]);
 
 export function getSidebarItemMinPlan(itemId: string): VertialPlanId {

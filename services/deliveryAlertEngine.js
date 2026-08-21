@@ -564,14 +564,36 @@ function filterDriverSessionsForBusiness(sessions, businessId, scopedPdvIds) {
   });
 }
 
-async function resolveOwnerBusinessIds(userId, account) {
+async function resolveOwnerBusinesses(userId, account) {
   const owned = await listOwnerBusinessesForUser(fakeReq, userId).catch(() => []);
   const fromOwned = owned
-    .map((b) => bareBusinessId(b?.business_id || b?.businessId || b?.id))
-    .filter(Boolean);
-  if (fromOwned.length > 0) return [...new Set(fromOwned)];
+    .map((b) => ({
+      id: bareBusinessId(b?.business_id || b?.businessId || b?.id),
+      businessType: String(b?.businessType || '').trim(),
+    }))
+    .filter((b) => b.id);
+  if (fromOwned.length > 0) {
+    const seen = new Set();
+    return fromOwned.filter((b) => {
+      if (seen.has(b.id)) return false;
+      seen.add(b.id);
+      return true;
+    });
+  }
   const fallback = bareBusinessId(account?.businessId || account?.business_id);
-  return fallback ? [fallback] : [''];
+  if (!fallback) return [];
+  return [{
+    id: fallback,
+    businessType: String(account?.businessType || '').trim(),
+  }];
+}
+
+/** Solo verticales que usan el motor delivery (no Eventos: tiene eventsAlertEngine). */
+function usesDeliveryAlertMotorForBusinessType(businessType) {
+  const bt = String(businessType || '').trim();
+  if (!bt) return true; // legado sin tipo: mantener comportamiento anterior
+  if (bt === 'events') return false;
+  return true;
 }
 
 /** Empresa de sesión repartidor: sesión → PDV → work center. Sin fallback a otra empresa. */
@@ -607,6 +629,7 @@ async function runForBusinessScope({
   userId,
   account,
   businessId,
+  businessType,
   allOrders,
   catItems,
   catalogInfraDocs,
@@ -616,6 +639,11 @@ async function runForBusinessScope({
   drivers,
 }) {
   const bId = bareBusinessId(businessId);
+  if (!usesDeliveryAlertMotorForBusinessType(businessType)) {
+    // Eventos (u otros fuera de delivery): limpiar alertas delivery colgadas de ese PDV.
+    if (bId) await reconcileDeliveryAlerts(bId, userId, []);
+    return 0;
+  }
   const scopedPdvs = bId
     ? await listScopedPointsOfSaleForBusiness(fakeReq, userId, bId).catch(() => [])
     : pointsOfSale;
@@ -688,7 +716,7 @@ async function runForUser(userId) {
   const account = await findAccountByUserId(fakeReq, userId);
   if (!account) return 0;
 
-  const [allOrders, catItems, catalogInfraDocs, tpvS, drvS, pointsOfSale, drivers, businessIds] = await Promise.all([
+  const [allOrders, catItems, catalogInfraDocs, tpvS, drvS, pointsOfSale, drivers, businesses] = await Promise.all([
     fetchDocsOfType(getDeliveryDbName(), 'delivery_order').then((d) => d.filter((o) => o.user_id === userId)),
     fetchDocsOfType(getCatalogDbName(), 'catalog_item').then((d) => d.filter((i) => i.user_id === userId && i.active)),
     fetchCatalogInfraDocs(userId),
@@ -696,15 +724,17 @@ async function runForUser(userId) {
     fetchDocsOfType(getDeliveryDbName(), 'driver_cash_session').then((d) => d.filter((s) => s.user_id === userId)),
     fetchPointsOfSale(userId),
     fetchDrivers(userId),
-    resolveOwnerBusinessIds(userId, account),
+    resolveOwnerBusinesses(userId, account),
   ]);
 
   let tot = 0;
-  for (const bId of businessIds) {
+  const loop = businesses.length ? businesses : [{ id: '', businessType: '' }];
+  for (const biz of loop) {
     tot += await runForBusinessScope({
       userId,
       account,
-      businessId: bId,
+      businessId: biz.id,
+      businessType: biz.businessType,
       allOrders,
       catItems,
       catalogInfraDocs,
@@ -734,7 +764,7 @@ export async function getDeliveryAlertSummary(userId, options = {}) {
   if (!account) return { alerts: [], summary: { total: 0, byPriority: {}, byType: {} } };
 
   const filterBiz = bareBusinessId(options.businessId || options.business_id || '');
-  const [allOrders, catItems, catalogInfraDocs, tpvS, drvS, pointsOfSale, drivers, businessIds] = await Promise.all([
+  const [allOrders, catItems, catalogInfraDocs, tpvS, drvS, pointsOfSale, drivers, businesses] = await Promise.all([
     fetchDocsOfType(getDeliveryDbName(), 'delivery_order').then((d) => d.filter((o) => o.user_id === userId)),
     fetchDocsOfType(getCatalogDbName(), 'catalog_item').then((d) => d.filter((i) => i.user_id === userId && i.active)),
     fetchCatalogInfraDocs(userId),
@@ -742,17 +772,21 @@ export async function getDeliveryAlertSummary(userId, options = {}) {
     fetchDocsOfType(getDeliveryDbName(), 'driver_cash_session').then((d) => d.filter((s) => s.user_id === userId)),
     fetchPointsOfSale(userId),
     fetchDrivers(userId),
-    resolveOwnerBusinessIds(userId, account),
+    resolveOwnerBusinesses(userId, account),
   ]);
 
-  const targetBizIds = filterBiz
-    ? businessIds.filter((id) => id === filterBiz)
-    : businessIds;
+  const targetBiz = filterBiz
+    ? businesses.filter((b) => b.id === filterBiz)
+    : businesses;
   // Si piden una empresa concreta que no está en owned, aún así evaluar solo esa (scope estricto).
-  const loopIds = filterBiz && targetBizIds.length === 0 ? [filterBiz] : (targetBizIds.length ? targetBizIds : ['']);
+  const loopBiz = filterBiz && targetBiz.length === 0
+    ? [{ id: filterBiz, businessType: '' }]
+    : (targetBiz.length ? targetBiz : [{ id: '', businessType: '' }]);
 
   const pending = [];
-  for (const bId of loopIds) {
+  for (const biz of loopBiz) {
+    const bId = biz.id;
+    if (!usesDeliveryAlertMotorForBusinessType(biz.businessType)) continue;
     const scopedPdvs = bId
       ? await listScopedPointsOfSaleForBusiness(fakeReq, userId, bId).catch(() => [])
       : pointsOfSale;

@@ -11,6 +11,7 @@ describe('isManagerRole', () => {
   it('roles clásicos siguen siendo gerente', () => {
     assert.equal(isManagerRole('Admin'), true);
     assert.equal(isManagerRole('Gerente'), true);
+    assert.equal(isManagerRole('Gestor'), true);
   });
 
   it('trabajadores operativos no son gerente', () => {

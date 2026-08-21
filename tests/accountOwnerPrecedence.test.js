@@ -42,7 +42,23 @@ describe('owner precedence (creador vs Admin invitado)', () => {
     expect(canOwnerPrecedenceRemoveMember(business, 'owner-1', 'administ', 'Administrador')).toBe(true);
   });
 
-  it('solo el propietario asigna roles gated', () => {
+  it('Admin invitado puede expulsar Encargado/Gestor (casi CEO)', () => {
+    const withEncargado = {
+      ...business,
+      members: [
+        ...business.members,
+        { user_id: 'enc-1', role: 'Encargado' },
+        { user_id: 'ges-1', role: 'Gestor' },
+      ],
+    };
+    expect(canRemoveBusinessMember(withEncargado, 'admin-inv', 'enc-1')).toBe(true);
+    expect(canRemoveBusinessMember(withEncargado, 'admin-inv', 'ges-1')).toBe(true);
+    expect(canOwnerPrecedenceRemoveMember(withEncargado, 'admin-inv', 'enc-1', 'Encargado')).toBe(true);
+    expect(canChangeBusinessMemberRole(withEncargado, 'admin-inv', 'Comercial', 'Encargado')).toBe(true);
+    expect(isOwnerGatedTeamRole('Encargado')).toBe(false);
+  });
+
+  it('solo el propietario asigna roles Admin / Administrador', () => {
     expect(isOwnerGatedTeamRole('Admin')).toBe(true);
     expect(isOwnerGatedTeamRoleFe('Administrador')).toBe(true);
     expect(canChangeBusinessMemberRole(business, 'admin-inv', 'Comercial', 'Admin')).toBe(false);

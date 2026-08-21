@@ -5,6 +5,8 @@ export const MANAGER_ROLES = new Set([
   'GerenteGrupo',
   'Administrador',
   'Encargado',
+  'Gestor',
+  'Superadmin',
 ]);
 
 export function isManagerRole(role) {

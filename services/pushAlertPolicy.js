@@ -8,9 +8,46 @@ import {
 } from './alertRulesCatalog.js';
 import { resolveAlertPlanTier } from './alertPlanTiers.js';
 import { resolvePlanTier } from './subscriptionAddons.js';
-import { findAccountByUserId } from './couchdb.js';
+import { findAccountByUserId, listBusinessesByUser } from './couchdb.js';
 
 const PLAN_TIER_RANK = { basic: 0, normal: 1, pro: 2 };
+
+function isManagementInviteRole(role) {
+  const r = String(role || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  return (
+    r === 'admin'
+    || r === 'administrador'
+    || r === 'owner'
+    || r === 'gerente'
+    || r === 'gerentogrupo'
+    || r === 'manager'
+    || r === 'encargado'
+    || r === 'gestor'
+    || r === 'superadmin'
+  );
+}
+
+/** Admin/Gerente invitado al panel: sí push. Trabajador de piso: no. */
+async function userIsManagementInvite(req, userId) {
+  const uid = String(userId || '').trim();
+  if (!uid) return false;
+  try {
+    const businesses = await listBusinessesByUser(req, uid);
+    for (const b of businesses || []) {
+      if (String(b.owner_user_id || '').trim() === uid) return true;
+      const members = Array.isArray(b.members) ? b.members : [];
+      if (members.some((m) => String(m?.user_id || '').trim() === uid && isManagementInviteRole(m.role))) {
+        return true;
+      }
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
 
 /**
  * Reglas que llegan al iPhone/Web Push del CEO con banner + sonido.
@@ -96,8 +133,8 @@ export async function userMeetsPushPlanTier(req, userId, ruleId, category) {
 
 /**
  * ¿Enviar push móvil a este usuario para esta alerta?
- * Solo CEO/titular: trabajadores (código / invitedBy) nunca.
- * Requiere: canal push + whitelist CEO + plan + no haber rechazado permiso.
+ * Titular + Admin/Gerente invitados. Trabajadores de piso: no.
+ * Requiere: canal push + whitelist + plan + no haber rechazado permiso.
  */
 export async function shouldSendMobilePush(req, {
   userId,
@@ -112,12 +149,19 @@ export async function shouldSendMobilePush(req, {
   try {
     const account = await findAccountByUserId(req, userId);
     if (!account) return false;
-    // Trabajador (login con código / invitado) → sin push de momento
-    if (String(account.accountType || '') === 'user') return false;
-    if (String(account.invitedBy || '').trim()) return false;
 
     const decision = account?.notificationPreferences?.pushConsent?.decision;
     if (decision === 'declined') return false;
+
+    const isInvitedOrWorker =
+      String(account.accountType || '') === 'user'
+      || Boolean(String(account.invitedBy || '').trim());
+    if (isInvitedOrWorker) {
+      const allowed = await userIsManagementInvite(req, userId);
+      if (!allowed) return false;
+      // El plan es del titular del negocio; el admin invitado hereda el aviso.
+      return true;
+    }
   } catch {
     /* si no se puede leer la cuenta, no bloqueamos el envío al titular */
   }

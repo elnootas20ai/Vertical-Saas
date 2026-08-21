@@ -2,7 +2,9 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
 import { createVerticalApi, type VerticalEntity } from '../../lib/verticalApiFactory';
+import { resolveEventsUserId } from '../../lib/eventsFlow';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
   Search, Plus, X, Edit3, Trash2, CheckSquare, Clock,
@@ -68,12 +70,13 @@ const EMPTY_FORM: LogisticsForm = { evento: '', tarea: '', responsable: '', fech
 
 export function EventsLogistics({ embedded = false }: { embedded?: boolean } = {}) {
   const { user } = useAuth();
+  const { currentBusiness } = useBusiness();
   const [searchParams] = useSearchParams();
   const linkedEventName = searchParams.get('eventName') || '';
   const linkedEventId = searchParams.get('eventId') || '';
   const api = useMemo(() => createVerticalApi<LogisticsTask>('events', 'logistics'), []);
   const eventsCatalogApi = useMemo(() => createVerticalApi<EventRecord>('events', 'events'), []);
-  const userId = user?.user_id || user?.id || '';
+  const userId = useMemo(() => resolveEventsUserId(user, currentBusiness), [user, currentBusiness]);
 
   const [tasks, setTasks] = useState<LogisticsTask[]>([]);
   const [eventCatalog, setEventCatalog] = useState<EventRecord[]>([]);

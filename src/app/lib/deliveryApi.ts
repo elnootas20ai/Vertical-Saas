@@ -449,6 +449,11 @@ export interface PurchaseInvoice {
     manualReview?: boolean;
   };
 
+  businessId?: string;
+  businessName?: string;
+  workCenterId?: string;
+  workCenterName?: string;
+
   validationStatus: InvoiceValidationStatus;
   validatedAt?: string;
   validatedBy?: string;

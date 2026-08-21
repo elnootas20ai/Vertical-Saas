@@ -12,6 +12,7 @@ import {
 } from '../lib/tpvCatalogCache';
 import type { TpvCatalogBusinessRef } from '../lib/tpvCatalogScope';
 import { resolveTpvCatalogLoadScope } from '../lib/tpvCatalogScope';
+import { filterCatalogByEventAllowlist } from '../lib/eventsPortableTpv';
 
 const REVALIDATE_MS = 60_000;
 
@@ -21,10 +22,13 @@ export function useTpvCatalog(
   options?: {
     accountBusinessCount?: number;
     businesses?: TpvCatalogBusinessRef[];
+    /** Si viene (p. ej. PDV de evento), solo esos productos. null = sin filtro. */
+    catalogItemIdAllowlist?: string[] | null;
   },
 ) {
   const businesses = options?.businesses ?? [];
   const accountBusinessCount = options?.accountBusinessCount;
+  const allowlist = options?.catalogItemIdAllowlist;
 
   const fetchInput = useMemo((): TpvCatalogFetchInput => ({
     scopeBusinessId: String(scopeBusinessId || '').trim(),
@@ -177,5 +181,10 @@ export function useTpvCatalog(
     };
   }, [userId, reloadCatalog]);
 
-  return { catalog, brands, loadingCatalog, reloadCatalog, catalogBusinessId };
+  const scopedCatalog = useMemo(
+    () => filterCatalogByEventAllowlist(catalog, allowlist),
+    [catalog, allowlist],
+  );
+
+  return { catalog: scopedCatalog, brands, loadingCatalog, reloadCatalog, catalogBusinessId };
 }

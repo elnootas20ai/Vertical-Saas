@@ -306,35 +306,27 @@ function resolvePostLoginRedirect(account, { pendingInvitationsCount = 0 } = {})
     return '/saas/invitations';
   }
 
-  const isUserAccount = account.accountType === 'user';
-  const isInvitedWorker = Boolean(String(account.invitedBy || '').trim());
-  const landing = String(account.landingPage || '').trim();
-  const linkedBusiness = String(account.linkedBusinessId || '').trim();
-  const hasWorkerLanding = landing.startsWith('/saas/worker');
-  const isWorker = isUserAccount || isInvitedWorker || (hasWorkerLanding && Boolean(linkedBusiness));
+  const accountType = String(account.accountType || 'company').trim();
+  // CEO / empresa: NUNCA rutas de trabajador (aunque quede linkedBusinessId o landing vieja).
+  if (accountType === 'company') {
+    if (companyNeedsOnboarding(account)) {
+      return resolveCompanyOnboardingResumePath(account);
+    }
+    if (shouldBlockSubscriptionAccess(account.subscription)) {
+      return '/saas/subscription';
+    }
+    return '/auth/gate';
+  }
 
-  if (isUserAccount && !linkedBusiness) {
+  // Trabajador (accountType user): NUNCA Gate/CEO por defecto.
+  const linkedBusiness = String(account.linkedBusinessId || '').trim();
+  if (!linkedBusiness) {
     return '/saas/user-dashboard';
   }
-
-  if (isWorker) {
-    if (linkedBusiness && needsWorkerPayrollSetup(account)) {
-      return WORKER_PAYROLL_SETUP_PATH;
-    }
-    return resolveWorkerSessionEntryPath(account);
+  if (needsWorkerPayrollSetup(account)) {
+    return WORKER_PAYROLL_SETUP_PATH;
   }
-
-  // Alta incompleta: nunca saltar a paywall/Gate (pending_payment bloquearía el onboarding).
-  if (companyNeedsOnboarding(account)) {
-    return resolveCompanyOnboardingResumePath(account);
-  }
-
-  // Empresa sin licencia activa → pantalla de transferencia (no Gate/dashboard).
-  if (shouldBlockSubscriptionAccess(account.subscription)) {
-    return '/saas/subscription';
-  }
-
-  return '/auth/gate';
+  return resolveWorkerSessionEntryPath(account);
 }
 
 // S-01 + S-07: Emite tokens JWT, crea sesión y establece httpOnly cookies
@@ -986,6 +978,9 @@ export async function login(req, res) {
       try {
         const otp = await dispatchLoginOtp(req, unlockedAccount);
         if (!otp.ok && otp.status === 429) {
+          // Sin tokens aún: no dejar cookie de otra cuenta (p. ej. trabajador) viva
+          // mientras el admin espera el OTP — el refresh la reinstalaría.
+          clearAuthCookies(res);
           return res.status(200).json({
             ok: true,
             requiresLoginCode: true,
@@ -1013,6 +1008,9 @@ export async function login(req, res) {
           metadata: { otpHint: otp.hint },
         });
 
+        // Critico: al pedir OTP no se emiten tokens. Si queda cookie refresh de
+        // otra sesión (trabajador), un keepalive puede pisar el login admin.
+        clearAuthCookies(res);
         return res.json({
           ok: true,
           requiresLoginCode: true,
@@ -1961,7 +1959,7 @@ export async function inviteUser(req, res) {
       ) {
         return res.status(403).json({
           ok: false,
-          error: 'Solo el propietario puede invitar roles de administración (Admin, Administrador…)',
+          error: 'Solo el propietario puede invitar roles Admin / Administrador',
           code: 'OWNER_ONLY',
         });
       }
@@ -2951,7 +2949,7 @@ export async function deleteUser(req, res) {
       if (!canRemove) {
         return res.status(403).json({
           ok: false,
-          error: 'Solo el propietario puede expulsar a un Admin u otro rol de administración',
+          error: 'Solo el propietario puede expulsar a un Admin o Administrador',
           code: 'OWNER_ONLY',
         });
       }

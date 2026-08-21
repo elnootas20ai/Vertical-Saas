@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Link, Navigate, useSearchParams } from 'react-router-dom';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
 import { createVerticalApi, type VerticalEntity } from '../../lib/verticalApiFactory';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
@@ -10,6 +11,7 @@ import {
   type EventServiceCategory,
   type EventServiceUnit,
 } from '../../lib/eventsTypes';
+import { resolveEventsUserId } from '../../lib/eventsFlow';
 import {
   Search, X, Edit3, Trash2, Sparkles, DollarSign, Tag,
   CheckCircle, Loader2, ToggleLeft, ToggleRight,
@@ -33,6 +35,7 @@ import { EventsVenues } from './EventsVenues';
 import { EventsVendors } from './EventsVendors';
 import { EventsCatering } from './EventsCatering';
 import { EventsLogistics } from './EventsLogistics';
+import { EventsTpvProductsCatalog } from './EventsTpvProductsCatalog';
 
 interface EventService extends VerticalEntity {
   nombre: string;
@@ -76,7 +79,8 @@ function mapServiceUnit(raw: string): EventServiceUnit {
 }
 
 const SERVICE_TABS = [
-  { id: 'catalogo', label: 'Catálogo' },
+  { id: 'servicios', label: 'Servicios' },
+  { id: 'productos', label: 'Productos' },
   { id: 'espacios', label: 'Espacios' },
   { id: 'externos', label: 'Externos' },
   { id: 'catering', label: 'Catering' },
@@ -86,11 +90,13 @@ const SERVICE_TABS = [
 export type EventsServicesTabId = (typeof SERVICE_TABS)[number]['id'];
 
 function parseEventsServicesTab(raw: string | null): EventsServicesTabId {
+  if (raw === 'productos' || raw === 'tpv' || raw === 'tpv_products' || raw === 'list=productos') return 'productos';
   if (raw === 'espacios' || raw === 'venues') return 'espacios';
   if (raw === 'externos' || raw === 'vendors') return 'externos';
   if (raw === 'catering') return 'catering';
   if (raw === 'logistica' || raw === 'logistics') return 'logistica';
-  return 'catalogo';
+  // Catálogo / contratación / sin tab = Servicios
+  return 'servicios';
 }
 
 export function RedirectToEventsServicesTab({ tab }: { tab: EventsServicesTabId }) {
@@ -102,8 +108,12 @@ export function RedirectToEventsServicesTab({ tab }: { tab: EventsServicesTabId 
 
 function EventsServicesCatalog() {
   const { user } = useAuth();
+  const { currentBusiness } = useBusiness();
   const api = useMemo(() => createVerticalApi<EventService>('events', 'services'), []);
-  const userId = user?.user_id || user?.id || '';
+  const userId = useMemo(
+    () => resolveEventsUserId(user, currentBusiness),
+    [user, currentBusiness],
+  );
 
   const [items, setItems] = useState<EventService[]>([]);
   const [loading, setLoading] = useState(true);
@@ -125,6 +135,9 @@ function EventsServicesCatalog() {
     setLoading(true);
     try {
       setItems(await api.list(userId));
+    } catch {
+      setItems([]);
+      toast.error('No se pudieron cargar los servicios');
     } finally {
       setLoading(false);
     }
@@ -143,9 +156,11 @@ function EventsServicesCatalog() {
 
   const filtered = useMemo(() => items.filter((s) => {
     const q = search.toLowerCase();
-    const ms = !q || s.nombre.toLowerCase().includes(q) || s.descripcion.toLowerCase().includes(q);
+    const name = String(s.nombre || '').toLowerCase();
+    const desc = String(s.descripcion || '').toLowerCase();
+    const ms = !q || name.includes(q) || desc.includes(q);
     const mc = !filterCat || s.categoria === filterCat;
-    const ma = !filterActive || (filterActive === 'si' ? s.activo : !s.activo);
+    const ma = !filterActive || (filterActive === 'si' ? s.activo !== false : s.activo === false);
     return ms && mc && ma;
   }), [items, search, filterCat, filterActive]);
 
@@ -267,7 +282,7 @@ function EventsServicesCatalog() {
     <>
       <div className="space-y-6">
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          Catálogo de servicios disponibles y precios. Se usan al armar presupuestos en nuevas contrataciones.
+          Catálogo de servicios para presupuestos y contrataciones (mismo listado de siempre).
         </p>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -499,13 +514,19 @@ function EventsServicesCatalog() {
 
 export function EventsServices() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab = parseEventsServicesTab(searchParams.get('tab'));
+  const tabRaw = searchParams.get('tab');
+  const listRaw = searchParams.get('list');
+  // Compat: ?list=productos (versión anterior) → pestaña Productos
+  const tab = parseEventsServicesTab(
+    tabRaw || (listRaw === 'productos' || listRaw === 'tpv' || listRaw === 'tpv_products' ? 'productos' : null),
+  );
   const linkedEventName = searchParams.get('eventName') || '';
   const linkedEventId = searchParams.get('eventId') || '';
 
   const setTab = (next: EventsServicesTabId) => {
     const params = new URLSearchParams(searchParams);
-    if (next === 'catalogo') params.delete('tab');
+    params.delete('list');
+    if (next === 'servicios') params.delete('tab');
     else params.set('tab', next);
     setSearchParams(params, { replace: true });
   };
@@ -544,7 +565,8 @@ export function EventsServices() {
           ))}
         </div>
 
-        {tab === 'catalogo' && <EventsServicesCatalog />}
+        {tab === 'servicios' && <EventsServicesCatalog />}
+        {tab === 'productos' && <EventsTpvProductsCatalog />}
         {tab === 'espacios' && <EventsVenues embedded />}
         {tab === 'externos' && <EventsVendors embedded />}
         {tab === 'catering' && <EventsCatering embedded />}

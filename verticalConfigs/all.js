@@ -159,9 +159,15 @@ export const eventsConfig = {
       required: ['eventId', 'cliente', 'total'],
     },
     vendors:   { type: 'ev_vendor',   idPrefix: 'evv', fields: ['empresa','tipoServicio','contacto','telefono','email','valoracion','eventosRealizados','tarifaBase'], required: ['empresa'] },
-    guests:    { type: 'ev_guest',    idPrefix: 'evg', fields: ['nombre','evento','eventId','email','telefono','mesa','confirmacion','menu','acompanantes'], required: ['nombre','evento'] },
     venues:    { type: 'ev_venue',    idPrefix: 'evn', fields: ['nombre','tipo','direccion','capacidad','precio','servicios','disponibilidad','valoracion'], required: ['nombre'] },
     services:  { type: 'ev_service',  idPrefix: 'evs', fields: ['nombre','categoria','precio','unidad','descripcion','activo'], required: ['nombre','precio'] },
+    /** Productos simples para cobro en el evento (no son servicios de presupuesto). */
+    tpv_products: {
+      type: 'ev_tpv_product',
+      idPrefix: 'evp',
+      fields: ['nombre', 'precio', 'descripcion', 'activo'],
+      required: ['nombre', 'precio'],
+    },
     catering:  { type: 'ev_catering', idPrefix: 'evc', fields: ['evento','eventId','menu','tipo','comensales','precioPorPersona','total','alergiasDietas','proveedor','estado'], required: ['evento'] },
     logistics: { type: 'ev_task',     idPrefix: 'evl', fields: ['evento','eventId','tarea','responsable','fechaLimite','estado','prioridad','categoria'], required: ['evento','tarea'] },
   },

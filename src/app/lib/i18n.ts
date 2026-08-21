@@ -212,12 +212,13 @@ const es = {
       // Events
       eventsHub: 'Centro de eventos',
       eventsNewContract: 'Nueva contratación',
+      eventsTpv: 'TPV evento',
       eventsQuotes: 'Presupuestos',
       eventsPipeline: 'Contrataciones',
       eventsServices: 'Servicios',
       eventsManagement: 'Gestión',
       eventsVendors: 'Externos',
-      eventsGuests: 'Invitados',
+      eventsGuests: 'Personas',
       eventsVenues: 'Espacios',
       eventsCatering: 'Catering',
       eventsLogistics: 'Logística',
@@ -2138,6 +2139,7 @@ const en = {
       // Events
       eventsHub: 'Events hub',
       eventsNewContract: 'New contract',
+      eventsTpv: 'Event POS',
       eventsQuotes: 'Quotes',
       eventsPipeline: 'Contracts',
       eventsServices: 'Services',
@@ -4048,6 +4050,7 @@ const pt = {
       // Events
       eventsHub: 'Centro de eventos',
       eventsNewContract: 'Nova contratação',
+      eventsTpv: 'TPV evento',
       eventsQuotes: 'Orçamentos',
       eventsPipeline: 'Contratações',
       eventsServices: 'Serviços',
@@ -5573,6 +5576,7 @@ const fr = {
       // Events
       eventsHub: 'Centre événements',
       eventsNewContract: 'Nouveau contrat',
+      eventsTpv: 'TPV événement',
       eventsQuotes: 'Devis',
       eventsPipeline: 'Contrats',
       eventsServices: 'Services',
@@ -7098,6 +7102,7 @@ const it = {
       // Events
       eventsHub: 'Centro eventi',
       eventsNewContract: 'Nuovo contratto',
+      eventsTpv: 'TPV evento',
       eventsQuotes: 'Preventivi',
       eventsPipeline: 'Contratti',
       eventsServices: 'Servizi',

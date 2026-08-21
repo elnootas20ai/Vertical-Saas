@@ -26,6 +26,7 @@ import {
   dismissDocumentAlerts,
 } from '../../lib/documentAlertsApi';
 import { mapAlertsForBusinessVertical } from '../../lib/alertActions';
+import { canUseCeoAdminPanel } from '../../lib/teamManagerAccess';
 import { toast } from 'sonner';
 import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
 import { formatDateTimeEs } from '../../lib/formatDateEs';
@@ -645,9 +646,15 @@ function ManagerInbox({
 
 export function SAAS__NotificationsDrawer({ isOpen, onClose }: Props) {
   const auth = useAuthOptional();
+  const businessCtx = useBusinessOptional();
   if (!auth?.user) return null;
 
-  if (isWorkerAccount(auth.user)) {
+  // Admin / Administrador invitados: misma campana del CEO (no inbox de trabajador).
+  const usesManagerInbox =
+    !isWorkerAccount(auth.user)
+    || canUseCeoAdminPanel(auth.user, businessCtx?.businesses);
+
+  if (!usesManagerInbox) {
     return <WorkerInbox isOpen={isOpen} onClose={onClose} />;
   }
 

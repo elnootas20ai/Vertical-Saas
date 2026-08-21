@@ -6,6 +6,8 @@ import { useTranslation } from 'react-i18next';
 import { useApp } from '../../context/AppContext';
 import { useAuthOptional, type AuthContextType } from '../../context/AuthContext';
 import { isWorkerAccount } from '../../lib/authApi';
+import { canUseCeoAdminPanel } from '../../lib/teamManagerAccess';
+import { useBusinessOptional } from '../../context/BusinessContext';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import { pointOfSaleDisplayLabel } from '../../lib/deliveryApi';
 import { useAlertCenterBusinessId } from '../../hooks/useAlertCenterBusinessId';
@@ -66,13 +68,16 @@ function TopbarInner({
   const location = useLocation();
   const { notifications } = useApp();
   const { user } = auth;
+  const businessCtx = useBusinessOptional();
   const isWorker = isWorkerAccount(user);
+  const usesCeoAlerts =
+    !isWorker || canUseCeoAdminPanel(user, businessCtx?.businesses);
   const alertCenterBusinessId = useAlertCenterBusinessId();
   const { unresolved: alertCenterUnresolved, summary: alertSummary } = useAlertCenterSummary(
-    !isWorker ? alertCenterBusinessId : undefined,
+    usesCeoAlerts ? alertCenterBusinessId : undefined,
     { pollMs: 60_000 },
   );
-  useDeliveryAlertsReviewPrompt({ sendNotif: !isWorker });
+  useDeliveryAlertsReviewPrompt({ sendNotif: usesCeoAlerts });
   const { setTheme, resolvedTheme } = useTheme();
   const { i18n, t } = useTranslation();
   const [mounted, setMounted] = useState(false);
@@ -103,8 +108,8 @@ function TopbarInner({
     { code: 'it', label: 'Italiano', flag: '🇮🇹' },
   ] as const;
   const legacyUnread = notifications.filter((notification) => !notification.read).length;
-  // CEO: alertas de negocio + mensajes personales (RRHH, fichaje, solicitudes…).
-  const unreadCount = isWorker ? legacyUnread : alertCenterUnresolved + legacyUnread;
+  // CEO + Admin invitado: alertas de negocio + mensajes personales.
+  const unreadCount = usesCeoAlerts ? alertCenterUnresolved + legacyUnread : legacyUnread;
   const highAlertCount = alertSummary?.byPriority?.high ?? 0;
   const bellTone = unreadCount <= 0
     ? 'text-slate-600 dark:text-slate-300'

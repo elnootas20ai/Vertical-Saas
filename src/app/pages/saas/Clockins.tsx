@@ -121,10 +121,13 @@ export function Clockins() {
   const urlMemberId = searchParams.get('memberId') || '';
   const businessId = currentBusiness?.business_id || '';
 
-  const myMember = useMemo(
-    () => currentBusiness?.members?.find((m) => m.user_id === user?.user_id),
-    [currentBusiness, user?.user_id],
-  );
+  const myMember = useMemo(() => {
+    const uid = String(user?.user_id || '').replace(/^account:/, '').trim();
+    if (!uid) return undefined;
+    return currentBusiness?.members?.find(
+      (m) => String(m.user_id || '').replace(/^account:/, '').trim() === uid,
+    );
+  }, [currentBusiness, user?.user_id]);
   const { activeWorkCenters, hasWorkCenters } = useWorkCenters();
   const myRole = myMember?.role || user?.role || 'Usuario';
   const isAdmin = isManagerRole(myRole) || isManagerRole(user?.role);

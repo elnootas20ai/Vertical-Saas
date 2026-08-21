@@ -9,6 +9,7 @@ import { runDeliveryAlerts } from './deliveryAlertEngine.js';
 import { runCleaningAlerts } from './cleaningAlertEngine.js';
 import { runButcherAlertEngine } from './butcherAlertEngine.js';
 import { runConstructionAlertEngine } from './constructionAlertEngine.js';
+import { runEventsAlertEngine } from './eventsAlertEngine.js';
 
 const TAG = 'ALERT_ORCHESTRATOR';
 
@@ -20,6 +21,7 @@ export async function runAllAlertMotors() {
     runCleaningAlerts(),
     runButcherAlertEngine(),
     runConstructionAlertEngine(),
+    runEventsAlertEngine(),
   ]);
 
   const errors = results

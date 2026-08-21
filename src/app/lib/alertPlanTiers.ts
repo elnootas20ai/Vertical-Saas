@@ -28,6 +28,7 @@ const BASIC_ALERT_RULE_IDS = new Set([
   'delivery_delayed_order',
   'delivery_unpaid_order',
   'delivery_order_cancelled',
+  'events_cash_pending_close',
 ]);
 
 const PRO_ALERT_DEPARTMENTS = new Set<AlertRuleDepartment>([

@@ -21,7 +21,7 @@ import {
   getInviteRoleDisplayLabel,
   suggestPositionForInviteRole,
 } from '../../lib/inviteFunctionRoles';
-import { isBusinessOwner, isOwnerGatedTeamRole } from '../../lib/accountOwnerPrecedence';
+import { isBusinessOwner, isOwnerOnlyPeerRole } from '../../lib/accountOwnerPrecedence';
 import { isEventsBusinessType, isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import {
   computeLaborCostBreakdown,
@@ -533,8 +533,9 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
             inviteBusiness?.ownDeliveryEnabled ?? ctxBusiness?.ownDeliveryEnabled,
           ),
         });
+    // Titular: todos los roles. Admin invitado: todo excepto Admin/Administrador (solo titular).
     if (inviteAsOwner) return base;
-    return base.filter((r) => !isOwnerGatedTeamRole(r.id));
+    return base.filter((r) => !isOwnerOnlyPeerRole(r.id));
   }, [
     roles,
     inviteBusiness?.businessType,
@@ -1211,7 +1212,13 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                                     · Misma capacidad operativa que el titular en el día a día
                                   </li>
                                   <li className="text-[11px] text-blue-900/85 dark:text-blue-100/85">
-                                    · Sin restricción a «Mi trabajo»
+                                    · Campana y push del negocio (presupuestos, cobros, caja…)
+                                  </li>
+                                  <li className="text-[11px] text-blue-900/85 dark:text-blue-100/85">
+                                    · Puede invitar Encargado/Gestor y operativos
+                                  </li>
+                                  <li className="text-[11px] text-blue-900/85 dark:text-blue-100/85">
+                                    · Solo el titular: plan/facturación e invitar otros Admin
                                   </li>
                                 </>
                               ) : isAdministrador ? (
@@ -1221,6 +1228,9 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                                   </li>
                                   <li className="text-[11px] text-blue-900/85 dark:text-blue-100/85">
                                     · Gestiona el negocio en el día a día
+                                  </li>
+                                  <li className="text-[11px] text-blue-900/85 dark:text-blue-100/85">
+                                    · Campana y push del negocio (presupuestos, cobros, caja…)
                                   </li>
                                   <li className="text-[11px] text-blue-900/85 dark:text-blue-100/85">
                                     · Sin restricción a «Mi trabajo»
@@ -1235,6 +1245,9 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                                     · Clientes, cobros, finanzas y equipo
                                   </li>
                                   <li className="text-[11px] text-blue-900/85 dark:text-blue-100/85">
+                                    · Campana y push del negocio (presupuestos, cobros, caja…)
+                                  </li>
+                                  <li className="text-[11px] text-blue-900/85 dark:text-blue-100/85">
                                     · Todo el menú de la vertical eventos
                                   </li>
                                 </>
@@ -1245,6 +1258,9 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                                   </li>
                                   <li className="text-[11px] text-blue-900/85 dark:text-blue-100/85">
                                     · Equipo, nóminas y operación
+                                  </li>
+                                  <li className="text-[11px] text-blue-900/85 dark:text-blue-100/85">
+                                    · Campana y push del negocio
                                   </li>
                                 </>
                               )}

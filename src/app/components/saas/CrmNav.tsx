@@ -19,6 +19,9 @@ const REAL_ESTATE_CRM_TAB_IDS = new Set<CrmSection>(['clients', 'quotes', 'promo
 /** Bar/restaurante: igual que el sidebar — Clientes + Promociones (sin leads/presupuestos). */
 const RESTAURANT_CRM_TAB_IDS = new Set<CrmSection>(['clients', 'promotions']);
 
+/** Eventos: Clientes + Promociones (presupuestos van en el menú Eventos, no en CRM core). */
+const EVENTS_CRM_TAB_IDS = new Set<CrmSection>(['clients', 'promotions']);
+
 interface CrmNavProps {
   active: CrmSection;
 }
@@ -28,12 +31,14 @@ export function CrmNav({ active }: CrmNavProps) {
   const businessType = useBusinessOptional()?.currentBusiness?.businessType;
   const isRealEstate = businessType === 'realEstate';
   const isRestaurant = businessType === 'restaurant';
+  const isEvents = businessType === 'events';
 
   const tabs = useMemo(() => {
     if (isRealEstate) return CRM_TABS.filter((t) => REAL_ESTATE_CRM_TAB_IDS.has(t.id));
     if (isRestaurant) return CRM_TABS.filter((t) => RESTAURANT_CRM_TAB_IDS.has(t.id));
+    if (isEvents) return CRM_TABS.filter((t) => EVENTS_CRM_TAB_IDS.has(t.id));
     return CRM_TABS;
-  }, [isRealEstate, isRestaurant]);
+  }, [isRealEstate, isRestaurant, isEvents]);
 
   return (
     <div className="flex w-full bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">

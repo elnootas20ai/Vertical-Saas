@@ -12,6 +12,7 @@ import type { AuthUser } from '../lib/authApi';
 import { isCompraventaBusinessType } from '../lib/compraventaSetup';
 import {
   isIceCreamShopBusinessType,
+  isEventsBusinessType,
   isRestaurantBusinessType,
   isStrictDeliveryBusinessType,
 } from '../lib/deliveryOpsTypes';
@@ -83,8 +84,12 @@ export function resolveRetailScopeKind(
   businessType: string | null | undefined,
 ): RetailScopeKind {
   if (isRestaurantBusinessType(businessType)) return 'restaurant';
-  // Heladería usa el mismo pipeline de tiendas/PDV retail que delivery (sin mezclar módulos).
-  if (isStrictDeliveryBusinessType(businessType) || isIceCreamShopBusinessType(businessType)) {
+  // Heladería y eventos: mismo pipeline de tiendas/PDV retail que delivery (PDV portátiles).
+  if (
+    isStrictDeliveryBusinessType(businessType)
+    || isIceCreamShopBusinessType(businessType)
+    || isEventsBusinessType(businessType)
+  ) {
     return 'delivery';
   }
   return 'strict';

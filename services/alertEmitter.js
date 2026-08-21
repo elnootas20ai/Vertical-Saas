@@ -136,10 +136,27 @@ async function businessOwnerMeetsAlertRule(business, ruleId, category) {
 }
 
 /**
- * Destinatarios de alertas.
- * De momento SOLO el CEO / titular de la empresa (owner).
- * Trabajadores (código / invitedBy) NO reciben alertas ni push.
+ * Destinatarios de alertas: titular + Admin/Gerente invitados del negocio.
+ * Trabajadores de piso (sin rol de gestión) NO reciben alertas ni push.
  */
+function isManagementInviteRole(role) {
+  const r = String(role || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  return (
+    r === 'admin'
+    || r === 'administrador'
+    || r === 'owner'
+    || r === 'gerente'
+    || r === 'gerentogrupo'
+    || r === 'manager'
+    || r === 'encargado'
+    || r === 'gestor'
+    || r === 'superadmin'
+  );
+}
+
 async function resolveRecipients(businessId, ruleId, category, fallbackUserId, { force = false } = {}) {
   if (!businessId) {
     if (!fallbackUserId) return [];
@@ -161,8 +178,15 @@ async function resolveRecipients(businessId, ruleId, category, fallbackUserId, {
     }
 
     const business = await findBusinessById(fakeReq, businessId);
-    const ownerId = business?.owner_user_id || '';
-    if (ownerId) return [ownerId];
+    const recipients = new Set();
+    const ownerId = String(business?.owner_user_id || '').trim();
+    if (ownerId) recipients.add(ownerId);
+    for (const m of business?.members || []) {
+      const uid = String(m?.user_id || '').trim();
+      if (!uid) continue;
+      if (isManagementInviteRole(m.role)) recipients.add(uid);
+    }
+    if (recipients.size > 0) return [...recipients];
     if (fallbackUserId) {
       const account = await findAccountByUserId(fakeReq, fallbackUserId);
       if (isWorkerAccountDoc(account)) return [];
@@ -174,7 +198,7 @@ async function resolveRecipients(businessId, ruleId, category, fallbackUserId, {
   }
 }
 
-/** Cuenta de trabajador (invitado / código), no el CEO titular. */
+/** Cuenta de trabajador de piso (invitado sin rol de gestión). El titular no tiene invitedBy. */
 function isWorkerAccountDoc(account) {
   if (!account) return false;
   if (String(account.accountType || '') === 'user') return true;

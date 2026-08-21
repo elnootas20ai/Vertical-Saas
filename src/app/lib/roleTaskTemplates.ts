@@ -509,7 +509,7 @@ const EVENTS_BUNDLES: RoleTaskTemplateBundle[] = [
   {
     roleId: 'Operaciones',
     roleLabel: 'Operaciones',
-    summary: 'Plan del día del evento e invitados.',
+    summary: 'Plan del día del evento y logística.',
     tasks: [
       {
         key: 'ev-ops-plan',
@@ -518,9 +518,9 @@ const EVENTS_BUNDLES: RoleTaskTemplateBundle[] = [
         priority: 'high',
       },
       {
-        key: 'ev-ops-invitados',
-        title: 'Gestionar lista de invitados / accesos',
-        description: 'Confirmaciones e incidencias en puerta.',
+        key: 'ev-ops-ruta',
+        title: 'Revisar ruta y material',
+        description: 'Qué hay que llevar al evento y tareas de logística.',
         priority: 'medium',
       },
     ],

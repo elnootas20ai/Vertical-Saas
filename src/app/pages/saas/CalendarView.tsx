@@ -19,9 +19,17 @@ import {
   User, Filter, Car, Check, X, Link, Settings,
   Users, AlertCircle, Loader2, ShoppingCart, PhoneCall,
   Handshake, BellRing, FileSignature, Truck, Wrench, Crown, Store,
+  Smartphone,
 } from 'lucide-react';
 import { listWorkOrdersRequest, type WorkOrder } from '../../lib/workshopApi';
 import { useWorkCenters } from '../../hooks/useWorkCenters';
+import { isEventsBusinessType } from '../../lib/deliveryOpsTypes';
+import { loadEvents, resolveEventsUserId } from '../../lib/eventsFlow';
+import {
+  EVENT_STAGE_CONFIG,
+  EVENT_TYPE_LABELS,
+  type EventRecord,
+} from '../../lib/eventsTypes';
 import {
   format, startOfMonth, endOfMonth, startOfWeek, endOfWeek,
   eachDayOfInterval, isSameDay, isSameMonth, isToday, addMonths, subMonths,
@@ -40,12 +48,23 @@ import {
   type AppointmentType,
   type AppointmentStatus,
 } from '../../lib/appointmentsApi';
+import {
+  addEventToPhoneCalendar,
+  addEventsToPhoneCalendar,
+  calendarIcsFromParts,
+  isLikelyAppleMobileDevice,
+  isPhoneCalendarSent,
+  markPhoneCalendarSent,
+  type CalendarIcsEvent,
+} from '../../lib/calendarIcs';
+import { VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
+import { toast } from 'sonner';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
 interface CalendarEvent {
   id: string;
-  type: 'appointment' | 'followup' | 'delivery' | 'test_drive' | 'sale' | 'purchase' | 'call' | 'meeting' | 'reminder' | 'paperwork' | 'visit' | 'workshop';
+  type: 'appointment' | 'followup' | 'delivery' | 'test_drive' | 'sale' | 'purchase' | 'call' | 'meeting' | 'reminder' | 'paperwork' | 'visit' | 'workshop' | 'event';
   title: string;
   subtitle: string;
   date: Date;
@@ -93,7 +112,21 @@ function isDeliveryLikeCalendar(businessType: string | null | undefined): boolea
   return businessType === 'delivery' || businessType === 'restaurant';
 }
 
+function isEventsCalendar(businessType: string | null | undefined): boolean {
+  return isEventsBusinessType(businessType);
+}
+
 function defaultEventTypeConfig(businessType?: string | null): EventTypeConfig {
+  if (isEventsCalendar(businessType)) {
+    return {
+      event:    { enabled: true,  label: 'Evento',         color: 'cyan' },
+      meeting:  { enabled: true,  label: 'Reunión',        color: 'indigo' },
+      call:     { enabled: true,  label: 'Llamada',        color: 'orange' },
+      visit:    { enabled: true,  label: 'Visita',         color: 'blue' },
+      reminder: { enabled: true,  label: 'Recordatorio',   color: 'rose' },
+      delivery: { enabled: false, label: 'Logística',      color: 'purple' },
+    };
+  }
   if (isDeliveryLikeCalendar(businessType)) {
     return {
       delivery:  { enabled: true,  label: 'Reparto',        color: 'purple' },
@@ -117,6 +150,9 @@ function defaultEventTypeConfig(businessType?: string | null): EventTypeConfig {
 }
 
 function configurableEventTypes(businessType?: string | null): AppointmentType[] {
+  if (isEventsCalendar(businessType)) {
+    return ['meeting', 'call', 'visit', 'reminder', 'delivery'];
+  }
   if (isDeliveryLikeCalendar(businessType)) {
     return ['delivery', 'call', 'meeting', 'visit', 'reminder', 'paperwork'];
   }
@@ -141,6 +177,7 @@ const EVENT_COLORS: Record<string, string> = {
   paperwork:   'bg-amber-600',
   visit:       'bg-blue-600',
   workshop:    'bg-slate-700',
+  event:       'bg-cyan-600',
 };
 
 const EVENT_BG: Record<string, string> = {
@@ -156,6 +193,7 @@ const EVENT_BG: Record<string, string> = {
   paperwork:   'bg-amber-50',
   visit:       'bg-blue-50',
   workshop:    'bg-slate-100',
+  event:       'bg-cyan-50',
 };
 
 const EVENT_TEXT_COLOR: Record<string, string> = {
@@ -171,6 +209,7 @@ const EVENT_TEXT_COLOR: Record<string, string> = {
   paperwork:   'text-amber-700',
   visit:       'text-blue-700',
   workshop:    'text-slate-700',
+  event:       'text-cyan-700',
 };
 
 const EVENT_TEXT: Record<string, string> = {
@@ -186,10 +225,14 @@ const EVENT_TEXT: Record<string, string> = {
   paperwork:   'Papeleo',
   visit:       'Visita',
   workshop:    'OT Taller',
+  event:       'Evento',
 };
 
 /** Tipos fijos + configurables que salen en la leyenda lateral. */
 function calendarLegendTypes(businessType?: string | null): string[] {
+  if (isEventsCalendar(businessType)) {
+    return ['event', 'meeting', 'call', 'visit', 'reminder'];
+  }
   if (isDeliveryLikeCalendar(businessType)) {
     return ['appointment', 'delivery', 'followup', 'call', 'meeting', 'visit', 'reminder'];
   }
@@ -197,6 +240,98 @@ function calendarLegendTypes(businessType?: string | null): string[] {
     'appointment', 'test_drive', 'followup', 'delivery', 'sale', 'purchase',
     'call', 'meeting', 'reminder', 'paperwork', 'visit', 'workshop',
   ];
+}
+
+function parseEventCalendarDate(fecha: string): Date | null {
+  const raw = String(fecha || '').trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+  const date = parseISO(`${raw}T12:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** Construye el evento ICS/Google desde un ítem del calendario Vertial. */
+function buildPhoneCalendarEvent(
+  ev: Pick<CalendarEvent, 'id' | 'title' | 'subtitle' | 'date' | 'time' | 'route'>,
+  appointment?: Appointment | null,
+): CalendarIcsEvent {
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const description = [
+    ev.subtitle,
+    appointment?.notes,
+    appointment?.clientPhone ? `Tel: ${appointment.clientPhone}` : '',
+    appointment?.clientEmail ? `Email: ${appointment.clientEmail}` : '',
+    ev.route ? `Abrir en Vertial: ${origin}${ev.route}` : '',
+  ]
+    .map((s) => String(s || '').trim())
+    .filter(Boolean)
+    .join('\n');
+
+  return calendarIcsFromParts({
+    uid: `vertial-${String(ev.id || 'event').replace(/[^a-zA-Z0-9_-]/g, '-')}@vertial.app`,
+    title: ev.title || appointment?.clientName || 'Evento Vertial',
+    description,
+    location: appointment?.location || '',
+    date: ev.date,
+    timeHhMm: ev.time || appointment?.time || null,
+  });
+}
+
+/** Añade al calendario del móvil (Google en Android/PC; Apple en iPhone/iPad). */
+function addVertialCalendarItemToPhone(
+  ev: Pick<CalendarEvent, 'id' | 'title' | 'subtitle' | 'date' | 'time' | 'route'>,
+  appointment?: Appointment | null,
+  options?: { silent?: boolean; force?: boolean; onMarked?: () => void },
+): boolean {
+  const eventId = String(ev.id || '').trim();
+  if (eventId && !options?.force && isPhoneCalendarSent(eventId)) {
+    if (!options?.silent) {
+      toast.message('Ya en este móvil', {
+        description: 'Si ya lo confirmaste en el calendario, no hace falta otra vez.',
+        action: {
+          label: 'Abrir otra vez',
+          onClick: () => {
+            addVertialCalendarItemToPhone(ev, appointment, {
+              force: true,
+              onMarked: options?.onMarked,
+            });
+          },
+        },
+      });
+    }
+    return false;
+  }
+
+  const channel = addEventToPhoneCalendar(buildPhoneCalendarEvent(ev, appointment));
+  if (eventId) {
+    markPhoneCalendarSent(eventId);
+    options?.onMarked?.();
+  }
+  if (!options?.silent) {
+    toast.success(
+      channel === 'ics'
+        ? 'Se abre Calendario — añade el evento para recibir avisos en el iPhone'
+        : 'Se abre Google Calendar — confirma el evento para recibir avisos en el móvil',
+    );
+  }
+  return true;
+}
+
+function addAppointmentToPhoneCalendar(
+  appointment: Appointment,
+  options?: { onMarked?: () => void },
+): void {
+  const date = parseISO(`${appointment.date}T${appointment.time || '12:00'}:00`);
+  addVertialCalendarItemToPhone(
+    {
+      id: `appt-${appointment.id}`,
+      title: appointment.clientName || 'Cita',
+      subtitle: appointment.notes || '',
+      date: Number.isNaN(date.getTime()) ? new Date(`${appointment.date}T12:00:00`) : date,
+      time: appointment.time,
+    },
+    appointment,
+    { onMarked: options?.onMarked },
+  );
 }
 
 const EVENT_ICONS: Record<string, React.ReactNode> = {
@@ -254,6 +389,7 @@ const APPOINTMENT_TYPE_LABELS: Record<AppointmentType, string> = {
 };
 
 const WEEKDAYS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+const WEEKDAYS_SHORT = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 
@@ -271,7 +407,7 @@ export function CalendarView() {
 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [mode, setMode] = useState<CalendarMode>('month');
-  const [filterType, setFilterType] = useState<'all' | 'appointment' | 'test_drive' | 'followup' | 'delivery' | 'sale' | 'purchase' | 'call' | 'meeting' | 'reminder' | 'paperwork' | 'visit' | 'workshop'>('all');
+  const [filterType, setFilterType] = useState<'all' | 'appointment' | 'test_drive' | 'followup' | 'delivery' | 'sale' | 'purchase' | 'call' | 'meeting' | 'reminder' | 'paperwork' | 'visit' | 'workshop' | 'event'>('all');
   const [showNewEventModal, setShowNewEventModal] = useState(false);
   const [showEventTypesSettings, setShowEventTypesSettings] = useState(false);
   const [filterPerson, setFilterPerson] = useState<string>('all');
@@ -282,12 +418,27 @@ export function CalendarView() {
   const [loadingAppointments, setLoadingAppointments] = useState(true);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
+  const [verticalEvents, setVerticalEvents] = useState<EventRecord[]>([]);
+  const [loadingVerticalEvents, setLoadingVerticalEvents] = useState(false);
 
   const [showNewModal, setShowNewModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState<Appointment | null>(null);
   const [showBookingConfig, setShowBookingConfig] = useState(false);
   const [bookingConfig, setBookingConfig] = useState<BookingConfig | null>(null);
   const [savingConfig, setSavingConfig] = useState(false);
+  /** Cola “Todo al móvil”: Google solo deja 1 evento por pestaña. */
+  const [phoneSendQueue, setPhoneSendQueue] = useState<CalendarEvent[] | null>(null);
+  const [phoneSendIdx, setPhoneSendIdx] = useState(0);
+  /** Refresco UI tras marcar “ya enviado” en este móvil. */
+  const [phoneSentTick, setPhoneSentTick] = useState(0);
+  const bumpPhoneSent = useCallback(() => setPhoneSentTick((n) => n + 1), []);
+  const isEventOnPhone = useCallback(
+    (eventId: string) => {
+      void phoneSentTick;
+      return isPhoneCalendarSent(eventId);
+    },
+    [phoneSentTick],
+  );
   const [draggingAppointmentId, setDraggingAppointmentId] = useState<string | null>(null);
 
   useModalClose(showNewModal, () => setShowNewModal(false));
@@ -305,6 +456,11 @@ export function CalendarView() {
   const userId = authUser?.user_id || user?.id || '';
   const businessType = currentBusiness?.businessType || null;
   const deliveryCalendar = isDeliveryLikeCalendar(businessType);
+  const eventsCalendar = isEventsCalendar(businessType);
+  const eventsDataUserId = useMemo(
+    () => (eventsCalendar ? resolveEventsUserId(authUser, currentBusiness) : ''),
+    [eventsCalendar, authUser, currentBusiness],
+  );
 
   const eventTypeStorageKey = useMemo(
     () => {
@@ -384,7 +540,7 @@ export function CalendarView() {
   }, [userId]);
 
   const loadWorkOrders = useCallback(async () => {
-    if (!userId || isDeliveryLikeCalendar(businessType)) {
+    if (!userId || isDeliveryLikeCalendar(businessType) || isEventsCalendar(businessType)) {
       setWorkOrders([]);
       return;
     }
@@ -397,6 +553,25 @@ export function CalendarView() {
   }, [userId, workshopScope, businessType]);
 
   useEffect(() => { void loadAppointments(); void loadWorkOrders(); }, [loadAppointments, loadWorkOrders]);
+
+  const loadVerticalEvents = useCallback(async () => {
+    if (!eventsCalendar || !eventsDataUserId) {
+      setVerticalEvents([]);
+      setLoadingVerticalEvents(false);
+      return;
+    }
+    setLoadingVerticalEvents(true);
+    try {
+      const list = await loadEvents(eventsDataUserId);
+      setVerticalEvents(list.filter((e) => e.estado !== 'cancelado' && String(e.fecha || '').trim()));
+    } catch {
+      setVerticalEvents([]);
+    } finally {
+      setLoadingVerticalEvents(false);
+    }
+  }, [eventsCalendar, eventsDataUserId]);
+
+  useEffect(() => { void loadVerticalEvents(); }, [loadVerticalEvents]);
 
   useEffect(() => {
     if (!authUser) return;
@@ -411,6 +586,26 @@ export function CalendarView() {
   const events = useMemo<CalendarEvent[]>(() => {
     const result: CalendarEvent[] = [];
 
+    // Contrataciones de la vertical Eventos (fuente: fecha del evento)
+    if (eventsCalendar) {
+      verticalEvents.forEach((ev) => {
+        const date = parseEventCalendarDate(String(ev.fecha || ''));
+        if (!date) return;
+        const tipoLabel = EVENT_TYPE_LABELS[(ev.tipo || 'otro') as keyof typeof EVENT_TYPE_LABELS] || 'Evento';
+        const stageLabel = EVENT_STAGE_CONFIG[ev.estado]?.label || ev.estado;
+        const bits = [ev.cliente, tipoLabel, ev.lugar, stageLabel].filter(Boolean);
+        result.push({
+          id: `evt-${ev._id}`,
+          type: 'event',
+          title: ev.nombre || 'Evento',
+          subtitle: bits.join(' · '),
+          date,
+          color: EVENT_COLORS.event,
+          route: `/saas/vertical/eventos/${encodeURIComponent(ev._id)}`,
+        });
+      });
+    }
+
     // Citas y eventos persistentes
     appointments.forEach((a) => {
       if (!a.date) return;
@@ -422,9 +617,10 @@ export function CalendarView() {
 
       // En verticales como delivery no queremos mezclar "Venta/Compra" (compraventa).
       if (deliveryCalendar && (evType === 'sale' || evType === 'purchase' || evType === 'test_drive' || evType === 'workshop')) return;
+      if (eventsCalendar && (evType === 'sale' || evType === 'purchase' || evType === 'test_drive' || evType === 'workshop')) return;
 
       const color = (() => {
-        if (evType === 'appointment' || evType === 'test_drive' || evType === 'followup' || evType === 'workshop') {
+        if (evType === 'appointment' || evType === 'test_drive' || evType === 'followup' || evType === 'workshop' || evType === 'event') {
           return EVENT_COLORS[evType] || EVENT_COLORS.appointment;
         }
         const c = getTypeColors(evType as unknown as AppointmentType);
@@ -452,7 +648,7 @@ export function CalendarView() {
     });
 
     // Seguimientos desde leads
-    if (businessType === 'carDealership' || businessType === 'scrapyard' || businessType === 'workshop') {
+    if (!eventsCalendar && (businessType === 'carDealership' || businessType === 'scrapyard' || businessType === 'workshop')) {
       leads
         .filter((l) => (l.status === 'contacted' || l.status === 'negotiation') && l.lastContact)
         .forEach((l) => {
@@ -471,7 +667,7 @@ export function CalendarView() {
     }
 
     // Entregas desde ventas
-    if (businessType === 'carDealership' || businessType === 'scrapyard') {
+    if (!eventsCalendar && (businessType === 'carDealership' || businessType === 'scrapyard')) {
       sales
         .filter((s) => s.deliveryDate)
         .forEach((s) => {
@@ -489,7 +685,7 @@ export function CalendarView() {
     }
 
     // Órdenes de trabajo del taller (por fecha estimada de entrega)
-    if (!deliveryCalendar) {
+    if (!deliveryCalendar && !eventsCalendar) {
       workOrders
       .filter((wo) => wo.estimatedCompletion)
       .forEach((wo) => {
@@ -508,7 +704,7 @@ export function CalendarView() {
     }
 
     // OTs recién creadas (entrada del vehículo = createdAt)
-    if (!deliveryCalendar) {
+    if (!deliveryCalendar && !eventsCalendar) {
       workOrders
         .filter((wo) => wo.status === 'pending' || wo.status === 'in_progress')
         .forEach((wo) => {
@@ -527,7 +723,7 @@ export function CalendarView() {
     }
 
     return result;
-  }, [appointments, leads, sales, vehicles, workOrders, businessType, deliveryCalendar, getTypeLabel, getTypeColors]);
+  }, [appointments, leads, sales, vehicles, workOrders, verticalEvents, businessType, deliveryCalendar, eventsCalendar, getTypeLabel, getTypeColors]);
 
   const filteredEvents = useMemo(() => {
     let evs = events;
@@ -571,6 +767,104 @@ export function CalendarView() {
 
   const eventsForDay = (day: Date) => filteredEvents.filter((e) => isSameDay(e.date, day));
   const selectedDayEvents = selectedDay ? filteredEvents.filter((e) => isSameDay(e.date, selectedDay)) : [];
+
+  const upcomingForPhone = useMemo(
+    () =>
+      filteredEvents
+        .filter((e) => isAfter(e.date, new Date()) || isSameDay(e.date, new Date()))
+        .sort((a, b) => a.date.getTime() - b.date.getTime())
+        .slice(0, 40),
+    [filteredEvents],
+  );
+
+  const upcomingPendingPhone = useMemo(
+    () => upcomingForPhone.filter((e) => !isEventOnPhone(e.id)),
+    [upcomingForPhone, isEventOnPhone],
+  );
+
+  const sendNextUpcomingToPhone = useCallback(() => {
+    const pending = upcomingPendingPhone;
+    if (pending.length === 0) {
+      if (upcomingForPhone.length > 0) {
+        toast.message('Todos ya están en este móvil');
+      } else {
+        toast.message(eventsCalendar ? 'No hay eventos próximos' : 'No hay citas próximas');
+      }
+      return;
+    }
+
+    // iPhone/iPad: un solo .ics con todos los pendientes (Calendario Apple).
+    if (isLikelyAppleMobileDevice()) {
+      const icsList = pending.map((ev) => {
+        const appt = ev.appointmentId ? appointments.find((a) => a.id === ev.appointmentId) : null;
+        return buildPhoneCalendarEvent(ev, appt);
+      });
+      addEventsToPhoneCalendar(icsList);
+      pending.forEach((ev) => markPhoneCalendarSent(ev.id));
+      bumpPhoneSent();
+      setPhoneSendQueue(null);
+      setPhoneSendIdx(0);
+      toast.success(
+        pending.length === 1
+          ? 'Se abre Calendario — añade el evento en el iPhone'
+          : `Se abre Calendario — añade los ${pending.length} eventos en el iPhone`,
+      );
+      return;
+    }
+
+    // Android/PC: Google (uno a uno).
+    let queue = phoneSendQueue;
+    let idx = phoneSendIdx;
+
+    if (!queue) {
+      queue = pending;
+      idx = 0;
+      setPhoneSendQueue(queue);
+      setPhoneSendIdx(0);
+    }
+
+    const ev = queue[idx];
+    if (!ev) {
+      setPhoneSendQueue(null);
+      setPhoneSendIdx(0);
+      return;
+    }
+
+    const appt = ev.appointmentId ? appointments.find((a) => a.id === ev.appointmentId) : null;
+    const opened = addVertialCalendarItemToPhone(ev, appt, {
+      silent: true,
+      onMarked: bumpPhoneSent,
+    });
+
+    const next = idx + 1;
+    if (next >= queue.length) {
+      setPhoneSendQueue(null);
+      setPhoneSendIdx(0);
+      toast.success(
+        queue.length === 1
+          ? opened
+            ? 'Confirma en Google Calendar para recibir avisos'
+            : 'Ya estaba en este móvil'
+          : `Listo (${queue.length}) — confirma el último en Google`,
+      );
+      return;
+    }
+
+    setPhoneSendIdx(next);
+    toast.success(
+      opened
+        ? `Abierto ${next} de ${queue.length} — confirma y pulsa Siguiente`
+        : `Ya estaba (${next} de ${queue.length}) — pulsa Siguiente`,
+    );
+  }, [
+    appointments,
+    bumpPhoneSent,
+    eventsCalendar,
+    phoneSendIdx,
+    phoneSendQueue,
+    upcomingForPhone.length,
+    upcomingPendingPhone,
+  ]);
 
   // ─── Booking config ───────────────────────────────────────────────────────
   const openBookingConfig = async () => {
@@ -669,28 +963,145 @@ export function CalendarView() {
     }
   };
 
+  const upcomingList = useMemo(
+    () =>
+      filteredEvents
+        .filter((e) => isAfter(e.date, new Date()))
+        .sort((a, b) => a.date.getTime() - b.date.getTime())
+        .slice(0, 6),
+    [filteredEvents],
+  );
+
+  const upcomingLoading = loadingAppointments || (eventsCalendar && loadingVerticalEvents);
+
+  const renderUpcomingPanel = (placement: 'mobile-top' | 'sidebar') => {
+    const isMobileTop = placement === 'mobile-top';
+    return (
+      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-4">
+        <div className="mb-3 flex flex-col gap-2.5">
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2 min-w-0">
+            <Clock className="w-4 h-4 text-amber-500 shrink-0" />
+            <span className="truncate">
+              {eventsCalendar ? 'Próximos eventos' : 'Próximas citas'}
+            </span>
+          </h3>
+          <button
+            type="button"
+            onClick={sendNextUpcomingToPhone}
+            disabled={!phoneSendQueue && upcomingPendingPhone.length === 0}
+            className={`inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-[var(--v-blue,#2563eb)] px-3 text-xs font-semibold text-white hover:bg-[#1d4ed8] disabled:opacity-40 ${
+              isMobileTop ? 'min-h-11' : 'min-h-10 py-2'
+            }`}
+          >
+            <Smartphone className="w-3.5 h-3.5 shrink-0" />
+            {phoneSendQueue
+              ? `Siguiente (${phoneSendIdx + 1}/${phoneSendQueue.length})`
+              : upcomingForPhone.length > 0 && upcomingPendingPhone.length === 0
+                ? 'Ya en el móvil'
+                : 'Todo al móvil'}
+          </button>
+        </div>
+        {upcomingLoading ? (
+          <div className="flex justify-center py-4">
+            <Loader2 className="w-4 h-4 animate-spin text-gray-400 dark:text-gray-500" />
+          </div>
+        ) : (
+          <>
+            {upcomingList.map((ev) => (
+              <div
+                key={ev.id}
+                className="border-b border-gray-100 dark:border-gray-700 last:border-0 py-2"
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (ev.appointmentId) {
+                      const appt = appointments.find((a) => a.id === ev.appointmentId);
+                      if (appt) setShowDetailModal(appt);
+                    } else if (ev.route) {
+                      navigate(ev.route);
+                    }
+                  }}
+                  className="w-full text-left flex items-center gap-3 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-750 rounded-lg px-1 transition-colors min-h-11"
+                >
+                  <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${ev.color}`} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-gray-900 dark:text-gray-100 truncate">{ev.title}</p>
+                    <p className="text-[10px] text-gray-400 dark:text-gray-500">
+                      {format(ev.date, 'd MMM', { locale: es })}
+                      {ev.time && ` · ${ev.time}`}
+                    </p>
+                  </div>
+                  {ev.type === 'test_drive' && <Car className="w-3 h-3 text-emerald-500 flex-shrink-0" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const appt = ev.appointmentId
+                      ? appointments.find((a) => a.id === ev.appointmentId)
+                      : null;
+                    addVertialCalendarItemToPhone(ev, appt, { onMarked: bumpPhoneSent });
+                  }}
+                  className={`mt-0.5 ml-5 inline-flex items-center gap-1 min-h-9 text-[11px] font-semibold hover:underline ${
+                    isEventOnPhone(ev.id)
+                      ? 'text-stone-500 dark:text-stone-400'
+                      : 'text-[var(--v-blue,#2563eb)]'
+                  }`}
+                >
+                  <Smartphone className="w-3 h-3" />
+                  {isEventOnPhone(ev.id) ? 'Ya en el móvil' : 'Al móvil'}
+                </button>
+              </div>
+            ))}
+            {upcomingList.length === 0 && (
+              <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-4">
+                {eventsCalendar ? 'Sin eventos próximos' : 'Sin citas próximas'}
+              </p>
+            )}
+          </>
+        )}
+      </div>
+    );
+  };
+
   return (
     <Layout title={t('calendar.title')} subtitle={t('calendar.subtitle')} noPadding>
-      <div className="flex flex-col lg:flex-row gap-0 min-h-[calc(100vh-80px)]">
+      <div className="flex flex-col md:flex-row gap-0 min-h-[calc(100vh-80px)]">
+
+        {/* Móvil: próximos arriba (antes del calendario) */}
+        <div className="md:hidden p-3 pb-0 shrink-0">
+          {renderUpcomingPanel('mobile-top')}
+        </div>
 
         {/* ─── Panel principal ─────────────────────────────────────────── */}
-        <div className="flex-1 min-w-0 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col">
+        <div className="flex-1 min-w-0 bg-white dark:bg-gray-800 md:border-r border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col">
 
           {/* Toolbar */}
-          <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-4 border-b border-gray-200 dark:border-gray-700">
-            <div className="flex items-center gap-2">
-              <button onClick={prev} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-3 sm:px-5 py-3 sm:py-4 border-b border-gray-200 dark:border-gray-700">
+            <div className="flex items-center gap-1 sm:gap-2 min-w-0 flex-1">
+              <button
+                type="button"
+                onClick={prev}
+                className="p-2.5 sm:p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors shrink-0"
+                aria-label="Anterior"
+              >
                 <ChevronLeft className="w-4 h-4 text-gray-600 dark:text-gray-300" />
               </button>
-              <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100 w-48 text-center capitalize">
+              <h2 className="text-sm sm:text-base font-semibold text-gray-900 dark:text-gray-100 min-w-0 flex-1 sm:flex-none sm:w-48 text-center capitalize truncate">
                 {headerLabel}
               </h2>
-              <button onClick={next} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
+              <button
+                type="button"
+                onClick={next}
+                className="p-2.5 sm:p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors shrink-0"
+                aria-label="Siguiente"
+              >
                 <ChevronRight className="w-4 h-4 text-gray-600 dark:text-gray-300" />
               </button>
               <button
+                type="button"
                 onClick={goToday}
-                className="ml-1 px-3 py-1.5 text-xs font-semibold text-violet-700 bg-violet-50 dark:bg-violet-900/30 dark:text-violet-300 rounded-lg hover:bg-violet-100 dark:hover:bg-violet-900/50 transition-colors"
+                className="ml-0.5 sm:ml-1 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-[var(--v-blue,#2563eb)] bg-blue-50 dark:bg-blue-900/30 dark:text-blue-300 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors shrink-0"
               >
                 Hoy
               </button>
@@ -783,10 +1194,16 @@ export function CalendarView() {
                 <DropdownMenuContent align="end" className="min-w-[11rem]">
                   <DropdownMenuItem
                     className="cursor-pointer"
-                    onSelect={() => setShowNewEventModal(true)}
+                    onSelect={() => {
+                      if (eventsCalendar) {
+                        navigate('/saas/vertical/eventos/nueva-contratacion');
+                        return;
+                      }
+                      setShowNewEventModal(true);
+                    }}
                   >
                     <Calendar className="w-4 h-4" />
-                    Nuevo evento
+                    {eventsCalendar ? 'Nueva contratación' : 'Nuevo evento'}
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className="cursor-pointer"
@@ -809,9 +1226,10 @@ export function CalendarView() {
 
           {/* Cabecera días */}
           <div className="grid grid-cols-7 border-b border-gray-200 dark:border-gray-700">
-            {WEEKDAYS.map((d) => (
-              <div key={d} className="py-2 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                {d}
+            {WEEKDAYS.map((d, i) => (
+              <div key={d} className="py-1.5 sm:py-2 text-center text-[10px] sm:text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                <span className="sm:hidden">{WEEKDAYS_SHORT[i]}</span>
+                <span className="hidden sm:inline">{d}</span>
               </div>
             ))}
           </div>
@@ -838,18 +1256,27 @@ export function CalendarView() {
                     if (!droppedAppointmentId) return;
                     await handleAppointmentDrop(droppedAppointmentId, day);
                   }}
-                  className={`p-2 cursor-pointer transition-colors ${
-                    isSelected ? 'bg-violet-50 dark:bg-violet-900/20' : 'hover:bg-gray-50 dark:hover:bg-gray-750'
+                  className={`p-1 sm:p-2 min-h-[3.25rem] sm:min-h-0 cursor-pointer transition-colors ${
+                    isSelected ? 'bg-blue-50 dark:bg-blue-900/20' : 'hover:bg-gray-50 dark:hover:bg-gray-750'
                   } ${draggingAppointmentId ? 'ring-1 ring-blue-200 dark:ring-blue-700/60' : ''} ${
                     !isCurrentMonth && mode === 'month' ? 'opacity-40' : ''
                   }`}
                 >
-                  <div className={`text-xs font-semibold mb-1 w-6 h-6 flex items-center justify-center rounded-full ${
-                    isToday(day) ? 'bg-violet-600 text-white' : 'text-gray-700 dark:text-gray-300'
+                  <div className={`text-[11px] sm:text-xs font-semibold mb-0.5 sm:mb-1 w-6 h-6 flex items-center justify-center rounded-full ${
+                    isToday(day) ? 'bg-[var(--v-blue,#2563eb)] text-white' : 'text-gray-700 dark:text-gray-300'
                   }`}>
                     {format(day, 'd')}
                   </div>
-                  <div className="space-y-0.5">
+                  {/* Móvil: solo contador (el detalle al tocar el día) */}
+                  {dayEvents.length > 0 && (
+                    <div className="sm:hidden flex justify-center">
+                      <span className="min-w-[1.1rem] h-4 px-1 rounded-full bg-[var(--v-blue,#2563eb)] text-white text-[9px] font-bold leading-4 text-center">
+                        {dayEvents.length}
+                      </span>
+                    </div>
+                  )}
+                  {/* Tablet/PC: chips con título */}
+                  <div className="hidden sm:block space-y-0.5">
                     {dayEvents.slice(0, mode === 'week' ? 8 : 3).map((ev) => (
                       <button
                         key={ev.id}
@@ -880,7 +1307,9 @@ export function CalendarView() {
                       </button>
                     ))}
                     {dayEvents.length > (mode === 'week' ? 8 : 3) && (
-                      <p className="text-[10px] text-gray-400 dark:text-gray-500 pl-1">+{dayEvents.length - (mode === 'week' ? 8 : 3)} más</p>
+                      <p className="text-[10px] text-gray-400 dark:text-gray-500 pl-1">
+                        +{dayEvents.length - (mode === 'week' ? 8 : 3)} más
+                      </p>
                     )}
                   </div>
                 </div>
@@ -890,30 +1319,36 @@ export function CalendarView() {
         </div>
 
         {/* ─── Panel lateral ───────────────────────────────────────────── */}
-        <div className="lg:w-64 xl:w-72 shrink-0 space-y-4 p-4 overflow-y-auto">
+        <div className="md:w-64 xl:w-72 shrink-0 space-y-4 p-3 sm:p-4 overflow-y-auto">
 
           {/* Acciones rápidas */}
           <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-4">
             <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">Acciones rápidas</h3>
             <div className="space-y-2">
               <button
-                onClick={() => setShowNewEventModal(true)}
-                className="w-full flex items-center gap-2 px-3 py-2.5 bg-gray-900 hover:bg-black text-white rounded-xl text-sm font-medium transition-colors"
+                onClick={() => {
+                  if (eventsCalendar) {
+                    navigate('/saas/vertical/eventos/nueva-contratacion');
+                    return;
+                  }
+                  setShowNewEventModal(true);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2.5 min-h-11 bg-gray-900 hover:bg-black text-white rounded-xl text-sm font-medium transition-colors"
               >
                 <Plus className="w-4 h-4" />
-                Nuevo evento
+                {eventsCalendar ? 'Nueva contratación' : 'Nuevo evento'}
               </button>
               <button
                 onClick={() => setShowNewModal(true)}
-                className="w-full flex items-center gap-2 px-3 py-2.5 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-blue-700 dark:text-blue-400 rounded-xl text-sm font-medium transition-colors"
+                className="w-full flex items-center gap-2 px-3 py-2.5 min-h-11 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-blue-700 dark:text-blue-400 rounded-xl text-sm font-medium transition-colors"
               >
                 <User className="w-4 h-4" />
                 Nueva cita con cliente
               </button>
-              {!deliveryCalendar && (
+              {!deliveryCalendar && !eventsCalendar && (
               <button
                 onClick={openBookingConfig}
-                className="w-full flex items-center gap-2 px-3 py-2.5 bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl text-sm font-medium transition-colors"
+                className="w-full flex items-center gap-2 px-3 py-2.5 min-h-11 bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl text-sm font-medium transition-colors"
               >
                 <Link className="w-4 h-4" />
                 Enlace de reserva
@@ -941,13 +1376,13 @@ export function CalendarView() {
             <div className="space-y-1.5">
               {legendFilterTypes
                 .filter((ft) => {
-                  if (ft === 'appointment' || ft === 'followup') return true;
-                  if (!deliveryCalendar && (ft === 'test_drive' || ft === 'workshop')) return true;
+                  if (ft === 'appointment' || ft === 'followup' || ft === 'event') return true;
+                  if (!deliveryCalendar && !eventsCalendar && (ft === 'test_drive' || ft === 'workshop')) return true;
                   return enabledCustomEventTypes.includes(String(ft));
                 })
                 .map((ft) => {
                   const c = getTypeColors(ft as AppointmentType);
-                  const label = (ft === 'appointment' || ft === 'test_drive' || ft === 'followup' || ft === 'workshop')
+                  const label = (ft === 'appointment' || ft === 'test_drive' || ft === 'followup' || ft === 'workshop' || ft === 'event')
                     ? (deliveryCalendar && ft === 'appointment' ? 'Cita' : EVENT_TEXT[ft])
                     : getTypeLabel(ft as AppointmentType);
                   return (
@@ -981,93 +1416,76 @@ export function CalendarView() {
               ) : (
                 <div className="space-y-2">
                   {selectedDayEvents.map((ev) => (
-                    <button
+                    <div
                       key={ev.id}
-                      onClick={() => {
-                        if (ev.appointmentId) {
-                          const appt = appointments.find((a) => a.id === ev.appointmentId);
-                          if (appt) setShowDetailModal(appt);
-                        } else if (ev.route) {
-                          navigate(ev.route);
-                        }
-                      }}
-                      className="w-full text-left p-3 rounded-xl border border-gray-200 dark:border-gray-600 hover:border-blue-300 dark:hover:border-blue-600 transition-colors"
+                      className="rounded-xl border border-gray-200 dark:border-gray-600 hover:border-blue-300 dark:hover:border-blue-600 transition-colors"
                     >
-                      <div className="flex items-center gap-2 mb-1">
-                        <div className={`w-2 h-2 rounded-full ${ev.color}`} />
-                        <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                          {(ev.type === 'appointment' || ev.type === 'test_drive' || ev.type === 'followup' || ev.type === 'workshop')
-                            ? EVENT_TEXT[ev.type]
-                            : getTypeLabel(ev.type as unknown as AppointmentType)}
-                        </span>
-                        {ev.time && (
-                          <span className="ml-auto text-xs text-gray-400 dark:text-gray-500">{ev.time}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (ev.appointmentId) {
+                            const appt = appointments.find((a) => a.id === ev.appointmentId);
+                            if (appt) setShowDetailModal(appt);
+                          } else if (ev.route) {
+                            navigate(ev.route);
+                          }
+                        }}
+                        className="w-full text-left p-3 pb-2"
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          <div className={`w-2 h-2 rounded-full ${ev.color}`} />
+                          <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                            {(ev.type === 'appointment' || ev.type === 'test_drive' || ev.type === 'followup' || ev.type === 'workshop' || ev.type === 'event')
+                              ? EVENT_TEXT[ev.type]
+                              : getTypeLabel(ev.type as unknown as AppointmentType)}
+                          </span>
+                          {ev.time && (
+                            <span className="ml-auto text-xs text-gray-400 dark:text-gray-500">{ev.time}</span>
+                          )}
+                        </div>
+                        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{ev.title}</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{ev.subtitle}</p>
+                        {ev.assignedName && (
+                          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1 flex items-center gap-1">
+                            <User className="w-3 h-3" /> {ev.assignedName}
+                          </p>
                         )}
+                        {ev.status && (
+                          <span className={`mt-1 inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold border ${STATUS_COLORS[ev.status]}`}>
+                            {STATUS_LABELS[ev.status]}
+                          </span>
+                        )}
+                      </button>
+                      <div className="px-3 pb-3">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const appt = ev.appointmentId
+                              ? appointments.find((a) => a.id === ev.appointmentId)
+                              : null;
+                            addVertialCalendarItemToPhone(ev, appt, { onMarked: bumpPhoneSent });
+                          }}
+                          className={`inline-flex items-center gap-1.5 min-h-9 text-xs font-semibold hover:underline ${
+                            isEventOnPhone(ev.id)
+                              ? 'text-stone-500 dark:text-stone-400'
+                              : 'text-[var(--v-blue,#2563eb)]'
+                          }`}
+                        >
+                          <Smartphone className="w-3.5 h-3.5" />
+                          {isEventOnPhone(ev.id) ? 'Ya en el móvil' : 'Al móvil'}
+                        </button>
                       </div>
-                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{ev.title}</p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{ev.subtitle}</p>
-                      {ev.assignedName && (
-                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1 flex items-center gap-1">
-                          <User className="w-3 h-3" /> {ev.assignedName}
-                        </p>
-                      )}
-                      {ev.status && (
-                        <span className={`mt-1 inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold border ${STATUS_COLORS[ev.status]}`}>
-                          {STATUS_LABELS[ev.status]}
-                        </span>
-                      )}
-                    </button>
+                    </div>
                   ))}
                 </div>
               )}
             </div>
           )}
 
-          {/* Próximas citas */}
-          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-4">
-            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center gap-2">
-              <Clock className="w-4 h-4 text-amber-500" />
-              Próximas citas
-            </h3>
-            {loadingAppointments ? (
-              <div className="flex justify-center py-4">
-                <Loader2 className="w-4 h-4 animate-spin text-gray-400 dark:text-gray-500" />
-              </div>
-            ) : (
-              <>
-                {filteredEvents
-                  .filter((e) => isAfter(e.date, new Date()))
-                  .sort((a, b) => a.date.getTime() - b.date.getTime())
-                  .slice(0, 6)
-                  .map((ev) => (
-                    <button
-                      key={ev.id}
-                      onClick={() => {
-                        if (ev.appointmentId) {
-                          const appt = appointments.find((a) => a.id === ev.appointmentId);
-                          if (appt) setShowDetailModal(appt);
-                        } else if (ev.route) {
-                          navigate(ev.route);
-                        }
-                      }}
-                      className="w-full text-left flex items-center gap-3 py-2.5 border-b border-gray-100 dark:border-gray-700 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-750 rounded-lg px-1 transition-colors"
-                    >
-                      <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${ev.color}`} />
-                      <div className="min-w-0">
-                        <p className="text-xs font-semibold text-gray-900 dark:text-gray-100 truncate">{ev.title}</p>
-                        <p className="text-[10px] text-gray-400 dark:text-gray-500">
-                          {format(ev.date, "d MMM", { locale: es })}
-                          {ev.time && ` · ${ev.time}`}
-                        </p>
-                      </div>
-                      {ev.type === 'test_drive' && <Car className="w-3 h-3 text-emerald-500 flex-shrink-0" />}
-                    </button>
-                  ))}
-                {filteredEvents.filter((e) => isAfter(e.date, new Date())).length === 0 && (
-                  <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-4">Sin citas próximas</p>
-                )}
-              </>
-            )}
+          {/* Próximos: en tablet/PC va aquí; en móvil ya está arriba */}
+          <div className="hidden md:block">
+            {renderUpcomingPanel('sidebar')}
           </div>
         </div>
       </div>
@@ -1118,6 +1536,10 @@ export function CalendarView() {
           onClose={() => setShowDetailModal(null)}
           onStatusChange={(status) => handleStatusChange(showDetailModal, status)}
           onDelete={() => handleDeleteAppointment(showDetailModal.id)}
+          onAddToPhoneCalendar={() => {
+            addAppointmentToPhoneCalendar(showDetailModal, { onMarked: bumpPhoneSent });
+          }}
+          phoneAlreadySent={isEventOnPhone(`appt-${showDetailModal.id}`)}
         />
       )}
 
@@ -1738,11 +2160,15 @@ function AppointmentDetailModal({
   onClose,
   onStatusChange,
   onDelete,
+  onAddToPhoneCalendar,
+  phoneAlreadySent = false,
 }: {
   appointment: Appointment;
   onClose: () => void;
   onStatusChange: (status: AppointmentStatus) => void;
   onDelete: () => void;
+  onAddToPhoneCalendar: () => void;
+  phoneAlreadySent?: boolean;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -1835,7 +2261,11 @@ function AppointmentDetailModal({
             </div>
 
             {/* Acciones */}
-            <div className="pt-2 border-t border-gray-100 dark:border-gray-700">
+            <div className="pt-2 border-t border-gray-100 dark:border-gray-700 space-y-2">
+              <button type="button" onClick={onAddToPhoneCalendar} className={`${VERTIAL_BTN_SECONDARY} w-full`}>
+                <Smartphone className="w-4 h-4" />
+                {phoneAlreadySent ? 'Ya en el móvil' : 'Al móvil'}
+              </button>
               {confirmDelete ? (
                 <div className="space-y-2">
                   <p className="text-sm text-red-600 font-medium">¿Eliminar esta cita?</p>

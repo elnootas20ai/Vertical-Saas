@@ -16,6 +16,13 @@ import {
   resolveEventsUserId,
   retreatEventStage,
 } from '../../../../lib/eventsFlow';
+import { ensureEventPortableTpv } from '../../../../lib/eventsPortableTpv';
+import {
+  notifyDeliveryActiveStoreChanged,
+  writeDeliveryOpsSelectedPdvId,
+} from '../../../../lib/deliveryOpsPdvSelection';
+import { EVENTS_CEO_TPV_PATH } from '../../../../lib/retailOpsPaths';
+import { saasPathWithBusinessScope } from '../../../../lib/businessScopeUrl';
 import { downloadEventQuotePdf, sendEventQuoteByEmailRequest, sendEventReviewInviteRequest, summarizeEventFinancials } from '../../../../lib/eventsFinance';
 import { resolveBusinessScopeId } from '../../../../lib/deliverySetup';
 import {
@@ -41,8 +48,12 @@ import { currentStageDwellLabel } from '../../../../lib/eventsStageTiming';
 import { formatDateTimeEs } from '../../../../lib/formatDateEs';
 import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../../../lib/vertialUiTokens';
 import {
+  addEventToPhoneCalendar,
+  calendarIcsFromParts,
+} from '../../../../lib/calendarIcs';
+import {
   ArrowLeft, Loader2, Send, CheckCircle2, FileSignature, CalendarCheck,
-  MapPin, Phone, Mail, RefreshCw, FileDown, Link2, Pencil, Settings,
+  MapPin, Phone, Mail, RefreshCw, FileDown, Link2, Pencil, Settings, Download, Copy, Monitor,
 } from 'lucide-react';
 
 type TabId = 'resumen' | 'planificacion' | 'finanzas';
@@ -129,6 +140,22 @@ export function EventsProjectPage() {
   }, [dataUserId, eventId]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  // Eventos sin código TPV (creados antes): generar PDV temporal en silencio.
+  useEffect(() => {
+    if (!dataUserId || !event || event.estado === 'cancelado') return;
+    if (String(event.portableTerminalCode || '').trim()) return;
+    let cancelled = false;
+    void ensureEventPortableTpv(dataUserId, event, currentBusiness)
+      .then((next) => {
+        if (cancelled || !next?.portableTerminalCode) return;
+        setEvent(next);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [dataUserId, event?._id, event?.portableTerminalCode, event?.estado, currentBusiness]);
 
   // Mientras espera respuesta del cliente, refrescar el estado periódicamente.
   useEffect(() => {
@@ -456,20 +483,52 @@ export function EventsProjectPage() {
             <section className="lg:col-span-2 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 p-5 space-y-4">
               <div className="flex items-center justify-between gap-3">
                 <h2 className="font-semibold text-gray-900 dark:text-gray-100">Datos del evento</h2>
-                {canEdit && (
-                  <button
-                    type="button"
-                    onClick={() => setShowQuoteEditor(true)}
-                    className={`${VERTIAL_BTN_SECONDARY} min-h-10 px-3 py-2`}
-                  >
-                    <Pencil className="w-4 h-4" />
-                    Editar
-                  </button>
-                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  {String(event.fecha || '').trim() ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const icsEv = calendarIcsFromParts({
+                          uid: `vertial-event-${event._id}@vertial.app`,
+                          title: event.nombre || 'Evento Vertial',
+                          description: [
+                            event.cliente ? `Cliente: ${event.cliente}` : '',
+                            event.lugar || '',
+                            typeof window !== 'undefined'
+                              ? `Abrir en Vertial: ${window.location.origin}/saas/vertical/eventos/${encodeURIComponent(event._id)}`
+                              : '',
+                          ].filter(Boolean).join('\n'),
+                          location: event.lugar || '',
+                          date: event.fecha,
+                        });
+                        const channel = addEventToPhoneCalendar(icsEv);
+                        toast.success(
+                          channel === 'ics'
+                            ? 'Se abre Calendario — añade el evento para avisos en el iPhone'
+                            : 'Se abre Google Calendar — confirma el evento para recibir avisos en el móvil',
+                        );
+                      }}
+                      className={`${VERTIAL_BTN_SECONDARY} min-h-10 px-3 py-2`}
+                    >
+                      <Download className="w-4 h-4" />
+                      Añadir al calendario
+                    </button>
+                  ) : null}
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={() => setShowQuoteEditor(true)}
+                      className={`${VERTIAL_BTN_SECONDARY} min-h-10 px-3 py-2`}
+                    >
+                      <Pencil className="w-4 h-4" />
+                      Editar
+                    </button>
+                  )}
+                </div>
               </div>
               <dl className="grid sm:grid-cols-2 gap-3 text-sm">
                 <div><dt className="text-gray-500">Cliente</dt><dd className="font-medium">{event.cliente}</dd></div>
-                <div><dt className="text-gray-500">Invitados</dt><dd className="font-medium">{event.invitados || '—'}</dd></div>
+                <div><dt className="text-gray-500">Personas</dt><dd className="font-medium">{event.invitados || '—'}</dd></div>
                 <div className="sm:col-span-2 flex items-start gap-1"><MapPin className="w-4 h-4 text-gray-400 mt-0.5" /><dd>{event.lugar || '—'}</dd></div>
                 {event.clientEmail && <div className="flex items-center gap-1"><Mail className="w-4 h-4 text-gray-400" />{event.clientEmail}</div>}
                 {event.clientTelefono && <div className="flex items-center gap-1"><Phone className="w-4 h-4 text-gray-400" />{event.clientTelefono}</div>}
@@ -491,6 +550,54 @@ export function EventsProjectPage() {
                 <p className="font-bold tabular-nums">{formatMoneyEs(Number(event.presupuesto) || 0)}</p>
               </div>
             </section>
+
+            {String(event.portableTerminalCode || '').trim() ? (
+              <section className="rounded-2xl border border-blue-200 bg-blue-50/60 dark:border-blue-900 dark:bg-blue-950/20 p-5 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Monitor className="w-4 h-4 text-[#2563EB]" />
+                  <h2 className="font-semibold text-gray-900 dark:text-gray-100">Código TPV del evento</h2>
+                </div>
+                <p className="text-xs text-gray-600 dark:text-gray-400">
+                  En la tablet, entra con este código: carga solo los productos de este evento.
+                </p>
+                <p className="text-3xl font-bold tracking-[0.2em] tabular-nums text-[#2563EB]">
+                  {String(event.portableTerminalCode).trim().toUpperCase()}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className={`${VERTIAL_BTN_SECONDARY} text-sm`}
+                    onClick={() => {
+                      void navigator.clipboard.writeText(String(event.portableTerminalCode || '').trim().toUpperCase())
+                        .then(() => toast.success('Código TPV copiado'))
+                        .catch(() => toast.error('No se pudo copiar'));
+                    }}
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    Copiar
+                  </button>
+                  <button
+                    type="button"
+                    className={`${VERTIAL_BTN_PRIMARY} text-sm`}
+                    onClick={() => {
+                      const pdvId = String(event.portablePdvId || '').trim();
+                      if (!pdvId) {
+                        toast.error('Este evento aún no tiene PDV listo. Genera el TPV portátil otra vez.');
+                        return;
+                      }
+                      if (businessId && dataUserId) {
+                        writeDeliveryOpsSelectedPdvId(businessId, dataUserId, pdvId);
+                        notifyDeliveryActiveStoreChanged();
+                      }
+                      navigate(saasPathWithBusinessScope(EVENTS_CEO_TPV_PATH, businessId));
+                    }}
+                  >
+                    <Monitor className="w-3.5 h-3.5" />
+                    Ir a TPV
+                  </button>
+                </div>
+              </section>
+            ) : null}
 
             <section className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 p-5 space-y-3">
               <h2 className="font-semibold text-gray-900 dark:text-gray-100">Siguiente paso</h2>

@@ -15,6 +15,13 @@ import {
   MISSING_BRAND_IMPORT_CODE,
   type ImportBrandLike,
 } from './deliveryCatalogImportLogic';
+import {
+  downloadEventsTpvCatalogImportTemplate,
+  EVENTS_TPV_CATALOG_IMPORT_FIELDS,
+  EVENTS_TPV_CATALOG_TEMPLATE_FILENAME,
+  EVENTS_TPV_CATALOG_HEADER_ALIASES,
+} from './eventsTpvCatalogExcelTemplate';
+import { isEventsBusinessType } from './deliveryOpsTypes';
 
 /** Columnas oficiales del Excel → claves internas (mapeo automático sin errores). */
 export const DELIVERY_CATALOG_IMPORT_COLUMNS = [
@@ -76,7 +83,7 @@ export const RESTAURANT_CATALOG_TEMPLATE_FILENAME = 'plantilla_catalogo_bar_rest
 /** Filas vacías en «catalogo» (fila 2 en adelante). No se importan si están vacías. Si hacen falta más, se insertan filas en Excel. */
 export const DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS = 100;
 
-export type CatalogTemplateVertical = 'delivery' | 'restaurant' | 'iceCreamShop';
+export type CatalogTemplateVertical = 'delivery' | 'restaurant' | 'iceCreamShop' | 'events';
 
 /** Categorías TPV típicas de heladería (hoja referencia / valores válidos). */
 export const HELADERIA_CATALOG_CATEGORIES = [
@@ -180,6 +187,8 @@ export const DELIVERY_CATALOG_HEADER_ALIASES: Record<string, string[]> = {
   stock: ['stock', 'stock_actual', 'stock actual', 'cantidad', 'existencia', 'qty', 'quantity'],
   minStock: ['stock_minimo', 'stock minimo', 'min_stock', 'minstock', 'stock min', 'minimo'],
   unit: ['unidad', 'unit', 'ud', 'uom', 'medida'],
+  costPrice: ['coste', 'coste_escandallo', 'costprice', 'cost price', 'coste unitario', 'precio coste'],
+  mermaPct: ['merma_pct', 'merma', 'merma %', '% merma', 'merma%', 'waste', 'waste_pct'],
 };
 
 export type DeliveryCatalogImportIssue = {
@@ -236,16 +245,32 @@ export function isRestaurantCatalogVertical(vertical?: string | null): boolean {
   return String(vertical || '').trim() === 'restaurant';
 }
 
+export function isEventsCatalogVertical(vertical?: string | null): boolean {
+  return isEventsBusinessType(vertical);
+}
+
 export function catalogTemplateFilenameForVertical(vertical?: string | null): string {
+  if (isEventsCatalogVertical(vertical)) return EVENTS_TPV_CATALOG_TEMPLATE_FILENAME;
   if (isHeladeriaCatalogVertical(vertical)) return HELADERIA_CATALOG_TEMPLATE_FILENAME;
   if (isRestaurantCatalogVertical(vertical)) return RESTAURANT_CATALOG_TEMPLATE_FILENAME;
   return DELIVERY_CATALOG_TEMPLATE_FILENAME;
 }
 
 export function catalogImportFieldsForVertical(vertical?: string | null): ImportFieldDef[] {
+  if (isEventsCatalogVertical(vertical)) return EVENTS_TPV_CATALOG_IMPORT_FIELDS;
   if (isHeladeriaCatalogVertical(vertical)) return HELADERIA_CATALOG_IMPORT_FIELDS;
   if (isRestaurantCatalogVertical(vertical)) return RESTAURANT_CATALOG_IMPORT_FIELDS;
   return DELIVERY_CATALOG_IMPORT_FIELDS;
+}
+
+export function catalogHeaderAliasesForVertical(vertical?: string | null): Record<string, string[]> {
+  if (isEventsCatalogVertical(vertical)) {
+    return {
+      ...DELIVERY_CATALOG_HEADER_ALIASES,
+      ...EVENTS_TPV_CATALOG_HEADER_ALIASES,
+    };
+  }
+  return DELIVERY_CATALOG_HEADER_ALIASES;
 }
 
 export function catalogTemplateHeadersForVertical(_vertical?: string | null): string[] {
@@ -810,6 +835,10 @@ export function downloadDeliveryCatalogImportTemplate(
   options?: { vertical?: string | null },
 ) {
   const vertical = options?.vertical;
+  if (isEventsCatalogVertical(vertical)) {
+    downloadEventsTpvCatalogImportTemplate();
+    return;
+  }
   const organizers = organizerBrandsForCatalogTemplate(commercialLines);
   const wb = buildDeliveryCatalogImportWorkbook(organizers, vertical);
   XLSX.writeFile(

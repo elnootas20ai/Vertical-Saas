@@ -258,7 +258,6 @@ import { NightclubGuestlist } from './pages/saas/NightclubGuestlist';
 import { NightclubArtists } from './pages/saas/NightclubArtists';
 
 // ── Events ──
-import { EventsGuests } from './pages/saas/EventsGuests';
 import { EventsServices, RedirectToEventsServicesTab } from './pages/saas/EventsServices';
 import { EventsHub } from './pages/saas/vertical/eventos/EventsHub';
 import { EventsContractWizardPage } from './pages/saas/vertical/eventos/EventsContractWizardPage';
@@ -266,6 +265,7 @@ import { EventsPipelinePage } from './pages/saas/vertical/eventos/EventsPipeline
 import { EventsQuotesPage } from './pages/saas/vertical/eventos/EventsQuotesPage';
 import { EventsRoutePage } from './pages/saas/vertical/eventos/EventsRoutePage';
 import { EventsProjectPage } from './pages/saas/vertical/eventos/EventsProjectPage';
+import { EventsTpvPage } from './pages/saas/vertical/eventos/EventsTpvPage';
 
 // ── Hair Salon ──
 import { SalonServices } from './pages/saas/SalonServices';
@@ -368,6 +368,7 @@ import {
   WorkerConstructionReport,
   WorkerStockReviewPage,
   WorkerEventsOps,
+  WorkerEventDayPage,
 } from './pages/saas/worker';
 import { UserDashboard } from './pages/saas/UserDashboard';
 import { AuthRouteLoading } from './components/AuthRouteLoading';
@@ -427,7 +428,7 @@ function SaasIndexRedirect() {
     return <Navigate to="/saas/user-dashboard" replace />;
   }
   if (isWorkerAccount(user) && !ownsBusiness) {
-    if (canUseCeoAdminPanel(user)) {
+    if (canUseCeoAdminPanel(user, businessCtx?.businesses)) {
       return <Navigate to="/saas/dashboard" replace />;
     }
     return <Navigate to={resolveWorkerSessionEntryPath(user)} replace />;
@@ -853,13 +854,15 @@ export const router = createBrowserRouter([
           // Events
           { path: 'vertical/eventos', element: <RequireWorkerPermission permission="sales"><EventsHub /></RequireWorkerPermission> },
           { path: 'vertical/eventos/nueva-contratacion', element: <RequireWorkerPermission permission="sales"><EventsContractWizardPage /></RequireWorkerPermission> },
+          { path: 'vertical/eventos/tpv', element: <RequireWorkerPermission permission="sales"><EventsTpvPage /></RequireWorkerPermission> },
+          { path: 'vertical/eventos/operar', element: <RequireWorkerPermission permission="sales"><RequirePdvTerminal><TpvRouteShell><TpvRapidoPage /></TpvRouteShell></RequirePdvTerminal></RequireWorkerPermission> },
           { path: 'vertical/eventos/presupuestos', element: <RequireWorkerPermission permission="sales"><EventsQuotesPage /></RequireWorkerPermission> },
           { path: 'vertical/eventos/ruta', element: <RequireWorkerPermission permission="sales"><EventsRoutePage /></RequireWorkerPermission> },
           { path: 'vertical/eventos/contrataciones', element: <RequireWorkerPermission permission="sales"><EventsPipelinePage /></RequireWorkerPermission> },
           { path: 'vertical/eventos/:eventId', element: <RequireWorkerPermission permission="sales"><EventsProjectPage /></RequireWorkerPermission> },
           { path: 'events-management', element: <Navigate to="/saas/vertical/eventos/contrataciones" replace /> },
           { path: 'events-vendors', element: <RequireWorkerPermission permission="sales"><RedirectToEventsServicesTab tab="externos" /></RequireWorkerPermission> },
-          { path: 'events-guests', element: <RequireWorkerPermission permission="sales"><EventsGuests /></RequireWorkerPermission> },
+          { path: 'events-guests', element: <Navigate to="/saas/vertical/eventos" replace /> },
           { path: 'events-venues', element: <RequireWorkerPermission permission="sales"><RedirectToEventsServicesTab tab="espacios" /></RequireWorkerPermission> },
           { path: 'events-services', element: <RequireWorkerPermission permission="sales"><EventsServices /></RequireWorkerPermission> },
           { path: 'events-catering', element: <RequireWorkerPermission permission="sales"><RedirectToEventsServicesTab tab="catering" /></RequireWorkerPermission> },
@@ -1013,6 +1016,7 @@ export const router = createBrowserRouter([
 
           // Worker mode
           { path: 'worker/events', Component: WorkerEventsOps },
+          { path: 'worker/events/dia/:eventId', Component: WorkerEventDayPage },
           { path: 'worker/setup-profile', Component: WorkerIdentitySetup },
           { path: 'worker/complete-payroll', Component: WorkerPayrollSetup },
           { path: 'worker', element: <Navigate to="/saas/worker/tasks" replace /> },

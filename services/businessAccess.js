@@ -37,21 +37,31 @@ export function canManageBusinessTeam(business, userId) {
 }
 
 /**
- * Roles de confianza: solo el propietario de la empresa puede
- * expulsarlos, subirlos o bajarlos (Admin invitado no puede).
+ * Roles de confianza «casi CEO»: solo el propietario de la empresa puede
+ * invitarlos, expulsarlos o cambiarles el rol (Admin invitado no puede).
+ * Encargado/Gestor sí los gestiona el Admin del negocio.
  */
-export const OWNER_GATED_TEAM_ROLES = new Set([
+export const OWNER_ONLY_PEER_ROLES = new Set([
   'Admin',
   'Gerente',
   'GerenteGrupo',
   'Administrador',
-  'Encargado',
-  'Gestor',
   'Superadmin',
 ]);
 
+/** @deprecated Preferir OWNER_ONLY_PEER_ROLES / isOwnerOnlyPeerRole. */
+export const OWNER_GATED_TEAM_ROLES = new Set([
+  ...OWNER_ONLY_PEER_ROLES,
+  'Encargado',
+  'Gestor',
+]);
+
+export function isOwnerOnlyPeerRole(role) {
+  return OWNER_ONLY_PEER_ROLES.has(String(role || '').trim());
+}
+
 export function isOwnerGatedTeamRole(role) {
-  return OWNER_GATED_TEAM_ROLES.has(String(role || '').trim());
+  return isOwnerOnlyPeerRole(role);
 }
 
 /** Titular de cuenta SaaS (no trabajador invitado). */
@@ -71,7 +81,7 @@ export function canRemoveBusinessMember(business, actorUserId, targetUserId) {
   if (!canManageBusinessTeam(business, actor)) return false;
   if (isBusinessOwner(business, actor)) return true;
   const member = getMember(business, target);
-  if (isOwnerGatedTeamRole(member?.role)) return false;
+  if (isOwnerOnlyPeerRole(member?.role)) return false;
   return true;
 }
 
@@ -80,7 +90,7 @@ export function canChangeBusinessMemberRole(business, actorUserId, currentRole, 
   if (!actor || !business) return false;
   if (!canManageBusinessTeam(business, actor)) return false;
   if (isBusinessOwner(business, actor)) return true;
-  if (isOwnerGatedTeamRole(currentRole) || isOwnerGatedTeamRole(nextRole)) return false;
+  if (isOwnerOnlyPeerRole(currentRole) || isOwnerOnlyPeerRole(nextRole)) return false;
   return true;
 }
 

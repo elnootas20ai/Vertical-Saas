@@ -35,12 +35,12 @@ export function EventsStageMetrics({
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-stone-900 dark:text-stone-100">
-            {event ? 'Tiempo en cada paso' : 'Tiempo y dinero por paso'}
+            {event ? 'Tiempo en cada paso' : 'Tiempo por paso'}
           </p>
           <p className="mt-0.5 text-xs text-stone-500">
             {event
               ? 'Cuánto ha tardado esta contratación en cada punto'
-              : 'Eventos en cada punto, tiempo medio y lo que generan'}
+              : 'Cuántos eventos hay en cada fase y cuánto tardan de media'}
           </p>
         </div>
         {singleMoney ? (
@@ -77,9 +77,6 @@ export function EventsStageMetrics({
               <p className={`${event ? 'mt-2' : 'mt-1'} text-sm font-semibold text-stone-800 dark:text-stone-100`}>
                 {timeLabel}
               </p>
-              {!event && (
-                <p className="mt-0.5 text-xs font-medium text-stone-500">{formatMoneyEs(step.budget)}</p>
-              )}
             </li>
           );
         })}

@@ -2,12 +2,16 @@ import { createVerticalApi } from './verticalApiFactory';
 import { resolveBusinessDataUserId } from './tenantUserId';
 import type { Business } from './businessApi';
 import {
+  emptyPlanningChecklist,
   furthestReachedStage,
+  parsePlanningChecklist,
   serializePlanningChecklist,
   type EventContractStage,
   type EventPlanningChecklist,
+  type EventPlanningWorker,
   type EventQuoteRecord,
   type EventRecord,
+  type EventRouteStockLine,
   type EventServiceRecord,
   type EventType,
   type QuoteLine,
@@ -192,6 +196,10 @@ export type CreateEventDraftInput = {
   lineas: QuoteLine[];
   deposito?: number;
   notas?: string;
+  /** Equipo previsto en el alta (planificación). */
+  workers?: EventPlanningWorker[];
+  /** Empresa activa: scope del PDV temporal TPV. */
+  business?: Business | null;
 };
 
 export async function createEventDraft(
@@ -200,6 +208,15 @@ export async function createEventDraft(
 ): Promise<EventRecord> {
   const lineas = await ensureCatalogServicesFromQuoteLines(userId, input.lineas);
   const total = computeQuoteTotal(lineas);
+  const workers = (input.workers || [])
+    .map((w) => ({
+      id: String(w.id || '').trim(),
+      name: String(w.name || '').trim(),
+      ok: Boolean(w.ok),
+    }))
+    .filter((w) => w.id && w.name);
+  const checklist = emptyPlanningChecklist();
+  if (workers.length > 0) checklist.workers = workers;
   const item = await eventsApi.create(userId, {
     nombre: input.nombre.trim(),
     tipo: input.tipo,
@@ -215,6 +232,7 @@ export async function createEventDraft(
     deposito: Number(input.deposito) || 0,
     lineasPresupuesto: serializeQuoteLines(lineas),
     notas: input.notas || '',
+    planningChecklist: serializePlanningChecklist(checklist),
     estado: 'presupuesto',
     furthestEstado: 'presupuesto',
   });
@@ -231,13 +249,22 @@ export async function createEventDraft(
     notas: input.notas || '',
   });
 
-  return {
+  const draft: EventRecord = {
     ...item,
     tipo: normalizeEventType(item.tipo),
     estado: 'presupuesto',
     furthestEstado: 'presupuesto',
     presupuesto: total,
+    lineasPresupuesto: serializeQuoteLines(lineas),
   };
+
+  try {
+    const { ensureEventPortableTpv } = await import('./eventsPortableTpv');
+    return await ensureEventPortableTpv(userId, draft, input.business || null);
+  } catch {
+    /* el evento ya está creado; el código TPV se puede regenerar en la ficha */
+    return draft;
+  }
 }
 
 export async function updateEventRecord(
@@ -306,7 +333,13 @@ export async function saveEventQuoteLines(
     /* el envío lee las líneas del evento; el quote vertical es auxiliar */
   }
 
-  return { ...updated, presupuesto: total, lineasPresupuesto: serializeQuoteLines(cleaned) };
+  const withLines = { ...updated, presupuesto: total, lineasPresupuesto: serializeQuoteLines(cleaned) };
+  try {
+    const { syncEventPortableTpvStock } = await import('./eventsPortableTpv');
+    return await syncEventPortableTpvStock(userId, withLines);
+  } catch {
+    return withLines;
+  }
 }
 
 export async function saveEventPlanningChecklist(
@@ -319,11 +352,91 @@ export async function saveEventPlanningChecklist(
   });
 }
 
+/** Eventos activos donde tiene sentido asignar equipo (no cancelados). */
+export function listAssignableEvents(events: EventRecord[]): EventRecord[] {
+  return events
+    .filter((e) => e.estado !== 'cancelado')
+    .slice()
+    .sort((a, b) => String(a.fecha || '').localeCompare(String(b.fecha || '')));
+}
+
+/**
+ * Evento al que va un trabajador (checklist de planificación del centro de eventos).
+ * Si hay varios, prioriza fecha en la semana indicada y luego el más próximo.
+ */
+export function findWorkerAssignedEvent(
+  events: EventRecord[],
+  workerId: string,
+  opts?: { weekStart?: string; weekEnd?: string },
+): EventRecord | null {
+  const id = String(workerId || '').trim();
+  if (!id) return null;
+  const hits = events.filter((e) => {
+    if (e.estado === 'cancelado') return false;
+    const workers = parsePlanningChecklist(e.planningChecklist).workers;
+    return workers.some((w) => w.id === id);
+  });
+  if (!hits.length) return null;
+  const weekStart = opts?.weekStart || '';
+  const weekEnd = opts?.weekEnd || weekStart;
+  if (weekStart) {
+    const inWeek = hits.filter((e) => {
+      const f = String(e.fecha || '').slice(0, 10);
+      return f && f >= weekStart && f <= weekEnd;
+    });
+    if (inWeek.length) {
+      return inWeek.slice().sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)))[0];
+    }
+  }
+  return hits.slice().sort((a, b) => String(a.fecha || '').localeCompare(String(b.fecha || '')))[0];
+}
+
+/**
+ * Asigna (o quita) un trabajador al equipo de un evento.
+ * Misma fuente que Planificación del centro de eventos: planningChecklist.workers.
+ */
+export async function assignWorkerToEventPlanning(
+  userId: string,
+  events: EventRecord[],
+  worker: { id: string; name: string },
+  eventId: string | null,
+): Promise<EventRecord[]> {
+  const workerId = String(worker.id || '').trim();
+  const workerName = String(worker.name || '').trim() || workerId;
+  if (!workerId) return events;
+
+  const nextEvents = [...events];
+  for (let i = 0; i < nextEvents.length; i++) {
+    const ev = nextEvents[i];
+    const checklist = parsePlanningChecklist(ev.planningChecklist);
+    const prev = checklist.workers.find((w) => w.id === workerId);
+    const shouldHave = Boolean(eventId && ev._id === eventId);
+
+    if (shouldHave) {
+      if (prev?.ok && prev.name === workerName) continue;
+      const workers = [
+        ...checklist.workers.filter((w) => w.id !== workerId),
+        { id: workerId, name: workerName, ok: true },
+      ];
+      nextEvents[i] = await saveEventPlanningChecklist(userId, ev, { ...checklist, workers });
+      continue;
+    }
+
+    if (!prev) continue;
+    nextEvents[i] = await saveEventPlanningChecklist(userId, ev, {
+      ...checklist,
+      workers: checklist.workers.filter((w) => w.id !== workerId),
+    });
+  }
+  return nextEvents;
+}
+
 export async function advanceEventStage(
   userId: string,
   event: EventRecord,
   next: EventContractStage,
 ): Promise<EventRecord> {
+  const prevEstado = String(event.estado || '');
   const now = new Date().toISOString();
   const patch: Partial<EventRecord> = { estado: next };
   if (next === 'enviado') patch.quoteSentAt = now;
@@ -332,10 +445,30 @@ export async function advanceEventStage(
   if (next === 'planificacion') patch.planificacionAt = now;
   if (next === 'en_curso') patch.enCursoAt = now;
   if (next === 'finalizado') patch.finishedAt = now;
+  if (next === 'cancelado') patch.cancelledAt = now;
   patch.furthestEstado = next === 'cancelado'
     ? furthestReachedStage(event)
     : furthestReachedStage({ ...event, ...patch });
-  return updateEventRecord(userId, event, patch);
+  const updated = await updateEventRecord(userId, event, patch);
+  if (next === 'aceptado' && prevEstado !== 'aceptado') {
+    const { notifyEventQuoteAccepted } = await import('./eventsNotifications');
+    void notifyEventQuoteAccepted(userId, updated);
+  }
+  // Al aceptar (o entrar en fases operativas) el Día D queda listo para tocar.
+  const unlockDayOps =
+    next === 'aceptado'
+    || next === 'contratado'
+    || next === 'planificacion'
+    || next === 'en_curso';
+  if (unlockDayOps) {
+    try {
+      const { ensureEventDayOps } = await import('./eventsDayOps');
+      return await ensureEventDayOps(userId, updated);
+    } catch {
+      return updated;
+    }
+  }
+  return updated;
 }
 
 export async function retreatEventStage(
@@ -354,10 +487,25 @@ export async function jumpToReachedStage(
   event: EventRecord,
   target: EventContractStage,
 ): Promise<EventRecord> {
-  return updateEventRecord(userId, event, {
+  const updated = await updateEventRecord(userId, event, {
     estado: target,
     furthestEstado: furthestReachedStage(event),
   });
+  const unlock =
+    target === 'aceptado'
+    || target === 'contratado'
+    || target === 'planificacion'
+    || target === 'en_curso'
+    || target === 'finalizado';
+  if (unlock && !String(updated.dayOps || '').trim()) {
+    try {
+      const { ensureEventDayOps } = await import('./eventsDayOps');
+      return await ensureEventDayOps(userId, updated);
+    } catch {
+      return updated;
+    }
+  }
+  return updated;
 }
 
 export async function loadEventQuotes(userId: string, eventId: string): Promise<EventQuoteRecord[]> {
@@ -535,6 +683,82 @@ export function quoteLineFromService(service: EventServiceRecord, invitados: num
     total: cantidad * precioUnitario,
     serviceId: service._id,
   };
+}
+
+/** Línea de presupuesto desde producto de Carta TPV (cantidad en unidades). */
+export function quoteLineFromCatalogItem(
+  item: { _id: string; name: string; unitPrice?: number; unit?: string },
+  qty = 1,
+): QuoteLine {
+  const cantidad = Math.max(1, Math.floor(Number(qty) || 1));
+  const precioUnitario = Number(item.unitPrice) || 0;
+  const unit = String(item.unit || '').trim();
+  return {
+    id: `line-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    concepto: unit ? `${item.name} (${unit})` : item.name,
+    cantidad,
+    precioUnitario,
+    total: cantidad * precioUnitario,
+    catalogItemId: item._id,
+  };
+}
+
+export function parseRouteExtraStock(raw: unknown): EventRouteStockLine[] {
+  if (!raw) return [];
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((row) => {
+        if (!row || typeof row !== 'object') return null;
+        const r = row as Record<string, unknown>;
+        const name = String(r.name || '').trim();
+        const id = String(r.id || '').trim() || `stk-${name}`;
+        const qty = Math.max(0, Number(r.qty) || 0);
+        if (!name || qty <= 0) return null;
+        return {
+          id,
+          name,
+          qty,
+          catalogItemId: String(r.catalogItemId || '').trim() || undefined,
+          unit: String(r.unit || '').trim() || undefined,
+        } satisfies EventRouteStockLine;
+      })
+      .filter((x): x is EventRouteStockLine => Boolean(x));
+  } catch {
+    return [];
+  }
+}
+
+export function serializeRouteExtraStock(lines: EventRouteStockLine[]): string {
+  return JSON.stringify(lines);
+}
+
+export async function saveEventRouteExtraStock(
+  userId: string,
+  event: EventRecord,
+  lines: EventRouteStockLine[],
+): Promise<EventRecord> {
+  const updated = await updateEventRecord(userId, event, {
+    routeExtraStock: serializeRouteExtraStock(lines),
+  });
+  try {
+    const { syncEventPortableTpvStock } = await import('./eventsPortableTpv');
+    return await syncEventPortableTpvStock(userId, updated);
+  } catch {
+    return updated;
+  }
+}
+
+export async function saveEventDayOps(
+  userId: string,
+  event: EventRecord,
+  ops: import('./eventsDayOps').EventDayOps,
+): Promise<EventRecord> {
+  const { serializeDayOps } = await import('./eventsDayOps');
+  return updateEventRecord(userId, event, {
+    dayOps: serializeDayOps(ops),
+  });
 }
 
 export function eventDisplayLabel(event: Pick<EventRecord, 'nombre' | 'cliente' | 'fecha'>): string {

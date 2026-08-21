@@ -154,6 +154,7 @@ import { startButcherAlertEngine } from './services/butcherAlertEngine.js';
 import { startConstructionAlertEngine } from './services/constructionAlertEngine.js';
 import { startDeliveryAlertEngine } from './services/deliveryAlertEngine.js';
 import { startCleaningAlertEngine } from './services/cleaningAlertEngine.js';
+import { startEventsAlertEngine } from './services/eventsAlertEngine.js';
 import { markSystemActivity, shouldRunBackgroundEngine } from './services/engineIdleGate.js';
 import { startSupplierInvoicePolling } from './services/supplierInvoiceScheduler.js';
 import { runAutoOrdersForAllUsers } from './services/autoOrderService.js';
@@ -3323,6 +3324,9 @@ if (backgroundEnginesEnabled) {
 
   // CARN-ALR: Motor alertas carniceria — principal 30 min + bascula 5 min
   startButcherAlertEngine();
+
+  // Eventos: caja PDV portátil pendiente de cierre
+  startEventsAlertEngine();
 
   // PO-01: Pedidos automáticos a proveedores — DESACTIVADO (generaba borradores basura
   // cada 2 h; se reactivará cuando se reconstruya el flujo de pedidos a proveedores).

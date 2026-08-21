@@ -283,7 +283,7 @@ function SaasContent() {
       navigate(WORKER_UNLINKED_HOME_PATH, { replace: true });
       return;
     }
-    if (canUseCeoAdminPanel(user)) {
+    if (canUseCeoAdminPanel(user, businessCtx?.businesses)) {
       if (path === '/auth/gate' || path.startsWith('/saas/settings/empresas') || path === '/saas/user-dashboard') {
         navigate('/saas/dashboard', { replace: true });
       }
@@ -297,6 +297,23 @@ function SaasContent() {
     location.pathname,
     navigate,
     unlinkedWorkerNeedsCompany,
+    tpvTabletSaasSession,
+    businessCtx?.businesses,
+  ]);
+
+  // CEO / empresa: nunca «Mi trabajo» de trabajador (salvo TPV tablet compartido).
+  useEffect(() => {
+    if (isInitializing || !isAuthenticated || !user) return;
+    if (isWorkerAccount(user)) return;
+    if (tpvTabletSaasSession || location.pathname.startsWith('/saas/worker/tpv')) return;
+    if (!location.pathname.startsWith('/saas/worker')) return;
+    navigate('/auth/gate', { replace: true });
+  }, [
+    isInitializing,
+    isAuthenticated,
+    user,
+    location.pathname,
+    navigate,
     tpvTabletSaasSession,
   ]);
 

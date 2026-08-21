@@ -1,6 +1,7 @@
 import {
   ALL_SCHEDULE_DAY_KEYS,
   hasOpeningHoursPayload,
+  isOvernightScheduleWindow,
   normalizeBusinessHoursConfig,
   SCHEDULE_DAY_LABELS_ES,
   scheduleTimeToMinutes,
@@ -17,6 +18,12 @@ const JS_DAY_TO_KEY: ScheduleDayKey[] = [
   'friday',
   'saturday',
 ];
+
+function previousScheduleDayKey(dayKey: ScheduleDayKey): ScheduleDayKey {
+  const idx = ALL_SCHEDULE_DAY_KEYS.indexOf(dayKey);
+  if (idx < 0) return dayKey;
+  return ALL_SCHEDULE_DAY_KEYS[(idx + ALL_SCHEDULE_DAY_KEYS.length - 1) % ALL_SCHEDULE_DAY_KEYS.length];
+}
 
 export type StoreHoursStatus = 'open' | 'closed' | 'outside_hours' | 'no_schedule';
 
@@ -73,7 +80,14 @@ export function resolveWorkerWorkCenter(
   return matches.reduce((best, wc) => preferRicherWorkCenter(best, wc));
 }
 
-function isWithinOpenWindow(date: Date, from: string, to: string): boolean | null {
+/**
+ * ¿Está abierta la franja de ESTE día en este instante?
+ * Turno nocturno (20:00–06:00) = pertenece al día de inicio:
+ *   - en el día de inicio solo cuenta la parte de noche (desde `from`)
+ *   - la madrugada hasta `to` la resuelve el día anterior (ver `formatStoreHoursToday`)
+ * Así Lunes 20→06 y Martes 20→06 no se pisan en la madrugada.
+ */
+function isWithinDayStartWindow(date: Date, from: string, to: string): boolean | null {
   const fromMin = scheduleTimeToMinutes(from);
   const toMin = scheduleTimeToMinutes(to);
   if (fromMin < 0 || toMin < 0 || fromMin === toMin) return null;
@@ -81,8 +95,17 @@ function isWithinOpenWindow(date: Date, from: string, to: string): boolean | nul
   if (fromMin < toMin) {
     return nowMin >= fromMin && nowMin < toMin;
   }
-  // Franja que cruza medianoche (p. ej. 22:00 – 02:00)
-  return nowMin >= fromMin || nowMin < toMin;
+  // Nocturno: solo la cola de noche del día de inicio.
+  return nowMin >= fromMin;
+}
+
+/** ¿Seguimos dentro de la madrugada del turno nocturno del día ANTERIOR? */
+function isWithinPreviousOvernightTail(date: Date, from: string, to: string): boolean {
+  if (!isOvernightScheduleWindow(from, to)) return false;
+  const toMin = scheduleTimeToMinutes(to);
+  if (toMin < 0) return false;
+  const nowMin = date.getHours() * 60 + date.getMinutes();
+  return nowMin < toMin;
 }
 
 /**
@@ -115,6 +138,34 @@ export function formatStoreHoursToday(
   // Normaliza legacy (schedule anidado o plano) / horas rotas.
   const hours = normalizeBusinessHoursConfig(workCenter!.openingHours);
   const dayKey = getScheduleDayKeyForDate(date);
+
+  // Madrugada: turno nocturno del día anterior (antes de mirar si hoy abre).
+  const prevKey = previousScheduleDayKey(dayKey);
+  const prev = hours.schedule[prevKey];
+  if (prev?.open) {
+    const prevFrom = String(prev.from || '').trim();
+    const prevTo = String(prev.to || '').trim();
+    if (
+      prevFrom
+      && prevTo
+      && scheduleTimeToMinutes(prevFrom) >= 0
+      && scheduleTimeToMinutes(prevTo) >= 0
+      && isWithinPreviousOvernightTail(date, prevFrom, prevTo)
+    ) {
+      return {
+        label: `${prevFrom} – ${prevTo} (+1)`,
+        headline: `${prevFrom} – ${prevTo} (+1)`,
+        open: true,
+        openForClockIn: true,
+        storeOpenNow: true,
+        status: 'open',
+        from: prevFrom,
+        to: prevTo,
+        dayKey: prevKey,
+      };
+    }
+  }
+
   const day = hours.schedule[dayKey];
   if (!day?.open) {
     return {
@@ -145,21 +196,24 @@ export function formatStoreHoursToday(
       dayKey,
     };
   }
-  const within = isWithinOpenWindow(date, from, to);
-  if (within === false) {
+
+  const withinToday = isWithinDayStartWindow(date, from, to);
+  if (withinToday === true) {
+    const overnight = isOvernightScheduleWindow(from, to);
     return {
-      label: `${from} – ${to}`,
-      headline: 'Fuera de horario',
+      label: overnight ? `${from} – ${to} (+1)` : `${from} – ${to}`,
+      headline: overnight ? `${from} – ${to} (+1)` : `${from} – ${to}`,
       open: true,
       openForClockIn: true,
-      storeOpenNow: false,
-      status: 'outside_hours',
+      storeOpenNow: true,
+      status: 'open',
       from,
       to,
       dayKey,
     };
   }
-  if (within === null) {
+
+  if (withinToday === null) {
     return {
       label: from && to ? `${from} – ${to}` : 'Horario incompleto',
       headline: 'Horario incompleto',
@@ -173,13 +227,15 @@ export function formatStoreHoursToday(
     };
   }
 
+  // Día abierto pero fuera de franja (o aún no ha empezado el nocturno).
+  const overnight = isOvernightScheduleWindow(from, to);
   return {
-    label: `${from} – ${to}`,
-    headline: `${from} – ${to}`,
+    label: overnight ? `${from} – ${to} (+1)` : `${from} – ${to}`,
+    headline: 'Fuera de horario',
     open: true,
     openForClockIn: true,
-    storeOpenNow: true,
-    status: 'open',
+    storeOpenNow: false,
+    status: 'outside_hours',
     from,
     to,
     dayKey,
@@ -193,6 +249,7 @@ export function listStoreHoursWeek(workCenter: WorkCenter | null | undefined) {
   return ALL_SCHEDULE_DAY_KEYS.map((dayKey) => {
     const day = hours.schedule[dayKey];
     const isToday = dayKey === todayKey;
+    const overnight = Boolean(day?.open && isOvernightScheduleWindow(day.from, day.to));
     return {
       dayKey,
       label: SCHEDULE_DAY_LABELS_ES[dayKey],
@@ -200,7 +257,11 @@ export function listStoreHoursWeek(workCenter: WorkCenter | null | undefined) {
       open: Boolean(day?.open),
       from: day?.from || '',
       to: day?.to || '',
-      text: day?.open ? `${day.from} – ${day.to}` : 'Cerrado',
+      text: day?.open
+        ? overnight
+          ? `${day.from} – ${day.to} (+1)`
+          : `${day.from} – ${day.to}`
+        : 'Cerrado',
     };
   });
 }

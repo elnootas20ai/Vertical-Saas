@@ -121,6 +121,7 @@ const RESTAURANT_DEPARTMENTS: BusinessAlertDepartment[] = [
 const VERTICAL_DEPARTMENT_IDS: Record<string, string[]> = {
   delivery: ['pdvs', 'delivery', 'rrhh', 'catalogProviders', 'finanzas', 'documentacion'],
   restaurant: ['pdvs', 'delivery', 'rrhh', 'catalogProviders', 'finanzas', 'documentacion'],
+  events: ['pdvs', 'rrhh', 'catalogProviders', 'finanzas', 'documentacion'],
   carDealership: ['rrhh', 'catalogProviders', 'finanzas', 'documentacion', 'operaciones'],
   workshop: ['rrhh', 'catalogProviders', 'finanzas', 'documentacion', 'operaciones'],
   cleaning: ['rrhh', 'catalogProviders', 'finanzas', 'documentacion', 'limpieza'],
@@ -214,8 +215,19 @@ export function isAlertRuleListedForVertical(
   rule: Pick<AlertRule, 'id' | 'department' | 'category'>,
   vertical: string | null | undefined,
 ): boolean {
-  if (!isRuleVisibleForVertical(ruleDepartment(rule), vertical)) return false;
   const v = String(vertical || 'delivery').toLowerCase();
+  if (v === 'events') {
+    const id = String(rule.id || '').toLowerCase();
+    const cat = String(rule.category || '').toLowerCase();
+    return (
+      id.startsWith('events_')
+      || cat === 'eventos'
+      || id === 'merma_registered'
+      || id === 'worker_no_clockin'
+      || id.startsWith('document_')
+    );
+  }
+  if (!isRuleVisibleForVertical(ruleDepartment(rule), vertical)) return false;
   if (v === 'delivery' || v === 'restaurant' || !vertical) {
     return isDeliveryCompactAlertRuleId(rule.id);
   }

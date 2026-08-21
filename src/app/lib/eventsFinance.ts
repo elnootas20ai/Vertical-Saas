@@ -49,6 +49,19 @@ export function summarizeEventFinancials(event: EventRecord): EventFinancialSumm
   };
 }
 
+async function stampFullyPaidIfCrossed(
+  userId: string,
+  before: EventRecord,
+  after: EventRecord,
+): Promise<EventRecord> {
+  const prev = summarizeEventFinancials(before);
+  const next = summarizeEventFinancials(after);
+  if (!(prev.pendiente > 0.01 && next.pendiente <= 0.01)) return after;
+  if (next.presupuesto <= 0) return after;
+  if (after.fullyPaidAt) return after;
+  return updateEventRecord(userId, after, { fullyPaidAt: new Date().toISOString() });
+}
+
 type BusinessIssuer = {
   name?: string;
   taxId?: string;
@@ -238,7 +251,11 @@ export async function registerEventDepositPayment(
     depositInvoiceId: invoice?.id || '',
   });
 
-  return { event: updated, invoice };
+  const stamped = await stampFullyPaidIfCrossed(userId, event, updated);
+  const { maybeNotifyEventFullyPaid } = await import('./eventsNotifications');
+  void maybeNotifyEventFullyPaid(userId, event, stamped);
+
+  return { event: stamped, invoice };
 }
 
 export async function createEventFinalInvoice(
@@ -333,9 +350,16 @@ export async function registerEventFinalPayment(
   await linkClientInvoiceToFinanceRequest(userId, event.finalInvoiceId).catch(() => null);
 
   const paid = Number(invoice?.paid ?? amount);
-  return updateEventRecord(userId, event, {
+  const updated = await updateEventRecord(userId, event, {
     finalPaidAmount: paid,
+    finalPaidAt: new Date().toISOString(),
   });
+
+  const stamped = await stampFullyPaidIfCrossed(userId, event, updated);
+  const { maybeNotifyEventFullyPaid } = await import('./eventsNotifications');
+  void maybeNotifyEventFullyPaid(userId, event, stamped);
+
+  return stamped;
 }
 
 /**

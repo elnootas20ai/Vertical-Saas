@@ -2,7 +2,9 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
 import { createVerticalApi, type VerticalEntity } from '../../lib/verticalApiFactory';
+import { resolveEventsUserId } from '../../lib/eventsFlow';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
   Search, Plus, X, Edit3, Trash2, UtensilsCrossed, Users,
@@ -71,13 +73,14 @@ const EMPTY_FORM: CateringForm = { evento: '', menu: '', tipo: 'buffet', comensa
 
 export function EventsCatering({ embedded = false }: { embedded?: boolean } = {}) {
   const { user } = useAuth();
+  const { currentBusiness } = useBusiness();
   const [searchParams] = useSearchParams();
   const linkedEventName = searchParams.get('eventName') || '';
   const linkedEventId = searchParams.get('eventId') || '';
   const api = useMemo(() => createVerticalApi<CateringOrder>('events', 'catering'), []);
   const eventsCatalogApi = useMemo(() => createVerticalApi<EventRecord>('events', 'events'), []);
   const vendorsCatalogApi = useMemo(() => createVerticalApi<VendorRecord>('events', 'vendors'), []);
-  const userId = user?.user_id || user?.id || '';
+  const userId = useMemo(() => resolveEventsUserId(user, currentBusiness), [user, currentBusiness]);
 
   const [orders, setOrders] = useState<CateringOrder[]>([]);
   const [eventCatalog, setEventCatalog] = useState<EventRecord[]>([]);

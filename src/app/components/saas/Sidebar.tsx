@@ -413,6 +413,7 @@ const menuItemDefs = [
   // ── Vertical: Eventos ──────────────────────────────────────────────────────
   { id: 'events-hub', navKey: 'eventsHub', icon: <LayoutDashboard className="w-5 h-5" />, path: '/saas/vertical/eventos' },
   { id: 'events-new-contract', navKey: 'eventsNewContract', icon: <PlusCircle className="w-5 h-5" />, path: '/saas/vertical/eventos/nueva-contratacion' },
+  { id: 'events-tpv', navKey: 'eventsTpv', icon: <Monitor className="w-5 h-5" />, path: '/saas/vertical/eventos/tpv' },
   { id: 'events-quotes', navKey: 'eventsQuotes', icon: <Receipt className="w-5 h-5" />, path: '/saas/vertical/eventos/presupuestos' },
   { id: 'events-pipeline', navKey: 'eventsPipeline', icon: <FileText className="w-5 h-5" />, path: '/saas/vertical/eventos/contrataciones' },
   { id: 'events-services', navKey: 'eventsServices', icon: <Sparkles className="w-5 h-5" />, path: '/saas/events-services' },
@@ -515,7 +516,7 @@ const workerMenuItemDefs = [
 ] as const;
 
 /** Ítems del menú trabajador que no van en sidebar (acceso operativo vía landing / código tienda). */
-const WORKER_SIDEBAR_HIDDEN_ITEM_IDS = new Set(['worker-tpv', 'worker-stock-review', 'worker-onboarding', 'tpv-rapido', 'caja', 'events-guests']);
+const WORKER_SIDEBAR_HIDDEN_ITEM_IDS = new Set(['worker-tpv', 'worker-stock-review', 'worker-onboarding', 'tpv-rapido', 'caja']);
 
 const WORKER_HOME_GROUP: SidebarGroup = {
   id: 'worker-main',
@@ -546,7 +547,7 @@ const sidebarGroupDefs = [
   { id: 'realEstate',       icon: <Building2 className="w-4 h-4 shrink-0" />,     itemIds: ['realestate-properties', 'realestate-visits', 'realestate-contracts', 'realestate-appraisals'] },
   { id: 'lawyer',           icon: <Scale className="w-4 h-4 shrink-0" />,          itemIds: ['lawyer-cases', 'lawyer-hearings', 'lawyer-deadlines'] },
   { id: 'nightclub',        icon: <Music className="w-4 h-4 shrink-0" />,          itemIds: ['nightclub-events', 'nightclub-vip', 'nightclub-promoters', 'nightclub-guestlist', 'nightclub-artists'] },
-  { id: 'events',           icon: <PartyPopper className="w-4 h-4 shrink-0" />,   itemIds: ['events-hub', 'events-new-contract', 'events-quotes', 'events-pipeline', 'events-services', 'events-route'] },
+  { id: 'events',           icon: <PartyPopper className="w-4 h-4 shrink-0" />,   itemIds: ['events-hub', 'events-new-contract', 'events-tpv', 'events-quotes', 'events-pipeline', 'events-services', 'events-route'] },
   { id: 'hairSalon',        icon: <Scissors className="w-4 h-4 shrink-0" />,      itemIds: ['salon-services', 'salon-loyalty'] },
   { id: 'scrapyard',        icon: <Container className="w-4 h-4 shrink-0" />,    itemIds: ['scrapyard-hub', 'scrapyard-purchases', 'scrapyard-vehicles', 'scrapyard-dismantling', 'scrapyard-parts', 'scrapyard-deregistrations', 'scrapyard-expedition', 'scrapyard-environment', 'scrapyard-documentation'] },
   { id: 'spareParts',       icon: <Cog className="w-4 h-4 shrink-0" />,          itemIds: ['spareparts-compatibility', 'spareparts-counter'] },
@@ -626,8 +627,13 @@ const VERTICAL_GROUP_ITEM_OVERRIDES: Partial<Record<BusinessType, Record<string,
     ],
   },
   events: {
-    clientesCrm: ['clients'],
-    catalogProviders: ['suppliers', 'catalog-invoice-email'],
+    clientesCrm: ['clients', 'promotions'],
+    catalogProviders: [
+      'catalog-carta',
+      'catalog-stock-tpv',
+      'catalog-purchases',
+      'catalog-invoice-email',
+    ],
   },
   delivery: {
     clientesCrm: ['clients', 'promotions'],
@@ -1252,15 +1258,23 @@ function SidebarInner({
     const isCompraventaCommercial = g.id === 'commercial' && vertical === 'carDealership';
     let itemIds = override ? [...override] : [...g.itemIds];
     if (g.id === 'catalogProviders') {
-      if (usesDeliverySidebarCore || isRestaurantVertical) {
+      if (usesDeliverySidebarCore || isRestaurantVertical || isEventsVertical) {
         // TPV: Carta · Almacén · Compras · Consumos · Correo facturas (abajo).
-        itemIds = [
-          'catalog-carta',
-          'catalog-stock-tpv',
-          'catalog-purchases',
-          'catalog-consumos',
-          'catalog-invoice-email',
-        ];
+        // Eventos: misma carta TPV, sin consumos de staff.
+        itemIds = isEventsVertical
+          ? [
+              'catalog-carta',
+              'catalog-stock-tpv',
+              'catalog-purchases',
+              'catalog-invoice-email',
+            ]
+          : [
+              'catalog-carta',
+              'catalog-stock-tpv',
+              'catalog-purchases',
+              'catalog-consumos',
+              'catalog-invoice-email',
+            ];
       } else {
         itemIds = itemIds.filter((id) => id !== 'costing');
         if (!itemIds.includes('catalog-invoice-email')) {
@@ -1441,6 +1455,11 @@ function SidebarInner({
       const rawId = item.id.slice('sp-'.length);
       if (rawId) {
         selectSidebarStore(rawId);
+        if (isEventsVertical) {
+          handleNavigate(`/saas/vertical/eventos/tpv?pdv=${encodeURIComponent(rawId)}`);
+          onMobileClose();
+          return;
+        }
         if (usesOpsStoreSidebar) {
           handleNavigate(isRestaurantVertical ? '/saas/restaurant-ops' : '/saas/delivery-ops');
           onMobileClose();
@@ -1503,9 +1522,6 @@ function SidebarInner({
     if (!isMenuItemVisibleForVertical(item.id, vertical)) {
       return false;
     }
-    if (!isSidebarItemUnlockedForPlan(item.id, planTier)) {
-      return false;
-    }
     if (!user) {
       return true;
     }
@@ -1516,9 +1532,12 @@ function SidebarInner({
     if (treatAsWorkerNav && WORKER_SIDEBAR_HIDDEN_ITEM_IDS.has(item.id)) {
       return false;
     }
-    // Items siempre accesibles para el owner / gestor RRHH.
-    if (!treatAsWorkerNav && ['dashboard', 'settings', 'configuracion', 'chat', 'team', 'payroll', 'gestoria', 'hr-requests', 'horarios-vacaciones', 'clockins'].includes(item.id)) {
+    // Titular + invitado Admin/Gestor/Encargado: RRHH y shell siempre, sin recorte por plan.
+    if (!treatAsWorkerNav && ['dashboard', 'settings', 'configuracion', 'chat', 'team', 'payroll', 'gestoria', 'commissions', 'hr-requests', 'horarios-vacaciones', 'clockins'].includes(item.id)) {
       return true;
+    }
+    if (!isSidebarItemUnlockedForPlan(item.id, planTier)) {
+      return false;
     }
     // Items operativos siempre visibles para todos (chat es transversal).
     if (item.id === 'chat') {

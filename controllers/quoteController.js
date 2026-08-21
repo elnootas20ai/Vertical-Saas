@@ -42,36 +42,66 @@ async function notifyQuoteAction(req, quote, action) {
 
     const isAccepted = action === 'accepted';
     const isEvent = Boolean(quote.eventId || quote.source === 'events');
-    const eventName = String(quote.vehicleName || '').trim();
-    const eventRoute = quote.eventId
-      ? `/saas/vertical/eventos/${encodeURIComponent(String(quote.eventId))}`
-      : '/saas/vertical/eventos/contrataciones';
-    const route = isEvent ? eventRoute : '/saas/quotes';
 
-    const title = isEvent
-      ? (isAccepted ? 'Cliente aceptado' : 'Cliente rechazado')
-      : (isAccepted
-        ? `Presupuesto ${quote.number} aceptado`
-        : `Presupuesto ${quote.number} rechazado`);
+    // Eventos: aviso al CEO (owner), con push fuera de app + dedup. No al trabajador.
+    if (isEvent && quote.eventId) {
+      const {
+        loadEventForNotify,
+        notifyEventQuoteAcceptedCeo,
+        notifyEventQuoteRejectedCeo,
+      } = await import('../services/eventsNotifications.js');
 
-    const message = isEvent
-      ? (isAccepted
-        ? `${quote.clientName || 'El cliente'} ha aceptado el presupuesto${eventName ? ` de ${eventName}` : ''}`
-        : `${quote.clientName || 'El cliente'} ha rechazado el presupuesto${eventName ? ` de ${eventName}` : ''}`)
-      : (isAccepted
-        ? `${quote.clientName} ha aceptado el presupuesto ${quote.number} por ${Number(quote.total || 0).toFixed(2)} €`
-        : `${quote.clientName} ha rechazado el presupuesto ${quote.number}`);
+      const event = await loadEventForNotify(req, quote.eventId);
+      const eventFallback = event || {
+        _id: String(quote.eventId),
+        nombre: quote.vehicleName || 'Evento',
+        cliente: quote.clientName || 'Cliente',
+        user_id: userId,
+        business_id: quote.businessId || quote.business_id || '',
+      };
+
+      if (isAccepted) {
+        await notifyEventQuoteAcceptedCeo(req, {
+          event: eventFallback,
+          dataUserId: userId,
+          source: 'email',
+        });
+      } else {
+        await notifyEventQuoteRejectedCeo(req, {
+          event: eventFallback,
+          dataUserId: userId,
+          clientName: quote.clientName,
+        });
+      }
+      return;
+    }
+
+    const route = '/saas/quotes';
+    const title = isAccepted
+      ? `Presupuesto ${quote.number} aceptado`
+      : `Presupuesto ${quote.number} rechazado`;
+    const message = isAccepted
+      ? `${quote.clientName} ha aceptado el presupuesto ${quote.number} por ${Number(quote.total || 0).toFixed(2)} €`
+      : `${quote.clientName} ha rechazado el presupuesto ${quote.number}`;
 
     const notification = buildNotificationDocument({
       userId,
       level: isAccepted ? 'success' : 'warning',
-      category: isEvent ? 'events' : 'quotes',
+      category: 'quotes',
       title,
       message,
-      entityId: isEvent ? (quote.eventId || quote._id) : quote._id,
-      entityType: isEvent ? 'event' : 'quote',
+      entityId: quote._id,
+      entityType: 'quote',
       route,
-      metadata: { quoteNumber: quote.number, clientName: quote.clientName, action, eventId: quote.eventId || '' },
+      metadata: {
+        quoteNumber: quote.number,
+        clientName: quote.clientName,
+        action,
+        source: 'email',
+        ...(isAccepted
+          ? { polarity: 'positive', kind: 'activity', excludeFromAlertCenter: true }
+          : {}),
+      },
     });
 
     const saved = await saveNotification(req, notification);
