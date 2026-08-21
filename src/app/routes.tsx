@@ -1,4 +1,4 @@
-import { createBrowserRouter, Navigate, Outlet, useParams } from 'react-router-dom';
+import { createBrowserRouter, Navigate, Outlet, useLocation, useParams } from 'react-router-dom';
 import { lazy, Suspense } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -7,6 +7,7 @@ import { useBusinessOptional } from './context/BusinessContext';
 import { isWorkerAccount } from './lib/authApi';
 import { resolveWorkerSessionEntryPath, userOwnsAnyBusiness } from './lib/workerProfileCompletion';
 import { canUseCeoAdminPanel } from './lib/teamManagerAccess';
+import { isAffiliateWorldPath } from './lib/authEntryPaths';
 import { RootLayout } from './components/RootLayout';
 import { LandingNew } from './pages/LandingNew';
 import { NativeOnboarding } from './pages/native/NativeOnboarding';
@@ -386,8 +387,13 @@ function EquipoRedirect() {
   return <Navigate to={`/saas/team/${userId}`} replace />;
 }
 
+/** Rutas desconocidas: NUNCA al SaaS (evita saltar afiliado → trabajador al fallar un PDF/enlace). */
 function CatchAll() {
-  return <Navigate to="/saas/dashboard" replace />;
+  const location = useLocation();
+  if (isAffiliateWorldPath(location.pathname) || location.pathname.startsWith('/docs/')) {
+    return <Navigate to="/panel-afiliado" replace />;
+  }
+  return <Navigate to="/" replace />;
 }
 
 /**

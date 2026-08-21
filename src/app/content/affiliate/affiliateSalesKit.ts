@@ -33,18 +33,19 @@ export const AFFILIATE_SALES_RESOURCES: AffiliateResourceItem[] = [
     type: 'checklist',
   },
   {
-    id: 'guia-panel',
-    title: 'Guía del panel de afiliado (PDF)',
-    description: 'Resumen imprimible del panel, códigos y seguimiento de comisiones.',
+    id: 'dosier-comercial',
+    title: 'Dosier comercial afiliados',
+    description: 'Documento comercial del programa (se abre en una pestaña; puedes imprimir o guardar como PDF).',
     type: 'pdf',
-    downloadUrl: '/docs/affiliate/guia-panel-afiliado.pdf',
+    // Archivo real en /public (los PDF inventados redirigían al SaaS trabajador).
+    downloadUrl: '/dosier-afiliados-vertial.html',
   },
   {
-    id: 'one-pager',
-    title: 'One-pager comercial (PDF)',
-    description: 'Ficha de una página para enviar por WhatsApp o email a prospectos.',
+    id: 'guia-panel',
+    title: 'Guía rápida del panel',
+    description: 'Cómo entrar, código AFF/REF, clientes y comisiones.',
     type: 'pdf',
-    downloadUrl: '/docs/affiliate/one-pager-vertial.pdf',
+    downloadUrl: '/docs/affiliate/guia-panel-afiliado.html',
   },
 ];
 

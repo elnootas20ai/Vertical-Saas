@@ -32,10 +32,11 @@ export function AffiliateResourcesSection() {
                   href={resource.downloadUrl}
                   target="_blank"
                   rel="noopener noreferrer"
+                  download={resource.downloadUrl.endsWith('.html') ? undefined : true}
                   className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-blue-600 hover:underline"
                 >
                   <Download className="w-4 h-4" />
-                  Descargar PDF
+                  {resource.downloadUrl.endsWith('.html') ? 'Abrir documento' : 'Descargar PDF'}
                   <ExternalLink className="w-3.5 h-3.5 opacity-60" />
                 </a>
               ) : (
@@ -97,7 +98,7 @@ export function AffiliateResourcesSection() {
       </div>
 
       <p className="text-xs text-slate-400">
-        Los PDF descargables se irán ampliando. Si necesitas material personalizado para tu vertical, escribe a{' '}
+        Los documentos se abren en una pestaña nueva (puedes imprimir o guardar como PDF). Si necesitas material personalizado, escribe a{' '}
         <a href="mailto:hola@vertialapp.com" className="text-blue-600 hover:underline">hola@vertialapp.com</a>.
       </p>
     </div>

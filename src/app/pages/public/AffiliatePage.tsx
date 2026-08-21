@@ -213,11 +213,11 @@ export function AffiliatePage() {
           <div className="hidden sm:flex items-center gap-2">
             <button
               type="button"
-              onClick={() => navigate(AUTH_PATHS.companyLogin)}
+              onClick={() => navigate(AUTH_PATHS.affiliatePortal)}
               className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 transition-colors"
             >
               <LogIn className="w-3.5 h-3.5" />
-              Ya soy cliente
+              Ya soy afiliado
             </button>
             <button
               type="button"
@@ -402,21 +402,12 @@ export function AffiliatePage() {
           <div className="mb-8 flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3">
             <button
               type="button"
-              onClick={() => navigate(AUTH_PATHS.companyLogin)}
-              className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl border-2 border-slate-200 bg-white text-slate-800 text-sm font-semibold hover:border-blue-300 hover:bg-blue-50/50 transition-colors"
-            >
-              <LogIn className="w-4 h-4 text-blue-600" />
-              Ya soy cliente
-              <span className="text-slate-400 font-normal hidden sm:inline">— acceder al panel</span>
-            </button>
-            <button
-              type="button"
               onClick={() => navigate(AUTH_PATHS.affiliatePortal)}
               className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl border border-violet-200 bg-violet-50 text-violet-800 text-sm font-semibold hover:bg-violet-100 transition-colors"
             >
               <Handshake className="w-4 h-4" />
               Ya soy afiliado
-              <span className="text-violet-500/80 font-normal hidden sm:inline">— tengo código</span>
+              <span className="text-violet-500/80 font-normal hidden sm:inline">— entrar al panel</span>
             </button>
           </div>
 

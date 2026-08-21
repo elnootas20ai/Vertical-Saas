@@ -542,7 +542,9 @@ export function AffiliateReferralSection({
 
         {referralUrl && (
           <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Enlace de registro</p>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+              Enlace para tus clientes (no abras este enlace tú)
+            </p>
             <p className="text-sm text-slate-700 break-all font-mono">{referralUrl}</p>
             <button type="button" onClick={() => navigator.clipboard.writeText(referralUrl)}
               className="mt-3 text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1">
