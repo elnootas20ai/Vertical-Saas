@@ -1563,6 +1563,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
             businessId={businessId || undefined}
             brands={deliveryBrands}
             orders={scopedDeliveryOrders}
+            tpvSessions={deliveryTpvSessions}
             refreshButton={
               <button
                 type="button"

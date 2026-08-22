@@ -150,8 +150,8 @@ import {
   canEmitVehicleAlerts,
 } from './services/moduleAlertUtils.js';
 import { startAlertEngine } from './services/alertEngine.js';
-import { startButcherAlertEngine } from './services/butcherAlertEngine.js';
-import { startConstructionAlertEngine } from './services/constructionAlertEngine.js';
+// butcherAlertEngine desactivado (solo delivery/eventos/bar por ahora)
+// constructionAlertEngine no arranca
 import { startDeliveryAlertEngine } from './services/deliveryAlertEngine.js';
 // cleaningAlertEngine desactivado (saturaba RAM)
 import { startEventsAlertEngine } from './services/eventsAlertEngine.js';
@@ -3323,8 +3323,8 @@ if (backgroundEnginesEnabled) {
   // de cleaning/clockins/finance/invoices/catalog por cada business cada 120s).
   // startCleaningAlertEngine();
 
-  // CARN-ALR: Motor alertas carniceria — principal 30 min + bascula 5 min
-  startButcherAlertEngine();
+  // CARN-ALR: Motor alertas carniceria — DESACTIVADO de momento
+  // (solo delivery / eventos / bar). startButcherAlertEngine();
 
   // Eventos: caja PDV portátil pendiente de cierre
   startEventsAlertEngine();

@@ -150,6 +150,7 @@ import { RequireWorkerPermission } from './components/saas/RequireWorkerPermissi
 import { ChangelogPage } from './pages/saas/ChangelogPage';
 import { WorkOrderStatus } from './pages/public/WorkOrderStatus';
 import { WebStorefront } from './pages/public/WebStorefront';
+import { MesaQrPublicPage } from './pages/public/MesaQrPublicPage';
 import { QuotePublicResponse } from './pages/public/QuotePublicResponse';
 import { WebConfig } from './pages/saas/WebConfig';
 import { WebOrders } from './pages/saas/WebOrders';
@@ -1139,6 +1140,10 @@ export const router = createBrowserRouter([
       {
         path: 'web/:slug',
         Component: WebStorefront,
+      },
+      {
+        path: 'm/:token',
+        Component: MesaQrPublicPage,
       },
       {
         path: 'sign/:token',

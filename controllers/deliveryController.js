@@ -1488,10 +1488,25 @@ export async function registerPayment(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     const now = new Date().toISOString();
-    const partAmount = Number(paidAmount);
-    const newPaid = Number(existing.paidAmount || 0) + partAmount;
-    const total = Number(existing.totalAmount || 0);
-    const paymentStatus = newPaid >= total ? 'paid' : (newPaid > 0 ? 'partial' : 'pending');
+    const partAmount = Math.round(Number(paidAmount) * 100) / 100;
+    const total = Math.round(Number(existing.totalAmount || 0) * 100) / 100;
+    const alreadyPaid = Math.round(Number(existing.paidAmount || 0) * 100) / 100;
+    const remaining = Math.round(Math.max(0, total - alreadyPaid) * 100) / 100;
+    const alreadySettled =
+      existing.paymentStatus === 'paid'
+      || existing.paymentCollected === true
+      || (total > 0 && alreadyPaid >= total - 0.009);
+    if (alreadySettled || remaining <= 0.009) {
+      return badRequest(res, 'Este pedido ya está cobrado. No se puede registrar otro pago.');
+    }
+    if (partAmount > remaining + 0.009) {
+      return badRequest(
+        res,
+        `El cobro (${partAmount.toFixed(2)} €) supera lo pendiente (${remaining.toFixed(2)} €).`,
+      );
+    }
+    const newPaid = Math.round((alreadyPaid + partAmount) * 100) / 100;
+    const paymentStatus = newPaid >= total - 0.009 ? 'paid' : (newPaid > 0 ? 'partial' : 'pending');
     const received = Number(amountReceived);
     const change = Number(changeGiven);
     const pm = normalizeTpvPaymentMethod(paymentMethod);

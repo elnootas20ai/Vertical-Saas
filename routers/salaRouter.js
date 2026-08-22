@@ -31,6 +31,10 @@ import {
   listTableTicketStats,
   emitSalaStaffAlert,
 } from '../controllers/salaController.js';
+import {
+  ensureMesaQrTokens,
+  regenerateMesaQrToken,
+} from '../controllers/mesaQrController.js';
 
 const salaRouter = Router();
 
@@ -39,6 +43,8 @@ salaRouter.get('/tables/:userId', listTables);
 salaRouter.post('/tables/:userId', createTable);
 salaRouter.post('/tables/:userId/bulk-create', bulkCreateTables);
 salaRouter.put('/tables/:userId/bulk', bulkUpdateTables);
+salaRouter.post('/tables/:userId/ensure-qr', ensureMesaQrTokens);
+salaRouter.post('/tables/:userId/:tableId/regenerate-qr', regenerateMesaQrToken);
 salaRouter.put('/tables/:userId/:tableId', updateTable);
 salaRouter.patch('/tables/:userId/:tableId/status', changeTableStatus);
 salaRouter.delete('/tables/:userId/:tableId', removeTable);

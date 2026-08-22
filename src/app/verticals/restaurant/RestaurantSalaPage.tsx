@@ -109,11 +109,11 @@ export function RestaurantSalaPage() {
   const [accountLoading, setAccountLoading] = useState(false);
   const bootRef = useRef('');
 
-  // Solo refrescar tiendas: no vaciar caché de retail al abrir Sala
-  // (eso provocaba “Crear local” aunque el PDV ya existiera).
+  // Solo refrescar tiendas: force:false (como sidebar). force:true puede
+  // pisar la lista buena con un fetch vacío → «No encontramos el local».
   useEffect(() => {
     if (!businessId) return;
-    void refreshStore();
+    void refreshStore({ force: false });
   }, [businessId, refreshStore]);
 
   useEffect(() => {
@@ -175,7 +175,7 @@ export function RestaurantSalaPage() {
     if (deletedTables > 0) {
       toast.message('Mapa anterior borrado. Empezamos de cero.');
     }
-    void refreshStore();
+    void refreshStore({ force: false });
   }, [userId, businessId, wantReset, stripResetParam, refreshStore]);
 
   const enterLive = useCallback(
@@ -277,7 +277,7 @@ export function RestaurantSalaPage() {
       consumeSalaSetupPending(businessId);
       setPendingPdvId('');
       enterLive(result.rooms, result.tables);
-      void refreshStore();
+      void refreshStore({ force: false });
       navigate('/saas/sala', { replace: true });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'No se pudo crear el mapa de sala');

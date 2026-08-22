@@ -1844,6 +1844,7 @@ export function WorkerTpvDelivery({
       if (!userId) return;
       if (orderAlreadyCobrado(order)) {
         setDeliveryCompleteOrder(null);
+        toast.error('Este pedido ya está cobrado');
         return;
       }
       if (markingPaidIdRef.current === order._id) return;
@@ -1907,8 +1908,15 @@ export function WorkerTpvDelivery({
         };
         setOrders((prev) => prev.map((o) => (o._id === merged._id ? merged : o)));
         setSelectedOrder((prev) => (prev?._id === merged._id ? merged : prev));
-      } catch {
-        enqueueTpvOfflineItem('order_update', { userId, order: localPaid });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : '';
+        if (/ya está cobrado|supera lo pendiente/i.test(msg)) {
+          toast.error(msg || 'Este pedido ya está cobrado');
+          setOrders((prev) => prev.map((o) => (o._id === order._id ? order : o)));
+          setSelectedOrder((prev) => (prev?._id === order._id ? order : prev));
+        } else {
+          enqueueTpvOfflineItem('order_update', { userId, order: localPaid });
+        }
       } finally {
         markingPaidIdRef.current = null;
         setMarkingPaidId(null);
@@ -1919,7 +1927,10 @@ export function WorkerTpvDelivery({
   );
 
   const requestMarkPaid = useCallback((order: DeliveryOrder) => {
-    if (orderAlreadyCobrado(order)) return;
+    if (orderAlreadyCobrado(order)) {
+      toast.error('Este pedido ya está cobrado');
+      return;
+    }
     setPaymentPromptPurpose('pagado');
     setDeliveryCompleteOrder(order);
   }, []);
@@ -1960,6 +1971,7 @@ export function WorkerTpvDelivery({
       const fresh = orders.find((o) => o._id === deliveryCompleteOrder._id) || deliveryCompleteOrder;
       if (orderAlreadyCobrado(fresh)) {
         setDeliveryCompleteOrder(null);
+        toast.error('Este pedido ya está cobrado');
         return;
       }
       setMarkingPaidId(fresh._id);

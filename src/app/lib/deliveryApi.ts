@@ -2315,6 +2315,12 @@ export interface TpvRegisterSession {
   closingBrandLabels?: Record<string, string>;
 
   /**
+   * Dirección cierre → Excel: brandId (ancla o miembro) → id de hoja Facturación.
+   * Total MM → hoja MM; Total BB → hoja BB. Las 4 pestañas (marca×tienda) usan esto.
+   */
+  closingBrandSheetIds?: Record<string, string>;
+
+  /**
    * Conteo de pizzas / burgers / tacos del turno al cerrar caja.
    * `byChannel` opcional por integrador (glovo, ubereats…).
    */

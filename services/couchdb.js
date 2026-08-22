@@ -12513,6 +12513,13 @@ export function buildWebConfigDocument(businessId, data = {}, existing = null) {
     currency: String(data.currency || existing?.currency || 'EUR'),
     taxRate: Number(data.taxRate ?? existing?.taxRate ?? 21),
 
+    /** Tiendas (PDV) que salen en la web de pedir para que el cliente elija. */
+    salesPointIds: Array.isArray(data.salesPointIds)
+      ? data.salesPointIds.map((x) => String(x || '').trim()).filter(Boolean)
+      : (Array.isArray(existing?.salesPointIds)
+        ? existing.salesPointIds.map((x) => String(x || '').trim()).filter(Boolean)
+        : []),
+
     integrations: data.integrations || existing?.integrations || {
       uber:    { enabled: false, token: '' },
       globo:   { enabled: false, token: '' },
@@ -12592,6 +12599,9 @@ export function sanitizeWebConfig(doc) {
     address: doc.address || '',
     currency: doc.currency || 'EUR',
     taxRate: Number(doc.taxRate || 21),
+    salesPointIds: Array.isArray(doc.salesPointIds)
+      ? doc.salesPointIds.map((x) => String(x || '').trim()).filter(Boolean)
+      : [],
     createdAt: doc.createdAt || '',
     updatedAt: doc.updatedAt || '',
   };
@@ -12651,6 +12661,8 @@ export function buildWebOrderDocument(businessId, data = {}, existing = null) {
     id,
     orderNumber,
     business_id: businessId,
+    salesPointId: String(data.salesPointId || existing?.salesPointId || '').trim(),
+    salesPointName: String(data.salesPointName || existing?.salesPointName || '').trim(),
     customerName: String(data.customerName || ''),
     customerPhone: String(data.customerPhone || ''),
     customerEmail: String(data.customerEmail || ''),
@@ -12665,6 +12677,10 @@ export function buildWebOrderDocument(businessId, data = {}, existing = null) {
     shippingZoneName: String(data.shippingZoneName || ''),
     totalAmount,
     notes: String(data.notes || ''),
+    tableId: String(data.tableId || existing?.tableId || '').trim(),
+    tableNumber: Number(data.tableNumber ?? existing?.tableNumber ?? 0) || 0,
+    tableName: String(data.tableName || existing?.tableName || '').trim(),
+    mesaToken: String(data.mesaToken || existing?.mesaToken || '').trim(),
     promoCode: String(data.promoCode || ''),
     promoDiscount: Number(data.promoDiscount || 0),
     volumeDiscount: Number(data.volumeDiscount || 0),
@@ -12685,6 +12701,8 @@ export function sanitizeWebOrder(doc) {
     id: doc._id,
     orderNumber: doc.orderNumber || '',
     business_id: doc.business_id || '',
+    salesPointId: doc.salesPointId || '',
+    salesPointName: doc.salesPointName || '',
     customerName: doc.customerName || '',
     customerPhone: doc.customerPhone || '',
     customerEmail: doc.customerEmail || '',
@@ -12699,6 +12717,10 @@ export function sanitizeWebOrder(doc) {
     shippingZoneName: doc.shippingZoneName || '',
     totalAmount: Number(doc.totalAmount || 0),
     notes: doc.notes || '',
+    tableId: doc.tableId || '',
+    tableNumber: Number(doc.tableNumber || 0) || 0,
+    tableName: doc.tableName || '',
+    mesaToken: doc.mesaToken || '',
     promoCode: doc.promoCode || '',
     promoDiscount: Number(doc.promoDiscount || 0),
     volumeDiscount: Number(doc.volumeDiscount || 0),

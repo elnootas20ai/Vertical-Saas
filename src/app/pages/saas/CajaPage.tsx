@@ -7,7 +7,6 @@ import { useBusiness } from '../../context/BusinessContext';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { resolveBusinessScopeId } from '../../lib/businessStoreScope';
-import { tpvSessionBelongsToBusiness } from '../../lib/tpvCajaScope';
 import {
   listCajaBootstrapRequest,
   updateTpvRegisterSessionRequest,
@@ -59,6 +58,9 @@ import {
   localDayBoundsForKey,
   sessionBelongsToCajaDay,
   sortRegisterSessionsForDisplay,
+  sumCashWithdrawnAtClose,
+  sessionWorkDayKey,
+  tpvSessionBelongsToBusiness,
 } from '../../lib/tpvCajaScope';
 import { resolveCajaPageExitPath } from '../../lib/retailOpsPaths';
 
@@ -757,12 +759,13 @@ export function CajaPage() {
     if (!silent) setLoading(true);
     else setRefreshing(true);
     try {
-      // Solo el día seleccionado (+ abiertas/pendientes en servidor). No tirar de años.
+      // Mes del día seleccionado (+ abiertas/pendientes en servidor) para resumen «retirado».
       const deepLink = typeof window !== 'undefined'
         ? (new URLSearchParams(window.location.search).get('validate')
           || new URLSearchParams(window.location.search).get('view'))
         : null;
-      let dateFrom = localDayBoundsForKey(selectedDate).from;
+      const monthStartKey = `${String(selectedDate || '').slice(0, 7)}-01`;
+      let dateFrom = localDayBoundsForKey(monthStartKey).from;
       if (deepLink) {
         const lookback = new Date();
         lookback.setDate(lookback.getDate() - 120);
@@ -944,6 +947,13 @@ export function CajaPage() {
       cashOut += summary.totalCashOut;
     }
     const diff = scopedDay.filter((s) => s.status === 'closed').reduce((sum, s) => sum + (s.difference || 0), 0);
+    const monthPrefix = String(selectedDate || '').slice(0, 7);
+    const monthScoped = sessions.filter((s) => {
+      if (filterPdv && s.pointOfSaleId !== filterPdv) return false;
+      return sessionWorkDayKey(s).startsWith(monthPrefix);
+    });
+    const withdrawn = sumCashWithdrawnAtClose(scopedDay);
+    const withdrawnMonth = sumCashWithdrawnAtClose(monthScoped);
     return {
       stores: storesWithActivity,
       turns: scopedDay.length,
@@ -954,6 +964,8 @@ export function CajaPage() {
       cashIn,
       cashOut,
       diff,
+      withdrawn,
+      withdrawnMonth,
     };
   }, [sessions, selectedDate, filterPdv]);
 

@@ -369,15 +369,32 @@ export function DeliveryOrders() {
 
   const handlePayment = async (method: string) => {
     if (!userId || !paymentOrder) return;
+    const remaining = Math.round(
+      (Number(paymentOrder.totalAmount || 0) - Number(paymentOrder.paidAmount || 0)) * 100,
+    ) / 100;
+    if (
+      paymentOrder.paymentStatus === 'paid'
+      || paymentOrder.paymentCollected
+      || remaining <= 0.009
+    ) {
+      toast.error('Este pedido ya está cobrado');
+      setPaymentOrder(null);
+      return;
+    }
     setActionLoading(true);
     try {
-      const updated = await registerPaymentRequest(userId, paymentOrder._id, method, paymentOrder.totalAmount - paymentOrder.paidAmount);
+      const updated = await registerPaymentRequest(
+        userId,
+        paymentOrder._id,
+        method,
+        remaining,
+      );
       setOrders((prev) => prev.map((o) => o._id === updated._id ? updated : o));
       setPaymentOrder(null);
       if (selectedOrder?._id === updated._id) setSelectedOrder(updated);
       toast.success(`Cobro registrado: ${PAYMENT_LABELS[method] || method}`);
-    } catch {
-      toast.error('Error al registrar cobro');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al registrar cobro');
     } finally {
       setActionLoading(false);
     }
@@ -385,6 +402,19 @@ export function DeliveryOrders() {
 
   const handleSplitPayment = async (parts: TpvSplitPaymentPart[]) => {
     if (!userId || !paymentOrder) return;
+    const remaining = Math.round(
+      (Number(paymentOrder.totalAmount || 0) - Number(paymentOrder.paidAmount || 0)) * 100,
+    ) / 100;
+    if (
+      paymentOrder.paymentStatus === 'paid'
+      || paymentOrder.paymentCollected
+      || remaining <= 0.009
+    ) {
+      toast.error('Este pedido ya está cobrado');
+      setPaymentOrder(null);
+      setPaymentSplitOpen(false);
+      return;
+    }
     setActionLoading(true);
     try {
       const updated = await registerSplitPaymentsRequest(userId, paymentOrder._id, parts);
@@ -393,8 +423,8 @@ export function DeliveryOrders() {
       setPaymentSplitOpen(false);
       if (selectedOrder?._id === updated._id) setSelectedOrder(updated);
       toast.success(`Cobro dividido: ${formatSplitPartsSummary(parts)}`);
-    } catch {
-      toast.error('Error al registrar cobro dividido');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al registrar cobro dividido');
     } finally {
       setActionLoading(false);
     }

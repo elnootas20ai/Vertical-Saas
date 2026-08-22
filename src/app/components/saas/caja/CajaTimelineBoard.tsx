@@ -93,6 +93,10 @@ export type CajaTimelineBoardProps = {
     apps?: number;
     cashIn?: number;
     cashOut?: number;
+    /** Efectivo retirado en cierres del día (contado − fondo). */
+    withdrawn?: number;
+    /** Efectivo retirado en cierres del mes del día seleccionado. */
+    withdrawnMonth?: number;
   };
   excelClosedCount: number;
   /** Un solo formato (p. ej. restaurant). Preferir onDownloadFormat en delivery. */
@@ -523,8 +527,27 @@ export function CajaTimelineBoard({
           </div>
         ) : null}
 
+        {/* Resumen del mes (efectivo sacado en cierres) */}
+        {typeof dayStats.withdrawnMonth === 'number' ? (
+          <div className="my-3 rounded-xl border border-rose-200/80 bg-rose-50/70 px-3 py-2.5 dark:border-rose-900/40 dark:bg-rose-950/25">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-rose-700/80 dark:text-rose-300/80">
+                  Retirado este mes
+                </p>
+                <p className="text-[11px] text-rose-800/70 dark:text-rose-200/70">
+                  Contado − fondo dejado en caja (cierres del mes)
+                </p>
+              </div>
+              <p className="text-xl font-black tabular-nums text-rose-800 dark:text-rose-200">
+                {formatMoneyEs(dayStats.withdrawnMonth)}
+              </p>
+            </div>
+          </div>
+        ) : null}
+
         {/* KPIs del día seleccionado: Total = TPV + integradores */}
-        <div className="my-3.5 grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-7">
+        <div className="my-3.5 grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-8">
           <DayStat
             label={locPlural.charAt(0).toUpperCase() + locPlural.slice(1)}
             value={String(dayStats.stores)}
@@ -539,6 +562,7 @@ export function CajaTimelineBoard({
           <DayStat label="TPV" value={formatMoneyEs(dayStats.tpv ?? 0)} />
           <DayStat label="Integradores" value={formatMoneyEs(dayStats.apps || 0)} />
           <DayStat label="Entradas / salidas" value={`${formatMoneyEs(dayStats.cashIn || 0)} / ${formatMoneyEs(dayStats.cashOut || 0)}`} />
+          <DayStat label="Se retira (día)" value={formatMoneyEs(dayStats.withdrawn || 0)} />
         </div>
 
         {/* Filtro de tiendas: Todas / Tienda 1 / Tienda 2… */}

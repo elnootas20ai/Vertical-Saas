@@ -668,6 +668,11 @@ export type ClosingBillingBrandSlot = {
   name: string;
   /** Todas las marcas de la hoja (p. ej. burger + taco). */
   memberBrandIds: string[];
+  /**
+   * Hoja de Facturación / Excel a la que va este Total (MM → hoja MM, BB → hoja BB).
+   * Misma dirección en cierre y en las 4 pestañas marca×tienda.
+   */
+  sheetId?: string;
 };
 
 /** Hojas listas para cierre/Excel: config guardada o sugerencia clasica (tacos → burger). */
@@ -744,6 +749,7 @@ export function closingSlotsFromBillingSheets(
       brandId: hostId,
       name: candidate,
       memberBrandIds,
+      sheetId: String(sheet.id || '').trim() || undefined,
     });
   }
 

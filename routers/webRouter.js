@@ -10,11 +10,13 @@ import {
   listWebOrders,
   updateWebOrder,
 } from '../controllers/webController.js';
+import { getPublicMesaByToken } from '../controllers/mesaQrController.js';
 
 const webPublicRouter = Router();
 webPublicRouter.get('/storefront/:slug', getPublicStorefront);
 webPublicRouter.post('/storefront/:slug/shipping-rates', getPublicShippingRates);
 webPublicRouter.post('/storefront/:slug/orders', createPublicOrder);
+webPublicRouter.get('/mesa/:token', getPublicMesaByToken);
 
 const webProtectedRouter = Router();
 webProtectedRouter.get('/config/:businessId', getWebConfig);

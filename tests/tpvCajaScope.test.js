@@ -14,6 +14,8 @@ import {
   findLastClosedTpvSession,
   resolvePreviousCloseCashAmount,
   previousCloseCashIsNextDayInitial,
+  cashWithdrawnAtClose,
+  sumCashWithdrawnAtClose,
   sessionActiveOnCalendarDay,
   sessionBelongsToCajaDay,
   sessionWorkDayKey,
@@ -475,5 +477,34 @@ describe('findLastClosedTpvSession', () => {
     };
     expect(resolvePreviousCloseCashAmount(last)).toBe(0);
     expect(previousCloseCashIsNextDayInitial(last)).toBe(true);
+  });
+});
+
+describe('cashWithdrawnAtClose', () => {
+  it('contado − fondo = se retira', () => {
+    expect(cashWithdrawnAtClose({
+      status: 'closed',
+      finalCashAmount: 160.35,
+      nextDayInitialCash: 10,
+    })).toBe(150.35);
+  });
+
+  it('null sin fondo declarado o si sigue abierta', () => {
+    expect(cashWithdrawnAtClose({ status: 'closed', finalCashAmount: 100 })).toBeNull();
+    expect(cashWithdrawnAtClose({
+      status: 'open',
+      finalCashAmount: 100,
+      nextDayInitialCash: 10,
+    })).toBeNull();
+  });
+
+  it('suma retirados del mes / filtro', () => {
+    const sessions = [
+      { status: 'closed', finalCashAmount: 100, nextDayInitialCash: 20, openedAt: '2026-08-01T10:00:00.000Z' },
+      { status: 'closed', finalCashAmount: 50, nextDayInitialCash: 50, openedAt: '2026-08-02T10:00:00.000Z' },
+      { status: 'closed', finalCashAmount: 80, nextDayInitialCash: 10, openedAt: '2026-07-30T10:00:00.000Z' },
+    ];
+    expect(sumCashWithdrawnAtClose(sessions)).toBe(150);
+    expect(sumCashWithdrawnAtClose(sessions, (s) => String(s.openedAt || '').startsWith('2026-08'))).toBe(80);
   });
 });

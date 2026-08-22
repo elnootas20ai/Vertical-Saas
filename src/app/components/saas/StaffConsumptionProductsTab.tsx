@@ -124,6 +124,7 @@ export function StaffConsumptionProductsTab({
   const [openCategory, setOpenCategory] = useState<string | null>(null);
   const [presetByCategory, setPresetByCategory] = useState<Record<string, string>>({});
   const [applyingCategory, setApplyingCategory] = useState<string | null>(null);
+  const [priceOverlay, setPriceOverlay] = useState<Record<string, number>>({});
   const [draftPrices, setDraftPrices] = useState<Record<string, string>>({});
   const [savingItemId, setSavingItemId] = useState<string | null>(null);
   const [deliveryConfig, setDeliveryConfig] = useState<DeliveryConfig | null>(null);
@@ -224,7 +225,7 @@ export function StaffConsumptionProductsTab({
         if (!merged.some((c) => c.trim().toLowerCase() === category.trim().toLowerCase())) {
           merged.push(category);
         }
-        // Si están todos activos → [] (sin filtro).
+        // Si quedan todos activos → [] (sin filtro).
         const allOn =
           allCategoryLabels.length > 0
           && allCategoryLabels.every((label) =>
@@ -273,6 +274,20 @@ export function StaffConsumptionProductsTab({
     }
   };
 
+  const paintAppliedPrices = (items: CatalogItem[], price: number) => {
+    const overlay: Record<string, number> = {};
+    const drafts: Record<string, string> = {};
+    const draft = formatEuroDraft(price);
+    for (const item of items) {
+      const id = String(item._id || '').trim();
+      if (!id) continue;
+      overlay[id] = price;
+      drafts[id] = draft;
+    }
+    setPriceOverlay((prev) => ({ ...prev, ...overlay }));
+    setDraftPrices((prev) => ({ ...prev, ...drafts }));
+  };
+
   const handleApplyPreset = async (category: string, items: CatalogItem[]) => {
     const price = parseEuroInput(presetByCategory[category] || '');
     if (price == null) {
@@ -284,11 +299,14 @@ export function StaffConsumptionProductsTab({
       return;
     }
     setApplyingCategory(category);
+    setOpenCategory(category);
     try {
       if (category === 'Sin organizador') {
+        // Sin categoría real: el bulk filtra por category; guardar ítem a ítem.
         await Promise.all(
           items.map((item) => updateCatalogItemRequest(userId, { ...item, staffPrice: price })),
         );
+        paintAppliedPrices(items, price);
         onCatalogUpdated?.();
         toast.success(`Precio ${formatMoneyEs(price)} aplicado a ${items.length} producto(s)`);
       } else {
@@ -297,17 +315,18 @@ export function StaffConsumptionProductsTab({
           categories: [category],
           enabled: true,
         });
+        paintAppliedPrices(items, price);
+        if (result.config?.staffConsumption) {
+          setDeliveryConfig(result.config);
+          setStaffConfig(normalizeStaffConsumptionConfig(result.config.staffConsumption));
+        } else {
+          await loadConfig();
+        }
         onCatalogUpdated?.();
         toast.success(
           `Precio ${formatMoneyEs(price)} aplicado a ${result.updated} producto(s) · ${category}`,
         );
       }
-      setDraftPrices((prev) => {
-        const next = { ...prev };
-        for (const item of items) delete next[item._id];
-        return next;
-      });
-      await loadConfig();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'No se pudo aplicar el precio');
     } finally {
@@ -325,6 +344,11 @@ export function StaffConsumptionProductsTab({
     setSavingItemId(item._id);
     try {
       await updateCatalogItemRequest(userId, { ...item, staffPrice: price });
+      const id = String(item._id || '').trim();
+      if (id) {
+        setPriceOverlay((prev) => ({ ...prev, [id]: price }));
+        setDraftPrices((prev) => ({ ...prev, [id]: formatEuroDraft(price) }));
+      }
       onCatalogUpdated?.();
       toast.success(`Precio empleado actualizado · ${item.name}`);
     } catch (err) {
@@ -427,12 +451,12 @@ export function StaffConsumptionProductsTab({
                 </label>
                 <button
                   type="button"
-                  disabled={applying || !categoryOn}
+                  disabled={!categoryOn || applying}
                   onClick={() => void handleApplyPreset(group.category, group.items)}
                   className={`${VERTIAL_BTN_PRIMARY} min-h-9 shrink-0 px-3 py-1.5 text-xs`}
                 >
                   {applying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                  Aplicar a todos
+                  {applying ? 'Aplicando…' : 'Aplicar a todos'}
                 </button>
               </div>
             </div>
@@ -441,10 +465,13 @@ export function StaffConsumptionProductsTab({
               <div className="border-t border-stone-100 dark:border-stone-800">
                 <div className="divide-y divide-stone-100 dark:divide-stone-800">
                   {group.items.map((item) => {
+                    const overlayPrice = priceOverlay[item._id];
                     const currentStaff =
-                      item.staffPrice != null && Number.isFinite(Number(item.staffPrice))
-                        ? Number(item.staffPrice)
-                        : null;
+                      overlayPrice != null && Number.isFinite(overlayPrice)
+                        ? overlayPrice
+                        : item.staffPrice != null && Number.isFinite(Number(item.staffPrice))
+                          ? Number(item.staffPrice)
+                          : null;
                     const draft =
                       draftPrices[item._id]
                       ?? (currentStaff != null ? formatEuroDraft(currentStaff) : '');

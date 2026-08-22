@@ -132,6 +132,8 @@ export interface WebConfig {
   address: string;
   currency: string;
   taxRate: number;
+  /** PDVs que el cliente puede elegir en la web de pedir. */
+  salesPointIds?: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -160,6 +162,8 @@ export interface WebOrder {
   id: string;
   orderNumber: string;
   business_id: string;
+  salesPointId?: string;
+  salesPointName?: string;
   customerName: string;
   customerPhone: string;
   customerEmail: string;
@@ -198,10 +202,22 @@ export interface PublicCatalogItem {
   customFields: Record<string, unknown>;
 }
 
+export interface PublicWebStore {
+  id: string;
+  name: string;
+  code: string;
+  address: string;
+}
+
 // ─── Public API (no auth) ────────────────────────────────────────────────────
 
 export async function getPublicStorefront(slug: string) {
-  return publicRequest<{ ok: boolean; config: WebConfig; catalog: PublicCatalogItem[] }>(
+  return publicRequest<{
+    ok: boolean;
+    config: WebConfig;
+    catalog: PublicCatalogItem[];
+    stores?: PublicWebStore[];
+  }>(
     `/api/web/storefront/${encodeURIComponent(slug)}`,
   );
 }

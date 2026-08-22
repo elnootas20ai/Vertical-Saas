@@ -483,14 +483,33 @@ function sheetIdByFoodUnit(
   return null;
 }
 
-/** Marca del cierre → hoja Excel (brandIds, id, nombre, o pista pizza/burger). */
+/**
+ * Marca del cierre → hoja Excel.
+ * 1) closingBrandSheetIds (Total MM → hoja MM, Total BB → hoja BB)
+ * 2) brandIds / id / nombre / pista comida
+ */
 function sheetIdForClosingBrand(
   brandId: string,
   sheets: BrandBillingSheet[],
   labels?: Record<string, string> | null,
+  sheetIds?: Record<string, string> | null,
 ): string | null {
   const aliases = new Set(brandIdAliases(brandId).map((a) => a.toLowerCase()));
   if (aliases.size === 0) return null;
+  const sheetIdSet = new Set(sheets.map((s) => String(s.id || '').trim()).filter(Boolean));
+  if (sheetIds && typeof sheetIds === 'object') {
+    for (const key of brandIdAliases(brandId)) {
+      const mapped = String(sheetIds[key] || '').trim();
+      if (mapped && sheetIdSet.has(mapped)) return mapped;
+    }
+    for (const [rawId, rawSheet] of Object.entries(sheetIds)) {
+      const mapped = String(rawSheet || '').trim();
+      if (!mapped || !sheetIdSet.has(mapped)) continue;
+      for (const alias of brandIdAliases(rawId)) {
+        if (aliases.has(alias.toLowerCase())) return mapped;
+      }
+    }
+  }
   for (const sheet of sheets) {
     const ids = [
       ...(sheet.brandIds || []),
@@ -528,11 +547,12 @@ function canMapClosingBrandsToSheets(
 ): boolean {
   if (!sessionHasDeclaredBrandTotals(session) || sheets.length === 0) return false;
   const labels = session.closingBrandLabels || {};
+  const sheetIds = session.closingBrandSheetIds || {};
   for (const perBrand of Object.values(session.aggregatorClosingBrandTotals || {})) {
     if (!perBrand || typeof perBrand !== 'object') continue;
     for (const [brandId, raw] of Object.entries(perBrand)) {
       if (Number(raw) <= 0) continue;
-      if (sheetIdForClosingBrand(brandId, sheets, labels)) return true;
+      if (sheetIdForClosingBrand(brandId, sheets, labels, sheetIds)) return true;
     }
   }
   return false;
@@ -571,6 +591,7 @@ function appsAmountsForBillingSheet(
     return null;
   }
   const labels = session.closingBrandLabels || {};
+  const sheetIds = session.closingBrandSheetIds || {};
   const shares = sheetMoneyShares(countsFromAmounts(amounts), allSheets);
   const share = shares[billingSheet.id] ?? 0;
   const out = { app: 0, uber: 0, justEat: 0, glovo: 0 };
@@ -581,7 +602,7 @@ function appsAmountsForBillingSheet(
     const attributed: Record<string, number> = {};
     let attributedSum = 0;
     for (const [brandId, amt] of Object.entries(byBrand)) {
-      const sheetId = sheetIdForClosingBrand(brandId, allSheets, labels);
+      const sheetId = sheetIdForClosingBrand(brandId, allSheets, labels, sheetIds);
       if (!sheetId) continue;
       attributed[sheetId] = round2((attributed[sheetId] || 0) + amt);
       attributedSum = round2(attributedSum + amt);
@@ -591,7 +612,10 @@ function appsAmountsForBillingSheet(
       value = round2(channelAmt * share);
     } else {
       const leftover = round2(channelAmt - attributedSum);
-      if (leftover >= 0.01) value = round2(value + leftover * share);
+      if (leftover >= 0.01) {
+        const sheetAttr = attributed[billingSheet.id] || 0;
+        value = round2(value + leftover * (sheetAttr / attributedSum));
+      }
     }
     out[key] = value;
   }
@@ -621,6 +645,7 @@ function tpvAmountsForBillingSheet(
 ): Pick<CajaDayAmounts, 'efectivo' | 'tpv' | 'x'> | null {
   if (!sessionHasDeclaredBrandTpvTotals(session) || allSheets.length === 0) return null;
   const labels = session.closingBrandLabels || {};
+  const brandSheetMap = session.closingBrandSheetIds || {};
   const attributedEf: Record<string, number> = {};
   const attributedTj: Record<string, number> = {};
   let sumEf = 0;
@@ -630,7 +655,7 @@ function tpvAmountsForBillingSheet(
     const ef = round2(pay.efectivo);
     const tj = round2(pay.tarjeta);
     if (ef <= 0 && tj <= 0) continue;
-    const sheetId = sheetIdForClosingBrand(brandId, allSheets, labels);
+    const sheetId = sheetIdForClosingBrand(brandId, allSheets, labels, brandSheetMap);
     if (!sheetId) continue;
     if (ef > 0) {
       attributedEf[sheetId] = round2((attributedEf[sheetId] || 0) + ef);
@@ -644,9 +669,9 @@ function tpvAmountsForBillingSheet(
   if (sumEf <= 0 && sumTj <= 0) return null;
 
   // Resto vs total del cierre: peso del dinero ya atribuido (regla del cierre), no pizzas.
-  const sheetIds = allSheets.map((s) => s.id);
+  const allSheetIds = allSheets.map((s) => s.id);
   const weightOf = (id: string) => round2((attributedEf[id] || 0) + (attributedTj[id] || 0));
-  const weightTotal = round2(sheetIds.reduce((s, id) => s + weightOf(id), 0));
+  const weightTotal = round2(allSheetIds.reduce((s, id) => s + weightOf(id), 0));
   const equalShare = allSheets.length > 0 ? 1 / allSheets.length : 0;
   const moneyShare = (id: string) => (weightTotal > 0 ? weightOf(id) / weightTotal : equalShare);
 
@@ -661,7 +686,7 @@ function tpvAmountsForBillingSheet(
 
   const brandMoney = round2(efectivo + tpv);
   const allBrandMoney = round2(
-    sheetIds.reduce((s, id) => {
+    allSheetIds.reduce((s, id) => {
       let ef = attributedEf[id] || 0;
       let tj = attributedTj[id] || 0;
       const sh = moneyShare(id);

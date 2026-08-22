@@ -767,3 +767,32 @@ export function previousCloseCashIsNextDayInitial(
   const leave = Number(session.nextDayInitialCash);
   return Number.isFinite(leave) && leave >= 0;
 }
+
+/**
+ * Efectivo retirado al cierre = contado − fondo que queda.
+ * Misma fórmula que «se retira» en ClosingScreen. null si no hay cierre con fondo declarado.
+ */
+export function cashWithdrawnAtClose(
+  session: TpvRegisterSession | null | undefined,
+): number | null {
+  if (!session || String(session.status || '') !== 'closed') return null;
+  if (session.nextDayInitialCash == null) return null;
+  const counted = Number(session.finalCashAmount);
+  const leave = Number(session.nextDayInitialCash);
+  if (!Number.isFinite(counted) || !Number.isFinite(leave) || leave < 0) return null;
+  return Math.round(Math.max(0, counted - leave) * 100) / 100;
+}
+
+/** Suma retirados de cierres (opcional: filtrar por predicado, p. ej. día / mes / PDV). */
+export function sumCashWithdrawnAtClose(
+  sessions: TpvRegisterSession[] | null | undefined,
+  predicate?: (session: TpvRegisterSession) => boolean,
+): number {
+  let sum = 0;
+  for (const s of sessions || []) {
+    if (predicate && !predicate(s)) continue;
+    const w = cashWithdrawnAtClose(s);
+    if (w != null) sum += w;
+  }
+  return Math.round(sum * 100) / 100;
+}

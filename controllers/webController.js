@@ -1,6 +1,7 @@
 import {
   getWebDbName,
   getCatalogDbName,
+  getDeliveryDbName,
   buildWebConfigDocument,
   sanitizeWebConfig,
   sanitizeDeliveryIntegrations,
@@ -44,6 +45,32 @@ async function isWebOrderingAllowedForBusiness(req, businessId) {
   return String(business?.businessType || '').trim() !== 'restaurant';
 }
 
+/** Tiendas marcadas en web_config para el selector público. */
+async function resolvePublicWebStores(req, config) {
+  const ids = Array.isArray(config?.salesPointIds)
+    ? config.salesPointIds.map((x) => String(x || '').trim()).filter(Boolean)
+    : [];
+  if (ids.length === 0) return [];
+  const db = getDeliveryDbName();
+  await ensureDatabase(req, db);
+  const stores = [];
+  for (const id of ids) {
+    try {
+      const doc = await getDocument(req, db, id);
+      if (!doc || doc.type !== 'point_of_sale' || doc.deletedAt || doc.active === false) continue;
+      stores.push({
+        id: doc._id,
+        name: String(doc.name || '').trim() || 'Tienda',
+        code: String(doc.code || '').trim(),
+        address: String(doc.address || '').trim(),
+      });
+    } catch {
+      /* PDV borrado o inaccesible */
+    }
+  }
+  return stores;
+}
+
 async function loadEnabledStorefrontConfig(req, res, slug) {
   const config = await getWebConfigBySlug(req, slug);
   if (!config || !config.enabled) {
@@ -67,18 +94,31 @@ export async function getPublicStorefront(req, res) {
     const config = await loadEnabledStorefrontConfig(req, res, slug);
     if (!config) return;
 
-    const catalogItems = await listCatalogItemsByUser(req, config.business_id);
+    const business = await findBusinessById(req, config.business_id).catch(() => null);
+    const catalogOwnerId = String(
+      business?.owner_user_id || business?.user_id || config.business_id || '',
+    ).trim();
+
+    const [catalogItems, stores] = await Promise.all([
+      listCatalogItemsByUser(req, catalogOwnerId, { module: 'catalog' }),
+      resolvePublicWebStores(req, config),
+    ]);
     const activeItems = catalogItems
-      .filter((item) => item.active && item.webVisible !== false)
+      .filter((item) => {
+        if (item.active === false) return false;
+        if (item.webVisible === false) return false;
+        if (String(item.module || '') === 'stock') return false;
+        return true;
+      })
       .map((item) => ({
         _id: item._id,
         name: item.name,
         description: item.description,
-        category: item.category,
+        category: String(item.category || '').trim() || 'Carta',
         unitPrice: item.unitPrice,
         unit: item.unit,
         allergens: item.allergens || [],
-        image: item.image || '',
+        image: item.image || (Array.isArray(item.images) ? item.images[0] : '') || '',
         available: item.available !== false,
         vertical: item.vertical || '',
         customFields: item.customFields || {},
@@ -88,6 +128,7 @@ export async function getPublicStorefront(req, res) {
       ok: true,
       config: sanitizeWebConfig(config),
       catalog: activeItems,
+      stores,
     });
   } catch (error) {
     return res.status(500).json({ ok: false, error: errorMsg(error) });
@@ -132,11 +173,15 @@ export async function createPublicOrder(req, res) {
       return badRequest(res, 'Nombre y teléfono son obligatorios');
     }
 
-    if (order.orderType === 'delivery' && !config.deliveryEnabled) {
-      return badRequest(res, 'El envío a domicilio no está disponible');
-    }
-    if (order.orderType === 'pickup' && !config.pickupEnabled) {
-      return badRequest(res, 'La recogida no está disponible');
+    if (order.tableId) {
+      // Pedido desde QR de mesa: no exige flags delivery/pickup de la web de calle.
+    } else {
+      if (order.orderType === 'delivery' && !config.deliveryEnabled) {
+        return badRequest(res, 'El envío a domicilio no está disponible');
+      }
+      if (order.orderType === 'pickup' && !config.pickupEnabled) {
+        return badRequest(res, 'La recogida no está disponible');
+      }
     }
 
     const db = getWebDbName();

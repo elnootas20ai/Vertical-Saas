@@ -29,7 +29,7 @@ import {
   type BrandBillingSplitRules,
 } from '../../lib/brandBillingConfig';
 import { isBrandActive } from '../../lib/brandUtils';
-import type { DeliveryOrder } from '../../lib/deliveryApi';
+import type { DeliveryOrder, TpvRegisterSession } from '../../lib/deliveryApi';
 import { formatDateEs } from '../../lib/formatDateEs';
 import { formatNumberEs } from '../../lib/formatNumberEs';
 import {
@@ -37,6 +37,8 @@ import {
   buildPdvBrandSameDayCompare,
   emptyOpsExcelChannels,
   fmtEuro,
+  listMonthToDateDayKeys,
+  listTrailingDayKeys,
   monthOverMonthPct,
   opsExcelChannelsTotal,
   rankStoreOpsPulses,
@@ -44,7 +46,7 @@ import {
   type PdvBrandSameDayCompare,
   type StoreOpsPulse,
 } from '../../lib/portfolioMetrics';
-import { localCalendarDayKey } from '../../lib/tpvCajaScope';
+import { localCalendarDayKey, sessionWorkDayKey, sumCashWithdrawnAtClose } from '../../lib/tpvCajaScope';
 
 type RangeMode = 'day' | '7d' | 'month';
 
@@ -56,6 +58,8 @@ type Props = {
   businessId?: string;
   brands?: Brand[];
   orders?: DeliveryOrder[];
+  /** Sesiones TPV para retirado de caja (contado - fondo). */
+  tpvSessions?: TpvRegisterSession[];
   /** Móvil / CeoMobileHome: sin tablas anchas ni gráfica grande. */
   compact?: boolean;
 };
@@ -177,6 +181,7 @@ export function PortfolioOpsPulse({
   businessId,
   brands = [],
   orders = [],
+  tpvSessions = [],
   compact = false,
 }: Props) {
   const [range, setRange] = useState<RangeMode>('7d');
@@ -240,6 +245,29 @@ export function PortfolioOpsPulse({
   );
 
   const totals = useMemo(() => aggregateStoreOpsPulses(pulses), [pulses]);
+
+  /** Efectivo sacado en cierres (contado − fondo) en el rango activo. */
+  const cashWithdrawnRange = useMemo(() => {
+    const todayKey = localCalendarDayKey();
+    const dayKeys =
+      range === 'day'
+        ? [todayKey]
+        : range === '7d'
+          ? listTrailingDayKeys(todayKey, 7)
+          : listMonthToDateDayKeys(todayKey);
+    const daySet = new Set(dayKeys);
+    let pdvId = '';
+    if (selectedKey && selectedKey !== TOTAL_KEY) {
+      const hit = pulses.find((p) => `${p.businessId}:${p.storeId}` === selectedKey);
+      pdvId = String(hit?.pdvId || '').trim();
+    }
+    return sumCashWithdrawnAtClose(tpvSessions, (s) => {
+      const workDay = sessionWorkDayKey(s);
+      if (!workDay || !daySet.has(workDay)) return false;
+      if (pdvId && String(s.pointOfSaleId || '') !== pdvId) return false;
+      return true;
+    });
+  }, [tpvSessions, range, selectedKey, pulses]);
 
   /** Pulso sintético: suma de todas las tiendas (día a día + canales). */
   const allStoresPulse = useMemo((): StoreOpsPulse | null => {
@@ -531,6 +559,17 @@ export function PortfolioOpsPulse({
           </p>
         </div>
         <ChannelMixStrip channels={groupChannels} />
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-rose-200/70 bg-rose-50/80 px-2.5 py-1.5 dark:border-rose-900/40 dark:bg-rose-950/30">
+          <p className="text-[10px] font-semibold text-rose-800 dark:text-rose-200">
+            Retirado de caja
+            <span className="ml-1 font-normal text-rose-700/70 dark:text-rose-300/70">
+              · efectivo ({rangeShort})
+            </span>
+          </p>
+          <p className="text-sm font-black tabular-nums text-rose-800 dark:text-rose-200">
+            {fmtEuro(cashWithdrawnRange)}
+          </p>
+        </div>
         <div className="mt-2.5 overflow-x-auto">
           <table className="w-full min-w-[560px] text-[11px]">
             <thead>

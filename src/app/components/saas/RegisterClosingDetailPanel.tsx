@@ -34,6 +34,7 @@ import { DeliveryFoodUnitLabel } from './delivery/DeliveryFoodUnitIcon';
 import { CajaCashMovementsList } from './caja/CajaCashMovementsList';
 import { sessionToCajaAmounts } from '../../lib/cajaFacturacionExcelExport';
 import { formatMoneyEs } from '../../lib/formatNumberEs';
+import { cashWithdrawnAtClose } from '../../lib/tpvCajaScope';
 
 const METHOD_CHIP =
   'bg-zinc-100 text-zinc-700 border border-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:border-zinc-600';
@@ -450,6 +451,18 @@ export function RegisterClosingDetailPanel({
             </span>
           </div>
         ) : null}
+        {(() => {
+          const withdrawn = cashWithdrawnAtClose(session);
+          if (withdrawn == null) return null;
+          return (
+            <div className="flex justify-between">
+              <span className="text-rose-700 dark:text-rose-300 font-medium">Se retira</span>
+              <span className="font-semibold tabular-nums text-rose-700 dark:text-rose-300">
+                {formatMoneyEs(withdrawn)}
+              </span>
+            </div>
+          );
+        })()}
         <div
           className={`flex justify-between p-2 rounded-lg border ${
             session.difference === 0

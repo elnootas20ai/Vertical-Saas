@@ -678,37 +678,13 @@ async function runScaleChecksForBusiness(business) {
 // --- Public API -------------------------------------------------------------
 
 export async function runButcherAlertEngine() {
-  const startMs = Date.now();
-  try {
-    const businesses = await getBusinessesOfType('butcherShop');
-    if (businesses.length === 0) return;
-
-    let total = 0;
-    for (const biz of businesses) {
-      try { total += await runButcherAlertsForBusiness(biz); }
-      catch (err) { logger.warn({ tag: TAG, businessId: biz._id, err: err?.message }, 'Error alertas carniceria'); }
-    }
-    if (total > 0) {
-      logger.info({ tag: TAG, businesses: businesses.length, alerts: total, ms: Date.now() - startMs }, 'Alertas carniceria generadas');
-    }
-  } catch (err) {
-    logger.error({ tag: TAG, err: err?.message }, 'Error en motor de alertas carniceria');
-  }
+  // Desactivado de momento (solo delivery / eventos / bar). No reactivar sin OK.
+  return;
 }
 
 export async function runButcherScaleChecks() {
-  try {
-    const businesses = await getBusinessesOfType('butcherShop');
-    if (businesses.length === 0) return;
-    let total = 0;
-    for (const biz of businesses) {
-      try { total += await runScaleChecksForBusiness(biz); }
-      catch (err) { logger.warn({ tag: TAG, businessId: biz._id, err: err?.message }, 'Error chequeando basculas'); }
-    }
-    if (total > 0) logger.info({ tag: TAG, alerts: total }, 'Alertas bascula generadas');
-  } catch (err) {
-    logger.error({ tag: TAG, err: err?.message }, 'Error en chequeo de basculas');
-  }
+  // Desactivado de momento (mismo criterio que el motor principal).
+  return;
 }
 
 // --- On-demand summary ------------------------------------------------------
@@ -815,19 +791,7 @@ let mainTimer = null;
 let scaleTimer = null;
 
 export function startButcherAlertEngine() {
-  logger.info({ tag: TAG }, `Motor alertas carniceria programado - inicio en ${STARTUP_DELAY_MS / 1000}s, principal cada ${MAIN_INTERVAL_MS / 60000} min, bascula cada ${SCALE_INTERVAL_MS / 60000} min`);
-  setTimeout(() => {
-    runButcherAlertEngine().catch(() => null);
-    mainTimer = setInterval(() => {
-      if (!shouldRunBackgroundEngine('butcher_alerts')) return;
-      runButcherAlertEngine().catch(() => null);
-    }, MAIN_INTERVAL_MS);
-    runButcherScaleChecks().catch(() => null);
-    scaleTimer = setInterval(() => {
-      if (!shouldRunBackgroundEngine('butcher_scale')) return;
-      runButcherScaleChecks().catch(() => null);
-    }, SCALE_INTERVAL_MS);
-  }, STARTUP_DELAY_MS);
+  logger.info({ tag: TAG }, 'Motor alertas carniceria DESACTIVADO (no arranca ciclo)');
 }
 
 export function stopButcherAlertEngine() {

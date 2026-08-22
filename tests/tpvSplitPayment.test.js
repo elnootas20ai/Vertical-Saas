@@ -3,6 +3,7 @@ import {
   buildOrderSplitPayLines,
   cashQuickAmountsFor,
   itemAssignmentsToSplitParts,
+  orderPaymentRemaining,
   remainingSplitAmount,
   splitPartsAreComplete,
   sumSplitParts,
@@ -11,6 +12,12 @@ import {
 } from '../src/app/lib/tpvSplitPayment.ts';
 
 describe('tpvSplitPayment', () => {
+  it('calcula restante de cobro del pedido', () => {
+    expect(orderPaymentRemaining({ totalAmount: 57.89, paidAmount: 59.39 })).toBe(0);
+    expect(orderPaymentRemaining({ totalAmount: 57.89, paidAmount: 9.39 })).toBe(48.5);
+    expect(orderPaymentRemaining({ totalAmount: 10, paidAmount: 0 })).toBe(10);
+  });
+
   it('valida tramos que cubren el total', () => {
     const parts = [
       { id: 'a', method: 'efectivo', amount: 10 },

@@ -43,7 +43,9 @@ import {
   localCalendarDayKey,
   localDayBoundsForKey,
   sessionBelongsToCajaDay,
+  sessionWorkDayKey,
   sortRegisterSessionsForDisplay,
+  sumCashWithdrawnAtClose,
 } from '../../lib/tpvCajaScope';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -562,7 +564,8 @@ export function RestaurantCajaPage() {
         ? (new URLSearchParams(window.location.search).get('validate')
           || new URLSearchParams(window.location.search).get('view'))
         : null;
-      let dateFrom = localDayBoundsForKey(selectedDate).from;
+      const monthStartKey = `${String(selectedDate || '').slice(0, 7)}-01`;
+      let dateFrom = localDayBoundsForKey(monthStartKey).from;
       if (deepLink) {
         const lookback = new Date();
         lookback.setDate(lookback.getDate() - 120);
@@ -677,6 +680,11 @@ export function RestaurantCajaPage() {
     const sales = scopedDay.reduce((sum, s) => sum + buildTpvRegisterSummaryForDay(s, selectedDate).totalSales, 0);
     const cashIn = scopedDay.reduce((sum, s) => sum + buildTpvRegisterSummaryForDay(s, selectedDate).totalCashIn, 0);
     const cashOut = scopedDay.reduce((sum, s) => sum + buildTpvRegisterSummaryForDay(s, selectedDate).totalCashOut, 0);
+    const monthPrefix = String(selectedDate || '').slice(0, 7);
+    const monthScoped = scopedSessions.filter((s) => {
+      if (filterPdv && s.pointOfSaleId !== filterPdv) return false;
+      return sessionWorkDayKey(s).startsWith(monthPrefix);
+    });
     return {
       stores: storesWithActivity,
       turns: scopedDay.length,
@@ -684,6 +692,8 @@ export function RestaurantCajaPage() {
       sales,
       cashIn,
       cashOut,
+      withdrawn: sumCashWithdrawnAtClose(scopedDay),
+      withdrawnMonth: sumCashWithdrawnAtClose(monthScoped),
     };
   }, [scopedSessions, selectedDate, filterPdv]);
 

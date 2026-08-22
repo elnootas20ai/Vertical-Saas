@@ -45,6 +45,12 @@ export { DeliveryOpsInsightsPanel } from './DeliveryOpsInsightsPanel';
 export { DeliveryMobileDashboardBlocks } from './DeliveryMobileDashboardBlocks';
 export { DeliveryMobileHomeAlerts } from './DeliveryMobileHomeAlerts';
 
+export {
+  DeliveryTpvSurfaceToggle,
+  type DeliveryTpvSurface,
+} from './DeliveryTpvSurfaceToggle';
+export { useDeliverySalaMapReady } from './useDeliverySalaMapReady';
+
 export { DeliverySoldProductMarginPanel } from './DeliverySoldProductMarginPanel';
 export {
   buildSoldProductMarginRanking,

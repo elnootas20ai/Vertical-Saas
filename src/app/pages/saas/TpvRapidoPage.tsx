@@ -110,6 +110,11 @@ import {
   resolveRetailOpsWriteBusinessId,
 } from '../../lib/tpvRegisterScope';
 import { isRestaurantBusinessType, isDeliveryOpsBusinessType } from '../../lib/deliveryOpsTypes';
+import {
+  DeliveryTpvSurfaceToggle,
+  useDeliverySalaMapReady,
+  type DeliveryTpvSurface,
+} from '../../verticals/delivery';
 import { resolveTpvCeoExitPath } from '../../lib/retailOpsPaths';
 import {
   cancelDiningOrderRequest,
@@ -221,6 +226,12 @@ import {
 const WorkerTpvDeliveryLazy = lazy(async () => {
   const mod = await import('./worker/WorkerTpvDelivery');
   return { default: mod.WorkerTpvDelivery };
+});
+
+/** Plano mesas dentro del mismo TPV delivery (caja abierta). */
+const RestaurantTpvFloorBoardLazy = lazy(async () => {
+  const mod = await import('../../verticals/restaurant/RestaurantTpvFloorBoard');
+  return { default: mod.RestaurantTpvFloorBoard };
 });
 
 type Step = 'client' | 'delivery' | 'products' | 'payment';
@@ -447,6 +458,17 @@ function TpvRapidoCeoBoard() {
   const [selectedPdvId, setSelectedPdvId] = useState<string | null>(null);
   const [forceStorePicker, setForceStorePicker] = useState(false);
   const [ceoBootstrapLoading, setCeoBootstrapLoading] = useState(false);
+  /** Pedidos (tablero delivery) | Mesas (plano sala) — misma caja. */
+  const [tpvSurface, setTpvSurface] = useState<DeliveryTpvSurface>('pedidos');
+  const salaMapReady = useDeliverySalaMapReady(dataUserId || user?.user_id, businessId);
+  const showMesasToggle = salaMapReady && isDeliveryOpsBusinessType(currentBusiness?.businessType);
+
+  useEffect(() => {
+    if (!showMesasToggle && tpvSurface === 'mesas') {
+      setTpvSurface('pedidos');
+    }
+  }, [showMesasToggle, tpvSurface]);
+
   const [ceoBootstrapSettled, setCeoBootstrapSettled] = useState(false);
   const ceoBootstrapDoneRef = useRef(false);
   const ceoBootstrapInflightRef = useRef(false);
@@ -849,7 +871,11 @@ function TpvRapidoCeoBoard() {
   return (
     <TpvChromeScope
       insetBottomBar
-      bottomBar={!stockOpen ? <WorkerTpvBottomBar ceoMode onExitCeo={() => navigate(tpvExitPath)} /> : null}
+      bottomBar={
+        !stockOpen && tpvSurface === 'pedidos'
+          ? <WorkerTpvBottomBar ceoMode onExitCeo={() => navigate(tpvExitPath)} />
+          : null
+      }
     >
       <div className="flex flex-col overflow-hidden h-full min-h-0 bg-gray-50 dark:bg-gray-950">
         <TpvOfflineBanner />
@@ -871,20 +897,36 @@ function TpvRapidoCeoBoard() {
                 }}
               />
             ) : (
-              <Suspense
-                fallback={(
-                  <div className="flex h-full min-h-0 flex-col items-center justify-center gap-3">
-                    <Loader2 className="h-8 w-8 animate-spin text-stone-400" />
-                    <p className="text-sm text-stone-500">Cargando TPV…</p>
-                  </div>
-                )}
-              >
-                <WorkerTpvDeliveryLazy
-                  ceoMode
-                  forcedPdvId={effectivePdvId}
-                  onChangeStore={handleChangeStore}
-                />
-              </Suspense>
+              <div className="flex h-full min-h-0 flex-col overflow-hidden">
+                {showMesasToggle ? (
+                  <DeliveryTpvSurfaceToggle value={tpvSurface} onChange={setTpvSurface} />
+                ) : null}
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                  <Suspense
+                    fallback={(
+                      <div className="flex h-full min-h-0 flex-col items-center justify-center gap-3">
+                        <Loader2 className="h-8 w-8 animate-spin text-stone-400" />
+                        <p className="text-sm text-stone-500">Cargando TPV…</p>
+                      </div>
+                    )}
+                  >
+                    {tpvSurface === 'mesas' ? (
+                      <RestaurantTpvFloorBoardLazy
+                        pdvId={effectivePdvId}
+                        pdvName={selectedPdvName}
+                        tabletMode={false}
+                        onChangeStore={handleChangeStore}
+                      />
+                    ) : (
+                      <WorkerTpvDeliveryLazy
+                        ceoMode
+                        forcedPdvId={effectivePdvId}
+                        onChangeStore={handleChangeStore}
+                      />
+                    )}
+                  </Suspense>
+                </div>
+              </div>
             )}
           </TpvRegisterGate>
         </div>

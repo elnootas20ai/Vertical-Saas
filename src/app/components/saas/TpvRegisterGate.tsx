@@ -1033,16 +1033,6 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
           )}
           Continuar en esta caja
         </button>
-        {isManagerView && onClearStorePick ? (
-          <button
-            type="button"
-            onClick={onClearStorePick}
-            disabled={parentLoading || openingBusy}
-            className={`w-full ${VERTIAL_BTN_SECONDARY}`}
-          >
-            Otra tienda
-          </button>
-        ) : null}
       </div>
     );
   })() : null;
@@ -1670,21 +1660,47 @@ function brandsFromClosedSession(
     .sort((a, b) => a.name.localeCompare(b.name, 'es'));
 }
 
-/** Si el snapshot de apps no trae marcas, arma channel→brand desde filas ya calculadas. */
+/**
+ * Si el snapshot de apps no trae marcas, reparte totales de marca en CADA canal
+ * con peso del € del canal (nunca todo al primer canal).
+ */
 function brandTotalsByChannelFromAppsRows(
   rows: Array<{ brandId: string; revenue: number }>,
   channelKeys: string[],
+  channelAmounts: Record<string, number> = {},
 ): Record<string, Record<string, number>> {
   const positive = rows.filter((r) => (Number(r.revenue) || 0) > 0 && String(r.brandId || '').trim());
   if (positive.length === 0) return {};
   const channels = channelKeys.map((c) => String(c || '').trim()).filter(Boolean);
-  const bucket = channels[0] || '_apps';
+  if (channels.length === 0) return {};
   const byBrand: Record<string, number> = {};
   for (const r of positive) {
     const id = String(r.brandId).trim();
     byBrand[id] = Math.round(((byBrand[id] || 0) + (Number(r.revenue) || 0)) * 100) / 100;
   }
-  return { [bucket]: byBrand };
+  const weights: Record<string, number> = {};
+  let weightSum = 0;
+  for (const ch of channels) {
+    const w = Math.max(0, Number(channelAmounts[ch]) || 0);
+    weights[ch] = w;
+    weightSum += w;
+  }
+  if (weightSum <= 0) {
+    const eq = 1 / channels.length;
+    for (const ch of channels) weights[ch] = eq;
+    weightSum = 1;
+  }
+  const out: Record<string, Record<string, number>> = {};
+  for (const ch of channels) {
+    const scale = weights[ch] / weightSum;
+    const per: Record<string, number> = {};
+    for (const [id, amt] of Object.entries(byBrand)) {
+      const v = Math.round(amt * scale * 100) / 100;
+      if (v > 0) per[id] = v;
+    }
+    if (Object.keys(per).length > 0) out[ch] = per;
+  }
+  return out;
 }
 
 function excelLikeAmountsFromClosedSession(
@@ -1896,6 +1912,8 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
       unpaidCashByBrandByChannel?: Record<string, Record<string, number>>;
       unpaidCardByBrandByChannel?: Record<string, Record<string, number>>;
       closingBrandLabels?: Record<string, string>;
+      /** Total MM/BB → id hoja Excel (mismas 4 pestañas marca×tienda). */
+      closingBrandSheetIds?: Record<string, string>;
       /** Caja 1 efectivo/tarjeta por marca (Excel = finales de caja). */
       brandTpvTotals?: Record<string, { efectivo: number; tarjeta: number }>;
     },
@@ -3751,6 +3769,8 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                     );
                     // Fallback: lo que se ve en el resumen (sistema/escalado) si el snapshot
                     // de inputs por marca llegó vacío — el cierre NO puede perder marcas.
+                    const fallbackChannels = finalAggregatorRows
+                      .filter((r) => (Number(r.totalSales) || 0) > 0);
                     const fallbackBrandTotals = hasSnapBrands
                       ? snapBrands
                       : brandTotalsByChannelFromAppsRows(
@@ -3759,9 +3779,13 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                           appsBrandBilling.unbranded,
                           hechoAppsTotal,
                         ).rows,
-                        finalAggregatorRows
-                          .filter((r) => (Number(r.totalSales) || 0) > 0)
-                          .map((r) => r.platform.channel),
+                        fallbackChannels.map((r) => r.platform.channel),
+                        Object.fromEntries(
+                          fallbackChannels.map((r) => [
+                            r.platform.channel,
+                            Number(r.totalSales) || 0,
+                          ]),
+                        ),
                       );
                     const labelMap: Record<string, string> = { ...brandLabels };
                     for (const slot of closingBrands) {
@@ -3792,6 +3816,18 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                         unpaidCashByBrandByChannel: appsSnapshot?.unpaidCashByBrandByChannel,
                         unpaidCardByBrandByChannel: appsSnapshot?.unpaidCardByBrandByChannel,
                         closingBrandLabels: labelMap,
+                        closingBrandSheetIds: (() => {
+                          const map: Record<string, string> = {};
+                          for (const slot of closingBrands) {
+                            const sid = String(slot.sheetId || '').trim();
+                            if (!sid) continue;
+                            for (const id of brandIdAliases(slot.brandId)) map[id] = sid;
+                            for (const mid of slot.memberBrandIds || []) {
+                              for (const id of brandIdAliases(mid)) map[id] = sid;
+                            }
+                          }
+                          return map;
+                        })(),
                         brandTpvTotals: Object.fromEntries(
                           brandBilling.rows
                             .filter((r) => (Number(r.revenueEfectivo) || 0) > 0 || (Number(r.revenueTarjeta) || 0) > 0)
@@ -6684,6 +6720,7 @@ export function TpvRegisterGate({
     const unpaidCashByBrandByChannel = appsClosingExtras?.unpaidCashByBrandByChannel;
     const unpaidCardByBrandByChannel = appsClosingExtras?.unpaidCardByBrandByChannel;
     const closingBrandLabels = appsClosingExtras?.closingBrandLabels;
+    const closingBrandSheetIds = appsClosingExtras?.closingBrandSheetIds;
     const brandTpvTotals = appsClosingExtras?.brandTpvTotals;
     const hasBrandTotals = Boolean(
       brandTotalsByChannel
@@ -6699,6 +6736,9 @@ export function TpvRegisterGate({
     );
     const hasClosingLabels = Boolean(
       closingBrandLabels && Object.keys(closingBrandLabels).length > 0,
+    );
+    const hasClosingSheetIds = Boolean(
+      closingBrandSheetIds && Object.keys(closingBrandSheetIds).length > 0,
     );
     const hasBrandTpvTotals = Boolean(
       brandTpvTotals
@@ -6743,6 +6783,7 @@ export function TpvRegisterGate({
         ? { aggregatorClosingUnpaidCardByBrand: unpaidCardByBrandByChannel }
         : {}),
       ...(hasClosingLabels ? { closingBrandLabels } : {}),
+      ...(hasClosingSheetIds ? { closingBrandSheetIds } : {}),
       ...(hasBrandTpvTotals ? { closingBrandTpvTotals: brandTpvTotals } : {}),
       closingValidationStatus: autoValidated ? 'validated' : 'pending',
       ...(autoValidated

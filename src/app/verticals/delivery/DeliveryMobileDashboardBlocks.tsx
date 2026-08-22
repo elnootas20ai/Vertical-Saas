@@ -451,6 +451,7 @@ export function DeliveryMobileDashboardBlocks({
             businessId={businessId}
             brands={brands}
             orders={orders}
+            tpvSessions={tpvSessions}
             refreshButton={
               <button
                 type="button"

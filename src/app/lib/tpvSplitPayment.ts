@@ -41,6 +41,19 @@ export function remainingSplitAmount(
   return roundMoney2(Math.max(0, roundMoney2(total) - sumSplitParts(parts)));
 }
 
+/** € pendientes de cobro en un pedido (total − ya pagado). */
+export function orderPaymentRemaining(order: {
+  totalAmount?: number;
+  paidAmount?: number;
+}): number {
+  return roundMoney2(
+    Math.max(
+      0,
+      roundMoney2(Number(order.totalAmount) || 0) - roundMoney2(Number(order.paidAmount) || 0),
+    ),
+  );
+}
+
 export function splitPartsAreComplete(
   total: number,
   parts: Array<{ amount: number }>,
