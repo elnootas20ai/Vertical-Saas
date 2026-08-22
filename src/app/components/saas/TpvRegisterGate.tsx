@@ -174,6 +174,7 @@ import {
 import { requestClockinGeo } from '../../hooks/useGeolocation';
 import type { WorkCenter } from '../../lib/workCentersApi';
 import { listUsersRequest, type AuthUser } from '../../lib/authApi';
+import { getBusinessRequest } from '../../lib/businessApi';
 import {
   Lock, Unlock, Banknote, CreditCard, Phone as PhoneIcon, Wifi, WifiOff, User, Monitor,
   Printer, Smartphone, CheckCircle2, X, AlertTriangle, Calculator, ChevronDown,
@@ -3860,8 +3861,27 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
 // ─── Fichaje (TPV tablet / mostrador) ───────────────────────────────────────
 
 async function fetchBusinessUsers(businessId: string): Promise<AuthUser[]> {
-  const data = await listUsersRequest(businessId);
-  return data.users || [];
+  try {
+    const data = await listUsersRequest(businessId);
+    return data.users || [];
+  } catch (primaryErr) {
+    try {
+      const biz = await getBusinessRequest(businessId);
+      const business = biz.business;
+      const fromMembers = (business?.members || []).map((m) => ({
+        user_id: m.user_id,
+        id: m.user_id,
+        fullName: m.fullName,
+        email: m.email,
+        role: m.role,
+        status: 'active' as const,
+      }));
+      if (fromMembers.length > 0) return fromMembers;
+    } catch {
+      /* fallback secundario */
+    }
+    throw primaryErr;
+  }
 }
 
 function ClockInModal({
@@ -3959,7 +3979,12 @@ function ClockInModal({
       }
     } catch (e) {
       if (!silent) {
-        setError(e instanceof Error ? e.message : 'Error al cargar fichajes');
+        const msg = extractErrorMessage(e, 'Error al cargar el equipo para fichar');
+        setError(
+          msg === 'No se pudo completar la solicitud. Inténtalo de nuevo.'
+            ? 'No se pudo cargar el equipo. Recarga la página o vuelve a iniciar sesión.'
+            : msg,
+        );
       }
     } finally {
       if (!silent) setLoading(false);

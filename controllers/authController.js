@@ -6,6 +6,7 @@ import {
   isOwnerGatedTeamRole,
   canRemoveBusinessMember,
 } from '../services/businessAccess.js';
+import { normalizeClockinUserId } from '../services/clockinsAccess.js';
 import crypto from 'node:crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { OAuth2Client } from 'google-auth-library';
@@ -1217,11 +1218,21 @@ export async function listUsers(req, res) {
     if (businessId) {
       const business = await findBusinessById(req, businessId);
       if (business) {
-        const actorUserId = String(req.authUser?.userId || req.authUser?.user_id || '').trim();
-        const isOwner = business.owner_user_id === actorUserId;
+        const actorUserId = normalizeClockinUserId(req.authUser?.userId || req.authUser?.user_id);
+        const scopedBusinessId = String(business.business_id || businessId || '').trim();
+        const isOwner = normalizeClockinUserId(business.owner_user_id) === actorUserId;
         const isMember = Array.isArray(business.members)
-          && business.members.some((m) => m.user_id === actorUserId);
-        if (!isOwner && !isMember) {
+          && business.members.some((m) => normalizeClockinUserId(m.user_id) === actorUserId);
+        let isLinkedWorker = false;
+        if (actorUserId && scopedBusinessId) {
+          for (const account of accounts) {
+            if (normalizeClockinUserId(account?.user_id) !== actorUserId) continue;
+            if (String(account?.linkedBusinessId || '').trim() !== scopedBusinessId) continue;
+            isLinkedWorker = true;
+            break;
+          }
+        }
+        if (!isOwner && !isMember && !isLinkedWorker) {
           return res.status(403).json({ ok: false, error: 'No autorizado para ver este equipo' });
         }
         const members = Array.isArray(business.members) ? business.members : [];
@@ -1233,13 +1244,14 @@ export async function listUsers(req, res) {
           business.owner_user_id,
           ...memberById.keys(),
         ].filter(Boolean));
-        const scopedBusinessId = String(business.business_id || businessId || '').trim();
         for (const account of accounts) {
           if (String(account?.linkedBusinessId || '').trim() !== scopedBusinessId) continue;
           const uid = String(account?.user_id || '').trim();
           if (uid) memberIds.add(uid);
         }
-        accounts = accounts.filter((a) => memberIds.has(a.user_id));
+        accounts = accounts.filter((a) =>
+          [...memberIds].some((id) => normalizeClockinUserId(id) === normalizeClockinUserId(a.user_id)),
+        );
       } else {
         accounts = [];
       }
@@ -1270,7 +1282,11 @@ export async function listUsers(req, res) {
       if (!account?.user_id || seenUserIds.has(account.user_id)) continue;
       seenUserIds.add(account.user_id);
       const sanitized = sanitizeAccount(account);
-      const member = memberById.get(account.user_id);
+      const member =
+        memberById.get(account.user_id)
+        || [...memberById.entries()].find(
+          ([id]) => normalizeClockinUserId(id) === normalizeClockinUserId(account.user_id),
+        )?.[1];
       if (member?.fullName?.trim() && !String(sanitized.fullName || '').trim()) {
         sanitized.fullName = member.fullName.trim();
       }
