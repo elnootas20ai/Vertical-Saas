@@ -10,17 +10,12 @@
  * Alcance (historyRange): all (por defecto) | year | month
  * En mes: columna DIA. En año/historial: columna FECHA (DD/MM/YYYY).
  *
- * Plantilla dinero:
- *   DIA | EFECTIVO | TPV | App | UBER | JUST EAT | GLOVO | TOTAL | [uds]
+ * Plantilla dinero (foto Excel cliente):
+ *   DIA | EFECTIVO | VISA | FLIPDISH | JUST EAT | UBER | GLOVO | TOTAL | [uds]
  *
  * Dinero por hoja marca:
- *   · Apps (App/Uber/Just Eat/Glovo) = totales por marca del cierre (Caja 2).
- *     El no-pagado es solo cajón; no entra en el Excel.
- *   · EFECTIVO / TPV / X = Caja 1 del cierre (`closingBrandTpvTotals`).
- *     Si no hay desglose por marca escrito → 0 (igual que el cierre).
- *   · Apps = totales por marca del cierre (Caja 2).
- * TPV = tarjeta. Bizum/otro (x interno) se suma a EFECTIVO en el Excel (sin columna X).
- * App = Flipdish (columna del excel cliente) + app Vertial propia (`flipdish` + `app`).
+ *   · Integradores (Flipdish/Just Eat/Uber/Glovo) = Caja 2 por marca. Flipdish incluye canal `app`.
+ *   · EFECTIVO / VISA = Caja 1 (`closingBrandTpvTotals`). Bizum/otro → EFECTIVO.
  *
  * Sin config → fallback 2 marcas: MODOMIO (pizza) + BLACK BURGER (burger + tacos).
  * Acceso: CEO / Admin (canDownloadCajaExcel).
@@ -68,7 +63,8 @@ const MONTH_NAMES_ES = [
   'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE',
 ] as const;
 
-const VERTIAL_CHANNELS = ['flipdish', 'app'] as const;
+const VERTIAL_APP_CHANNEL = 'app' as const;
+const FLIPDISH_CHANNEL = 'flipdish' as const;
 
 /** @deprecated Preferir hojas desde BrandBillingConfig. */
 export type CajaBrandId = 'modomio' | 'blackburger' | 'tacos';
@@ -77,10 +73,21 @@ export type CajaBrandId = 'modomio' | 'blackburger' | 'tacos';
 export const CAJA_MONEY_HEADERS = [
   'DIA',
   'EFECTIVO',
-  'TPV',
-  'App',
-  'UBER',
+  'VISA',
+  'FLIPDISH',
   'JUST EAT',
+  'UBER',
+  'GLOVO',
+  'TOTAL',
+] as const;
+
+/** Dinero sin columna DIA/FECHA (RESUMEN por mes). */
+export const CAJA_MONEY_HEADERS_NO_DAY = [
+  'EFECTIVO',
+  'VISA',
+  'FLIPDISH',
+  'JUST EAT',
+  'UBER',
   'GLOVO',
   'TOTAL',
 ] as const;
@@ -126,6 +133,11 @@ export type CajaDayAmounts = {
   efectivo: number;
   tpv: number;
   x: number;
+  /** App propia Vertial (`app`). */
+  vertial: number;
+  /** Canal Flipdish. */
+  flipdish: number;
+  /** @deprecated Suma vertial + flipdish (CEO / compat). */
   app: number;
   uber: number;
   justEat: number;
@@ -135,7 +147,6 @@ export type CajaDayAmounts = {
   totalBurger: number;
   totalTaco: number;
   visa: number;
-  vertial: number;
   totalPizzas: number;
 };
 
@@ -279,11 +290,15 @@ function channelTotal(session: TpvRegisterSession, channel: string): number {
   return round2(fromAgg || fromSummary || fromSession);
 }
 
-function withAliases(row: Omit<CajaDayAmounts, 'visa' | 'vertial' | 'totalPizzas'>): CajaDayAmounts {
+function withAliases(row: Omit<CajaDayAmounts, 'visa' | 'app' | 'totalPizzas'>): CajaDayAmounts {
+  const vertial = round2(Number(row.vertial) || 0);
+  const flipdish = round2(Number(row.flipdish) || 0);
   return {
     ...row,
+    vertial,
+    flipdish,
+    app: round2(vertial + flipdish),
     visa: row.tpv,
-    vertial: row.app,
     totalPizzas: row.totalPizza,
   };
 }
@@ -346,12 +361,9 @@ export function sessionToCajaAmounts(session: TpvRegisterSession): Omit<CajaDayA
   const justEat = channelTotal(session, 'justeat');
   const uber = channelTotal(session, 'ubereats');
   const glovo = channelTotal(session, 'glovo');
-  let app = 0;
-  for (const ch of VERTIAL_CHANNELS) {
-    app += channelTotal(session, ch);
-  }
-  app = round2(app);
-  const total = round2(efectivo + tpv + b + app + uber + justEat + glovo);
+  const flipdish = channelTotal(session, FLIPDISH_CHANNEL);
+  const vertial = channelTotal(session, VERTIAL_APP_CHANNEL);
+  const total = round2(efectivo + tpv + b + vertial + flipdish + uber + justEat + glovo);
   const totalPizza = Math.max(0, Math.floor(Number(session.productClosingCounts?.pizza || 0)));
   const totalBurger = Math.max(0, Math.floor(Number(session.productClosingCounts?.burger || 0)));
   const totalTaco = Math.max(0, Math.floor(Number(session.productClosingCounts?.taco || 0)));
@@ -359,7 +371,8 @@ export function sessionToCajaAmounts(session: TpvRegisterSession): Omit<CajaDayA
     efectivo,
     tpv,
     x: b,
-    app,
+    vertial,
+    flipdish,
     uber,
     justEat,
     glovo,
@@ -398,7 +411,8 @@ export function splitCajaAmountsByBillingSheet(
     efectivo: scale(amounts.efectivo),
     tpv: scale(amounts.tpv),
     x: scale(amounts.x),
-    app: scale(amounts.app),
+    vertial: scale(amounts.vertial),
+    flipdish: scale(amounts.flipdish),
     uber: scale(amounts.uber),
     justEat: scale(amounts.justEat),
     glovo: scale(amounts.glovo),
@@ -406,7 +420,8 @@ export function splitCajaAmountsByBillingSheet(
       scale(amounts.efectivo)
       + scale(amounts.tpv)
       + scale(amounts.x)
-      + scale(amounts.app)
+      + scale(amounts.vertial)
+      + scale(amounts.flipdish)
       + scale(amounts.uber)
       + scale(amounts.justEat)
       + scale(amounts.glovo),
@@ -426,8 +441,8 @@ export function splitCajaAmountsByBrand(
   return splitCajaAmountsByBillingSheet(amounts, billingSheet, LEGACY_BILLING_SHEETS);
 }
 
-const EXCEL_APP_CHANNEL_GROUPS: Record<'app' | 'uber' | 'justEat' | 'glovo', string[]> = {
-  app: ['flipdish', 'app'],
+const EXCEL_CHANNEL_GROUPS: Record<'flipdish' | 'uber' | 'justEat' | 'glovo', string[]> = {
+  flipdish: [FLIPDISH_CHANNEL, VERTIAL_APP_CHANNEL],
   uber: ['ubereats'],
   justEat: ['justeat'],
   glovo: ['glovo'],
@@ -586,7 +601,7 @@ function appsAmountsForBillingSheet(
   amounts: Omit<CajaDayAmounts, 'day'>,
   billingSheet: BrandBillingSheet,
   allSheets: BrandBillingSheet[],
-): Pick<CajaDayAmounts, 'app' | 'uber' | 'justEat' | 'glovo'> | null {
+): Pick<CajaDayAmounts, 'flipdish' | 'uber' | 'justEat' | 'glovo'> | null {
   if (!canMapClosingBrandsToSheets(session, allSheets)) {
     return null;
   }
@@ -594,9 +609,9 @@ function appsAmountsForBillingSheet(
   const sheetIds = session.closingBrandSheetIds || {};
   const shares = sheetMoneyShares(countsFromAmounts(amounts), allSheets);
   const share = shares[billingSheet.id] ?? 0;
-  const out = { app: 0, uber: 0, justEat: 0, glovo: 0 };
-  for (const key of ['app', 'uber', 'justEat', 'glovo'] as const) {
-    const channels = EXCEL_APP_CHANNEL_GROUPS[key];
+  const out = { flipdish: 0, uber: 0, justEat: 0, glovo: 0 };
+  for (const key of ['flipdish', 'uber', 'justEat', 'glovo'] as const) {
+    const channels = EXCEL_CHANNEL_GROUPS[key];
     const channelAmt = round2(channels.reduce((s, ch) => s + channelTotal(session, ch), 0));
     const byBrand = brandTotalsForChannels(session, channels);
     const attributed: Record<string, number> = {};
@@ -717,16 +732,19 @@ export function splitSessionCajaAmountsByBillingSheet(
   const tpv = tpvBrand ? tpvBrand.tpv : 0;
   const x = tpvBrand ? tpvBrand.x : 0;
 
-  const app = apps ? apps.app : unitSplit.app;
+  const flipdish = apps
+    ? apps.flipdish
+    : round2(unitSplit.flipdish + unitSplit.vertial);
   const uber = apps ? apps.uber : unitSplit.uber;
   const justEat = apps ? apps.justEat : unitSplit.justEat;
   const glovo = apps ? apps.glovo : unitSplit.glovo;
-  const total = round2(efectivo + tpv + x + app + uber + justEat + glovo);
+  const total = round2(efectivo + tpv + x + flipdish + uber + justEat + glovo);
   return withAliases({
     efectivo,
     tpv,
     x,
-    app,
+    vertial: 0,
+    flipdish,
     uber,
     justEat,
     glovo,
@@ -743,7 +761,8 @@ function emptyDay(day: number): CajaDayAmounts {
     efectivo: 0,
     tpv: 0,
     x: 0,
-    app: 0,
+    vertial: 0,
+    flipdish: 0,
     uber: 0,
     justEat: 0,
     glovo: 0,
@@ -760,7 +779,8 @@ function addAmounts(a: CajaDayAmounts, b: Omit<CajaDayAmounts, 'day'>): CajaDayA
     efectivo: round2(a.efectivo + b.efectivo),
     tpv: round2(a.tpv + b.tpv),
     x: round2(a.x + b.x),
-    app: round2(a.app + b.app),
+    vertial: round2(a.vertial + b.vertial),
+    flipdish: round2(a.flipdish + b.flipdish),
     uber: round2(a.uber + b.uber),
     justEat: round2(a.justEat + b.justEat),
     glovo: round2(a.glovo + b.glovo),
@@ -894,13 +914,44 @@ function unitValue(row: CajaDayAmounts, key: string): number {
   return 0;
 }
 
-/** Bizum/otro (x interno) → columna EFECTIVO en el Excel cliente (sin barra X). */
-function excelEfectivoDisplay(row: Pick<CajaDayAmounts, 'efectivo' | 'x'>): number {
-  return round2((Number(row.efectivo) || 0) + (Number(row.x) || 0));
+/** Bizum/otro (x interno) se suma a EFECTIVO en el Excel (sin columna B). */
+type CajaMoneyFields = Pick<
+  CajaDayAmounts,
+  'efectivo' | 'tpv' | 'x' | 'justEat' | 'uber' | 'glovo' | 'vertial' | 'flipdish' | 'total'
+>;
+
+function excelEfectivoWithB(amounts: Pick<CajaMoneyFields, 'efectivo' | 'x'>): number {
+  return round2((Number(amounts.efectivo) || 0) + (Number(amounts.x) || 0));
 }
 
-function excelMonthEfectivoDisplay(efectivo: number, x: number): number {
-  return round2((Number(efectivo) || 0) + (Number(x) || 0));
+function sumCajaMoneyFields(rows: CajaDayAmounts[]): CajaMoneyFields {
+  return {
+    efectivo: sumMoneyField(rows, 'efectivo'),
+    tpv: sumMoneyField(rows, 'tpv'),
+    x: sumMoneyField(rows, 'x'),
+    justEat: sumMoneyField(rows, 'justEat'),
+    uber: sumMoneyField(rows, 'uber'),
+    glovo: sumMoneyField(rows, 'glovo'),
+    vertial: sumMoneyField(rows, 'vertial'),
+    flipdish: sumMoneyField(rows, 'flipdish'),
+    total: sumMoneyField(rows, 'total'),
+  };
+}
+
+function excelFlipdishDisplay(amounts: Pick<CajaMoneyFields, 'flipdish' | 'vertial'>): number {
+  return round2((Number(amounts.flipdish) || 0) + (Number(amounts.vertial) || 0));
+}
+
+function cajaMoneyValueCells(amounts: CajaMoneyFields): unknown[] {
+  return [
+    cellBlankZero(excelEfectivoWithB(amounts)),
+    cellBlankZero(amounts.tpv),
+    cellBlankZero(excelFlipdishDisplay(amounts)),
+    cellBlankZero(amounts.justEat),
+    cellBlankZero(amounts.uber),
+    cellBlankZero(amounts.glovo),
+    cellBlankZero(amounts.total),
+  ];
 }
 
 function billingDayHasActivity(row: CajaDayAmounts, billingSheet: BrandBillingSheet): boolean {
@@ -911,18 +962,9 @@ function billingDayHasActivity(row: CajaDayAmounts, billingSheet: BrandBillingSh
   return billingSheet.unitColumns.some((c) => unitValue(row, c.key) > 0);
 }
 
-/** DIA | EFECTIVO | TPV | App | UBER | JUST EAT | GLOVO | TOTAL */
+/** DIA | EFECTIVO | VISA | FLIPDISH | JUST EAT | UBER | GLOVO | TOTAL */
 function moneyRowCells(row: CajaDayAmounts): unknown[] {
-  return [
-    row.day,
-    cellBlankZero(excelEfectivoDisplay(row)),
-    cellBlankZero(row.tpv),
-    cellBlankZero(row.app),
-    cellBlankZero(row.uber),
-    cellBlankZero(row.justEat),
-    cellBlankZero(row.glovo),
-    cellBlankZero(row.total),
-  ];
+  return [row.day, ...cajaMoneyValueCells(row)];
 }
 
 export function resolveBillingSheetsForExcel(sheets?: BrandBillingSheet[] | null): BrandBillingSheet[] {
@@ -939,7 +981,7 @@ function sumMoneyField(
   rows: CajaDayAmounts[],
   field: keyof Pick<
     CajaDayAmounts,
-    'efectivo' | 'tpv' | 'x' | 'app' | 'uber' | 'justEat' | 'glovo' | 'total'
+    'efectivo' | 'tpv' | 'x' | 'vertial' | 'flipdish' | 'uber' | 'justEat' | 'glovo' | 'total'
   >,
 ): number {
   return round2(rows.reduce((s, r) => s + (Number(r[field]) || 0), 0));
@@ -964,15 +1006,7 @@ export function buildCajaBillingSheetAoa(
     ...billingSheet.unitColumns.map((c) => c.header),
   ];
 
-  const monthEfectivo = round2(
-    sumMoneyField(allRows, 'efectivo') + sumMoneyField(allRows, 'x'),
-  );
-  const monthTpv = sumMoneyField(allRows, 'tpv');
-  const monthApp = sumMoneyField(allRows, 'app');
-  const monthUber = sumMoneyField(allRows, 'uber');
-  const monthJustEat = sumMoneyField(allRows, 'justEat');
-  const monthGlovo = sumMoneyField(allRows, 'glovo');
-  const monthMoney = sumMoneyField(allRows, 'total');
+  const monthMoneyFields = sumCajaMoneyFields(allRows);
   const monthUnits = billingSheet.unitColumns.map((col) =>
     allRows.reduce((s, r) => s + unitValue(r, col.key), 0),
   );
@@ -988,7 +1022,7 @@ export function buildCajaBillingSheetAoa(
   const aoa: unknown[][] = [
     [title],
     [],
-    [...headers],
+    ...buildCajaMoneyGroupHeaderBlock(headers),
   ];
   for (const row of rows) {
     aoa.push([
@@ -999,13 +1033,7 @@ export function buildCajaBillingSheetAoa(
   aoa.push([]);
   aoa.push([
     'TOTAL MES',
-    cellBlankZero(monthEfectivo),
-    cellBlankZero(monthTpv),
-    cellBlankZero(monthApp),
-    cellBlankZero(monthUber),
-    cellBlankZero(monthJustEat),
-    cellBlankZero(monthGlovo),
-    cellBlankZero(monthMoney),
+    ...cajaMoneyValueCells(monthMoneyFields),
     ...monthUnits.map((n) => cellBlankZero(n)),
   ]);
   return aoa;
@@ -1024,14 +1052,8 @@ export const CAJA_STORE_HEADERS = [
 /** Cabeceras RESUMEN (datos básicos por mes). */
 export const CAJA_RESUMEN_HEADERS = [
   'MES',
-  'EFECTIVO',
-  'TPV',
-  'App',
-  'UBER',
-  'JUST EAT',
-  'GLOVO',
-  'TOTAL',
-  'TOTAL PIZZA',
+  ...CAJA_MONEY_HEADERS_NO_DAY,
+  'TOTAL PIZZAS',
   'TOTAL BURGUER',
   'TOTAL TACOS',
 ] as const;
@@ -1039,13 +1061,7 @@ export const CAJA_RESUMEN_HEADERS = [
 /** Cabeceras historial (año / todo): FECHA en lugar de DIA. */
 export const CAJA_HISTORY_MONEY_HEADERS = [
   'FECHA',
-  'EFECTIVO',
-  'TPV',
-  'App',
-  'UBER',
-  'JUST EAT',
-  'GLOVO',
-  'TOTAL',
+  ...CAJA_MONEY_HEADERS_NO_DAY,
 ] as const;
 
 export const CAJA_HISTORY_STORE_HEADERS = [
@@ -1068,16 +1084,7 @@ export function normalizeCajaHistoryRange(raw?: string | null): CajaHistoryRange
 export type CajaHistoryDayRow = CajaDayAmounts & { dateKey: string };
 
 function historyMoneyRowCells(row: CajaHistoryDayRow): unknown[] {
-  return [
-    formatDateEs(row.dateKey),
-    cellBlankZero(excelEfectivoDisplay(row)),
-    cellBlankZero(row.tpv),
-    cellBlankZero(row.app),
-    cellBlankZero(row.uber),
-    cellBlankZero(row.justEat),
-    cellBlankZero(row.glovo),
-    cellBlankZero(row.total),
-  ];
+  return [formatDateEs(row.dateKey), ...cajaMoneyValueCells(row)];
 }
 
 function storeDayHasActivity(row: CajaDayAmounts): boolean {
@@ -1093,16 +1100,7 @@ export function buildCajaStoreSheetAoa(
   opts?: { companyName?: string },
 ): unknown[][] {
   const rows = monthSheet.rows.filter(storeDayHasActivity);
-  const monthEfectivo = excelMonthEfectivoDisplay(
-    sumMoneyField(monthSheet.rows, 'efectivo'),
-    sumMoneyField(monthSheet.rows, 'x'),
-  );
-  const monthTpv = sumMoneyField(monthSheet.rows, 'tpv');
-  const monthApp = sumMoneyField(monthSheet.rows, 'app');
-  const monthUber = sumMoneyField(monthSheet.rows, 'uber');
-  const monthJustEat = sumMoneyField(monthSheet.rows, 'justEat');
-  const monthGlovo = sumMoneyField(monthSheet.rows, 'glovo');
-  const monthMoney = sumMoneyField(monthSheet.rows, 'total');
+  const monthMoneyFields = sumCajaMoneyFields(monthSheet.rows);
   const monthPizza = monthSheet.rows.reduce((s, r) => s + (r.totalPizza || 0), 0);
   const monthBurger = monthSheet.rows.reduce((s, r) => s + (r.totalBurger || 0), 0);
   const monthTaco = monthSheet.rows.reduce((s, r) => s + (r.totalTaco || 0), 0);
@@ -1111,7 +1109,7 @@ export function buildCajaStoreSheetAoa(
   const aoa: unknown[][] = [
     [withCompanyTitle(opts?.companyName, `INGRESOS · ${label} · ${monthSheet.monthLabel}`)],
     [],
-    [...CAJA_STORE_HEADERS],
+    ...buildCajaMoneyGroupHeaderBlock([...CAJA_STORE_HEADERS]),
   ];
   for (const row of rows) {
     aoa.push([
@@ -1124,13 +1122,7 @@ export function buildCajaStoreSheetAoa(
   aoa.push([]);
   aoa.push([
     'TOTAL MES',
-    cellBlankZero(monthEfectivo),
-    cellBlankZero(monthTpv),
-    cellBlankZero(monthApp),
-    cellBlankZero(monthUber),
-    cellBlankZero(monthJustEat),
-    cellBlankZero(monthGlovo),
-    cellBlankZero(monthMoney),
+    ...cajaMoneyValueCells(monthMoneyFields),
     cellBlankZero(monthPizza),
     cellBlankZero(monthBurger),
     cellBlankZero(monthTaco),
@@ -1156,7 +1148,8 @@ export function buildCajaResumenYearSheetAoa(
     efectivo: number;
     tpv: number;
     x: number;
-    app: number;
+    vertial: number;
+    flipdish: number;
     uber: number;
     justEat: number;
     glovo: number;
@@ -1179,7 +1172,8 @@ export function buildCajaResumenYearSheetAoa(
       efectivo: sumMoneyField(sheet.rows, 'efectivo'),
       tpv: sumMoneyField(sheet.rows, 'tpv'),
       x: sumMoneyField(sheet.rows, 'x'),
-      app: sumMoneyField(sheet.rows, 'app'),
+      vertial: sumMoneyField(sheet.rows, 'vertial'),
+      flipdish: sumMoneyField(sheet.rows, 'flipdish'),
       uber: sumMoneyField(sheet.rows, 'uber'),
       justEat: sumMoneyField(sheet.rows, 'justEat'),
       glovo: sumMoneyField(sheet.rows, 'glovo'),
@@ -1189,7 +1183,7 @@ export function buildCajaResumenYearSheetAoa(
       taco: sheet.rows.reduce((s, r) => s + (r.totalTaco || 0), 0),
     };
     if (
-      agg.total > 0 || agg.efectivo > 0 || agg.tpv > 0 || agg.x > 0 || agg.app > 0
+      agg.total > 0 || agg.efectivo > 0 || agg.tpv > 0 || agg.x > 0 || agg.vertial > 0 || agg.flipdish > 0
       || agg.uber > 0 || agg.justEat > 0 || agg.glovo > 0
       || agg.pizza > 0 || agg.burger > 0 || agg.taco > 0
     ) {
@@ -1204,18 +1198,12 @@ export function buildCajaResumenYearSheetAoa(
     [`RESUMEN · ${year} · TODAS LAS TIENDAS`],
     ['Datos básicos por mes (canales). Detalle día a día en las hojas de marca y tienda.'],
     [],
-    [...CAJA_RESUMEN_HEADERS],
+    ...buildCajaMoneyGroupHeaderBlock([...CAJA_RESUMEN_HEADERS]),
   ];
   for (const m of months) {
     aoa.push([
       m.label,
-      cellBlankZero(excelMonthEfectivoDisplay(m.efectivo, m.x)),
-      cellBlankZero(m.tpv),
-      cellBlankZero(m.app),
-      cellBlankZero(m.uber),
-      cellBlankZero(m.justEat),
-      cellBlankZero(m.glovo),
-      cellBlankZero(m.total),
+      ...cajaMoneyValueCells(m),
       cellBlankZero(m.pizza),
       cellBlankZero(m.burger),
       cellBlankZero(m.taco),
@@ -1224,13 +1212,17 @@ export function buildCajaResumenYearSheetAoa(
   aoa.push([]);
   aoa.push([
     'TOTAL AÑO',
-    cellBlankZero(excelMonthEfectivoDisplay(yearTotal('efectivo'), yearTotal('x'))),
-    cellBlankZero(yearTotal('tpv')),
-    cellBlankZero(yearTotal('app')),
-    cellBlankZero(yearTotal('uber')),
-    cellBlankZero(yearTotal('justEat')),
-    cellBlankZero(yearTotal('glovo')),
-    cellBlankZero(yearTotal('total')),
+    ...cajaMoneyValueCells({
+      efectivo: yearTotal('efectivo'),
+      tpv: yearTotal('tpv'),
+      x: yearTotal('x'),
+      justEat: yearTotal('justEat'),
+      uber: yearTotal('uber'),
+      glovo: yearTotal('glovo'),
+      vertial: yearTotal('vertial'),
+      flipdish: yearTotal('flipdish'),
+      total: yearTotal('total'),
+    }),
     cellBlankZero(yearTotal('pizza')),
     cellBlankZero(yearTotal('burger')),
     cellBlankZero(yearTotal('taco')),
@@ -1316,15 +1308,7 @@ export function buildCajaBillingHistorySheetAoa(
     ...CAJA_HISTORY_MONEY_HEADERS,
     ...billingSheet.unitColumns.map((c) => c.header),
   ];
-  const monthEfectivo = round2(
-    sumMoneyField(allRows, 'efectivo') + sumMoneyField(allRows, 'x'),
-  );
-  const monthTpv = sumMoneyField(allRows, 'tpv');
-  const monthApp = sumMoneyField(allRows, 'app');
-  const monthUber = sumMoneyField(allRows, 'uber');
-  const monthJustEat = sumMoneyField(allRows, 'justEat');
-  const monthGlovo = sumMoneyField(allRows, 'glovo');
-  const monthMoney = sumMoneyField(allRows, 'total');
+  const monthMoneyFields = sumCajaMoneyFields(allRows);
   const monthUnits = billingSheet.unitColumns.map((col) =>
     allRows.reduce((s, r) => s + unitValue(r, col.key), 0),
   );
@@ -1337,7 +1321,7 @@ export function buildCajaBillingHistorySheetAoa(
       : `INGRESOS ${billingSheet.label} · ${suffix}`,
   );
 
-  const aoa: unknown[][] = [[title], [], [...headers]];
+  const aoa: unknown[][] = [[title], [], ...buildCajaMoneyGroupHeaderBlock(headers)];
   for (const row of rows) {
     aoa.push([
       ...historyMoneyRowCells(row),
@@ -1347,13 +1331,7 @@ export function buildCajaBillingHistorySheetAoa(
   aoa.push([]);
   aoa.push([
     'TOTAL',
-    cellBlankZero(monthEfectivo),
-    cellBlankZero(monthTpv),
-    cellBlankZero(monthApp),
-    cellBlankZero(monthUber),
-    cellBlankZero(monthJustEat),
-    cellBlankZero(monthGlovo),
-    cellBlankZero(monthMoney),
+    ...cajaMoneyValueCells(monthMoneyFields),
     ...monthUnits.map((n) => cellBlankZero(n)),
   ]);
   return aoa;
@@ -1366,16 +1344,7 @@ export function buildCajaStoreHistorySheetAoa(
   opts?: { titleSuffix?: string; companyName?: string },
 ): unknown[][] {
   const rows = rowsIn.filter(storeDayHasActivity);
-  const monthEfectivo = excelMonthEfectivoDisplay(
-    sumMoneyField(rowsIn, 'efectivo'),
-    sumMoneyField(rowsIn, 'x'),
-  );
-  const monthTpv = sumMoneyField(rowsIn, 'tpv');
-  const monthApp = sumMoneyField(rowsIn, 'app');
-  const monthUber = sumMoneyField(rowsIn, 'uber');
-  const monthJustEat = sumMoneyField(rowsIn, 'justEat');
-  const monthGlovo = sumMoneyField(rowsIn, 'glovo');
-  const monthMoney = sumMoneyField(rowsIn, 'total');
+  const monthMoneyFields = sumCajaMoneyFields(rowsIn);
   const monthPizza = rowsIn.reduce((s, r) => s + (r.totalPizza || 0), 0);
   const monthBurger = rowsIn.reduce((s, r) => s + (r.totalBurger || 0), 0);
   const monthTaco = rowsIn.reduce((s, r) => s + (r.totalTaco || 0), 0);
@@ -1385,7 +1354,7 @@ export function buildCajaStoreHistorySheetAoa(
   const aoa: unknown[][] = [
     [withCompanyTitle(opts?.companyName, `INGRESOS · ${label} · ${suffix}`)],
     [],
-    [...CAJA_HISTORY_STORE_HEADERS],
+    ...buildCajaMoneyGroupHeaderBlock([...CAJA_HISTORY_STORE_HEADERS]),
   ];
   for (const row of rows) {
     aoa.push([
@@ -1398,13 +1367,7 @@ export function buildCajaStoreHistorySheetAoa(
   aoa.push([]);
   aoa.push([
     'TOTAL',
-    cellBlankZero(monthEfectivo),
-    cellBlankZero(monthTpv),
-    cellBlankZero(monthApp),
-    cellBlankZero(monthUber),
-    cellBlankZero(monthJustEat),
-    cellBlankZero(monthGlovo),
-    cellBlankZero(monthMoney),
+    ...cajaMoneyValueCells(monthMoneyFields),
     cellBlankZero(monthPizza),
     cellBlankZero(monthBurger),
     cellBlankZero(monthTaco),
@@ -1423,7 +1386,8 @@ export function buildCajaResumenHistorySheetAoa(
     efectivo: number;
     tpv: number;
     x: number;
-    app: number;
+    vertial: number;
+    flipdish: number;
     uber: number;
     justEat: number;
     glovo: number;
@@ -1446,7 +1410,8 @@ export function buildCajaResumenHistorySheetAoa(
       efectivo: sumMoneyField(sheet.rows, 'efectivo'),
       tpv: sumMoneyField(sheet.rows, 'tpv'),
       x: sumMoneyField(sheet.rows, 'x'),
-      app: sumMoneyField(sheet.rows, 'app'),
+      vertial: sumMoneyField(sheet.rows, 'vertial'),
+      flipdish: sumMoneyField(sheet.rows, 'flipdish'),
       uber: sumMoneyField(sheet.rows, 'uber'),
       justEat: sumMoneyField(sheet.rows, 'justEat'),
       glovo: sumMoneyField(sheet.rows, 'glovo'),
@@ -1456,7 +1421,7 @@ export function buildCajaResumenHistorySheetAoa(
       taco: sheet.rows.reduce((s, r) => s + (r.totalTaco || 0), 0),
     };
     if (
-      agg.total > 0 || agg.efectivo > 0 || agg.tpv > 0 || agg.x > 0 || agg.app > 0
+      agg.total > 0 || agg.efectivo > 0 || agg.tpv > 0 || agg.x > 0 || agg.vertial > 0 || agg.flipdish > 0
       || agg.uber > 0 || agg.justEat > 0 || agg.glovo > 0
       || agg.pizza > 0 || agg.burger > 0 || agg.taco > 0
     ) {
@@ -1470,18 +1435,12 @@ export function buildCajaResumenHistorySheetAoa(
     [withCompanyTitle(opts.companyName, 'RESUMEN · HISTORIAL · TODAS LAS TIENDAS')],
     ['Totales por mes. Detalle día a día en las hojas de marca y tienda.'],
     [],
-    [...CAJA_RESUMEN_HEADERS],
+    ...buildCajaMoneyGroupHeaderBlock([...CAJA_RESUMEN_HEADERS]),
   ];
   for (const m of months) {
     aoa.push([
       m.label,
-      cellBlankZero(excelMonthEfectivoDisplay(m.efectivo, m.x)),
-      cellBlankZero(m.tpv),
-      cellBlankZero(m.app),
-      cellBlankZero(m.uber),
-      cellBlankZero(m.justEat),
-      cellBlankZero(m.glovo),
-      cellBlankZero(m.total),
+      ...cajaMoneyValueCells(m),
       cellBlankZero(m.pizza),
       cellBlankZero(m.burger),
       cellBlankZero(m.taco),
@@ -1490,13 +1449,17 @@ export function buildCajaResumenHistorySheetAoa(
   aoa.push([]);
   aoa.push([
     'TOTAL',
-    cellBlankZero(excelMonthEfectivoDisplay(yearTotal('efectivo'), yearTotal('x'))),
-    cellBlankZero(yearTotal('tpv')),
-    cellBlankZero(yearTotal('app')),
-    cellBlankZero(yearTotal('uber')),
-    cellBlankZero(yearTotal('justEat')),
-    cellBlankZero(yearTotal('glovo')),
-    cellBlankZero(yearTotal('total')),
+    ...cajaMoneyValueCells({
+      efectivo: yearTotal('efectivo'),
+      tpv: yearTotal('tpv'),
+      x: yearTotal('x'),
+      justEat: yearTotal('justEat'),
+      uber: yearTotal('uber'),
+      glovo: yearTotal('glovo'),
+      vertial: yearTotal('vertial'),
+      flipdish: yearTotal('flipdish'),
+      total: yearTotal('total'),
+    }),
     cellBlankZero(yearTotal('pizza')),
     cellBlankZero(yearTotal('burger')),
     cellBlankZero(yearTotal('taco')),
@@ -1717,6 +1680,62 @@ function csvFileSafeName(raw: string): string {
     .slice(0, 40) || 'hoja';
 }
 
+const CAJA_MONEY_TIENDA_GROUP_START = 1;
+const CAJA_MONEY_TIENDA_GROUP_END = 2;
+const CAJA_MONEY_INTEGRADOR_GROUP_START = 3;
+const CAJA_MONEY_INTEGRADOR_GROUP_END = 6;
+const CAJA_MONEY_TOTAL_COL = 7;
+
+function buildCajaMoneyGroupHeaderRow(columnCount: number): unknown[] {
+  const row = Array.from({ length: columnCount }, () => '');
+  if (columnCount > CAJA_MONEY_INTEGRADOR_GROUP_END) {
+    row[CAJA_MONEY_TIENDA_GROUP_START] = 'TIENDA';
+    row[CAJA_MONEY_INTEGRADOR_GROUP_START] = 'INTEGRADORES';
+    if (columnCount > CAJA_MONEY_TOTAL_COL) {
+      row[CAJA_MONEY_TOTAL_COL] = 'TOTAL';
+    }
+  }
+  return row;
+}
+
+/** Fila agrupada + cabeceras de columnas (plantilla foto). */
+function buildCajaMoneyGroupHeaderBlock(headers: readonly string[]): unknown[][] {
+  return [
+    buildCajaMoneyGroupHeaderRow(headers.length),
+    [...headers],
+  ];
+}
+
+function findMoneyHeaderRowIndex(aoa: unknown[][], colHeaders: string[]): number {
+  for (let i = 0; i < aoa.length; i += 1) {
+    const row = aoa[i];
+    if (!Array.isArray(row)) continue;
+    if (colHeaders.every((h, idx) => String(row[idx] || '') === String(h))) return i;
+  }
+  return -1;
+}
+
+function applyCajaMoneyHeaderMerges(ws: XLSX.WorkSheet, headerRowIndex: number): void {
+  const groupRowIndex = headerRowIndex - 1;
+  if (groupRowIndex < 0) return;
+  const merges: XLSX.Range[] = [
+    { s: { r: groupRowIndex, c: 0 }, e: { r: headerRowIndex, c: 0 } },
+    {
+      s: { r: groupRowIndex, c: CAJA_MONEY_TIENDA_GROUP_START },
+      e: { r: groupRowIndex, c: CAJA_MONEY_TIENDA_GROUP_END },
+    },
+    {
+      s: { r: groupRowIndex, c: CAJA_MONEY_INTEGRADOR_GROUP_START },
+      e: { r: groupRowIndex, c: CAJA_MONEY_INTEGRADOR_GROUP_END },
+    },
+    {
+      s: { r: groupRowIndex, c: CAJA_MONEY_TOTAL_COL },
+      e: { r: groupRowIndex, c: CAJA_MONEY_TOTAL_COL },
+    },
+  ];
+  ws['!merges'] = [...(ws['!merges'] || []), ...merges];
+}
+
 function appendSheetFromAoa(
   workbook: XLSX.WorkBook,
   usedNames: Set<string>,
@@ -1729,6 +1748,10 @@ function appendSheetFromAoa(
   ws['!cols'] = colHeaders.map((h) => ({
     wch: Math.min(18, Math.max(10, String(h).length + 2)),
   }));
+  if (colHeaders.includes('EFECTIVO') && colHeaders.includes('VISA')) {
+    const headerRowIndex = findMoneyHeaderRowIndex(aoa, colHeaders);
+    if (headerRowIndex > 0) applyCajaMoneyHeaderMerges(ws, headerRowIndex);
+  }
   const name = sanitizeExcelSheetName(rawName, usedNames);
   sheetNames.push(name);
   XLSX.utils.book_append_sheet(workbook, ws, name);

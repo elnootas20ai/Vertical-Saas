@@ -58,7 +58,7 @@ function closedSession(partial) {
 }
 
 describe('sessionToCajaAmounts', () => {
-  it('mapea VISA + B(Bizum/otro) + aggregators + Flipdish→App', () => {
+  it('mapea VISA + B(Bizum/otro) + aggregators + Vertial/Flipdish por separado', () => {
     const amounts = sessionToCajaAmounts(closedSession({
       summary: {
         salesByMethod: { efectivo: 100.5, tarjeta: 40, bizum: 12, online: 0, otro: 3 },
@@ -81,8 +81,9 @@ describe('sessionToCajaAmounts', () => {
     expect(amounts.justEat).toBe(50);
     expect(amounts.uber).toBe(30);
     expect(amounts.glovo).toBe(20);
+    expect(amounts.vertial).toBe(10);
+    expect(amounts.flipdish).toBe(15);
     expect(amounts.app).toBe(25);
-    expect(amounts.vertial).toBe(25);
     expect(amounts.total).toBe(280.5);
     expect(amounts.totalPizza).toBe(7);
     expect(amounts.totalBurger).toBe(2);
@@ -436,6 +437,7 @@ describe('buildCajaMonthSheet', () => {
     expect(day5.tpv).toBe(6);
     expect(day5.justEat).toBe(2);
     expect(day5.glovo).toBe(4);
+    expect(day5.flipdish).toBe(8);
     expect(day5.app).toBe(8);
     expect(day5.total).toBe(50);
     expect(day5.totalPizza).toBe(5);
@@ -511,26 +513,30 @@ describe('buildCajaMonthSheet', () => {
     const sheet = buildCajaMonthSheet(sessions, { pointOfSaleId: 'pdv-a', yearMonth: '2026-07' });
 
     expect(CAJA_MONEY_HEADERS).toEqual([
-      'DIA', 'EFECTIVO', 'TPV', 'App', 'UBER', 'JUST EAT', 'GLOVO', 'TOTAL',
+      'DIA', 'EFECTIVO', 'VISA', 'FLIPDISH', 'JUST EAT', 'UBER', 'GLOVO', 'TOTAL',
     ]);
-    expect(MODOMIO_HEADERS).toContain('TPV');
-    expect(MODOMIO_HEADERS).not.toContain('X');
+    expect(MODOMIO_HEADERS).toContain('VISA');
+    expect(MODOMIO_HEADERS).toContain('FLIPDISH');
+    expect(MODOMIO_HEADERS).not.toContain('VERTIAL');
     expect(MODOMIO_HEADERS).toContain('GLOVO');
-    expect(MODOMIO_HEADERS).not.toContain('VISA');
-    expect(MODOMIO_HEADERS).not.toContain('GLOVVO');
+    expect(MODOMIO_HEADERS).not.toContain('TPV');
+    expect(MODOMIO_HEADERS).not.toContain('App');
 
     const modo = buildCajaSheetAoa(sheet, 'modomio');
     expect(modo[0][0]).toContain('MODOMIO');
-    expect(modo[2]).toEqual([...MODOMIO_HEADERS]);
+    expect(modo[2][1]).toBe('TIENDA');
+    expect(modo[2][3]).toBe('INTEGRADORES');
+    expect(modo[2][7]).toBe('TOTAL');
+    expect(modo[3]).toEqual([...MODOMIO_HEADERS]);
     // Día 1 · Caja 1 del cierre (70 Modomio / 30 BB)
-    expect(modo[3]).toEqual([1, 70, '', '', '', '', '', 70, 7]);
-    expect(modo[5]).toEqual(['TOTAL MES', 70, '', '', '', '', '', 70, 7]);
+    expect(modo[4]).toEqual([1, 70, '', '', '', '', '', 70, 7]);
+    expect(modo[6]).toEqual(['TOTAL MES', 70, '', '', '', '', '', 70, 7]);
 
     const bb = buildCajaSheetAoa(sheet, 'blackburger');
     expect(bb[0][0]).toContain('BLACK BURGER');
-    expect(bb[2]).toEqual([...BLACKBURGER_HEADERS]);
-    expect(bb[3]).toEqual([1, 30, '', '', '', '', '', 30, 2, 1]);
-    expect(bb[5]).toEqual(['TOTAL MES', 30, '', '', '', '', '', 30, 2, 1]);
+    expect(bb[3]).toEqual([...BLACKBURGER_HEADERS]);
+    expect(bb[4]).toEqual([1, 30, '', '', '', '', '', 30, 2, 1]);
+    expect(bb[6]).toEqual(['TOTAL MES', 30, '', '', '', '', '', 30, 2, 1]);
 
     const comp = buildCajaComparativaYearSheetAoa(sessions, {
       pointOfSaleId: 'pdv-a',
@@ -653,7 +659,7 @@ describe('buildCajaMonthSheet', () => {
     const modoTitle = String(built.workbook.Sheets['MM TIANA']?.A1?.v || '');
     expect(modoTitle).toContain('MM TIANA');
     // Marca solo suma la tienda de esta empresa (70), no 999
-    const totalCell = built.workbook.Sheets['MM TIANA']?.H4?.v;
+    const totalCell = built.workbook.Sheets['MM TIANA']?.H5?.v;
     expect(Number(totalCell)).toBe(70);
   });
 
@@ -700,9 +706,12 @@ describe('buildCajaMonthSheet', () => {
       pointsOfSale: [{ id: 'pdv-a', name: 'Tienda A' }],
     });
     expect(built.historyRange).toBe('month');
-    const headerRow = built.workbook.Sheets['MM TIENDA']?.A3?.v
-      || built.workbook.Sheets[built.sheetNames[0]]?.A3?.v;
+    const headerRow = built.workbook.Sheets['MM TIENDA']?.A4?.v
+      || built.workbook.Sheets[built.sheetNames[0]]?.A4?.v;
     expect(headerRow).toBe('DIA');
+    const groupRow = built.workbook.Sheets['MM TIENDA']?.B3?.v
+      || built.workbook.Sheets[built.sheetNames[0]]?.B3?.v;
+    expect(groupRow).toBe('TIENDA');
   });
 
   it('nombre de archivo y títulos usan el nombre de la empresa', () => {
@@ -754,6 +763,6 @@ describe('buildCajaMonthSheet', () => {
     });
     expect(built.sheetNames).toContain('MM TIANA');
     expect(built.rows).toBe(1);
-    expect(Number(built.workbook.Sheets['MM TIANA']?.H4?.v)).toBe(25);
+    expect(Number(built.workbook.Sheets['MM TIANA']?.H5?.v)).toBe(25);
   });
 });
