@@ -5560,13 +5560,13 @@ export function TpvRapidoOrderFlow({
             ) : null}
 
             {selectedClient?.id
-            && userId
+            && clientSearchUserId
             && !isQuickAttentionFlowClient(selectedClient)
             && !isTpvSyntheticClientId(selectedClient.id)
             && !showNewAddress
             && !editingAddressId ? (
               <TpvClientRecentOrdersStrip
-                userId={userId}
+                userId={clientSearchUserId}
                 clientId={selectedClient.id}
                 clientName={selectedClient.name}
                 limit={5}

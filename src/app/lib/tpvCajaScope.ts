@@ -527,15 +527,17 @@ export function resolveActiveTpvRegisterSession(params: {
   pointsOfSale: Array<{ _id: string; workCenterId?: string }>;
   /** tablet, trabajador o pedido en curso: no soltar la caja abierta por un pick raro. */
   holdStickyWhileOpen: boolean;
+  alternateRefIds?: string[];
 }): { session: TpvRegisterSession | null; nextSticky: TpvRegisterSession | null } {
   const sessions = Array.isArray(params.sessions) ? params.sessions : [];
   const open = sessions.filter((s) => isTpvRegisterSessionOpenStatus(s));
   const pick = String(params.pickId || '').trim();
   const pdvs = params.pointsOfSale || [];
+  const altRefs = params.alternateRefIds || [];
 
   let found: TpvRegisterSession | null = null;
   if (pick) {
-    found = pickNewestOpenRegisterSessionForStore(open, pick, pdvs);
+    found = pickNewestOpenRegisterSessionForStore(open, pick, pdvs, altRefs);
   } else if (open.length === 1) {
     found = open[0];
   } else if (open.length > 1 && params.sticky?._id) {
@@ -543,7 +545,7 @@ export function resolveActiveTpvRegisterSession(params: {
     if (stickyLive) {
       const storeRef = String(stickyLive.pointOfSaleId || '').trim();
       found =
-        pickNewestOpenRegisterSessionForStore(open, storeRef, pdvs) || stickyLive;
+        pickNewestOpenRegisterSessionForStore(open, storeRef, pdvs, altRefs) || stickyLive;
     }
   }
 
@@ -608,16 +610,37 @@ export function compareTpvSessionsByOpenedAtDesc(
  * Entre cajas abiertas de la misma tienda (PDV o workCenter), la más nueva.
  * «Salir del TPV» no cierra caja: sin esto un `find` puede reenganchar una abierta antigua.
  */
+/** Refs extra (tablet workCenterId, pick) para matchear caja antes de hidratar PDVs. */
+export function resolveTpvStoreAlternateRefs(params: {
+  pickId?: string | null;
+  pointsOfSale?: Array<{ _id: string; workCenterId?: string }>;
+  tabletWorkCenterId?: string | null;
+}): string[] {
+  const out = new Set<string>();
+  const pick = String(params.pickId || '').trim();
+  if (pick) out.add(pick);
+  const wcBinding = String(params.tabletWorkCenterId || '').trim();
+  if (wcBinding) out.add(wcBinding);
+  if (pick && params.pointsOfSale?.length) {
+    const pdv = params.pointsOfSale.find((p) => p._id === pick);
+    const wc = String(pdv?.workCenterId || '').trim();
+    if (wc) out.add(wc);
+  }
+  return [...out].filter(Boolean);
+}
+
 export function pickNewestOpenRegisterSessionForStore(
   sessions: TpvRegisterSession[],
   storeRefId: string,
   pointsOfSale: Array<{ _id: string; workCenterId?: string }> = [],
+  alternateRefIds: string[] = [],
 ): TpvRegisterSession | null {
   const pick = String(storeRefId || '').trim();
   if (!pick) return null;
   const matches = (Array.isArray(sessions) ? sessions : []).filter(
     (s) =>
-      isTpvRegisterSessionOpenStatus(s) && tpvSessionMatchesStoreRef(s, pick, pointsOfSale),
+      isTpvRegisterSessionOpenStatus(s)
+      && tpvSessionMatchesStoreRef(s, pick, pointsOfSale, alternateRefIds),
   );
   if (matches.length === 0) return null;
   return [...matches].sort(compareTpvSessionsByOpenedAtDesc)[0] || null;

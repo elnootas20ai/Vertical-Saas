@@ -25,6 +25,8 @@ import {
   tpvSessionMatchesStoreRef,
   canEnterTpvOrderFlow,
   writeTpvOpenRegisterLatch,
+  pickNewestOpenRegisterSessionForStore,
+  resolveTpvStoreAlternateRefs,
 } from '../src/app/lib/tpvCajaScope.js';
 import { filterTpvRegisterSessionsForBusiness } from '../services/couchdb.js';
 
@@ -62,6 +64,22 @@ describe('resolveActiveTpvRegisterSession', () => {
       tpvSessionMatchesStoreRef(session, 'pdv-mataro', stubPdvs, ['wc-real-mataro']),
     ).toBe(true);
     expect(tpvSessionMatchesStoreRef(session, 'pdv-mataro', stubPdvs, [])).toBe(false);
+  });
+
+  it('pickNewest matchea por alternateRefs sin PDVs hidratados', () => {
+    const session = {
+      _id: 's1',
+      status: 'open',
+      pointOfSaleId: 'wc-real-mataro',
+      openedAt: '2026-08-12T10:00:00.000Z',
+    };
+    const found = pickNewestOpenRegisterSessionForStore(
+      [session],
+      'pdv-mataro',
+      [],
+      ['wc-real-mataro', 'pdv-mataro'],
+    );
+    expect(found?._id).toBe('s1');
   });
 
   it('holds sticky on tablet even when pick momentarily fails to match', () => {

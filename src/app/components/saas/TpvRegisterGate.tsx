@@ -45,6 +45,7 @@ import {
   isTpvRegisterSessionStaleOpen,
   resolvePreviousCloseCashAmount,
   previousCloseCashIsNextDayInitial,
+  resolveTpvStoreAlternateRefs,
   shouldKeepTpvSessionInClientList,
   tpvSessionBelongsToBusiness,
   tpvSessionMatchesStoreRef,
@@ -610,7 +611,12 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
     const pdvId = String(selectedPdv?._id || restrictedToPdvId || '').trim();
     if (!pdvId) return null;
     const opens = (registerSessions || []).filter((s) => isTpvRegisterSessionOpen(s));
-    return pickNewestOpenRegisterSessionForStore(opens, pdvId, pointsOfSale);
+    const alternateRefs = resolveTpvStoreAlternateRefs({
+      pickId: pdvId,
+      pointsOfSale,
+      tabletWorkCenterId: readTpvTabletBinding()?.workCenterId,
+    });
+    return pickNewestOpenRegisterSessionForStore(opens, pdvId, pointsOfSale, alternateRefs);
   }, [registerSessions, selectedPdv, restrictedToPdvId, pointsOfSale]);
 
   /** Turno vivo reciente: pantalla «Continuar» (sin pedir fondo otra vez). */
@@ -5663,12 +5669,18 @@ export function TpvRegisterGate({
   ]);
 
   const activeSession = useMemo(() => {
+    const alternateRefs = resolveTpvStoreAlternateRefs({
+      pickId: resolvedStorePickId,
+      pointsOfSale,
+      tabletWorkCenterId: isTabletSession ? tabletBinding?.workCenterId : null,
+    });
     const { session, nextSticky } = resolveActiveTpvRegisterSession({
       sessions,
       sticky: stickyOpenSessionRef.current,
       pickId: resolvedStorePickId,
       pointsOfSale,
       holdStickyWhileOpen,
+      alternateRefIds: alternateRefs,
     });
     // Ref en el mismo render: si el pick parpadea en el siguiente update, sticky ya está.
     stickyOpenSessionRef.current = nextSticky;
@@ -5678,6 +5690,8 @@ export function TpvRegisterGate({
     resolvedStorePickId,
     pointsOfSale,
     holdStickyWhileOpen,
+    isTabletSession,
+    tabletBinding?.workCenterId,
   ]);
 
   /**
@@ -6545,8 +6559,18 @@ export function TpvRegisterGate({
 
     try {
     const pdvId = String(data.pointOfSaleId || '').trim();
+    const openAlternateRefs = resolveTpvStoreAlternateRefs({
+      pickId: pdvId,
+      pointsOfSale,
+      tabletWorkCenterId: isTabletSession ? tabletBinding?.workCenterId : null,
+    });
 
-    const localOpen = pickNewestOpenRegisterSessionForStore(sessions, pdvId, pointsOfSale);
+    const localOpen = pickNewestOpenRegisterSessionForStore(
+      sessions,
+      pdvId,
+      pointsOfSale,
+      openAlternateRefs,
+    );
     // Seguro: si otra tablet abrió mientras, entrar (turnos viejos >18 h se abren vía Continuar o cierre automático al crear).
     if (localOpen && !isTpvRegisterSessionStaleOpen(localOpen)) {
       attachOpenSession(localOpen, { preferredStoreId: pdvId });
@@ -6686,7 +6710,12 @@ export function TpvRegisterGate({
           );
           const merged = mergeTpvRegisterSessionsPreservingOpen(sessions, fresh);
           setSessions(merged);
-          const again = pickNewestOpenRegisterSessionForStore(merged, pdvId, pointsOfSale);
+          const again = pickNewestOpenRegisterSessionForStore(
+            merged,
+            pdvId,
+            pointsOfSale,
+            openAlternateRefs,
+          );
           if (again && !isTpvRegisterSessionStaleOpen(again)) {
             attachOpenSession(again, { preferredStoreId: pdvId });
             return;
