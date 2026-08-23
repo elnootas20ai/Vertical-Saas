@@ -484,11 +484,17 @@ export function tpvSessionMatchesStoreRef(
   session: Pick<TpvRegisterSession, 'pointOfSaleId'>,
   refId: string,
   pointsOfSale: Array<{ _id: string; workCenterId?: string }>,
+  /** Refs extra (p. ej. workCenterId del binding tablet antes de hidratar el PDV). */
+  alternateRefIds: string[] = [],
 ): boolean {
   const pick = String(refId || '').trim();
   const sp = String(session.pointOfSaleId || '').trim();
   if (!pick || !sp) return false;
   if (sp === pick) return true;
+  for (const alt of alternateRefIds) {
+    const a = String(alt || '').trim();
+    if (a && sp === a) return true;
+  }
   const pdv = pointsOfSale.find((p) => p._id === pick);
   if (pdv && sp === String(pdv.workCenterId || '').trim()) return true;
   const byWc = pointsOfSale.find((p) => String(p.workCenterId || '').trim() === sp);

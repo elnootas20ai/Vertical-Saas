@@ -11,7 +11,7 @@
  * En mes: columna DIA. En año/historial: columna FECHA (DD/MM/YYYY).
  *
  * Plantilla dinero:
- *   DIA | EFECTIVO | TPV | X | App | UBER | JUST EAT | GLOVO | TOTAL | [uds]
+ *   DIA | EFECTIVO | TPV | App | UBER | JUST EAT | GLOVO | TOTAL | [uds]
  *
  * Dinero por hoja marca:
  *   · Apps (App/Uber/Just Eat/Glovo) = totales por marca del cierre (Caja 2).
@@ -19,7 +19,8 @@
  *   · EFECTIVO / TPV / X = Caja 1 del cierre (`closingBrandTpvTotals`).
  *     Si no hay desglose por marca escrito → 0 (igual que el cierre).
  *   · Apps = totales por marca del cierre (Caja 2).
- * TPV = tarjeta. X = Bizum + otro. App = Flipdish + app propia.
+ * TPV = tarjeta. Bizum/otro (x interno) se suma a EFECTIVO en el Excel (sin columna X).
+ * App = Flipdish (columna del excel cliente) + app Vertial propia (`flipdish` + `app`).
  *
  * Sin config → fallback 2 marcas: MODOMIO (pizza) + BLACK BURGER (burger + tacos).
  * Acceso: CEO / Admin (canDownloadCajaExcel).
@@ -77,7 +78,6 @@ export const CAJA_MONEY_HEADERS = [
   'DIA',
   'EFECTIVO',
   'TPV',
-  'X',
   'App',
   'UBER',
   'JUST EAT',
@@ -894,6 +894,15 @@ function unitValue(row: CajaDayAmounts, key: string): number {
   return 0;
 }
 
+/** Bizum/otro (x interno) → columna EFECTIVO en el Excel cliente (sin barra X). */
+function excelEfectivoDisplay(row: Pick<CajaDayAmounts, 'efectivo' | 'x'>): number {
+  return round2((Number(row.efectivo) || 0) + (Number(row.x) || 0));
+}
+
+function excelMonthEfectivoDisplay(efectivo: number, x: number): number {
+  return round2((Number(efectivo) || 0) + (Number(x) || 0));
+}
+
 function billingDayHasActivity(row: CajaDayAmounts, billingSheet: BrandBillingSheet): boolean {
   if (row.total > 0 || row.efectivo > 0 || row.tpv > 0 || row.x > 0 || row.app > 0
     || row.uber > 0 || row.justEat > 0 || row.glovo > 0) {
@@ -902,13 +911,12 @@ function billingDayHasActivity(row: CajaDayAmounts, billingSheet: BrandBillingSh
   return billingSheet.unitColumns.some((c) => unitValue(row, c.key) > 0);
 }
 
-/** DIA | EFECTIVO | TPV | X | App | UBER | JUST EAT | GLOVO | TOTAL */
+/** DIA | EFECTIVO | TPV | App | UBER | JUST EAT | GLOVO | TOTAL */
 function moneyRowCells(row: CajaDayAmounts): unknown[] {
   return [
     row.day,
-    cellBlankZero(row.efectivo),
+    cellBlankZero(excelEfectivoDisplay(row)),
     cellBlankZero(row.tpv),
-    cellBlankZero(row.x),
     cellBlankZero(row.app),
     cellBlankZero(row.uber),
     cellBlankZero(row.justEat),
@@ -956,9 +964,10 @@ export function buildCajaBillingSheetAoa(
     ...billingSheet.unitColumns.map((c) => c.header),
   ];
 
-  const monthEfectivo = sumMoneyField(allRows, 'efectivo');
+  const monthEfectivo = round2(
+    sumMoneyField(allRows, 'efectivo') + sumMoneyField(allRows, 'x'),
+  );
   const monthTpv = sumMoneyField(allRows, 'tpv');
-  const monthX = sumMoneyField(allRows, 'x');
   const monthApp = sumMoneyField(allRows, 'app');
   const monthUber = sumMoneyField(allRows, 'uber');
   const monthJustEat = sumMoneyField(allRows, 'justEat');
@@ -992,7 +1001,6 @@ export function buildCajaBillingSheetAoa(
     'TOTAL MES',
     cellBlankZero(monthEfectivo),
     cellBlankZero(monthTpv),
-    cellBlankZero(monthX),
     cellBlankZero(monthApp),
     cellBlankZero(monthUber),
     cellBlankZero(monthJustEat),
@@ -1018,7 +1026,6 @@ export const CAJA_RESUMEN_HEADERS = [
   'MES',
   'EFECTIVO',
   'TPV',
-  'X',
   'App',
   'UBER',
   'JUST EAT',
@@ -1034,7 +1041,6 @@ export const CAJA_HISTORY_MONEY_HEADERS = [
   'FECHA',
   'EFECTIVO',
   'TPV',
-  'X',
   'App',
   'UBER',
   'JUST EAT',
@@ -1064,9 +1070,8 @@ export type CajaHistoryDayRow = CajaDayAmounts & { dateKey: string };
 function historyMoneyRowCells(row: CajaHistoryDayRow): unknown[] {
   return [
     formatDateEs(row.dateKey),
-    cellBlankZero(row.efectivo),
+    cellBlankZero(excelEfectivoDisplay(row)),
     cellBlankZero(row.tpv),
-    cellBlankZero(row.x),
     cellBlankZero(row.app),
     cellBlankZero(row.uber),
     cellBlankZero(row.justEat),
@@ -1088,9 +1093,11 @@ export function buildCajaStoreSheetAoa(
   opts?: { companyName?: string },
 ): unknown[][] {
   const rows = monthSheet.rows.filter(storeDayHasActivity);
-  const monthEfectivo = sumMoneyField(monthSheet.rows, 'efectivo');
+  const monthEfectivo = excelMonthEfectivoDisplay(
+    sumMoneyField(monthSheet.rows, 'efectivo'),
+    sumMoneyField(monthSheet.rows, 'x'),
+  );
   const monthTpv = sumMoneyField(monthSheet.rows, 'tpv');
-  const monthX = sumMoneyField(monthSheet.rows, 'x');
   const monthApp = sumMoneyField(monthSheet.rows, 'app');
   const monthUber = sumMoneyField(monthSheet.rows, 'uber');
   const monthJustEat = sumMoneyField(monthSheet.rows, 'justEat');
@@ -1119,7 +1126,6 @@ export function buildCajaStoreSheetAoa(
     'TOTAL MES',
     cellBlankZero(monthEfectivo),
     cellBlankZero(monthTpv),
-    cellBlankZero(monthX),
     cellBlankZero(monthApp),
     cellBlankZero(monthUber),
     cellBlankZero(monthJustEat),
@@ -1203,9 +1209,8 @@ export function buildCajaResumenYearSheetAoa(
   for (const m of months) {
     aoa.push([
       m.label,
-      cellBlankZero(m.efectivo),
+      cellBlankZero(excelMonthEfectivoDisplay(m.efectivo, m.x)),
       cellBlankZero(m.tpv),
-      cellBlankZero(m.x),
       cellBlankZero(m.app),
       cellBlankZero(m.uber),
       cellBlankZero(m.justEat),
@@ -1219,9 +1224,8 @@ export function buildCajaResumenYearSheetAoa(
   aoa.push([]);
   aoa.push([
     'TOTAL AÑO',
-    cellBlankZero(yearTotal('efectivo')),
+    cellBlankZero(excelMonthEfectivoDisplay(yearTotal('efectivo'), yearTotal('x'))),
     cellBlankZero(yearTotal('tpv')),
-    cellBlankZero(yearTotal('x')),
     cellBlankZero(yearTotal('app')),
     cellBlankZero(yearTotal('uber')),
     cellBlankZero(yearTotal('justEat')),
@@ -1312,9 +1316,10 @@ export function buildCajaBillingHistorySheetAoa(
     ...CAJA_HISTORY_MONEY_HEADERS,
     ...billingSheet.unitColumns.map((c) => c.header),
   ];
-  const monthEfectivo = sumMoneyField(allRows, 'efectivo');
+  const monthEfectivo = round2(
+    sumMoneyField(allRows, 'efectivo') + sumMoneyField(allRows, 'x'),
+  );
   const monthTpv = sumMoneyField(allRows, 'tpv');
-  const monthX = sumMoneyField(allRows, 'x');
   const monthApp = sumMoneyField(allRows, 'app');
   const monthUber = sumMoneyField(allRows, 'uber');
   const monthJustEat = sumMoneyField(allRows, 'justEat');
@@ -1344,7 +1349,6 @@ export function buildCajaBillingHistorySheetAoa(
     'TOTAL',
     cellBlankZero(monthEfectivo),
     cellBlankZero(monthTpv),
-    cellBlankZero(monthX),
     cellBlankZero(monthApp),
     cellBlankZero(monthUber),
     cellBlankZero(monthJustEat),
@@ -1362,9 +1366,11 @@ export function buildCajaStoreHistorySheetAoa(
   opts?: { titleSuffix?: string; companyName?: string },
 ): unknown[][] {
   const rows = rowsIn.filter(storeDayHasActivity);
-  const monthEfectivo = sumMoneyField(rowsIn, 'efectivo');
+  const monthEfectivo = excelMonthEfectivoDisplay(
+    sumMoneyField(rowsIn, 'efectivo'),
+    sumMoneyField(rowsIn, 'x'),
+  );
   const monthTpv = sumMoneyField(rowsIn, 'tpv');
-  const monthX = sumMoneyField(rowsIn, 'x');
   const monthApp = sumMoneyField(rowsIn, 'app');
   const monthUber = sumMoneyField(rowsIn, 'uber');
   const monthJustEat = sumMoneyField(rowsIn, 'justEat');
@@ -1394,7 +1400,6 @@ export function buildCajaStoreHistorySheetAoa(
     'TOTAL',
     cellBlankZero(monthEfectivo),
     cellBlankZero(monthTpv),
-    cellBlankZero(monthX),
     cellBlankZero(monthApp),
     cellBlankZero(monthUber),
     cellBlankZero(monthJustEat),
@@ -1470,9 +1475,8 @@ export function buildCajaResumenHistorySheetAoa(
   for (const m of months) {
     aoa.push([
       m.label,
-      cellBlankZero(m.efectivo),
+      cellBlankZero(excelMonthEfectivoDisplay(m.efectivo, m.x)),
       cellBlankZero(m.tpv),
-      cellBlankZero(m.x),
       cellBlankZero(m.app),
       cellBlankZero(m.uber),
       cellBlankZero(m.justEat),
@@ -1486,9 +1490,8 @@ export function buildCajaResumenHistorySheetAoa(
   aoa.push([]);
   aoa.push([
     'TOTAL',
-    cellBlankZero(yearTotal('efectivo')),
+    cellBlankZero(excelMonthEfectivoDisplay(yearTotal('efectivo'), yearTotal('x'))),
     cellBlankZero(yearTotal('tpv')),
-    cellBlankZero(yearTotal('x')),
     cellBlankZero(yearTotal('app')),
     cellBlankZero(yearTotal('uber')),
     cellBlankZero(yearTotal('justEat')),

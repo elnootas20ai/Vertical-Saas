@@ -22,6 +22,7 @@ import {
   buildTpvRegisterSummaryForDay,
   shouldKeepTpvSessionInClientList,
   tpvSessionBelongsToBusiness,
+  tpvSessionMatchesStoreRef,
 } from '../src/app/lib/tpvCajaScope.js';
 import { filterTpvRegisterSessionsForBusiness } from '../services/couchdb.js';
 
@@ -51,6 +52,15 @@ describe('resolveActiveTpvRegisterSession', () => {
   const todayIso = new Date().toISOString();
   const openPdv1 = { _id: 's1', status: 'open', pointOfSaleId: 'pdv-1', openedAt: todayIso };
   const openWc1 = { _id: 's1', status: 'open', pointOfSaleId: 'wc-1', openedAt: todayIso };
+
+  it('empareja sesión por workCenterId extra (binding tablet antes de hidratar PDV)', () => {
+    const session = { pointOfSaleId: 'wc-real-mataro', status: 'open' };
+    const stubPdvs = [{ _id: 'pdv-mataro', workCenterId: 'wc-tablet-pdv-mataro' }];
+    expect(
+      tpvSessionMatchesStoreRef(session, 'pdv-mataro', stubPdvs, ['wc-real-mataro']),
+    ).toBe(true);
+    expect(tpvSessionMatchesStoreRef(session, 'pdv-mataro', stubPdvs, [])).toBe(false);
+  });
 
   it('holds sticky on tablet even when pick momentarily fails to match', () => {
     const r = resolveActiveTpvRegisterSession({

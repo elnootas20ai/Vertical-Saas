@@ -511,10 +511,10 @@ describe('buildCajaMonthSheet', () => {
     const sheet = buildCajaMonthSheet(sessions, { pointOfSaleId: 'pdv-a', yearMonth: '2026-07' });
 
     expect(CAJA_MONEY_HEADERS).toEqual([
-      'DIA', 'EFECTIVO', 'TPV', 'X', 'App', 'UBER', 'JUST EAT', 'GLOVO', 'TOTAL',
+      'DIA', 'EFECTIVO', 'TPV', 'App', 'UBER', 'JUST EAT', 'GLOVO', 'TOTAL',
     ]);
     expect(MODOMIO_HEADERS).toContain('TPV');
-    expect(MODOMIO_HEADERS).toContain('X');
+    expect(MODOMIO_HEADERS).not.toContain('X');
     expect(MODOMIO_HEADERS).toContain('GLOVO');
     expect(MODOMIO_HEADERS).not.toContain('VISA');
     expect(MODOMIO_HEADERS).not.toContain('GLOVVO');
@@ -523,14 +523,14 @@ describe('buildCajaMonthSheet', () => {
     expect(modo[0][0]).toContain('MODOMIO');
     expect(modo[2]).toEqual([...MODOMIO_HEADERS]);
     // Día 1 · Caja 1 del cierre (70 Modomio / 30 BB)
-    expect(modo[3]).toEqual([1, 70, '', '', '', '', '', '', 70, 7]);
-    expect(modo[5]).toEqual(['TOTAL MES', 70, '', '', '', '', '', '', 70, 7]);
+    expect(modo[3]).toEqual([1, 70, '', '', '', '', '', 70, 7]);
+    expect(modo[5]).toEqual(['TOTAL MES', 70, '', '', '', '', '', 70, 7]);
 
     const bb = buildCajaSheetAoa(sheet, 'blackburger');
     expect(bb[0][0]).toContain('BLACK BURGER');
     expect(bb[2]).toEqual([...BLACKBURGER_HEADERS]);
-    expect(bb[3]).toEqual([1, 30, '', '', '', '', '', '', 30, 2, 1]);
-    expect(bb[5]).toEqual(['TOTAL MES', 30, '', '', '', '', '', '', 30, 2, 1]);
+    expect(bb[3]).toEqual([1, 30, '', '', '', '', '', 30, 2, 1]);
+    expect(bb[5]).toEqual(['TOTAL MES', 30, '', '', '', '', '', 30, 2, 1]);
 
     const comp = buildCajaComparativaYearSheetAoa(sessions, {
       pointOfSaleId: 'pdv-a',
@@ -653,7 +653,7 @@ describe('buildCajaMonthSheet', () => {
     const modoTitle = String(built.workbook.Sheets['MM TIANA']?.A1?.v || '');
     expect(modoTitle).toContain('MM TIANA');
     // Marca solo suma la tienda de esta empresa (70), no 999
-    const totalCell = built.workbook.Sheets['MM TIANA']?.I4?.v;
+    const totalCell = built.workbook.Sheets['MM TIANA']?.H4?.v;
     expect(Number(totalCell)).toBe(70);
   });
 
@@ -754,6 +754,6 @@ describe('buildCajaMonthSheet', () => {
     });
     expect(built.sheetNames).toContain('MM TIANA');
     expect(built.rows).toBe(1);
-    expect(Number(built.workbook.Sheets['MM TIANA']?.I4?.v)).toBe(25);
+    expect(Number(built.workbook.Sheets['MM TIANA']?.H4?.v)).toBe(25);
   });
 });

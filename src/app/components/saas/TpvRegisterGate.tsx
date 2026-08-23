@@ -5601,9 +5601,15 @@ export function TpvRegisterGate({
             const bid = scopeBusinessIdRef.current;
             let next = sessData;
             if (isTabletSessionRef.current && tabletPdvId) {
+              const wcId = String(tabletBindingRef.current?.workCenterId || '').trim();
               next = sessData.filter((s) => {
                 const pid = String(s.pointOfSaleId || '').trim();
-                return !pid || tpvSessionMatchesStoreRef(s, tabletPdvId, pointsOfSaleRef.current);
+                return !pid || tpvSessionMatchesStoreRef(
+                  s,
+                  tabletPdvId,
+                  pointsOfSaleRef.current,
+                  wcId ? [wcId] : [],
+                );
               });
             } else if (pointsOfSaleRef.current.length > 0) {
               next = sessData.filter((s) => shouldKeepTpvSessionInList(s, pointsOfSaleRef.current, bid));
@@ -6161,12 +6167,18 @@ export function TpvRegisterGate({
         }
 
         if (tabletFastPath) {
+          const wcId = String(tabletBindingRef.current?.workCenterId || '').trim();
           setSessions((prev) =>
             mergeTpvRegisterSessionsPreservingOpen(
               prev,
               sessData.filter((s) => {
                 const pid = String(s.pointOfSaleId || '').trim();
-                return !pid || tpvSessionMatchesStoreRef(s, tabletPdvId, pointsOfSaleRef.current);
+                return !pid || tpvSessionMatchesStoreRef(
+                  s,
+                  tabletPdvId,
+                  pointsOfSaleRef.current,
+                  wcId ? [wcId] : [],
+                );
               }),
             ),
           );
