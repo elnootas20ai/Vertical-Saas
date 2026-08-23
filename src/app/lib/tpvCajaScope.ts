@@ -479,6 +479,16 @@ export function hasTpvOpenRegisterLatch(): boolean {
   }
 }
 
+/** Tablero TPV operativo: caja en Context, sticky o latch (parpadeos React / tablet). */
+export function canEnterTpvOrderFlow(signals?: {
+  registerOpen?: boolean;
+  stickyOpen?: boolean;
+  boardReady?: boolean;
+}): boolean {
+  if (signals?.registerOpen || signals?.stickyOpen || signals?.boardReady) return true;
+  return hasTpvOpenRegisterLatch();
+}
+
 /** PDV id o workCenterId de la sesión ↔ tienda elegida (tablet/CEO). */
 export function tpvSessionMatchesStoreRef(
   session: Pick<TpvRegisterSession, 'pointOfSaleId'>,

@@ -23,6 +23,8 @@ import {
   shouldKeepTpvSessionInClientList,
   tpvSessionBelongsToBusiness,
   tpvSessionMatchesStoreRef,
+  canEnterTpvOrderFlow,
+  writeTpvOpenRegisterLatch,
 } from '../src/app/lib/tpvCajaScope.js';
 import { filterTpvRegisterSessionsForBusiness } from '../services/couchdb.js';
 
@@ -516,5 +518,28 @@ describe('cashWithdrawnAtClose', () => {
     ];
     expect(sumCashWithdrawnAtClose(sessions)).toBe(150);
     expect(sumCashWithdrawnAtClose(sessions, (s) => String(s.openedAt || '').startsWith('2026-08'))).toBe(80);
+  });
+});
+
+describe('canEnterTpvOrderFlow', () => {
+  it('permite entrar con latch aunque el Context parpadee', () => {
+    const store = new Map();
+    const prev = global.sessionStorage;
+    global.sessionStorage = {
+      getItem: (k) => store.get(k) ?? null,
+      setItem: (k, v) => { store.set(k, v); },
+      removeItem: (k) => { store.delete(k); },
+    };
+    try {
+      writeTpvOpenRegisterLatch({ _id: 'sess-1', status: 'open' });
+      expect(canEnterTpvOrderFlow({ registerOpen: false, stickyOpen: false, boardReady: false })).toBe(true);
+      writeTpvOpenRegisterLatch(null);
+    } finally {
+      global.sessionStorage = prev;
+    }
+  });
+
+  it('permite entrar con boardReady sin latch', () => {
+    expect(canEnterTpvOrderFlow({ boardReady: true })).toBe(true);
   });
 });

@@ -47,6 +47,7 @@ import {
 } from '../../lib/promoCodes';
 import { listPromotionsRequest } from '../../lib/promotionsApi';
 import { prefetchDeliveryTicketPrint, printDeliveryTicket } from '../../lib/deliveryTicketPrint';
+import { TpvClientRecentOrdersStrip } from '../../components/saas/tpv/TpvClientRecentOrdersStrip';
 import { businessTicketInfoFrom, formatTicketCustomerAddress, formatTicketCustomerPhone } from '../../lib/deliveryTicketHelpers';
 import { OrderTicketButtons } from '../../components/delivery/OrderTicketButtons';
 import { fetchClientPromotionsRequest, type ClientPromotion } from '../../lib/clientPromotionsApi';
@@ -5558,8 +5559,23 @@ export function TpvRapidoOrderFlow({
               </p>
             ) : null}
 
+            {selectedClient?.id
+            && userId
+            && !isQuickAttentionFlowClient(selectedClient)
+            && !isTpvSyntheticClientId(selectedClient.id)
+            && !showNewAddress
+            && !editingAddressId ? (
+              <TpvClientRecentOrdersStrip
+                userId={userId}
+                clientId={selectedClient.id}
+                clientName={selectedClient.name}
+                limit={5}
+                className="mb-1"
+              />
+            ) : null}
+
             {deliveryCanContinue && (
-              <div className="flex justify-end mt-4">
+              <div className="flex justify-end mt-5 pt-1">
                 <button
                   type="button"
                   onClick={() => completeStep('delivery')}

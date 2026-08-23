@@ -36,7 +36,7 @@ import { pickDefaultActivePdvId } from '../../../lib/deliveryOpsPdvSelection';
 import { useTpvOrderFlowChrome, useTpvSuppressBottomBar, useTpvOrderFlowLockControls } from '../../../context/TpvChromeContext';
 import {
   cancelledOrderHistoryLabel,
-  hasTpvOpenRegisterLatch,
+  canEnterTpvOrderFlow,
   isCancelledDeliveryOrder,
   isDeliveredBoardOrder,
   isTpvMontajeBoardOrder,
@@ -1393,15 +1393,22 @@ export function WorkerTpvDelivery({
   }
   const register = registerCtx ?? registerStickyRef.current;
   const registerOpen = Boolean(register && isTpvRegisterSessionOpen(register.session));
-  // No usar boardReady solo: el Worker ya monta con tablero. Latch sin sesión real
-  // dejaba entrar al pedido y fallaba al cobrar.
-  const canUseOrderFlow =
-    registerOpen
-    || Boolean(
-      registerStickyRef.current
-      && isTpvRegisterSessionOpen(registerStickyRef.current.session),
-    )
-    || (boardReady && hasTpvOpenRegisterLatch());
+  const resolveRegisterForFlow = useCallback((): TpvRegisterContextType | null => {
+    if (register && isTpvRegisterSessionOpen(register.session)) return register;
+    const sticky = registerStickyRef.current;
+    if (sticky && isTpvRegisterSessionOpen(sticky.session)) return sticky;
+    return null;
+  }, [register]);
+  const orderFlowSignals = useCallback(() => {
+    const sticky = registerStickyRef.current;
+    return {
+      registerOpen,
+      stickyOpen: Boolean(sticky && isTpvRegisterSessionOpen(sticky.session)),
+      boardReady,
+    };
+  }, [registerOpen, boardReady]);
+  // El tablero solo monta tras caja abierta (gate); latch/contexto cubren parpadeos.
+  const canUseOrderFlow = canEnterTpvOrderFlow(orderFlowSignals());
   const historySectionRef = useRef<HTMLDivElement | null>(null);
 
   const isTabletSession = registerScope.isTabletSession;
@@ -2120,7 +2127,6 @@ export function WorkerTpvDelivery({
       const sticky = registerStickyRef.current;
       if (sticky && isTpvRegisterSessionOpen(sticky.session)) return;
       if (boardReady) return;
-      if (hasTpvOpenRegisterLatch()) return;
       releaseOrderFlowClickLock();
       setEditingOrder(null);
       setView('board');
@@ -2129,16 +2135,7 @@ export function WorkerTpvDelivery({
   }, [view, canUseOrderFlow, boardReady, releaseOrderFlowClickLock]);
 
   const startEditOrder = useCallback((order: DeliveryOrder) => {
-    const sticky = registerStickyRef.current;
-    const ok =
-      registerOpen
-      || Boolean(sticky && isTpvRegisterSessionOpen(sticky.session))
-      || (boardReady && hasTpvOpenRegisterLatch());
-    if (!ok) {
-      toast.error('Abre la caja de la tienda antes de editar un pedido');
-      return;
-    }
-    // Lock YA (antes del paint): evita OpeningScreen / blanco al entrar a editar.
+    // Si el tablero está visible, el gate ya validó caja abierta; no bloquear por Context parpadeante.
     if (!orderFlowClickLockRef.current) {
       orderFlowLock.acquire();
       orderFlowClickLockRef.current = true;
@@ -2146,25 +2143,16 @@ export function WorkerTpvDelivery({
     setSelectedOrder(null);
     setEditingOrder(order);
     setView('new-order');
-  }, [registerOpen, boardReady, orderFlowLock]);
+  }, [orderFlowLock]);
 
   const startNewOrder = useCallback(() => {
-    const sticky = registerStickyRef.current;
-    const ok =
-      registerOpen
-      || Boolean(sticky && isTpvRegisterSessionOpen(sticky.session))
-      || (boardReady && hasTpvOpenRegisterLatch());
-    if (!ok) {
-      toast.error('Abre la caja de la tienda antes de crear un pedido');
-      return;
-    }
     if (!orderFlowClickLockRef.current) {
       orderFlowLock.acquire();
       orderFlowClickLockRef.current = true;
     }
     setEditingOrder(null);
     setView('new-order');
-  }, [registerOpen, boardReady, orderFlowLock]);
+  }, [orderFlowLock]);
 
   const exitTabletTpv = useCallback(() => {
     void leaveTpvTabletSession(logout, { navigate });
@@ -2371,36 +2359,13 @@ export function WorkerTpvDelivery({
   }
 
   if (view === 'new-order') {
-    const registerForFlow =
-      (register && isTpvRegisterSessionOpen(register.session) ? register : null)
-      ?? (
-        registerStickyRef.current
-        && isTpvRegisterSessionOpen(registerStickyRef.current.session)
-          ? registerStickyRef.current
-          : null
-      );
-    // Sin sesión real no montar el cobro: el latch dejaba pasar y el toast salía al enviar.
-    if (!registerForFlow) {
-      return (
-        <div className="flex h-full min-h-0 flex-col items-center justify-center gap-3 p-6 text-center">
-          <div className="animate-spin w-8 h-8 border-2 border-gray-300 border-t-gray-900 rounded-full" />
-          <p className="text-sm text-gray-600 dark:text-gray-400">Recuperando caja abierta…</p>
-          <button
-            type="button"
-            onClick={backToBoard}
-            className="mt-1 text-sm font-semibold text-[#2563EB] hover:underline"
-          >
-            Volver al tablero
-          </button>
-        </div>
-      );
-    }
+    const registerForFlow = resolveRegisterForFlow();
     return (
       <TpvRapidoOrderFlow
         tabletMode
         onBack={backToBoard}
         editingDeliveryOrder={editingOrder}
-        registerOverride={registerForFlow}
+        registerOverride={registerForFlow ?? undefined}
         onEditingDeliveryOrderSaved={() => {
           releaseOrderFlowClickLock();
           setEditingOrder(null);

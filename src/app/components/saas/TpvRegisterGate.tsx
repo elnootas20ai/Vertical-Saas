@@ -6404,16 +6404,19 @@ export function TpvRegisterGate({
       return;
     }
     if (loading) {
+      if (isTpvRegisterSessionOpen(stickyOpenSessionRef.current)) {
+        writeTpvOpenRegisterLatch(stickyOpenSessionRef.current);
+      }
       if (!openingScreenUnlockedRef.current) {
         setOpeningRecoverHold(true);
       }
       return;
     }
     // Sin caja en el pick actual → Abrir caja. Mantener latch si sticky sigue open
-    // (otra tienda / ghost), pero NO quedarse en «Recuperando caja…».
+    // (otra tienda / ghost), pero NO quedar sin latch a mitad de turno.
     if (isTpvRegisterSessionOpen(stickyOpenSessionRef.current)) {
       writeTpvOpenRegisterLatch(stickyOpenSessionRef.current);
-    } else {
+    } else if (!orderFlowActiveRef.current) {
       writeTpvOpenRegisterLatch(null);
     }
     if (openingScreenUnlockedRef.current) {
@@ -7802,9 +7805,10 @@ export function TpvRegisterGate({
 
   // Tras el guard, boardSession es la caja open (active o sticky).
   const openBoardSession = boardSession!;
+  writeTpvOpenRegisterLatch(openBoardSession);
 
   return wrapShell(
-    <TpvRegisterBoardReadyContext.Provider value>
+    <TpvRegisterBoardReadyContext.Provider value={true}>
       <TpvStatusBarQuickActionsContext.Provider value={statusBarQuickActionsApi}>
       <div className={tpvFrameClass}>
         <RegisterStatusBar
