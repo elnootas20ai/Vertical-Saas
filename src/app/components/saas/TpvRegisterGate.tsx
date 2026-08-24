@@ -1089,7 +1089,12 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
         pointsOfSale,
         tabletWorkCenterId: tabletWorkCenterId || readTpvTabletBinding()?.workCenterId,
       });
-      return pickNewestOpenRegisterSessionForStore(opens, pdvId, pointsOfSale, alternateRefs);
+      const fromList = pickNewestOpenRegisterSessionForStore(opens, pdvId, pointsOfSale, alternateRefs);
+      if (fromList) return fromList;
+    }
+    const cached = readTabletCajaOpeningHint(pdvId || restrictedToPdvId || undefined);
+    if (cached?.openSession && isTpvRegisterSessionOpen(cached.openSession)) {
+      return cached.openSession;
     }
     return null;
   }, [
@@ -1108,9 +1113,12 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
     <div className="min-h-[100dvh] min-h-screen bg-stone-50 dark:bg-stone-950 flex flex-col">
       <div className="flex-1 flex items-stretch sm:items-center justify-center p-2 sm:p-3">
       <div className="relative bg-white dark:bg-stone-900 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-lg w-full max-w-4xl min-h-[min(88dvh,680px)] sm:min-h-0 sm:max-h-[min(88svh,680px)] flex flex-col">
+        <span className="absolute left-3 top-2 z-10 text-[9px] font-mono text-stone-400 pointer-events-none select-none">
+          {String(import.meta.env.VITE_BUILD_STAMP || 'caja v5')}
+        </span>
         {tabletBoundOpening ? (
           <span className="absolute right-3 bottom-[5.5rem] z-10 text-[10px] font-mono text-stone-400 pointer-events-none select-none">
-            {String(import.meta.env.VITE_BUILD_STAMP || 'caja v4')}
+            tablet
           </span>
         ) : null}
         <div className="shrink-0 border-b border-stone-200 dark:border-stone-800 flex items-center gap-2.5 px-3 sm:px-4 py-2.5">
@@ -5847,20 +5855,24 @@ export function TpvRegisterGate({
   /** Última caja abierta conocida: no perder el tablero si el pick de tienda parpadea. */
   const stickyOpenSessionRef = useRef<TpvRegisterSession | null>(null);
 
-  // Tablet/código: mostrar apertura al momento (no bloquear en «Recuperando caja…»).
+  // Tablet/código: mostrar apertura al momento (2ª tablet, app nativa, sin esperar red).
   useEffect(() => {
-    if (!hasTabletStoreCode && !readTpvTabletBinding()?.pdvId) return;
+    const bindingPdv = String(readTpvTabletBinding()?.pdvId || '').trim();
+    if (!isTabletCajaScope && !bindingPdv) return;
     openingScreenUnlockedRef.current = true;
     setOpeningScreenUnlocked(true);
     setOpeningRecoverHold(false);
+    // Cada entrada al TPV en tablet: pedir Continuar si hay caja abierta (no saltar en silencio).
     setAckedOpenSessionId(null);
-  }, [hasTabletStoreCode]);
+  }, [isTabletCajaScope, tabletBinding?.pdvId]);
 
   const hydrateTabletCajaFromHint = useCallback(async () => {
     const binding = tabletBindingRef.current;
     const pdvId = String(binding?.pdvId || initialManagerPdvIdRef.current || '').trim();
     if (!pdvId) return;
-    const uid = String(dataUserIdRef.current || binding?.dataUserId || '').trim();
+    const uid = String(
+      dataUserIdRef.current || binding?.dataUserId || '',
+    ).trim();
     const bid = String(scopeBusinessIdRef.current || binding?.businessId || '').trim();
 
     const cached = readTabletCajaOpeningHint(pdvId);
@@ -5911,9 +5923,10 @@ export function TpvRegisterGate({
   }, [tabletBinding?.pdvId]);
 
   useEffect(() => {
-    if (!tabletBinding?.pdvId && !isTabletCajaScope) return;
+    const pdvId = String(tabletBinding?.pdvId || initialManagerPdvId || '').trim();
+    if (!pdvId) return;
     void hydrateTabletCajaFromHint();
-  }, [isTabletCajaScope, dataUserId, scopeBusinessId, tabletBinding?.pdvId, hydrateTabletCajaFromHint]);
+  }, [isTabletCajaScope, dataUserId, scopeBusinessId, tabletBinding?.pdvId, initialManagerPdvId, hydrateTabletCajaFromHint]);
 
   // Bar/restaurante CEO: sin sticky el pick de PDV puede soltar la caja un frame
   // al abrir mesa → TPV embebido se queda en «Recuperando la caja…».
