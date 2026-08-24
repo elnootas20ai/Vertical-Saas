@@ -97,6 +97,21 @@ describe('tpvTabletSession — rutas tablet', () => {
     ).toBe(true);
   });
 
+  it('quien activó el código entra sin dataUserId en binding', () => {
+    expect(
+      isTpvTabletBindingAllowedForAuth({
+        binding: {
+          pdvId: 'pdv-1',
+          businessId: 'biz-1',
+          authUserId: 'worker-1',
+        },
+        authUser: { user_id: 'worker-1' },
+        businesses: [],
+        businessesSettled: true,
+      }),
+    ).toBe(true);
+  });
+
   it('isTpvTabletWorkerPath reconoce delivery, restaurant y prefijo worker/tpv', () => {
     expect(isTpvTabletWorkerPath(TPV_TABLET_DELIVERY_PATH)).toBe(true);
     expect(isTpvTabletWorkerPath(TPV_TABLET_RESTAURANT_PATH)).toBe(true);
@@ -154,7 +169,7 @@ describe('tpvTabletSession — rutas tablet', () => {
     expect(readTpvTabletBinding()).toBeNull();
   });
 
-  it('leaveTpvTabletSession hace logout y sale a login trabajador (sin pillarse en login empresa)', async () => {
+  it('leaveTpvTabletSession hace logout y sale a la pantalla de código con el código recordado', async () => {
     writeTpvTabletBinding({
       terminalCode: 'STORE-001',
       pdvId: 'pdv-1',
@@ -167,6 +182,7 @@ describe('tpvTabletSession — rutas tablet', () => {
     const prev = globalThis.window;
     globalThis.window = {
       location: {
+        pathname: '/saas/worker/tpv/delivery',
         replace: (url) => {
           replaced.push(url);
         },
@@ -178,15 +194,13 @@ describe('tpvTabletSession — rutas tablet', () => {
       });
       expect(logoutCalls).toBe(1);
       expect(readTpvTabletBinding()).toBeNull();
-      expect(replaced).toEqual([
-        `${AUTH_PATHS.workerLogin}?from=tpv-tablet&code=STORE-001`,
-      ]);
+      expect(replaced).toEqual([`${TPV_TABLET_LOGIN_PATH}?code=STORE-001`]);
     } finally {
       globalThis.window = prev;
     }
   });
 
-  it('leaveTpvTabletSession con keepAuthAndGoTo no hace logout (admin)', async () => {
+  it('leaveTpvTabletSession ignora keepAuthAndGoTo (deprecado): también sale a login por código', async () => {
     writeTpvTabletBinding({
       terminalCode: 'STORE-001',
       pdvId: 'pdv-1',
@@ -199,6 +213,7 @@ describe('tpvTabletSession — rutas tablet', () => {
     const prev = globalThis.window;
     globalThis.window = {
       location: {
+        pathname: '/saas/worker/tpv/delivery',
         replace: (url) => {
           replaced.push(url);
         },
@@ -208,9 +223,9 @@ describe('tpvTabletSession — rutas tablet', () => {
       await leaveTpvTabletSession(async () => {
         logoutCalls += 1;
       }, { keepAuthAndGoTo: '/saas/delivery-ops' });
-      expect(logoutCalls).toBe(0);
+      expect(logoutCalls).toBe(1);
       expect(readTpvTabletBinding()).toBeNull();
-      expect(replaced).toEqual(['/saas/delivery-ops']);
+      expect(replaced).toEqual([`${TPV_TABLET_LOGIN_PATH}?code=STORE-001`]);
     } finally {
       globalThis.window = prev;
     }

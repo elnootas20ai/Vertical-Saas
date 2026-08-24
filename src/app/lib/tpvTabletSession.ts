@@ -73,6 +73,19 @@ export function readTabletCajaOpeningHint(pdvId?: string): TabletCajaOpeningHint
   }
 }
 
+/** Sesiones de caja cacheadas en tablet (carga instantánea al abrir TPV). */
+export function seedTabletSessionsFromCache(
+  pdvId?: string | null,
+): import('./deliveryApi').TpvRegisterSession[] {
+  const pick = String(pdvId || readTpvTabletBinding()?.pdvId || '').trim();
+  if (!pick) return [];
+  const cached = readTabletCajaOpeningHint(pick);
+  if (!cached) return [];
+  return [cached.openSession, cached.lastClosed].filter(
+    (s): s is import('./deliveryApi').TpvRegisterSession => Boolean(s?._id),
+  );
+}
+
 export function clearTabletCajaOpeningHint(): void {
   try {
     localStorage.removeItem(CAJA_HINT_KEY);
@@ -282,6 +295,7 @@ export async function leaveTpvTabletSession(
   }
 
   const paintCodePlaceholder = () => {
+    if (typeof document === 'undefined') return;
     const root = document.getElementById('root');
     if (!root) return;
     root.innerHTML = `
@@ -380,8 +394,7 @@ export function isTpvTabletBindingAllowedForAuth(params: {
   if (!binding) return false;
   const pdvId = String(binding.pdvId || '').trim();
   const businessId = normalizeBusinessScopeId(binding.businessId);
-  const dataUserId = String(binding.dataUserId || '').trim();
-  if (!pdvId || !businessId || !dataUserId) return false;
+  if (!pdvId || !businessId) return false;
 
   const selfId = String(params.authUser?.user_id || params.authUser?.id || '').trim();
   if (!selfId) return false;
@@ -389,10 +402,11 @@ export function isTpvTabletBindingAllowedForAuth(params: {
   const boundAuth = String(binding.authUserId || '').trim();
   if (boundAuth && boundAuth !== selfId) return false;
 
-  // Quien activó el código en este dispositivo: OK siempre.
-  // Debe ir ANTES de mirar la lista de empresas: si el API tarda, viene vacío
-  // o no trae aún ese negocio, no se puede echar del TPV tras un login correcto.
+  // Quien activó el código en este dispositivo: OK siempre (sin esperar empresas ni dataUserId).
   if (boundAuth === selfId) return true;
+
+  const dataUserId = String(binding.dataUserId || '').trim();
+  if (!dataUserId) return false;
 
   const list = Array.isArray(params.businesses) ? params.businesses : [];
   if (list.length === 0) {

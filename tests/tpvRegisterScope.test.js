@@ -80,6 +80,30 @@ describe('tpvRegisterScope — regresión caja tablet', () => {
     expect(r.effectiveDataUserId).toBe('yo');
   });
 
+  it('binding sin dataUserId: usa titular de la empresa (cualquier tienda delivery)', () => {
+    const r = resolveTpvRegisterScope({
+      currentBusiness: { business_id: 'otra', id: 'otra' },
+      tabletBinding: {
+        pdvId: 'pdv-vb64',
+        businessId: 'biz-tiana',
+        authUserId: 'worker-1',
+      },
+      authUser: { user_id: 'worker-1' },
+      pathname: '/saas/worker/tpv/delivery',
+      businesses: [
+        {
+          business_id: 'biz-tiana',
+          owner_user_id: 'owner-tiana',
+          members: [{ user_id: 'worker-1' }],
+        },
+      ],
+      businessesSettled: true,
+    });
+    expect(r.hasTabletStoreCode).toBe(true);
+    expect(r.effectiveDataUserId).toBe('owner-tiana');
+    expect(r.scopeBusinessId).toBe('biz-tiana');
+  });
+
   it('código tienda en ruta no-tpv: caja usa binding (hasTabletStoreCode) sin UI tablet', () => {
     const r = resolveTpvRegisterScope({
       currentBusiness: { business_id: 'rest-1', id: 'rest-1', owner_user_id: 'owner-1' },
@@ -178,6 +202,19 @@ describe('tpvRegisterScope — regresión caja tablet', () => {
         scopeBusinessId: 'biz-1',
       }).canLoad,
     ).toBe(true);
+  });
+
+  it('evaluateTpvRegisterLoadGate: tablet caja scope carga sin lista de empresas', () => {
+    const r = evaluateTpvRegisterLoadGate({
+      businessLoading: true,
+      businessesFetchSettled: false,
+      isTabletSession: false,
+      hasTabletStoreCode: false,
+      isTabletCajaScope: true,
+      dataUserId: 'owner-1',
+      scopeBusinessId: 'biz-1',
+    });
+    expect(r.canLoad).toBe(true);
   });
 
   it('shouldApplyTpvRegisterLoadResult: tablet aplica aunque activeBid difiera', () => {

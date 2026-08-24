@@ -41,7 +41,10 @@ workflows:
           done
           exit 1
       - name: Build web de producción
-        script: npm run build
+        script: |
+          export VITE_BUILD_STAMP="$(git rev-parse --short HEAD)"
+          echo "VITE_BUILD_STAMP=$VITE_BUILD_STAMP"
+          npm run build
       - name: Sincronizar Capacitor iOS (front embebido en dist/)
         script: |
           set -e
@@ -113,7 +116,7 @@ workflows:
           set -e
           cd ios/App
           # Marketing: front embebido en IPA (misma cara que el build de este commit).
-          agvtool new-marketing-version 1.13
+          agvtool new-marketing-version 1.14
           # Build: mayor que el último en TestFlight (si no, Apple rechaza el upload).
           LATEST_TF=""
           LATEST_TF=$(app-store-connect get-latest-testflight-build-number com.vertial.app 2>/dev/null || true)
