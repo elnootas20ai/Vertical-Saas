@@ -22,6 +22,9 @@ import {
 import { fetchTpvStoreOpeningHintRequest } from '../../lib/deliveryApi';
 import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
 
+/** Marca visible del front embebido: si la tablet no la muestra, el build es viejo. */
+const TPV_UI_BUILD_STAMP = 'caja 24/08 · v2';
+
 export function TpvTabletLogin() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -269,6 +272,9 @@ export function TpvTabletLogin() {
                 Soy trabajador — iniciar sesión
               </button>
             </form>
+            <p className="mt-4 text-center text-[10px] text-stone-400 dark:text-stone-600">
+              {TPV_UI_BUILD_STAMP}
+            </p>
           </div>
         </div>
       </div>
