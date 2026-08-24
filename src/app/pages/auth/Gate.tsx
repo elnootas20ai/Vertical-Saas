@@ -198,7 +198,7 @@ export function Gate() {
         navigate('/saas/dashboard', { replace: true });
         return;
       }
-      navigate(resolveWorkerSessionEntryPath(user), { replace: true });
+      navigate(resolveWorkerSessionEntryPath(user, businesses), { replace: true });
     }
   }, [user, isWorkerUser, navigate, businesses]);
 

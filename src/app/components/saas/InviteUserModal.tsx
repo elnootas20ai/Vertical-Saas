@@ -1216,7 +1216,7 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                       businessType={inviteBusinessType}
                     />
                     {role && (() => {
-                      if (inviteRoleUsesCeoAdminPanel(role)) {
+                      if (inviteRoleUsesCeoAdminPanel(role, inviteBusinessType)) {
                         const isEvents = inviteBusinessType === 'events';
                         const isAccountAdmin = role === 'Admin' || role === 'Gerente' || role === 'GerenteGrupo';
                         const isAdministrador = role === 'Administrador';

@@ -1,5 +1,6 @@
 import type { AuthUser, EmploymentInfo } from './authApi';
 import { normalizeBirthDateIso } from './birthDateIso';
+import { isDeliveryInvitedEncargadoWorker } from './deliveryEncargadoAccess';
 
 export interface PersonalData {
   dni: string;
@@ -137,10 +138,13 @@ export function isManagerRole(role?: string | null): boolean {
   return MANAGER_ROLES.has(normalized) || MANAGER_ROLES.has(normalized.toLowerCase());
 }
 
-export function isWorkerProfileSubject(user?: Pick<AuthUser, 'accountType' | 'invitedBy' | 'linkedBusinessId' | 'role'> | null): boolean {
+export function isWorkerProfileSubject(
+  user?: Pick<AuthUser, 'accountType' | 'invitedBy' | 'linkedBusinessId' | 'role'> | null,
+  businesses?: ReadonlyArray<{ business_id?: string; id?: string; businessType?: string; owner_user_id?: string; members?: { user_id?: string; role?: string }[] }> | null,
+): boolean {
   if (!user) return false;
   if (user.accountType === 'company') return false;
-  if (isManagerRole(user.role)) return false;
+  if (isManagerRole(user.role) && !isDeliveryInvitedEncargadoWorker(user, businesses)) return false;
   if (user.accountType === 'user') return true;
   if (String(user.invitedBy || '').trim()) return true;
   if (user.linkedBusinessId && user.role) return true;
@@ -264,7 +268,9 @@ export function resolveWorkerSessionEntryPath(
     | 'personalData'
     | 'employment'
     | 'workerIdentityCompleted'
+    | 'user_id'
   > | null,
+  businesses?: ReadonlyArray<{ business_id?: string; id?: string; businessType?: string; owner_user_id?: string; members?: { user_id?: string; role?: string }[] }> | null,
 ): string {
   if (!user) return WORKER_DEFAULT_LANDING_PATH;
   if (user.accountType === 'company') return '/saas/dashboard';
@@ -272,8 +278,8 @@ export function resolveWorkerSessionEntryPath(
     return '/saas/user-dashboard';
   }
   if (needsWorkerPayrollSetup(user)) return WORKER_PAYROLL_SETUP_PATH;
-  // 2º Admin / gestores: panel SaaS, no «Mi trabajo».
-  if (isManagerRole(user.role)) {
+  // 2º Admin / gestores: panel SaaS, no «Mi trabajo» (salvo Encargado delivery invitado).
+  if (isManagerRole(user.role) && !isDeliveryInvitedEncargadoWorker(user, businesses)) {
     const landing = String(user.landingPage || '').trim();
     if (landing.startsWith('/saas/') && !isEphemeralWorkerSetupPath(landing) && !landing.startsWith('/saas/worker')) {
       return normalizeWorkerLandingPage(landing);
@@ -351,12 +357,13 @@ export function resolveLandingAfterWorkerSetup(
 }
 
 export function resolveRedirectAfterInvitationAccept(
-  account: Pick<AuthUser, 'linkedBusinessId' | 'landingPage' | 'workerProfileCompletion' | 'phone' | 'personalData' | 'workerIdentityCompleted' | 'accountType' | 'invitedBy' | 'role'>,
+  account: Pick<AuthUser, 'linkedBusinessId' | 'landingPage' | 'workerProfileCompletion' | 'phone' | 'personalData' | 'workerIdentityCompleted' | 'accountType' | 'invitedBy' | 'role' | 'user_id'>,
+  businesses?: ReadonlyArray<{ business_id?: string; id?: string; businessType?: string; owner_user_id?: string; members?: { user_id?: string; role?: string }[] }> | null,
 ): string {
   if (needsWorkerPayrollSetup(account)) {
     return WORKER_PAYROLL_SETUP_PATH;
   }
-  if (isManagerRole(account.role)) {
+  if (isManagerRole(account.role) && !isDeliveryInvitedEncargadoWorker(account, businesses)) {
     const landing = String(account.landingPage || '').trim();
     if (landing.startsWith('/saas/') && !isEphemeralWorkerSetupPath(landing) && !landing.startsWith('/saas/worker')) {
       return normalizeWorkerLandingPage(landing);

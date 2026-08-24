@@ -1,4 +1,7 @@
-import { userOwnsAnyBusiness } from '../lib/workerProfileCompletion';
+export { isDeliveryInvitedEncargadoWorker } from './deliveryEncargadoAccess';
+import { isDeliveryBusinessType } from './deliverySetup';
+import { isDeliveryInvitedEncargadoWorker } from './deliveryEncargadoAccess';
+import { userOwnsAnyBusiness } from './workerProfileCompletion';
 
 /** Roles de backoffice RRHH / equipo (invitar, nóminas, ZIP). */
 export const TEAM_MANAGER_ROLES = new Set([
@@ -14,10 +17,16 @@ export const TEAM_MANAGER_ROLES = new Set([
 type TeamUser = {
   user_id?: string;
   role?: string;
+  accountType?: string;
+  invitedBy?: string;
+  linkedBusinessId?: string;
   permissions?: Record<string, { view?: boolean; edit?: boolean }>;
 } | null | undefined;
 
 type TeamBusiness = {
+  business_id?: string;
+  id?: string;
+  businessType?: string;
   owner_user_id?: string;
   members?: { user_id?: string; role?: string }[];
 } | null | undefined;
@@ -34,15 +43,23 @@ function memberHasManagerRole(businesses: TeamBusiness[] | null | undefined, use
     if (!b) continue;
     for (const m of b.members || []) {
       if (bareUserId(m?.user_id) !== uid) continue;
-      if (TEAM_MANAGER_ROLES.has(String(m?.role || '').trim())) return true;
+      const memberRole = String(m?.role || '').trim();
+      if (!TEAM_MANAGER_ROLES.has(memberRole)) continue;
+      if (memberRole === 'Encargado' && isDeliveryBusinessType(b.businessType)) continue;
+      return true;
     }
   }
   return false;
 }
 
-/** Al invitar: Admin / Administrador / Gestor / Encargado usan panel SaaS (no «Mi trabajo»). */
-export function inviteRoleUsesCeoAdminPanel(role?: string | null): boolean {
-  return TEAM_MANAGER_ROLES.has(String(role || '').trim());
+/** Al invitar: Admin / Administrador / Gestor usan panel SaaS. Delivery Encargado → Mi trabajo. */
+export function inviteRoleUsesCeoAdminPanel(
+  role?: string | null,
+  businessType?: string | null,
+): boolean {
+  const normalizedRole = String(role || '').trim();
+  if (normalizedRole === 'Encargado' && isDeliveryBusinessType(businessType)) return false;
+  return TEAM_MANAGER_ROLES.has(normalizedRole);
 }
 
 export function canManageTeam(
@@ -51,6 +68,7 @@ export function canManageTeam(
 ): boolean {
   if (!user?.user_id) return false;
   if (userOwnsAnyBusiness(user.user_id, businesses)) return true;
+  if (isDeliveryInvitedEncargadoWorker(user, businesses)) return false;
   if (user.permissions?.team?.edit) return true;
   if (TEAM_MANAGER_ROLES.has(String(user.role || '').trim())) return true;
   // 2º Admin: el rol vive en business.members aunque account.role falle.

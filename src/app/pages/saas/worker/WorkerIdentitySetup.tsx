@@ -11,6 +11,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
+import { useBusiness } from '../../../context/BusinessContext';
 import {
   buildDefaultPersonalData,
   markWorkerIdentityBypass,
@@ -109,12 +110,13 @@ function validateForm(
 export function WorkerIdentitySetup() {
   const navigate = useNavigate();
   const { user, updateUser } = useAuth();
+  const { businesses } = useBusiness();
 
   /** Paso 1 obsoleto: redirigir al destino correcto (ya no se usa tras login). */
   useEffect(() => {
     if (!user) return;
-    navigate(resolveWorkerSessionEntryPath(user), { replace: true });
-  }, [user, navigate]);
+    navigate(resolveWorkerSessionEntryPath(user, businesses), { replace: true });
+  }, [user, navigate, businesses]);
 
   const birthDateRef = useRef<BirthDateEsFieldHandle>(null);
   const errorBannerRef = useRef<HTMLDivElement>(null);

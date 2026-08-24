@@ -61,10 +61,10 @@ export function UserDashboard() {
   useEffect(() => {
     if (!user || !linkedWorker) return;
     navigate(
-      canUseCeoAdminPanel(user) ? '/saas/dashboard' : resolveWorkerSessionEntryPath(user),
+      canUseCeoAdminPanel(user, businesses) ? '/saas/dashboard' : resolveWorkerSessionEntryPath(user, businesses),
       { replace: true },
     );
-  }, [user, linkedWorker, navigate]);
+  }, [user, linkedWorker, navigate, businesses]);
 
   const ownsBusiness = userOwnsAnyBusiness(user?.user_id, businesses);
   const ownedBusinesses = useMemo(

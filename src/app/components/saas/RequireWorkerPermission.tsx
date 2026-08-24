@@ -1,10 +1,11 @@
 import { useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
 import {
-  isManagerRole,
   WORKER_DEFAULT_LANDING_PATH,
 } from '../../lib/workerProfileCompletion';
+import { canUseCeoAdminPanel } from '../../lib/teamManagerAccess';
 
 type PermissionEntry = { view?: boolean; edit?: boolean } | boolean | undefined;
 
@@ -32,6 +33,7 @@ export function RequireWorkerPermission({
   children: React.ReactNode;
 }) {
   const { user, isLoading } = useAuth();
+  const { businesses } = useBusiness();
   const navigate = useNavigate();
 
   const keys = useMemo(
@@ -42,7 +44,7 @@ export function RequireWorkerPermission({
   const isWorker = Boolean(
     user && (user.accountType === 'user' || (user as { invitedBy?: string }).invitedBy),
   );
-  const isInvitedHrManager = Boolean(user && isManagerRole(user.role));
+  const isInvitedHrManager = Boolean(user && canUseCeoAdminPanel(user, businesses));
 
   const hasPermission = useMemo(() => {
     if (!user) return false;

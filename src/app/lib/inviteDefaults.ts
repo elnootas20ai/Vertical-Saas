@@ -144,13 +144,13 @@ export function getDefaultInviteLandingPage(
     }
     return '/saas/vertical/eventos';
   }
-  if (isHrManagerRole(role)) return '/saas/payroll';
-
   if (isDeliveryBusinessType(businessType)) {
     if (role === 'Reparto') return '/saas/delivery-reparto';
     if (role === 'Cocina') return '/saas/delivery-kitchen';
     return WORKER_DEFAULT_LANDING_PATH;
   }
+  if (isHrManagerRole(role)) return '/saas/payroll';
+
   if (isRestaurantBusinessType(businessType)) {
     if (role === 'Cocina') return '/saas/cocina';
     if (role === 'Mostrador / Atención' || role === 'Encargado') return '/saas/sala';

@@ -289,7 +289,7 @@ function SaasContent() {
       }
       return;
     }
-    navigate(resolveWorkerSessionEntryPath(user) || WORKER_DEFAULT_LANDING_PATH, { replace: true });
+    navigate(resolveWorkerSessionEntryPath(user, businessCtx?.businesses) || WORKER_DEFAULT_LANDING_PATH, { replace: true });
   }, [
     isInitializing,
     isAuthenticated,

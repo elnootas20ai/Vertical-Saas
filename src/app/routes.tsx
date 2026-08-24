@@ -438,7 +438,7 @@ function SaasIndexRedirect() {
     if (canUseCeoAdminPanel(user, businessCtx?.businesses)) {
       return <Navigate to="/saas/dashboard" replace />;
     }
-    return <Navigate to={resolveWorkerSessionEntryPath(user)} replace />;
+    return <Navigate to={resolveWorkerSessionEntryPath(user, businessCtx?.businesses)} replace />;
   }
   return <Navigate to="/saas/dashboard" replace />;
 }
