@@ -9,10 +9,12 @@ import {
   sessionToCajaAmounts,
   splitSessionCajaAmountsByBillingSheet,
   splitCajaAmountsByBrand,
+  isTrustworthyClosingBrandTpvForExcel,
   BLACKBURGER_HEADERS,
   CAJA_MONEY_HEADERS,
   MODOMIO_HEADERS,
 } from '../src/app/lib/cajaFacturacionExcelExport.ts';
+import { resolveClosingBrandTpvForExcelExport } from '../src/app/lib/cajaExcelBrandTpvEnrich.ts';
 
 describe('canDownloadCajaExcel', () => {
   it('permite cuenta dueña (no worker) y Admin; bloquea cajero/trabajador', () => {
@@ -186,6 +188,51 @@ describe('splitSessionCajaAmountsByBillingSheet', () => {
     expect(bb.efectivo).toBe(10);
     expect(bb.tpv).toBe(50);
     expect(mm.total + bb.total).toBe(300);
+  });
+
+  it('ignora Caja 1 corrupta (uds como €) y reparte ef/tpv por % uds', () => {
+    const session = closedSession({
+      summary: {
+        salesByMethod: { efectivo: 368.28, tarjeta: 50, bizum: 0, online: 0, otro: 0 },
+        salesByChannel: {},
+        totalSales: 418.28,
+      },
+      closingBrandTpvTotals: {
+        'brand-mm': { efectivo: 149, tarjeta: 0 },
+        'brand-bb': { efectivo: 0, tarjeta: 1 },
+      },
+      productClosingCounts: { pizza: 149, burger: 1, taco: 0 },
+    });
+    const mm = splitSessionCajaAmountsByBillingSheet(session, sheets[0], sheets);
+    const bb = splitSessionCajaAmountsByBillingSheet(session, sheets[1], sheets);
+    expect(mm.efectivo).toBeCloseTo(368.28 * (149 / 150), 2);
+    expect(mm.tpv).toBeCloseTo(50 * (149 / 150), 2);
+    expect(bb.efectivo).toBeCloseTo(368.28 / 150, 2);
+    expect(bb.tpv).toBeCloseTo(50 / 150, 2);
+    expect(mm.totalPizza).toBe(149);
+    expect(bb.totalBurger).toBe(1);
+  });
+
+  it('resolveClosingBrandTpvForExcelExport descarta Caja 1 corrupta y prefiere pedidos', () => {
+    const session = closedSession({
+      summary: {
+        salesByMethod: { efectivo: 368.28, tarjeta: 50, bizum: 0, online: 0, otro: 0 },
+        salesByChannel: {},
+        totalSales: 418.28,
+      },
+      closingBrandTpvTotals: {
+        'brand-mm': { efectivo: 149, tarjeta: 0 },
+        'brand-bb': { efectivo: 0, tarjeta: 1 },
+      },
+      productClosingCounts: { pizza: 149, burger: 1, taco: 0 },
+    });
+    expect(isTrustworthyClosingBrandTpvForExcel(session, sessionToCajaAmounts(session))).toBe(false);
+    const fromOrders = {
+      'brand-mm': { efectivo: 360, tarjeta: 48 },
+      'brand-bb': { efectivo: 8.28, tarjeta: 2 },
+    };
+    expect(resolveClosingBrandTpvForExcelExport(session, fromOrders)).toEqual(fromOrders);
+    expect(resolveClosingBrandTpvForExcelExport(session, null)).toBeUndefined();
   });
 
   it('enlaza Caja 1 por nombre aunque brandIds de hoja estén vacíos (Modomio Pizza → MODOMIO)', () => {

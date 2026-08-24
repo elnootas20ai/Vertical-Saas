@@ -642,6 +642,61 @@ function sessionHasDeclaredBrandTpvTotals(session: TpvRegisterSession): boolean 
   return false;
 }
 
+function sumClosingBrandTpvTotals(session: TpvRegisterSession): { efectivo: number; tarjeta: number } {
+  let efectivo = 0;
+  let tarjeta = 0;
+  for (const pay of Object.values(session.closingBrandTpvTotals || {})) {
+    if (!pay || typeof pay !== 'object') continue;
+    efectivo = round2(efectivo + (Number(pay.efectivo) || 0));
+    tarjeta = round2(tarjeta + (Number(pay.tarjeta) || 0));
+  }
+  return { efectivo, tarjeta };
+}
+
+/** Caja 1 guardó conteos P/B como € (p. ej. 149 ef + 1 tj con 149 pizzas + 1 burger). */
+function declaredBrandTpvLooksLikeUnitCounts(
+  session: TpvRegisterSession,
+  amounts: Pick<CajaDayAmounts, 'totalPizza' | 'totalBurger' | 'totalTaco'>,
+): boolean {
+  const pizza = amounts.totalPizza;
+  const burger = amounts.totalBurger;
+  const unitTotal = pizza + burger + amounts.totalTaco;
+  if (unitTotal <= 0) return false;
+
+  const { efectivo, tarjeta } = sumClosingBrandTpvTotals(session);
+  const moneyTotal = round2(efectivo + tarjeta);
+  if (moneyTotal <= 0) return false;
+  if (Math.abs(moneyTotal - unitTotal) > 0.02) return false;
+  if (pizza > 0 && Math.abs(efectivo - pizza) > 0.02) return false;
+  if (burger > 0 && Math.abs(tarjeta - burger) > 0.02) return false;
+  return true;
+}
+
+/** Suma € ≈ suma uds pero la caja tienda tiene mucho más dinero (Caja 1 incoherente). */
+function declaredBrandTpvSuspiciousForExcel(
+  session: TpvRegisterSession,
+  amounts: Omit<CajaDayAmounts, 'day'>,
+): boolean {
+  if (declaredBrandTpvLooksLikeUnitCounts(session, amounts)) return true;
+
+  const { efectivo, tarjeta } = sumClosingBrandTpvTotals(session);
+  const declared = round2(efectivo + tarjeta);
+  const unitTotal = amounts.totalPizza + amounts.totalBurger + amounts.totalTaco;
+  const storeVertial = round2(amounts.efectivo + amounts.tpv + amounts.x);
+  if (unitTotal <= 0 || storeVertial <= 10 || declared <= 0) return false;
+  if (Math.abs(declared - unitTotal) > 0.02) return false;
+  return storeVertial > declared * 1.5;
+}
+
+/** Excel: solo confiar en Caja 1 del cierre si no parece conteos mezclados con €. */
+export function isTrustworthyClosingBrandTpvForExcel(
+  session: TpvRegisterSession,
+  amounts: Omit<CajaDayAmounts, 'day'>,
+): boolean {
+  if (!sessionHasDeclaredBrandTpvTotals(session)) return false;
+  return !declaredBrandTpvSuspiciousForExcel(session, amounts);
+}
+
 /**
  * Efectivo/tarjeta/X del cierre → hoja de marca.
  * Fuente: Caja 1 del cierre (`closingBrandTpvTotals`). Sin % de pizzas.
@@ -704,7 +759,9 @@ export function splitSessionCajaAmountsByBillingSheet(
 ): Omit<CajaDayAmounts, 'day'> {
   const amounts = sessionToCajaAmounts(session);
   const unitSplit = splitCajaAmountsByBillingSheet(amounts, billingSheet, allSheets);
-  const tpvBrand = tpvAmountsForBillingSheet(session, amounts, billingSheet, allSheets);
+  const tpvBrand = isTrustworthyClosingBrandTpvForExcel(session, amounts)
+    ? tpvAmountsForBillingSheet(session, amounts, billingSheet, allSheets)
+    : null;
   const apps = appsAmountsForBillingSheet(session, amounts, billingSheet, allSheets);
 
   // Caja 1 por marca → lo declarado. Cierres viejos sin Caja 1 → % uds (solo Vertial, no apps).

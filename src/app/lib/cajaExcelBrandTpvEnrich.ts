@@ -1,8 +1,7 @@
 /**
  * Enriquece cierres con Caja 1 por marca (efectivo/tarjeta) para el Excel.
- * - Si ya viene `closingBrandTpvTotals` del cierre → no recalcula importes.
- * - Siempre aporta nombres de marca (para enlazar hojas del Excel).
- * - Si no hay desglose (cierres antiguos) → recalcula desde pedidos del turno, igual que la UI de Caja.
+ * Misma fuente que la UI al cerrar: pedidos del turno → buildShiftBrandRevenue.
+ * Si la Caja 1 guardada es incoherente (p. ej. uds como €) → recalcula o elimina para reparto por uds.
  */
 import type { DeliveryOrder, TpvRegisterSession } from './deliveryApi';
 import type { Brand } from './brandApi';
@@ -19,6 +18,10 @@ import {
   type ShiftBrandRevenueRow,
 } from './registerShiftBrandBilling';
 import { fetchShiftOrdersForSession } from './registerShiftOrders';
+import {
+  isTrustworthyClosingBrandTpvForExcel,
+  sessionToCajaAmounts,
+} from './cajaFacturacionExcelExport';
 
 export function closingBrandTpvTotalsFromRows(
   rows: Array<Pick<ShiftBrandRevenueRow, 'brandId' | 'revenueEfectivo' | 'revenueTarjeta'>>,
@@ -37,14 +40,6 @@ export function closingBrandTpvTotalsFromRows(
     };
   }
   return out;
-}
-
-function sessionAlreadyHasBrandTpv(session: TpvRegisterSession): boolean {
-  const map = session.closingBrandTpvTotals;
-  if (!map || typeof map !== 'object') return false;
-  return Object.values(map).some(
-    (pay) => pay && (Number(pay.efectivo) > 0 || Number(pay.tarjeta) > 0),
-  );
 }
 
 function withBrandLabels(
@@ -86,9 +81,36 @@ export function computeClosingBrandTpvTotalsForSession(
   return closingBrandTpvTotalsFromRows(rolled.rows);
 }
 
+function isClosedSession(session: TpvRegisterSession): boolean {
+  return String(session.status || '').toLowerCase() !== 'open';
+}
+
+/** Elige Caja 1 para Excel: pedidos del turno > guardado fiable > sin Caja 1 (reparto uds). */
+export function resolveClosingBrandTpvForExcelExport(
+  session: TpvRegisterSession,
+  recomputed: Record<string, { efectivo: number; tarjeta: number }> | null | undefined,
+): Record<string, { efectivo: number; tarjeta: number }> | undefined {
+  const amounts = sessionToCajaAmounts(session);
+  const savedTrust = isTrustworthyClosingBrandTpvForExcel(session, amounts);
+
+  const fromOrders = recomputed && Object.keys(recomputed).length > 0 ? recomputed : null;
+  if (fromOrders) {
+    const preview = { ...session, closingBrandTpvTotals: fromOrders };
+    if (isTrustworthyClosingBrandTpvForExcel(preview, sessionToCajaAmounts(preview))) {
+      return fromOrders;
+    }
+  }
+
+  if (savedTrust && session.closingBrandTpvTotals) {
+    return session.closingBrandTpvTotals;
+  }
+
+  return undefined;
+}
+
 /**
- * Para descarga Excel: rellena Caja 1 por marca en cierres que no la tenían guardada
- * y asegura nombres de marca para enlazar hojas.
+ * Para descarga Excel: Caja 1 por marca alineada con Vertial (pedidos del turno).
+ * Corrige cierres con Caja 1 corrupta antes de generar el archivo.
  */
 export async function enrichSessionsWithClosingBrandTpv(
   sessions: TpvRegisterSession[],
@@ -107,7 +129,7 @@ export async function enrichSessionsWithClosingBrandTpv(
   const out = sessions.map((s) => withBrandLabels(s, opts.brands));
   const need = out
     .map((s, index) => ({ s, index }))
-    .filter(({ s }) => !sessionAlreadyHasBrandTpv(s));
+    .filter(({ s }) => isClosedSession(s));
   if (need.length === 0) return out;
 
   const concurrency = Math.max(1, Math.min(6, opts.concurrency || 4));
@@ -119,14 +141,23 @@ export async function enrichSessionsWithClosingBrandTpv(
       try {
         const orders = await fetchShiftOrdersForSession(userId, s);
         const totals = computeClosingBrandTpvTotalsForSession(s, orders, opts);
-        if (Object.keys(totals).length > 0) {
-          out[index] = {
-            ...out[index],
-            closingBrandTpvTotals: totals,
-          };
+        const resolved = resolveClosingBrandTpvForExcelExport(s, totals);
+        const next: TpvRegisterSession = { ...out[index] };
+        if (resolved && Object.keys(resolved).length > 0) {
+          next.closingBrandTpvTotals = resolved;
+        } else {
+          delete next.closingBrandTpvTotals;
         }
+        out[index] = next;
       } catch {
-        /* deja el cierre sin enriquecer → Excel cae a reparto por uds */
+        const resolved = resolveClosingBrandTpvForExcelExport(s, null);
+        const next: TpvRegisterSession = { ...out[index] };
+        if (resolved && Object.keys(resolved).length > 0) {
+          next.closingBrandTpvTotals = resolved;
+        } else {
+          delete next.closingBrandTpvTotals;
+        }
+        out[index] = next;
       } finally {
         done += 1;
         opts.onProgress?.(done, need.length);
