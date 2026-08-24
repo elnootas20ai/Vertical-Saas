@@ -1050,7 +1050,10 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
     );
   })() : null;
 
-  const continueSession = existingOpenForStore || staleOpenForStore;
+  const continueSession =
+    existingOpenForStore
+    || staleOpenForStore
+    || (knownOpenSession && isTpvRegisterSessionOpen(knownOpenSession) ? knownOpenSession : null);
   const continueWho = continueSession
     ? [
         continueSession.workerName || 'Equipo',
@@ -1068,10 +1071,10 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
       <button
         type="button"
         onClick={() => onContinueExistingOpen?.(continueSession)}
-        disabled={openingBusy || !onContinueExistingOpen}
-        className="w-full min-h-[52px] rounded-xl bg-white text-emerald-800 font-bold text-base shadow-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform disabled:opacity-60"
+        disabled={parentLoading || openingBusy || !onContinueExistingOpen}
+        className="w-full min-h-[52px] rounded-xl bg-white text-emerald-800 font-bold text-base shadow-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform disabled:opacity-70"
       >
-        {openingBusy ? (
+        {(parentLoading || openingBusy) ? (
           <RefreshCw className="w-5 h-5 animate-spin" />
         ) : (
           <LogIn className="w-5 h-5" />
@@ -1114,10 +1117,10 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
   })() : null;
 
   return (
-    <div className="h-full min-h-0 bg-stone-50 dark:bg-stone-950 flex flex-col overflow-hidden">
+    <div className="min-h-[100dvh] min-h-screen bg-stone-50 dark:bg-stone-950 flex flex-col">
       {tabletContinueTopBar}
-      <div className="flex-1 min-h-0 flex items-stretch sm:items-center justify-center p-2 sm:p-3 overflow-hidden">
-      <div className="relative bg-white dark:bg-stone-900 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-lg w-full max-w-4xl h-full sm:h-auto sm:max-h-[min(88svh,680px)] min-h-0 flex flex-col overflow-hidden">
+      <div className="flex-1 flex items-stretch sm:items-center justify-center p-2 sm:p-3">
+      <div className="relative bg-white dark:bg-stone-900 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-lg w-full max-w-4xl min-h-[min(88dvh,680px)] sm:min-h-0 sm:max-h-[min(88svh,680px)] flex flex-col">
         {/* Header — banner Continuar (web / no tablet) */}
         {!tabletBoundOpening && (liveOpenBanner || staleOpenBanner) ? (
           <div className="shrink-0 px-3 sm:px-4 pt-3 space-y-2">
@@ -5832,20 +5835,19 @@ export function TpvRegisterGate({
   /** Última caja abierta conocida: no perder el tablero si el pick de tienda parpadea. */
   const stickyOpenSessionRef = useRef<TpvRegisterSession | null>(null);
 
-  // Recarga / reentrada al TPV: pantalla de apertura (Continuar si hay caja abierta).
+  // Tablet/código: mostrar apertura al momento (no bloquear en «Recuperando caja…»).
   useEffect(() => {
-    stickyOpenSessionRef.current = null;
-    clearTpvRegisterLocalSessionState();
+    if (!hasTabletStoreCode && !readTpvTabletBinding()?.pdvId) return;
+    openingScreenUnlockedRef.current = true;
+    setOpeningScreenUnlocked(true);
+    setOpeningRecoverHold(false);
     setAckedOpenSessionId(null);
-    openingScreenUnlockedRef.current = false;
-    setOpeningScreenUnlocked(false);
-    setOpeningRecoverHold(true);
-  }, []);
+  }, [hasTabletStoreCode]);
 
   // Bar/restaurante CEO: sin sticky el pick de PDV puede soltar la caja un frame
   // al abrir mesa → TPV embebido se queda en «Recuperando la caja…».
   const holdStickyWhileOpen = Boolean(
-    isTabletSession || isWorkerUser || orderFlowActive || isRestaurantVerticalChrome,
+    isTabletCajaScope || isWorkerUser || orderFlowActive || isRestaurantVerticalChrome,
   );
 
   /**
@@ -5860,7 +5862,7 @@ export function TpvRegisterGate({
     if (fromProp) return fromProp;
     return managerPdvPickId;
   }, [
-    isTabletSession,
+    isTabletCajaScope,
     tabletRestrictedPdvId,
     isWorkerUser,
     workerAssignedPdvId,
@@ -5893,7 +5895,7 @@ export function TpvRegisterGate({
     resolvedStorePickId,
     pointsOfSale,
     holdStickyWhileOpen,
-    isTabletSession,
+    isTabletCajaScope,
     tabletBinding?.workCenterId,
   ]);
 
@@ -5930,7 +5932,7 @@ export function TpvRegisterGate({
     sessions,
     resolvedStorePickId,
     pointsOfSale,
-    isTabletSession,
+    isTabletCajaScope,
     tabletBinding?.workCenterId,
   ]);
 
@@ -7815,7 +7817,8 @@ export function TpvRegisterGate({
   }
 
   if (
-    !openingScreenUnlocked
+    !hasTabletStoreCode
+    && !openingScreenUnlocked
     && (loading || openingRecoverHold)
     && !isTpvRegisterSessionOpen(boardSession)
     && !isTpvRegisterSessionOpen(stickyOpenSessionRef.current)
@@ -8105,9 +8108,10 @@ export function TpvRegisterGate({
 
     const openingStoreLabel =
       tabletBinding?.pdvName
+      || tabletBinding?.businessName
       || pointsOfSale.find((p) => p._id === openingRestrictedPdvId)?.name
       || workCenters.find((w) => w._id === openingRestrictedPdvId)?.name
-      || undefined;
+      || (openingRestrictedPdvId ? 'Tienda' : undefined);
 
     const openingScreen = (
       <OpeningScreen
