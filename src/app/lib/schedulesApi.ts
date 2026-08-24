@@ -99,6 +99,9 @@ export interface ShiftTemplate {
   color: string;
   weekly: Record<Weekday, DayShift>;
   weeklyHours: number;
+  /** PDV / centro al que pertenece esta plantilla (una por tienda). */
+  work_center_id?: string;
+  work_center_name?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -341,6 +344,40 @@ export const TEMPLATE_COLORS = [
   '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1',
 ];
 
+/** Nombre estándar de plantilla RRHH vinculada a un PDV. */
+export function shiftTemplateNameForStore(storeLabel: string): string {
+  const label = String(storeLabel || 'tienda').trim() || 'tienda';
+  return `Horario ${label}`;
+}
+
+/** Plantilla de turno asociada a un centro/tienda (por id o por nombre). */
+export function findShiftTemplateForStore(
+  templates: ShiftTemplate[],
+  opts: { workCenterId?: string; storeLabel?: string },
+): ShiftTemplate | null {
+  const wcId = String(opts.workCenterId || '').trim();
+  const targetName = shiftTemplateNameForStore(opts.storeLabel || '').toLowerCase();
+  if (wcId) {
+    const byWc = templates.find((t) => String(t.work_center_id || '').trim() === wcId);
+    if (byWc) return byWc;
+  }
+  if (targetName) {
+    const byName = templates.find(
+      (t) => String(t.name || '').trim().toLowerCase() === targetName,
+    );
+    if (byName) return byName;
+  }
+  return null;
+}
+
+export function pickShiftTemplateIdForWorkCenter(
+  templates: ShiftTemplate[],
+  workCenterId: string,
+  storeLabel?: string,
+): string {
+  return findShiftTemplateForStore(templates, { workCenterId, storeLabel })?._id || '';
+}
+
 // ─── Schedule CRUD ───────────────────────────────────────────────────────────
 
 export async function listSchedules(businessId: string, weekStart?: string): Promise<ScheduleTemplate[]> {
@@ -457,12 +494,15 @@ export async function saveShiftTemplate(
   color: string,
   weekly: Record<Weekday, DayShift>,
   existing?: ShiftTemplate | null,
+  opts?: { workCenterId?: string; workCenterName?: string },
 ): Promise<ShiftTemplate> {
   const bid = normalizeBusinessScopeId(businessId);
   if (!bid) throw new Error('Empresa no válida');
   await ensureDb();
   const now = new Date().toISOString();
   const id = existing?._id || `shift_template:${bid}:${Date.now()}`;
+  const wcId = String(opts?.workCenterId || existing?.work_center_id || '').trim() || undefined;
+  const wcName = String(opts?.workCenterName || existing?.work_center_name || '').trim() || undefined;
   const doc: ShiftTemplate = {
     _id: id,
     ...(existing?._rev ? { _rev: existing._rev } : {}),
@@ -472,6 +512,7 @@ export async function saveShiftTemplate(
     color,
     weekly,
     weeklyHours: computeWeeklyHours(weekly),
+    ...(wcId ? { work_center_id: wcId, work_center_name: wcName || name.replace(/^Horario\s+/i, '') } : {}),
     createdAt: existing?.createdAt || now,
     updatedAt: now,
   };
@@ -491,28 +532,41 @@ export async function saveShiftTemplate(
 export async function applyOpeningHoursToShiftTemplates(
   businessId: string,
   openingHours: BusinessHoursConfig | null | undefined,
-  opts?: { storeLabel?: string },
+  opts?: { storeLabel?: string; workCenterId?: string },
 ): Promise<{ updated: number; created: number }> {
-  const bid = String(businessId || '').trim();
+  const bid = normalizeBusinessScopeId(businessId);
   if (!bid) return { updated: 0, created: 0 };
   const weekly = defaultWeekly(openingHours);
+  const label = String(opts?.storeLabel || 'tienda').trim() || 'tienda';
+  const wcId = String(opts?.workCenterId || '').trim();
+  const templateName = shiftTemplateNameForStore(label);
   const templates = await listShiftTemplates(bid);
-  if (templates.length === 0) {
-    const label = String(opts?.storeLabel || 'tienda').trim() || 'tienda';
+  const existing = findShiftTemplateForStore(templates, { workCenterId: wcId, storeLabel: label });
+  const colorIdx = templates.length % TEMPLATE_COLORS.length;
+
+  if (existing) {
     await saveShiftTemplate(
       bid,
-      `Horario ${label}`,
-      TEMPLATE_COLORS[0] || '#2563eb',
+      templateName,
+      existing.color,
       weekly,
-      null,
+      existing,
+      { workCenterId: wcId || existing.work_center_id, workCenterName: label },
     );
-    return { updated: 0, created: 1 };
+    notifyShiftTemplatesChanged(bid);
+    return { updated: 1, created: 0 };
   }
-  for (const t of templates) {
-    await saveShiftTemplate(bid, t.name, t.color, weekly, t);
-  }
+
+  await saveShiftTemplate(
+    bid,
+    templateName,
+    TEMPLATE_COLORS[colorIdx] || '#2563eb',
+    weekly,
+    null,
+    { workCenterId: wcId, workCenterName: label },
+  );
   notifyShiftTemplatesChanged(bid);
-  return { updated: templates.length, created: 0 };
+  return { updated: 0, created: 1 };
 }
 
 export async function deleteShiftTemplate(template: ShiftTemplate): Promise<void> {

@@ -28,7 +28,7 @@ import {
   formatLaborCurrency,
   resolvePayPeriodsPerYear,
 } from '../../lib/laborCost';
-import { listShiftTemplates, SHIFT_TEMPLATES_CHANGED_EVENT, type ShiftTemplate } from '../../lib/schedulesApi';
+import { listShiftTemplates, pickShiftTemplateIdForWorkCenter, SHIFT_TEMPLATES_CHANGED_EVENT, type ShiftTemplate } from '../../lib/schedulesApi';
 import { getRoleTaskBundle } from '../../lib/roleTaskTemplates';
 import { workerSeatBillingWarning } from '../../lib/workerSeatLimits';
 import { VertialBillingUpgradeLink } from './VertialBillingUpgradeLink';
@@ -644,6 +644,13 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
     window.addEventListener(SHIFT_TEMPLATES_CHANGED_EVENT, onChanged);
     return () => window.removeEventListener(SHIFT_TEMPLATES_CHANGED_EVENT, onChanged);
   }, [selectedBusinessId, currentBusinessId, inviteBusiness?.business_id]);
+
+  useEffect(() => {
+    if (!workCenterId || templatesLoading) return;
+    const label = loadedWorkCenterOptions.find((wc) => wc.id === workCenterId)?.label || '';
+    const matchId = pickShiftTemplateIdForWorkCenter(shiftTemplates, workCenterId, label);
+    if (matchId) setScheduleTemplateId(matchId);
+  }, [workCenterId, shiftTemplates, templatesLoading, loadedWorkCenterOptions]);
 
   // UI
   const [errors, setErrors] = useState<Record<string, string>>({});

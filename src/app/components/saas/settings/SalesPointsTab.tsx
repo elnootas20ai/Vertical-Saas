@@ -810,9 +810,12 @@ function WorkCenterModal({
         try {
           const result = await applyOpeningHoursToShiftTemplates(schedulesBusinessId, openingHours, {
             storeLabel: form.name,
+            workCenterId: String(editItem?._id || editItem?.id || '').trim() || undefined,
           });
           if (result.created > 0) {
             toast.success(`Plantilla «Horario ${form.name}» lista para invitaciones`);
+          } else if (result.updated > 0) {
+            toast.success(`Plantilla «Horario ${form.name}» actualizada`);
           }
         } catch (syncErr) {
           toast.warning(
@@ -1464,14 +1467,15 @@ function WorkCenterModal({
                         const result = await applyOpeningHoursToShiftTemplates(
                           schedulesBusinessId,
                           openingHours,
-                          { storeLabel: form.name },
+                          {
+                            storeLabel: form.name,
+                            workCenterId: String(editItem?._id || editItem?.id || '').trim() || undefined,
+                          },
                         );
                         if (result.created > 0) {
-                          toast.success('Plantilla creada desde el horario de tienda');
+                          toast.success(`Plantilla «Horario ${form.name}» creada`);
                         } else {
-                          toast.success(
-                            `${result.updated} plantilla${result.updated === 1 ? '' : 's'} actualizada${result.updated === 1 ? '' : 's'}`,
-                          );
+                          toast.success(`Plantilla «Horario ${form.name}» actualizada`);
                         }
                       } catch (err) {
                         toast.error(

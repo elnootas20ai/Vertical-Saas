@@ -15,6 +15,7 @@ import { getInvitePermissionsForUser } from '../../lib/roleCatalog';
 import { getHrLocationCopy } from '../../lib/retailLocationCopy';
 import {
   listShiftTemplates,
+  pickShiftTemplateIdForWorkCenter,
   SHIFT_TEMPLATES_CHANGED_EVENT,
   type ShiftTemplate,
 } from '../../lib/schedulesApi';
@@ -79,6 +80,27 @@ export function WorkerInviteQrModal({ onClose, business }: Props) {
       setWorkCenterId(storeOptions[0].id);
     }
   }, [storeOptions, workCenterId]);
+
+  useEffect(() => {
+    if (!workCenterId) {
+      setScheduleTemplateId('');
+      return;
+    }
+    const storeLabel = storeOptions.find((s) => s.id === workCenterId)?.label || '';
+    const matchId = pickShiftTemplateIdForWorkCenter(shiftTemplates, workCenterId, storeLabel);
+    setScheduleTemplateId(matchId);
+  }, [workCenterId, shiftTemplates, storeOptions]);
+
+  const visibleShiftTemplates = useMemo(() => {
+    if (!workCenterId) return shiftTemplates;
+    const storeLabel = storeOptions.find((s) => s.id === workCenterId)?.label || '';
+    const matchId = pickShiftTemplateIdForWorkCenter(shiftTemplates, workCenterId, storeLabel);
+    return [...shiftTemplates].sort((a, b) => {
+      if (a._id === matchId) return -1;
+      if (b._id === matchId) return 1;
+      return a.name.localeCompare(b.name, 'es');
+    });
+  }, [shiftTemplates, workCenterId, storeOptions]);
 
   const reloadShiftTemplates = useCallback(async () => {
     if (!businessId) {
@@ -291,7 +313,7 @@ export function WorkerInviteQrModal({ onClose, business }: Props) {
                   className="w-full rounded-xl border-2 border-gray-200 bg-white px-3 py-2.5 text-sm dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
                 >
                   <option value="">Sin horario por ahora</option>
-                  {shiftTemplates.map((t) => (
+                  {visibleShiftTemplates.map((t) => (
                     <option key={t._id} value={t._id}>{t.name}</option>
                   ))}
                 </select>
