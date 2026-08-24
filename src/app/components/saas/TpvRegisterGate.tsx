@@ -1089,15 +1089,15 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
         <button
           type="button"
           onClick={() => onContinueExistingOpen?.(staleOpenForStore)}
-          disabled={parentLoading || openingBusy || !onContinueExistingOpen}
-          className={`w-full ${VERTIAL_BTN_PRIMARY} min-h-10 text-sm`}
+          disabled={openingBusy || !onContinueExistingOpen}
+          className={`w-full ${VERTIAL_BTN_PRIMARY} min-h-[52px] text-base font-bold`}
         >
-          {(parentLoading || openingBusy) ? (
-            <RefreshCw className="w-4 h-4 animate-spin" />
+          {openingBusy ? (
+            <RefreshCw className="w-5 h-5 animate-spin" />
           ) : (
-            <LogIn className="w-4 h-4" />
+            <LogIn className="w-5 h-5" />
           )}
-          Continuar en esta caja
+          Continuar en caja abierta
         </button>
       </div>
     );
@@ -1121,15 +1121,15 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
         <button
           type="button"
           onClick={() => onContinueExistingOpen?.(existingOpenForStore)}
-          disabled={parentLoading || openingBusy || !onContinueExistingOpen}
-          className={`w-full ${VERTIAL_BTN_PRIMARY} min-h-10 text-sm`}
+          disabled={openingBusy || !onContinueExistingOpen}
+          className={`w-full ${VERTIAL_BTN_PRIMARY} min-h-[52px] text-base font-bold`}
         >
-          {(parentLoading || openingBusy) ? (
-            <RefreshCw className="w-4 h-4 animate-spin" />
+          {openingBusy ? (
+            <RefreshCw className="w-5 h-5 animate-spin" />
           ) : (
-            <LogIn className="w-4 h-4" />
+            <LogIn className="w-5 h-5" />
           )}
-          Continuar en esta caja
+          Continuar en caja abierta
         </button>
       </div>
     );
