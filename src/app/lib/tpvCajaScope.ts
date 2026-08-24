@@ -446,6 +446,15 @@ export function mergeTpvRegisterSessionsPreservingOpen(
     const id = String(prevSession._id || '').trim();
     if (!id) continue;
     if (nextById.has(id)) continue;
+    const storeRef = String(prevSession.pointOfSaleId || '').trim();
+    const openedAt = String(prevSession.openedAt || prevSession.createdAt || '').trim();
+    const hasNewerCloseForStore = storeRef && nextList.some((s) => {
+      if (String(s?.status || '').toLowerCase() !== 'closed') return false;
+      if (String(s?.pointOfSaleId || '').trim() !== storeRef) return false;
+      const closedAt = String(s?.closedAt || s?.updatedAt || '').trim();
+      return Boolean(closedAt && openedAt && closedAt >= openedAt);
+    });
+    if (hasNewerCloseForStore) continue;
     merged.push(prevSession);
   }
   return merged;
@@ -453,6 +462,32 @@ export function mergeTpvRegisterSessionsPreservingOpen(
 
 function isTpvRegisterSessionOpenStatus(session: Pick<TpvRegisterSession, 'status'> | null | undefined): boolean {
   return Boolean(session && String(session.status || '').toLowerCase() === 'open');
+}
+
+/** Limpia estado local de caja (recarga / cierre remoto). */
+export function clearTpvRegisterLocalSessionState(): void {
+  writeTpvOpenRegisterLatch(null);
+}
+
+export function isTpvRegisterSessionClosed(
+  session: Pick<TpvRegisterSession, 'status'> | null | undefined,
+): boolean {
+  return Boolean(session && String(session.status || '').toLowerCase() === 'closed');
+}
+
+/**
+ * ¿La sesión cerrada remota afecta a nuestra tienda operativa?
+ */
+export function remoteClosedSessionAffectsStore(
+  closedSession: Pick<TpvRegisterSession, 'pointOfSaleId' | 'status'>,
+  storePickId: string,
+  pointsOfSale: Array<{ _id: string; workCenterId?: string }> = [],
+  alternateRefIds: string[] = [],
+): boolean {
+  if (!isTpvRegisterSessionClosed(closedSession)) return false;
+  const pick = String(storePickId || '').trim();
+  if (!pick) return false;
+  return tpvSessionMatchesStoreRef(closedSession, pick, pointsOfSale, alternateRefIds);
 }
 
 /** Latch de caja abierta: sobrevive parpadeos del Context React (HMR / refresh). */
@@ -717,6 +752,7 @@ export function findLastClosedTpvSession(
   pdvId: string,
   terminalId?: string | null,
   pointsOfSale: Array<{ _id: string; workCenterId?: string }> = [],
+  alternateRefIds: string[] = [],
 ): TpvRegisterSession | null {
   const pid = String(pdvId || '').trim();
   const tid = String(terminalId || '').trim();
@@ -725,7 +761,9 @@ export function findLastClosedTpvSession(
   const closedForStore = (Array.isArray(sessions) ? sessions : [])
     .filter((s) => String(s.status || '') === 'closed')
     .filter((s) => {
-      if (pointsOfSale.length > 0) return tpvSessionMatchesStoreRef(s, pid, pointsOfSale);
+      if (pointsOfSale.length > 0 || alternateRefIds.length > 0) {
+        return tpvSessionMatchesStoreRef(s, pid, pointsOfSale, alternateRefIds);
+      }
       return String(s.pointOfSaleId || '').trim() === pid;
     })
     .sort(
@@ -767,8 +805,9 @@ export function findReopenableClosedTpvSession(
   pdvId: string,
   terminalId?: string | null,
   pointsOfSale: Array<{ _id: string; workCenterId?: string }> = [],
+  alternateRefIds: string[] = [],
 ): TpvRegisterSession | null {
-  const last = findLastClosedTpvSession(sessions, pdvId, terminalId, pointsOfSale);
+  const last = findLastClosedTpvSession(sessions, pdvId, terminalId, pointsOfSale, alternateRefIds);
   if (!last || String(last.status || '') !== 'closed') return null;
   const closedDay = calendarDayMadrid(last.closedAt || last.openedAt);
   const today = calendarDayMadrid(new Date());

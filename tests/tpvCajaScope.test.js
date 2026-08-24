@@ -49,6 +49,25 @@ describe('mergeTpvRegisterSessionsPreservingOpen', () => {
     expect(merged.find((s) => s._id === 's-open')?.status).toBe('closed');
     expect(merged.filter((s) => s._id === 's-open')).toHaveLength(1);
   });
+
+  it('drops stale open when a newer closed session exists for the same store', () => {
+    const staleOpen = {
+      _id: 's-stale-open',
+      status: 'open',
+      pointOfSaleId: 'pdv-1',
+      openedAt: '2026-07-19T08:00:00.000Z',
+    };
+    const newerClosed = {
+      _id: 's-closed-today',
+      status: 'closed',
+      pointOfSaleId: 'pdv-1',
+      openedAt: '2026-07-19T08:00:00.000Z',
+      closedAt: '2026-07-20T22:00:00.000Z',
+    };
+    const merged = mergeTpvRegisterSessionsPreservingOpen([staleOpen], [newerClosed]);
+    expect(merged.find((s) => s._id === 's-stale-open')).toBeUndefined();
+    expect(merged).toEqual([newerClosed]);
+  });
 });
 
 describe('resolveActiveTpvRegisterSession', () => {
@@ -487,6 +506,25 @@ describe('findLastClosedTpvSession', () => {
     const last = findLastClosedTpvSession([closedTablet, closedTpv], 'pdv-1', 'other-term', pdvs);
     expect(last?._id).toBe('c2');
     expect(resolvePreviousCloseCashAmount(last)).toBe(80);
+  });
+
+  it('matchea cierre cuando pointOfSaleId es workCenterId (tablet)', () => {
+    const closedOnWc = {
+      _id: 'c-wc',
+      status: 'closed',
+      pointOfSaleId: 'wc-1',
+      closedAt: '2026-08-23T22:00:00.000Z',
+      nextDayInitialCash: 85.5,
+    };
+    const last = findLastClosedTpvSession(
+      [closedOnWc],
+      'pdv-1',
+      'tablet-pdv-1',
+      [],
+      ['wc-1', 'pdv-1'],
+    );
+    expect(last?._id).toBe('c-wc');
+    expect(resolvePreviousCloseCashAmount(last)).toBe(85.5);
   });
 
   it('prefers nextDayInitialCash over finalCashAmount for next open', () => {

@@ -8241,6 +8241,17 @@ export async function listTpvRegisterSessionsByUser(req, userId, options = {}) {
     const recentCreatedAt = dateTo
       ? { $gte: lookback, $lte: dateTo }
       : { $gte: lookback };
+    const inOpsLiteWindow = (doc) => {
+      if (inWindow(doc)) return true;
+      // Caja abierta hace días pero cerrada ayer: createdAt viejo ≠ fuera de ventana.
+      if (String(doc?.status || '') === 'closed') {
+        const closedTs = String(doc?.closedAt || doc?.updatedAt || '').trim();
+        if (closedTs && closedTs >= lookback) {
+          if (!dateTo || closedTs <= dateTo) return true;
+        }
+      }
+      return false;
+    };
     const [recent, openOnes, pendingOnes] = await Promise.all([
       findDocuments(
         req,
@@ -8268,7 +8279,7 @@ export async function listTpvRegisterSessionsByUser(req, userId, options = {}) {
       if (
         doc.status === 'open'
         || String(doc.closingValidationStatus || '') === 'pending'
-        || inWindow(doc)
+        || inOpsLiteWindow(doc)
       ) {
         byId.set(doc._id, doc);
       }
@@ -8492,6 +8503,40 @@ export function findOpenTpvRegisterSessionForPointOfSale(
     openForPdv.find((s) => tpvRegisterSessionBelongsToBusiness(s, bid, scopedPdvIds)) || null;
   // Si el stamp de empresa está mal, igual hay caja viva en esa tienda.
   return matchingBiz || openForPdv[0];
+}
+
+/** Cierra otras sesiones TPV abiertas en la misma tienda (sync multi-terminal). */
+export async function autoCloseDuplicateOpenTpvSessions(req, userId, closedSession, closedBy = 'Sistema') {
+  const uid = String(userId || '').trim();
+  const pdvId = String(closedSession?.pointOfSaleId || '').trim();
+  if (!uid || !pdvId || String(closedSession?.status || '') !== 'closed') return [];
+
+  const db = getDeliveryDbName();
+  const openOnes = await findDocuments(
+    req,
+    db,
+    { type: 'tpv_register_session', user_id: uid, status: 'open', pointOfSaleId: pdvId },
+    { pageSize: 20, maxDocs: 30 },
+  ).catch(() => []);
+
+  const closedId = String(closedSession._id || '').trim();
+  const closedAt = String(closedSession.closedAt || '').trim();
+  const reason = closedAt
+    ? `Cierre sincronizado: otra sesión cerró esta tienda (${closedAt.slice(0, 10)}).`
+    : 'Cierre sincronizado: otra sesión cerró esta tienda.';
+
+  const results = [];
+  for (const open of openOnes) {
+    if (!open?._id || open._id === closedId || open.deletedAt) continue;
+    const doc = autoCloseTpvRegisterSessionDocument(uid, open, reason, closedBy);
+    try {
+      const saved = await putDocument(req, db, doc._id, doc);
+      results.push({ ...doc, _rev: saved.rev });
+    } catch (err) {
+      console.error('[TPV] auto-close duplicate open failed:', open._id, err?.message);
+    }
+  }
+  return results;
 }
 
 /** Cierra una sesión TPV sin conteo manual (mantenimiento / fin de jornada). */

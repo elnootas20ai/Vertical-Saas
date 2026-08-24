@@ -52,6 +52,9 @@ import {
   tpvSessionBelongsToBusiness,
   tpvSessionMatchesStoreRef,
   writeTpvOpenRegisterLatch,
+  clearTpvRegisterLocalSessionState,
+  remoteClosedSessionAffectsStore,
+  isTpvRegisterSessionClosed,
 } from '../../lib/tpvCajaScope';
 import { fetchShiftOrdersForSession, prefetchShiftOrdersForSession } from '../../lib/registerShiftOrders';
 import {
@@ -294,7 +297,7 @@ function tpvGateSessionsQueryOpts(businessId?: string): {
   dateFrom: string;
 } {
   const from = new Date();
-  from.setUTCDate(from.getUTCDate() - 3);
+  from.setUTCDate(from.getUTCDate() - 7);
   from.setUTCHours(0, 0, 0, 0);
   const bid = String(businessId || '').trim();
   return {
@@ -586,7 +589,18 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
     const pdvId = selectedPdv?._id || restrictedToPdvId || '';
     const tabletBound = Boolean(readTpvTabletBinding());
     const terminalId = selectedTerminal?.id || (tabletBound ? `tablet-${pdvId || 'default'}` : '');
-    const last = findLastClosedTpvSession(registerSessions, pdvId, terminalId, pointsOfSale);
+    const alternateRefs = resolveTpvStoreAlternateRefs({
+      pickId: pdvId,
+      pointsOfSale,
+      tabletWorkCenterId: readTpvTabletBinding()?.workCenterId,
+    });
+    const last = findLastClosedTpvSession(
+      registerSessions,
+      pdvId,
+      terminalId,
+      pointsOfSale,
+      alternateRefs,
+    );
     if (!last) return null as null | { amount: number; isNextDayInitial: boolean; label: string };
     let amount = resolvePreviousCloseCashAmount(last);
     if (amount == null) {
@@ -5768,6 +5782,16 @@ export function TpvRegisterGate({
   /** Última caja abierta conocida: no perder el tablero si el pick de tienda parpadea. */
   const stickyOpenSessionRef = useRef<TpvRegisterSession | null>(null);
 
+  // Recarga / reentrada al TPV: pantalla de apertura (Continuar si hay caja abierta).
+  useEffect(() => {
+    stickyOpenSessionRef.current = null;
+    clearTpvRegisterLocalSessionState();
+    setAckedOpenSessionId(null);
+    openingScreenUnlockedRef.current = false;
+    setOpeningScreenUnlocked(false);
+    setOpeningRecoverHold(true);
+  }, []);
+
   // Bar/restaurante CEO: sin sticky el pick de PDV puede soltar la caja un frame
   // al abrir mesa → TPV embebido se queda en «Recuperando la caja…».
   const holdStickyWhileOpen = Boolean(
@@ -5793,6 +5817,9 @@ export function TpvRegisterGate({
     initialManagerPdvId,
     managerPdvPickId,
   ]);
+
+  const resolvedStorePickIdRef = useRef(resolvedStorePickId);
+  resolvedStorePickIdRef.current = resolvedStorePickId;
 
   const activeSession = useMemo(() => {
     const alternateRefs = resolveTpvStoreAlternateRefs({
@@ -5852,10 +5879,37 @@ export function TpvRegisterGate({
   const activeSessionIdRef = useRef<string | null>(null);
   activeSessionIdRef.current = isTpvRegisterSessionOpen(activeSession) ? activeSession?._id ?? null : null;
 
+  const applyRemoteSessionClose = useCallback((session: TpvRegisterSession): boolean => {
+    if (!isTpvRegisterSessionClosed(session)) return false;
+    const pick = String(resolvedStorePickIdRef.current || '').trim();
+    if (!pick) return false;
+    const alternateRefs = resolveTpvStoreAlternateRefs({
+      pickId: pick,
+      pointsOfSale: pointsOfSaleRef.current,
+      tabletWorkCenterId: isTabletSessionRef.current ? tabletBindingRef.current?.workCenterId : null,
+    });
+    if (!remoteClosedSessionAffectsStore(session, pick, pointsOfSaleRef.current, alternateRefs)) {
+      return false;
+    }
+    stickyOpenSessionRef.current = null;
+    clearTpvRegisterLocalSessionState();
+    setAckedOpenSessionId(null);
+    openingScreenUnlockedRef.current = false;
+    setOpeningScreenUnlocked(false);
+    setOpeningRecoverHold(true);
+    setShowClosing(false);
+    setClosingSession(null);
+    if (activeSessionIdRef.current) {
+      toast.message('Caja cerrada desde otro terminal. Abre caja para el nuevo turno.', { duration: 6000 });
+    }
+    return true;
+  }, []);
+
   useEffect(() => {
     const onSessionSync = (event: Event) => {
       const session = (event as CustomEvent<TpvRegisterSession>).detail;
       if (!session?._id) return;
+      applyRemoteSessionClose(session);
       setSessions((prev) => {
         const idx = prev.findIndex((s) => s._id === session._id);
         if (idx < 0) return [session, ...prev];
@@ -5864,7 +5918,7 @@ export function TpvRegisterGate({
     };
     window.addEventListener(TPV_SESSION_SYNC_EVENT, onSessionSync);
     return () => window.removeEventListener(TPV_SESSION_SYNC_EVENT, onSessionSync);
-  }, []);
+  }, [applyRemoteSessionClose]);
 
   const sseAuthUserId = String(user?.user_id || user?.id || '').trim() || null;
   const sseToken = useMemo(() => {
@@ -5877,8 +5931,9 @@ export function TpvRegisterGate({
   const applyLiveSession = useCallback((raw: unknown) => {
     const session = raw as TpvRegisterSession | null;
     if (!session?._id) return;
+    applyRemoteSessionClose(session);
     window.dispatchEvent(new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: session }));
-  }, []);
+  }, [applyRemoteSessionClose]);
 
   // El navegador bloquea el audio hasta el primer gesto: desbloquear una vez
   // para que el sonido de traspaso entrante suene aunque llegue por SSE.

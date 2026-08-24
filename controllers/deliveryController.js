@@ -36,6 +36,7 @@ import {
   normalizeTpvPaymentMethod,
   getNextDeliveryTicketNumber,
   autoCloseTpvRegisterSessionDocument,
+  autoCloseDuplicateOpenTpvSessions,
   buildPointOfSaleDocument,
   sanitizePointOfSale,
   listPointsOfSaleByUser,
@@ -3239,8 +3240,15 @@ export async function listTpvRegisterSessions(req, res) {
         }
       : {});
     if (req.callerIsWorker) {
+      const businessFilterEarly = String(req.query.businessId || req.query.business_id || '').trim();
       const workerSalesPoint = String(req.callerAccount?.employment?.salesPointId || '').trim();
-      if (workerSalesPoint) {
+      if (businessFilterEarly) {
+        const scopedPdvIds = await collectTpvSessionScopePdvIds(req, userId, businessFilterEarly);
+        sessions = sessions.filter((s) => {
+          const pid = String(s.pointOfSaleId || '').trim();
+          return !pid || scopedPdvIds.has(pid);
+        });
+      } else if (workerSalesPoint) {
         const pdvs = await listScopedPointsOfSaleForUser(req, userId);
         const allowedStoreIds = new Set([workerSalesPoint]);
         for (const p of pdvs || []) {
@@ -3729,6 +3737,17 @@ export async function updateTpvRegisterSession(req, res) {
         actorUserId: req.authUser?.user_id || userId,
         session: { ...doc, _rev: saved.rev },
       });
+
+      const closedByName = String(doc.closedBy || account.fullName || 'Sistema').trim() || 'Sistema';
+      const alsoClosed = await autoCloseDuplicateOpenTpvSessions(
+        req,
+        userId,
+        { ...doc, _rev: saved.rev },
+        closedByName,
+      );
+      for (const synced of alsoClosed) {
+        broadcastTpvSessionLive(account, userId, synced);
+      }
     }
 
     const sanitizedSession = sanitizeTpvRegisterSession({ ...doc, _rev: saved.rev });
@@ -3798,6 +3817,10 @@ async function collectTpvSessionScopePdvIds(req, userId, businessFilter) {
   const bid = String(businessFilter || '').replace(/^business:/, '').trim();
   const scopedPdvs = await listScopedPointsOfSaleForBusiness(req, userId, businessFilter);
   const ids = new Set((scopedPdvs || []).map((p) => String(p._id || '').trim()).filter(Boolean));
+  for (const p of scopedPdvs || []) {
+    const wc = String(p?.workCenterId || '').trim();
+    if (wc) ids.add(wc);
+  }
   if (!bid) return ids;
   try {
     const allPdvs = await listPointsOfSaleByUser(req, userId);
@@ -3807,6 +3830,8 @@ async function collectTpvSessionScopePdvIds(req, userId, businessFilter) {
       if (pb === bid) {
         const id = String(p._id || '').trim();
         if (id) ids.add(id);
+        const wc = String(p.workCenterId || '').trim();
+        if (wc) ids.add(wc);
       }
     }
   } catch {
