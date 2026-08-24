@@ -14,6 +14,7 @@ import { getDefaultInviteLandingPage } from '../../lib/inviteDefaults';
 import { getInvitePermissionsForUser } from '../../lib/roleCatalog';
 import { getHrLocationCopy } from '../../lib/retailLocationCopy';
 import {
+  findShiftTemplateForStore,
   listShiftTemplates,
   pickShiftTemplateIdForWorkCenter,
   SHIFT_TEMPLATES_CHANGED_EVENT,
@@ -92,14 +93,10 @@ export function WorkerInviteQrModal({ onClose, business }: Props) {
   }, [workCenterId, shiftTemplates, storeOptions]);
 
   const visibleShiftTemplates = useMemo(() => {
-    if (!workCenterId) return shiftTemplates;
+    if (!workCenterId) return [];
     const storeLabel = storeOptions.find((s) => s.id === workCenterId)?.label || '';
-    const matchId = pickShiftTemplateIdForWorkCenter(shiftTemplates, workCenterId, storeLabel);
-    return [...shiftTemplates].sort((a, b) => {
-      if (a._id === matchId) return -1;
-      if (b._id === matchId) return 1;
-      return a.name.localeCompare(b.name, 'es');
-    });
+    const match = findShiftTemplateForStore(shiftTemplates, { workCenterId, storeLabel });
+    return match ? [match] : [];
   }, [shiftTemplates, workCenterId, storeOptions]);
 
   const reloadShiftTemplates = useCallback(async () => {
@@ -310,18 +307,23 @@ export function WorkerInviteQrModal({ onClose, business }: Props) {
                 <select
                   value={scheduleTemplateId}
                   onChange={(e) => setScheduleTemplateId(e.target.value)}
-                  className="w-full rounded-xl border-2 border-gray-200 bg-white px-3 py-2.5 text-sm dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                  disabled={!workCenterId}
+                  className="w-full rounded-xl border-2 border-gray-200 bg-white px-3 py-2.5 text-sm dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 disabled:opacity-60"
                 >
-                  <option value="">Sin horario por ahora</option>
+                  <option value="">
+                    {!workCenterId
+                      ? 'Primero elige la tienda / PDV'
+                      : 'Sin horario por ahora'}
+                  </option>
                   {visibleShiftTemplates.map((t) => (
                     <option key={t._id} value={t._id}>{t.name}</option>
                   ))}
                 </select>
                 {templatesError ? (
                   <p className="mt-1.5 text-xs text-red-500">{templatesError}</p>
-                ) : shiftTemplates.length === 0 ? (
+                ) : workCenterId && visibleShiftTemplates.length === 0 ? (
                   <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-                    Sin plantillas aún. Guárdalas en Ajustes → Tiendas (horario) o Equipo → Horarios → Configuración.
+                    Esta tienda no tiene horario RRHH aún. Guárdalo en Ajustes → Tiendas → Horarios (se vincula a este PDV).
                   </p>
                 ) : null}
               </>

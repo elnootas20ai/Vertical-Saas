@@ -101,6 +101,33 @@ import { useActivationFocus } from '../../../hooks/useActivationFocus';
 import { ActivationFieldWrap } from '../ActivationGuideUi';
 import { ACCESO__AddressAutocomplete } from '../../design-system/ACCESO__AddressAutocomplete';
 import { SettingsWizardFooter, SettingsWizardShell, type SettingsWizardStep } from './SettingsWizardShell';
+
+async function syncPdvOpeningHoursToRrhhTemplate(
+  businessId: string,
+  workCenter: Pick<WorkCenter, '_id' | 'name' | 'openingHours'>,
+): Promise<void> {
+  const bid = String(businessId || '').trim();
+  const wcId = String(workCenter._id || '').trim();
+  if (!bid || !wcId) return;
+  if (!hasValidBusinessHoursConfig(workCenter.openingHours)) return;
+  try {
+    const result = await applyOpeningHoursToShiftTemplates(bid, workCenter.openingHours, {
+      storeLabel: String(workCenter.name || '').trim() || 'tienda',
+      workCenterId: wcId,
+    });
+    if (result.created > 0) {
+      toast.success(`Horario de «${workCenter.name}» vinculado al QR de invitación`);
+    } else if (result.updated > 0) {
+      toast.success(`Horario de «${workCenter.name}» actualizado en invitaciones`);
+    }
+  } catch (err) {
+    toast.warning(
+      err instanceof Error
+        ? `Tienda guardada, pero no se vinculó el horario al QR: ${err.message}`
+        : 'Tienda guardada, pero no se vinculó el horario al QR',
+    );
+  }
+}
 import { formatAddonPriceShort } from '../../../lib/planAddonCatalog';
 import {
   Search,
@@ -805,26 +832,6 @@ function WorkCenterModal({
             })()
           : editItem?.openingHours,
       });
-      // RRHH: alinear plantillas con el horario de tienda (no toca turnos personales).
-      if (includeOpeningHours && schedulesBusinessId) {
-        try {
-          const result = await applyOpeningHoursToShiftTemplates(schedulesBusinessId, openingHours, {
-            storeLabel: form.name,
-            workCenterId: String(editItem?._id || editItem?.id || '').trim() || undefined,
-          });
-          if (result.created > 0) {
-            toast.success(`Plantilla «Horario ${form.name}» lista para invitaciones`);
-          } else if (result.updated > 0) {
-            toast.success(`Plantilla «Horario ${form.name}» actualizada`);
-          }
-        } catch (syncErr) {
-          toast.warning(
-            syncErr instanceof Error
-              ? `Tienda guardada, pero no se pudo sincronizar el horario RRHH: ${syncErr.message}`
-              : 'Tienda guardada, pero no se pudo sincronizar el horario RRHH',
-          );
-        }
-      }
       if (draftBusinessId) clearPdvCreateDraft(draftBusinessId);
       onClose();
     } catch (err) {
@@ -2100,6 +2107,9 @@ export function SalesPointsTab() {
             businessName: currentBusiness?.name || '',
           });
         }
+        if (businessIdForWc) {
+          await syncPdvOpeningHoursToRrhhTemplate(businessIdForWc, updated);
+        }
         setShowModal(false);
         setEditingItem(null);
         setForceCreatePdv(false);
@@ -2242,6 +2252,9 @@ export function SalesPointsTab() {
           writeSalaSetupPending(businessIdForWc, createdPdv._id);
           activeStore.setActiveSalesPoint(createdPdv._id);
           navigate(`/saas/sala/setup?pdv=${encodeURIComponent(createdPdv._id)}`);
+        }
+        if (businessIdForWc) {
+          await syncPdvOpeningHoursToRrhhTemplate(businessIdForWc, created);
         }
       }
     } catch (err) {

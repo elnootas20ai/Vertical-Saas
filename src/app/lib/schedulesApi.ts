@@ -350,23 +350,52 @@ export function shiftTemplateNameForStore(storeLabel: string): string {
   return `Horario ${label}`;
 }
 
-/** Plantilla de turno asociada a un centro/tienda (por id o por nombre). */
+/** Normaliza id de centro (wc:xxx → xxx) para comparar PDV con plantilla. */
+export function normalizeWorkCenterRefId(value: string | null | undefined): string {
+  return String(value || '').trim().replace(/^wc:/, '');
+}
+
+function normalizeStoreLabelForMatch(value: string): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^local\s+/i, '')
+    .replace(/\s+/g, ' ');
+}
+
+/** Plantilla de turno asociada a un centro/tienda (por id de PDV o nombre). */
 export function findShiftTemplateForStore(
   templates: ShiftTemplate[],
   opts: { workCenterId?: string; storeLabel?: string },
 ): ShiftTemplate | null {
-  const wcId = String(opts.workCenterId || '').trim();
-  const targetName = shiftTemplateNameForStore(opts.storeLabel || '').toLowerCase();
+  const wcId = normalizeWorkCenterRefId(opts.workCenterId);
+  const normLabel = normalizeStoreLabelForMatch(opts.storeLabel || '');
+
   if (wcId) {
-    const byWc = templates.find((t) => String(t.work_center_id || '').trim() === wcId);
+    const byWc = templates.find(
+      (t) => normalizeWorkCenterRefId(t.work_center_id) === wcId,
+    );
     if (byWc) return byWc;
   }
-  if (targetName) {
-    const byName = templates.find(
-      (t) => String(t.name || '').trim().toLowerCase() === targetName,
+
+  if (normLabel) {
+    const byWcName = templates.find(
+      (t) => normalizeStoreLabelForMatch(t.work_center_name || '') === normLabel,
     );
+    if (byWcName) return byWcName;
+
+    const targetName = normalizeStoreLabelForMatch(
+      shiftTemplateNameForStore(opts.storeLabel || '').replace(/^horario\s+/i, ''),
+    );
+    const byName = templates.find((t) => {
+      const tn = normalizeStoreLabelForMatch(
+        String(t.name || '').replace(/^horario\s+/i, ''),
+      );
+      return tn === targetName || tn === normLabel;
+    });
     if (byName) return byName;
   }
+
   return null;
 }
 
@@ -538,7 +567,7 @@ export async function applyOpeningHoursToShiftTemplates(
   if (!bid) return { updated: 0, created: 0 };
   const weekly = defaultWeekly(openingHours);
   const label = String(opts?.storeLabel || 'tienda').trim() || 'tienda';
-  const wcId = String(opts?.workCenterId || '').trim();
+  const wcId = normalizeWorkCenterRefId(opts?.workCenterId);
   const templateName = shiftTemplateNameForStore(label);
   const templates = await listShiftTemplates(bid);
   const existing = findShiftTemplateForStore(templates, { workCenterId: wcId, storeLabel: label });
