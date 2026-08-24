@@ -622,15 +622,10 @@ function appsAmountsForBillingSheet(
       attributed[sheetId] = round2((attributed[sheetId] || 0) + amt);
       attributedSum = round2(attributedSum + amt);
     }
+    // Solo Total MM/BB del cierre por canal; sin repartir un «total canal» inventado.
     let value = attributed[billingSheet.id] || 0;
-    if (attributedSum <= 0) {
+    if (attributedSum <= 0 && channelAmt > 0) {
       value = round2(channelAmt * share);
-    } else {
-      const leftover = round2(channelAmt - attributedSum);
-      if (leftover >= 0.01) {
-        const sheetAttr = attributed[billingSheet.id] || 0;
-        value = round2(value + leftover * (sheetAttr / attributedSum));
-      }
     }
     out[key] = value;
   }
@@ -683,34 +678,19 @@ function tpvAmountsForBillingSheet(
   }
   if (sumEf <= 0 && sumTj <= 0) return null;
 
-  // Resto vs total del cierre: peso del dinero ya atribuido (regla del cierre), no pizzas.
-  const allSheetIds = allSheets.map((s) => s.id);
-  const weightOf = (id: string) => round2((attributedEf[id] || 0) + (attributedTj[id] || 0));
-  const weightTotal = round2(allSheetIds.reduce((s, id) => s + weightOf(id), 0));
-  const equalShare = allSheets.length > 0 ? 1 / allSheets.length : 0;
-  const moneyShare = (id: string) => (weightTotal > 0 ? weightOf(id) / weightTotal : equalShare);
-
-  const addEf = round2(Math.max(0, round2(amounts.efectivo - sumEf)));
-  const addTj = round2(Math.max(0, round2(amounts.tpv - sumTj)));
-  const share = moneyShare(billingSheet.id);
-
-  let efectivo = attributedEf[billingSheet.id] || 0;
-  let tpv = attributedTj[billingSheet.id] || 0;
-  if (addEf >= 0.01) efectivo = round2(efectivo + addEf * share);
-  if (addTj >= 0.01) tpv = round2(tpv + addTj * share);
-
+  const efectivo = attributedEf[billingSheet.id] || 0;
+  const tpv = attributedTj[billingSheet.id] || 0;
   const brandMoney = round2(efectivo + tpv);
-  const allBrandMoney = round2(
-    allSheetIds.reduce((s, id) => {
-      let ef = attributedEf[id] || 0;
-      let tj = attributedTj[id] || 0;
-      const sh = moneyShare(id);
-      if (addEf >= 0.01) ef = round2(ef + addEf * sh);
-      if (addTj >= 0.01) tj = round2(tj + addTj * sh);
-      return s + ef + tj;
+  const declaredBrandMoney = round2(
+    allSheets.reduce((s, sheet) => {
+      const id = sheet.id;
+      return s + (attributedEf[id] || 0) + (attributedTj[id] || 0);
     }, 0),
   );
-  const xShare = allBrandMoney > 0 ? brandMoney / allBrandMoney : share;
+  const shares = sheetMoneyShares(countsFromAmounts(amounts), allSheets);
+  const xShare = declaredBrandMoney > 0
+    ? brandMoney / declaredBrandMoney
+    : (shares[billingSheet.id] ?? 0);
   const x = round2(amounts.x * xShare);
 
   return { efectivo: round2(efectivo), tpv: round2(tpv), x };
@@ -727,10 +707,10 @@ export function splitSessionCajaAmountsByBillingSheet(
   const tpvBrand = tpvAmountsForBillingSheet(session, amounts, billingSheet, allSheets);
   const apps = appsAmountsForBillingSheet(session, amounts, billingSheet, allSheets);
 
-  // Sin desglose Caja 1 por marca → 0 (igual que el cierre: no hay nada escrito).
-  const efectivo = tpvBrand ? tpvBrand.efectivo : 0;
-  const tpv = tpvBrand ? tpvBrand.tpv : 0;
-  const x = tpvBrand ? tpvBrand.x : 0;
+  // Caja 1 por marca → lo declarado. Cierres viejos sin Caja 1 → % uds (solo Vertial, no apps).
+  const efectivo = tpvBrand ? tpvBrand.efectivo : unitSplit.efectivo;
+  const tpv = tpvBrand ? tpvBrand.tpv : unitSplit.tpv;
+  const x = tpvBrand ? tpvBrand.x : unitSplit.x;
 
   const flipdish = apps
     ? apps.flipdish
@@ -1689,7 +1669,7 @@ const CAJA_MONEY_TOTAL_COL = 7;
 function buildCajaMoneyGroupHeaderRow(columnCount: number): unknown[] {
   const row = Array.from({ length: columnCount }, () => '');
   if (columnCount > CAJA_MONEY_INTEGRADOR_GROUP_END) {
-    row[CAJA_MONEY_TIENDA_GROUP_START] = 'TIENDA';
+    row[CAJA_MONEY_TIENDA_GROUP_START] = 'VERTIAL';
     row[CAJA_MONEY_INTEGRADOR_GROUP_START] = 'INTEGRADORES';
     if (columnCount > CAJA_MONEY_TOTAL_COL) {
       row[CAJA_MONEY_TOTAL_COL] = 'TOTAL';

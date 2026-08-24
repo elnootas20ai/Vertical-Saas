@@ -146,7 +146,7 @@ describe('splitSessionCajaAmountsByBillingSheet', () => {
     expect(bb.total).toBe(50);
   });
 
-  it('sin Caja 1 por marca: EFECTIVO/TPV/X a 0 (igual que el cierre)', () => {
+  it('sin Caja 1 por marca: Vertial (ef/tpv) reparte por % uds', () => {
     const session = closedSession({
       summary: {
         salesByMethod: { efectivo: 100, tarjeta: 40, bizum: 10, online: 0, otro: 0 },
@@ -157,12 +157,12 @@ describe('splitSessionCajaAmountsByBillingSheet', () => {
     });
     const mm = splitSessionCajaAmountsByBillingSheet(session, sheets[0], sheets);
     const bb = splitSessionCajaAmountsByBillingSheet(session, sheets[1], sheets);
-    expect(mm.efectivo).toBe(0);
-    expect(mm.tpv).toBe(0);
-    expect(mm.x).toBe(0);
-    expect(bb.efectivo).toBe(0);
-    expect(bb.tpv).toBe(0);
-    expect(bb.x).toBe(0);
+    expect(mm.efectivo).toBe(90);
+    expect(mm.tpv).toBe(36);
+    expect(mm.x).toBe(9);
+    expect(bb.efectivo).toBe(10);
+    expect(bb.tpv).toBe(4);
+    expect(bb.x).toBe(1);
   });
 
   it('efectivo/tarjeta usan Caja 1 por marca, no el % de pizzas/burgers', () => {
@@ -229,7 +229,54 @@ describe('splitSessionCajaAmountsByBillingSheet', () => {
     expect(mm.total + bb.total).toBe(300);
   });
 
-  it('resto de tarjeta del cierre sigue el peso de Caja 1, no el % de pizzas', () => {
+  it('Badalona 06 ago: MM Vertial por uds; integradores = Total MM del cierre', () => {
+    const session = closedSession({
+      _id: 'tpvreg-de2decbb',
+      pointOfSaleId: 'pdv-594a8503-1515-47b8-9e02-fb8ff09052b6',
+      pointOfSaleName: 'BADALONA',
+      openedAt: '2026-08-06T10:00:00.000Z',
+      closedAt: '2026-08-06T22:00:00.000Z',
+      summary: {
+        salesByMethod: { efectivo: 18.9, tarjeta: 133.7, bizum: 0, otro: 0 },
+        salesByChannel: {},
+        totalSales: 152.6,
+      },
+      aggregatorClosingTotals: { glovo: 159.37, justeat: 74.39, ubereats: 24.89 },
+      aggregatorClosingBrandTotals: {
+        glovo: { 'brand-96a8d7ce-e9af-459c-b8a9-48ffc55949ec': 159.37 },
+        justeat: { 'brand-96a8d7ce-e9af-459c-b8a9-48ffc55949ec': 74.39 },
+        ubereats: { 'brand-96a8d7ce-e9af-459c-b8a9-48ffc55949ec': 24.89 },
+      },
+      productClosingCounts: { pizza: 29, burger: 2, taco: 1 },
+    });
+    const legacy = [
+      {
+        id: 'modomio',
+        label: 'MODOMIO',
+        brandIds: ['brand-96a8d7ce-e9af-459c-b8a9-48ffc55949ec'],
+        unitColumns: [{ key: 'pizza', header: 'TOTAL PIZZA' }],
+      },
+      {
+        id: 'blackburger',
+        label: 'BLACK BURGER',
+        brandIds: [],
+        unitColumns: [{ key: 'burger', header: 'TOTAL BURGUER' }],
+      },
+    ];
+    const mm = splitSessionCajaAmountsByBillingSheet(session, legacy[0], legacy);
+    const bb = splitSessionCajaAmountsByBillingSheet(session, legacy[1], legacy);
+    // 29/31 del Vertial tienda (pizza vs burger; taco no en columnas de hoja)
+    expect(mm.efectivo).toBe(17.68);
+    expect(mm.tpv).toBe(125.07);
+    expect(mm.glovo).toBe(159.37);
+    expect(mm.justEat).toBe(74.39);
+    expect(mm.uber).toBe(24.89);
+    expect(mm.totalPizza).toBe(29);
+    expect(bb.totalBurger).toBe(2);
+    expect(bb.glovo).toBe(0);
+  });
+
+  it('Caja 1 por marca: solo lo declarado (sin sumar resto de tienda)', () => {
     const session = closedSession({
       summary: {
         salesByMethod: { efectivo: 100, tarjeta: 110, bizum: 0, online: 0, otro: 0 },
@@ -237,7 +284,6 @@ describe('splitSessionCajaAmountsByBillingSheet', () => {
         totalSales: 210,
       },
       closingBrandTpvTotals: {
-        // Suma tarjeta 100; quedan 10 € del cierre → van al peso Caja 1 (90/10), no al 50/50 de uds
         'brand-mm': { efectivo: 90, tarjeta: 90 },
         'brand-bb': { efectivo: 10, tarjeta: 10 },
       },
@@ -245,9 +291,10 @@ describe('splitSessionCajaAmountsByBillingSheet', () => {
     });
     const mm = splitSessionCajaAmountsByBillingSheet(session, sheets[0], sheets);
     const bb = splitSessionCajaAmountsByBillingSheet(session, sheets[1], sheets);
-    expect(mm.tpv).toBe(99); // 90 + 10*0.9
-    expect(bb.tpv).toBe(11); // 10 + 10*0.1
-    expect(mm.total + bb.total).toBe(210);
+    expect(mm.tpv).toBe(90);
+    expect(bb.tpv).toBe(10);
+    expect(mm.efectivo).toBe(90);
+    expect(bb.efectivo).toBe(10);
   });
 
   it('X (Bizum/otro) sigue el reparto de dinero Vertial, no el % de unidades', () => {
@@ -524,7 +571,7 @@ describe('buildCajaMonthSheet', () => {
 
     const modo = buildCajaSheetAoa(sheet, 'modomio');
     expect(modo[0][0]).toContain('MODOMIO');
-    expect(modo[2][1]).toBe('TIENDA');
+    expect(modo[2][1]).toBe('VERTIAL');
     expect(modo[2][3]).toBe('INTEGRADORES');
     expect(modo[2][7]).toBe('TOTAL');
     expect(modo[3]).toEqual([...MODOMIO_HEADERS]);
@@ -711,7 +758,7 @@ describe('buildCajaMonthSheet', () => {
     expect(headerRow).toBe('DIA');
     const groupRow = built.workbook.Sheets['MM TIENDA']?.B3?.v
       || built.workbook.Sheets[built.sheetNames[0]]?.B3?.v;
-    expect(groupRow).toBe('TIENDA');
+    expect(groupRow).toBe('VERTIAL');
   });
 
   it('nombre de archivo y títulos usan el nombre de la empresa', () => {
