@@ -2411,6 +2411,65 @@ export async function listTpvRegisterSessionsRequest(
   return payload.sessions;
 }
 
+export type TpvStoreOpeningHint = {
+  openSession: TpvRegisterSession | null;
+  lastClosed: TpvRegisterSession | null;
+  suggestedFondo: number | null;
+};
+
+/** Tablet / código tienda: caja abierta + fondo dejado (petición mínima). */
+export async function fetchTpvStoreOpeningHintRequest(
+  userId: string,
+  options: {
+    pointOfSaleId: string;
+    workCenterId?: string;
+    businessId?: string;
+  },
+): Promise<TpvStoreOpeningHint> {
+  const id = normalizeUserId(userId);
+  const pdvId = String(options.pointOfSaleId || '').trim();
+  if (!pdvId) {
+    return { openSession: null, lastClosed: null, suggestedFondo: null };
+  }
+  const params = new URLSearchParams();
+  params.set('pointOfSaleId', pdvId);
+  const wc = String(options.workCenterId || '').trim();
+  if (wc) params.set('workCenterId', wc);
+  const bid = String(options.businessId || '').trim();
+  if (bid) params.set('businessId', bid);
+  params.set('_', String(Date.now()));
+  const response = await authFetch(
+    `${API_BASE}/api/delivery/tpv-sessions/${encodeURIComponent(id)}/opening-hint?${params.toString()}`,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getCouchHeaders(),
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
+      },
+    },
+  );
+  const payload = (await response.json().catch(() => ({}))) as {
+    ok?: boolean;
+    openSession?: TpvRegisterSession | null;
+    lastClosed?: TpvRegisterSession | null;
+    suggestedFondo?: number | null;
+    error?: string;
+  };
+  if (!response.ok) {
+    throw new Error(deliveryRequestErrorMessage(payload, 'No se pudo cargar la caja de esta tienda'));
+  }
+  return {
+    openSession: payload.openSession ?? null,
+    lastClosed: payload.lastClosed ?? null,
+    suggestedFondo:
+      payload.suggestedFondo != null && Number.isFinite(Number(payload.suggestedFondo))
+        ? Number(payload.suggestedFondo)
+        : null,
+  };
+}
+
 export async function createTpvRegisterSessionRequest(userId: string, data: Partial<TpvRegisterSession>): Promise<TpvRegisterSession> {
   const id = normalizeUserId(userId);
   const url = `${API_BASE}/api/delivery/tpv-sessions/${encodeURIComponent(id)}`;

@@ -15,6 +15,7 @@ import { formatAddonPriceShort } from '../../lib/planAddonCatalog';
 import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
 import {
   listTpvRegisterSessionsRequest,
+  fetchTpvStoreOpeningHintRequest,
   createTpvRegisterSessionRequest,
   reopenTpvRegisterSessionRequest,
   TpvRegisterSessionConflictError,
@@ -138,6 +139,8 @@ import {
   leaveTpvTabletSession,
   mergeTabletBindingPdv,
   readTpvTabletBinding,
+  readTabletCajaOpeningHint,
+  writeTabletCajaOpeningHint,
 } from '../../lib/tpvTabletSession';
 
 import {
@@ -299,7 +302,7 @@ function tpvGateSessionsQueryOpts(businessId?: string): {
   dateFrom: string;
 } {
   const from = new Date();
-  from.setUTCDate(from.getUTCDate() - 7);
+  from.setUTCDate(from.getUTCDate() - 30);
   from.setUTCHours(0, 0, 0, 0);
   const bid = String(businessId || '').trim();
   return {
@@ -607,7 +610,57 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
       pointsOfSale,
       alternateRefs,
     );
-    if (!last) return null as null | { amount: number; isNextDayInitial: boolean; label: string };
+    if (!last) {
+      const cached = readTabletCajaOpeningHint(pdvId || restrictedToPdvId || undefined);
+      if (cached?.lastClosed) {
+        const fromCache = findLastClosedTpvSession(
+          [cached.lastClosed],
+          pdvId,
+          terminalId,
+          pointsOfSale,
+          alternateRefs,
+        );
+        if (fromCache) {
+          let amount = resolvePreviousCloseCashAmount(fromCache);
+          if (amount == null && cached.suggestedFondo != null) {
+            amount = cached.suggestedFondo;
+          }
+          if (amount != null) {
+            let label = '';
+            if (fromCache.closedAt) {
+              try {
+                label = new Date(fromCache.closedAt).toLocaleDateString('es-ES', {
+                  weekday: 'short',
+                  day: 'numeric',
+                  month: 'short',
+                });
+              } catch {
+                label = '';
+              }
+            }
+            return {
+              amount,
+              isNextDayInitial: previousCloseCashIsNextDayInitial(fromCache),
+              label,
+            };
+          }
+        }
+        if (cached.suggestedFondo != null && Number.isFinite(cached.suggestedFondo)) {
+          return {
+            amount: cached.suggestedFondo,
+            isNextDayInitial: true,
+            label: cached.lastClosed?.closedAt
+              ? new Date(cached.lastClosed.closedAt).toLocaleDateString('es-ES', {
+                weekday: 'short',
+                day: 'numeric',
+                month: 'short',
+              })
+              : '',
+          };
+        }
+      }
+      return null as null | { amount: number; isNextDayInitial: boolean; label: string };
+    }
     let amount = resolvePreviousCloseCashAmount(last);
     if (amount == null) {
       const fromCount = calcDenominationTotal(last.closingCashCount || {});
@@ -5809,6 +5862,52 @@ export function TpvRegisterGate({
     setAckedOpenSessionId(null);
   }, [hasTabletStoreCode]);
 
+  const hydrateTabletCajaFromHint = useCallback(async () => {
+    if (!isTabletCajaScopeRef.current) return;
+    const binding = tabletBindingRef.current;
+    const uid = String(dataUserIdRef.current || binding?.dataUserId || '').trim();
+    const pdvId = String(binding?.pdvId || initialManagerPdvIdRef.current || '').trim();
+    const bid = String(scopeBusinessIdRef.current || binding?.businessId || '').trim();
+    if (!uid || !pdvId) return;
+
+    const cached = readTabletCajaOpeningHint(pdvId);
+    const cachedMerge = [cached?.openSession, cached?.lastClosed].filter(
+      (s): s is TpvRegisterSession => Boolean(s?._id),
+    );
+    if (cachedMerge.length > 0) {
+      setSessions((prev) => mergeTpvRegisterSessionsPreservingOpen(prev, cachedMerge));
+    }
+
+    try {
+      const hint = await fetchTpvStoreOpeningHintRequest(uid, {
+        pointOfSaleId: pdvId,
+        workCenterId: binding?.workCenterId,
+        businessId: bid || undefined,
+      });
+      writeTabletCajaOpeningHint({
+        pdvId,
+        businessId: bid || undefined,
+        openSession: hint.openSession,
+        lastClosed: hint.lastClosed,
+        suggestedFondo: hint.suggestedFondo,
+        fetchedAt: new Date().toISOString(),
+      });
+      const fresh = [hint.openSession, hint.lastClosed].filter(
+        (s): s is TpvRegisterSession => Boolean(s?._id),
+      );
+      if (fresh.length > 0) {
+        setSessions((prev) => mergeTpvRegisterSessionsPreservingOpen(prev, fresh));
+      }
+    } catch {
+      // Mantener caché local si la red falla en tablet.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isTabletCajaScope || !dataUserId) return;
+    void hydrateTabletCajaFromHint();
+  }, [isTabletCajaScope, dataUserId, scopeBusinessId, tabletBinding?.pdvId, hydrateTabletCajaFromHint]);
+
   // Bar/restaurante CEO: sin sticky el pick de PDV puede soltar la caja un frame
   // al abrir mesa → TPV embebido se queda en «Recuperando la caja…».
   const holdStickyWhileOpen = Boolean(
@@ -5891,7 +5990,15 @@ export function TpvRegisterGate({
       tabletWorkCenterId: isTabletCajaScope ? tabletBinding?.workCenterId : null,
     });
     const opens = sessions.filter((s) => isTpvRegisterSessionOpen(s));
-    return pickNewestOpenRegisterSessionForStore(opens, pick, pointsOfSale, alternateRefs);
+    const fromList = pickNewestOpenRegisterSessionForStore(opens, pick, pointsOfSale, alternateRefs);
+    if (fromList) return fromList;
+    if (isTabletCajaScope) {
+      const cached = readTabletCajaOpeningHint(pick);
+      if (cached?.openSession && isTpvRegisterSessionOpen(cached.openSession)) {
+        return cached.openSession;
+      }
+    }
+    return null;
   }, [
     boardSession,
     sessions,
@@ -6428,6 +6535,10 @@ export function TpvRegisterGate({
         ).trim();
         const tabletFastPath = isTabletCajaScopeRef.current && Boolean(tabletPdvId);
 
+        if (tabletFastPath) {
+          void hydrateTabletCajaFromHint();
+        }
+
         if (tabletFastPath && !hasDisplayedStoresRef.current) {
           const stubPdvs = mergeTabletBindingPdv([], tabletBindingRef.current);
           setPointsOfSale(stubPdvs);
@@ -6626,6 +6737,7 @@ export function TpvRegisterGate({
           seq === loadSeqRef.current
           && !hasDisplayedStoresRef.current
           && !sessionsRef.current.some((s) => isTpvRegisterSessionOpen(s))
+          && !isTabletCajaScopeRef.current
         ) {
           setPointsOfSale([]);
           setWorkCenters([]);

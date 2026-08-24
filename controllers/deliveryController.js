@@ -3215,6 +3215,94 @@ export async function removeDriverCashSession(req, res) {
 
 // ─── TPV REGISTER SESSIONS ──────────────────────────────────────────────────
 
+function resolvePreviousCloseCashAmountForHint(session) {
+  if (!session || String(session.status || '') !== 'closed') return null;
+  if (session.nextDayInitialCash != null) {
+    const leave = Number(session.nextDayInitialCash);
+    if (Number.isFinite(leave) && leave >= 0) return Math.round(leave * 100) / 100;
+  }
+  const fromFinal = Number(session.finalCashAmount);
+  if (Number.isFinite(fromFinal) && fromFinal >= 0) return Math.round(fromFinal * 100) / 100;
+  return null;
+}
+
+function pickOpenSessionForStoreRefs(sessions, pdvId, workCenterId, businessId, scopedPdvIds) {
+  const refs = new Set([pdvId, workCenterId].filter(Boolean));
+  const opens = (Array.isArray(sessions) ? sessions : [])
+    .filter((s) => String(s.status || '').toLowerCase() === 'open' && !s.deletedAt)
+    .filter((s) => refs.has(String(s.pointOfSaleId || '').trim()))
+    .sort((a, b) => String(b.openedAt || '').localeCompare(String(a.openedAt || '')));
+  if (opens.length > 0) return opens[0];
+  return findOpenTpvRegisterSessionForPointOfSale(sessions, pdvId, businessId, scopedPdvIds)
+    || (workCenterId
+      ? findOpenTpvRegisterSessionForPointOfSale(sessions, workCenterId, businessId, scopedPdvIds)
+      : null);
+}
+
+function pickLastClosedForStoreRefs(sessions, pdvId, workCenterId) {
+  const refs = new Set([pdvId, workCenterId].filter(Boolean));
+  return (Array.isArray(sessions) ? sessions : [])
+    .filter((s) => String(s.status || '') === 'closed' && !s.deletedAt)
+    .filter((s) => refs.has(String(s.pointOfSaleId || '').trim()))
+    .sort(
+      (a, b) =>
+        new Date(b.closedAt || b.updatedAt || 0).getTime()
+        - new Date(a.closedAt || a.updatedAt || 0).getTime(),
+    )[0] || null;
+}
+
+/** Tablet / código tienda: caja abierta + fondo dejado en una sola petición ligera. */
+export async function getTpvStoreOpeningHint(req, res) {
+  try {
+    const { userId } = req.params;
+    if (!userId) return badRequest(res, 'Falta userId');
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    const pdvId = String(
+      req.query.pointOfSaleId || req.query.pdvId || req.query.salesPointId || '',
+    ).trim();
+    const workCenterId = String(req.query.workCenterId || '').trim();
+    const businessFilter = String(req.query.businessId || req.query.business_id || '').trim();
+    if (!pdvId) return badRequest(res, 'Falta pointOfSaleId');
+
+    let sessions = await listTpvRegisterSessionsByUser(req, userId, { opsLite: true, maxDocs: 800 });
+    let scopedPdvIds = new Set();
+    if (businessFilter) {
+      scopedPdvIds = await collectTpvSessionScopePdvIds(req, userId, businessFilter);
+      const beforeBizFilter = sessions;
+      sessions = filterTpvRegisterSessionsForBusiness(sessions, businessFilter, scopedPdvIds);
+      sessions = await recoverOpenSessionsWithNonOpsBusinessStamp(
+        req,
+        userId,
+        businessFilter,
+        sessions,
+        beforeBizFilter,
+      );
+    }
+
+    const openSession = pickOpenSessionForStoreRefs(
+      sessions,
+      pdvId,
+      workCenterId,
+      businessFilter,
+      scopedPdvIds,
+    );
+    const lastClosed = pickLastClosedForStoreRefs(sessions, pdvId, workCenterId);
+    const suggestedFondo = resolvePreviousCloseCashAmountForHint(lastClosed);
+
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({
+      ok: true,
+      openSession: openSession ? sanitizeTpvRegisterSession(openSession) : null,
+      lastClosed: lastClosed ? sanitizeTpvRegisterSession(lastClosed, { slimClosed: true }) : null,
+      suggestedFondo,
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al cargar apertura de caja' });
+  }
+}
+
 async function ensureTpvRegisterOwner(req, userId, sessionId) {
   const db = getDeliveryDbName();
   await ensureDatabase(req, db);

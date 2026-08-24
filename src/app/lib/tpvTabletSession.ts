@@ -40,7 +40,46 @@ export interface TpvTabletBinding {
 }
 
 const STORAGE_KEY = 'vertial_tpv_tablet_binding';
+const CAJA_HINT_KEY = 'vertial_tpv_tablet_caja_hint';
 const DEVICE_ID_KEY = 'vertial_tpv_device_id';
+
+export type TabletCajaOpeningHint = {
+  pdvId: string;
+  businessId?: string;
+  openSession?: import('./deliveryApi').TpvRegisterSession | null;
+  lastClosed?: import('./deliveryApi').TpvRegisterSession | null;
+  suggestedFondo?: number | null;
+  fetchedAt: string;
+};
+
+export function writeTabletCajaOpeningHint(hint: TabletCajaOpeningHint): void {
+  try {
+    localStorage.setItem(CAJA_HINT_KEY, JSON.stringify(hint));
+  } catch {
+    // ignore
+  }
+}
+
+export function readTabletCajaOpeningHint(pdvId?: string): TabletCajaOpeningHint | null {
+  try {
+    const raw = localStorage.getItem(CAJA_HINT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as TabletCajaOpeningHint;
+    const pick = String(pdvId || '').trim();
+    if (pick && String(parsed?.pdvId || '').trim() !== pick) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function clearTabletCajaOpeningHint(): void {
+  try {
+    localStorage.removeItem(CAJA_HINT_KEY);
+  } catch {
+    // ignore
+  }
+}
 
 /** Id estable del navegador/tablet para vincular al código de tienda. */
 export function getOrCreateTpvDeviceId(): string {

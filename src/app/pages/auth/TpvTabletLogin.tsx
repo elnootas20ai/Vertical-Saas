@@ -17,7 +17,9 @@ import {
   writeTpvTabletBinding,
   clearTpvTabletBinding,
   resolveTpvTabletWorkerPath,
+  writeTabletCajaOpeningHint,
 } from '../../lib/tpvTabletSession';
+import { fetchTpvStoreOpeningHintRequest } from '../../lib/deliveryApi';
 import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
 
 export function TpvTabletLogin() {
@@ -100,6 +102,26 @@ export function TpvTabletLogin() {
         businessName: business?.name,
       });
       setStoreLabel(pdv?.name || business?.name || '');
+      const ownerId = String(terminalBinding.dataUserId || '').trim();
+      const pdvId = String(terminalBinding.pdvId || '').trim();
+      if (ownerId && pdvId) {
+        void fetchTpvStoreOpeningHintRequest(ownerId, {
+          pointOfSaleId: pdvId,
+          workCenterId: terminalBinding.workCenterId,
+          businessId: terminalBinding.businessId,
+        })
+          .then((hint) => {
+            writeTabletCajaOpeningHint({
+              pdvId,
+              businessId: terminalBinding.businessId,
+              openSession: hint.openSession,
+              lastClosed: hint.lastClosed,
+              suggestedFondo: hint.suggestedFondo,
+              fetchedAt: new Date().toISOString(),
+            });
+          })
+          .catch(() => null);
+      }
     }
 
     if (business?.business_id && pdv) {
