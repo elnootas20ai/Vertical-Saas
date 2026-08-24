@@ -53,6 +53,7 @@ describe('tpvRegisterScope — regresión caja tablet', () => {
     expect(r.scopeBusinessId).toBe('empresa-tablet');
     expect(r.effectiveDataUserId).toBe('owner-tablet');
     expect(r.isTabletSession).toBe(true);
+    expect(r.hasTabletStoreCode).toBe(true);
     expect(r.shouldSyncBusinessFromTablet).toBe(true);
   });
 
@@ -77,6 +78,26 @@ describe('tpvRegisterScope — regresión caja tablet', () => {
     expect(r.isTabletSession).toBe(false);
     expect(r.scopeBusinessId).toBe('mi-empresa');
     expect(r.effectiveDataUserId).toBe('yo');
+  });
+
+  it('código tienda en ruta no-tpv: caja usa binding (hasTabletStoreCode) sin UI tablet', () => {
+    const r = resolveTpvRegisterScope({
+      currentBusiness: { business_id: 'rest-1', id: 'rest-1', owner_user_id: 'owner-1' },
+      tabletBinding: {
+        pdvId: 'pdv-tiana',
+        businessId: 'biz-tiana',
+        dataUserId: 'owner-tiana',
+        authUserId: 'owner-1',
+      },
+      authUser: { user_id: 'owner-1' },
+      pathname: '/saas/vertical/delivery',
+      businesses: [{ business_id: 'biz-tiana', owner_user_id: 'owner-tiana' }],
+      businessesSettled: true,
+    });
+    expect(r.hasTabletStoreCode).toBe(true);
+    expect(r.isTabletSession).toBe(false);
+    expect(r.scopeBusinessId).toBe('biz-tiana');
+    expect(r.effectiveDataUserId).toBe('owner-tiana');
   });
 
   it('binding tablet en /saas/caja/tpv no activa sesión tablet (gerente restaurante)', () => {

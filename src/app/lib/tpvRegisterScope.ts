@@ -134,6 +134,9 @@ export function resolveTpvRegisterScope(params: {
 }): {
   scopeBusinessId: string;
   effectiveDataUserId: string;
+  /** Código de tienda válido (misma caja TPV que tablet, da igual la ruta). */
+  hasTabletStoreCode: boolean;
+  /** UI compacta tablet: solo en rutas /saas/worker/tpv*. */
   isTabletSession: boolean;
   shouldSyncBusinessFromTablet: boolean;
 } {
@@ -180,6 +183,7 @@ export function resolveTpvRegisterScope(params: {
   return {
     scopeBusinessId,
     effectiveDataUserId,
+    hasTabletStoreCode: tablet,
     /** UI/caja tablet: solo en rutas worker/tpv. Los datos de tienda ya van arriba con `tablet`. */
     isTabletSession: tablet && pathOk,
     shouldSyncBusinessFromTablet,
@@ -191,6 +195,7 @@ export function evaluateTpvRegisterLoadGate(params: {
   businessLoading: boolean;
   businessesFetchSettled: boolean;
   isTabletSession: boolean;
+  hasTabletStoreCode?: boolean;
   dataUserId: string;
   scopeBusinessId: string;
 }): { canLoad: boolean; shouldClearLoading: boolean } {
@@ -198,14 +203,16 @@ export function evaluateTpvRegisterLoadGate(params: {
     businessLoading,
     businessesFetchSettled,
     isTabletSession,
+    hasTabletStoreCode = false,
     dataUserId,
     scopeBusinessId,
   } = params;
 
   const hasIds = Boolean(dataUserId && scopeBusinessId);
+  const tabletLoad = isTabletSession || hasTabletStoreCode;
 
-  // Tablet: el código de tienda ya fija empresa y titular; no esperar al selector global.
-  if (isTabletSession) {
+  // Código tienda: empresa y titular fijados; no esperar al selector global del CEO.
+  if (tabletLoad) {
     return {
       canLoad: hasIds,
       shouldClearLoading: !hasIds,
@@ -225,19 +232,21 @@ export function evaluateTpvRegisterLoadGate(params: {
 /** Evita descartar resultados obsoletos en tablet cuando el selector global aún no ha sincronizado. */
 export function shouldApplyTpvRegisterLoadResult(params: {
   isTabletSession: boolean;
+  hasTabletStoreCode?: boolean;
   bidAtStart: string;
   activeBid: string;
 }): boolean {
-  if (params.isTabletSession) return true;
+  if (params.isTabletSession || params.hasTabletStoreCode) return true;
   return params.activeBid === params.bidAtStart;
 }
 
 export function resolveTpvRegisterBidAtStart(params: {
   isTabletSession: boolean;
+  hasTabletStoreCode?: boolean;
   tabletBinding?: Pick<TpvTabletBindingRef, 'businessId'> | null;
   scopeBusinessId: string;
 }): string {
-  if (params.isTabletSession && params.tabletBinding?.businessId) {
+  if ((params.isTabletSession || params.hasTabletStoreCode) && params.tabletBinding?.businessId) {
     return businessScopeIdFromTabletBinding(params.tabletBinding);
   }
   return params.scopeBusinessId;

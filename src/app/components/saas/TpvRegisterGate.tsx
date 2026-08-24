@@ -5493,6 +5493,9 @@ export function TpvRegisterGate({
   );
 
   const isTabletSession = registerScope.isTabletSession;
+  const hasTabletStoreCode = registerScope.hasTabletStoreCode;
+  /** Mismo TPV caja con código tienda (tablet) o ruta worker — no solo CEO. */
+  const isTabletCajaScope = hasTabletStoreCode || isTabletSession;
   const orderFlowActive = useTpvOrderFlowActive();
   const isRestaurantVerticalChrome = isRestaurantBusinessType(currentBusiness?.businessType);
   const compactRegisterChrome = isTabletSession || orderFlowActive || isRestaurantVerticalChrome;
@@ -5621,6 +5624,10 @@ export function TpvRegisterGate({
   scopeBusinessIdRef.current = scopeBusinessId;
   const isTabletSessionRef = useRef(isTabletSession);
   isTabletSessionRef.current = isTabletSession;
+  const isTabletCajaScopeRef = useRef(isTabletCajaScope);
+  isTabletCajaScopeRef.current = isTabletCajaScope;
+  const hasTabletStoreCodeRef = useRef(hasTabletStoreCode);
+  hasTabletStoreCodeRef.current = hasTabletStoreCode;
   const accountBusinessCountRef = useRef(accountBusinessCount);
   accountBusinessCountRef.current = accountBusinessCount;
   const businessesRef = useRef(businesses);
@@ -5628,7 +5635,9 @@ export function TpvRegisterGate({
   const businessId = scopeBusinessId;
   const tpvFrameClass = fillParent ? 'flex flex-col h-full min-h-0' : 'flex flex-col min-h-screen';
 
-  const tabletRestrictedPdvId = isTabletSession ? tabletBinding!.pdvId : null;
+  const tabletRestrictedPdvId = isTabletCajaScope
+    ? String(tabletBinding?.pdvId || initialManagerPdvId || '').trim() || null
+    : null;
 
   useEffect(() => {
     if (!tabletBinding?.businessId || !businessesFetchSettled) return;
@@ -5787,7 +5796,7 @@ export function TpvRegisterGate({
             const tabletPdvId = String(tabletBindingRef.current?.pdvId || '').trim();
             const bid = scopeBusinessIdRef.current;
             let next = sessData;
-            if (isTabletSessionRef.current && tabletPdvId) {
+            if (isTabletCajaScopeRef.current && tabletPdvId) {
               const pdvs = mergeTabletBindingPdv(
                 pointsOfSaleRef.current,
                 tabletBindingRef.current,
@@ -5845,7 +5854,7 @@ export function TpvRegisterGate({
    * de managerPdvPickId) para que Continuar/Abrir no carguen con tienda vacía o ajena.
    */
   const resolvedStorePickId = useMemo(() => {
-    if (isTabletSession) return tabletRestrictedPdvId;
+    if (isTabletCajaScope) return tabletRestrictedPdvId;
     if (isWorkerUser) return workerAssignedPdvId;
     const fromProp = String(initialManagerPdvId || '').trim();
     if (fromProp) return fromProp;
@@ -5866,7 +5875,7 @@ export function TpvRegisterGate({
     const alternateRefs = resolveTpvStoreAlternateRefs({
       pickId: resolvedStorePickId,
       pointsOfSale,
-      tabletWorkCenterId: isTabletSession ? tabletBinding?.workCenterId : null,
+      tabletWorkCenterId: isTabletCajaScope ? tabletBinding?.workCenterId : null,
     });
     const { session, nextSticky } = resolveActiveTpvRegisterSession({
       sessions,
@@ -5912,7 +5921,7 @@ export function TpvRegisterGate({
     const alternateRefs = resolveTpvStoreAlternateRefs({
       pickId: pick,
       pointsOfSale,
-      tabletWorkCenterId: isTabletSession ? tabletBinding?.workCenterId : null,
+      tabletWorkCenterId: isTabletCajaScope ? tabletBinding?.workCenterId : null,
     });
     const opens = sessions.filter((s) => isTpvRegisterSessionOpen(s));
     return pickNewestOpenRegisterSessionForStore(opens, pick, pointsOfSale, alternateRefs);
@@ -5948,7 +5957,7 @@ export function TpvRegisterGate({
     const alternateRefs = resolveTpvStoreAlternateRefs({
       pickId: pick,
       pointsOfSale: pointsOfSaleRef.current,
-      tabletWorkCenterId: isTabletSessionRef.current ? tabletBindingRef.current?.workCenterId : null,
+      tabletWorkCenterId: isTabletCajaScopeRef.current ? tabletBindingRef.current?.workCenterId : null,
     });
     if (!remoteClosedSessionAffectsStore(session, pick, pointsOfSaleRef.current, alternateRefs)) {
       return false;
@@ -6373,7 +6382,7 @@ export function TpvRegisterGate({
       const cached = readRetailScopeCacheForBusiness(scopeBusinessId, buildRetailScopeCtx());
       if (cached && (cached.allPointsOfSale.length > 0 || cached.retailWorkCenters.length > 0)) {
         applyScopedStoreRows(cached.allPointsOfSale, cached.retailWorkCenters);
-      } else if (isTabletSession && tabletBindingRef.current?.pdvId) {
+      } else if (isTabletCajaScope && tabletBindingRef.current?.pdvId) {
         const stubPdvs = mergeTabletBindingPdv([], tabletBindingRef.current);
         setPointsOfSale(stubPdvs);
         setWorkCenters([]);
@@ -6402,6 +6411,7 @@ export function TpvRegisterGate({
   }, [
     scopeBusinessId,
     isTabletSession,
+    isTabletCajaScope,
     initialManagerPdvId,
     applyScopedStoreRows,
     buildRetailScopeCtx,
@@ -6418,6 +6428,7 @@ export function TpvRegisterGate({
       const biz = scopeBusinessRef.current;
       const bidAtStart = resolveTpvRegisterBidAtStart({
         isTabletSession: isTabletSessionRef.current,
+        hasTabletStoreCode: hasTabletStoreCodeRef.current,
         tabletBinding: tabletBindingRef.current,
         scopeBusinessId: scopeBusinessIdRef.current,
       });
@@ -6430,7 +6441,7 @@ export function TpvRegisterGate({
 
       if (!hasDisplayedStoresRef.current) {
         const tabletPdv = String(tabletBindingRef.current?.pdvId || '').trim();
-        if (!(isTabletSessionRef.current && tabletPdv)) {
+        if (!(isTabletCajaScopeRef.current && tabletPdv)) {
           setLoading(true);
         }
       }
@@ -6443,8 +6454,12 @@ export function TpvRegisterGate({
 
       try {
         const workerUser = isInvitedWorkerUser(authUser);
-        const tabletPdvId = String(tabletBindingRef.current?.pdvId || '').trim();
-        const tabletFastPath = isTabletSessionRef.current && Boolean(tabletPdvId);
+        const tabletPdvId = String(
+          tabletBindingRef.current?.pdvId
+          || initialManagerPdvIdRef.current
+          || '',
+        ).trim();
+        const tabletFastPath = isTabletCajaScopeRef.current && Boolean(tabletPdvId);
 
         if (tabletFastPath && !hasDisplayedStoresRef.current) {
           const stubPdvs = mergeTabletBindingPdv([], tabletBindingRef.current);
@@ -6460,10 +6475,11 @@ export function TpvRegisterGate({
         );
 
         if (seq !== loadSeqRef.current) return;
-        if (!isTabletSessionRef.current && scopeBusinessIdRef.current !== bidAtStart) return;
+        if (!isTabletCajaScopeRef.current && scopeBusinessIdRef.current !== bidAtStart) return;
         if (
           !shouldApplyTpvRegisterLoadResult({
             isTabletSession: isTabletSessionRef.current,
+            hasTabletStoreCode: hasTabletStoreCodeRef.current,
             bidAtStart,
             activeBid: resolveBusinessScopeId(scopeBusinessRef.current),
           })
@@ -6551,7 +6567,7 @@ export function TpvRegisterGate({
         }
 
         if (seq !== loadSeqRef.current) return;
-        if (!isTabletSessionRef.current && scopeBusinessIdRef.current !== bidAtStart) return;
+        if (!isTabletCajaScopeRef.current && scopeBusinessIdRef.current !== bidAtStart) return;
 
         let scopedPdvs = storeState.pointsOfSale.filter((p) => p.active !== false);
         let scopedWorkCenters = storeState.workCenters.filter(
@@ -6561,7 +6577,7 @@ export function TpvRegisterGate({
             (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
         );
 
-        if (workerUser && !isTabletSessionRef.current) {
+        if (workerUser && !isTabletCajaScopeRef.current) {
           const salesPointRef = resolveEffectiveSalesPointRef({
             employmentSalesPointId: authUser?.employment?.salesPointId,
             workCenters: scopedWorkCenters,
@@ -6577,7 +6593,7 @@ export function TpvRegisterGate({
         }
 
         // Código tablet delivery: solo la tienda del código (misma OpeningScreen por código).
-        if (isTabletSessionRef.current && tabletPdvId) {
+        if (isTabletCajaScopeRef.current && tabletPdvId) {
           scopedPdvs = scopedPdvs.filter(
             (p) => p._id === tabletPdvId || String(p.workCenterId || '').trim() === tabletPdvId,
           );
@@ -6607,7 +6623,7 @@ export function TpvRegisterGate({
         if (scopedPdvs.length > 0 || scopedWorkCenters.length > 0) {
           setWorkCenters(scopedWorkCenters);
           setPointsOfSale(
-            mergeTabletBindingPdv(scopedPdvs, isTabletSessionRef.current ? tabletBindingRef.current : null),
+            mergeTabletBindingPdv(scopedPdvs, isTabletCajaScopeRef.current ? tabletBindingRef.current : null),
           );
           writeRetailScopeCacheForBusiness(
             bidAtStart,
@@ -6623,12 +6639,12 @@ export function TpvRegisterGate({
         // Re-filtrar sesiones con PDVs frescos (misma lista, scope más preciso).
         const mergedPdvs = mergeTabletBindingPdv(
           scopedPdvs,
-          isTabletSessionRef.current ? tabletBindingRef.current : null,
+          isTabletCajaScopeRef.current ? tabletBindingRef.current : null,
         );
         setSessions((prev) =>
           mergeTpvRegisterSessionsPreservingOpen(
             prev,
-            isTabletSessionRef.current && tabletPdvId
+            isTabletCajaScopeRef.current && tabletPdvId
               ? filterSessionsForTabletStore(
                   sessData,
                   tabletPdvId,
@@ -6667,6 +6683,7 @@ export function TpvRegisterGate({
       businessLoading,
       businessesFetchSettled,
       isTabletSession,
+      hasTabletStoreCode,
       dataUserId,
       scopeBusinessId,
     });
@@ -6675,7 +6692,7 @@ export function TpvRegisterGate({
       return;
     }
     void loadData();
-  }, [businessLoading, businessesFetchSettled, dataUserId, scopeBusinessId, loadData, isTabletSession]);
+  }, [businessLoading, businessesFetchSettled, dataUserId, scopeBusinessId, loadData, isTabletSession, hasTabletStoreCode]);
 
   useEffect(() => {
     if (!loading) {
@@ -6864,7 +6881,7 @@ export function TpvRegisterGate({
     const openAlternateRefs = resolveTpvStoreAlternateRefs({
       pickId: pdvId,
       pointsOfSale,
-      tabletWorkCenterId: isTabletSession ? tabletBinding?.workCenterId : null,
+      tabletWorkCenterId: isTabletCajaScope ? tabletBinding?.workCenterId : null,
     });
 
     const localOpen = pickNewestOpenRegisterSessionForStore(
@@ -7784,9 +7801,9 @@ export function TpvRegisterGate({
   );
 
   const waitForBusinessList =
-    businessLoading && !(isTabletSession && scopeBusinessId);
+    businessLoading && !(isTabletCajaScope && scopeBusinessId);
 
-  if (waitForBusinessList || (!scopeBusinessId && businessesFetchSettled && !isTabletSession)) {
+  if (waitForBusinessList || (!scopeBusinessId && businessesFetchSettled && !isTabletCajaScope)) {
     return wrapShell(
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
         <div className="text-center">
@@ -8084,7 +8101,7 @@ export function TpvRegisterGate({
 
     // Entrada por código TPV: misma UI de apertura que tienda/CEO, pero sin
     // poderes de gerente (cambiar tienda / volver a cuenta).
-    const tabletEntryLocked = Boolean(isTabletSession || tabletBinding);
+    const tabletEntryLocked = Boolean(isTabletCajaScope || tabletBinding);
 
     const openingStoreLabel =
       tabletBinding?.pdvName
