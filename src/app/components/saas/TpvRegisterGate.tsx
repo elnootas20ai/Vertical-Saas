@@ -598,7 +598,7 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
     const alternateRefs = resolveTpvStoreAlternateRefs({
       pickId: pdvId,
       pointsOfSale,
-      tabletWorkCenterId: readTpvTabletBinding()?.workCenterId,
+      tabletWorkCenterId: tabletWorkCenterId || readTpvTabletBinding()?.workCenterId,
     });
     const last = findLastClosedTpvSession(
       registerSessions,
@@ -1050,40 +1050,6 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
     );
   })() : null;
 
-  const continueSession =
-    existingOpenForStore
-    || staleOpenForStore
-    || (knownOpenSession && isTpvRegisterSessionOpen(knownOpenSession) ? knownOpenSession : null);
-  const continueWho = continueSession
-    ? [
-        continueSession.workerName || 'Equipo',
-        continueSession.terminalName || '',
-        displayStoreName || continueSession.pointOfSaleName || '',
-      ].filter(Boolean).join(' · ')
-    : '';
-
-  /** Tablet / código tienda: barra fija arriba — imposible de perder al entrar. */
-  const tabletContinueTopBar = tabletBoundOpening && continueSession ? (
-    <div className="shrink-0 z-30 bg-emerald-600 dark:bg-emerald-700 px-3 py-3 shadow-md border-b border-emerald-700/40">
-      <p className="text-[11px] font-semibold text-emerald-100 text-center mb-2 truncate">
-        {continueWho || 'Hay caja abierta en esta tienda'}
-      </p>
-      <button
-        type="button"
-        onClick={() => onContinueExistingOpen?.(continueSession)}
-        disabled={parentLoading || openingBusy || !onContinueExistingOpen}
-        className="w-full min-h-[52px] rounded-xl bg-white text-emerald-800 font-bold text-base shadow-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform disabled:opacity-70"
-      >
-        {(parentLoading || openingBusy) ? (
-          <RefreshCw className="w-5 h-5 animate-spin" />
-        ) : (
-          <LogIn className="w-5 h-5" />
-        )}
-        Continuar en caja abierta
-      </button>
-    </div>
-  ) : null;
-
   /** Misma OpeningScreen siempre: si hay caja abierta de ESTA tienda, banner Continuar (no otra pantalla). */
   const liveOpenBanner = existingOpenForStore ? (() => {
     const who = [
@@ -1118,11 +1084,10 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
 
   return (
     <div className="min-h-[100dvh] min-h-screen bg-stone-50 dark:bg-stone-950 flex flex-col">
-      {tabletContinueTopBar}
       <div className="flex-1 flex items-stretch sm:items-center justify-center p-2 sm:p-3">
       <div className="relative bg-white dark:bg-stone-900 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-lg w-full max-w-4xl min-h-[min(88dvh,680px)] sm:min-h-0 sm:max-h-[min(88svh,680px)] flex flex-col">
-        {/* Header — banner Continuar (web / no tablet) */}
-        {!tabletBoundOpening && (liveOpenBanner || staleOpenBanner) ? (
+        {/* Header — banner Continuar (CEO, tablet y código tienda: misma UI) */}
+        {(liveOpenBanner || staleOpenBanner) ? (
           <div className="shrink-0 px-3 sm:px-4 pt-3 space-y-2">
             {liveOpenBanner}
             {!liveOpenBanner ? staleOpenBanner : null}
