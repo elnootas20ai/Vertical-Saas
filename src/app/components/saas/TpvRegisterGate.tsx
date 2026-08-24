@@ -931,8 +931,8 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
       toast.info('Abriendo caja…', { id: 'tpv-opening-busy', duration: 1500 });
       return;
     }
-    if (existingOpenForStore) {
-      toast.info('Ya hay caja abierta. Usa Continuar en esta caja.', { id: 'tpv-use-enter-banner', duration: 2500 });
+    if (openSessionForStore) {
+      toast.info('Ya hay caja abierta. Pulsa Continuar en caja abierta.', { id: 'tpv-use-enter-banner', duration: 2500 });
       return;
     }
     const wName = effectiveWorkerName();
@@ -953,8 +953,8 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
       toast.info('Abriendo caja…', { id: 'tpv-opening-busy', duration: 1500 });
       return;
     }
-    if (existingOpenForStore) {
-      toast.info('Ya hay caja abierta. Usa Continuar en esta caja.', { id: 'tpv-use-enter-banner', duration: 2500 });
+    if (openSessionForStore) {
+      toast.info('Ya hay caja abierta. Pulsa Continuar en caja abierta.', { id: 'tpv-use-enter-banner', duration: 2500 });
       return;
     }
     const wName = effectiveWorkerName();
@@ -1074,84 +1074,44 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
             ? 'Elige el terminal'
             : '';
 
-  const staleOpenBanner = staleOpenForStore ? (() => {
-    const who = [
-      staleOpenForStore.workerName || 'Equipo',
-      staleOpenForStore.terminalName || '',
-      displayStoreName || staleOpenForStore.pointOfSaleName || '',
-    ].filter(Boolean).join(' · ');
-    return (
-      <div className="rounded-xl border border-amber-200 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/30 p-3 space-y-2">
-        <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">
-          Caja abierta desde ayer
-        </p>
-        <p className="text-xs text-amber-800/90 dark:text-amber-200/80">
-          {who || 'Hay un turno antiguo sin cerrar.'} Puedes continuar en esa caja o abrir una nueva (se cerrará la anterior si corresponde).
-        </p>
-        <button
-          type="button"
-          onClick={() => onContinueExistingOpen?.(staleOpenForStore)}
-          disabled={openingBusy || !onContinueExistingOpen}
-          className={`w-full ${VERTIAL_BTN_PRIMARY} min-h-[52px] text-base font-bold`}
-        >
-          {openingBusy ? (
-            <RefreshCw className="w-5 h-5 animate-spin" />
-          ) : (
-            <LogIn className="w-5 h-5" />
-          )}
-          Continuar en caja abierta
-        </button>
-      </div>
-    );
-  })() : null;
+  /** Caja abierta de esta tienda → botón fijo en el pie (sin banner). */
+  const sessionToContinue = useMemo(() => {
+    if (knownOpenSession && isTpvRegisterSessionOpen(knownOpenSession)) {
+      return knownOpenSession;
+    }
+    if (openSessionForStore) return openSessionForStore;
+    const pdvId = String(restrictedToPdvId || selectedPdv?._id || '').trim();
+    const opens = (registerSessions || []).filter((s) => isTpvRegisterSessionOpen(s));
+    if (!pdvId && opens.length === 1) return opens[0];
+    if (pdvId && opens.length > 0) {
+      const alternateRefs = resolveTpvStoreAlternateRefs({
+        pickId: pdvId,
+        pointsOfSale,
+        tabletWorkCenterId: tabletWorkCenterId || readTpvTabletBinding()?.workCenterId,
+      });
+      return pickNewestOpenRegisterSessionForStore(opens, pdvId, pointsOfSale, alternateRefs);
+    }
+    return null;
+  }, [
+    knownOpenSession,
+    openSessionForStore,
+    registerSessions,
+    restrictedToPdvId,
+    selectedPdv,
+    pointsOfSale,
+    tabletWorkCenterId,
+  ]);
 
-  /** Misma OpeningScreen siempre: si hay caja abierta de ESTA tienda, banner Continuar (no otra pantalla). */
-  const liveOpenBanner = existingOpenForStore ? (() => {
-    const who = [
-      existingOpenForStore.workerName || 'Equipo',
-      existingOpenForStore.terminalName || '',
-      displayStoreName || existingOpenForStore.pointOfSaleName || '',
-    ].filter(Boolean).join(' · ');
-    return (
-      <div className="rounded-xl border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50 dark:bg-emerald-950/30 p-3 space-y-2">
-        <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">
-          Caja abierta
-        </p>
-        <p className="text-xs text-emerald-800/90 dark:text-emerald-200/80">
-          {who || 'Saliste sin cerrar.'} Continúa en la misma caja — no hace falta contar el fondo.
-        </p>
-        <button
-          type="button"
-          onClick={() => onContinueExistingOpen?.(existingOpenForStore)}
-          disabled={openingBusy || !onContinueExistingOpen}
-          className={`w-full ${VERTIAL_BTN_PRIMARY} min-h-[52px] text-base font-bold`}
-        >
-          {openingBusy ? (
-            <RefreshCw className="w-5 h-5 animate-spin" />
-          ) : (
-            <LogIn className="w-5 h-5" />
-          )}
-          Continuar en caja abierta
-        </button>
-      </div>
-    );
-  })() : null;
+  const continueOpenBusy = openingBusy;
 
   return (
     <div className="min-h-[100dvh] min-h-screen bg-stone-50 dark:bg-stone-950 flex flex-col">
       <div className="flex-1 flex items-stretch sm:items-center justify-center p-2 sm:p-3">
       <div className="relative bg-white dark:bg-stone-900 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-lg w-full max-w-4xl min-h-[min(88dvh,680px)] sm:min-h-0 sm:max-h-[min(88svh,680px)] flex flex-col">
         {tabletBoundOpening ? (
-          <span className="absolute right-3 bottom-[4.75rem] z-10 text-[10px] font-mono text-stone-400 pointer-events-none select-none">
-            {String(import.meta.env.VITE_BUILD_STAMP || 'caja v3')}
+          <span className="absolute right-3 bottom-[5.5rem] z-10 text-[10px] font-mono text-stone-400 pointer-events-none select-none">
+            {String(import.meta.env.VITE_BUILD_STAMP || 'caja v4')}
           </span>
-        ) : null}
-        {/* Header — banner Continuar (CEO, tablet y código tienda: misma UI) */}
-        {(liveOpenBanner || staleOpenBanner) ? (
-          <div className="shrink-0 px-3 sm:px-4 pt-3 space-y-2">
-            {liveOpenBanner}
-            {!liveOpenBanner ? staleOpenBanner : null}
-          </div>
         ) : null}
         <div className="shrink-0 border-b border-stone-200 dark:border-stone-800 flex items-center gap-2.5 px-3 sm:px-4 py-2.5">
           <div className="bg-emerald-100 dark:bg-emerald-900/30 rounded-xl flex items-center justify-center shrink-0 w-9 h-9">
@@ -1374,38 +1334,56 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
               </div>
         </div>
 
-        {/* Footer */}
-        <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 flex gap-2 bg-white dark:bg-gray-800 px-3 sm:px-4 py-2">
+        {/* Footer — botón fijo: Continuar si hay caja abierta, si no Abrir caja */}
+        <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 flex gap-2 bg-white dark:bg-gray-800 px-3 sm:px-4 py-3">
           <button
             type="button"
             onClick={goBack}
-            className="px-3 py-2 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg font-semibold text-xs hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+            className="px-3 py-2.5 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-semibold text-xs hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors shrink-0"
           >
             Volver
           </button>
           <div className="flex-1 flex flex-col gap-1 min-w-0">
-            {!canOpen && !existingOpenForStore && !staleOpenForStore && openBlockedReason ? (
-              <p className="text-[11px] text-amber-700 dark:text-amber-300 font-medium truncate px-0.5">
-                {openBlockedReason}
-              </p>
-            ) : null}
-            <button
-              type="button"
-              onClick={requestOpenCash}
-              disabled={!canOpen || openActionBusy || Boolean(existingOpenForStore)}
-              className={`w-full py-2.5 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-1.5 ${
-                canOpen && !openActionBusy && !existingOpenForStore
-                  ? 'bg-[#2563EB] hover:bg-blue-700 text-white'
-                  : 'bg-stone-200 dark:bg-stone-700 text-stone-400 cursor-not-allowed'
-              }`}
-            >
-              {openingBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Unlock className="w-4 h-4" />}
-              {openingBusy
-                ? 'Abriendo…'
-                : existingOpenForStore
-                  ? 'Usa Continuar arriba'
-                  : `Abrir caja — ${total.toFixed(2)}€`}
-            </button>
+            {sessionToContinue ? (
+              <button
+                type="button"
+                onClick={() => onContinueExistingOpen?.(sessionToContinue)}
+                disabled={continueOpenBusy || !onContinueExistingOpen}
+                className={`w-full min-h-[56px] rounded-xl font-bold text-base transition-all flex items-center justify-center gap-2 ${
+                  !continueOpenBusy && onContinueExistingOpen
+                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-md'
+                    : 'bg-stone-200 dark:bg-stone-700 text-stone-400 cursor-not-allowed'
+                }`}
+              >
+                {continueOpenBusy ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <LogIn className="w-5 h-5" />
+                )}
+                Continuar en caja abierta
+              </button>
+            ) : (
+              <>
+                {!canOpen && openBlockedReason ? (
+                  <p className="text-[11px] text-amber-700 dark:text-amber-300 font-medium truncate px-0.5">
+                    {openBlockedReason}
+                  </p>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={requestOpenCash}
+                  disabled={!canOpen || openActionBusy}
+                  className={`w-full min-h-[56px] rounded-xl font-bold text-base transition-all flex items-center justify-center gap-2 ${
+                    canOpen && !openActionBusy
+                      ? 'bg-[#2563EB] hover:bg-blue-700 text-white shadow-md'
+                      : 'bg-stone-200 dark:bg-stone-700 text-stone-400 cursor-not-allowed'
+                  }`}
+                >
+                  {openingBusy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Unlock className="w-5 h-5" />}
+                  {openingBusy ? 'Abriendo…' : `Abrir caja — ${total.toFixed(2)}€`}
+                </button>
+              </>
+            )}
           </div>
         </div>
 
