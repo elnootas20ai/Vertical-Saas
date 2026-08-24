@@ -2385,13 +2385,14 @@ export async function listTpvRegisterSessionsRequest(
   // que no había sesiones (OpeningScreen con caja viva en servidor).
   params.set('_', String(Date.now()));
   const qs = `?${params.toString()}`;
+  // OJO: sin cabeceras Cache-Control/Pragma. En la app nativa (origen capacitor://)
+  // disparan un preflight CORS que el servidor no permite y la petición nunca sale
+  // (Safari web es mismo origen y no lo sufre). El anticache ya lo hace el param `_`.
   const response = await authFetch(`${API_BASE}/api/delivery/tpv-sessions/${encodeURIComponent(id)}${qs}`, {
     method: 'GET',
     headers: {
       'Content-Type': 'application/json',
       ...getCouchHeaders(),
-      'Cache-Control': 'no-cache',
-      Pragma: 'no-cache',
     },
   });
   if (response.status === 304) {
@@ -2438,6 +2439,8 @@ export async function fetchTpvStoreOpeningHintRequest(
   const bid = String(options.businessId || '').trim();
   if (bid) params.set('businessId', bid);
   params.set('_', String(Date.now()));
+  // Sin Cache-Control/Pragma: en la app nativa provocan preflight CORS bloqueado
+  // (el servidor solo permite Content-Type/Authorization). El param `_` ya evita caché.
   const response = await authFetch(
     `${API_BASE}/api/delivery/tpv-sessions/${encodeURIComponent(id)}/opening-hint?${params.toString()}`,
     {
@@ -2445,8 +2448,6 @@ export async function fetchTpvStoreOpeningHintRequest(
       headers: {
         'Content-Type': 'application/json',
         ...getCouchHeaders(),
-        'Cache-Control': 'no-cache',
-        Pragma: 'no-cache',
       },
     },
   );

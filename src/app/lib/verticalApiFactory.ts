@@ -57,11 +57,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const isGet = method === 'GET';
   // GET autenticado: evitar 304 sin cuerpo (navegador/ETag/SW).
   const urlPath = isGet ? withCacheBust(path) : path;
+  // Sin Cache-Control/Pragma en GET: en la app nativa (origen capacitor://) esas
+  // cabeceras fuerzan un preflight CORS que el servidor rechaza y la petición no
+  // llega a salir. El anticache lo cubren el param `_` y cache:'no-store'.
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...getAuthHeaders(),
     ...getCouchHeaders(),
-    ...(isGet ? { 'Cache-Control': 'no-cache', Pragma: 'no-cache' } : {}),
     ...(init?.headers as Record<string, string> | undefined),
   };
 
@@ -76,12 +78,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   for (let attempt = 0; response.status === 304 && isGet && attempt < 2; attempt += 1) {
     response = await authFetch(`${API_BASE}${withCacheBust(path)}&retry=${attempt + 1}`, {
       ...fetchInit,
-      headers: {
-        ...headers,
-        'Cache-Control': 'no-store',
-        Pragma: 'no-cache',
-        'If-None-Match': 'undefined',
-      },
+      headers,
       cache: 'reload',
     });
   }
