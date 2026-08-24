@@ -560,7 +560,7 @@ describe('buildCajaMonthSheet', () => {
     const sheet = buildCajaMonthSheet(sessions, { pointOfSaleId: 'pdv-a', yearMonth: '2026-07' });
 
     expect(CAJA_MONEY_HEADERS).toEqual([
-      'DIA', 'EFECTIVO', 'VISA', 'FLIPDISH', 'JUST EAT', 'UBER', 'GLOVO', 'TOTAL',
+      'DIA', 'EFECTIVO', 'VISA', 'JUST EAT', 'UBER', 'GLOVO', 'FLIPDISH', 'TOTAL',
     ]);
     expect(MODOMIO_HEADERS).toContain('VISA');
     expect(MODOMIO_HEADERS).toContain('FLIPDISH');

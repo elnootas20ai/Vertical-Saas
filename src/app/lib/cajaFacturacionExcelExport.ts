@@ -11,7 +11,7 @@
  * En mes: columna DIA. En año/historial: columna FECHA (DD/MM/YYYY).
  *
  * Plantilla dinero (foto Excel cliente):
- *   DIA | EFECTIVO | VISA | FLIPDISH | JUST EAT | UBER | GLOVO | TOTAL | [uds]
+ *   DIA | EFECTIVO | VISA | JUST EAT | UBER | GLOVO | FLIPDISH | TOTAL | [uds]
  *
  * Dinero por hoja marca:
  *   · Integradores (Flipdish/Just Eat/Uber/Glovo) = Caja 2 por marca. Flipdish incluye canal `app`.
@@ -74,10 +74,10 @@ export const CAJA_MONEY_HEADERS = [
   'DIA',
   'EFECTIVO',
   'VISA',
-  'FLIPDISH',
   'JUST EAT',
   'UBER',
   'GLOVO',
+  'FLIPDISH',
   'TOTAL',
 ] as const;
 
@@ -85,10 +85,10 @@ export const CAJA_MONEY_HEADERS = [
 export const CAJA_MONEY_HEADERS_NO_DAY = [
   'EFECTIVO',
   'VISA',
-  'FLIPDISH',
   'JUST EAT',
   'UBER',
   'GLOVO',
+  'FLIPDISH',
   'TOTAL',
 ] as const;
 
@@ -926,10 +926,10 @@ function cajaMoneyValueCells(amounts: CajaMoneyFields): unknown[] {
   return [
     cellBlankZero(excelEfectivoWithB(amounts)),
     cellBlankZero(amounts.tpv),
-    cellBlankZero(excelFlipdishDisplay(amounts)),
     cellBlankZero(amounts.justEat),
     cellBlankZero(amounts.uber),
     cellBlankZero(amounts.glovo),
+    cellBlankZero(excelFlipdishDisplay(amounts)),
     cellBlankZero(amounts.total),
   ];
 }
@@ -942,7 +942,7 @@ function billingDayHasActivity(row: CajaDayAmounts, billingSheet: BrandBillingSh
   return billingSheet.unitColumns.some((c) => unitValue(row, c.key) > 0);
 }
 
-/** DIA | EFECTIVO | VISA | FLIPDISH | JUST EAT | UBER | GLOVO | TOTAL */
+/** DIA | EFECTIVO | VISA | JUST EAT | UBER | GLOVO | FLIPDISH | TOTAL */
 function moneyRowCells(row: CajaDayAmounts): unknown[] {
   return [row.day, ...cajaMoneyValueCells(row)];
 }
