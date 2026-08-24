@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Copy, Loader2, QrCode, Trash2, X } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Copy, Loader2, QrCode, RefreshCw, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useModalClose } from '../../hooks/useModalClose';
 import { useInviteWorkCenters } from '../../hooks/useInviteWorkCenters';
 import type { Business } from '../../lib/businessApi';
+import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import {
   getFunctionRolesForBusiness,
   getInviteRoleDisplayLabel,
@@ -12,7 +13,11 @@ import {
 import { getDefaultInviteLandingPage } from '../../lib/inviteDefaults';
 import { getInvitePermissionsForUser } from '../../lib/roleCatalog';
 import { getHrLocationCopy } from '../../lib/retailLocationCopy';
-import { listShiftTemplates, type ShiftTemplate } from '../../lib/schedulesApi';
+import {
+  listShiftTemplates,
+  SHIFT_TEMPLATES_CHANGED_EVENT,
+  type ShiftTemplate,
+} from '../../lib/schedulesApi';
 import {
   buildWorkerJoinQrImageUrl,
   createWorkerInviteLinkRequest,
@@ -40,6 +45,7 @@ function pickDefaultRole(
 export function WorkerInviteQrModal({ onClose, business }: Props) {
   useModalClose(true, onClose);
   const businessType = business?.businessType;
+  const businessId = resolveBusinessScopeId(business);
   const hrCopy = getHrLocationCopy(businessType);
   const roleOptions = useMemo(
     () => getFunctionRolesForBusiness(businessType, {
@@ -56,6 +62,8 @@ export function WorkerInviteQrModal({ onClose, business }: Props) {
   );
   const [scheduleTemplateId, setScheduleTemplateId] = useState('');
   const [shiftTemplates, setShiftTemplates] = useState<ShiftTemplate[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templatesError, setTemplatesError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [links, setLinks] = useState<WorkerInviteLink[]>([]);
   const [loadingLinks, setLoadingLinks] = useState(false);
@@ -72,27 +80,40 @@ export function WorkerInviteQrModal({ onClose, business }: Props) {
     }
   }, [storeOptions, workCenterId]);
 
-  useEffect(() => {
-    const businessId = business?.business_id || '';
+  const reloadShiftTemplates = useCallback(async () => {
     if (!businessId) {
       setShiftTemplates([]);
+      setTemplatesError(null);
       return;
     }
-    let cancelled = false;
-    listShiftTemplates(businessId)
-      .then((list) => {
-        if (!cancelled) setShiftTemplates(list);
-      })
-      .catch(() => {
-        if (!cancelled) setShiftTemplates([]);
-      });
-    return () => {
-      cancelled = true;
+    setTemplatesLoading(true);
+    setTemplatesError(null);
+    try {
+      const list = await listShiftTemplates(businessId);
+      setShiftTemplates(list);
+    } catch (err) {
+      setShiftTemplates([]);
+      setTemplatesError(err instanceof Error ? err.message : 'No se pudieron cargar las plantillas');
+    } finally {
+      setTemplatesLoading(false);
+    }
+  }, [businessId]);
+
+  useEffect(() => {
+    void reloadShiftTemplates();
+  }, [reloadShiftTemplates]);
+
+  useEffect(() => {
+    const onChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ businessId?: string }>).detail;
+      if (detail?.businessId && detail.businessId !== businessId) return;
+      void reloadShiftTemplates();
     };
-  }, [business?.business_id]);
+    window.addEventListener(SHIFT_TEMPLATES_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(SHIFT_TEMPLATES_CHANGED_EVENT, onChanged);
+  }, [businessId, reloadShiftTemplates]);
 
   const refreshLinks = async () => {
-    const businessId = business?.business_id || '';
     if (!businessId) return;
     setLoadingLinks(true);
     try {
@@ -108,10 +129,9 @@ export function WorkerInviteQrModal({ onClose, business }: Props) {
   useEffect(() => {
     void refreshLinks();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al abrir / cambiar negocio
-  }, [business?.business_id]);
+  }, [businessId]);
 
   const handleCreate = async () => {
-    const businessId = business?.business_id || '';
     if (!businessId) {
       toast.error('No hay empresa seleccionada');
       return;
@@ -243,19 +263,47 @@ export function WorkerInviteQrModal({ onClose, business }: Props) {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-              Horario (opcional)
-            </label>
-            <select
-              value={scheduleTemplateId}
-              onChange={(e) => setScheduleTemplateId(e.target.value)}
-              className="w-full rounded-xl border-2 border-gray-200 bg-white px-3 py-2.5 text-sm dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
-            >
-              <option value="">Sin horario por ahora</option>
-              {shiftTemplates.map((t) => (
-                <option key={t._id} value={t._id}>{t.name}</option>
-              ))}
-            </select>
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+              <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300">
+                Horario (opcional)
+              </label>
+              <button
+                type="button"
+                onClick={() => void reloadShiftTemplates()}
+                disabled={templatesLoading}
+                className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold text-gray-500 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                title="Recargar plantillas"
+              >
+                <RefreshCw className={`h-3 w-3 ${templatesLoading ? 'animate-spin' : ''}`} />
+                Recargar
+              </button>
+            </div>
+            {templatesLoading ? (
+              <div className="flex items-center gap-2.5 rounded-xl border-2 border-gray-200 bg-gray-50 px-3.5 py-2.5 dark:border-gray-700 dark:bg-gray-800/50">
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin text-gray-400" />
+                <p className="text-xs text-gray-500 dark:text-gray-400">Cargando plantillas…</p>
+              </div>
+            ) : (
+              <>
+                <select
+                  value={scheduleTemplateId}
+                  onChange={(e) => setScheduleTemplateId(e.target.value)}
+                  className="w-full rounded-xl border-2 border-gray-200 bg-white px-3 py-2.5 text-sm dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                >
+                  <option value="">Sin horario por ahora</option>
+                  {shiftTemplates.map((t) => (
+                    <option key={t._id} value={t._id}>{t.name}</option>
+                  ))}
+                </select>
+                {templatesError ? (
+                  <p className="mt-1.5 text-xs text-red-500">{templatesError}</p>
+                ) : shiftTemplates.length === 0 ? (
+                  <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+                    Sin plantillas aún. Guárdalas en Ajustes → Tiendas (horario) o Equipo → Horarios → Configuración.
+                  </p>
+                ) : null}
+              </>
+            )}
           </div>
 
           <button

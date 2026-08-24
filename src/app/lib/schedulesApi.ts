@@ -6,9 +6,26 @@ import {
   normalizeScheduleTimeValue,
   scheduleTimeToMinutes,
 } from './businessHoursUtils';
+import { normalizeBusinessScopeId } from './deliverySetup';
 import { ensureCouchDb } from './ensureCouchDb';
 import { formatDateRangeEs } from './formatDateEs';
 import type { BusinessHoursConfig } from './settingsApi';
+
+/** Disparado tras crear/editar/borrar plantillas RRHH (p. ej. sync desde horario de tienda). */
+export const SHIFT_TEMPLATES_CHANGED_EVENT = 'shift-templates:changed';
+
+export function notifyShiftTemplatesChanged(businessId?: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.dispatchEvent(
+      new CustomEvent(SHIFT_TEMPLATES_CHANGED_EVENT, {
+        detail: { businessId: normalizeBusinessScopeId(businessId) },
+      }),
+    );
+  } catch {
+    /* ignore */
+  }
+}
 
 const env = typeof import.meta !== 'undefined' ? (import.meta as any).env || {} : {};
 
@@ -422,10 +439,15 @@ export async function deleteSchedule(schedule: ScheduleTemplate): Promise<void> 
 // ─── Shift Template CRUD ─────────────────────────────────────────────────────
 
 export async function listShiftTemplates(businessId: string): Promise<ShiftTemplate[]> {
+  const bid = normalizeBusinessScopeId(businessId);
+  if (!bid) return [];
   await ensureDb();
   const payload = await req<{ docs: unknown[] }>(`/api/couch/docs/${encodeURIComponent(DB)}`);
   return ((payload.docs || []) as ShiftTemplate[])
-    .filter(d => d?.type === 'shift_template' && d?.business_id === businessId && !((d as any).deletedAt))
+    .filter((d) => {
+      if (d?.type !== 'shift_template' || (d as any).deletedAt) return false;
+      return normalizeBusinessScopeId(d.business_id) === bid;
+    })
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -436,14 +458,16 @@ export async function saveShiftTemplate(
   weekly: Record<Weekday, DayShift>,
   existing?: ShiftTemplate | null,
 ): Promise<ShiftTemplate> {
+  const bid = normalizeBusinessScopeId(businessId);
+  if (!bid) throw new Error('Empresa no válida');
   await ensureDb();
   const now = new Date().toISOString();
-  const id = existing?._id || `shift_template:${businessId}:${Date.now()}`;
+  const id = existing?._id || `shift_template:${bid}:${Date.now()}`;
   const doc: ShiftTemplate = {
     _id: id,
     ...(existing?._rev ? { _rev: existing._rev } : {}),
     type: 'shift_template',
-    business_id: businessId,
+    business_id: bid,
     name,
     color,
     weekly,
@@ -455,7 +479,9 @@ export async function saveShiftTemplate(
     `/api/couch/doc/${encodeURIComponent(DB)}/${encodeURIComponent(id)}`,
     { method: 'PUT', body: JSON.stringify(doc) },
   );
-  return { ...doc, _rev: result.rev };
+  const saved = { ...doc, _rev: result.rev };
+  notifyShiftTemplatesChanged(businessId);
+  return saved;
 }
 
 /**
@@ -485,6 +511,7 @@ export async function applyOpeningHoursToShiftTemplates(
   for (const t of templates) {
     await saveShiftTemplate(bid, t.name, t.color, weekly, t);
   }
+  notifyShiftTemplatesChanged(bid);
   return { updated: templates.length, created: 0 };
 }
 
@@ -494,6 +521,7 @@ export async function deleteShiftTemplate(template: ShiftTemplate): Promise<void
     `/api/couch/doc/${encodeURIComponent(DB)}/${encodeURIComponent(template._id)}?rev=${template._rev}`,
     { method: 'DELETE' },
   );
+  notifyShiftTemplatesChanged(template.business_id);
 }
 
 // ─── Assignment Rule CRUD ────────────────────────────────────────────────────

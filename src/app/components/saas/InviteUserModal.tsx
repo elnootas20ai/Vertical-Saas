@@ -28,7 +28,7 @@ import {
   formatLaborCurrency,
   resolvePayPeriodsPerYear,
 } from '../../lib/laborCost';
-import { listShiftTemplates, type ShiftTemplate } from '../../lib/schedulesApi';
+import { listShiftTemplates, SHIFT_TEMPLATES_CHANGED_EVENT, type ShiftTemplate } from '../../lib/schedulesApi';
 import { getRoleTaskBundle } from '../../lib/roleTaskTemplates';
 import { workerSeatBillingWarning } from '../../lib/workerSeatLimits';
 import { VertialBillingUpgradeLink } from './VertialBillingUpgradeLink';
@@ -623,6 +623,26 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
         if (!cancelled) setTemplatesLoading(false);
       });
     return () => { cancelled = true; };
+  }, [selectedBusinessId, currentBusinessId, inviteBusiness?.business_id]);
+
+  useEffect(() => {
+    const activeId = selectedBusinessId || currentBusinessId || inviteBusiness?.business_id || '';
+    const reload = () => {
+      if (!activeId) return;
+      setTemplatesLoading(true);
+      listShiftTemplates(activeId)
+        .then((list) => setShiftTemplates(list))
+        .catch(() => setShiftTemplates([]))
+        .finally(() => setTemplatesLoading(false));
+    };
+    const onChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ businessId?: string }>).detail;
+      const normActive = String(activeId).replace(/^business:/, '').trim();
+      if (detail?.businessId && detail.businessId !== normActive) return;
+      reload();
+    };
+    window.addEventListener(SHIFT_TEMPLATES_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(SHIFT_TEMPLATES_CHANGED_EVENT, onChanged);
   }, [selectedBusinessId, currentBusinessId, inviteBusiness?.business_id]);
 
   // UI

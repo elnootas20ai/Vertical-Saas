@@ -808,11 +808,18 @@ function WorkCenterModal({
       // RRHH: alinear plantillas con el horario de tienda (no toca turnos personales).
       if (includeOpeningHours && schedulesBusinessId) {
         try {
-          await applyOpeningHoursToShiftTemplates(schedulesBusinessId, openingHours, {
+          const result = await applyOpeningHoursToShiftTemplates(schedulesBusinessId, openingHours, {
             storeLabel: form.name,
           });
-        } catch {
-          /* best-effort: el centro ya está guardado */
+          if (result.created > 0) {
+            toast.success(`Plantilla «Horario ${form.name}» lista para invitaciones`);
+          }
+        } catch (syncErr) {
+          toast.warning(
+            syncErr instanceof Error
+              ? `Tienda guardada, pero no se pudo sincronizar el horario RRHH: ${syncErr.message}`
+              : 'Tienda guardada, pero no se pudo sincronizar el horario RRHH',
+          );
         }
       }
       if (draftBusinessId) clearPdvCreateDraft(draftBusinessId);
