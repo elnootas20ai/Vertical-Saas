@@ -25,6 +25,7 @@ import {
   Filter,
   Info,
   Truck,
+  Lock,
   type LucideIcon,
 } from 'lucide-react';
 import type {
@@ -39,6 +40,11 @@ import {
   getInformesByCategory,
 } from './deliveryInformesCatalog';
 import { DeliveryEstadisticasDashboard } from './DeliveryEstadisticasDashboard';
+import { useEffectivePlanTier } from '../../../hooks/useEffectivePlanTier';
+import {
+  canAccessDeliveryInforme,
+  deliveryInformeMinPlanLabel,
+} from './deliveryInformesPlanAccess';
 
 const CATEGORY_ICON: Record<DeliveryInformeCategoryId, LucideIcon> = {
   finanzas: Wallet,
@@ -130,9 +136,15 @@ function NivelBadge({ nivel }: { nivel?: DeliveryInformeNivel }) {
 function InformeRow({
   entry,
   onOpen,
+  locked,
+  disabled,
+  disabledReason,
 }: {
   entry: DeliveryInformeEntry;
   onOpen: (entry: DeliveryInformeEntry) => void;
+  locked?: boolean;
+  disabled?: boolean;
+  disabledReason?: string;
 }) {
   const Icon = ENTRY_ICON[entry.id] || CATEGORY_ICON[entry.category] || FileText;
   const iconTone =
@@ -148,20 +160,27 @@ function InformeRow({
               ? 'bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-300'
               : 'bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300';
   const hoverTone =
-    entry.category === 'clientes'
-      ? 'hover:border-teal-200 hover:bg-teal-50/40 dark:hover:border-teal-800 dark:hover:bg-teal-950/20'
-      : entry.category === 'stock'
-        ? 'hover:border-orange-200 hover:bg-orange-50/40 dark:hover:border-orange-800 dark:hover:bg-orange-950/20'
-        : entry.category === 'equipo'
-          ? 'hover:border-red-200 hover:bg-red-50/40 dark:hover:border-red-800 dark:hover:bg-red-950/20'
-          : entry.category === 'facturacion'
-            ? 'hover:border-violet-200 hover:bg-violet-50/40 dark:hover:border-violet-800 dark:hover:bg-violet-950/20'
-            : 'hover:border-rose-200 hover:bg-rose-50/40 dark:hover:border-rose-800 dark:hover:bg-rose-950/20';
+    locked || disabled
+      ? ''
+      : entry.category === 'clientes'
+        ? 'hover:border-teal-200 hover:bg-teal-50/40 dark:hover:border-teal-800 dark:hover:bg-teal-950/20'
+        : entry.category === 'stock'
+          ? 'hover:border-orange-200 hover:bg-orange-50/40 dark:hover:border-orange-800 dark:hover:bg-orange-950/20'
+          : entry.category === 'equipo'
+            ? 'hover:border-red-200 hover:bg-red-50/40 dark:hover:border-red-800 dark:hover:bg-red-950/20'
+            : entry.category === 'facturacion'
+              ? 'hover:border-violet-200 hover:bg-violet-50/40 dark:hover:border-violet-800 dark:hover:bg-violet-950/20'
+              : 'hover:border-rose-200 hover:bg-rose-50/40 dark:hover:border-rose-800 dark:hover:bg-rose-950/20';
+
   return (
     <button
       type="button"
+      disabled={disabled}
       onClick={() => onOpen(entry)}
-      className={`group flex w-full items-center gap-3 rounded-2xl border border-stone-200 bg-white px-4 py-3.5 text-left transition-colors dark:border-stone-700 dark:bg-stone-900 ${hoverTone}`}
+      title={disabled ? disabledReason : locked ? `Requiere plan ${deliveryInformeMinPlanLabel(entry)}` : undefined}
+      className={`group flex w-full items-center gap-3 rounded-2xl border border-stone-200 bg-white px-4 py-3.5 text-left transition-colors dark:border-stone-700 dark:bg-stone-900 ${hoverTone} ${
+        disabled ? 'cursor-not-allowed opacity-55' : ''
+      }`}
     >
       <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${iconTone}`}>
         <Icon className="h-5 w-5" />
@@ -170,10 +189,23 @@ function InformeRow({
         <span className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-semibold text-stone-900 dark:text-stone-100">{entry.title}</span>
           <NivelBadge nivel={entry.nivel} />
+          {locked && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-bold uppercase text-stone-500 dark:bg-stone-800 dark:text-stone-400">
+              <Lock className="h-3 w-3" /> {deliveryInformeMinPlanLabel(entry)}
+            </span>
+          )}
+          {disabled && (
+            <span className="rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-bold uppercase text-stone-500 dark:bg-stone-800">
+              No activo
+            </span>
+          )}
         </span>
+        {disabled && disabledReason ? (
+          <span className="mt-0.5 block text-[11px] text-stone-400">{disabledReason}</span>
+        ) : null}
       </span>
       <span className="shrink-0 text-xs font-semibold text-stone-400 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 dark:text-stone-500">
-        Ver →
+        {locked ? 'Bloqueado' : disabled ? '—' : 'Ver →'}
       </span>
     </button>
   );
@@ -188,14 +220,19 @@ export function DeliveryInformesCatalogView({
   category: DeliveryInformeCategoryId;
   onCategoryChange: (id: DeliveryInformeCategoryId) => void;
   onOpen: (entry: DeliveryInformeEntry) => void;
-  /** Titular de datos (CEO) para el dashboard de estadísticas. */
   dataUserId?: string;
 }) {
+  const planTier = useEffectivePlanTier();
   const items = getInformesByCategory(category);
   const extraHidden = DELIVERY_INFORMES_CATALOG.filter(
     (e) => e.category === category && e.hubHidden,
   );
   const showEstadisticasDashboard = category === 'clientes';
+
+  const handleOpen = (entry: DeliveryInformeEntry) => {
+    if (entry.id === 'finanzas-presupuesto-vs-real') return;
+    onOpen(entry);
+  };
 
   return (
     <div className="space-y-4">
@@ -252,9 +289,24 @@ export function DeliveryInformesCatalogView({
         </div>
       ) : (
         <div className="space-y-2">
-          {items.map((entry) => (
-            <InformeRow key={entry.id} entry={entry} onOpen={onOpen} />
-          ))}
+          {items.map((entry) => {
+            const locked = !canAccessDeliveryInforme(entry, planTier);
+            const disabled = entry.id === 'finanzas-presupuesto-vs-real';
+            return (
+              <InformeRow
+                key={entry.id}
+                entry={entry}
+                onOpen={handleOpen}
+                locked={locked}
+                disabled={disabled}
+                disabledReason={
+                  disabled
+                    ? 'Sin presupuestos cargados — no se puede activar'
+                    : undefined
+                }
+              />
+            );
+          })}
         </div>
       )}
 
@@ -264,7 +316,12 @@ export function DeliveryInformesCatalogView({
             Delivery · datos reales
           </p>
           {extraHidden.map((entry) => (
-            <InformeRow key={entry.id} entry={entry} onOpen={onOpen} />
+            <InformeRow
+              key={entry.id}
+              entry={entry}
+              onOpen={handleOpen}
+              locked={!canAccessDeliveryInforme(entry, planTier)}
+            />
           ))}
         </div>
       )}
@@ -274,7 +331,7 @@ export function DeliveryInformesCatalogView({
         <div>
           <p className="text-sm font-semibold text-sky-900 dark:text-sky-100">Catálogo de informes</p>
           <p className="mt-0.5 text-xs leading-relaxed text-sky-800/80 dark:text-sky-200/80">
-            Los informes marcados con NORMAL o PRO requieren una suscripción de nivel superior. Todos los informes utilizan la misma plantilla unificada con gráficos interactivos, filtros avanzados y exportación.
+            Elige el mes, aplica filtros (fechas, centro, comparar) y exporta a Excel/PDF. Los informes NORMAL o PRO requieren el plan correspondiente.
           </p>
         </div>
       </div>

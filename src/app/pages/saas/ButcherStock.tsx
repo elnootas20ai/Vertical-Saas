@@ -48,6 +48,8 @@ const MOVEMENT_LABELS: Record<string, { label: string; color: string; sign: stri
   adjustment_out: { label: 'Ajuste -', color: 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300', sign: '-' },
   internal_consumption: { label: 'Consumo', color: 'bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300', sign: '-' },
   transfer: { label: 'Transferencia', color: 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300', sign: '~' },
+  transfer_out: { label: 'Traspaso salida', color: 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300', sign: '-' },
+  transfer_in: { label: 'Traspaso entrada', color: 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300', sign: '+' },
   return_supplier: { label: 'Dev. proveedor', color: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300', sign: '-' },
   return_customer: { label: 'Dev. cliente', color: 'bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300', sign: '+' },
   initial: { label: 'Inicial', color: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300', sign: '=' },

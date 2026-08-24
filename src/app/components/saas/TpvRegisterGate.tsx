@@ -8,6 +8,8 @@ import { useBusiness } from '../../context/BusinessContext';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { useApp } from '../../context/AppContext';
 import { usePointOfSaleAccess } from '../../hooks/usePointOfSaleAccess';
+import { useTpvStockScope } from '../../hooks/useTpvStockScope';
+import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import { writeBillingSelection } from '../../lib/billingSelection';
 import { formatAddonPriceShort } from '../../lib/planAddonCatalog';
 import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
@@ -159,9 +161,20 @@ import { setActivePrinterScope } from '../../lib/vertialPrint/printerActiveScope
 const TpvPrinterSetupModal = lazy(() =>
   import('./TpvPrinterSetupModal').then((m) => ({ default: m.TpvPrinterSetupModal })),
 );
+const SaasOcrScanModal = lazy(() =>
+  import('../design-system/SAAS__OcrScanModal').then((m) => ({ default: m.SAAS__OcrScanModal })),
+);
 import { enqueueTpvOfflineItem, isBrowserOnline } from '../../lib/tpvTabletOffline';
 import { sessionHasIdenticalSaleForOrder, isAllowMultipleSaleTx } from '../../lib/tpvLocalCajaSale';
 import { requestTpvStockReviewOpen } from '../../lib/tpvStockReview';
+import {
+  requestTpvStoreTransfersOpen,
+  emitStoreTransferSync,
+  playStoreTransferSound,
+  unlockStoreTransferAudio,
+  isStoreTransferSoundEnabled,
+  type StoreTransferLiveEvent,
+} from '../../lib/tpvStoreTransfers';
 import {
   clockIn,
   clockOut,
@@ -181,7 +194,7 @@ import {
   Printer, Smartphone, CheckCircle2, X, AlertTriangle, Calculator, ChevronDown,
   ChevronUp, ChevronLeft, ChevronRight, Clock, TrendingUp, TrendingDown, DollarSign, Receipt, BarChart3,
   MapPin, Store, Plus, LogIn, UserCheck, Loader2, RefreshCw, Coffee, Square,
-  MoreVertical, Save, RotateCcw, Eye, ClipboardCheck,
+  MoreVertical, Save, RotateCcw, Eye, ClipboardCheck, ArrowRightLeft, ScanLine,
 } from 'lucide-react';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
@@ -385,6 +398,8 @@ export type TpvStatusBarQuickAction = {
   active?: boolean;
   /** Resalte opcional (p. ej. consumo equipo). */
   tone?: 'default' | 'amber';
+  /** Sección del menú lateral donde se coloca (por defecto «Pedidos»). */
+  section?: 'pedidos' | 'equipo';
   onClick: () => void;
   icon: ReactNode;
 };
@@ -4694,6 +4709,7 @@ function RegisterStatusBar({
       : 'px-4 py-1.5 rounded-lg border-2 border-red-300 bg-red-50 text-red-700 font-bold transition-colors flex items-center gap-1 hover:bg-red-100 ml-2 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300';
   const actionBtn = opsBtn;
   const [menuOpen, setMenuOpen] = useState(false);
+  const [invoiceOcrOpen, setInvoiceOcrOpen] = useState(false);
   useModalClose(menuOpen, () => setMenuOpen(false));
 
   const runMenuAction = (fn: () => void) => {
@@ -4701,59 +4717,122 @@ function RegisterStatusBar({
     fn();
   };
 
-  const cajaMenuItems: { id: string; label: string; title?: string; danger?: boolean; icon: ReactNode; onClick: () => void }[] = [
+  type TpvMenuEntry = {
+    id: string;
+    label: string;
+    title?: string;
+    danger?: boolean;
+    active?: boolean;
+    tone?: 'default' | 'amber';
+    icon: ReactNode;
+    onClick: () => void;
+  };
+
+  const quickToEntry = (a: TpvStatusBarQuickAction): TpvMenuEntry => ({
+    id: a.id,
+    label: a.label,
+    title: a.title,
+    active: a.active,
+    tone: a.tone,
+    icon: a.icon,
+    onClick: a.onClick,
+  });
+  const equipoQuickEntries = (quickActions || []).filter((a) => a.section === 'equipo').map(quickToEntry);
+  const pedidoEntries = (quickActions || []).filter((a) => a.section !== 'equipo').map(quickToEntry);
+
+  const menuSections: { id: string; label: string; items: TpvMenuEntry[] }[] = [
     {
-      id: 'clockin',
-      label: 'Fichar equipo',
-      title: 'Fichar entrada del resto del equipo',
-      icon: <UserCheck className="w-5 h-5" />,
-      onClick: onRequestClockIn,
+      id: 'equipo',
+      label: 'Equipo',
+      items: [
+        {
+          id: 'clockin',
+          label: 'Fichar equipo',
+          title: 'Fichar entrada del resto del equipo',
+          icon: <UserCheck className="w-5 h-5" />,
+          onClick: onRequestClockIn,
+        },
+        ...equipoQuickEntries,
+        {
+          id: 'incident',
+          label: 'Incidencia',
+          title: 'Registrar incidencia',
+          icon: <AlertTriangle className="w-5 h-5" />,
+          onClick: onRequestIncident,
+        },
+      ],
     },
     {
-      id: 'cashops',
-      label: 'Movimiento de caja',
-      title: 'Entrada o salida de efectivo',
-      icon: <Banknote className="w-5 h-5" />,
-      onClick: onRequestCashOps,
+      id: 'caja',
+      label: 'Caja',
+      items: [
+        {
+          id: 'cashops',
+          label: 'Movimiento de caja',
+          title: 'Entrada o salida de efectivo',
+          icon: <Banknote className="w-5 h-5" />,
+          onClick: onRequestCashOps,
+        },
+        {
+          id: 'cashcount',
+          label: 'Arqueo',
+          title: 'Contar efectivo de la caja',
+          icon: <Calculator className="w-5 h-5" />,
+          onClick: onRequestCashCount,
+        },
+        {
+          id: 'close',
+          label: 'Cerrar caja',
+          title: 'Cerrar caja del turno',
+          danger: true,
+          icon: <Lock className="w-5 h-5" />,
+          onClick: onRequestClose,
+        },
+      ],
     },
+    {
+      id: 'stock',
+      label: 'Stock',
+      items: [
+        {
+          id: 'stock-review',
+          label: 'Revisión stock',
+          title: 'Pasar lista del inventario de la tienda',
+          icon: <ClipboardCheck className="w-5 h-5" />,
+          onClick: () => requestTpvStockReviewOpen(),
+        },
+        {
+          id: 'invoice-scan',
+          label: 'Escanear factura',
+          title: 'Foto a la factura del proveedor: entra en compras y stock',
+          icon: <ScanLine className="w-5 h-5" />,
+          onClick: () => setInvoiceOcrOpen(true),
+        },
+        {
+          id: 'store-transfer',
+          label: 'Movimiento tienda',
+          title: 'Traspasos de stock entre tiendas',
+          icon: <ArrowRightLeft className="w-5 h-5" />,
+          onClick: () => requestTpvStoreTransfersOpen(),
+        },
+      ],
+    },
+    ...(pedidoEntries.length > 0
+      ? [{ id: 'pedidos', label: 'Pedidos', items: pedidoEntries }]
+      : []),
     ...(showNativePrinter && onRequestPrinterSetup
       ? [{
-          id: 'printer',
-          label: 'Ajustes impresora',
-          title: nativePrinterReady ? 'Ajustes impresora' : 'Configurar impresora WiFi',
-          icon: <Printer className="w-5 h-5" />,
-          onClick: onRequestPrinterSetup,
+          id: 'dispositivo',
+          label: 'Dispositivo',
+          items: [{
+            id: 'printer',
+            label: 'Ajustes impresora',
+            title: nativePrinterReady ? 'Ajustes impresora' : 'Configurar impresora WiFi',
+            icon: <Printer className="w-5 h-5" />,
+            onClick: onRequestPrinterSetup,
+          }],
         }]
       : []),
-    {
-      id: 'cashcount',
-      label: 'Arqueo',
-      title: 'Contar efectivo de la caja',
-      icon: <Calculator className="w-5 h-5" />,
-      onClick: onRequestCashCount,
-    },
-    {
-      id: 'stock-review',
-      label: 'Revisión stock',
-      title: 'Pasar lista del inventario de la tienda',
-      icon: <ClipboardCheck className="w-5 h-5" />,
-      onClick: () => requestTpvStockReviewOpen(),
-    },
-    {
-      id: 'incident',
-      label: 'Incidencia',
-      title: 'Registrar incidencia',
-      icon: <AlertTriangle className="w-5 h-5" />,
-      onClick: onRequestIncident,
-    },
-    {
-      id: 'close',
-      label: 'Cerrar caja',
-      title: 'Cerrar caja del turno',
-      danger: true,
-      icon: <Lock className="w-5 h-5" />,
-      onClick: onRequestClose,
-    },
   ];
 
   const menuRowBase =
@@ -4803,41 +4882,45 @@ function RegisterStatusBar({
             </button>
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-5">
-            {quickActions && quickActions.length > 0 ? (
-              <div>
+            {menuSections.map((section) => (
+              <div key={section.id}>
                 <p className="px-1 mb-2 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--v-muted)]">
-                  Pedidos
+                  {section.label}
                 </p>
                 <div className="space-y-1.5">
-                  {quickActions.map((action) => (
+                  {section.items.map((item) => (
                     <button
-                      key={action.id}
+                      key={item.id}
                       type="button"
-                      onClick={() => runMenuAction(action.onClick)}
+                      onClick={() => runMenuAction(item.onClick)}
                       className={
-                        action.active
-                          ? menuRowActive
-                          : action.tone === 'amber'
-                            ? menuRowWarn
-                            : menuRowDefault
+                        item.danger
+                          ? menuRowDanger
+                          : item.active
+                            ? menuRowActive
+                            : item.tone === 'amber'
+                              ? menuRowWarn
+                              : menuRowDefault
                       }
                     >
                       <span
                         className={`${menuIconWell} ${
-                          action.active
-                            ? 'border-blue-200 text-[var(--v-blue,#2563eb)] dark:border-blue-800'
-                            : action.tone === 'amber'
-                              ? 'border-amber-200 text-amber-700 dark:border-amber-800 dark:text-amber-300'
-                              : ''
+                          item.danger
+                            ? 'border-rose-200 text-[var(--v-rose,#e11d48)] dark:border-rose-800'
+                            : item.active
+                              ? 'border-blue-200 text-[var(--v-blue,#2563eb)] dark:border-blue-800'
+                              : item.tone === 'amber'
+                                ? 'border-amber-200 text-amber-700 dark:border-amber-800 dark:text-amber-300'
+                                : ''
                         }`}
                       >
-                        {action.icon}
+                        {item.icon}
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-bold leading-tight tracking-tight">{action.label}</span>
-                        {action.title && action.title !== action.label ? (
-                          <span className="block text-[11px] font-medium text-[var(--v-muted)] mt-0.5 leading-snug">
-                            {action.title}
+                        <span className="block text-sm font-bold leading-tight tracking-tight">{item.label}</span>
+                        {item.title && item.title !== item.label ? (
+                          <span className="block text-[11px] font-medium text-[var(--v-muted)] mt-0.5 leading-snug opacity-90">
+                            {item.title}
                           </span>
                         ) : null}
                       </span>
@@ -4845,40 +4928,7 @@ function RegisterStatusBar({
                   ))}
                 </div>
               </div>
-            ) : null}
-            <div>
-              <p className="px-1 mb-2 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--v-muted)]">
-                Caja
-              </p>
-              <div className="space-y-1.5">
-                {cajaMenuItems.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => runMenuAction(item.onClick)}
-                    className={item.danger ? menuRowDanger : menuRowDefault}
-                  >
-                    <span
-                      className={`${menuIconWell} ${
-                        item.danger
-                          ? 'border-rose-200 text-[var(--v-rose,#e11d48)] dark:border-rose-800'
-                          : ''
-                      }`}
-                    >
-                      {item.icon}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-bold leading-tight tracking-tight">{item.label}</span>
-                      {item.title && item.title !== item.label ? (
-                        <span className="block text-[11px] font-medium text-[var(--v-muted)] mt-0.5 leading-snug opacity-90">
-                          {item.title}
-                        </span>
-                      ) : null}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
+            ))}
           </div>
         </aside>
         <button
@@ -4888,6 +4938,12 @@ function RegisterStatusBar({
           onClick={() => setMenuOpen(false)}
         />
       </div>
+    </TpvGatePortal>
+  ) : null;
+
+  const invoiceOcrModal = invoiceOcrOpen ? (
+    <TpvGatePortal>
+      <TpvInvoiceOcrModal session={session} onClose={() => setInvoiceOcrOpen(false)} />
     </TpvGatePortal>
   ) : null;
 
@@ -4954,6 +5010,7 @@ function RegisterStatusBar({
         </div>
       </div>
       {menuPanel}
+      {invoiceOcrModal}
       </>
     );
   }
@@ -5044,7 +5101,76 @@ function RegisterStatusBar({
       </div>
     </div>
     {menuPanel}
+    {invoiceOcrModal}
     </>
+  );
+}
+
+// ─── OCR factura desde TPV: foto → proveedor + artículos + stock de la tienda ─
+
+function TpvInvoiceOcrModal({ session, onClose }: { session: TpvRegisterSession; onClose: () => void }) {
+  const { currentBusiness } = useBusiness();
+  const activeStore = useActiveStoreScope();
+  const tpvScope = useTpvStockScope({
+    pdvId: String(session.pointOfSaleId || '').trim() || undefined,
+    storeLabel: String(session.pointOfSaleName || '').trim() || undefined,
+  });
+  const pdv = activeStore.pointsOfSale.find((p) => p._id === tpvScope.pdvId);
+  const binding = readTpvTabletBinding();
+  const bindingWorkCenterId =
+    binding?.pdvId && binding.pdvId === tpvScope.pdvId ? String(binding.workCenterId || '') : '';
+  const workCenterId = String(pdv?.workCenterId || bindingWorkCenterId || '').trim();
+  const businessName = String(currentBusiness?.name || binding?.businessName || '').trim();
+
+  if (!tpvScope.dataUserId) return null;
+
+  return (
+    <Suspense fallback={null}>
+      <SaasOcrScanModal
+        isOpen
+        onClose={onClose}
+        userId={tpvScope.dataUserId}
+        targetModule="compras"
+        context={{
+          workCenterId,
+          workCenterName: tpvScope.storeLabel,
+          costCenterId: workCenterId,
+          costCenterName: tpvScope.storeLabel,
+          businessId: tpvScope.businessId,
+          businessName,
+        }}
+        onDocumentCreated={async (payload) => {
+          onClose();
+          const fx = payload?.sideEffects as {
+            stockUpdated?: number;
+            matchedLines?: number;
+            totalLines?: number;
+            financeMovementId?: string;
+          } | undefined;
+          const unmatched =
+            fx?.totalLines != null && fx?.matchedLines != null
+              ? Math.max(0, fx.totalLines - fx.matchedLines)
+              : 0;
+          if (fx?.stockUpdated && fx.stockUpdated > 0) {
+            if (unmatched > 0) {
+              toast.warning(
+                `Factura guardada: ${fx.stockUpdated} artículo(s) en stock. ${unmatched} línea(s) sin vínculo — no subieron stock.`,
+              );
+            } else {
+              toast.success(
+                `Factura procesada: ${fx.stockUpdated} artículo(s) al stock de ${tpvScope.storeLabel}`,
+              );
+            }
+          } else if (fx?.financeMovementId) {
+            toast.warning(
+              'Factura y gasto registrados, pero ninguna línea subió stock. Se puede revisar en Compras.',
+            );
+          } else {
+            toast.success('Factura procesada. Quedará revisable en Compras.');
+          }
+        }}
+      />
+    </Suspense>
   );
 }
 
@@ -5754,6 +5880,52 @@ export function TpvRegisterGate({
     window.dispatchEvent(new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: session }));
   }, []);
 
+  // El navegador bloquea el audio hasta el primer gesto: desbloquear una vez
+  // para que el sonido de traspaso entrante suene aunque llegue por SSE.
+  useEffect(() => {
+    const unlock = () => unlockStoreTransferAudio();
+    window.addEventListener('pointerdown', unlock, { once: true });
+    return () => window.removeEventListener('pointerdown', unlock);
+  }, []);
+
+  // Traspasos entre tiendas: el PDV activo se resuelve más abajo (activeStoreScope);
+  // el handler solo lo lee cuando llega un evento SSE, por eso basta un ref.
+  const storeTransferPdvIdRef = useRef('');
+  const seenStoreTransferEventsRef = useRef<Set<string>>(new Set());
+  const applyStoreTransferLive = useCallback((raw: unknown) => {
+    const data = raw as StoreTransferLiveEvent | null;
+    if (!data?.id) return;
+    // El evento llega por usuario y por empresa: no sonar/avisar dos veces.
+    const key = `${data.id}:${data.kind || ''}:${data.updatedAt || ''}`;
+    if (seenStoreTransferEventsRef.current.has(key)) return;
+    seenStoreTransferEventsRef.current.add(key);
+    if (seenStoreTransferEventsRef.current.size > 200) {
+      seenStoreTransferEventsRef.current = new Set([key]);
+    }
+
+    emitStoreTransferSync(data);
+
+    const myPdvId = storeTransferPdvIdRef.current;
+    if (!myPdvId) return;
+    if (data.kind === 'incoming' && data.toPdvId === myPdvId) {
+      if (isStoreTransferSoundEnabled()) playStoreTransferSound();
+      toast.info(
+        `Traspaso en camino desde ${data.fromPdvName || 'otra tienda'}`,
+        {
+          duration: 10_000,
+          action: {
+            label: 'Ver',
+            onClick: () => requestTpvStoreTransfersOpen(),
+          },
+        },
+      );
+    } else if (data.kind === 'received' && data.fromPdvId === myPdvId) {
+      toast.success(`${data.toPdvName || 'La otra tienda'} recibió el traspaso`);
+    } else if (data.kind === 'cancelled' && data.toPdvId === myPdvId) {
+      toast.message(`${data.fromPdvName || 'La otra tienda'} canceló el traspaso en camino`);
+    }
+  }, []);
+
   useSSE({
     userId: sseAuthUserId,
     token: sseToken,
@@ -5762,8 +5934,9 @@ export function TpvRegisterGate({
     handlers: useMemo(
       () => ({
         tpv_session_updated: applyLiveSession,
+        store_transfer_updated: applyStoreTransferLive,
       }),
-      [applyLiveSession],
+      [applyLiveSession, applyStoreTransferLive],
     ),
   });
 
@@ -5786,6 +5959,7 @@ export function TpvRegisterGate({
     pointsOfSale,
     tabletBinding?.workCenterId,
   ]);
+  storeTransferPdvIdRef.current = activeStoreScope.pdvId;
 
   const printerStores = useMemo(() => {
     const active = pointsOfSale.filter((p) => p.active !== false);

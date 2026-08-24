@@ -62,19 +62,29 @@ export function playTpvChannelOrderSound(channel?: string | null) {
   const seq = CHANNEL_TONES[key];
   if (!ctx || !seq?.length) return;
 
-  let t = ctx.currentTime;
-  for (const note of seq) {
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.frequency.value = note.freq;
-    osc.type = 'sine';
-    gain.gain.setValueAtTime(0.001, t);
-    gain.gain.exponentialRampToValueAtTime(0.22, t + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.001, t + note.duration);
-    osc.start(t);
-    osc.stop(t + note.duration + 0.02);
-    t += note.duration + (note.gap ?? 0.05);
+  const schedule = () => {
+    let t = ctx.currentTime;
+    for (const note of seq) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = note.freq;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.001, t);
+      gain.gain.exponentialRampToValueAtTime(0.22, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + note.duration);
+      osc.start(t);
+      osc.stop(t + note.duration + 0.02);
+      t += note.duration + (note.gap ?? 0.05);
+    }
+  };
+
+  // Con el audio aún bloqueado (antes del primer toque), programar apila las
+  // notas y suenan todas de golpe al desbloquear: reanudar primero.
+  if (ctx.state === 'suspended') {
+    void ctx.resume().then(schedule).catch(() => undefined);
+    return;
   }
+  schedule();
 }

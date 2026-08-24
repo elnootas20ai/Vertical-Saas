@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { playUiBeep, unlockUiAudio } from '../../lib/uiSounds';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import { useSSE } from '../../hooks/useSSE';
@@ -339,18 +340,14 @@ export function RestaurantKitchenBoard({
   }, []);
 
   const playNewComandaSound = useCallback(() => {
-    try {
-      const ctx = new AudioContext();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.frequency.value = 880;
-      osc.type = 'sine';
-      gain.gain.value = 0.3;
-      osc.start();
-      osc.stop(ctx.currentTime + 0.15);
-    } catch { /* audio no disponible */ }
+    playUiBeep();
+  }, []);
+
+  // Desbloqueo de audio al primer toque (sin él, iPad no deja sonar el beep).
+  useEffect(() => {
+    const unlock = () => unlockUiAudio();
+    window.addEventListener('pointerdown', unlock, { once: true });
+    return () => window.removeEventListener('pointerdown', unlock);
   }, []);
 
   const loadOrders = useCallback(async () => {

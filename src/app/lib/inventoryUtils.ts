@@ -466,6 +466,8 @@ export function movementTypeLabel(type: MovementType | string): string {
     adjustment_in: 'Entrada',
     adjustment_out: 'Salida',
     transfer: 'Transferencia',
+    transfer_out: 'Traspaso salida (a otra tienda)',
+    transfer_in: 'Traspaso entrada (de otra tienda)',
     return_supplier: 'Devolución proveedor',
     return_customer: 'Devolución cliente',
     initial: 'Stock inicial',

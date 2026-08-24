@@ -102,6 +102,7 @@ import { eventsQuoteRouter } from './routers/eventsQuoteRouter.js';
 import { catalogConfigRouter } from './routers/catalogConfigRouter.js';
 import { purchaseOrderRouter } from './routers/purchaseOrderRouter.js';
 import { stockMovementRouter } from './routers/stockMovementRouter.js';
+import { storeTransferRouter } from './routers/storeTransferRouter.js';
 import { warehouseRouter } from './routers/warehouseRouter.js';
 import { alertRouter } from './routers/alertRouter.js';
 import { recipeRouter } from './routers/recipeRouter.js';
@@ -1071,6 +1072,7 @@ const internalRouters = [
   ['/api/waste',           ...saasAuthGate, wasteRouter],
   ['/api/stock-counts',    ...saasAuthGate, stockCountRouter],
   ['/api/stock-movements', ...saasAuthGate, stockMovementRouter],
+  ['/api/store-transfers', ...saasAuthGate, storeTransferRouter],
   ['/api/setup-progress',  ...saasAuthGate, setupProgressRouter],
   ['/api/signatures',      ...saasAuthGate, signatureRouter],
   ['/api/vehicle-acquisitions', ...saasAuthGate, vehicleAcquisitionRouter],
@@ -1371,12 +1373,72 @@ async function convertPdfToImageBase64(pdfBase64) {
   }
 }
 
+/**
+ * Resultado OCR de ejemplo para desarrollo local sin OPENAI_API_KEY (OCR_SIMULATE=1).
+ * Confianza 80 (< 85) para que nunca se auto-apruebe y siempre pase por revisión.
+ */
+function buildSimulatedOcrResult({ isVehicleMode, context }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const docNumber = `SIM-${Date.now().toString().slice(-6)}`;
+  const simNote = 'Resultado SIMULADO (OCR_SIMULATE=1, sin OPENAI_API_KEY). Solo para pruebas en local.';
+  if (isVehicleMode) {
+    return {
+      documentType: 'permiso_circulacion',
+      documentTypeLabel: 'Permiso de circulación (SIMULADO)',
+      confidenceScore: 80,
+      registrationPlate: '0000 SIM',
+      vin: 'SIMULADO0000000000',
+      vehicleBrand: 'Seat',
+      vehicleModel: 'Ibiza',
+      vehicleYear: 2020,
+      fuelType: 'gasolina',
+      ownerName: 'Titular Demo',
+      ownerNif: '00000000T',
+      date: today,
+      documentNumber: docNumber,
+      notes: simNote,
+    };
+  }
+  return {
+    documentType: 'factura_proveedor',
+    documentTypeLabel: 'Factura proveedor (SIMULADA)',
+    confidenceScore: 80,
+    emitter: 'Proveedor Demo SL',
+    emitterCIF: 'B00000000',
+    receiver: String(context?.businessName || '') || null,
+    receiverCIF: null,
+    date: today,
+    documentNumber: docNumber,
+    subtotal: 100,
+    taxRate: 10,
+    taxAmount: 10,
+    total: 110,
+    currency: 'EUR',
+    lines: [
+      { description: 'Harina 25 kg (simulado)', quantity: 2, unitPrice: 20, total: 40 },
+      { description: 'Tomate triturado 10 kg (simulado)', quantity: 3, unitPrice: 20, total: 60 },
+    ],
+    workerName: null,
+    workerDNI: null,
+    periodStart: null,
+    periodEnd: null,
+    contractDuration: null,
+    notes: simNote,
+  };
+}
+
 app.post('/api/ocr/scan', requireAuthAndEmailVerified, sensitiveOpLimiter, async (req, res) => {
   const t0 = Date.now();
   try {
     const cfg = getAiConfig();
-    if (!cfg.openAiApiKey) {
-      return res.status(500).json({ error: 'Falta OPENAI_API_KEY para OCR' });
+    // Modo simulación local: sin OPENAI_API_KEY y con OCR_SIMULATE=1 se devuelve un
+    // resultado de ejemplo para probar el circuito completo (propuesta → proveedor →
+    // stock → aprobación) sin depender de OpenAI. Confianza 80 => nunca auto-aprueba.
+    const simulateOcr = !cfg.openAiApiKey && process.env.OCR_SIMULATE === '1';
+    if (!cfg.openAiApiKey && !simulateOcr) {
+      return res.status(500).json({
+        error: 'Falta OPENAI_API_KEY para OCR. Para probar en local sin OpenAI, arranca el backend con OCR_SIMULATE=1.',
+      });
     }
 
     const { imageBase64, mimeType, context, ocrMode } = req.body || {};
@@ -1392,7 +1454,8 @@ app.post('/api/ocr/scan', requireAuthAndEmailVerified, sensitiveOpLimiter, async
     else if (prefix.startsWith('iVBOR')) detectedMime = 'image/png';
     else if (prefix.startsWith('R0lG')) detectedMime = 'image/gif';
     else if (prefix.startsWith('UklG')) detectedMime = 'image/webp';
-    else if (prefix.startsWith('JVBE') || prefix.startsWith('JVBERi') || mimeType === 'application/pdf') {
+    else if (!simulateOcr && (prefix.startsWith('JVBE') || prefix.startsWith('JVBERi') || mimeType === 'application/pdf')) {
+      // En simulación no hace falta convertir el PDF (solo se usa el hash para duplicados).
       logger.info({ tag: 'OCR' }, 'Converting PDF to PNG');
       try {
         cleanBase64 = await convertPdfToImageBase64(cleanBase64);
@@ -1407,7 +1470,9 @@ app.post('/api/ocr/scan', requireAuthAndEmailVerified, sensitiveOpLimiter, async
       c.createHash('sha256').update(cleanBase64).digest('hex'),
     );
 
-    logger.info({ tag: 'OCR', detectedMime, base64Len: cleanBase64.length, sourceHash }, 'Sending to OpenAI Vision');
+    if (!simulateOcr) {
+      logger.info({ tag: 'OCR', detectedMime, base64Len: cleanBase64.length, sourceHash }, 'Sending to OpenAI Vision');
+    }
 
     const dataUrl = `data:${detectedMime};base64,${cleanBase64}`;
 
@@ -1469,6 +1534,14 @@ isScrapyard se pone true si el documento es de un desguace/CAT, false si es de c
       : '';
 
     const isVehicleMode = ocrMode === 'vehicle';
+
+    let parsed;
+    let usage = {};
+
+    if (simulateOcr) {
+      logger.warn({ tag: 'OCR', sourceHash }, 'OCR SIMULADO (OCR_SIMULATE=1, sin OPENAI_API_KEY)');
+      parsed = buildSimulatedOcrResult({ isVehicleMode, context });
+    } else {
 
     const response = await fetch(`${cfg.openAiBaseUrl}/chat/completions`, {
       method: 'POST',
@@ -1559,14 +1632,15 @@ Los campos financieros (subtotal, taxRate, lines, etc.) solo se rellenan si el d
 
     const payload = await response.json();
     const rawContent = payload.choices?.[0]?.message?.content || '{}';
-    const usage = payload.usage || {};
+    usage = payload.usage || {};
 
-    let parsed;
     try {
       const cleaned = rawContent.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
       parsed = JSON.parse(cleaned);
     } catch {
       parsed = { raw: rawContent, parseError: true };
+    }
+
     }
 
     const processingTimeMs = Date.now() - t0;
@@ -1605,7 +1679,7 @@ Los campos financieros (subtotal, taxRate, lines, etc.) solo se rellenan si el d
         sourceHash,
         processingTimeMs,
         tokensUsed: { prompt: usage.prompt_tokens || 0, completion: usage.completion_tokens || 0 },
-        model: 'gpt-4o',
+        model: simulateOcr ? 'simulado' : 'gpt-4o',
       },
     });
   } catch (error) {

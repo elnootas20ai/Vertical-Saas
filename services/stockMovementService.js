@@ -16,6 +16,9 @@ const VALID_MOVEMENT_TYPES = [
   'adjustment_in',
   'adjustment_out',
   'transfer',
+  // Traspaso entre tiendas: salida en almacén origen / entrada en destino.
+  'transfer_out',
+  'transfer_in',
   'return_supplier',
   'return_customer',
   'initial',
@@ -27,8 +30,8 @@ const VALID_MOVEMENT_TYPES = [
   'material_return',
 ];
 
-const INBOUND_TYPES = new Set(['purchase_reception', 'adjustment_in', 'return_customer', 'initial', 'sale_reversal', 'recipe_consumption_reversal', 'material_return']);
-const OUTBOUND_TYPES = new Set(['sale', 'internal_consumption', 'adjustment_out', 'return_supplier', 'recipe_consumption', 'waste', 'material_delivery']);
+const INBOUND_TYPES = new Set(['purchase_reception', 'adjustment_in', 'return_customer', 'initial', 'sale_reversal', 'recipe_consumption_reversal', 'material_return', 'transfer_in']);
+const OUTBOUND_TYPES = new Set(['sale', 'internal_consumption', 'adjustment_out', 'return_supplier', 'recipe_consumption', 'waste', 'material_delivery', 'transfer_out']);
 
 function buildStockMovementDocument(userId, data = {}) {
   const now = new Date().toISOString();

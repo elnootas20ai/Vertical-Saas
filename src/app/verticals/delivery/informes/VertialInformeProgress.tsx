@@ -213,15 +213,18 @@ export function VertialInformeReadyCard({
 export function VertialInformeUnavailableCard({
   title,
   onBack,
+  reason,
 }: {
   title: string;
   onBack: () => void;
+  reason?: string;
 }) {
   return (
     <div className="space-y-4 rounded-2xl border border-stone-200 bg-white p-6 dark:border-stone-700 dark:bg-stone-900">
       <h2 className="text-lg font-bold text-stone-900 dark:text-stone-100">{title}</h2>
       <p className="text-sm text-stone-600 dark:text-stone-400">
-        Este informe aún no tiene fuente de datos conectada. Misma pantalla y descarga cuando lo definamos.
+        {reason
+          || 'Este informe aún no tiene fuente de datos conectada. Misma pantalla y descarga cuando lo definamos.'}
       </p>
       <button type="button" className={VERTIAL_BTN_SECONDARY} onClick={onBack}>
         Volver al catálogo
@@ -261,17 +264,24 @@ export async function downloadPdf(
   title: string,
   rows: Record<string, unknown>[],
   filename: string,
-  options?: { summary?: string; businessName?: string },
+  options?: {
+    summary?: string;
+    businessName?: string;
+    dashboard?: import('./loaders/informeTypes').InformeDashboard;
+    periodLabel?: string;
+  },
 ) {
-  if (!rows.length) return;
+  if (!rows.length && !options?.dashboard) return;
   try {
     const { generateVertialInformePdf } = await import('./vertialInformePdf');
     generateVertialInformePdf({
       title,
-      rows,
+      rows: rows.length ? rows : (options?.dashboard ? [{ _: 1 }] : []),
       filename,
       summary: options?.summary,
       businessName: options?.businessName,
+      dashboard: options?.dashboard,
+      periodLabel: options?.periodLabel,
     });
   } catch {
     downloadCsv(rows, filename);
@@ -283,7 +293,12 @@ export async function downloadInforme(
   title: string,
   rows: Record<string, unknown>[],
   filename: string,
-  options?: { summary?: string; businessName?: string },
+  options?: {
+    summary?: string;
+    businessName?: string;
+    dashboard?: import('./loaders/informeTypes').InformeDashboard;
+    periodLabel?: string;
+  },
 ) {
   if (format === 'xlsx') return downloadXlsx(rows, filename);
   if (format === 'pdf') return downloadPdf(title, rows, filename, options);

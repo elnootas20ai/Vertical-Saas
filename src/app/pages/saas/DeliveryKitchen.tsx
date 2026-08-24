@@ -7,6 +7,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { playUiBeep, unlockUiAudio } from '../../lib/uiSounds';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
   filterDeliveryOrdersRequest,
@@ -741,12 +742,18 @@ export function DeliveryKitchen() {
 
   // Refs
   const prevOrderCountRef = useRef(0);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Sound toggle
   useEffect(() => {
     localStorage.setItem('kds_sound', soundEnabled ? 'on' : 'off');
   }, [soundEnabled]);
+
+  // Desbloqueo de audio al primer toque (sin él, iPad no deja sonar el beep).
+  useEffect(() => {
+    const unlock = () => unlockUiAudio();
+    window.addEventListener('pointerdown', unlock, { once: true });
+    return () => window.removeEventListener('pointerdown', unlock);
+  }, []);
 
   // Load data
   const loadOrders = useCallback(async () => {
@@ -772,18 +779,7 @@ export function DeliveryKitchen() {
         const activeNew = data.filter((o) => o.status === 'nuevo').length;
         const activePrev = prevOrderCountRef.current;
         if (activeNew > activePrev && soundEnabled) {
-          try {
-            const ctx = new AudioContext();
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            osc.frequency.value = 880;
-            osc.type = 'sine';
-            gain.gain.value = 0.3;
-            osc.start();
-            osc.stop(ctx.currentTime + 0.15);
-          } catch {}
+          playUiBeep();
         }
       }
       prevOrderCountRef.current = data.filter((o) => o.status === 'nuevo').length;

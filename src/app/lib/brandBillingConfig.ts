@@ -14,6 +14,14 @@ import {
   looksLikeBrandTechnicalId,
 } from './brandLabels';
 import { isBrandActive, isDefaultBrandNamePlaceholder, isDefaultCommercialBrand } from './brandUtils';
+import {
+  DEFAULT_ES_TAX_POLICY,
+  normalizeEsTaxPolicy,
+} from './spainVat';
+
+export type BrandBillingTaxPolicy = ReturnType<typeof normalizeEsTaxPolicy>;
+
+export { DEFAULT_ES_TAX_POLICY };
 
 export type FoodUnitKey = 'pizza' | 'burger' | 'taco';
 
@@ -61,6 +69,8 @@ export type BrandBillingConfig = {
   orphanMode: BrandBillingOrphanMode;
   /** Si orphanMode = fixed_brand: id de marca destino. */
   orphanFixedBrandId: string;
+  /** IVA España — opt-in (enabled:false por defecto). El % por producto va en el catálogo. */
+  taxPolicy: BrandBillingTaxPolicy;
   updatedAt: string;
   createdAt?: string;
 };
@@ -164,9 +174,17 @@ export function emptyBrandBillingConfig(businessId: string): BrandBillingConfig 
     monoBrandTakesAll: true,
     orphanMode: 'shift_majority',
     orphanFixedBrandId: '',
+    taxPolicy: { ...DEFAULT_ES_TAX_POLICY },
     createdAt: now,
     updatedAt: now,
   };
+}
+
+/** Política fiscal de la empresa (desde Facturación de marcas). */
+export function taxPolicyFromBillingConfig(
+  config: Pick<BrandBillingConfig, 'taxPolicy'> | null | undefined,
+): BrandBillingTaxPolicy {
+  return normalizeEsTaxPolicy(config?.taxPolicy);
 }
 
 /** Reglas de cruce listas para el motor (sin hardcode de marcas). */
@@ -555,6 +573,7 @@ export function normalizeBrandBillingConfig(
     monoBrandTakesAll: raw.monoBrandTakesAll !== false,
     orphanMode: normalizeBillingOrphanMode(raw.orphanMode),
     orphanFixedBrandId: String(raw.orphanFixedBrandId || '').trim(),
+    taxPolicy: normalizeEsTaxPolicy(raw.taxPolicy || base.taxPolicy),
     createdAt: String(raw.createdAt || base.createdAt || ''),
     updatedAt: String(raw.updatedAt || base.updatedAt),
   };

@@ -1,10 +1,12 @@
 import { jsPDF } from 'jspdf';
+import type { InformeChart, InformeDashboard, InformeKpi, InformeTable } from './loaders/informeTypes';
+import { formatMoneyEs, formatNumberEs } from '../../../lib/formatNumberEs';
 
-/** Colores marca Vertial (logo: verde → teal → azul) */
 const V = {
   green: [34, 197, 94] as [number, number, number],
   teal: [20, 184, 166] as [number, number, number],
   blue: [37, 99, 235] as [number, number, number],
+  rose: [225, 29, 72] as [number, number, number],
   dark: [11, 18, 32] as [number, number, number],
   slate: [71, 85, 105] as [number, number, number],
   muted: [148, 163, 184] as [number, number, number],
@@ -19,65 +21,12 @@ export type VertialInformePdfMeta = {
   businessName?: string;
   filename: string;
   rows: Record<string, unknown>[];
+  dashboard?: InformeDashboard;
+  periodLabel?: string;
 };
 
-type Kpi = { label: string; value: string };
-
-function parseNum(v: unknown): number | null {
-  if (typeof v === 'number' && Number.isFinite(v)) return v;
-  if (typeof v !== 'string') return null;
-  const n = Number(String(v).replace(/\s/g, '').replace(',', '.').replace(/€/g, ''));
-  return Number.isFinite(n) ? n : null;
-}
-
-function looksMoney(key: string): boolean {
-  const k = key.toLowerCase();
-  return /ingreso|gastado|gasto|ltv|ticket|margen|comision|valor|importe|€|euro|spent|revenue|total/.test(k);
-}
-
-function looksCount(key: string): boolean {
-  const k = key.toLowerCase();
-  return /pedido|unidad|cantidad|tickets|visitas|uds/.test(k);
-}
-
-function formatEur(n: number): string {
-  return `${n.toLocaleString('es-ES', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} €`;
-}
-
-function formatNum(n: number): string {
-  return n.toLocaleString('es-ES', { maximumFractionDigits: 1 });
-}
-
-/** Extrae KPIs útiles de las filas del informe. */
-export function buildInformeKpis(rows: Record<string, unknown>[]): Kpi[] {
-  const kpis: Kpi[] = [
-    { label: 'Registros', value: rows.length.toLocaleString('es-ES') },
-  ];
-  if (!rows.length) return kpis;
-
-  const keys = Object.keys(rows[0]);
-  for (const key of keys) {
-    const nums = rows.map((r) => parseNum(r[key])).filter((n): n is number => n != null);
-    if (nums.length < Math.max(1, Math.floor(rows.length * 0.4))) continue;
-
-    const sum = nums.reduce((a, b) => a + b, 0);
-    const avg = sum / nums.length;
-
-    if (looksMoney(key)) {
-      kpis.push({ label: `Total ${key}`, value: formatEur(sum) });
-      kpis.push({ label: `Media ${key}`, value: formatEur(avg) });
-    } else if (looksCount(key) || /pedido|unidad/i.test(key)) {
-      kpis.push({ label: `Total ${key}`, value: formatNum(sum) });
-    }
-
-    if (kpis.length >= 6) break;
-  }
-
-  return kpis.slice(0, 6);
-}
-
 function drawBrandBar(doc: jsPDF, pageW: number) {
-  const bandH = 4;
+  const bandH = 3.5;
   const third = pageW / 3;
   doc.setFillColor(...V.green);
   doc.rect(0, 0, third, bandH, 'F');
@@ -87,47 +36,6 @@ function drawBrandBar(doc: jsPDF, pageW: number) {
   doc.rect(third * 2, 0, pageW - third * 2, bandH, 'F');
 }
 
-function drawHeader(
-  doc: jsPDF,
-  pageW: number,
-  meta: VertialInformePdfMeta,
-) {
-  drawBrandBar(doc, pageW);
-
-  doc.setFillColor(...V.dark);
-  doc.rect(0, 4, pageW, 28, 'F');
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(16);
-  doc.setTextColor(...V.white);
-  doc.text('Vertial', 14, 16);
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  doc.setTextColor(...V.muted);
-  doc.text('Informe de negocio', 14, 22);
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
-  doc.setTextColor(...V.white);
-  doc.text(meta.title, pageW - 14, 16, { align: 'right' });
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  doc.setTextColor(...V.muted);
-  const when = new Date().toLocaleString('es-ES', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-  const rightSub = meta.businessName
-    ? `${meta.businessName} · ${when}`
-    : when;
-  doc.text(rightSub, pageW - 14, 22, { align: 'right' });
-}
-
 function drawFooter(doc: jsPDF, pageW: number, pageH: number, page: number, total: number) {
   doc.setDrawColor(...V.line);
   doc.setLineWidth(0.2);
@@ -135,64 +43,247 @@ function drawFooter(doc: jsPDF, pageW: number, pageH: number, page: number, tota
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
   doc.setTextColor(...V.muted);
-  doc.text('Generado con Vertial · Confidencial', 14, pageH - 7);
+  doc.text('Generado con Vertial · Confidencial · Uso interno / asesoría', 14, pageH - 7);
   doc.text(`Pág. ${page} / ${total}`, pageW - 14, pageH - 7, { align: 'right' });
 }
 
-function drawKpiCards(doc: jsPDF, kpis: Kpi[], startY: number, pageW: number): number {
-  if (!kpis.length) return startY;
-  const margin = 14;
-  const gap = 4;
-  const cols = Math.min(3, kpis.length);
+function formatCell(format: InformeTable['columns'][0]['format'], value: unknown): string {
+  if (value == null || value === '') return '—';
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    if (format === 'money') return formatMoneyEs(value);
+    if (format === 'pct') return `${formatNumberEs(value, { minFraction: 1, maxFraction: 1 })} %`;
+    if (format === 'number') return formatNumberEs(value, { minFraction: 0, maxFraction: 2 });
+  }
+  return String(value);
+}
+
+function ensureSpace(
+  doc: jsPDF,
+  y: number,
+  need: number,
+  pageW: number,
+  pageH: number,
+  margin: number,
+): number {
+  if (y + need < pageH - 16) return y;
+  doc.addPage();
+  drawBrandBar(doc, pageW);
+  return margin;
+}
+
+function drawKpis(doc: jsPDF, kpis: InformeKpi[], y: number, pageW: number, margin: number): number {
+  if (!kpis.length) return y;
+  const gap = 3.5;
+  const cols = Math.min(4, kpis.length);
   const cardW = (pageW - margin * 2 - gap * (cols - 1)) / cols;
-  const cardH = 18;
-  let y = startY;
+  const cardH = 20;
+  let rowY = y;
 
   kpis.forEach((kpi, i) => {
-    if (i > 0 && i % cols === 0) y += cardH + gap;
+    if (i > 0 && i % cols === 0) rowY += cardH + gap;
     const col = i % cols;
     const x = margin + col * (cardW + gap);
-
     doc.setFillColor(...V.soft);
     doc.setDrawColor(...V.line);
-    doc.roundedRect(x, y, cardW, cardH, 2, 2, 'FD');
-
+    doc.roundedRect(x, rowY, cardW, cardH, 2, 2, 'FD');
+    doc.setFillColor(...V.blue);
+    doc.rect(x, rowY, 1.2, cardH, 'F');
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7);
+    doc.setFontSize(6.5);
     doc.setTextColor(...V.slate);
-    doc.text(kpi.label.slice(0, 28), x + 3, y + 6);
-
+    doc.text(kpi.label.slice(0, 32), x + 4, rowY + 6);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
     doc.setTextColor(...V.dark);
-    doc.text(kpi.value.slice(0, 18), x + 3, y + 13);
+    doc.text(String(kpi.value).slice(0, 22), x + 4, rowY + 13);
+    if (kpi.deltaPct != null) {
+      doc.setFontSize(7);
+      doc.setTextColor(kpi.deltaPct >= 0 ? V.green[0] : V.rose[0], kpi.deltaPct >= 0 ? V.green[1] : V.rose[1], kpi.deltaPct >= 0 ? V.green[2] : V.rose[2]);
+      doc.text(`${kpi.deltaPct > 0 ? '+' : ''}${kpi.deltaPct} %`, x + 4, rowY + 17.5);
+    }
+  });
+  return rowY + cardH + 8;
+}
+
+function drawSimpleChart(
+  doc: jsPDF,
+  chart: InformeChart,
+  y: number,
+  pageW: number,
+  margin: number,
+): number {
+  if (!chart.points.length || !chart.series.length) return y;
+  const chartH = 42;
+  const chartW = pageW - margin * 2;
+  const seriesKey = chart.series[0].key;
+  const values = chart.points.map((p) => Number(p[seriesKey] || 0));
+  const max = Math.max(...values.map((v) => Math.abs(v)), 1);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(...V.dark);
+  doc.text(chart.title.slice(0, 70), margin, y);
+  y += 4;
+
+  doc.setFillColor(...V.soft);
+  doc.roundedRect(margin, y, chartW, chartH, 2, 2, 'F');
+
+  const n = chart.points.length;
+  const barGap = 1.2;
+  const usable = chartW - 8;
+  const barW = Math.min(12, Math.max(2, usable / n - barGap));
+  const baseY = y + chartH - 6;
+
+  chart.points.forEach((p, i) => {
+    const val = Number(p[seriesKey] || 0);
+    const h = (Math.abs(val) / max) * (chartH - 14);
+    const x = margin + 4 + i * (barW + barGap);
+    const color = val >= 0 ? V.blue : V.rose;
+    doc.setFillColor(...color);
+    doc.rect(x, baseY - h, barW, h, 'F');
   });
 
-  return y + cardH + 8;
+  // second series as line if present
+  if (chart.series[1]) {
+    const key2 = chart.series[1].key;
+    const vals2 = chart.points.map((p) => Number(p[key2] || 0));
+    const max2 = Math.max(...vals2.map((v) => Math.abs(v)), max);
+    doc.setDrawColor(...V.teal);
+    doc.setLineWidth(0.6);
+    for (let i = 0; i < chart.points.length - 1; i += 1) {
+      const x1 = margin + 4 + i * (barW + barGap) + barW / 2;
+      const x2 = margin + 4 + (i + 1) * (barW + barGap) + barW / 2;
+      const y1 = baseY - (Math.abs(vals2[i]) / max2) * (chartH - 14);
+      const y2 = baseY - (Math.abs(vals2[i + 1]) / max2) * (chartH - 14);
+      doc.line(x1, y1, x2, y2);
+    }
+  }
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6);
+  doc.setTextColor(...V.muted);
+  doc.text(chart.series.map((s) => s.label).join(' · ').slice(0, 80), margin + 2, y + chartH - 1.5);
+
+  return y + chartH + 8;
+}
+
+function drawTable(
+  doc: jsPDF,
+  table: InformeTable,
+  startY: number,
+  pageW: number,
+  pageH: number,
+  margin: number,
+): number {
+  let y = startY;
+  y = ensureSpace(doc, y, 20, pageW, pageH, margin);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(...V.dark);
+  doc.text(table.title.slice(0, 80), margin, y);
+  y += 5;
+
+  const cols = table.columns;
+  const usableW = pageW - margin * 2;
+  const colW = usableW / Math.max(cols.length, 1);
+
+  const header = () => {
+    doc.setFillColor(...V.blue);
+    doc.rect(margin, y - 3.5, usableW, 6.5, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.5);
+    doc.setTextColor(...V.white);
+    cols.forEach((c, i) => {
+      doc.text(c.label.slice(0, 18), margin + i * colW + 1.2, y);
+    });
+    y += 5;
+  };
+
+  header();
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+
+  const maxRows = 40;
+  table.rows.slice(0, maxRows).forEach((row, idx) => {
+    y = ensureSpace(doc, y, 8, pageW, pageH, margin);
+    if (y < margin + 8) {
+      // new page from ensureSpace
+      header();
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(6.5);
+    }
+    if (idx % 2 === 0) {
+      doc.setFillColor(...V.soft);
+      doc.rect(margin, y - 3.2, usableW, 5, 'F');
+    }
+    const isResult = String(row.Tipo || '') === 'result' || String(row.Concepto || '').startsWith('=');
+    doc.setFont('helvetica', isResult ? 'bold' : 'normal');
+    doc.setTextColor(...V.dark);
+    cols.forEach((c, i) => {
+      const text = formatCell(c.format, row[c.key]).slice(0, 22);
+      const x = margin + i * colW + 1.2;
+      if (c.align === 'right' || c.format === 'money' || c.format === 'pct') {
+        doc.text(text, margin + (i + 1) * colW - 1.2, y, { align: 'right' });
+      } else {
+        doc.text(text, x, y);
+      }
+    });
+    y += 5;
+  });
+
+  if (table.rows.length > maxRows) {
+    y += 2;
+    doc.setFontSize(7);
+    doc.setTextColor(...V.slate);
+    doc.text(`… ${table.rows.length - maxRows} filas más (usa Excel para el listado completo)`, margin, y);
+    y += 5;
+  }
+
+  return y + 6;
 }
 
 /**
- * PDF informe Vertial: cabecera marca, KPIs y tabla de detalle.
+ * PDF informe Vertial — versión dashboard (portada + KPIs + gráfico + tablas).
+ * Fallback: tabla plana si no hay dashboard.
  */
 export function generateVertialInformePdf(meta: VertialInformePdfMeta): void {
+  const dashboard = meta.dashboard;
   const rows = meta.rows;
-  if (!rows.length) return;
+  if (!dashboard && !rows.length) return;
 
-  const keys = Object.keys(rows[0]);
-  const landscape = keys.length > 5;
-  const doc = new jsPDF({
-    orientation: landscape ? 'landscape' : 'portrait',
-    unit: 'mm',
-    format: 'a4',
-  });
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const margin = 14;
-  const bottom = pageH - 16;
 
-  drawHeader(doc, pageW, meta);
+  // Portada / cabecera
+  drawBrandBar(doc, pageW);
+  doc.setFillColor(...V.dark);
+  doc.rect(0, 3.5, pageW, 32, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(18);
+  doc.setTextColor(...V.white);
+  doc.text('Vertial', margin, 16);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(...V.muted);
+  doc.text('Informe financiero', margin, 22);
 
-  let y = 40;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
+  doc.setTextColor(...V.white);
+  doc.text(meta.title.slice(0, 48), pageW - margin, 15, { align: 'right' });
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(...V.muted);
+  const when = new Date().toLocaleString('es-ES', {
+    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+  const right = [meta.businessName, meta.periodLabel, when].filter(Boolean).join(' · ');
+  doc.text(right.slice(0, 70), pageW - margin, 22, { align: 'right' });
+
+  let y = 44;
 
   if (meta.summary) {
     doc.setFont('helvetica', 'normal');
@@ -200,72 +291,65 @@ export function generateVertialInformePdf(meta: VertialInformePdfMeta): void {
     doc.setTextColor(...V.slate);
     const lines = doc.splitTextToSize(meta.summary, pageW - margin * 2);
     doc.text(lines, margin, y);
-    y += lines.length * 4.2 + 4;
+    y += lines.length * 4.2 + 5;
   }
 
-  const kpis = buildInformeKpis(rows);
-  y = drawKpiCards(doc, kpis, y, pageW);
+  if (dashboard) {
+    y = drawKpis(doc, dashboard.kpis, y, pageW, margin);
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.setTextColor(...V.dark);
-  doc.text('Detalle', margin, y);
-  y += 5;
+    if (dashboard.alerts?.length) {
+      for (const a of dashboard.alerts.slice(0, 6)) {
+        y = ensureSpace(doc, y, 10, pageW, pageH, margin);
+        doc.setFillColor(a.severity === 'danger' ? 255 : a.severity === 'warning' ? 255 : 240, a.severity === 'danger' ? 241 : a.severity === 'warning' ? 251 : 249, a.severity === 'danger' ? 242 : a.severity === 'warning' ? 235 : 255);
+        doc.roundedRect(margin, y - 3, pageW - margin * 2, 7, 1.5, 1.5, 'F');
+        doc.setFontSize(7);
+        doc.setTextColor(...V.dark);
+        doc.text(a.message.slice(0, 110), margin + 2, y + 1.5);
+        y += 9;
+      }
+      y += 2;
+    }
 
-  const usableW = pageW - margin * 2;
-  const colW = usableW / keys.length;
-  const maxRowsFirst = 500; // safety
-  const data = rows.slice(0, maxRowsFirst);
+    if (dashboard.chart) {
+      y = ensureSpace(doc, y, 55, pageW, pageH, margin);
+      y = drawSimpleChart(doc, dashboard.chart, y, pageW, margin);
+    }
 
-  const drawTableHeader = () => {
+    for (const table of dashboard.tables) {
+      y = drawTable(doc, table, y, pageW, pageH, margin);
+    }
+  } else {
+    // Fallback flat table
+    const keys = Object.keys(rows[0] || {});
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(...V.dark);
+    doc.text('Detalle', margin, y);
+    y += 5;
+    const usableW = pageW - margin * 2;
+    const colW = usableW / Math.max(keys.length, 1);
     doc.setFillColor(...V.blue);
     doc.rect(margin, y - 4, usableW, 7, 'F');
-    doc.setFont('helvetica', 'bold');
     doc.setFontSize(7);
     doc.setTextColor(...V.white);
-    keys.forEach((h, i) => {
-      doc.text(String(h).slice(0, 16), margin + i * colW + 1.5, y);
-    });
+    keys.forEach((h, i) => doc.text(String(h).slice(0, 14), margin + i * colW + 1, y));
     y += 6;
-  };
-
-  drawTableHeader();
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7);
-
-  data.forEach((row, idx) => {
-    if (y > bottom - 4) {
-      doc.addPage();
-      drawBrandBar(doc, pageW);
-      y = 14;
-      drawTableHeader();
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(7);
-    }
-
-    if (idx % 2 === 0) {
-      doc.setFillColor(...V.soft);
-      doc.rect(margin, y - 3.5, usableW, 5.5, 'F');
-    }
-
     doc.setTextColor(...V.dark);
-    keys.forEach((k, i) => {
-      const cell = String(row[k] ?? '').slice(0, 22);
-      doc.text(cell, margin + i * colW + 1.5, y);
+    rows.slice(0, 80).forEach((row, idx) => {
+      if (y > pageH - 16) {
+        doc.addPage();
+        drawBrandBar(doc, pageW);
+        y = 14;
+      }
+      if (idx % 2 === 0) {
+        doc.setFillColor(...V.soft);
+        doc.rect(margin, y - 3.5, usableW, 5.5, 'F');
+      }
+      keys.forEach((k, i) => {
+        doc.text(String(row[k] ?? '').slice(0, 18), margin + i * colW + 1, y);
+      });
+      y += 5.5;
     });
-    y += 5.5;
-  });
-
-  if (rows.length > maxRowsFirst) {
-    y += 4;
-    doc.setFontSize(8);
-    doc.setTextColor(...V.slate);
-    doc.text(
-      `Mostrando ${maxRowsFirst.toLocaleString('es-ES')} de ${rows.length.toLocaleString('es-ES')} filas. Usa Excel/CSV para el listado completo.`,
-      margin,
-      y,
-    );
   }
 
   const totalPages = doc.getNumberOfPages();
@@ -275,4 +359,9 @@ export function generateVertialInformePdf(meta: VertialInformePdfMeta): void {
   }
 
   doc.save(`${meta.filename}.pdf`);
+}
+
+/** Compat: KPIs auto desde filas (informes legacy sin dashboard). */
+export function buildInformeKpis(rows: Record<string, unknown>[]) {
+  return [{ label: 'Registros', value: rows.length.toLocaleString('es-ES') }];
 }

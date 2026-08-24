@@ -77,6 +77,8 @@ export interface CreateFinanceMovementPayload {
   categoryColor?: string;
   amountBase: number;
   taxRate?: number;
+  taxAmount?: number;
+  totalAmount?: number;
   date: string;
   payMethod: string;
   notes?: string;
@@ -126,8 +128,14 @@ export function createFinanceMovementRecord(
   const now = new Date().toISOString();
   const amountBase = normalizeNumber(payload.amountBase);
   const taxRate = normalizeNumber(payload.taxRate);
-  const taxAmount = Number((amountBase * (taxRate / 100)).toFixed(2));
-  const totalAmount = Number((amountBase + taxAmount).toFixed(2));
+  const taxAmount =
+    payload.taxAmount !== undefined
+      ? normalizeNumber(payload.taxAmount)
+      : Number((amountBase * (taxRate / 100)).toFixed(2));
+  const totalAmount =
+    payload.totalAmount !== undefined
+      ? normalizeNumber(payload.totalAmount)
+      : Number((amountBase + taxAmount).toFixed(2));
   const id = `finance-${uuidv4()}`;
 
   return {

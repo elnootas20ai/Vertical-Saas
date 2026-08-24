@@ -7,7 +7,13 @@ import {
   buildFinanceDocument,
   listFinanceByUser,
   putDocument,
+  getBrandBillingConfigDoc,
 } from './couchdb.js';
+import {
+  calcOrderFinanceTaxAmounts,
+  calcRefundFinanceTaxAmounts,
+  normalizeEsTaxPolicy,
+} from '../shared/tax/spainVat.js';
 import logger from './logger.js';
 
 function round2(n) {
@@ -44,6 +50,17 @@ async function hasMovement(req, userId, predicate) {
   return movements.some(predicate);
 }
 
+async function loadTaxPolicy(req, order) {
+  const bid = businessIdOf(order);
+  if (!bid) return normalizeEsTaxPolicy(null);
+  try {
+    const doc = await getBrandBillingConfigDoc(req, bid);
+    return normalizeEsTaxPolicy(doc?.taxPolicy);
+  } catch {
+    return normalizeEsTaxPolicy(null);
+  }
+}
+
 export async function ensureDeliveryOrderIncomeServer(req, userId, order) {
   try {
     if (!userId || !order?._id) return false;
@@ -64,7 +81,8 @@ export async function ensureDeliveryOrderIncomeServer(req, userId, order) {
     const dateStr = String(
       order.paidAt || order.deliveredAt || order.updatedAt || order.createdAt || new Date().toISOString(),
     ).slice(0, 10);
-    const base = round2(total / 1.21);
+    const taxPolicy = await loadTaxPolicy(req, order);
+    const tax = calcOrderFinanceTaxAmounts(order, taxPolicy);
     const ticket = order.orderNumber || order.ticketNumber || String(id).slice(-6);
     const pdvName = String(order.salesPointName || '').trim();
     const bid = businessIdOf(order);
@@ -74,8 +92,10 @@ export async function ensureDeliveryOrderIncomeServer(req, userId, order) {
       concept: `Venta pedido #${ticket}${pdvName ? ` · ${pdvName}` : ''}`,
       reference: orderRef(id),
       category: 'ventas',
-      amountBase: base,
-      taxRate: 21,
+      amountBase: tax.amountBase,
+      taxRate: tax.taxRate,
+      taxAmount: tax.taxAmount,
+      totalAmount: tax.totalAmount,
       date: dateStr,
       payMethod: String(order.paymentMethod || 'mixto'),
       notes: `delivery_order:${id}`,
@@ -114,7 +134,8 @@ export async function ensureDeliveryOrderRefundServer(req, userId, order) {
     const dateStr = String(
       order.refundedAt || order.updatedAt || order.paidAt || order.createdAt || new Date().toISOString(),
     ).slice(0, 10);
-    const base = round2(refundAmount / 1.21);
+    const taxPolicy = await loadTaxPolicy(req, order);
+    const tax = calcRefundFinanceTaxAmounts(order, refundAmount, taxPolicy);
     const ticket = order.orderNumber || order.ticketNumber || String(id).slice(-6);
     const pdvName = String(order.salesPointName || '').trim();
     const bid = businessIdOf(order);
@@ -124,8 +145,10 @@ export async function ensureDeliveryOrderRefundServer(req, userId, order) {
       concept: `Devolución pedido #${ticket}${pdvName ? ` · ${pdvName}` : ''}`,
       reference: refundRef(id),
       category: 'devoluciones',
-      amountBase: base,
-      taxRate: 21,
+      amountBase: tax.amountBase,
+      taxRate: tax.taxRate,
+      taxAmount: tax.taxAmount,
+      totalAmount: tax.totalAmount,
       date: dateStr,
       payMethod: String(order.paymentMethod || 'mixto'),
       notes: `delivery_order_refund:${id}${order.refundReason ? ` · ${order.refundReason}` : ''}`,

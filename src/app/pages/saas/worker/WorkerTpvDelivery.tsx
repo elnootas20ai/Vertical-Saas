@@ -2246,6 +2246,7 @@ export function WorkerTpvDelivery({
             label: 'Consumo del trabajador',
             title: 'Registrar comida o bebida del equipo',
             tone: 'amber' as const,
+            section: 'equipo' as const,
             icon: <UtensilsCrossed />,
             onClick: () => setView('staff-consumption'),
           }]
@@ -2275,15 +2276,6 @@ export function WorkerTpvDelivery({
         icon: <History />,
         onClick: openOrderHistory,
       },
-      ...(ceoMode && onChangeStore
-        ? [{
-            id: 'store',
-            label: 'Cambiar tienda',
-            title: 'Elegir otro punto de venta',
-            icon: <Store />,
-            onClick: onChangeStore,
-          }]
-        : []),
       ...(tabletBinding && !ceoMode
         ? [{
             id: 'exit',
@@ -2308,7 +2300,6 @@ export function WorkerTpvDelivery({
     openOrderHistory,
     loadOrders,
     ceoMode,
-    onChangeStore,
     tabletBinding,
     exitTabletTpv,
   ]);
@@ -2382,7 +2373,7 @@ export function WorkerTpvDelivery({
       <div className={`shrink-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 ${isTabletUi ? 'px-2 py-1.5' : 'px-4 py-3'}`}>
         {isTabletUi ? (
           <>
-            {/* Una sola fila limpia: Nuevo/Consumo + filtros. Tienda/Avisos/Actualizar van al menú ☰ de la barra de caja. */}
+            {/* Una sola fila limpia: Nuevo/Consumo + filtros. Avisos/Actualizar/Historial van al menú ☰ de la barra de caja. */}
             <div className="flex items-stretch gap-1.5 min-w-0">
               <button
                 type="button"

@@ -105,7 +105,7 @@ export function BrandBillingSettingsPanel({
   )?.name;
 
   const load = useCallback(async () => {
-    if (!businessId || !unlocked) return;
+    if (!businessId) return;
     const brandsNow = brandsRef.current;
     setLoading(true);
     try {
@@ -131,7 +131,7 @@ export function BrandBillingSettingsPanel({
     } finally {
       setLoading(false);
     }
-  }, [businessId, unlocked, brandSyncKey]);
+  }, [businessId, brandSyncKey]);
 
   useEffect(() => {
     void load();
@@ -219,14 +219,14 @@ export function BrandBillingSettingsPanel({
           <div className="min-w-0 flex-1">
             <p className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
               <Receipt className="h-4 w-4 text-gray-400" />
-              Facturación
+              Reparto entre marcas
             </p>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Reparto de ingresos entre marcas (Excel de cierre y pedidos mezclados).
+              Hojas Excel y reglas de bebidas/postres (2+ marcas).
             </p>
             {lockedHint ? (
               <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
-                Necesitas 2 o más marcas para gestionar esto
+                Necesitas 2 o más marcas para gestionar el reparto
               </p>
             ) : (
               <p className="mt-2 text-[11px] text-gray-400">Pulsa para más info</p>

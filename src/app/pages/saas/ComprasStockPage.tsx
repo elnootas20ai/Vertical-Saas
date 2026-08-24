@@ -83,6 +83,8 @@ const MOVEMENT_LABELS: Record<string, { label: string; color: string; icon: type
   adjustment_in:       { label: 'Ajuste (+)',       color: 'text-emerald-600', icon: TrendingUp },
   adjustment_out:      { label: 'Ajuste (-)',       color: 'text-red-600',     icon: TrendingDown },
   transfer:            { label: 'Transferencia',    color: 'text-purple-600',  icon: ArrowRightLeft },
+  transfer_out:        { label: 'Traspaso salida',  color: 'text-purple-600',  icon: ArrowRightLeft },
+  transfer_in:         { label: 'Traspaso entrada', color: 'text-purple-600',  icon: ArrowRightLeft },
   return_supplier:     { label: 'Dev. proveedor',   color: 'text-amber-600',   icon: RotateCcw },
   return_customer:     { label: 'Dev. cliente',     color: 'text-cyan-600',    icon: RotateCcw },
   initial:             { label: 'Stock inicial',    color: 'text-gray-600',    icon: Package },

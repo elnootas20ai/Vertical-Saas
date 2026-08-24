@@ -8,6 +8,7 @@ import { TpvOfflineBanner } from '../../../components/saas/TpvOfflineBanner';
 import { WorkerTpvBottomBar } from '../../../components/saas/WorkerTpvBottomBar';
 import { isTpvTabletBound, readTpvTabletBinding, resolveTpvTabletWorkerPath } from '../../../lib/tpvTabletSession';
 import { consumeTpvStockReviewLaunch, TPV_OPEN_STOCK_REVIEW_EVENT } from '../../../lib/tpvStockReview';
+import { TPV_OPEN_STORE_TRANSFERS_EVENT } from '../../../lib/tpvStoreTransfers';
 import { WorkerTpvDelivery } from './WorkerTpvDelivery';
 import { WorkerTpvSales } from './WorkerTpvSales';
 import { WorkerTpvWorkshop } from './WorkerTpvWorkshop';
@@ -28,6 +29,7 @@ import { WorkerTpvClinic } from './WorkerTpvClinic';
 import { WorkerTpvHotel } from './WorkerTpvHotel';
 import { WorkerTpvTaxi } from './WorkerTpvTaxi';
 import { WorkerTpvStockReview } from './WorkerTpvStockReview';
+import { WorkerTpvStoreTransfers } from './WorkerTpvStoreTransfers';
 import { WorkerTpvButcherShop } from './WorkerTpvButcherShop';
 import { HairSalonWorkstationPage } from '../HairSalonWorkstationPage';
 import { Layout } from '../../../components/saas/Layout';
@@ -113,18 +115,30 @@ function WorkerTpvShell({
   initialManagerPdvId?: string | null;
 }) {
   const [stockOpen, setStockOpen] = useState(() => consumeTpvStockReviewLaunch());
+  const [transfersOpen, setTransfersOpen] = useState(false);
   const gatePdvId = String(initialManagerPdvId || '').trim() || null;
 
   useEffect(() => {
-    const onOpen = () => setStockOpen(true);
-    window.addEventListener(TPV_OPEN_STOCK_REVIEW_EVENT, onOpen);
-    return () => window.removeEventListener(TPV_OPEN_STOCK_REVIEW_EVENT, onOpen);
+    const onOpenStock = () => {
+      setStockOpen(true);
+      setTransfersOpen(false);
+    };
+    const onOpenTransfers = () => {
+      setTransfersOpen(true);
+      setStockOpen(false);
+    };
+    window.addEventListener(TPV_OPEN_STOCK_REVIEW_EVENT, onOpenStock);
+    window.addEventListener(TPV_OPEN_STORE_TRANSFERS_EVENT, onOpenTransfers);
+    return () => {
+      window.removeEventListener(TPV_OPEN_STOCK_REVIEW_EVENT, onOpenStock);
+      window.removeEventListener(TPV_OPEN_STORE_TRANSFERS_EVENT, onOpenTransfers);
+    };
   }, []);
 
   return (
     <TpvChromeScope
       insetBottomBar
-      bottomBar={!stockOpen && !restaurantMode ? <WorkerTpvBottomBar /> : null}
+      bottomBar={!stockOpen && !transfersOpen && !restaurantMode ? <WorkerTpvBottomBar /> : null}
     >
       <div
         className={`flex flex-col overflow-hidden h-full min-h-0 ${
@@ -142,6 +156,8 @@ function WorkerTpvShell({
           >
             {stockOpen ? (
               <WorkerTpvStockReview onBack={() => setStockOpen(false)} />
+            ) : transfersOpen ? (
+              <WorkerTpvStoreTransfers onBack={() => setTransfersOpen(false)} />
             ) : (
               children
             )}

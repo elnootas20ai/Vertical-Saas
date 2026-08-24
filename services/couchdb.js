@@ -32,6 +32,7 @@ import {
 import { nextPurchaseOrderNumber } from './purchaseOrderNumber.js';
 import { resolvePurchaseInvoiceNumber } from './purchaseDocNumber.js';
 import { sanitizeSupplierProductAliases } from '../shared/purchases/supplierProductAlias.js';
+import { normalizeEsTaxPolicy } from '../shared/tax/spainVat.js';
 
 export { clientMatchesBusinessScope };
 
@@ -4670,8 +4671,12 @@ export function buildFinanceDocument(userId, data = {}, existing = null) {
   const id = existing?._id || data.id || `finance-${uuidv4()}`;
   const amountBase = Number(data.amountBase || 0);
   const taxRate = Number(data.taxRate || 0);
-  const taxAmount = Number((amountBase * (taxRate / 100)).toFixed(2));
-  const totalAmount = Number((amountBase + taxAmount).toFixed(2));
+  const taxAmount = data.taxAmount !== undefined
+    ? Number(data.taxAmount)
+    : Number((amountBase * (taxRate / 100)).toFixed(2));
+  const totalAmount = data.totalAmount !== undefined
+    ? Number(data.totalAmount)
+    : Number((amountBase + taxAmount).toFixed(2));
 
   const linkedDocs = Array.isArray(data.linkedDocuments)
     ? data.linkedDocuments.map((d) => ({
@@ -11097,6 +11102,9 @@ export function buildBrandBillingConfigDocument(businessId, data = {}, existing 
       ? data.orphanFixedBrandId
       : (existing?.orphanFixedBrandId || ''),
   ).trim();
+  const taxPolicy = normalizeEsTaxPolicy(
+    data.taxPolicy !== undefined ? data.taxPolicy : existing?.taxPolicy,
+  );
 
   const out = {
     _id: id,
@@ -11107,6 +11115,7 @@ export function buildBrandBillingConfigDocument(businessId, data = {}, existing 
     monoBrandTakesAll: monoRaw !== false,
     orphanMode,
     orphanFixedBrandId,
+    taxPolicy,
     createdAt: existing?.createdAt || now,
     updatedAt: now,
   };
@@ -11132,6 +11141,7 @@ export function sanitizeBrandBillingConfig(doc) {
     monoBrandTakesAll: doc.monoBrandTakesAll !== false,
     orphanMode,
     orphanFixedBrandId: String(doc.orphanFixedBrandId || '').trim(),
+    taxPolicy: normalizeEsTaxPolicy(doc.taxPolicy),
     createdAt: doc.createdAt || '',
     updatedAt: doc.updatedAt || '',
   };

@@ -85,6 +85,8 @@ export interface DeliveryOrderItem {
   notes?: string;
   catalogItemId?: string;
   category?: string;
+  /** Tipo IVA español (0/4/5/10/21) — copiado del catálogo al cobrar. */
+  taxRate?: number;
   /** Marca(s) deducidas desde el catálogo (para reporting interno). */
   brandIds?: string[];
   extras?: string[];

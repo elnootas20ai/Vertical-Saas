@@ -7,6 +7,8 @@ import {
   deliveryOrderIncomeAmount,
   shouldSyncDeliveryOrderIncome,
 } from './deliveryOrderFinanceRules';
+import { calcOrderFinanceTaxAmounts, calcRefundFinanceTaxAmounts } from './spainVat';
+import type { BrandBillingTaxPolicy } from './brandBillingConfig';
 
 export {
   deliveryOrderFinanceRef,
@@ -48,6 +50,7 @@ export async function ensureDeliveryOrderIncome(
   order: DeliveryOrder,
   scope: FinanceMovementScope = {},
   existingMovements?: FinanceMovementRecord[],
+  taxPolicy?: BrandBillingTaxPolicy | null,
 ): Promise<boolean> {
   if (!userId || !order?._id) return false;
   if (!shouldSyncDeliveryOrderIncome(order)) return false;
@@ -71,7 +74,7 @@ export async function ensureDeliveryOrderIncome(
   const dateStr = String(
     order.paidAt || order.deliveredAt || order.updatedAt || order.createdAt || new Date().toISOString(),
   ).slice(0, 10);
-  const base = Number((total / 1.21).toFixed(2));
+  const tax = calcOrderFinanceTaxAmounts(order, taxPolicy || undefined);
   const ticket = order.orderNumber || order.ticketNumber || order._id.slice(-6);
 
   await createFinanceMovementInCouch(userId, {
@@ -80,8 +83,10 @@ export async function ensureDeliveryOrderIncome(
     concept: `Venta pedido #${ticket}${pointOfSaleName ? ` · ${pointOfSaleName}` : ''}`,
     reference: orderRef(order._id),
     category: 'ventas',
-    amountBase: base,
-    taxRate: 21,
+    amountBase: tax.amountBase,
+    taxRate: tax.taxRate,
+    taxAmount: tax.taxAmount,
+    totalAmount: tax.totalAmount,
     date: dateStr,
     payMethod: String(order.paymentMethod || 'mixto'),
     notes: `delivery_order:${order._id}`,
@@ -232,6 +237,7 @@ export async function ensureDeliveryOrderRefund(
   order: DeliveryOrder,
   scope: FinanceMovementScope = {},
   existingMovements?: FinanceMovementRecord[],
+  taxPolicy?: BrandBillingTaxPolicy | null,
 ): Promise<boolean> {
   if (!userId || !order?._id) return false;
   const refundAmount = Number(order.refundAmount || 0);
@@ -249,7 +255,7 @@ export async function ensureDeliveryOrderRefund(
   const dateStr = String(
     order.refundedAt || order.updatedAt || order.paidAt || order.createdAt || new Date().toISOString(),
   ).slice(0, 10);
-  const base = Number((refundAmount / 1.21).toFixed(2));
+  const tax = calcRefundFinanceTaxAmounts(order, refundAmount, taxPolicy || undefined);
   const ticket = order.orderNumber || order.ticketNumber || order._id.slice(-6);
 
   await createFinanceMovementInCouch(userId, {
@@ -258,8 +264,10 @@ export async function ensureDeliveryOrderRefund(
     concept: `Devolución pedido #${ticket}${pointOfSaleName ? ` · ${pointOfSaleName}` : ''}`,
     reference: `DEVOLUCION-${order._id}`,
     category: 'devoluciones',
-    amountBase: base,
-    taxRate: 21,
+    amountBase: tax.amountBase,
+    taxRate: tax.taxRate,
+    taxAmount: tax.taxAmount,
+    totalAmount: tax.totalAmount,
     date: dateStr,
     payMethod: String(order.paymentMethod || 'mixto'),
     notes: `delivery_order_refund:${order._id}${order.refundReason ? ` · ${order.refundReason}` : ''}`,

@@ -6,6 +6,7 @@ import {
   coalesceTacoIntoBurgerSheets,
   enforceExclusiveBrandAssignment,
   isBrandBillingUnlocked,
+  normalizeBrandBillingConfig,
   predominantBrandIdForSheet,
   resolveBillingSheetsForClosing,
   resolveBrandFoodUnitKey,
@@ -279,5 +280,29 @@ describe('closingSlotsFromBillingSheets / 2ª caja', () => {
     const slots = closingSlotsFromBillingSheets(sheets, []);
     expect(slots).toHaveLength(1);
     expect(slots[0].name).toBe('Marca');
+  });
+});
+
+describe('normalizeBrandBillingConfig taxPolicy', () => {
+  it('IVA apagado por defecto (no cambia el cliente)', () => {
+    const cfg = normalizeBrandBillingConfig({ businessId: 'b1' });
+    expect(cfg.taxPolicy.enabled).toBe(false);
+    expect(cfg.taxPolicy.defaultFoodTaxRate).toBe(10);
+    expect(cfg.taxPolicy.defaultStandardTaxRate).toBe(21);
+    expect(cfg.taxPolicy.pricesIncludeTax).toBe(true);
+  });
+
+  it('solo se activa con enabled explícito', () => {
+    const cfg = normalizeBrandBillingConfig({
+      businessId: 'b1',
+      taxPolicy: {
+        enabled: true,
+        defaultFoodTaxRate: 10,
+        defaultStandardTaxRate: 21,
+        pricesIncludeTax: false,
+      },
+    });
+    expect(cfg.taxPolicy.enabled).toBe(true);
+    expect(cfg.taxPolicy.pricesIncludeTax).toBe(false);
   });
 });

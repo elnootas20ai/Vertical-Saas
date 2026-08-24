@@ -174,6 +174,8 @@ import { WorkerTpvStockReview } from './worker/WorkerTpvStockReview';
 import { WorkerTpvBottomBar } from '../../components/saas/WorkerTpvBottomBar';
 import { TpvChromeScope, useTpvOrderFlowChrome, useTpvOrderFlowActive } from '../../context/TpvChromeContext';
 import { consumeTpvStockReviewLaunch, TPV_OPEN_STOCK_REVIEW_EVENT } from '../../lib/tpvStockReview';
+import { TPV_OPEN_STORE_TRANSFERS_EVENT } from '../../lib/tpvStoreTransfers';
+import { WorkerTpvStoreTransfers } from './worker/WorkerTpvStoreTransfers';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import {
   bootstrapCeoTpvStores,
@@ -476,6 +478,7 @@ function TpvRapidoCeoBoard() {
   /** Una vez por montaje: con varias tiendas, elegir TPV antes de Abrir/Continuar. */
   const ceoEntryPickerDoneRef = useRef(false);
   const [stockOpen, setStockOpen] = useState(() => consumeTpvStockReviewLaunch());
+  const [transfersOpen, setTransfersOpen] = useState(false);
   const lastSyncedStorePdvRef = useRef<string | null>(null);
   /** PDVs recuperados por bootstrap aunque ActiveStoreScope aún esté vacío. */
   const [bootstrapPdvs, setBootstrapPdvs] = useState<PointOfSale[]>([]);
@@ -684,9 +687,20 @@ function TpvRapidoCeoBoard() {
   }, [businessesFetchSettled, businesses, currentBusiness, switchBusiness]);
 
   useEffect(() => {
-    const onOpen = () => setStockOpen(true);
-    window.addEventListener(TPV_OPEN_STOCK_REVIEW_EVENT, onOpen);
-    return () => window.removeEventListener(TPV_OPEN_STOCK_REVIEW_EVENT, onOpen);
+    const onOpenStock = () => {
+      setStockOpen(true);
+      setTransfersOpen(false);
+    };
+    const onOpenTransfers = () => {
+      setTransfersOpen(true);
+      setStockOpen(false);
+    };
+    window.addEventListener(TPV_OPEN_STOCK_REVIEW_EVENT, onOpenStock);
+    window.addEventListener(TPV_OPEN_STORE_TRANSFERS_EVENT, onOpenTransfers);
+    return () => {
+      window.removeEventListener(TPV_OPEN_STOCK_REVIEW_EVENT, onOpenStock);
+      window.removeEventListener(TPV_OPEN_STORE_TRANSFERS_EVENT, onOpenTransfers);
+    };
   }, []);
 
   /** Misma tienda que Ops / sidebar / última elección — sin pedir de nuevo salvo "Cambiar tienda". */
@@ -873,7 +887,7 @@ function TpvRapidoCeoBoard() {
     <TpvChromeScope
       insetBottomBar
       bottomBar={
-        !stockOpen && tpvSurface === 'pedidos'
+        !stockOpen && !transfersOpen && tpvSurface === 'pedidos'
           ? <WorkerTpvBottomBar ceoMode onExitCeo={() => navigate(tpvExitPath)} />
           : null
       }
@@ -891,6 +905,15 @@ function TpvRapidoCeoBoard() {
             {stockOpen ? (
               <WorkerTpvStockReview
                 onBack={() => setStockOpen(false)}
+                scopeOverride={{
+                  dataUserId,
+                  storeLabel: selectedPdvName,
+                  pdvId: effectivePdvId,
+                }}
+              />
+            ) : transfersOpen ? (
+              <WorkerTpvStoreTransfers
+                onBack={() => setTransfersOpen(false)}
                 scopeOverride={{
                   dataUserId,
                   storeLabel: selectedPdvName,

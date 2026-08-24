@@ -34,6 +34,8 @@ import {
   consumeTpvStockReviewLaunch,
   TPV_OPEN_STOCK_REVIEW_EVENT,
 } from '../../lib/tpvStockReview';
+import { TPV_OPEN_STORE_TRANSFERS_EVENT } from '../../lib/tpvStoreTransfers';
+import { WorkerTpvStoreTransfers } from '../../pages/saas/worker/WorkerTpvStoreTransfers';
 
 const RESTAURANT_OPS_PATH = '/saas/restaurant-ops';
 
@@ -45,11 +47,23 @@ export function RestaurantSalaTpvShell({ tabletMode = false }: Props) {
   const { user } = useAuth();
   const { currentBusiness, businesses, businessesFetchSettled } = useBusiness();
   const [stockOpen, setStockOpen] = useState(() => consumeTpvStockReviewLaunch());
+  const [transfersOpen, setTransfersOpen] = useState(false);
 
   useEffect(() => {
-    const onOpen = () => setStockOpen(true);
-    window.addEventListener(TPV_OPEN_STOCK_REVIEW_EVENT, onOpen);
-    return () => window.removeEventListener(TPV_OPEN_STOCK_REVIEW_EVENT, onOpen);
+    const onOpenStock = () => {
+      setStockOpen(true);
+      setTransfersOpen(false);
+    };
+    const onOpenTransfers = () => {
+      setTransfersOpen(true);
+      setStockOpen(false);
+    };
+    window.addEventListener(TPV_OPEN_STOCK_REVIEW_EVENT, onOpenStock);
+    window.addEventListener(TPV_OPEN_STORE_TRANSFERS_EVENT, onOpenTransfers);
+    return () => {
+      window.removeEventListener(TPV_OPEN_STOCK_REVIEW_EVENT, onOpenStock);
+      window.removeEventListener(TPV_OPEN_STORE_TRANSFERS_EVENT, onOpenTransfers);
+    };
   }, []);
 
   const {
@@ -463,6 +477,8 @@ export function RestaurantSalaTpvShell({ tabletMode = false }: Props) {
           >
             {stockOpen ? (
               <WorkerTpvStockReview onBack={() => setStockOpen(false)} />
+            ) : transfersOpen ? (
+              <WorkerTpvStoreTransfers onBack={() => setTransfersOpen(false)} />
             ) : (
               <RestaurantTpvFloorBoard
                 pdvId={gatePdvId || null}

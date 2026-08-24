@@ -48,6 +48,8 @@ import {
 } from './catalogComboSlots';
 import { buildStableImportCatalogSku, catalogLooseIdentityKey } from '../../../shared/catalog/catalogItemIdentity.js';
 import { applyCatalogImportCartaStockGuard } from '../../../shared/catalog/catalogStockGuard.js';
+import type { BrandBillingTaxPolicy } from './brandBillingConfig';
+import { inferTaxRateFromCategory } from './spainVat';
 
 function inferInventoryBusinessType(
   brands: Array<{ deliveryLineKind?: string }>,
@@ -164,10 +166,11 @@ function defaultComboStructureForVertical(vertical?: string): ComboStructureSlot
   return DEFAULT_COMBO_STRUCTURE;
 }
 
-/** IVA del Excel (opcional). Restaurant → 10% por defecto; delivery → 21%. */
+/** IVA del Excel (opcional). Sin columna → restaurant/heladería 10%; delivery 21%. No fuerza política de empresa. */
 export function resolveImportTaxRate(
   entry: Record<string, string>,
   vertical?: string,
+  taxPolicy?: BrandBillingTaxPolicy | null,
 ): number {
   const raw = String(
     entry.taxRate || entry.iva || entry.vat || entry.impuesto || '',
@@ -179,8 +182,13 @@ export function resolveImportTaxRate(
     const n = Number(raw);
     if (Number.isFinite(n) && n >= 0 && n <= 100) return n;
   }
+  // Solo si la tienda activó la política (opt-in). Por defecto no cambia nada.
+  if (taxPolicy && taxPolicy.enabled === true) {
+    const category = String(entry.category || entry.categoria || '').trim();
+    if (category) return inferTaxRateFromCategory(category, taxPolicy);
+    return Number(taxPolicy.defaultFoodTaxRate) || 10;
+  }
   const v = String(vertical || '').trim();
-  // Comida / heladería: IVA reducido por defecto (se puede sobreescribir con columna iva).
   if (v === 'restaurant' || v === 'iceCreamShop') return 10;
   return 21;
 }
@@ -553,6 +561,8 @@ export type MapImportEntryOptions = {
   brandCache: Brand[];
   /** Vertical del negocio activo (delivery | restaurant). */
   vertical?: string;
+  /** Política IVA de Facturación de marcas (predeterminados si Excel sin columna iva). */
+  taxPolicy?: BrandBillingTaxPolicy | null;
 };
 
 export type MapImportEntryResult = {
@@ -625,7 +635,7 @@ export async function mapImportEntryToCatalogItem(
       }) ||
       undefined,
     unit: String(entry.unit || entry.unidad || 'ud').trim() || 'ud',
-    taxRate: resolveImportTaxRate(entry, options.vertical),
+    taxRate: resolveImportTaxRate(entry, options.vertical, options.taxPolicy),
     module: warehouseMeta ? 'stock' : 'catalog',
     ...(options.businessId
       ? {

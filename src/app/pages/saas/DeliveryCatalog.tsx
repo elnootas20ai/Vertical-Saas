@@ -405,6 +405,7 @@ function CreateCatalogItemModal({
     showNewBrand: false,
     unit: 'ud',
     unitPrice: '',
+    taxRate: '',
     staffPrice: '',
     costPrice: '',
     stockQuantity: '',
@@ -475,6 +476,12 @@ function CreateCatalogItemModal({
         showNewBrand: false,
         unit: editItem.unit || 'ud',
         unitPrice: String(editItem.unitPrice || ''),
+        taxRate: (() => {
+          const n = Number(editItem.taxRate);
+          // 21% es el default histórico de BD: en UI = Apagado (no parece forzado).
+          if (Number.isFinite(n) && n !== 21) return String(n);
+          return '';
+        })(),
         staffPrice: editItem.staffPrice != null && editItem.staffPrice > 0 ? String(editItem.staffPrice) : '',
         costPrice: String(editItem.costPrice || ''),
         stockQuantity: String(editItem.stockQuantity || ''),
@@ -535,6 +542,7 @@ function CreateCatalogItemModal({
         newBrandName: '',
         showNewBrand: false,
         unitPrice: '',
+        taxRate: '',
         staffPrice: '',
         costPrice: '',
         stockQuantity: '',
@@ -563,7 +571,7 @@ function CreateCatalogItemModal({
       selectedBrandIds: defaultId ? [defaultId] : [],
       newBrandName: '',
       showNewBrand: false,
-      unitPrice: '', staffPrice: '', costPrice: '', stockQuantity: '', minStock: '',
+      unitPrice: '', taxRate: '', staffPrice: '', costPrice: '', stockQuantity: '', minStock: '',
       image: '', allergens: [], notes: '', webVisible: true, available: true,
       ingredients: '', supplements: [], halfHalf: false, buildYourOwn: false,
       halfHalfAllowedProductIds: [],
@@ -1069,6 +1077,7 @@ function CreateCatalogItemModal({
         itemType: form.itemType,
         comboItems: form.itemType === 'combo' || /combo/i.test(category) ? comboItems : [],
         unitPrice: Number(form.unitPrice) || 0,
+        taxRate: form.taxRate.trim() === '' ? (editItem?.taxRate ?? 21) : Number(form.taxRate),
         staffPrice: form.staffPrice.trim() ? Number(form.staffPrice) : null,
         costPrice: Number(form.costPrice) || 0,
         stockQuantity: form.itemType === 'service' ? 0 : Number(form.stockQuantity) || 0,
@@ -1108,6 +1117,7 @@ function CreateCatalogItemModal({
           name: '',
           description: '',
           unitPrice: '',
+          taxRate: '',
           staffPrice: '',
           costPrice: '',
           stockQuantity: '',
@@ -2098,6 +2108,24 @@ function CreateCatalogItemModal({
                     <input type="number" step="0.01" className={inputClass} placeholder="0.00" value={form.unitPrice} onChange={(e) => setForm((f) => ({ ...f, unitPrice: e.target.value }))} />
                   </div>
                   <div>
+                    <label className={labelClass}>IVA venta</label>
+                    <select
+                      className={inputClass}
+                      value={form.taxRate}
+                      onChange={(e) => setForm((f) => ({ ...f, taxRate: e.target.value }))}
+                    >
+                      <option value="">Apagado (como hasta ahora)</option>
+                      <option value="0">0%</option>
+                      <option value="4">4%</option>
+                      <option value="5">5%</option>
+                      <option value="10">10%</option>
+                      <option value="21">21%</option>
+                    </select>
+                    <p className="mt-1 text-[10px] leading-snug text-gray-500 dark:text-gray-400">
+                      Opcional. No cambia finanzas del TPV mientras esté apagado.
+                    </p>
+                  </div>
+                  <div>
                     <label className={labelClass}>Precio empleado (€)</label>
                     <input type="number" step="0.01" className={inputClass} placeholder="Opcional" value={form.staffPrice} onChange={(e) => setForm((f) => ({ ...f, staffPrice: e.target.value }))} />
                   </div>
@@ -2218,6 +2246,21 @@ function CreateCatalogItemModal({
                 <div>
                   <label className={labelClass}>Precio venta (€)</label>
                   <input type="number" step="0.01" className={inputClass} placeholder="0.00" value={form.unitPrice} onChange={(e) => setForm((f) => ({ ...f, unitPrice: e.target.value }))} />
+                </div>
+                <div>
+                  <label className={labelClass}>IVA venta</label>
+                  <select
+                    className={inputClass}
+                    value={form.taxRate}
+                    onChange={(e) => setForm((f) => ({ ...f, taxRate: e.target.value }))}
+                  >
+                    <option value="">Apagado (como hasta ahora)</option>
+                    <option value="0">0%</option>
+                    <option value="4">4%</option>
+                    <option value="5">5%</option>
+                    <option value="10">10%</option>
+                    <option value="21">21%</option>
+                  </select>
                 </div>
                 <div>
                   <label className={labelClass}>Precio empleado (€)</label>

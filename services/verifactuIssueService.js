@@ -7,6 +7,7 @@ import {
   getDocument,
   putDocument,
   findBusinessById,
+  getBrandBillingConfigDoc,
 } from './couchdb.js';
 import {
   calcLineTotals,
@@ -20,6 +21,7 @@ import {
   normalizeNif,
 } from './verifactuEngine.js';
 import logger from './logger.js';
+import { saleLineOptsFromTaxPolicy, normalizeEsTaxPolicy } from '../shared/tax/spainVat.js';
 
 export function getVerifactuDbName() {
   const prefix = String(process.env.COUCHDB_DB || 'vertial')
@@ -229,13 +231,27 @@ export async function issueVerifactuRecordDoc(req, {
   };
 }
 
-function saleLineOpts(settings) {
+function saleLineOpts(settings, taxPolicy = null) {
+  const fromBilling = taxPolicy ? saleLineOptsFromTaxPolicy(taxPolicy) : null;
+  const pricesIncludeTax = settings?.pricesIncludeTax !== false;
+  const defaultTaxRate = Number.isFinite(Number(settings?.defaultTaxRate))
+    ? Number(settings.defaultTaxRate)
+    : 10;
   return {
-    pricesIncludeTax: settings.pricesIncludeTax !== false,
-    defaultTaxRate: Number.isFinite(Number(settings.defaultTaxRate))
-      ? Number(settings.defaultTaxRate)
-      : 10,
+    pricesIncludeTax: fromBilling?.pricesIncludeTax ?? pricesIncludeTax,
+    defaultTaxRate: fromBilling?.defaultTaxRate ?? defaultTaxRate,
   };
+}
+
+async function loadBusinessTaxPolicy(req, businessId) {
+  const bid = String(businessId || '').trim();
+  if (!bid) return normalizeEsTaxPolicy(null);
+  try {
+    const doc = await getBrandBillingConfigDoc(req, bid);
+    return normalizeEsTaxPolicy(doc?.taxPolicy);
+  } catch {
+    return normalizeEsTaxPolicy(null);
+  }
 }
 
 function shouldAutoIssue(settings) {
@@ -308,14 +324,17 @@ export async function tryAutoIssueForDeliveryOrder(req, order, actorId = '') {
   if (channel !== 'tpv') return { skipped: 'not_tpv_channel' };
 
   const businessId = String(order.business_id || order.businessId || '').replace(/^business:/, '').trim();
-  const settingsPreview = businessId
-    ? await loadVerifactuSettingsDoc(
-      req,
-      businessId,
-      await findBusinessById(req, businessId).catch(() => null),
-    ).catch(() => null)
-    : null;
-  const opts = saleLineOpts(settingsPreview || {});
+  const [settingsPreview, taxPolicy] = await Promise.all([
+    businessId
+      ? loadVerifactuSettingsDoc(
+        req,
+        businessId,
+        await findBusinessById(req, businessId).catch(() => null),
+      ).catch(() => null)
+      : null,
+    loadBusinessTaxPolicy(req, businessId),
+  ]);
+  const opts = saleLineOpts(settingsPreview || {}, taxPolicy);
   const lines = linesFromDeliveryOrder(order, opts);
 
   return tryAutoIssueVerifactuForSale(req, {
