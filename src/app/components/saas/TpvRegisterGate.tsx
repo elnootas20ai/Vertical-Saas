@@ -74,7 +74,7 @@ import {
 import { AggregatorClosingEditor, type AggregatorClosingSnapshot, type ManualLinesByChannel } from './AggregatorClosingEditor';
 import { DeliveryFoodUnitIcon, DeliveryFoodUnitLabel } from './delivery/DeliveryFoodUnitIcon';
 import { AggregatorCashSummary } from './AggregatorCashSummary';
-import { sessionToCajaAmounts } from '../../lib/cajaFacturacionExcelExport';
+import { isTrustworthyClosingBrandTpvForExcel, sessionToCajaAmounts } from '../../lib/cajaFacturacionExcelExport';
 import { ShiftBrandBillingSummary } from './ShiftBrandBillingSummary';
 import {
   buildShiftAppsBrandTotals,
@@ -464,7 +464,7 @@ interface OpeningData {
  * Misma UI: Fichaje | Quién abre | efectivo / fondo | Abrir caja.
  * Si ya hay caja abierta en ESA tienda → Continuar (misma familia de pantalla).
  */
-function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading, openingBusy = false, pointsOfSale, workCenters, workerOptions, registerSessions, restrictedToPdvId, onClearStorePick, isManagerView = false, tabletStoreLabel, onOpeningPdvChange, restaurantOpening = false, clockInBusinessId = '', clockInOwnerUserId = '', onClockInChanged, resumeAfterClose = null }: {
+function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading, openingBusy = false, pointsOfSale, workCenters, workerOptions, registerSessions, restrictedToPdvId, onClearStorePick, isManagerView = false, tabletStoreLabel, tabletWorkCenterId = null, knownOpenSession = null, onOpeningPdvChange, restaurantOpening = false, clockInBusinessId = '', clockInOwnerUserId = '', onClockInChanged, resumeAfterClose = null }: {
   onOpen: (data: OpeningData) => void;
   /** Entrar en una caja ya abierta (aviso proactivo; no al martillar Abrir). */
   onContinueExistingOpen?: (session: TpvRegisterSession) => void;
@@ -482,6 +482,10 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
   /** true = encargado/gerente elige tienda; false = trabajador con tienda ya asignada. */
   isManagerView?: boolean;
   tabletStoreLabel?: string;
+  /** workCenterId del binding tablet (matcheo caja antes de hidratar PDV). */
+  tabletWorkCenterId?: string | null;
+  /** Caja abierta ya resuelta en el gate (tablet / Continuar). */
+  knownOpenSession?: TpvRegisterSession | null;
   /** Sincroniza la tienda elegida en apertura para fichaje antes de abrir caja. */
   onOpeningPdvChange?: (pdvId: string) => void;
   /** Bar/restaurante: tienda fijada arriba, sin auto-scroll al bloque terminal. */
@@ -637,16 +641,19 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
 
   /** Caja abierta en esta tienda (incluye antiguas >18 h). Nunca cruzar con otra tienda. */
   const openSessionForStore = useMemo(() => {
+    if (knownOpenSession && isTpvRegisterSessionOpen(knownOpenSession)) {
+      return knownOpenSession;
+    }
     const pdvId = String(selectedPdv?._id || restrictedToPdvId || '').trim();
     if (!pdvId) return null;
     const opens = (registerSessions || []).filter((s) => isTpvRegisterSessionOpen(s));
     const alternateRefs = resolveTpvStoreAlternateRefs({
       pickId: pdvId,
       pointsOfSale,
-      tabletWorkCenterId: readTpvTabletBinding()?.workCenterId,
+      tabletWorkCenterId: tabletWorkCenterId || readTpvTabletBinding()?.workCenterId,
     });
     return pickNewestOpenRegisterSessionForStore(opens, pdvId, pointsOfSale, alternateRefs);
-  }, [registerSessions, selectedPdv, restrictedToPdvId, pointsOfSale]);
+  }, [knownOpenSession, registerSessions, selectedPdv, restrictedToPdvId, pointsOfSale, tabletWorkCenterId]);
 
   /** Turno vivo reciente: pantalla «Continuar» (sin pedir fondo otra vez). */
   const existingOpenForStore = useMemo(() => {
@@ -1041,6 +1048,37 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
     );
   })() : null;
 
+  const continueSession = existingOpenForStore || staleOpenForStore;
+  const continueWho = continueSession
+    ? [
+        continueSession.workerName || 'Equipo',
+        continueSession.terminalName || '',
+        displayStoreName || continueSession.pointOfSaleName || '',
+      ].filter(Boolean).join(' · ')
+    : '';
+
+  /** Tablet / código tienda: barra fija arriba — imposible de perder al entrar. */
+  const tabletContinueTopBar = tabletBoundOpening && continueSession ? (
+    <div className="shrink-0 z-30 bg-emerald-600 dark:bg-emerald-700 px-3 py-3 shadow-md border-b border-emerald-700/40">
+      <p className="text-[11px] font-semibold text-emerald-100 text-center mb-2 truncate">
+        {continueWho || 'Hay caja abierta en esta tienda'}
+      </p>
+      <button
+        type="button"
+        onClick={() => onContinueExistingOpen?.(continueSession)}
+        disabled={openingBusy || !onContinueExistingOpen}
+        className="w-full min-h-[52px] rounded-xl bg-white text-emerald-800 font-bold text-base shadow-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform disabled:opacity-60"
+      >
+        {openingBusy ? (
+          <RefreshCw className="w-5 h-5 animate-spin" />
+        ) : (
+          <LogIn className="w-5 h-5" />
+        )}
+        Continuar en caja abierta
+      </button>
+    </div>
+  ) : null;
+
   /** Misma OpeningScreen siempre: si hay caja abierta de ESTA tienda, banner Continuar (no otra pantalla). */
   const liveOpenBanner = existingOpenForStore ? (() => {
     const who = [
@@ -1074,10 +1112,12 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
   })() : null;
 
   return (
-    <div className="h-full min-h-0 bg-stone-50 dark:bg-stone-950 flex items-stretch sm:items-center justify-center p-2 sm:p-3 overflow-hidden">
+    <div className="h-full min-h-0 bg-stone-50 dark:bg-stone-950 flex flex-col overflow-hidden">
+      {tabletContinueTopBar}
+      <div className="flex-1 min-h-0 flex items-stretch sm:items-center justify-center p-2 sm:p-3 overflow-hidden">
       <div className="relative bg-white dark:bg-stone-900 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-lg w-full max-w-4xl h-full sm:h-auto sm:max-h-[min(88svh,680px)] min-h-0 flex flex-col overflow-hidden">
-        {/* Header — una sola línea clara */}
-        {(liveOpenBanner || staleOpenBanner) ? (
+        {/* Header — banner Continuar (web / no tablet) */}
+        {!tabletBoundOpening && (liveOpenBanner || staleOpenBanner) ? (
           <div className="shrink-0 px-3 sm:px-4 pt-3 space-y-2">
             {liveOpenBanner}
             {!liveOpenBanner ? staleOpenBanner : null}
@@ -1436,6 +1476,7 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
             </div>
           </div>
         ) : null}
+      </div>
       </div>
     </div>
   );
@@ -3864,17 +3905,32 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                           }
                           return map;
                         })(),
-                        brandTpvTotals: Object.fromEntries(
-                          brandBilling.rows
-                            .filter((r) => (Number(r.revenueEfectivo) || 0) > 0 || (Number(r.revenueTarjeta) || 0) > 0)
-                            .map((r) => [
-                              r.brandId,
-                              {
-                                efectivo: Math.round((Number(r.revenueEfectivo) || 0) * 100) / 100,
-                                tarjeta: Math.round((Number(r.revenueTarjeta) || 0) * 100) / 100,
-                              },
-                            ]),
-                        ),
+                        brandTpvTotals: (() => {
+                          const raw = Object.fromEntries(
+                            brandBilling.rows
+                              .filter((r) => (Number(r.revenueEfectivo) || 0) > 0 || (Number(r.revenueTarjeta) || 0) > 0)
+                              .map((r) => [
+                                r.brandId,
+                                {
+                                  efectivo: Math.round((Number(r.revenueEfectivo) || 0) * 100) / 100,
+                                  tarjeta: Math.round((Number(r.revenueTarjeta) || 0) * 100) / 100,
+                                },
+                              ]),
+                          );
+                          if (Object.keys(raw).length === 0) return undefined;
+                          const preview = {
+                            ...session,
+                            closingBrandTpvTotals: raw,
+                            productClosingCounts: {
+                              pizza: closingFood.pizza,
+                              burger: closingFood.burger,
+                              taco: closingFood.taco,
+                            },
+                            summary,
+                          };
+                          const amounts = sessionToCajaAmounts(preview);
+                          return isTrustworthyClosingBrandTpvForExcel(preview, amounts) ? raw : undefined;
+                        })(),
                       },
                       nextDayInitialAmount,
                     );
@@ -5863,6 +5919,27 @@ export function TpvRegisterGate({
     return null;
   }, [activeSession, holdStickyWhileOpen]);
 
+  /** Caja abierta de esta tienda (para Continuar en tablet / apertura). */
+  const openingKnownOpenSession = useMemo(() => {
+    if (isTpvRegisterSessionOpen(boardSession)) return boardSession;
+    const pick = String(resolvedStorePickId || '').trim();
+    if (!pick) return null;
+    const alternateRefs = resolveTpvStoreAlternateRefs({
+      pickId: pick,
+      pointsOfSale,
+      tabletWorkCenterId: isTabletSession ? tabletBinding?.workCenterId : null,
+    });
+    const opens = sessions.filter((s) => isTpvRegisterSessionOpen(s));
+    return pickNewestOpenRegisterSessionForStore(opens, pick, pointsOfSale, alternateRefs);
+  }, [
+    boardSession,
+    sessions,
+    resolvedStorePickId,
+    pointsOfSale,
+    isTabletSession,
+    tabletBinding?.workCenterId,
+  ]);
+
   /** Caja open detectada, pero el usuario aún no ha confirmado Continuar en esta visita. */
   const needsResumeAck = Boolean(
     isTpvRegisterSessionOpen(boardSession)
@@ -6410,17 +6487,31 @@ export function TpvRegisterGate({
         }
 
         if (tabletFastPath) {
-          const wcId = String(tabletBindingRef.current?.workCenterId || '').trim();
+          const stubPdvs = mergeTabletBindingPdv([], tabletBindingRef.current);
+          const alternateRefs = resolveTpvStoreAlternateRefs({
+            pickId: tabletPdvId,
+            pointsOfSale: [...pointsOfSaleRef.current, ...stubPdvs],
+            tabletWorkCenterId: tabletBindingRef.current?.workCenterId,
+          });
           setSessions((prev) =>
             mergeTpvRegisterSessionsPreservingOpen(
               prev,
               sessData.filter((s) => {
                 const pid = String(s.pointOfSaleId || '').trim();
-                return !pid || tpvSessionMatchesStoreRef(
+                if (!pid) return true;
+                if (isTpvRegisterSessionOpen(s)) {
+                  return tpvSessionMatchesStoreRef(
+                    s,
+                    tabletPdvId,
+                    [...pointsOfSaleRef.current, ...stubPdvs],
+                    alternateRefs,
+                  );
+                }
+                return tpvSessionMatchesStoreRef(
                   s,
                   tabletPdvId,
-                  pointsOfSaleRef.current,
-                  wcId ? [wcId] : [],
+                  [...pointsOfSaleRef.current, ...stubPdvs],
+                  alternateRefs,
                 );
               }),
             ),
@@ -7729,6 +7820,7 @@ export function TpvRegisterGate({
     && (loading || openingRecoverHold)
     && !isTpvRegisterSessionOpen(boardSession)
     && !isTpvRegisterSessionOpen(stickyOpenSessionRef.current)
+    && !isTpvRegisterSessionOpen(openingKnownOpenSession)
   ) {
     return wrapShell(
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 p-4">
@@ -8035,6 +8127,8 @@ export function TpvRegisterGate({
         registerSessions={sessions}
         isManagerView={!isWorkerUser && !tabletEntryLocked}
         tabletStoreLabel={openingStoreLabel}
+        tabletWorkCenterId={tabletBinding?.workCenterId || null}
+        knownOpenSession={openingKnownOpenSession}
         restrictedToPdvId={openingRestrictedPdvId}
         restaurantOpening={isRestaurantVerticalChrome}
         onOpeningPdvChange={handleOpeningPdvChange}
