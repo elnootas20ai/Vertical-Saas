@@ -75,7 +75,8 @@ import {
 import { AggregatorClosingEditor, type AggregatorClosingSnapshot, type ManualLinesByChannel } from './AggregatorClosingEditor';
 import { DeliveryFoodUnitIcon, DeliveryFoodUnitLabel } from './delivery/DeliveryFoodUnitIcon';
 import { AggregatorCashSummary } from './AggregatorCashSummary';
-import { isTrustworthyClosingBrandTpvForExcel, sessionToCajaAmounts } from '../../lib/cajaFacturacionExcelExport';
+import { sessionToCajaAmounts } from '../../lib/cajaFacturacionExcelExport';
+import { closingBrandTpvTotalsFromBillingRows } from '../../lib/cajaExcelBrandTpvEnrich';
 import { ShiftBrandBillingSummary } from './ShiftBrandBillingSummary';
 import {
   buildShiftAppsBrandTotals,
@@ -3907,30 +3908,13 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                           return map;
                         })(),
                         brandTpvTotals: (() => {
-                          const raw = Object.fromEntries(
-                            brandBilling.rows
-                              .filter((r) => (Number(r.revenueEfectivo) || 0) > 0 || (Number(r.revenueTarjeta) || 0) > 0)
-                              .map((r) => [
-                                r.brandId,
-                                {
-                                  efectivo: Math.round((Number(r.revenueEfectivo) || 0) * 100) / 100,
-                                  tarjeta: Math.round((Number(r.revenueTarjeta) || 0) * 100) / 100,
-                                },
-                              ]),
+                          const totals = closingBrandTpvTotalsFromBillingRows(
+                            brandBilling.rows,
+                            tpvCashSales,
+                            tpvCardSales,
                           );
-                          if (Object.keys(raw).length === 0) return undefined;
-                          const preview = {
-                            ...session,
-                            closingBrandTpvTotals: raw,
-                            productClosingCounts: {
-                              pizza: closingFood.pizza,
-                              burger: closingFood.burger,
-                              taco: closingFood.taco,
-                            },
-                            summary,
-                          };
-                          const amounts = sessionToCajaAmounts(preview);
-                          return isTrustworthyClosingBrandTpvForExcel(preview, amounts) ? raw : undefined;
+                          if (Object.keys(totals).length === 0) return undefined;
+                          return totals;
                         })(),
                       },
                       nextDayInitialAmount,

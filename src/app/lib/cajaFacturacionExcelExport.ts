@@ -441,6 +441,24 @@ export function splitCajaAmountsByBrand(
   return splitCajaAmountsByBillingSheet(amounts, billingSheet, LEGACY_BILLING_SHEETS);
 }
 
+/** Caja 1 por marca = reparto del total tienda por uds P/B/T (fallback fiable). */
+export function closingBrandTpvTotalsFromUnitSplit(
+  amounts: Omit<CajaDayAmounts, 'day'>,
+  allSheets: BrandBillingSheet[],
+): Record<string, { efectivo: number; tarjeta: number }> {
+  const out: Record<string, { efectivo: number; tarjeta: number }> = {};
+  for (const sheet of allSheets) {
+    const split = splitCajaAmountsByBillingSheet(amounts, sheet, allSheets);
+    const efectivo = round2(split.efectivo);
+    const tarjeta = round2(split.tpv);
+    if (efectivo <= 0 && tarjeta <= 0) continue;
+    const brandId = String(sheet.brandIds?.[0] || sheet.id || '').trim();
+    if (!brandId) continue;
+    out[brandId] = { efectivo, tarjeta };
+  }
+  return out;
+}
+
 const EXCEL_CHANNEL_GROUPS: Record<'flipdish' | 'uber' | 'justEat' | 'glovo', string[]> = {
   flipdish: [FLIPDISH_CHANNEL, VERTIAL_APP_CHANNEL],
   uber: ['ubereats'],
@@ -672,29 +690,13 @@ function declaredBrandTpvLooksLikeUnitCounts(
   return true;
 }
 
-/** Suma € ≈ suma uds pero la caja tienda tiene mucho más dinero (Caja 1 incoherente). */
-function declaredBrandTpvSuspiciousForExcel(
-  session: TpvRegisterSession,
-  amounts: Omit<CajaDayAmounts, 'day'>,
-): boolean {
-  if (declaredBrandTpvLooksLikeUnitCounts(session, amounts)) return true;
-
-  const { efectivo, tarjeta } = sumClosingBrandTpvTotals(session);
-  const declared = round2(efectivo + tarjeta);
-  const unitTotal = amounts.totalPizza + amounts.totalBurger + amounts.totalTaco;
-  const storeVertial = round2(amounts.efectivo + amounts.tpv + amounts.x);
-  if (unitTotal <= 0 || storeVertial <= 10 || declared <= 0) return false;
-  if (Math.abs(declared - unitTotal) > 0.02) return false;
-  return storeVertial > declared * 1.5;
-}
-
-/** Excel: solo confiar en Caja 1 del cierre si no parece conteos mezclados con €. */
+/** Solo el bug 149 ef / 1 tj (uds guardadas como €). El resto → confiar en Caja 1. */
 export function isTrustworthyClosingBrandTpvForExcel(
   session: TpvRegisterSession,
   amounts: Omit<CajaDayAmounts, 'day'>,
 ): boolean {
   if (!sessionHasDeclaredBrandTpvTotals(session)) return false;
-  return !declaredBrandTpvSuspiciousForExcel(session, amounts);
+  return !declaredBrandTpvLooksLikeUnitCounts(session, amounts);
 }
 
 /**

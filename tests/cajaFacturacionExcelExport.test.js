@@ -14,7 +14,7 @@ import {
   CAJA_MONEY_HEADERS,
   MODOMIO_HEADERS,
 } from '../src/app/lib/cajaFacturacionExcelExport.ts';
-import { resolveClosingBrandTpvForExcelExport } from '../src/app/lib/cajaExcelBrandTpvEnrich.ts';
+import { resolveClosingBrandTpvForExcelExport, closingBrandTpvTotalsFromBillingRows } from '../src/app/lib/cajaExcelBrandTpvEnrich.ts';
 
 describe('canDownloadCajaExcel', () => {
   it('permite cuenta dueña (no worker) y Admin; bloquea cajero/trabajador', () => {
@@ -213,7 +213,7 @@ describe('splitSessionCajaAmountsByBillingSheet', () => {
     expect(bb.totalBurger).toBe(1);
   });
 
-  it('resolveClosingBrandTpvForExcelExport descarta Caja 1 corrupta y prefiere pedidos', () => {
+  it('resolveClosingBrandTpvForExcelExport descarta Caja 1 corrupta', () => {
     const session = closedSession({
       summary: {
         salesByMethod: { efectivo: 368.28, tarjeta: 50, bizum: 0, online: 0, otro: 0 },
@@ -233,6 +233,38 @@ describe('splitSessionCajaAmountsByBillingSheet', () => {
     };
     expect(resolveClosingBrandTpvForExcelExport(session, fromOrders)).toEqual(fromOrders);
     expect(resolveClosingBrandTpvForExcelExport(session, null)).toBeUndefined();
+  });
+
+  it('closingBrandTpvTotalsFromBillingRows reparte cobro tienda por € marca si falta ef/tj', () => {
+    const totals = closingBrandTpvTotalsFromBillingRows(
+      [
+        { brandId: 'brand-mm', name: 'MM', revenue: 600, revenueEfectivo: 0, revenueTarjeta: 0, ownRevenue: 600, sharedAssigned: 0, orderCount: 10, sharePercent: 90, why: '' },
+        { brandId: 'brand-bb', name: 'BB', revenue: 100, revenueEfectivo: 0, revenueTarjeta: 0, ownRevenue: 100, sharedAssigned: 0, orderCount: 2, sharePercent: 10, why: '' },
+      ],
+      59.75,
+      657.84,
+    );
+    expect(totals['brand-mm'].efectivo).toBeCloseTo(51.21, 2);
+    expect(totals['brand-mm'].tarjeta).toBeCloseTo(563.86, 2);
+    expect(totals['brand-bb'].efectivo).toBeCloseTo(8.54, 2);
+    expect(totals['brand-bb'].tarjeta).toBeCloseTo(93.98, 2);
+    expect(totals['brand-mm'].tarjeta + totals['brand-bb'].tarjeta).toBeCloseTo(657.84, 2);
+  });
+
+  it('ago-22 prod Tiana: sin Caja 1 guardada reparte tienda por uds (MM)', () => {
+    const session = closedSession({
+      summary: {
+        salesByMethod: { efectivo: 59.75, tarjeta: 657.84, bizum: 0, online: 0, otro: 0 },
+        salesByChannel: { glovo: 100, justeat: 114.19, ubereats: 33.89, flipdish: 54.28 },
+        totalSales: 1094.43,
+      },
+      aggregatorClosingTotals: { glovo: 100, justeat: 114.19, ubereats: 33.89, flipdish: 54.28 },
+      productClosingCounts: { pizza: 57, burger: 6, taco: 0 },
+    });
+    const mm = splitSessionCajaAmountsByBillingSheet(session, sheets[0], sheets);
+    expect(mm.efectivo).toBeCloseTo(54.06, 2);
+    expect(mm.tpv).toBeCloseTo(595.19, 2);
+    expect(mm.totalPizza).toBe(57);
   });
 
   it('enlaza Caja 1 por nombre aunque brandIds de hoja estén vacíos (Modomio Pizza → MODOMIO)', () => {
