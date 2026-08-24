@@ -446,7 +446,7 @@ export function resolveTpvTabletWorkerPath(): string {
 /** PDV mínimo desde el binding tablet (cuando el fetch de tiendas aún no devolvió el local). */
 export function buildTabletBindingPdvStub(binding: TpvTabletBinding): PointOfSale {
   const pdvId = String(binding.pdvId).trim();
-  const wcId = String(binding.workCenterId || '').trim() || `wc-tablet-${pdvId}`;
+  const wcId = String(binding.workCenterId || '').trim();
   const now = new Date().toISOString();
   return {
     _id: pdvId,
@@ -478,6 +478,17 @@ export function mergeTabletBindingPdv(
 ): PointOfSale[] {
   if (!binding?.pdvId) return pointsOfSale;
   const pick = String(binding.pdvId).trim();
-  if (pointsOfSale.some((p) => p._id === pick)) return pointsOfSale;
+  const bindingWc = String(binding.workCenterId || '').trim();
+  const idx = pointsOfSale.findIndex((p) => p._id === pick);
+  if (idx >= 0) {
+    const existing = pointsOfSale[idx];
+    const existingWc = String(existing.workCenterId || '').trim();
+    if (bindingWc && bindingWc !== existingWc) {
+      const next = [...pointsOfSale];
+      next[idx] = { ...existing, workCenterId: bindingWc };
+      return next;
+    }
+    return pointsOfSale;
+  }
   return [...pointsOfSale, buildTabletBindingPdvStub(binding)];
 }

@@ -26,6 +26,7 @@ import {
   canEnterTpvOrderFlow,
   writeTpvOpenRegisterLatch,
   pickNewestOpenRegisterSessionForStore,
+  filterSessionsForTabletStore,
   resolveTpvStoreAlternateRefs,
 } from '../src/app/lib/tpvCajaScope.js';
 import { filterTpvRegisterSessionsForBusiness } from '../services/couchdb.js';
@@ -450,17 +451,30 @@ describe('shouldKeepTpvSessionInClientList + filter open with wrong business_id'
     ).toEqual([openWrongBiz]);
   });
 
-  it('still hides closed sessions from another business', () => {
+  it('keeps closed session on visible PDV for fondo (business_id desincronizado)', () => {
     const closedWrongBiz = {
       _id: 's-closed',
       status: 'closed',
       pointOfSaleId: 'pdv-pizzeria',
       business_id: 'biz-realsate',
+      closedAt: '2026-08-23T22:00:00.000Z',
+      nextDayInitialCash: 120,
     };
-    expect(shouldKeepTpvSessionInClientList(closedWrongBiz, pdvs, 'biz-pizzeria')).toBe(false);
+    expect(shouldKeepTpvSessionInClientList(closedWrongBiz, pdvs, 'biz-pizzeria')).toBe(true);
     expect(
-      filterTpvRegisterSessionsForBusiness([closedWrongBiz], 'biz-pizzeria', new Set(['pdv-pizzeria'])),
-    ).toEqual([]);
+      filterTpvRegisterSessionsForBusiness([closedWrongBiz], 'biz-pizzeria', new Set(['pdv-pizzeria', 'wc-pizzeria'])),
+    ).toEqual([closedWrongBiz]);
+  });
+
+  it('keeps closed session keyed by workCenterId on scoped PDV', () => {
+    const closedWc = {
+      _id: 's-closed-wc',
+      status: 'closed',
+      pointOfSaleId: 'wc-pizzeria',
+      closedAt: '2026-08-23T22:00:00.000Z',
+      nextDayInitialCash: 85,
+    };
+    expect(shouldKeepTpvSessionInClientList(closedWc, pdvs, 'biz-pizzeria')).toBe(true);
   });
 });
 
@@ -468,6 +482,33 @@ describe('isLocalCalendarDay', () => {
   it('matches local calendar day key', () => {
     const key = localCalendarDayKey(new Date(2026, 5, 17, 15, 0, 0));
     expect(isLocalCalendarDay(new Date(2026, 5, 17, 1, 0, 0).toISOString(), key)).toBe(true);
+  });
+});
+
+describe('filterSessionsForTabletStore', () => {
+  it('keeps open session when pointOfSaleId is workCenterId and pick is pdv', () => {
+    const pdvs = [{ _id: 'pdv-tiana', workCenterId: 'wc-real-tiana' }];
+    const open = {
+      _id: 's1',
+      status: 'open',
+      pointOfSaleId: 'wc-real-tiana',
+      openedAt: '2026-08-24T08:00:00.000Z',
+    };
+    const filtered = filterSessionsForTabletStore([open], 'pdv-tiana', pdvs, 'wc-real-tiana');
+    expect(filtered).toEqual([open]);
+  });
+
+  it('keeps yesterday closed for fondo on tablet store', () => {
+    const pdvs = [{ _id: 'pdv-tiana', workCenterId: 'wc-real-tiana' }];
+    const closed = {
+      _id: 's-closed',
+      status: 'closed',
+      pointOfSaleId: 'wc-real-tiana',
+      closedAt: '2026-08-23T22:00:00.000Z',
+      nextDayInitialCash: 150,
+    };
+    const filtered = filterSessionsForTabletStore([closed], 'pdv-tiana', pdvs, 'wc-real-tiana');
+    expect(filtered).toEqual([closed]);
   });
 });
 

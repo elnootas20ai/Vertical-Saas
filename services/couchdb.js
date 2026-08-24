@@ -8252,7 +8252,7 @@ export async function listTpvRegisterSessionsByUser(req, userId, options = {}) {
       }
       return false;
     };
-    const [recent, openOnes, pendingOnes] = await Promise.all([
+    const [recent, openOnes, pendingOnes, closedRecent] = await Promise.all([
       findDocuments(
         req,
         db,
@@ -8271,9 +8271,15 @@ export async function listTpvRegisterSessionsByUser(req, userId, options = {}) {
         { ...baseSelector, closingValidationStatus: 'pending' },
         { pageSize: 100, maxDocs: 300 },
       ).catch(() => []),
+      findDocuments(
+        req,
+        db,
+        { ...baseSelector, status: 'closed', closedAt: recentCreatedAt },
+        { pageSize: 150, maxDocs: 400 },
+      ).catch(() => []),
     ]);
     const byId = new Map();
-    for (const doc of [...recent, ...openOnes, ...pendingOnes]) {
+    for (const doc of [...recent, ...openOnes, ...pendingOnes, ...closedRecent]) {
       if (!keep(doc) || !doc._id) continue;
       // Abiertas/pendientes siempre; el resto respeta la ventana.
       if (
@@ -8472,8 +8478,8 @@ export function filterTpvRegisterSessionsForBusiness(sessions, businessId, scope
   const ids = scopedPdvIds instanceof Set ? scopedPdvIds : new Set(scopedPdvIds || []);
   return (Array.isArray(sessions) ? sessions : []).filter((s) => {
     if (tpvRegisterSessionBelongsToBusiness(s, bid, ids)) return true;
-    if (!isOpenTpvRegisterSessionDoc(s)) return false;
     const pdvId = String(s?.pointOfSaleId || '').trim();
+    // Abierta o cerrada: si el PDV/WC está en el scope de la empresa, conservar (fondo + Continuar).
     return Boolean(pdvId && ids.has(pdvId));
   });
 }

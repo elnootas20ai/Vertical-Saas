@@ -42,6 +42,7 @@ import { RegisterShiftSalesBreakdown } from './RegisterShiftSalesBreakdown';
 import {
   mergeTpvRegisterSessionsPreservingOpen,
   pickNewestOpenRegisterSessionForStore,
+  filterSessionsForTabletStore,
   resolveActiveTpvRegisterSession,
   findLastClosedTpvSession,
   isTpvRegisterSessionStaleOpen,
@@ -5803,16 +5804,16 @@ export function TpvRegisterGate({
             const bid = scopeBusinessIdRef.current;
             let next = sessData;
             if (isTabletSessionRef.current && tabletPdvId) {
-              const wcId = String(tabletBindingRef.current?.workCenterId || '').trim();
-              next = sessData.filter((s) => {
-                const pid = String(s.pointOfSaleId || '').trim();
-                return !pid || tpvSessionMatchesStoreRef(
-                  s,
-                  tabletPdvId,
-                  pointsOfSaleRef.current,
-                  wcId ? [wcId] : [],
-                );
-              });
+              const pdvs = mergeTabletBindingPdv(
+                pointsOfSaleRef.current,
+                tabletBindingRef.current,
+              );
+              next = filterSessionsForTabletStore(
+                sessData,
+                tabletPdvId,
+                pdvs,
+                tabletBindingRef.current?.workCenterId,
+              );
             } else if (pointsOfSaleRef.current.length > 0) {
               next = sessData.filter((s) => shouldKeepTpvSessionInList(s, pointsOfSaleRef.current, bid));
             }
@@ -6487,33 +6488,19 @@ export function TpvRegisterGate({
         }
 
         if (tabletFastPath) {
-          const stubPdvs = mergeTabletBindingPdv([], tabletBindingRef.current);
-          const alternateRefs = resolveTpvStoreAlternateRefs({
-            pickId: tabletPdvId,
-            pointsOfSale: [...pointsOfSaleRef.current, ...stubPdvs],
-            tabletWorkCenterId: tabletBindingRef.current?.workCenterId,
-          });
+          const pdvsForMatch = mergeTabletBindingPdv(
+            pointsOfSaleRef.current,
+            tabletBindingRef.current,
+          );
           setSessions((prev) =>
             mergeTpvRegisterSessionsPreservingOpen(
               prev,
-              sessData.filter((s) => {
-                const pid = String(s.pointOfSaleId || '').trim();
-                if (!pid) return true;
-                if (isTpvRegisterSessionOpen(s)) {
-                  return tpvSessionMatchesStoreRef(
-                    s,
-                    tabletPdvId,
-                    [...pointsOfSaleRef.current, ...stubPdvs],
-                    alternateRefs,
-                  );
-                }
-                return tpvSessionMatchesStoreRef(
-                  s,
-                  tabletPdvId,
-                  [...pointsOfSaleRef.current, ...stubPdvs],
-                  alternateRefs,
-                );
-              }),
+              filterSessionsForTabletStore(
+                sessData,
+                tabletPdvId,
+                pdvsForMatch,
+                tabletBindingRef.current?.workCenterId,
+              ),
             ),
           );
         } else {
@@ -6650,10 +6637,21 @@ export function TpvRegisterGate({
         }
 
         // Re-filtrar sesiones con PDVs frescos (misma lista, scope más preciso).
+        const mergedPdvs = mergeTabletBindingPdv(
+          scopedPdvs,
+          isTabletSessionRef.current ? tabletBindingRef.current : null,
+        );
         setSessions((prev) =>
           mergeTpvRegisterSessionsPreservingOpen(
             prev,
-            sessData.filter((s) => shouldKeepTpvSessionInList(s, scopedPdvs, bidAtStart)),
+            isTabletSessionRef.current && tabletPdvId
+              ? filterSessionsForTabletStore(
+                  sessData,
+                  tabletPdvId,
+                  mergedPdvs,
+                  tabletBindingRef.current?.workCenterId,
+                )
+              : sessData.filter((s) => shouldKeepTpvSessionInList(s, mergedPdvs, bidAtStart)),
           ),
         );
       } catch {

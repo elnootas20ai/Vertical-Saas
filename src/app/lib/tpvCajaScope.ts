@@ -397,6 +397,42 @@ export function registerSessionSpansMultipleDays(
   return openKey !== endKey;
 }
 
+/** IDs de tienda (PDV + workCenter) para matchear sesiones de caja. */
+export function collectScopedStoreRefIds(
+  scopedPdvs: Array<{ _id: string; workCenterId?: string }>,
+): Set<string> {
+  const ids = new Set<string>();
+  for (const p of scopedPdvs || []) {
+    const id = String(p._id || '').trim();
+    const wc = String(p.workCenterId || '').trim();
+    if (id) ids.add(id);
+    if (wc) ids.add(wc);
+  }
+  return ids;
+}
+
+/** Filtra sesiones TPV a las de la tienda del código tablet. */
+export function filterSessionsForTabletStore(
+  sessions: TpvRegisterSession[],
+  tabletPdvId: string,
+  pointsOfSale: Array<{ _id: string; workCenterId?: string }> = [],
+  tabletWorkCenterId?: string | null,
+): TpvRegisterSession[] {
+  const pick = String(tabletPdvId || '').trim();
+  if (!pick) return Array.isArray(sessions) ? sessions : [];
+  const pdvs = Array.isArray(pointsOfSale) ? pointsOfSale : [];
+  const alternateRefs = resolveTpvStoreAlternateRefs({
+    pickId: pick,
+    pointsOfSale: pdvs,
+    tabletWorkCenterId,
+  });
+  return (Array.isArray(sessions) ? sessions : []).filter((s) => {
+    const pid = String(s.pointOfSaleId || '').trim();
+    if (!pid) return true;
+    return tpvSessionMatchesStoreRef(s, pick, pdvs, alternateRefs);
+  });
+}
+
 export function shouldKeepTpvSessionInClientList(
   session: TpvRegisterSession,
   scopedPdvs: Array<{ _id: string; workCenterId?: string }>,
@@ -412,13 +448,14 @@ export function shouldKeepTpvSessionInClientList(
       ),
     );
   if (scopedPdvs.length === 0) return true;
-  if (String(session.status || '').toLowerCase() === 'open' && matchesScopedPdv()) return true;
-  const pdvIds = new Set(scopedPdvs.map((p) => p._id));
-  if (businessId && !tpvSessionBelongsToBusiness(session, businessId, pdvIds)) {
+  // Caja abierta o cierre de una tienda visible (fondo mañana), aunque business_id esté mal.
+  if (matchesScopedPdv()) return true;
+  const scopedRefIds = collectScopedStoreRefIds(scopedPdvs);
+  if (businessId && !tpvSessionBelongsToBusiness(session, businessId, scopedRefIds)) {
     return false;
   }
   if (!pid) return !businessId;
-  return matchesScopedPdv();
+  return false;
 }
 
 /**
@@ -656,10 +693,13 @@ export function resolveTpvStoreAlternateRefs(params: {
   if (pick) out.add(pick);
   const wcBinding = String(params.tabletWorkCenterId || '').trim();
   if (wcBinding) out.add(wcBinding);
-  if (pick && params.pointsOfSale?.length) {
-    const pdv = params.pointsOfSale.find((p) => p._id === pick);
-    const wc = String(pdv?.workCenterId || '').trim();
-    if (wc) out.add(wc);
+  for (const p of params.pointsOfSale || []) {
+    const id = String(p._id || '').trim();
+    const wc = String(p.workCenterId || '').trim();
+    if (pick && (id === pick || wc === pick)) {
+      if (id) out.add(id);
+      if (wc) out.add(wc);
+    }
   }
   return [...out].filter(Boolean);
 }
