@@ -49,6 +49,8 @@ import {
   isTpvRegisterSessionStaleOpen,
   resolvePreviousCloseCashAmount,
   previousCloseCashIsNextDayInitial,
+  resolveOpeningFondoHint,
+  findLastClosedTpvSessionForStoreOpening,
   resolveTpvStoreAlternateRefs,
   shouldKeepTpvSessionInClientList,
   tpvSessionBelongsToBusiness,
@@ -479,7 +481,7 @@ interface OpeningData {
  * Misma UI: Fichaje | Quién abre | efectivo / fondo | Abrir caja.
  * Si ya hay caja abierta en ESA tienda → Continuar (misma familia de pantalla).
  */
-function OpeningScreen({ onOpen, onContinueExistingOpen, onEnterWithoutOpen, loading: parentLoading, openingBusy = false, pointsOfSale, workCenters, workerOptions, registerSessions, restrictedToPdvId, onClearStorePick, isManagerView = false, tabletStoreLabel, tabletWorkCenterId = null, knownOpenSession = null, onOpeningPdvChange, restaurantOpening = false, clockInBusinessId = '', clockInOwnerUserId = '', onClockInChanged, resumeAfterClose = null }: {
+function OpeningScreen({ onOpen, onContinueExistingOpen, onEnterWithoutOpen, loading: parentLoading, openingBusy = false, pointsOfSale, workCenters, workerOptions, registerSessions, restrictedToPdvId, onClearStorePick, isManagerView = false, tabletStoreLabel, tabletWorkCenterId = null, knownOpenSession = null, suggestedOpeningFondo = null, lastClosedForOpening = null, onOpeningPdvChange, restaurantOpening = false, clockInBusinessId = '', clockInOwnerUserId = '', onClockInChanged, resumeAfterClose = null }: {
   onOpen: (data: OpeningData) => void;
   /** Entrar en una caja ya abierta (aviso proactivo; no al martillar Abrir). */
   onContinueExistingOpen?: (session: TpvRegisterSession) => void;
@@ -503,6 +505,10 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, onEnterWithoutOpen, loa
   tabletWorkCenterId?: string | null;
   /** Caja abierta ya resuelta en el gate (tablet / Continuar). */
   knownOpenSession?: TpvRegisterSession | null;
+  /** Fondo dejado (opening-hint del servidor; prioridad sobre lista local). */
+  suggestedOpeningFondo?: number | null;
+  /** Último cierre de la tienda (opening-hint). */
+  lastClosedForOpening?: TpvRegisterSession | null;
   /** Sincroniza la tienda elegida en apertura para fichaje antes de abrir caja. */
   onOpeningPdvChange?: (pdvId: string) => void;
   /** Bar/restaurante: tienda fijada arriba, sin auto-scroll al bloque terminal. */
@@ -608,95 +614,32 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, onEnterWithoutOpen, loa
 
   const previousCloseHint = useMemo(() => {
     const pdvId = selectedPdv?._id || restrictedToPdvId || '';
-    const tabletBound = Boolean(readTpvTabletBinding());
-    const terminalId = selectedTerminal?.id || (tabletBound ? `tablet-${pdvId || 'default'}` : '');
+    if (!pdvId) return null;
     const alternateRefs = resolveTpvStoreAlternateRefs({
       pickId: pdvId,
       pointsOfSale,
       tabletWorkCenterId: tabletWorkCenterId || readTpvTabletBinding()?.workCenterId,
     });
-    const last = findLastClosedTpvSession(
-      registerSessions,
+    const cached = readTabletCajaOpeningHint(pdvId || restrictedToPdvId || undefined);
+    const suggestedFondo = suggestedOpeningFondo ?? cached?.suggestedFondo ?? null;
+    const lastClosed = lastClosedForOpening ?? cached?.lastClosed ?? null;
+    return resolveOpeningFondoHint({
+      sessions: registerSessions,
       pdvId,
-      terminalId,
       pointsOfSale,
-      alternateRefs,
-    );
-    if (!last) {
-      const cached = readTabletCajaOpeningHint(pdvId || restrictedToPdvId || undefined);
-      if (cached?.lastClosed) {
-        const fromCache = findLastClosedTpvSession(
-          [cached.lastClosed],
-          pdvId,
-          terminalId,
-          pointsOfSale,
-          alternateRefs,
-        );
-        if (fromCache) {
-          let amount = resolvePreviousCloseCashAmount(fromCache);
-          if (amount == null && cached.suggestedFondo != null) {
-            amount = cached.suggestedFondo;
-          }
-          if (amount != null) {
-            let label = '';
-            if (fromCache.closedAt) {
-              try {
-                label = new Date(fromCache.closedAt).toLocaleDateString('es-ES', {
-                  weekday: 'short',
-                  day: 'numeric',
-                  month: 'short',
-                });
-              } catch {
-                label = '';
-              }
-            }
-            return {
-              amount,
-              isNextDayInitial: previousCloseCashIsNextDayInitial(fromCache),
-              label,
-            };
-          }
-        }
-        if (cached.suggestedFondo != null && Number.isFinite(cached.suggestedFondo)) {
-          return {
-            amount: cached.suggestedFondo,
-            isNextDayInitial: true,
-            label: cached.lastClosed?.closedAt
-              ? new Date(cached.lastClosed.closedAt).toLocaleDateString('es-ES', {
-                weekday: 'short',
-                day: 'numeric',
-                month: 'short',
-              })
-              : '',
-          };
-        }
-      }
-      return null as null | { amount: number; isNextDayInitial: boolean; label: string };
-    }
-    let amount = resolvePreviousCloseCashAmount(last);
-    if (amount == null) {
-      const fromCount = calcDenominationTotal(last.closingCashCount || {});
-      amount = Number.isFinite(fromCount) && fromCount >= 0 ? fromCount : null;
-    }
-    if (amount == null) return null;
-    let label = '';
-    if (last.closedAt) {
-      try {
-        label = new Date(last.closedAt).toLocaleDateString('es-ES', {
-          weekday: 'short',
-          day: 'numeric',
-          month: 'short',
-        });
-      } catch {
-        label = '';
-      }
-    }
-    return {
-      amount,
-      isNextDayInitial: previousCloseCashIsNextDayInitial(last),
-      label,
-    };
-  }, [registerSessions, selectedPdv, restrictedToPdvId, selectedTerminal, pointsOfSale]);
+      alternateRefIds: alternateRefs,
+      suggestedFondo,
+      lastClosedSession: lastClosed,
+    });
+  }, [
+    registerSessions,
+    selectedPdv,
+    restrictedToPdvId,
+    pointsOfSale,
+    tabletWorkCenterId,
+    suggestedOpeningFondo,
+    lastClosedForOpening,
+  ]);
 
   const previousCloseCash = previousCloseHint?.amount ?? null;
   const previousCloseLabel = previousCloseHint?.label || '';
@@ -6001,6 +5944,9 @@ export function TpvRegisterGate({
     workerId?: string;
     key: number;
   } | null>(null);
+  /** Fondo dejado (opening-hint): prioridad sobre lista local por terminal. */
+  const [openingHintFondo, setOpeningHintFondo] = useState<number | null>(null);
+  const [openingHintLastClosed, setOpeningHintLastClosed] = useState<TpvRegisterSession | null>(null);
   /**
    * Al reentrar al TPV con caja ya abierta, hay que pulsar «Continuar en esta caja».
    * Se resetea al desmontar el gate (salir del TPV). Tras Abrir / Continuar queda marcado.
@@ -6258,16 +6204,22 @@ export function TpvRegisterGate({
     setAckedOpenSessionId(null);
   }, [isTabletCajaScope, tabletBinding?.pdvId]);
 
-  const hydrateTabletCajaFromHint = useCallback(async () => {
+  const hydrateOpeningHintForPdv = useCallback(async (pdvId: string) => {
+    const pick = String(pdvId || '').trim();
+    if (!pick) return;
     const binding = tabletBindingRef.current;
-    const pdvId = String(binding?.pdvId || initialManagerPdvIdRef.current || '').trim();
-    if (!pdvId) return;
     const uid = String(
       dataUserIdRef.current || binding?.dataUserId || '',
     ).trim();
     const bid = String(scopeBusinessIdRef.current || binding?.businessId || '').trim();
 
-    const cached = readTabletCajaOpeningHint(pdvId);
+    const cached = readTabletCajaOpeningHint(pick);
+    if (cached?.suggestedFondo != null && Number.isFinite(cached.suggestedFondo)) {
+      setOpeningHintFondo(cached.suggestedFondo);
+    }
+    if (cached?.lastClosed?._id) {
+      setOpeningHintLastClosed(cached.lastClosed);
+    }
     const cachedMerge = [cached?.openSession, cached?.lastClosed].filter(
       (s): s is TpvRegisterSession => Boolean(s?._id),
     );
@@ -6279,18 +6231,24 @@ export function TpvRegisterGate({
 
     try {
       const hint = await fetchTpvStoreOpeningHintRequest(uid, {
-        pointOfSaleId: pdvId,
+        pointOfSaleId: pick,
         workCenterId: binding?.workCenterId,
         businessId: bid || undefined,
       });
       writeTabletCajaOpeningHint({
-        pdvId,
+        pdvId: pick,
         businessId: bid || undefined,
         openSession: hint.openSession,
         lastClosed: hint.lastClosed,
         suggestedFondo: hint.suggestedFondo,
         fetchedAt: new Date().toISOString(),
       });
+      setOpeningHintFondo(
+        hint.suggestedFondo != null && Number.isFinite(hint.suggestedFondo)
+          ? hint.suggestedFondo
+          : null,
+      );
+      setOpeningHintLastClosed(hint.lastClosed);
       const fresh = [hint.openSession, hint.lastClosed].filter(
         (s): s is TpvRegisterSession => Boolean(s?._id),
       );
@@ -6298,9 +6256,16 @@ export function TpvRegisterGate({
         setSessions((prev) => mergeTpvRegisterSessionsPreservingOpen(prev, fresh));
       }
     } catch {
-      // Mantener caché local si la red falla en tablet.
+      // Mantener caché local si la red falla.
     }
   }, []);
+
+  const hydrateTabletCajaFromHint = useCallback(async () => {
+    const binding = tabletBindingRef.current;
+    const pdvId = String(binding?.pdvId || initialManagerPdvIdRef.current || '').trim();
+    if (!pdvId) return;
+    await hydrateOpeningHintForPdv(pdvId);
+  }, [hydrateOpeningHintForPdv]);
 
   useLayoutEffect(() => {
     const pdvId = String(tabletBinding?.pdvId || '').trim();
@@ -6358,6 +6323,19 @@ export function TpvRegisterGate({
 
   const resolvedStorePickIdRef = useRef(resolvedStorePickId);
   resolvedStorePickIdRef.current = resolvedStorePickId;
+
+  useEffect(() => {
+    if (!isDeliveryTpvOpening) return;
+    const pdvId = String(resolvedStorePickId || '').trim();
+    if (!pdvId || !dataUserId) return;
+    void hydrateOpeningHintForPdv(pdvId);
+  }, [
+    isDeliveryTpvOpening,
+    resolvedStorePickId,
+    dataUserId,
+    scopeBusinessId,
+    hydrateOpeningHintForPdv,
+  ]);
 
   const activeSession = useMemo(() => {
     const alternateRefs = resolveTpvStoreAlternateRefs({
@@ -8663,6 +8641,8 @@ export function TpvRegisterGate({
         tabletStoreLabel={openingStoreLabel}
         tabletWorkCenterId={tabletBinding?.workCenterId || null}
         knownOpenSession={openingKnownOpenSession}
+        suggestedOpeningFondo={openingHintFondo}
+        lastClosedForOpening={openingHintLastClosed}
         restrictedToPdvId={openingRestrictedPdvId}
         restaurantOpening={isRestaurantVerticalChrome}
         onOpeningPdvChange={handleOpeningPdvChange}
@@ -8713,6 +8693,8 @@ export function TpvRegisterGate({
         tabletStoreLabel={browseStoreLabel}
         tabletWorkCenterId={tabletBinding?.workCenterId || null}
         knownOpenSession={openingKnownOpenSession}
+        suggestedOpeningFondo={openingHintFondo}
+        lastClosedForOpening={openingHintLastClosed}
         restrictedToPdvId={browsePdvId || null}
         restaurantOpening={isRestaurantVerticalChrome}
         onOpeningPdvChange={handleOpeningPdvChange}

@@ -823,6 +823,86 @@ export function findLastClosedTpvSession(
   return closedForStore[0];
 }
 
+/**
+ * Último cierre de la tienda para fondo de apertura.
+ * Una sola caja por local: ignora terminal (tablet vs TPV-1 comparten cajón).
+ */
+export function findLastClosedTpvSessionForStoreOpening(
+  sessions: TpvRegisterSession[],
+  pdvId: string,
+  pointsOfSale: Array<{ _id: string; workCenterId?: string }> = [],
+  alternateRefIds: string[] = [],
+): TpvRegisterSession | null {
+  return findLastClosedTpvSession(sessions, pdvId, null, pointsOfSale, alternateRefIds);
+}
+
+function formatOpeningFondoCloseLabel(closedAt?: string | null): string {
+  if (!closedAt) return '';
+  try {
+    return new Date(closedAt).toLocaleDateString('es-ES', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+    });
+  } catch {
+    return '';
+  }
+}
+
+export type OpeningFondoHint = {
+  amount: number;
+  isNextDayInitial: boolean;
+  label: string;
+  sessionId?: string;
+};
+
+/**
+ * Fondo sugerido al abrir caja: prioridad servidor (opening-hint) y último cierre de la tienda.
+ */
+export function resolveOpeningFondoHint(options: {
+  sessions: TpvRegisterSession[];
+  pdvId: string;
+  pointsOfSale?: Array<{ _id: string; workCenterId?: string }>;
+  alternateRefIds?: string[];
+  suggestedFondo?: number | null;
+  lastClosedSession?: TpvRegisterSession | null;
+}): OpeningFondoHint | null {
+  const pdvId = String(options.pdvId || '').trim();
+  if (!pdvId) return null;
+
+  const pointsOfSale = options.pointsOfSale || [];
+  const alternateRefIds = options.alternateRefIds || [];
+  const lastClosed = options.lastClosedSession
+    ?? findLastClosedTpvSessionForStoreOpening(
+      options.sessions,
+      pdvId,
+      pointsOfSale,
+      alternateRefIds,
+    );
+
+  const suggested = options.suggestedFondo;
+  if (suggested != null && Number.isFinite(Number(suggested)) && Number(suggested) >= 0) {
+    return {
+      amount: Math.round(Number(suggested) * 100) / 100,
+      isNextDayInitial: true,
+      label: formatOpeningFondoCloseLabel(lastClosed?.closedAt),
+      sessionId: lastClosed?._id,
+    };
+  }
+
+  if (!lastClosed) return null;
+
+  const amount = resolvePreviousCloseCashAmount(lastClosed);
+  if (amount == null) return null;
+
+  return {
+    amount,
+    isNextDayInitial: previousCloseCashIsNextDayInitial(lastClosed),
+    label: formatOpeningFondoCloseLabel(lastClosed.closedAt),
+    sessionId: lastClosed._id,
+  };
+}
+
 /** YYYY-MM-DD en Europe/Madrid (día operativo de bares ES). */
 export function calendarDayMadrid(value?: string | Date | null): string {
   const d = value instanceof Date ? value : new Date(value || Date.now());

@@ -12,6 +12,8 @@ import {
   orderOnOpenTpvOpsBoard,
   resolveActiveTpvRegisterSession,
   findLastClosedTpvSession,
+  findLastClosedTpvSessionForStoreOpening,
+  resolveOpeningFondoHint,
   resolvePreviousCloseCashAmount,
   previousCloseCashIsNextDayInitial,
   cashWithdrawnAtClose,
@@ -586,6 +588,50 @@ describe('findLastClosedTpvSession', () => {
     };
     expect(resolvePreviousCloseCashAmount(last)).toBe(0);
     expect(previousCloseCashIsNextDayInitial(last)).toBe(true);
+  });
+});
+
+describe('findLastClosedTpvSessionForStoreOpening', () => {
+  const pdvs = [{ _id: 'pdv-1', workCenterId: 'wc-1' }];
+  const closedTablet = {
+    _id: 'c-tablet',
+    status: 'closed',
+    pointOfSaleId: 'pdv-1',
+    terminalId: 'tablet-pdv-1',
+    closedAt: '2026-08-24T22:02:00.000Z',
+    nextDayInitialCash: 99.3,
+    finalCashAmount: 99.3,
+  };
+  const closedTpvOlder = {
+    _id: 'c-tpv',
+    status: 'closed',
+    pointOfSaleId: 'pdv-1',
+    terminalId: 'term-1',
+    closedAt: '2026-08-23T21:36:00.000Z',
+    nextDayInitialCash: 93.5,
+    finalCashAmount: 93.5,
+  };
+
+  it('ignores terminal and picks newest store close for opening fondo', () => {
+    const last = findLastClosedTpvSessionForStoreOpening(
+      [closedTpvOlder, closedTablet],
+      'pdv-1',
+      pdvs,
+    );
+    expect(last?._id).toBe('c-tablet');
+    expect(resolvePreviousCloseCashAmount(last)).toBe(99.3);
+  });
+
+  it('resolveOpeningFondoHint prefers server suggestedFondo', () => {
+    const hint = resolveOpeningFondoHint({
+      sessions: [closedTpvOlder, closedTablet],
+      pdvId: 'pdv-1',
+      pointsOfSale: pdvs,
+      suggestedFondo: 99.3,
+      lastClosedSession: closedTablet,
+    });
+    expect(hint?.amount).toBe(99.3);
+    expect(hint?.isNextDayInitial).toBe(true);
   });
 });
 
