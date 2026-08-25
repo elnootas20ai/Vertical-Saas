@@ -25,9 +25,18 @@ workflows:
       vars:
         # El WebView nativo no comparte origen con el backend: URL absoluta del API
         VITE_NATIVE_API_ORIGIN: "https://vertialapp.com"
-        # Tablet iOS: misma UI que Safari (no dist embebido que queda viejo).
-        CAPACITOR_SERVER_URL: "https://vertialapp.com"
     scripts:
+      - name: Verificar commit de build
+        script: |
+          set -e
+          echo "=== Codemagic build desde ==="
+          git rev-parse HEAD
+          git log -1 --oneline
+          BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+          echo "rama=$BRANCH"
+          if [ "$BRANCH" != "main" ]; then
+            echo "AVISO: no es main; confirma que quieres este IPA"
+          fi
       - name: Instalar dependencias
         script: |
           set -e
@@ -92,14 +101,9 @@ workflows:
             ls -la ios/App/App/ || true
             exit 1
           fi
-          # Tablet TPV: UI en vivo desde vertialapp.com (igual que Safari).
-          if ! grep -q '"url"' ios/App/App/capacitor.config.json; then
-            echo "ERROR: capacitor.config.json debe tener server.url (front en vivo)"
-            cat ios/App/App/capacitor.config.json
-            exit 1
-          fi
-          if ! grep -q 'vertialapp.com' ios/App/App/capacitor.config.json; then
-            echo "ERROR: server.url debe apuntar a vertialapp.com"
+          # Sin server.url: el IPA lleva el front de este build (dist/), no vertialapp.com en vivo.
+          if grep -q '"url"' ios/App/App/capacitor.config.json; then
+            echo "ERROR: capacitor.config.json no debe tener server.url (front embebido)"
             cat ios/App/App/capacitor.config.json
             exit 1
           fi
