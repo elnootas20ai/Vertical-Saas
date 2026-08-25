@@ -3783,65 +3783,75 @@ export async function updateTpvRegisterSession(req, res) {
     const action = doc.status === 'closed'
       ? `Cerró caja TPV "${doc.terminalName}" — Diferencia: ${doc.difference.toFixed(2)}€`
       : `Actualizó caja TPV "${doc.terminalName}"`;
-    await logAccountActivity(req, {
+    // No bloquear la UI del cierre esperando auditoría / alertas.
+    void logAccountActivity(req, {
       actorUserId: userId, actorName: account.fullName, targetUserId: userId,
       type: 'tpv_register_session', action, entityId: doc._id,
       entityLabel: doc.terminalName || 'Terminal', metadata: { status: doc.status },
-    });
+    }).catch(() => null);
     triggerReactiveAlert(userId, 'cash_session_changed', { sessionId: doc._id, sessionType: 'tpv', action: doc.status }).catch(() => null);
 
-    // CAJA-11: generate finance movements when closing the register
     const wasClosed = doc.status === 'closed' && existing.status === 'open';
-    if (wasClosed) {
-      try {
-        const finDb = getFinanceDbName();
-        await ensureDatabase(req, finDb);
-        const totalSales = (doc.transactions || []).filter(t => t.type === 'sale').reduce((s, t) => s + (t.amount || 0), 0);
-        if (totalSales > 0) {
-          const label = `Cierre caja ${doc.terminalName}${doc.pointOfSaleName ? ` (${doc.pointOfSaleName})` : ''} — ${new Date(doc.closedAt).toLocaleDateString('es-ES')}`;
-          const finDoc = buildFinanceDocument(userId, {
-            type: 'cobro',
-            concept: label,
-            category: 'Ventas TPV',
-            categoryIcon: '💰',
-            amountBase: totalSales,
-            taxRate: 0,
-            date: doc.closedAt,
-            paymentMethod: 'mixto',
-            tags: ['caja', 'tpv', doc.terminalName].filter(Boolean),
-            notes: `Auto: cierre de caja ${doc._id}. Efectivo: ${doc.summary?.salesByMethod?.efectivo?.toFixed(2) || 0}€, Tarjeta: ${doc.summary?.salesByMethod?.tarjeta?.toFixed(2) || 0}€, Bizum: ${doc.summary?.salesByMethod?.bizum?.toFixed(2) || 0}€.`,
-            linkedDocuments: [{ id: doc._id, type: 'tpv_register_session', name: label }],
-          });
-          await putDocument(req, finDb, finDoc._id, finDoc);
-        }
-      } catch (finErr) {
-        console.error('[CAJA-11] Error creating finance entry on register close:', finErr?.message);
-      }
-
-      // Aviso CEO/gerentes: caja OK o con descuadre (in-app + push).
-      void notifyTpvRegisterClosed({
-        req,
-        dataUserId: userId,
-        actorUserId: req.authUser?.user_id || userId,
-        session: { ...doc, _rev: saved.rev },
-      });
-
-      const closedByName = String(doc.closedBy || account.fullName || 'Sistema').trim() || 'Sistema';
-      const alsoClosed = await autoCloseDuplicateOpenTpvSessions(
-        req,
-        userId,
-        { ...doc, _rev: saved.rev },
-        closedByName,
-      );
-      for (const synced of alsoClosed) {
-        broadcastTpvSessionLive(account, userId, synced);
-      }
-    }
-
     const sanitizedSession = sanitizeTpvRegisterSession({ ...doc, _rev: saved.rev });
     broadcastTpvSessionLive(account, userId, { ...doc, _rev: saved.rev });
 
-    return res.json({ ok: true, session: sanitizedSession });
+    // Responder YA: finanzas / avisos / sync de duplicados en segundo plano.
+    // Antes el front se quedaba en «Cerrando la caja…» varios segundos.
+    res.json({ ok: true, session: sanitizedSession });
+
+    if (wasClosed) {
+      void (async () => {
+        try {
+          const finDb = getFinanceDbName();
+          await ensureDatabase(req, finDb);
+          const totalSales = (doc.transactions || [])
+            .filter((t) => t.type === 'sale')
+            .reduce((s, t) => s + (t.amount || 0), 0);
+          if (totalSales > 0) {
+            const label = `Cierre caja ${doc.terminalName}${doc.pointOfSaleName ? ` (${doc.pointOfSaleName})` : ''} — ${new Date(doc.closedAt).toLocaleDateString('es-ES')}`;
+            const finDoc = buildFinanceDocument(userId, {
+              type: 'cobro',
+              concept: label,
+              category: 'Ventas TPV',
+              categoryIcon: '💰',
+              amountBase: totalSales,
+              taxRate: 0,
+              date: doc.closedAt,
+              paymentMethod: 'mixto',
+              tags: ['caja', 'tpv', doc.terminalName].filter(Boolean),
+              notes: `Auto: cierre de caja ${doc._id}. Efectivo: ${doc.summary?.salesByMethod?.efectivo?.toFixed(2) || 0}€, Tarjeta: ${doc.summary?.salesByMethod?.tarjeta?.toFixed(2) || 0}€, Bizum: ${doc.summary?.salesByMethod?.bizum?.toFixed(2) || 0}€.`,
+              linkedDocuments: [{ id: doc._id, type: 'tpv_register_session', name: label }],
+            });
+            await putDocument(req, finDb, finDoc._id, finDoc);
+          }
+        } catch (finErr) {
+          console.error('[CAJA-11] Error creating finance entry on register close:', finErr?.message);
+        }
+
+        void notifyTpvRegisterClosed({
+          req,
+          dataUserId: userId,
+          actorUserId: req.authUser?.user_id || userId,
+          session: { ...doc, _rev: saved.rev },
+        });
+
+        try {
+          const closedByName = String(doc.closedBy || account.fullName || 'Sistema').trim() || 'Sistema';
+          const alsoClosed = await autoCloseDuplicateOpenTpvSessions(
+            req,
+            userId,
+            { ...doc, _rev: saved.rev },
+            closedByName,
+          );
+          for (const synced of alsoClosed) {
+            broadcastTpvSessionLive(account, userId, synced);
+          }
+        } catch (dupErr) {
+          console.error('[TPV] auto-close duplicates after register close:', dupErr?.message);
+        }
+      })();
+    }
+    return;
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al actualizar sesión de caja TPV' });
   }

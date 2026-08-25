@@ -2197,14 +2197,32 @@ export function DeliveryOpsCenter() {
 
   const advance = useCallback(async (order: DeliveryOrder, s: DeliveryOrderStatus) => {
     if (!authUserId) return;
+    const nextHistory = [
+      ...(order.stageHistory || []),
+      { status: s, date: new Date().toISOString(), user: user.fullName || 'Sistema' },
+    ];
+    const patched: DeliveryOrder = { ...order, status: s, stageHistory: nextHistory };
+
+    // UI al instante: no esperar al PUT + recarga completa del ops-center.
+    setData((prev) => {
+      if (!prev?.activeOrders) return prev;
+      const stillActive = !['delivered', 'cancelled', 'rejected'].includes(s);
+      const without = prev.activeOrders.filter((o) => o._id !== order._id);
+      return {
+        ...prev,
+        activeOrders: stillActive ? [patched, ...without] : without,
+      };
+    });
+
     try {
-      await updateDeliveryOrderRequest(authUserId, {
-        ...order, status: s,
-        stageHistory: [...(order.stageHistory || []), { status: s, date: new Date().toISOString(), user: user.fullName || 'Sistema' }],
-      });
+      await updateDeliveryOrderRequest(authUserId, patched);
       toast.success(`${order.orderNumber} → ${STATUS_CFG[s]?.label || s}`);
+      // No recargar desde caché aquí: pisaría el optimistic con datos viejos.
+      // SSE / poll ya refrescan con bypassCache.
+    } catch {
+      toast.error('Error al actualizar');
       void load({ bypassCache: true });
-    } catch { toast.error('Error al actualizar'); }
+    }
   }, [authUserId, user, load]);
 
   const cfg = data?.config || null;

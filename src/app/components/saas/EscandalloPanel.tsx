@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
@@ -487,8 +487,12 @@ export function EscandalloPanel() {
   const [categoryFilter, setCategoryFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  /** Vacío = todos cerrados al entrar; el usuario abre los que quiera. */
+  /**
+   * Categorías abiertas. Vacío al montar → al cargar datos se abren todas
+   * para ver productos/escandallos de golpe (como antes).
+   */
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const categoriesBootstrappedRef = useRef(false);
   const [editingProduct, setEditingProduct] = useState<CatalogItem | null>(null);
   const [showCategoryPanel, setShowCategoryPanel] = useState(false);
 
@@ -579,6 +583,14 @@ export function EscandalloPanel() {
     }
     return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0], 'es'));
   }, [filteredProducts]);
+
+  // Primera carga: abrir todas las categorías para ver productos/escandallos (como antes).
+  useEffect(() => {
+    if (categoriesBootstrappedRef.current) return;
+    if (groupedProducts.length === 0) return;
+    categoriesBootstrappedRef.current = true;
+    setExpandedCategories(new Set(groupedProducts.map(([cat]) => cat)));
+  }, [groupedProducts]);
 
   const toggleCategory = (cat: string) => {
     setExpandedCategories((prev) => {
