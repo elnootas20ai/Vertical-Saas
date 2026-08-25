@@ -2,15 +2,27 @@ import { Navigate } from 'react-router-dom';
 import { useBusinessOptional } from '../../context/BusinessContext';
 import { isRestaurantBusinessType, isStrictDeliveryBusinessType } from '../../lib/deliveryOpsTypes';
 import { DELIVERY_CAJA_PATH, DELIVERY_OPS_HOME_PATH } from '../../lib/retailOpsPaths';
+import { readTpvTabletBinding, resolveTpvTabletWorkerPath } from '../../lib/tpvTabletSession';
 import { AuthRouteLoading } from '../AuthRouteLoading';
 
 /**
  * Bloquea rutas de bar/restaurante si no es restaurant.
  * Nunca return null (pantalla en blanco): loading o redirect.
  * Si aún no hay empresa/tipo (recarga), no redirigir: evita echar del TPV al SaaS.
+ * Tablet: manda el binding del código (no el selector admin multi-empresa).
  */
 export function RequireRestaurantVertical({ children }: { children: React.ReactNode }) {
   const businessCtx = useBusinessOptional();
+  const tabletBinding = readTpvTabletBinding();
+  const tabletVertical = tabletBinding?.tpvVertical;
+
+  if (tabletVertical === 'delivery') {
+    return <Navigate to={resolveTpvTabletWorkerPath()} replace />;
+  }
+  if (tabletVertical === 'restaurant') {
+    return <>{children}</>;
+  }
+
   const businessType = businessCtx?.currentBusiness?.businessType;
   const pending =
     !businessCtx?.businessesFetchSettled

@@ -122,7 +122,11 @@ import {
   readRetailScopeCacheForBusiness,
   writeRetailScopeCacheForBusiness,
 } from '../../verticals/retailScopeRegistry';
-import { isRestaurantBusinessType, isStrictDeliveryBusinessType } from '../../lib/deliveryOpsTypes';
+import {
+  isRestaurantBusinessType,
+  isStrictDeliveryBusinessType,
+  resolveRestaurantVerticalFromContext,
+} from '../../lib/deliveryOpsTypes';
 import { checkRestaurantRegisterClose } from '../../lib/restaurantCloseWarnings';
 import { resolveRestaurantTpvPermissions } from '../../lib/restaurantTpvPermissions';
 import { evaluateTpvClockInGate, tpvClockInBlockMessage } from '../../lib/tpvClockInGate';
@@ -5827,9 +5831,6 @@ export function TpvRegisterGate({
   const isTabletCajaScope =
     hasTabletStoreCode || isTabletSession || (tabletWorkerRoute && tabletBindingStore);
   const orderFlowActive = useTpvOrderFlowActive();
-  const isRestaurantVerticalChrome = isRestaurantBusinessType(currentBusiness?.businessType);
-
-  const compactRegisterChrome = isTabletSession || orderFlowActive || isRestaurantVerticalChrome;
   const scopeBusinessId = registerScope.scopeBusinessId;
   const dataUserId = registerScope.effectiveDataUserId;
 
@@ -5846,13 +5847,20 @@ export function TpvRegisterGate({
       tabletBinding?.businessId
       && resolveBusinessScopeId({ business_id: tabletBinding.businessId }) === scopeBusinessId
     ) {
+      const fromCache = businesses.find(
+        (b) => resolveBusinessScopeId(b) === scopeBusinessId,
+      )?.businessType;
+      const fromTablet =
+        tabletBinding.tpvVertical === 'restaurant'
+          ? 'restaurant'
+          : tabletBinding.tpvVertical === 'delivery'
+            ? 'delivery'
+            : '';
       return {
         business_id: scopeBusinessId,
         id: scopeBusinessId,
         name: tabletBinding.businessName || tabletBinding.pdvName || 'Tienda',
-        businessType: businesses.find(
-          (b) => resolveBusinessScopeId(b) === scopeBusinessId,
-        )?.businessType || 'delivery',
+        businessType: fromCache || fromTablet || 'delivery',
         owner_user_id: tabletBinding.dataUserId || '',
         logo: '',
         members: [],
@@ -5861,6 +5869,17 @@ export function TpvRegisterGate({
     }
     return currentBusiness;
   }, [scopeBusinessId, currentBusiness, businesses, tabletBinding]);
+
+  // Tablet/código: vertical del binding; no el selector admin (evita bar en delivery).
+  const isRestaurantVerticalChrome = resolveRestaurantVerticalFromContext({
+    currentBusiness: scopeBusiness || currentBusiness,
+    businesses,
+    scopeBusinessId,
+    isTabletSession: isTabletCajaScope,
+    tabletVertical: tabletBinding?.tpvVertical ?? null,
+  });
+
+  const compactRegisterChrome = isTabletSession || orderFlowActive || isRestaurantVerticalChrome;
 
   /** Modo consulta / entrar sin abrir: solo vertical delivery (no restaurante/bar). */
   const isDeliveryTpvOpening = isStrictDeliveryBusinessType(
@@ -8011,9 +8030,13 @@ export function TpvRegisterGate({
     && clockInGate.reason !== 'loading'
     && !showClockIn;
 
-  const isRestaurantVertical = isRestaurantBusinessType(
-    scopeBusiness?.businessType || currentBusiness?.businessType,
-  );
+  const isRestaurantVertical = resolveRestaurantVerticalFromContext({
+    currentBusiness: scopeBusiness || currentBusiness,
+    businesses,
+    scopeBusinessId,
+    isTabletSession: isTabletCajaScope,
+    tabletVertical: tabletBinding?.tpvVertical ?? null,
+  });
   const restaurantTpvPermissions = useMemo(() => resolveRestaurantTpvPermissions(user), [user]);
   /** Home operativo bar/restaurante = Sala (no Caja). */
   const opsHomePath = isRestaurantVertical ? '/saas/sala' : '/saas/delivery-ops';

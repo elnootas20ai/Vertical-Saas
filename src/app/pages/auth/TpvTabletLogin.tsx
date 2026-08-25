@@ -279,8 +279,8 @@ export function TpvTabletLogin() {
                 Soy trabajador — iniciar sesión
               </button>
             </form>
-            <p className="mt-4 text-center text-[10px] text-stone-400 dark:text-stone-600">
-              {TPV_UI_BUILD_STAMP}
+            <p className="mt-4 text-center text-xs font-medium text-stone-500 dark:text-stone-400">
+              Vertial tablet · {TPV_UI_BUILD_STAMP}
             </p>
           </div>
         </div>
