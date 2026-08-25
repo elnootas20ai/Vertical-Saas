@@ -17,10 +17,8 @@ import {
   writeTpvTabletBinding,
   clearTpvTabletBinding,
   resolveTpvTabletWorkerPath,
-  writeTabletCajaOpeningHint,
 } from '../../lib/tpvTabletSession';
-import { fetchTpvStoreOpeningHintRequest } from '../../lib/deliveryApi';
-import { resolvePreviousCloseCashAmount } from '../../lib/tpvCajaScope';
+import { prefetchTabletCajaOpeningHint } from '../../lib/tabletCajaOpeningHint';
 import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
 
 /** Marca visible del front embebido: si la tablet no la muestra, el build es viejo. */
@@ -109,44 +107,35 @@ export function TpvTabletLogin() {
       const ownerId = String(terminalBinding.dataUserId || '').trim();
       const pdvId = String(terminalBinding.pdvId || '').trim();
       if (ownerId && pdvId) {
-        void fetchTpvStoreOpeningHintRequest(ownerId, {
-          pointOfSaleId: pdvId,
+        prefetchTabletCajaOpeningHint({
+          dataUserId: ownerId,
+          pdvId,
           workCenterId: terminalBinding.workCenterId,
           businessId: terminalBinding.businessId,
-        })
-          .then((hint) => {
-            const fondoFromClose = resolvePreviousCloseCashAmount(hint.lastClosed);
-            const suggestedFondo =
-              fondoFromClose != null
-                ? fondoFromClose
-                : (hint.suggestedFondo != null && Number.isFinite(hint.suggestedFondo)
-                  ? hint.suggestedFondo
-                  : null);
-            writeTabletCajaOpeningHint({
-              pdvId,
-              businessId: terminalBinding.businessId,
-              openSession: hint.openSession,
-              lastClosed: hint.lastClosed,
-              suggestedFondo,
-              fetchedAt: new Date().toISOString(),
-            });
-          })
-          .catch(() => null);
+        });
       }
     }
 
+    const dest =
+      (typeof result.redirectTo === 'string' && result.redirectTo.startsWith('/saas/worker/tpv')
+        ? result.redirectTo
+        : null)
+      || resolveTpvTabletWorkerPath();
+    navigate(dest, { replace: true });
+
     if (business?.business_id && pdv) {
-      const { seedRetailScopeCacheFromTabletLogin } = await import('../../lib/tabletLoginStoreSeed');
-      seedRetailScopeCacheFromTabletLogin({
-        businessId: business.business_id,
-        pointOfSale: pdv,
-        workCenterId: terminalBinding?.workCenterId,
-        business,
-        businesses: businessCtx?.businesses?.length
-          ? businessCtx.businesses
-          : business
-            ? [business]
-            : [],
+      void import('../../lib/tabletLoginStoreSeed').then(({ seedRetailScopeCacheFromTabletLogin }) => {
+        seedRetailScopeCacheFromTabletLogin({
+          businessId: business.business_id,
+          pointOfSale: pdv,
+          workCenterId: terminalBinding?.workCenterId,
+          business,
+          businesses: businessCtx?.businesses?.length
+            ? businessCtx.businesses
+            : business
+              ? [business]
+              : [],
+        });
       });
     }
 
@@ -167,18 +156,12 @@ export function TpvTabletLogin() {
     }
 
     try {
-      await businessCtx?.reloadBusinesses();
-      if (business?.business_id) businessCtx?.switchBusiness(business.business_id);
+      void businessCtx?.reloadBusinesses().then(() => {
+        if (business?.business_id) businessCtx?.switchBusiness(business.business_id);
+      });
     } catch {
       // El binding tablet ya fija empresa; seguir al TPV aunque falle el refresco global.
     }
-
-    const dest =
-      (typeof result.redirectTo === 'string' && result.redirectTo.startsWith('/saas/worker/tpv')
-        ? result.redirectTo
-        : null)
-      || resolveTpvTabletWorkerPath();
-    navigate(dest, { replace: true });
   };
 
   const handleTerminalKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
