@@ -23,7 +23,7 @@ import { prefetchTabletCajaOpeningHint } from '../../lib/tabletCajaOpeningHint';
 import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
 
 /** Marca visible del front embebido: si la tablet no la muestra, el build es viejo. */
-const TPV_UI_BUILD_STAMP = String(import.meta.env.VITE_BUILD_STAMP || 'delivery-no-mesas v5');
+const TPV_UI_BUILD_STAMP = String(import.meta.env.VITE_BUILD_STAMP || 'v5');
 
 export function TpvTabletLogin() {
   const navigate = useNavigate();
