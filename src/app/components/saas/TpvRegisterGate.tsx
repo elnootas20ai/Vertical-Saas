@@ -136,17 +136,13 @@ import {
   resolveRetailOpsWriteBusinessId,
   shouldApplyTpvRegisterLoadResult,
 } from '../../lib/tpvRegisterScope';
-import {
-  fetchAndCacheTabletCajaOpeningHint,
-  isTabletCajaHintFresh,
-  resolveOpeningHintSuggestedFondo,
-} from '../../lib/tabletCajaOpeningHint';
-import { readTabletRegisterBootstrapState } from '../../lib/tabletRegisterBootstrap';
+import { fetchAndCacheTabletCajaOpeningHint } from '../../lib/tabletCajaOpeningHint';
 import {
   leaveTpvTabletSession,
   mergeTabletBindingPdv,
   readTpvTabletBinding,
   readTabletCajaOpeningHint,
+  seedTabletSessionsFromCache,
   isTpvTabletWorkerPath,
 } from '../../lib/tpvTabletSession';
 
@@ -484,7 +480,7 @@ interface OpeningData {
  * Misma UI: Fichaje | Quién abre | efectivo / fondo | Abrir caja.
  * Si ya hay caja abierta en ESA tienda → Continuar (misma familia de pantalla).
  */
-function OpeningScreen({ onOpen, onContinueExistingOpen, onEnterWithoutOpen, loading: parentLoading, openingBusy = false, pointsOfSale, workCenters, workerOptions, registerSessions, restrictedToPdvId, onClearStorePick, isManagerView = false, tabletStoreLabel, tabletWorkCenterId = null, knownOpenSession = null, suggestedOpeningFondo = null, lastClosedForOpening = null, onOpeningPdvChange, restaurantOpening = false, clockInBusinessId = '', clockInOwnerUserId = '', onClockInChanged, resumeAfterClose = null }: {
+function OpeningScreen({ onOpen, onContinueExistingOpen, onEnterWithoutOpen, loading: parentLoading, openingBusy = false, pointsOfSale, workCenters, workerOptions, registerSessions, restrictedToPdvId, onClearStorePick, isManagerView = false, tabletStoreLabel, tabletWorkCenterId = null, knownOpenSession = null, onOpeningPdvChange, restaurantOpening = false, clockInBusinessId = '', clockInOwnerUserId = '', onClockInChanged, resumeAfterClose = null }: {
   onOpen: (data: OpeningData) => void;
   /** Entrar en una caja ya abierta (aviso proactivo; no al martillar Abrir). */
   onContinueExistingOpen?: (session: TpvRegisterSession) => void;
@@ -508,10 +504,6 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, onEnterWithoutOpen, loa
   tabletWorkCenterId?: string | null;
   /** Caja abierta ya resuelta en el gate (tablet / Continuar). */
   knownOpenSession?: TpvRegisterSession | null;
-  /** Fondo dejado (opening-hint del servidor; prioridad sobre lista local). */
-  suggestedOpeningFondo?: number | null;
-  /** Último cierre de la tienda (opening-hint). */
-  lastClosedForOpening?: TpvRegisterSession | null;
   /** Sincroniza la tienda elegida en apertura para fichaje antes de abrir caja. */
   onOpeningPdvChange?: (pdvId: string) => void;
   /** Bar/restaurante: tienda fijada arriba, sin auto-scroll al bloque terminal. */
@@ -624,15 +616,13 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, onEnterWithoutOpen, loa
       tabletWorkCenterId: tabletWorkCenterId || readTpvTabletBinding()?.workCenterId,
     });
     const cached = readTabletCajaOpeningHint(pdvId || restrictedToPdvId || undefined);
-    const suggestedFondo = suggestedOpeningFondo ?? cached?.suggestedFondo ?? null;
-    const lastClosed = lastClosedForOpening ?? cached?.lastClosed ?? null;
     return resolveOpeningFondoHint({
       sessions: registerSessions,
       pdvId,
       pointsOfSale,
       alternateRefIds: alternateRefs,
-      suggestedFondo,
-      lastClosedSession: lastClosed,
+      suggestedFondo: cached?.suggestedFondo ?? null,
+      lastClosedSession: cached?.lastClosed ?? null,
     });
   }, [
     registerSessions,
@@ -640,8 +630,6 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, onEnterWithoutOpen, loa
     restrictedToPdvId,
     pointsOfSale,
     tabletWorkCenterId,
-    suggestedOpeningFondo,
-    lastClosedForOpening,
   ]);
 
   const previousCloseCash = previousCloseHint?.amount ?? null;
@@ -5879,25 +5867,19 @@ export function TpvRegisterGate({
     scopeBusiness?.businessType || currentBusiness?.businessType,
   );
 
-  const tabletBootstrap = readTabletRegisterBootstrapState();
-  const [sessions, setSessions] = useState<TpvRegisterSession[]>(tabletBootstrap.sessions);
-  const [pointsOfSale, setPointsOfSale] = useState<PointOfSale[]>(tabletBootstrap.pointsOfSale);
-  const [workCenters, setWorkCenters] = useState<WorkCenter[]>([]);
-  /** Tablet con código: no bloquear en spinner; la caché local basta para la apertura. */
-  const [loading, setLoading] = useState(tabletBootstrap.loading);
-  /**
-   * Tras el primer load sin caja abierta, espera un instante por si la lista
-   * llega un tick tarde (reentrada al TPV) antes de mostrar OpeningScreen.
-   */
-  const [openingRecoverHold, setOpeningRecoverHold] = useState(tabletBootstrap.openingRecoverHold);
-  /**
-   * Tras pintar Abrir caja una vez, no volver a «Recuperando caja…» por poll/SSE/pick.
-   * Sin esto: pantallazos OpeningScreen ↔ Recuperando en bucle.
-   */
-  const [openingScreenUnlocked, setOpeningScreenUnlocked] = useState(
-    tabletBootstrap.openingScreenUnlocked,
+  const tabletBindingOnMount = readTpvTabletBinding();
+  const tabletHasCode = Boolean(String(tabletBindingOnMount?.pdvId || '').trim());
+  const [sessions, setSessions] = useState<TpvRegisterSession[]>(() =>
+    seedTabletSessionsFromCache(tabletBindingOnMount?.pdvId),
   );
-  const openingScreenUnlockedRef = useRef(tabletBootstrap.openingScreenUnlocked);
+  const [pointsOfSale, setPointsOfSale] = useState<PointOfSale[]>(() =>
+    tabletHasCode ? mergeTabletBindingPdv([], tabletBindingOnMount) : [],
+  );
+  const [workCenters, setWorkCenters] = useState<WorkCenter[]>([]);
+  const [loading, setLoading] = useState(() => !tabletHasCode);
+  const [openingRecoverHold, setOpeningRecoverHold] = useState(() => !tabletHasCode);
+  const [openingScreenUnlocked, setOpeningScreenUnlocked] = useState(tabletHasCode);
+  const openingScreenUnlockedRef = useRef(tabletHasCode);
   /** Tablero sin sesión de caja: fichaje, impresora y consulta; sin pedidos ni cobros. */
   const [browseWithoutOpen, setBrowseWithoutOpen] = useState(false);
   /** Desde modo consulta: overlay con pantalla de apertura para abrir caja del día. */
@@ -5947,9 +5929,6 @@ export function TpvRegisterGate({
     workerId?: string;
     key: number;
   } | null>(null);
-  /** Fondo dejado (opening-hint): prioridad sobre lista local por terminal. */
-  const [openingHintFondo, setOpeningHintFondo] = useState<number | null>(null);
-  const [openingHintLastClosed, setOpeningHintLastClosed] = useState<TpvRegisterSession | null>(null);
   /**
    * Al reentrar al TPV con caja ya abierta, hay que pulsar «Continuar en esta caja».
    * Se resetea al desmontar el gate (salir del TPV). Tras Abrir / Continuar queda marcado.
@@ -5963,7 +5942,6 @@ export function TpvRegisterGate({
   clockedInWorkersRef.current = clockedInWorkers;
   const [selectedOrderTakerId, setSelectedOrderTakerId] = useState<string | null>(null);
   const openingInFlightRef = useRef(false);
-  const openingHintInflightRef = useRef<Map<string, Promise<void>>>(new Map());
   const skipManagerAutoPdvRef = useRef(false);
   const loadSeqRef = useRef(0);
   const loadInflightRef = useRef<Promise<void> | null>(null);
@@ -5974,7 +5952,7 @@ export function TpvRegisterGate({
   pointsOfSaleRef.current = pointsOfSale;
   const workCentersRef = useRef(workCenters);
   workCentersRef.current = workCenters;
-  const hasDisplayedStoresRef = useRef(tabletBootstrap.hasDisplayedStores);
+  const hasDisplayedStoresRef = useRef(tabletHasCode);
   const userRef = useRef(user);
   userRef.current = user;
   const dataUserIdRef = useRef(dataUserId);
@@ -6208,88 +6186,26 @@ export function TpvRegisterGate({
     setAckedOpenSessionId(null);
   }, [isTabletCajaScope, tabletBinding?.pdvId]);
 
-  const hydrateOpeningHintForPdv = useCallback(async (pdvId: string) => {
-    const pick = String(pdvId || '').trim();
-    if (!pick) return;
-    const binding = tabletBindingRef.current;
-    const uid = String(
-      dataUserIdRef.current || binding?.dataUserId || '',
-    ).trim();
-    const bid = String(scopeBusinessIdRef.current || binding?.businessId || '').trim();
-
-    const cached = readTabletCajaOpeningHint(pick);
-    const cachedFondo = resolveOpeningHintSuggestedFondo({
-      lastClosed: cached?.lastClosed ?? null,
-      suggestedFondo: cached?.suggestedFondo,
-    });
-    if (cachedFondo != null) {
-      setOpeningHintFondo(cachedFondo);
-    }
-    if (cached?.lastClosed?._id) {
-      setOpeningHintLastClosed(cached.lastClosed);
-    }
-    const cachedMerge = [cached?.openSession, cached?.lastClosed].filter(
-      (s): s is TpvRegisterSession => Boolean(s?._id),
-    );
-    if (cachedMerge.length > 0) {
-      setSessions((prev) => mergeTpvRegisterSessionsPreservingOpen(prev, cachedMerge));
-    }
-
-    if (!uid) return;
-    if (isTabletCajaHintFresh(cached)) return;
-
-    const inflight = openingHintInflightRef.current.get(pick);
-    if (inflight) {
-      await inflight;
-      return;
-    }
-
-    const run = (async () => {
-      try {
-        const fresh = await fetchAndCacheTabletCajaOpeningHint({
-          dataUserId: uid,
-          pdvId: pick,
-          workCenterId: binding?.workCenterId,
-          businessId: bid || undefined,
-        });
-        if (!fresh) return;
-        setOpeningHintFondo(resolveOpeningHintSuggestedFondo(fresh));
-        if (fresh.lastClosed?._id) setOpeningHintLastClosed(fresh.lastClosed);
-        const freshSessions = [fresh.openSession, fresh.lastClosed].filter(
-          (s): s is TpvRegisterSession => Boolean(s?._id),
-        );
-        if (freshSessions.length > 0) {
-          setSessions((prev) => mergeTpvRegisterSessionsPreservingOpen(prev, freshSessions));
-        }
-      } catch {
-        // Mantener caché local si la red falla.
-      } finally {
-        openingHintInflightRef.current.delete(pick);
-      }
-    })();
-
-    openingHintInflightRef.current.set(pick, run);
-    await run;
-  }, []);
-
-  useLayoutEffect(() => {
-    const pdvId = String(tabletBinding?.pdvId || '').trim();
-    if (!pdvId) return;
-    const cached = readTabletCajaOpeningHint(pdvId);
-    const cachedMerge = [cached?.openSession, cached?.lastClosed].filter(
-      (s): s is TpvRegisterSession => Boolean(s?._id),
-    );
-    if (cachedMerge.length > 0) {
-      setSessions((prev) => mergeTpvRegisterSessionsPreservingOpen(prev, cachedMerge));
-    }
-  }, [tabletBinding?.pdvId]);
-
   useEffect(() => {
     if (!isTabletCajaScope && !tabletBinding?.pdvId) return;
     const pdvId = String(tabletBinding?.pdvId || initialManagerPdvId || '').trim();
-    if (!pdvId) return;
-    void hydrateOpeningHintForPdv(pdvId);
-  }, [isTabletCajaScope, dataUserId, scopeBusinessId, tabletBinding?.pdvId, initialManagerPdvId, hydrateOpeningHintForPdv]);
+    const uid = String(dataUserId || tabletBinding?.dataUserId || '').trim();
+    if (!pdvId || !uid) return;
+    void fetchAndCacheTabletCajaOpeningHint({
+      dataUserId: uid,
+      pdvId,
+      workCenterId: tabletBinding?.workCenterId,
+      businessId: scopeBusinessId || tabletBinding?.businessId,
+    }).then((fresh) => {
+      if (!fresh) return;
+      const freshSessions = [fresh.openSession, fresh.lastClosed].filter(
+        (s): s is TpvRegisterSession => Boolean(s?._id),
+      );
+      if (freshSessions.length > 0) {
+        setSessions((prev) => mergeTpvRegisterSessionsPreservingOpen(prev, freshSessions));
+      }
+    });
+  }, [isTabletCajaScope, dataUserId, scopeBusinessId, tabletBinding?.pdvId, tabletBinding?.dataUserId, tabletBinding?.workCenterId, tabletBinding?.businessId, initialManagerPdvId]);
 
   // Bar/restaurante CEO: sin sticky el pick de PDV puede soltar la caja un frame
   // al abrir mesa → TPV embebido se queda en «Recuperando la caja…».
@@ -8647,8 +8563,6 @@ export function TpvRegisterGate({
         tabletStoreLabel={openingStoreLabel}
         tabletWorkCenterId={tabletBinding?.workCenterId || null}
         knownOpenSession={openingKnownOpenSession}
-        suggestedOpeningFondo={openingHintFondo}
-        lastClosedForOpening={openingHintLastClosed}
         restrictedToPdvId={openingRestrictedPdvId}
         restaurantOpening={isRestaurantVerticalChrome}
         onOpeningPdvChange={handleOpeningPdvChange}
@@ -8699,8 +8613,6 @@ export function TpvRegisterGate({
         tabletStoreLabel={browseStoreLabel}
         tabletWorkCenterId={tabletBinding?.workCenterId || null}
         knownOpenSession={openingKnownOpenSession}
-        suggestedOpeningFondo={openingHintFondo}
-        lastClosedForOpening={openingHintLastClosed}
         restrictedToPdvId={browsePdvId || null}
         restaurantOpening={isRestaurantVerticalChrome}
         onOpeningPdvChange={handleOpeningPdvChange}
