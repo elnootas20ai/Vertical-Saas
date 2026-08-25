@@ -20,6 +20,7 @@ import {
   writeTabletCajaOpeningHint,
 } from '../../lib/tpvTabletSession';
 import { fetchTpvStoreOpeningHintRequest } from '../../lib/deliveryApi';
+import { resolvePreviousCloseCashAmount } from '../../lib/tpvCajaScope';
 import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
 
 /** Marca visible del front embebido: si la tablet no la muestra, el build es viejo. */
@@ -114,12 +115,19 @@ export function TpvTabletLogin() {
           businessId: terminalBinding.businessId,
         })
           .then((hint) => {
+            const fondoFromClose = resolvePreviousCloseCashAmount(hint.lastClosed);
+            const suggestedFondo =
+              fondoFromClose != null
+                ? fondoFromClose
+                : (hint.suggestedFondo != null && Number.isFinite(hint.suggestedFondo)
+                  ? hint.suggestedFondo
+                  : null);
             writeTabletCajaOpeningHint({
               pdvId,
               businessId: terminalBinding.businessId,
               openSession: hint.openSession,
               lastClosed: hint.lastClosed,
-              suggestedFondo: hint.suggestedFondo,
+              suggestedFondo,
               fetchedAt: new Date().toISOString(),
             });
           })

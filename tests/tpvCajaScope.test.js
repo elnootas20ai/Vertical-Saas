@@ -14,6 +14,7 @@ import {
   findLastClosedTpvSession,
   findLastClosedTpvSessionForStoreOpening,
   resolveOpeningFondoHint,
+  pickNewestClosedTpvSession,
   resolvePreviousCloseCashAmount,
   previousCloseCashIsNextDayInitial,
   cashWithdrawnAtClose,
@@ -622,16 +623,26 @@ describe('findLastClosedTpvSessionForStoreOpening', () => {
     expect(resolvePreviousCloseCashAmount(last)).toBe(99.3);
   });
 
-  it('resolveOpeningFondoHint prefers server suggestedFondo', () => {
+  it('resolveOpeningFondoHint uses newest store close (99.30), not stale cache (93.50)', () => {
     const hint = resolveOpeningFondoHint({
       sessions: [closedTpvOlder, closedTablet],
       pdvId: 'pdv-1',
       pointsOfSale: pdvs,
+      suggestedFondo: 93.5,
+      lastClosedSession: closedTpvOlder,
+    });
+    expect(hint?.amount).toBe(99.3);
+    expect(hint?.sessionId).toBe('c-tablet');
+  });
+
+  it('resolveOpeningFondoHint uses suggestedFondo only before sessions load', () => {
+    const hint = resolveOpeningFondoHint({
+      sessions: [],
+      pdvId: 'pdv-1',
       suggestedFondo: 99.3,
       lastClosedSession: closedTablet,
     });
     expect(hint?.amount).toBe(99.3);
-    expect(hint?.isNextDayInitial).toBe(true);
   });
 });
 

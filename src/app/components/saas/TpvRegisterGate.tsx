@@ -6214,7 +6214,10 @@ export function TpvRegisterGate({
     const bid = String(scopeBusinessIdRef.current || binding?.businessId || '').trim();
 
     const cached = readTabletCajaOpeningHint(pick);
-    if (cached?.suggestedFondo != null && Number.isFinite(cached.suggestedFondo)) {
+    const cachedFondo = resolvePreviousCloseCashAmount(cached?.lastClosed ?? null);
+    if (cachedFondo != null) {
+      setOpeningHintFondo(cachedFondo);
+    } else if (cached?.suggestedFondo != null && Number.isFinite(cached.suggestedFondo)) {
       setOpeningHintFondo(cached.suggestedFondo);
     }
     if (cached?.lastClosed?._id) {
@@ -6235,19 +6238,22 @@ export function TpvRegisterGate({
         workCenterId: binding?.workCenterId,
         businessId: bid || undefined,
       });
+      const fondoFromClose = resolvePreviousCloseCashAmount(hint.lastClosed);
+      const suggestedFondo =
+        fondoFromClose != null
+          ? fondoFromClose
+          : (hint.suggestedFondo != null && Number.isFinite(hint.suggestedFondo)
+            ? hint.suggestedFondo
+            : null);
       writeTabletCajaOpeningHint({
         pdvId: pick,
         businessId: bid || undefined,
         openSession: hint.openSession,
         lastClosed: hint.lastClosed,
-        suggestedFondo: hint.suggestedFondo,
+        suggestedFondo,
         fetchedAt: new Date().toISOString(),
       });
-      setOpeningHintFondo(
-        hint.suggestedFondo != null && Number.isFinite(hint.suggestedFondo)
-          ? hint.suggestedFondo
-          : null,
-      );
+      setOpeningHintFondo(suggestedFondo);
       setOpeningHintLastClosed(hint.lastClosed);
       const fresh = [hint.openSession, hint.lastClosed].filter(
         (s): s is TpvRegisterSession => Boolean(s?._id),
