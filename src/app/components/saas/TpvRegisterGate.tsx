@@ -5960,6 +5960,7 @@ export function TpvRegisterGate({
   clockedInWorkersRef.current = clockedInWorkers;
   const [selectedOrderTakerId, setSelectedOrderTakerId] = useState<string | null>(null);
   const openingInFlightRef = useRef(false);
+  const openingHintInflightRef = useRef<Map<string, Promise<void>>>(new Map());
   const skipManagerAutoPdvRef = useRef(false);
   const loadSeqRef = useRef(0);
   const loadInflightRef = useRef<Promise<void> | null>(null);
@@ -6232,46 +6233,57 @@ export function TpvRegisterGate({
 
     if (!uid) return;
 
-    try {
-      const hint = await fetchTpvStoreOpeningHintRequest(uid, {
-        pointOfSaleId: pick,
-        workCenterId: binding?.workCenterId,
-        businessId: bid || undefined,
-      });
-      const fondoFromClose = resolvePreviousCloseCashAmount(hint.lastClosed);
-      const suggestedFondo =
-        fondoFromClose != null
-          ? fondoFromClose
-          : (hint.suggestedFondo != null && Number.isFinite(hint.suggestedFondo)
-            ? hint.suggestedFondo
-            : null);
-      writeTabletCajaOpeningHint({
-        pdvId: pick,
-        businessId: bid || undefined,
-        openSession: hint.openSession,
-        lastClosed: hint.lastClosed,
-        suggestedFondo,
-        fetchedAt: new Date().toISOString(),
-      });
-      setOpeningHintFondo(suggestedFondo);
-      setOpeningHintLastClosed(hint.lastClosed);
-      const fresh = [hint.openSession, hint.lastClosed].filter(
-        (s): s is TpvRegisterSession => Boolean(s?._id),
-      );
-      if (fresh.length > 0) {
-        setSessions((prev) => mergeTpvRegisterSessionsPreservingOpen(prev, fresh));
-      }
-    } catch {
-      // Mantener caché local si la red falla.
+    const fetchedMs = cached?.fetchedAt ? new Date(cached.fetchedAt).getTime() : 0;
+    if (fetchedMs > 0 && Date.now() - fetchedMs < 45_000) {
+      return;
     }
-  }, []);
 
-  const hydrateTabletCajaFromHint = useCallback(async () => {
-    const binding = tabletBindingRef.current;
-    const pdvId = String(binding?.pdvId || initialManagerPdvIdRef.current || '').trim();
-    if (!pdvId) return;
-    await hydrateOpeningHintForPdv(pdvId);
-  }, [hydrateOpeningHintForPdv]);
+    const inflight = openingHintInflightRef.current.get(pick);
+    if (inflight) {
+      await inflight;
+      return;
+    }
+
+    const run = (async () => {
+      try {
+        const hint = await fetchTpvStoreOpeningHintRequest(uid, {
+          pointOfSaleId: pick,
+          workCenterId: binding?.workCenterId,
+          businessId: bid || undefined,
+        });
+        const fondoFromClose = resolvePreviousCloseCashAmount(hint.lastClosed);
+        const suggestedFondo =
+          fondoFromClose != null
+            ? fondoFromClose
+            : (hint.suggestedFondo != null && Number.isFinite(hint.suggestedFondo)
+              ? hint.suggestedFondo
+              : null);
+        writeTabletCajaOpeningHint({
+          pdvId: pick,
+          businessId: bid || undefined,
+          openSession: hint.openSession,
+          lastClosed: hint.lastClosed,
+          suggestedFondo,
+          fetchedAt: new Date().toISOString(),
+        });
+        setOpeningHintFondo(suggestedFondo);
+        setOpeningHintLastClosed(hint.lastClosed);
+        const fresh = [hint.openSession, hint.lastClosed].filter(
+          (s): s is TpvRegisterSession => Boolean(s?._id),
+        );
+        if (fresh.length > 0) {
+          setSessions((prev) => mergeTpvRegisterSessionsPreservingOpen(prev, fresh));
+        }
+      } catch {
+        // Mantener caché local si la red falla.
+      } finally {
+        openingHintInflightRef.current.delete(pick);
+      }
+    })();
+
+    openingHintInflightRef.current.set(pick, run);
+    await run;
+  }, []);
 
   useLayoutEffect(() => {
     const pdvId = String(tabletBinding?.pdvId || '').trim();
@@ -6286,10 +6298,11 @@ export function TpvRegisterGate({
   }, [tabletBinding?.pdvId]);
 
   useEffect(() => {
+    if (!isTabletCajaScope && !tabletBinding?.pdvId) return;
     const pdvId = String(tabletBinding?.pdvId || initialManagerPdvId || '').trim();
     if (!pdvId) return;
-    void hydrateTabletCajaFromHint();
-  }, [isTabletCajaScope, dataUserId, scopeBusinessId, tabletBinding?.pdvId, initialManagerPdvId, hydrateTabletCajaFromHint]);
+    void hydrateOpeningHintForPdv(pdvId);
+  }, [isTabletCajaScope, dataUserId, scopeBusinessId, tabletBinding?.pdvId, initialManagerPdvId, hydrateOpeningHintForPdv]);
 
   // Bar/restaurante CEO: sin sticky el pick de PDV puede soltar la caja un frame
   // al abrir mesa → TPV embebido se queda en «Recuperando la caja…».
@@ -6329,19 +6342,6 @@ export function TpvRegisterGate({
 
   const resolvedStorePickIdRef = useRef(resolvedStorePickId);
   resolvedStorePickIdRef.current = resolvedStorePickId;
-
-  useEffect(() => {
-    if (!isDeliveryTpvOpening) return;
-    const pdvId = String(resolvedStorePickId || '').trim();
-    if (!pdvId || !dataUserId) return;
-    void hydrateOpeningHintForPdv(pdvId);
-  }, [
-    isDeliveryTpvOpening,
-    resolvedStorePickId,
-    dataUserId,
-    scopeBusinessId,
-    hydrateOpeningHintForPdv,
-  ]);
 
   const activeSession = useMemo(() => {
     const alternateRefs = resolveTpvStoreAlternateRefs({
@@ -6946,10 +6946,6 @@ export function TpvRegisterGate({
           || '',
         ).trim();
         const tabletFastPath = isTabletCajaScopeRef.current && Boolean(tabletPdvId);
-
-        if (tabletFastPath) {
-          void hydrateTabletCajaFromHint();
-        }
 
         if (tabletFastPath && !hasDisplayedStoresRef.current) {
           const stubPdvs = mergeTabletBindingPdv([], tabletBindingRef.current);
