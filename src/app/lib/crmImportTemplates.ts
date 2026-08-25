@@ -27,13 +27,30 @@ export const LEAD_TEMPLATE_HEADERS = [
 
 export type ClientTemplateOptions = {
   includeResponsible?: boolean;
-  /** iceCreamShop → plantilla con ejemplos y hoja de instrucciones heladería */
+  /** iceCreamShop | lawyer → plantilla con ejemplos e instrucciones del vertical */
   vertical?: string | null;
 };
 
 function isHeladeriaClientVertical(vertical?: string | null): boolean {
   return String(vertical || '').trim() === 'iceCreamShop';
 }
+
+function isLawyerClientVertical(vertical?: string | null): boolean {
+  return String(vertical || '').trim() === 'lawyer';
+}
+
+/** Etiquetas sugeridas en plantilla abogados / despacho. */
+export const LAWYER_CLIENT_TAG_EXAMPLES = [
+  'Civil',
+  'Penal',
+  'Laboral',
+  'Mercantil',
+  'Familia',
+  'Administrativo',
+  'VIP',
+  'Empresa',
+  'Iguala',
+] as const;
 
 function buildHeladeriaClientExampleRows(includeResponsible: boolean): string[][] {
   const base = (row: {
@@ -107,13 +124,93 @@ function heladeriaClientInstructionLines(): string[] {
   ];
 }
 
+function buildLawyerClientExampleRows(includeResponsible: boolean): string[][] {
+  const base = (row: {
+    name: string;
+    phone: string;
+    email: string;
+    dni: string;
+    address: string;
+    city: string;
+    cp: string;
+    notes: string;
+    tags: string;
+  }) => {
+    const cells = [
+      row.name,
+      row.phone,
+      row.email,
+      row.dni,
+      row.address,
+      row.city,
+      row.cp,
+      row.notes,
+    ];
+    if (includeResponsible) cells.push('');
+    cells.push(row.tags);
+    return cells;
+  };
+
+  return [
+    base({
+      name: 'Ejemplo · María García López',
+      phone: '600111222',
+      email: 'maria@ejemplo.com',
+      dni: '12345678A',
+      address: 'C/ Justicia 8',
+      city: 'Madrid',
+      cp: '28001',
+      notes: 'Persona física · laboral. Borrar fila de ejemplo.',
+      tags: 'Laboral, VIP',
+    }),
+    base({
+      name: 'Ejemplo · Constructora Norte SL',
+      phone: '910000111',
+      email: 'legal@norte.ejemplo',
+      dni: 'B12345678',
+      address: 'Av. Empresa 22',
+      city: 'Barcelona',
+      cp: '08018',
+      notes: 'Persona jurídica · mercantil / iguala mensual',
+      tags: 'Mercantil, Empresa, Iguala',
+    }),
+  ];
+}
+
+function lawyerClientInstructionLines(): string[] {
+  return [
+    'PLANTILLA CLIENTES — ABOGADOS / DESPACHO',
+    '',
+    'HOJA A IMPORTAR: «Clientes» (la primera).',
+    '',
+    'COLUMNAS:',
+    '  Nombre* | Teléfono* | Email | DNI/CIF | Dirección | Ciudad | Código postal | Notas | Etiquetas',
+    '',
+    'OBLIGATORIO: Nombre y Teléfono.',
+    '',
+    'DNI/CIF: DNI o NIE (persona física) o CIF (persona jurídica).',
+    '',
+    'ETIQUETAS útiles (separadas por coma):',
+    `  ${LAWYER_CLIENT_TAG_EXAMPLES.join(' | ')}`,
+    '',
+    'NOTAS: tipo de cliente, asunto habitual, iguala, observaciones RGPD…',
+    '',
+    'Borra las filas «Ejemplo · …» antes de importar o cámbialas por clientes reales.',
+    '',
+    'Los leads de captación (consultas nuevas) se gestionan en Captación; esta plantilla es la base de clientes del despacho.',
+  ];
+}
+
 export function downloadClientImportTemplate(options?: ClientTemplateOptions) {
   const includeResponsible = options?.includeResponsible !== false;
   const heladeria = isHeladeriaClientVertical(options?.vertical);
+  const lawyer = isLawyerClientVertical(options?.vertical);
   const headers = getClientTemplateHeaders(includeResponsible);
   const rows: string[][] = [headers];
   if (heladeria) {
     rows.push(...buildHeladeriaClientExampleRows(includeResponsible));
+  } else if (lawyer) {
+    rows.push(...buildLawyerClientExampleRows(includeResponsible));
   }
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -125,11 +222,19 @@ export function downloadClientImportTemplate(options?: ClientTemplateOptions) {
     const help = XLSX.utils.aoa_to_sheet(heladeriaClientInstructionLines().map((line) => [line]));
     help['!cols'] = [{ wch: 90 }];
     XLSX.utils.book_append_sheet(wb, help, 'instrucciones');
+  } else if (lawyer) {
+    const help = XLSX.utils.aoa_to_sheet(lawyerClientInstructionLines().map((line) => [line]));
+    help['!cols'] = [{ wch: 90 }];
+    XLSX.utils.book_append_sheet(wb, help, 'instrucciones');
   }
 
   XLSX.writeFile(
     wb,
-    heladeria ? 'plantilla_clientes_heladeria.xlsx' : 'plantilla_clientes.xlsx',
+    heladeria
+      ? 'plantilla_clientes_heladeria.xlsx'
+      : lawyer
+        ? 'plantilla_clientes_abogados.xlsx'
+        : 'plantilla_clientes.xlsx',
   );
 }
 
@@ -146,8 +251,13 @@ function downloadCsvFile(filename: string, headers: string[]) {
 
 export function downloadClientImportTemplateCsv(options?: ClientTemplateOptions) {
   const heladeria = isHeladeriaClientVertical(options?.vertical);
+  const lawyer = isLawyerClientVertical(options?.vertical);
   downloadCsvFile(
-    heladeria ? 'plantilla_clientes_heladeria.csv' : 'plantilla_clientes.csv',
+    heladeria
+      ? 'plantilla_clientes_heladeria.csv'
+      : lawyer
+        ? 'plantilla_clientes_abogados.csv'
+        : 'plantilla_clientes.csv',
     getClientTemplateHeaders(options?.includeResponsible !== false),
   );
 }

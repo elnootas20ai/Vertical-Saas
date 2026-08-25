@@ -49,6 +49,7 @@ import {
   createWorkCenter,
   updateWorkCenter,
   deleteWorkCenter,
+  listWorkCenters,
   WORK_CENTER_TYPE_LABELS,
   WORK_CENTER_TYPE_SHORT,
   type WorkCenter,
@@ -337,6 +338,8 @@ interface WorkCenterModalProps {
   onSave: (data: WorkCenterSaveData) => Promise<void>;
   editItem?: WorkCenter | null;
   forcePointOfSale?: boolean;
+  /** Abogados: crear/editar como despacho (tipo oficina). */
+  forceDespacho?: boolean;
   /** Paso de horario en wizard (tiendas delivery / retail). */
   includeOpeningHours?: boolean;
   /**
@@ -367,6 +370,7 @@ function WorkCenterModal({
   onSave,
   editItem,
   forcePointOfSale = false,
+  forceDespacho = false,
   includeOpeningHours = false,
   legacyUserId,
   initialWizardStep,
@@ -457,7 +461,7 @@ function WorkCenterModal({
 
     // Crear PDV: recuperar borrador local si se cerró a medias.
     const draft = draftBusinessId ? readPdvCreateDraft(draftBusinessId) : null;
-    if (draft && pdvCreateDraftHasContent(draft)) {
+    if (draft && pdvCreateDraftHasContent(draft) && !forceDespacho) {
       setForm({ ...EMPTY_PDV_CREATE_FORM, ...draft.form });
       setStep(
         initialWizardStep === 'horarios' && includeOpeningHours
@@ -487,7 +491,11 @@ function WorkCenterModal({
       return;
     }
 
-    setForm(EMPTY_PDV_CREATE_FORM);
+    setForm(
+      forceDespacho
+        ? { ...EMPTY_PDV_CREATE_FORM, centerType: 'oficina' }
+        : EMPTY_PDV_CREATE_FORM,
+    );
     setStep(initialWizardStep === 'horarios' && includeOpeningHours ? 'horarios' : 'general');
     setIsMobilePdv(false);
     setPdvCode('');
@@ -498,7 +506,7 @@ function WorkCenterModal({
         ? createBlankBusinessHoursConfig()
         : normalizeBusinessHoursConfig(DEFAULT_BUSINESS_HOURS_CONFIG),
     );
-  }, [editItem, isOpen, initialWizardStep, includeOpeningHours, editPdvCode, draftBusinessId]);
+  }, [editItem, isOpen, initialWizardStep, includeOpeningHours, editPdvCode, draftBusinessId, forceDespacho]);
 
   useEffect(() => {
     if (!isOpen || !includeOpeningHours || !editItem) return;
@@ -802,9 +810,13 @@ function WorkCenterModal({
         ...editItem,
         name: saveName,
         pdvCode: isRetailSave ? codeForSave : undefined,
-        centerType: forcePointOfSale ? 'punto_de_venta' : form.centerType,
+        centerType: forceDespacho
+          ? 'oficina'
+          : forcePointOfSale
+            ? 'punto_de_venta'
+            : form.centerType,
         customTypeName:
-          !forcePointOfSale && form.centerType === 'custom'
+          !forcePointOfSale && !forceDespacho && form.centerType === 'custom'
             ? sanitizeRetailTextField(form.customTypeName, PDV_RETAIL_LIMITS.customTypeMax)
             : undefined,
         ownership: editItem?.ownership || 'propiedad',
@@ -929,11 +941,13 @@ function WorkCenterModal({
     hasError: stepHasFieldError(row.id),
   }));
 
-  const modalTitle = simplifyPdvCreate
-    ? retailCopy.modalTitleNew
-    : editItem
-      ? 'Editar centro de trabajo'
-      : 'Nuevo centro de trabajo';
+  const modalTitle = forceDespacho
+    ? (editItem ? 'Editar despacho' : 'Nuevo despacho')
+    : simplifyPdvCreate
+      ? retailCopy.modalTitleNew
+      : editItem
+        ? 'Editar centro de trabajo'
+        : 'Nuevo centro de trabajo';
 
   const storePreview = (
     <div className="flex flex-col items-center gap-2 text-center">
@@ -959,10 +973,14 @@ function WorkCenterModal({
       title={modalTitle}
       subtitle={
         editItem
-          ? 'Actualiza los datos del centro'
-          : 'Si cierras, guardamos un borrador para seguir luego'
+          ? forceDespacho
+            ? 'Actualiza los datos del despacho'
+            : 'Actualiza los datos del centro'
+          : forceDespacho
+            ? 'Se creará un despacho (oficina) para este negocio'
+            : 'Si cierras, guardamos un borrador para seguir luego'
       }
-      icon={<Store className="h-5 w-5" />}
+      icon={forceDespacho ? <Building2 className="h-5 w-5" /> : <Store className="h-5 w-5" />}
       steps={shellSteps}
       activeStepId={step}
       onStepChange={(id) => setStep(id as WizardStepId)}
@@ -999,6 +1017,10 @@ function WorkCenterModal({
                   {isCompraventaWizard
                     ? 'se creará el PDV de venta de vehículos y TPV automáticamente.'
                     : 'se creará el PDV de caja automáticamente.'}
+                </p>
+              ) : forceDespacho ? (
+                <p className="text-xs text-blue-800 dark:text-blue-200 bg-blue-50 dark:bg-blue-900/25 border border-blue-200 dark:border-blue-800 rounded-lg px-3 py-2 shrink-0">
+                  Tipo: <span className="font-semibold">Despacho</span> — centro de trabajo tipo oficina para el despacho jurídico.
                 </p>
               ) : (
               <div>
@@ -1521,6 +1543,7 @@ export function SalesPointsTab() {
   const [showProAccessModal, setShowProAccessModal] = useState(false);
   const [proAccessReason, setProAccessReason] = useState<'pro' | 'pdv-extra'>('pro');
   const [forceCreatePdv, setForceCreatePdv] = useState(false);
+  const [forceCreateDespacho, setForceCreateDespacho] = useState(false);
   const [editingItem, setEditingItem] = useState<WorkCenter | null>(null);
   const [search, setSearch] = useState('');
   const [filterActive, setFilterActive] = useState<'all' | 'active' | 'inactive'>('all');
@@ -1543,11 +1566,13 @@ export function SalesPointsTab() {
   const hasDeliveryPdvs = Object.keys(deliveryPdvsByWorkCenter).length > 0;
   const isDelivery = isDeliveryAccount || hasDeliveryPdvs || isOpsBusiness;
   const isCompraventa = isCompraventaBusinessType(currentBusiness?.businessType);
-  /** Delivery, compraventa y bar/restaurante crean local + PDV/caja. */
+  const isLawyer = currentBusiness?.businessType === 'lawyer';
+  /** Delivery, compraventa y bar/restaurante crean local + PDV/caja. Abogados: solo despacho (oficina), sin TPV. */
   const usesRetailPdvFlow =
-    isRetailStoreBusinessType(currentBusiness?.businessType) ||
-    isDeliveryAccount ||
-    hasDeliveryPdvs;
+    !isLawyer &&
+    (isRetailStoreBusinessType(currentBusiness?.businessType) ||
+      isDeliveryAccount ||
+      hasDeliveryPdvs);
   const pdvWizardVariant = resolvePdvWizardVariant({
     businessType: currentBusiness?.businessType,
     isDeliveryAccount,
@@ -1575,6 +1600,8 @@ export function SalesPointsTab() {
   isOpsBusinessRef.current = isOpsBusiness;
   const isCompraventaRef = useRef(isCompraventa);
   isCompraventaRef.current = isCompraventa;
+  const isLawyerRef = useRef(isLawyer);
+  isLawyerRef.current = isLawyer;
   const businessScopeId = resolveBusinessScopeId(currentBusiness);
   const activeStore = useActiveStoreScope();
 
@@ -1633,6 +1660,38 @@ export function SalesPointsTab() {
       if ((isDeliveryAccountRef.current || isCompraventaRef.current || isOpsBusinessRef.current) && !bid) {
         setWorkCenters([]);
         if (seq === loadSeqRef.current) setLoading(false);
+        return;
+      }
+
+      // Abogados: solo despachos de esta empresa (oficina), sin PDV/TPV de otras verticales.
+      if (isLawyerRef.current) {
+        const showSpinner = !hasDisplayedStoresRef.current;
+        if (showSpinner) setLoading(true);
+        try {
+          if (!bid) {
+            setWorkCenters([]);
+            setDeliveryPdvsByWorkCenter({});
+            setDeliveryPdvCodes([]);
+            setDeliveryPdvNames([]);
+            return;
+          }
+          const all = await listWorkCenters(uid);
+          if (seq !== loadSeqRef.current) return;
+          const scoped = all
+            .filter((wc) => !wc.deletedAt && readWorkCenterBusinessId(wc) === bid)
+            .sort((a, b) => a.name.localeCompare(b.name, 'es'));
+          applyDeliveryStoresState({
+            dataUserId: uid,
+            workCenters: scoped,
+            pointsOfSale: [],
+          });
+          hasDisplayedStoresRef.current = true;
+        } catch (err) {
+          if (seq !== loadSeqRef.current) return;
+          toast.error(err instanceof Error ? err.message : 'Error al cargar despachos');
+        } finally {
+          if (seq === loadSeqRef.current) setLoading(false);
+        }
         return;
       }
 
@@ -1735,6 +1794,12 @@ export function SalesPointsTab() {
 
   useEffect(() => {
     if (!businessesFetchSettled) return;
+    if (isLawyer && !businessScopeId) {
+      setWorkCenters([]);
+      setDeliveryPdvsByWorkCenter({});
+      setLoading(false);
+      return;
+    }
     if ((isDeliveryAccount || isCompraventa || isOpsBusiness || isRestaurant) && !businessScopeId) {
       setWorkCenters([]);
       setLoading(false);
@@ -1748,6 +1813,7 @@ export function SalesPointsTab() {
     isCompraventa,
     isOpsBusiness,
     isRestaurant,
+    isLawyer,
     loadData,
   ]);
 
@@ -1830,7 +1896,7 @@ export function SalesPointsTab() {
   const pointOfSaleAccess = usePointOfSaleAccess(pointOfSaleCount);
   const canCreateWorkCenter =
     hasProAccess || pointOfSaleCount === 0 || pointOfSaleAccess.devUnlimitedPdv;
-  const forceFirstCenterAsPdv = !hasProAccess && !editingItem && pointOfSaleCount === 0;
+  const forceFirstCenterAsPdv = !isLawyer && !hasProAccess && !editingItem && pointOfSaleCount === 0;
 
   const defaultActiveOnCreate = true;
 
@@ -1882,9 +1948,10 @@ export function SalesPointsTab() {
   const { focus: activationFocus, clearFocus: clearActivationFocus, isFocused } = useActivationFocus();
 
   const requestCreateWorkCenter = useCallback(
-    (forcePdv = false) => {
+    (forcePdv = false, forceDespacho = false) => {
       setEditingItem(null);
       setForceCreatePdv(forcePdv);
+      setForceCreateDespacho(forceDespacho || (isLawyer && !forcePdv));
       setShowModal(false);
       setShowProAccessModal(false);
 
@@ -1906,23 +1973,29 @@ export function SalesPointsTab() {
       usesRetailPdvFlow,
       pointOfSaleAccess.canCreatePointOfSale,
       pointOfSaleAccess.needsPointOfSaleAddon,
+      isLawyer,
     ],
   );
 
   useEffect(() => {
-    if (searchParams.get('action') !== 'new-pdv') {
+    const action = searchParams.get('action');
+    if (action !== 'new-pdv' && action !== 'new-despacho') {
       newPdvQueryHandledRef.current = false;
       return;
     }
     if (loading || newPdvQueryHandledRef.current) return;
     newPdvQueryHandledRef.current = true;
 
-    requestCreateWorkCenter(true);
+    if (action === 'new-despacho' || isLawyer) {
+      requestCreateWorkCenter(false, true);
+    } else {
+      requestCreateWorkCenter(true);
+    }
 
     const next = new URLSearchParams(searchParams);
     next.delete('action');
     setSearchParams(next, { replace: true });
-  }, [loading, searchParams, setSearchParams, requestCreateWorkCenter]);
+  }, [loading, searchParams, setSearchParams, requestCreateWorkCenter, isLawyer]);
 
   useEffect(() => {
     const wantsHorarios =
@@ -2016,9 +2089,18 @@ export function SalesPointsTab() {
       toast.error('No hay usuario autenticado para guardar este centro.');
       return;
     }
-    const requestedCenterType: WorkCenterType = (pointOfSaleCount === 0 || forceCreatePdv)
-      ? 'punto_de_venta'
-      : wcData.centerType || 'punto_de_venta';
+    const requestedCenterType: WorkCenterType = (() => {
+      if (forceCreateDespacho || (isLawyer && !forceCreatePdv && !editingItem)) {
+        return 'oficina';
+      }
+      if (isLawyer && editingItem) {
+        return wcData.centerType || editingItem.centerType || 'oficina';
+      }
+      if (pointOfSaleCount === 0 || forceCreatePdv) {
+        return 'punto_de_venta';
+      }
+      return wcData.centerType || 'punto_de_venta';
+    })();
     if (!editingItem && !canCreateWorkCenter) {
       setProAccessReason('pro');
       setShowProAccessModal(true);
@@ -2113,12 +2195,17 @@ export function SalesPointsTab() {
         setShowModal(false);
         setEditingItem(null);
         setForceCreatePdv(false);
+        setForceCreateDespacho(false);
         toast.success(`"${updated.name}" actualizado`);
         void loadData();
       } else {
         const businessIdForWc = resolveBusinessScopeId(currentBusiness ?? null);
         if (usesRetailPdvFlow && !businessIdForWc) {
           toast.error(retailCopy.missingBusiness);
+          throw new Error('missing business');
+        }
+        if (isLawyer && !businessIdForWc) {
+          toast.error('Selecciona la empresa del despacho antes de crear.');
           throw new Error('missing business');
         }
         const newNameNorm = sanitizeStoreDisplayName(String(wcData.name || '')).toLowerCase();
@@ -2181,6 +2268,7 @@ export function SalesPointsTab() {
             setShowModal(false);
             setEditingItem(null);
             setForceCreatePdv(false);
+            setForceCreateDespacho(false);
             toast.error(retailCopy.partialSaveWarning);
             void loadData();
             return;
@@ -2237,10 +2325,13 @@ export function SalesPointsTab() {
         setShowModal(false);
         setEditingItem(null);
         setForceCreatePdv(false);
+        setForceCreateDespacho(false);
         toast.success(
-          createdPdv
-            ? `"${created.name}" y PDV ${pointOfSaleDisplayLabel(createdPdv)} guardados`
-            : `"${created.name}" creada`,
+          isLawyer
+            ? `Despacho «${created.name}» creado`
+            : createdPdv
+              ? `"${created.name}" y PDV ${pointOfSaleDisplayLabel(createdPdv)} guardados`
+              : `"${created.name}" creada`,
         );
         // Recarga/scope en segundo plano: el WC+PDV ya están guardados y en estado local.
         void loadData()
@@ -2383,7 +2474,10 @@ export function SalesPointsTab() {
     };
   }, [workCenters]);
 
-  const getTypeLabel = (wc: WorkCenter) => wc.centerType === 'custom' ? (wc.customTypeName || 'Otro') : WORK_CENTER_TYPE_SHORT[wc.centerType];
+  const getTypeLabel = (wc: WorkCenter) => {
+    if (isLawyer && (wc.centerType === 'oficina' || !wc.centerType)) return 'Despacho';
+    return wc.centerType === 'custom' ? (wc.customTypeName || 'Otro') : WORK_CENTER_TYPE_SHORT[wc.centerType];
+  };
 
   return (
     <div className="space-y-6">
@@ -2392,7 +2486,7 @@ export function SalesPointsTab() {
         <div className="p-4 bg-indigo-50 dark:bg-indigo-900/20 border-2 border-indigo-200 dark:border-indigo-800 rounded-xl">
           <div className="text-indigo-600 mb-2"><Building2 className="w-5 h-5" /></div>
           <div className="text-2xl font-bold text-indigo-900 dark:text-indigo-200">{kpis.total}</div>
-          <div className="text-xs text-indigo-700 dark:text-indigo-400 mt-0.5">Total centros</div>
+          <div className="text-xs text-indigo-700 dark:text-indigo-400 mt-0.5">{isLawyer ? 'Total despachos' : 'Total centros'}</div>
         </div>
         <div className="p-4 bg-green-50 dark:bg-green-900/20 border-2 border-green-200 dark:border-green-800 rounded-xl">
           <div className="text-green-600 mb-2"><ToggleRight className="w-5 h-5" /></div>
@@ -2478,8 +2572,14 @@ export function SalesPointsTab() {
         </div>
         <ActivationFieldWrap fieldKey="create-store" activeKey={isFocused('create-store') ? 'create-store' : activationFocus}>
           <AddButtonDropdown
-            label={usesRetailPdvFlow ? retailCopy.createCta : 'Nuevo centro'}
-            onQuickAdd={() => requestCreateWorkCenter(usesRetailPdvFlow)}
+            label={
+              usesRetailPdvFlow
+                ? retailCopy.createCta
+                : isLawyer
+                  ? 'Nuevo despacho'
+                  : 'Nuevo centro'
+            }
+            onQuickAdd={() => requestCreateWorkCenter(usesRetailPdvFlow, isLawyer && !usesRetailPdvFlow)}
             quickAddLabel={usesRetailPdvFlow ? retailCopy.quickAdd : 'Alta rápida'}
             quickAddDesc={usesRetailPdvFlow ? retailCopy.quickAddDesc : 'Formulario de centro de trabajo'}
           />
@@ -2514,16 +2614,22 @@ export function SalesPointsTab() {
                 ? currentBusiness?.name
                   ? retailCopy.emptyWithBusiness(currentBusiness.name)
                   : retailCopy.emptyNoBusiness
-                : 'Crea el primer centro de trabajo: oficina, punto de venta, almacén...'
+                : isLawyer
+                  ? 'Crea el primer despacho del negocio.'
+                  : 'Crea el primer centro de trabajo: oficina, punto de venta, almacén...'
               : 'Prueba con otros términos de búsqueda'}
           </p>
           {workCenters.length === 0 && (
             <ActivationFieldWrap fieldKey="create-store" activeKey={activationFocus}>
               <button
-                onClick={() => requestCreateWorkCenter(usesRetailPdvFlow)}
+                onClick={() => requestCreateWorkCenter(usesRetailPdvFlow, isLawyer && !usesRetailPdvFlow)}
                 className="mt-4 px-4 py-2 bg-gray-900 dark:bg-gray-100 dark:text-gray-900 text-white rounded-xl text-sm font-medium"
               >
-                {usesRetailPdvFlow ? retailCopy.firstCta : '+ Nuevo centro de trabajo'}
+                {usesRetailPdvFlow
+                  ? retailCopy.firstCta
+                  : isLawyer
+                    ? '+ Nuevo despacho'
+                    : '+ Nuevo centro de trabajo'}
               </button>
             </ActivationFieldWrap>
           )}
@@ -2624,7 +2730,7 @@ export function SalesPointsTab() {
                     {retailCopy.missingPdvEdit}
                   </p>
                 )}
-                {wc.centerType === 'punto_de_venta' && deliveryPdvsByWorkCenter[wc._id]?.terminalCode && (
+                {!isLawyer && wc.centerType === 'punto_de_venta' && deliveryPdvsByWorkCenter[wc._id]?.terminalCode && (
                   <div className="rounded-xl border-2 border-indigo-200 dark:border-indigo-800/60 bg-indigo-50/90 dark:bg-indigo-950/40 px-4 py-4 space-y-3">
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
@@ -2751,12 +2857,19 @@ export function SalesPointsTab() {
           setShowModal(false);
           setEditingItem(null);
           setForceCreatePdv(false);
+          setForceCreateDespacho(false);
           setOpenModalAtHorarios(false);
         }}
         onSave={handleSave}
         editItem={editingItem}
         forcePointOfSale={
-          forceFirstCenterAsPdv || forceCreatePdv || (usesRetailPdvFlow && !editingItem)
+          !isLawyer &&
+          (forceFirstCenterAsPdv || forceCreatePdv || (usesRetailPdvFlow && !editingItem))
+        }
+        forceDespacho={
+          isLawyer
+          || forceCreateDespacho
+          || Boolean(editingItem && isLawyer)
         }
         includeOpeningHours={
           usesRetailPdvFlow

@@ -822,6 +822,8 @@ export function CompanyMarcaSettings() {
   const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
   const isRestaurant = isRestaurantBusinessType(currentBusiness?.businessType);
   const isHeladeria = isIceCreamShopBusinessType(currentBusiness?.businessType);
+  /** Reparto Excel / bebidas-postres: solo verticales TPV multi-marca. */
+  const showBrandBillingPanel = isDelivery || isRestaurant || isHeladeria;
   /** PDV obligatorio antes de marca (delivery y heladería). */
   const needsPdvBeforeBrand = isDelivery || isHeladeria;
   /** Mismo asistente de línea (qué vendes → categorías) para TPV retail. */
@@ -1439,7 +1441,9 @@ export function CompanyMarcaSettings() {
         </p>
       )}
 
-      {!loading ? <BrandBillingSettingsPanel businessId={businessId} brands={brands} /> : null}
+      {!loading && showBrandBillingPanel ? (
+        <BrandBillingSettingsPanel businessId={businessId} brands={brands} />
+      ) : null}
 
       <BrandLineModal
         isOpen={showModal}

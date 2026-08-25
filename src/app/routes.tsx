@@ -247,9 +247,14 @@ import { RealEstateContracts } from './pages/saas/RealEstateContracts';
 import { RealEstateAppraisals } from './pages/saas/RealEstateAppraisals';
 
 // ── Lawyer ──
+import { LawyerOpsCenter } from './pages/saas/LawyerOpsCenter';
+import { LawyerCaptacion } from './pages/saas/LawyerCaptacion';
 import { LawyerCases } from './pages/saas/LawyerCases';
+import { LawyerGestion } from './pages/saas/LawyerGestion';
+import { LawyerArchivo } from './pages/saas/LawyerArchivo';
 import { LawyerHearings } from './pages/saas/LawyerHearings';
 import { LawyerDeadlines } from './pages/saas/LawyerDeadlines';
+import { LawyerBilling } from './pages/saas/LawyerBilling';
 
 // ── Nightclub ──
 import { NightclubEvents } from './pages/saas/NightclubEvents';
@@ -843,11 +848,15 @@ export const router = createBrowserRouter([
           { path: 'realestate-appraisals', element: <RequireBusinessOwner><RequireRealEstateVertical><RealEstateAppraisals /></RequireRealEstateVertical></RequireBusinessOwner> },
 
           // Lawyer
+          { path: 'lawyer-ops', element: <RequireBusinessOwner><LawyerOpsCenter /></RequireBusinessOwner> },
+          { path: 'lawyer-captacion', element: <RequireBusinessOwner><LawyerCaptacion /></RequireBusinessOwner> },
           { path: 'lawyer-cases', element: <RequireBusinessOwner><LawyerCases /></RequireBusinessOwner> },
+          { path: 'lawyer-gestion', element: <RequireBusinessOwner><LawyerGestion key="lawyer-gestion-mock" /></RequireBusinessOwner> },
+          { path: 'lawyer-archivo', element: <RequireBusinessOwner><LawyerArchivo /></RequireBusinessOwner> },
           { path: 'lawyer-clients', element: <Navigate to="/saas/clients" replace /> },
           { path: 'lawyer-hearings', Component: LawyerHearings },
           { path: 'lawyer-documents', element: <Navigate to="/saas/documents" replace /> },
-          { path: 'lawyer-billing', element: <Navigate to="/saas/client-billing" replace /> },
+          { path: 'lawyer-billing', element: <RequireBusinessOwner><LawyerBilling /></RequireBusinessOwner> },
           { path: 'lawyer-deadlines', element: <RequireBusinessOwner><LawyerDeadlines /></RequireBusinessOwner> },
 
           // Nightclub

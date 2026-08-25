@@ -24,6 +24,8 @@ import {
   type CeoActionRequest,
 } from './portfolio/ceo/CeoActionRequests';
 import { MobileLazySection } from './MobileLazySection';
+import { enrichPortfolioRowsForAdminDemo } from '../../lib/adminDashboardDemo';
+import { AdminDemoChip } from './AdminDemoChip';
 
 interface GeneralDashboardProps {
   onSelectBusiness: (businessId: string) => void;
@@ -40,9 +42,14 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
   const { rows, finance, loading, isRefreshing, lastUpdatedAt, liveSseOk, error, reload } =
     usePortfolioOverview(user, businesses, { live: true });
 
+  const { rows: displayRows, usingDemo: portfolioDemo } = useMemo(
+    () => enrichPortfolioRowsForAdminDemo(user?.email, rows),
+    [user?.email, rows],
+  );
+
   const sortedRows = useMemo(
-    () => [...rows].sort((a, b) => companyGeneratedMonth(b) - companyGeneratedMonth(a)),
-    [rows],
+    () => [...displayRows].sort((a, b) => companyGeneratedMonth(b) - companyGeneratedMonth(a)),
+    [displayRows],
   );
 
   const {
@@ -117,6 +124,10 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
           canUsePortfolioView={portfolioPlan.canUsePortfolioView}
           portfolioLocked={portfolioPlan.portfolioLocked}
         />
+
+        <div className="flex flex-wrap items-center gap-2">
+          <AdminDemoChip show={portfolioDemo} />
+        </div>
 
         <CeoVisionTopBar
           companyCount={visions.length || businesses.length}

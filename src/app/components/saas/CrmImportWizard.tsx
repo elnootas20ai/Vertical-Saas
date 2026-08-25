@@ -48,7 +48,7 @@ interface CrmImportWizardProps {
   initialMode?: ImportMode;
   /** false = sin columna Responsable (p. ej. delivery) */
   includeResponsible?: boolean;
-  /** iceCreamShop → plantilla Excel clientes heladería */
+  /** iceCreamShop / lawyer → plantilla Excel clientes del vertical */
   templateVertical?: string | null;
   /** Si se indica, exporta todos los clientes del servidor bajo demanda. */
   exportUserId?: string;
@@ -111,7 +111,9 @@ export function CrmImportWizard({
   const importAbortRef = useRef<AbortController | null>(null);
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [mode, setMode] = useState<ImportMode>(initialMode ?? 'leads');
+  const [mode, setMode] = useState<ImportMode>(
+    initialMode ?? (templateVertical === 'lawyer' ? 'clients' : 'leads'),
+  );
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<string[][]>([]);
   const [mapping, setMapping] = useState<Record<number, ImportField>>({});
@@ -132,7 +134,8 @@ export function CrmImportWizard({
 
   useEffect(() => {
     if (initialMode) setMode(initialMode);
-  }, [initialMode]);
+    else if (templateVertical === 'lawyer') setMode('clients');
+  }, [initialMode, templateVertical]);
 
   const activeFields = mode === 'leads' ? LEAD_FIELDS : CLIENT_FIELDS;
   const requiredFields: ImportField[] = mode === 'leads' ? LEAD_REQUIRED_FIELDS : CLIENT_REQUIRED_FIELDS;
@@ -159,7 +162,9 @@ export function CrmImportWizard({
             toast.success(
               templateVertical === 'iceCreamShop'
                 ? 'Plantilla Excel heladería descargada'
-                : 'Plantilla Excel descargada',
+                : templateVertical === 'lawyer'
+                  ? 'Plantilla Excel abogados descargada'
+                  : 'Plantilla Excel descargada',
             );
           },
         },
@@ -176,7 +181,9 @@ export function CrmImportWizard({
             toast.success(
               templateVertical === 'iceCreamShop'
                 ? 'Plantilla CSV heladería descargada'
-                : 'Plantilla CSV descargada',
+                : templateVertical === 'lawyer'
+                  ? 'Plantilla CSV abogados descargada'
+                  : 'Plantilla CSV descargada',
             );
           },
         },
@@ -627,7 +634,9 @@ export function CrmImportWizard({
                     {[
                       { value: 'leads' as ImportMode, label: 'Leads / Consultas', desc: 'Prospectos aún no convertidos', icon: <User className="w-5 h-5" /> },
                       { value: 'clients' as ImportMode, label: 'Clientes', desc: 'Clientes ya existentes', icon: <Users className="w-5 h-5" /> },
-                    ].map((opt) => (
+                    ]
+                      .filter((opt) => !(templateVertical === 'lawyer' && opt.value === 'leads'))
+                      .map((opt) => (
                       <button
                         key={opt.value}
                         onClick={() => setMode(opt.value)}

@@ -1,5 +1,8 @@
 import type { PointOfSale } from './deliveryApi';
-import { isRestaurantBusinessType } from './deliveryOpsTypes';
+import {
+  isRestaurantBusinessType,
+  isStrictDeliveryBusinessType,
+} from './deliveryOpsTypes';
 import { AUTH_PATHS } from './authEntryPaths';
 import { clearAuthTokens, logoutRequest } from './authApi';
 import { clearVertialClientCaches, SESSION_USER_STORAGE_KEY } from './clientSessionStorage';
@@ -114,8 +117,48 @@ function normalizeBusinessScopeId(value?: string | null): string {
   return String(value || '').replace(/^business:/, '').trim();
 }
 
-/** Migración: bindings antiguos sin tpvVertical (inferir restaurante si aplica). */
+function lookupCachedBusinessType(businessId: string): string | null {
+  if (!businessId || typeof window === 'undefined') return null;
+  try {
+    const storages = [sessionStorage, localStorage];
+    for (const storage of storages) {
+      for (let i = 0; i < storage.length; i += 1) {
+        const key = storage.key(i);
+        if (!key?.startsWith('vertial_businesses_cache')) continue;
+        const raw = storage.getItem(key);
+        if (!raw) continue;
+        const parsed = JSON.parse(raw) as unknown;
+        const list = Array.isArray(parsed) ? parsed : [];
+        const match = list.find(
+          (b: { business_id?: string; id?: string; businessType?: string }) =>
+            normalizeBusinessScopeId(b.business_id || b.id) === businessId,
+        );
+        const type = String(match?.businessType || '').trim();
+        if (type) return type;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+/**
+ * Migración / anti-stale: un binding viejo no puede abrir mesas de bar
+ * si la empresa del código es delivery.
+ */
 function inferLegacyTpvVertical(binding: TpvTabletBinding): TpvTabletVertical {
+  const businessId = normalizeBusinessScopeId(binding.businessId);
+  const cachedType = businessId ? lookupCachedBusinessType(businessId) : null;
+
+  // Empresa delivery → siempre TPV delivery (ignora binding restaurant viejo).
+  if (isStrictDeliveryBusinessType(cachedType)) {
+    return TPV_TABLET_VERTICAL_DELIVERY;
+  }
+  if (isRestaurantBusinessType(cachedType)) {
+    return TPV_TABLET_VERTICAL_RESTAURANT;
+  }
+
   if (binding.salaTerminalId) return TPV_TABLET_VERTICAL_RESTAURANT;
 
   const code = String(binding.terminalCode || '').trim().toUpperCase();
@@ -123,32 +166,6 @@ function inferLegacyTpvVertical(binding: TpvTabletBinding): TpvTabletVertical {
 
   if (binding.tpvVertical === TPV_TABLET_VERTICAL_RESTAURANT) return TPV_TABLET_VERTICAL_RESTAURANT;
   if (binding.tpvVertical === TPV_TABLET_VERTICAL_DELIVERY) return TPV_TABLET_VERTICAL_DELIVERY;
-
-  const businessId = normalizeBusinessScopeId(binding.businessId);
-  if (businessId && typeof window !== 'undefined') {
-    try {
-      const storages = [sessionStorage, localStorage];
-      for (const storage of storages) {
-        for (let i = 0; i < storage.length; i += 1) {
-          const key = storage.key(i);
-          if (!key?.startsWith('vertial_businesses_cache')) continue;
-          const raw = storage.getItem(key);
-          if (!raw) continue;
-          const parsed = JSON.parse(raw) as unknown;
-          const list = Array.isArray(parsed) ? parsed : [];
-          const match = list.find(
-            (b: { business_id?: string; id?: string; businessType?: string }) =>
-              normalizeBusinessScopeId(b.business_id || b.id) === businessId,
-          );
-          if (isRestaurantBusinessType(match?.businessType)) {
-            return TPV_TABLET_VERTICAL_RESTAURANT;
-          }
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }
 
   return TPV_TABLET_VERTICAL_DELIVERY;
 }

@@ -91,7 +91,8 @@ export const realEstateConfig = {
 export const lawyerConfig = {
   name: 'lawyer', dbSuffix: 'lawyer',
   entities: {
-    cases:     { type: 'law_case',     idPrefix: 'lwc', fields: ['expediente','tipo','cliente','fechaApertura','estado','abogado','juzgado'], required: ['expediente','cliente'] },
+    leads:     { type: 'law_lead',     idPrefix: 'lwa', fields: ['nombre','telefono','email','canal','tipoAsunto','urgencia','consultaTipo','fechaConsulta','estado','notas','expedienteId','expediente'], required: ['nombre'] },
+    cases:     { type: 'law_case',     idPrefix: 'lwc', fields: ['expediente','tipo','cliente','fechaApertura','estado','abogado','juzgado','leadId','urgencia','notas'], required: ['expediente','cliente'] },
     clients:   { type: 'law_client',   idPrefix: 'lwl', fields: ['nombre','dni','tipo','telefono','email','casosActivos','fechaAlta','saldoPendiente'], required: ['nombre'] },
     hearings:  { type: 'law_hearing',  idPrefix: 'lwh', fields: ['caso','cliente','juzgado','fecha','hora','tipo','sala','estado'], required: ['caso','fecha'] },
     documents: { type: 'law_document', idPrefix: 'lwd', fields: ['nombre','caso','tipo','fecha','autor','estado'], required: ['nombre','caso'] },

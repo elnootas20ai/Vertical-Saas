@@ -118,6 +118,7 @@ import {
   ChefHat,
   Zap,
   Activity,
+  Archive,
   Route,
   Banknote,
   FileStack,
@@ -154,6 +155,7 @@ import {
   DELIVERY_WORK_CENTERS_CHANGED,
   filterWorkCentersForBusinessScope,
   isDeliveryBusinessType,
+  readWorkCenterBusinessId,
   resolveBusinessScopeId,
 } from '../../lib/deliverySetup';
 import { listSalesPoints, type SalesPoint } from '../../lib/salesPointsApi';
@@ -400,7 +402,13 @@ const menuItemDefs = [
   { id: 'realestate-appraisals', navKey: 'realestateAppraisals', icon: <DollarSign className="w-5 h-5" />, path: '/saas/realestate-appraisals' },
 
   // ── Vertical: Abogados ─────────────────────────────────────────────────────
+  { id: 'lawyer-ops',        navKey: 'lawyerOps',        icon: <LayoutDashboard className="w-5 h-5" />, path: '/saas/lawyer-ops' },
+  { id: 'lawyer-captacion',  navKey: 'lawyerCaptacion',  icon: <UserPlus className="w-5 h-5" />,     path: '/saas/lawyer-captacion' },
   { id: 'lawyer-cases',      navKey: 'lawyerCases',      icon: <Briefcase className="w-5 h-5" />,    path: '/saas/lawyer-cases' },
+  { id: 'lawyer-gestion',    navKey: 'lawyerGestion',    icon: <ListChecks className="w-5 h-5" />,   path: '/saas/lawyer-gestion' },
+  { id: 'lawyer-billing',    navKey: 'lawyerBilling',    icon: <Receipt className="w-5 h-5" />,      path: '/saas/lawyer-billing' },
+  { id: 'lawyer-archivo',    navKey: 'lawyerArchivo',    icon: <Archive className="w-5 h-5" />,      path: '/saas/lawyer-archivo' },
+  // Detalle Gestión (acceso desde hub; no en menú principal)
   { id: 'lawyer-hearings',   navKey: 'lawyerHearings',   icon: <Gavel className="w-5 h-5" />,        path: '/saas/lawyer-hearings' },
   { id: 'lawyer-deadlines',  navKey: 'lawyerDeadlines',  icon: <Timer className="w-5 h-5" />,        path: '/saas/lawyer-deadlines' },
 
@@ -538,7 +546,7 @@ const sidebarGroupDefs = [
   { id: 'documentacion',    icon: <FileText className="w-4 h-4 shrink-0" />,      itemIds: ['doc-society', 'doc-contracts', 'doc-licenses', 'doc-financial', 'doc-other'] },
   { id: 'commercial',       icon: <Car className="w-4 h-4 shrink-0" />,           itemIds: ['compraventa-hub', 'compraventa-vehiculos', 'entrada-vehiculo', 'compraventa-compras', 'compraventa-ventas', 'compraventa-tasaciones', 'compraventa-entregas', 'compraventa-crm', 'compraventa-fiscal', 'publicacion-venta'] },
   { id: 'workshop',         icon: <Wrench className="w-4 h-4 shrink-0" />,        itemIds: ['workshop', 'parts', 'tech'] },
-  { id: 'delivery',         icon: <Truck className="w-4 h-4 shrink-0" />,         itemIds: ['tpv-rapido', 'delivery-ops', 'sala', 'caja', 'web-config', 'delivery-integrations'] },
+  { id: 'delivery',         icon: <Truck className="w-4 h-4 shrink-0" />,         itemIds: ['tpv-rapido', 'delivery-ops', 'caja', 'web-config', 'delivery-integrations'] },
   { id: 'cleaning',         icon: <Droplets className="w-4 h-4 shrink-0" />,      itemIds: ['cleaning-hub', 'cleaning-contracts', 'cleaning-services', 'cleaning-workers', 'cleaning-routes', 'cleaning-clients', 'cleaning-execution', 'cleaning-checklist', 'cleaning-quality', 'cleaning-reviews', 'cleaning-incidents', 'cleaning-billing', 'cleaning-materials', 'cleaning-reports'] },
   { id: 'gym',              icon: <Dumbbell className="w-4 h-4 shrink-0" />,      itemIds: ['gym-hub', 'gym-members', 'gym-classes', 'gym-trainers', 'gym-memberships', 'gym-routines', 'gym-access'] },
   { id: 'clinic',           icon: <Stethoscope className="w-4 h-4 shrink-0" />,   itemIds: ['clinic-history', 'clinic-treatments', 'clinic-prescriptions'] },
@@ -546,7 +554,7 @@ const sidebarGroupDefs = [
   { id: 'construction',     icon: <HardHat className="w-4 h-4 shrink-0" />,       itemIds: ['construction-ops', 'construction-projects', 'construction-execution', 'construction-quick-budget', 'construction-budgets', 'construction-partidas', 'construction-collections', 'construction-payments', 'construction-tasks', 'construction-incidents', 'construction-closure'] },
   { id: 'academy',          icon: <GraduationCap className="w-4 h-4 shrink-0" />, itemIds: ['academy-courses', 'academy-enrollments', 'academy-grades'] },
   { id: 'realEstate',       icon: <Building2 className="w-4 h-4 shrink-0" />,     itemIds: ['realestate-properties', 'realestate-visits', 'realestate-contracts', 'realestate-appraisals'] },
-  { id: 'lawyer',           icon: <Scale className="w-4 h-4 shrink-0" />,          itemIds: ['lawyer-cases', 'lawyer-hearings', 'lawyer-deadlines'] },
+  { id: 'lawyer',           icon: <Scale className="w-4 h-4 shrink-0" />,          itemIds: ['lawyer-ops', 'lawyer-captacion', 'lawyer-cases', 'lawyer-gestion', 'lawyer-billing', 'lawyer-archivo'] },
   { id: 'nightclub',        icon: <Music className="w-4 h-4 shrink-0" />,          itemIds: ['nightclub-events', 'nightclub-vip', 'nightclub-promoters', 'nightclub-guestlist', 'nightclub-artists'] },
   { id: 'events',           icon: <PartyPopper className="w-4 h-4 shrink-0" />,   itemIds: ['events-hub', 'events-new-contract', 'events-tpv', 'events-quotes', 'events-pipeline', 'events-services', 'events-route'] },
   { id: 'hairSalon',        icon: <Scissors className="w-4 h-4 shrink-0" />,      itemIds: ['salon-services', 'salon-loyalty'] },
@@ -639,6 +647,8 @@ const VERTICAL_GROUP_ITEM_OVERRIDES: Partial<Record<BusinessType, Record<string,
   },
   delivery: {
     clientesCrm: ['clients', 'promotions'],
+    // Sin Sala/mesas: eso es solo bar/restaurante.
+    delivery: ['tpv-rapido', 'delivery-ops', 'caja', 'web-config', 'delivery-integrations'],
   },
   // Core CRM + ops propias heladería (no rutas Delivery).
   iceCreamShop: {
@@ -654,6 +664,10 @@ const VERTICAL_GROUP_ITEM_OVERRIDES: Partial<Record<BusinessType, Record<string,
   realEstate: {
     // CRM core (no delivery): Clientes + presupuestos/promos.
     clientesCrm: ['clients', 'quotes', 'promotions'],
+  },
+  lawyer: {
+    // Despacho: clientes + propuestas (sin promos TPV; captación = leads).
+    clientesCrm: ['clients', 'quotes'],
   },
 };
 
@@ -775,6 +789,7 @@ function SidebarInner({
   const isCompraventa = isCompraventaBusinessType(vertical);
   const isRestaurantVertical = isRestaurantBusinessType(vertical);
   const isHeladeriaVertical = vertical === 'iceCreamShop';
+  const isLawyerVertical = vertical === 'lawyer';
   const isStrictDeliveryVertical = isDeliveryBusinessType(vertical);
   /** Heladería reutiliza el shell Delivery (sidebar, tiendas/PDV, locks de alta). */
   const usesDeliverySidebarCore = isStrictDeliveryVertical || isHeladeriaVertical;
@@ -783,8 +798,9 @@ function SidebarInner({
     isDeliveryOpsBusinessType(vertical) || isRestaurantVertical || isHeladeriaVertical;
   /** Eventos: bloque PDV/tiendas entre Home y el vertical (como delivery/bar). */
   const isEventsVertical = isEventsBusinessType(vertical);
+  /** Abogados: bloque Despachos (misma mecánica de centros, sin PDV/caja). */
   const showWorkCentersSidebar =
-    usesOpsStoreSidebar || isCompraventa || isEventsVertical;
+    usesOpsStoreSidebar || isCompraventa || isEventsVertical || isLawyerVertical;
   const allowedGroups = vertical
     ? (VERTICAL_GROUPS[vertical] || VERTICAL_GROUPS.carDealership)
     : new Set<string>();
@@ -872,16 +888,27 @@ function SidebarInner({
     try {
       const sps = await listSalesPoints(dataUserId);
       const businessId = resolveBusinessScopeId(currentBusinessRef.current);
-      const scoped = filterWorkCentersForBusinessScope(sps, businessId, {
-        accountBusinessCount,
-      });
-      const filtered = scoped.filter(
-        (sp) =>
-          sp.active !== false &&
-          (!isDeliveryBusinessType(vertical) ||
-            sp.centerType === 'punto_de_venta' ||
-            sp.centerType === 'almacen'),
-      );
+      // Abogados: solo despachos de esta empresa (sin arrastrar PDV/tiendas de otras verticales).
+      const scoped = isLawyerVertical
+        ? sps.filter(
+            (sp) =>
+              sp.active !== false &&
+              !sp.deletedAt &&
+              Boolean(businessId) &&
+              readWorkCenterBusinessId(sp) === businessId,
+          )
+        : filterWorkCentersForBusinessScope(sps, businessId, {
+            accountBusinessCount,
+          });
+      const filtered = isLawyerVertical
+        ? scoped.sort((a, b) => a.name.localeCompare(b.name, 'es'))
+        : scoped.filter(
+            (sp) =>
+              sp.active !== false &&
+              (!isDeliveryBusinessType(vertical) ||
+                sp.centerType === 'punto_de_venta' ||
+                sp.centerType === 'almacen'),
+          );
       setSalesPoints(filtered);
 
       if (isEventsBusinessType(vertical)) {
@@ -913,7 +940,7 @@ function SidebarInner({
       setSalesPoints([]);
       setEventsTabletCodeByWc({});
     }
-  }, [accountBusinessCount, isCompraventa, loadCompraventaSidebarStores, vertical]);
+  }, [accountBusinessCount, isCompraventa, isLawyerVertical, loadCompraventaSidebarStores, vertical]);
 
   const activeStore = useActiveStoreScope();
   const sidebarDelivery = useSidebarDeliveryStoreRows(usesDeliverySidebarCore);
@@ -946,7 +973,7 @@ function SidebarInner({
   loadCompraventaSidebarStoresRef.current = loadCompraventaSidebarStores;
 
   useEffect(() => {
-    if (!isEventsVertical) return;
+    if (!isEventsVertical && !isLawyerVertical) return;
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const onStoresChanged = () => {
       if (debounceTimer) clearTimeout(debounceTimer);
@@ -960,7 +987,7 @@ function SidebarInner({
       if (debounceTimer) clearTimeout(debounceTimer);
       window.removeEventListener(DELIVERY_WORK_CENTERS_CHANGED, onStoresChanged);
     };
-  }, [isEventsVertical, loadSalesPoints]);
+  }, [isEventsVertical, isLawyerVertical, loadSalesPoints]);
 
   useEffect(() => {
     if (!isCompraventa) return;
@@ -1192,7 +1219,11 @@ function SidebarInner({
               ? 'Cocina'
               : isRestaurantVertical && item.id === 'web-config'
                 ? 'Pág. web'
-                : t(`nav.${item.navKey}`),
+                : isLawyerVertical && item.id === 'configuracion'
+                  ? 'Personalizar DPC'
+                  : isLawyerVertical && item.id === 'quotes'
+                    ? 'Propuestas'
+                    : t(`nav.${item.navKey}`),
       };
       let resolved: SidebarItem;
       if (eventsNav.isEvents && !item.disabled) {
@@ -1253,6 +1284,7 @@ function SidebarInner({
     eventsNav.hasClient,
     eventsNav.hasEvent,
     isRestaurantVertical,
+    isLawyerVertical,
   ]);
 
   const sidebarGroups: SidebarGroup[] = sidebarGroupDefs.map(g => {
@@ -1483,6 +1515,11 @@ function SidebarInner({
           onMobileClose();
           return;
         }
+        if (isLawyerVertical) {
+          handleNavigate('/saas/lawyer-ops');
+          onMobileClose();
+          return;
+        }
       }
       onMobileClose();
       return;
@@ -1514,7 +1551,7 @@ function SidebarInner({
     'construction-payments', 'construction-collections', 'construction-closure',
     'academy-courses', 'academy-enrollments', 'academy-grades',
     'realestate-properties', 'realestate-contracts', 'realestate-appraisals',
-    'lawyer-cases', 'lawyer-deadlines',
+    'lawyer-ops', 'lawyer-captacion', 'lawyer-cases', 'lawyer-gestion', 'lawyer-billing', 'lawyer-archivo', 'lawyer-deadlines',
     'nightclub-events', 'nightclub-vip', 'nightclub-promoters', 'nightclub-artists',
     'salon-services', 'salon-loyalty',
     'butcher-hub', 'butcher-clients', 'butcher-orders', 'butcher-sales', 'butcher-tpv',
@@ -1758,7 +1795,9 @@ function SidebarInner({
     ...allowedGroupsList.filter((g) => COMMON_SIDEBAR_GROUPS.has(g.id)),
   ];
   const workCentersSettingsPath = '/saas/settings/tienda';
-  const workCentersAddPath = `${workCentersSettingsPath}?action=new-pdv`;
+  const workCentersAddPath = isLawyerVertical
+    ? `${workCentersSettingsPath}?action=new-despacho`
+    : `${workCentersSettingsPath}?action=new-pdv`;
 
   const salesPointRows: SidebarItem[] =
     usesOpsStoreSidebar
@@ -1787,7 +1826,9 @@ function SidebarInner({
           label: sp.name,
           subLabel: isEventsVertical && !terminalCode ? 'Sin código TPV' : undefined,
           terminalCode,
-          icon: <Store className="w-3.5 h-3.5" />,
+          icon: isLawyerVertical
+            ? <Scale className="w-3.5 h-3.5" />
+            : <Store className="w-3.5 h-3.5" />,
           path: '#',
         };
       });
@@ -1803,7 +1844,9 @@ function SidebarInner({
             id: 'salesPoints-loading',
             label: isEventsVertical
               ? 'Cargando PDV…'
-              : t('sidebar.workCenters.loading', 'Cargando tiendas…'),
+              : isLawyerVertical
+                ? 'Cargando despachos…'
+                : t('sidebar.workCenters.loading', 'Cargando tiendas…'),
             icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />,
             path: '#',
             disabled: true,
@@ -1815,7 +1858,9 @@ function SidebarInner({
             id: 'salesPoints-settings',
             label: isEventsVertical
               ? 'Crear PDV portátil'
-              : t('sidebar.workCenters.firstCenter', 'Primer centro'),
+              : isLawyerVertical
+                ? 'Primer despacho'
+                : t('sidebar.workCenters.firstCenter', 'Primer centro'),
             icon: <Plus className="w-5 h-5" />,
             path: workCentersAddPath,
           },
@@ -1826,7 +1871,9 @@ function SidebarInner({
             id: 'salesPoints-add',
             label: isEventsVertical
               ? 'Nuevo PDV portátil'
-              : t('sidebar.workCenters.newCenter', 'Nuevo centro'),
+              : isLawyerVertical
+                ? 'Nuevo despacho'
+                : t('sidebar.workCenters.newCenter', 'Nuevo centro'),
             icon: <Plus className="w-3.5 h-3.5" />,
             path: workCentersAddPath,
           },
@@ -1836,10 +1883,14 @@ function SidebarInner({
     id: 'salesPoints',
     label: isEventsVertical
       ? 'PDV portátil'
-      : t('sidebar.groups.salesPoints', 'Centros de trabajo'),
+      : isLawyerVertical
+        ? 'Despachos'
+        : t('sidebar.groups.salesPoints', 'Centros de trabajo'),
     icon: isEventsVertical
       ? <Store className="w-4 h-4 shrink-0" />
-      : <Building2 className="w-4 h-4 shrink-0" />,
+      : isLawyerVertical
+        ? <Scale className="w-4 h-4 shrink-0" />
+        : <Building2 className="w-4 h-4 shrink-0" />,
     itemIds: workCentersSidebarItems.map((i) => i.id),
     items: workCentersSidebarItems,
   };

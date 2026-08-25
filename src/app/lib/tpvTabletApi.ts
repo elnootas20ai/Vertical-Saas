@@ -59,8 +59,8 @@ export interface TpvTabletBindingPayload {
   dataUserId: string;
   /** Terminal TPV de sala cuando el login usa código SALA-* */
   salaTerminalId?: string;
-  /** Vertical del TPV fijado por el código (no depende del businessType). */
-  tpvVertical?: 'delivery';
+  /** Vertical del TPV: lo fija el backend según businessType de la empresa del código. */
+  tpvVertical?: 'delivery' | 'restaurant';
 }
 
 export interface TpvTabletLoginResult extends ApiEnvelope<AuthUser> {
@@ -71,6 +71,7 @@ export interface TpvTabletLoginResult extends ApiEnvelope<AuthUser> {
     name: string;
     logo: string;
     owner_user_id?: string;
+    businessType?: string;
   };
   pointOfSale?: PointOfSale;
   terminalBinding?: TpvTabletBindingPayload;

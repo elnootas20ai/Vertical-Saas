@@ -217,7 +217,8 @@ function getModulosStatus(biz: Business | null): BlockStatus {
 function getImportStatus(biz: Business | null): BlockStatus {
   if (!biz || !biz.initialImportStatus) return 'empty';
   const s = biz.initialImportStatus;
-  const vals = [s.stock, s.clients, s.catalog];
+  const clientsOnly = biz.businessType === 'realEstate' || biz.businessType === 'lawyer';
+  const vals = clientsOnly ? [s.clients] : [s.stock, s.clients, s.catalog];
   if (vals.every((v) => v === 'completed')) return 'complete';
   if (vals.some((v) => v === 'completed')) return 'partial';
   if (vals.some((v) => v === 'skipped')) return 'partial';
@@ -287,9 +288,10 @@ function computeAlerts(biz: Business | null, subscription: { status: string }): 
 
   if (biz.onboardingImportPending) {
     const pending: string[] = [];
-    if (biz.initialImportStatus?.stock === 'pending') pending.push('stock');
+    const clientsOnly = biz.businessType === 'realEstate' || biz.businessType === 'lawyer';
+    if (!clientsOnly && biz.initialImportStatus?.stock === 'pending') pending.push('stock');
     if (biz.initialImportStatus?.clients === 'pending') pending.push('clientes');
-    if (biz.initialImportStatus?.catalog === 'pending') pending.push('catálogo');
+    if (!clientsOnly && biz.initialImportStatus?.catalog === 'pending') pending.push('catálogo');
     if (pending.length > 0) {
       alerts.push({
         id: 'import-pending',
@@ -349,6 +351,9 @@ const CONNECTIONS = [
 /** Módulos / conexiones de catálogo-proveedores ocultos en inmobiliaria. */
 const REAL_ESTATE_HIDDEN_MODULE_IDS = new Set(['catalog', 'stock', 'suppliers', 'invoices', 'tpv', 'sales']);
 const REAL_ESTATE_HIDDEN_CONNECTION_IDS = new Set(['stock', 'suppliers', 'invoices', 'tpv', 'ocr']);
+/** Misma ocultación retail que inmobiliaria (despacho no usa TPV/stock). */
+const LAWYER_HIDDEN_MODULE_IDS = REAL_ESTATE_HIDDEN_MODULE_IDS;
+const LAWYER_HIDDEN_CONNECTION_IDS = REAL_ESTATE_HIDDEN_CONNECTION_IDS;
 
 // ─── Main component ────────────────────────────────────────────────────────────
 
@@ -375,6 +380,7 @@ export function ConfiguracionGeneral() {
   const isHeladeriaBiz = isIceCreamShopBusinessType(biz?.businessType);
   const isEventsBiz = biz?.businessType === 'events';
   const isRealEstateBiz = biz?.businessType === 'realEstate';
+  const isLawyerBiz = biz?.businessType === 'lawyer';
   const isDeliveryOpsBiz = isDeliveryOpsBusinessType(biz?.businessType);
   /** Delivery, bar/restaurante y heladería: catálogo TPV + import Excel. */
   const usesTpvCatalogOps = isDeliveryOpsBiz || isRestaurantBiz || isHeladeriaBiz;
@@ -390,13 +396,14 @@ export function ConfiguracionGeneral() {
   const visibleConnections = useMemo(
     () => CONNECTIONS.filter((conn) => {
       if (isRealEstateBiz && REAL_ESTATE_HIDDEN_CONNECTION_IDS.has(conn.id)) return false;
+      if (isLawyerBiz && LAWYER_HIDDEN_CONNECTION_IDS.has(conn.id)) return false;
       if (conn.id === 'tpv') return usesTpvCatalogOps;
       if (conn.id === 'stock' && isCarDealershipBiz) return false;
       return true;
     }).map((conn) => (
       conn.id === 'tpv' ? { ...conn, path: retailCeoTpvPath } : conn
     )),
-    [usesTpvCatalogOps, isCarDealershipBiz, isRealEstateBiz, retailCeoTpvPath],
+    [usesTpvCatalogOps, isCarDealershipBiz, isRealEstateBiz, isLawyerBiz, retailCeoTpvPath],
   );
   const resolvedImportStatus = importData || biz?.initialImportStatus || null;
   const catalogImportDone =
@@ -726,8 +733,12 @@ export function ConfiguracionGeneral() {
           : isDeliveryBiz
             ? `${retailCenters.length} tienda(s) · ${pdvCount} PDV`
             : `${retailCenters.length} local(es) · ${pdvCount} PDV`
-        : `${activeCenters.length} centro(s) activo(s)`
-      : hrCopy.sedesEmptyHint;
+        : isLawyerBiz
+          ? `${activeCenters.length} despacho(s) activo(s)`
+          : `${activeCenters.length} centro(s) activo(s)`
+      : isLawyerBiz
+        ? 'Crea tu primer despacho para organizar el día a día'
+        : hrCopy.sedesEmptyHint;
 
   const sedesStats = loadingCenters
     ? '…'
@@ -753,7 +764,7 @@ export function ConfiguracionGeneral() {
     {
       id: 'sedes',
       icon: Store,
-      title: 'Sedes / PDV',
+      title: isLawyerBiz ? 'Despachos / DPC' : 'Sedes / PDV',
       description: sedesDescription,
       status: loadingCenters ? 'partial' as BlockStatus : getSedesStatus(activeCenters.length),
       route: '/saas/settings/tienda',
@@ -807,9 +818,9 @@ export function ConfiguracionGeneral() {
       status: (activeModulesSet.has('tpv') ? 'complete' : 'empty') as BlockStatus,
       route: '#tpv-config',
       stats: activeModulesSet.has('tpv') ? 'Activo' : 'Inactivo',
-      hidden: isEventsBiz || isRealEstateBiz || (!activeModulesSet.has('tpv') && !contractedModulesSet.has('tpv')),
+      hidden: isEventsBiz || isRealEstateBiz || isLawyerBiz || (!activeModulesSet.has('tpv') && !contractedModulesSet.has('tpv')),
     },
-  ], [biz, activeCenters.length, sedesDescription, sedesStats, loadingCenters, invitedAccepted, modulesData, activeModulesSet, contractedModulesSet, isEventsBiz, isRealEstateBiz]);
+  ], [biz, activeCenters.length, sedesDescription, sedesStats, loadingCenters, invitedAccepted, modulesData, activeModulesSet, contractedModulesSet, isEventsBiz, isRealEstateBiz, isLawyerBiz]);
 
   const visibleBlocks = blocks.filter((b) => !('hidden' in b && b.hidden));
 
@@ -958,7 +969,11 @@ export function ConfiguracionGeneral() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {MODULE_DEFS.filter((mod) => !(isRealEstateBiz && REAL_ESTATE_HIDDEN_MODULE_IDS.has(mod.id))).map((mod) => {
+            {MODULE_DEFS.filter((mod) => {
+              if (isRealEstateBiz && REAL_ESTATE_HIDDEN_MODULE_IDS.has(mod.id)) return false;
+              if (isLawyerBiz && LAWYER_HIDDEN_MODULE_IDS.has(mod.id)) return false;
+              return true;
+            }).map((mod) => {
               const Icon = mod.icon;
               const isActive = activeModulesSet.has(mod.id);
               const isContracted = contractedModulesSet.size === 0 || contractedModulesSet.has(mod.id);
@@ -1013,7 +1028,9 @@ export function ConfiguracionGeneral() {
             <div>
               <h2 className="font-bold text-gray-900 dark:text-gray-100">Importación inicial</h2>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                {isRealEstateBiz
+                {isLawyerBiz
+                  ? 'Despacho: importa tu base de clientes (DNI/CIF, contacto, etiquetas de asunto).'
+                  : isRealEstateBiz
                   ? 'Inmobiliaria: importa tu base de clientes para empezar a operar.'
                   : usesTpvCatalogOps
                   ? isRestaurantBiz
@@ -1033,9 +1050,9 @@ export function ConfiguracionGeneral() {
           ) : null}
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {(isRealEstateBiz
+            {(isLawyerBiz || isRealEstateBiz
               ? [
-                  { key: 'clients' as const, step: 1, label: 'Clientes', desc: 'Base de datos de clientes', icon: Users },
+                  { key: 'clients' as const, step: 1, label: 'Clientes', desc: isLawyerBiz ? 'Clientes del despacho (persona física / jurídica)' : 'Base de datos de clientes', icon: Users },
                 ]
               : usesTpvCatalogOps
               ? [
@@ -1111,6 +1128,7 @@ export function ConfiguracionGeneral() {
           exportBusinessId={usesTpvCatalogOps ? businessScopeId || undefined : undefined}
           importBusinessId={usesTpvCatalogOps ? businessScopeId || undefined : undefined}
           includeResponsible={!isDeliveryBiz}
+          templateVertical={isHeladeriaBiz ? 'iceCreamShop' : isLawyerBiz ? 'lawyer' : null}
         />
         {importPopup === 'stock' && usesTpvCatalogOps ? (
           <GenericImportModal

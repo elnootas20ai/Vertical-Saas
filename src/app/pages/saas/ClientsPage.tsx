@@ -1591,6 +1591,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   const isRestaurantBusiness = currentBusiness?.businessType === 'restaurant';
   const isHeladeriaBusiness = currentBusiness?.businessType === 'iceCreamShop';
   const isRealEstateBusiness = currentBusiness?.businessType === 'realEstate';
+  const isLawyerBusiness = currentBusiness?.businessType === 'lawyer';
   const reManagerRoles = useMemo(
     () => new Set([
       'Admin', 'Gerente', 'GerenteGrupo', 'Administrador', 'Gestor', 'Encargado', 'Superadmin', 'Administración',
@@ -3327,7 +3328,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                 value={filterWorkCenter}
                 onChange={(e) => setFilterWorkCenter(e.target.value)}
               >
-                <option value="all">Todos los centros</option>
+                <option value="all">{isLawyerBusiness ? 'Todos los despachos' : 'Todos los centros'}</option>
                 {activeWorkCenters.map((wc) => (
                   <option key={wc.id} value={wc.id}>{wc.name}</option>
                 ))}
@@ -4551,7 +4552,9 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
 
   const layoutSubtitleByTab: Record<ClientTabId, string> = {
     leads: 'Gestión de leads',
-    clients: isRestaurantBusiness
+    clients: isLawyerBusiness
+      ? 'Ficha de clientes del despacho · alta, Excel y búsqueda'
+      : isRestaurantBusiness
       ? 'Clientes del local · reservas y fidelización'
       : isHeladeriaBusiness
         ? 'Ficha de clientes · alta, Excel y búsqueda'
@@ -4606,7 +4609,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                   value={filterWorkCenter}
                   onChange={(e) => setFilterWorkCenter(e.target.value)}
                 >
-                  <option value="all">Todos los centros</option>
+                  <option value="all">{isLawyerBusiness ? 'Todos los despachos' : 'Todos los centros'}</option>
                   {activeWorkCenters.map((wc) => (
                     <option key={wc.id} value={wc.id}>{wc.name}</option>
                   ))}
@@ -4790,7 +4793,9 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
         exportBusinessId={scopedClientsBusinessId}
         importBusinessId={scopedClientsBusinessId}
         includeResponsible={!usesDeliveryLikeCrmActions}
-        templateVertical={isHeladeriaBusiness ? 'iceCreamShop' : null}
+        templateVertical={
+          isHeladeriaBusiness ? 'iceCreamShop' : isLawyerBusiness ? 'lawyer' : null
+        }
         onImportComplete={() => {
           if (useServerClients && !useSegmentMode) void refreshPaginatedClients();
         }}

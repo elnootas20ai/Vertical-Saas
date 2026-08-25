@@ -106,7 +106,12 @@ function ownerNavItemsForVertical(businessType?: string | null): BottomNavItem[]
         label: 'Operativa',
         matchPaths: ['/saas/vertical/delivery/pedidos', '/saas/vertical/delivery'],
       },
-      { id: 'sala', path: '/saas/sala', icon: Armchair, label: 'Sala' },
+      {
+        id: 'tpv',
+        path: '/saas/vertical/delivery/tpv',
+        icon: Zap,
+        label: 'TPV',
+      },
       {
         id: 'caja',
         path: '/saas/vertical/delivery/caja',

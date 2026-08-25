@@ -13,6 +13,11 @@ import { toast } from 'sonner';
 import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
+import {
+  buildLawyerDemoBundle,
+  isLawyerDemoViewer,
+  withLawyerDemoList,
+} from '../../lib/lawyerOpsDemo';
 
 type HearingType = 'vista_oral' | 'declaracion' | 'conciliacion' | 'mediacion';
 type HearingStatus = 'programada' | 'aplazada' | 'celebrada' | 'suspendida';
@@ -73,11 +78,12 @@ export function LawyerHearings() {
     setLoading(true);
     try {
       const list = await api.list(userId);
-      setHearings(list);
+      const demo = isLawyerDemoViewer(user?.email) ? buildLawyerDemoBundle(userId).hearings : [];
+      setHearings(withLawyerDemoList(list, demo as Hearing[], user?.email));
     } finally {
       setLoading(false);
     }
-  }, [userId, api]);
+  }, [userId, user?.email, api]);
 
   useEffect(() => {
     loadData();

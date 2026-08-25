@@ -64,6 +64,8 @@ import { usePortfolioPlanAccess } from '../../hooks/usePortfolioPlanAccess';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { isDeliveryBusinessType, loadDeliveryStores } from '../../lib/deliverySetup';
 import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
+import { shouldUseAdminDashboardDemo } from '../../lib/adminDashboardDemoGate';
+import { getAdminUnifiedOpsDemo } from '../../lib/adminDashboardDemo';
 import { RestaurantLiveDashboardPanelFromContext } from '../../components/saas/restaurant/RestaurantLiveDashboardPanel';
 import { RestaurantDashboardBillingCharts } from '../../verticals/restaurant/RestaurantDashboardBillingCharts';
 import { CRM_CLIENTS_SYNC_EVENT } from '../../lib/crmApi';
@@ -421,8 +423,9 @@ function getQuickAccessItems(vertical: string): QuickAccessItem[] {
       { label: 'Visitas', icon: <CalendarCheck className="w-5 h-5" />, route: '/saas/realestate-visits', color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950/40' },
     ],
     lawyer: [
-      { label: 'Casos', icon: <Briefcase className="w-5 h-5" />, route: '/saas/lawyer-cases', color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950/40' },
-      { label: 'Vistas', icon: <CalendarCheck className="w-5 h-5" />, route: '/saas/lawyer-hearings', color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950/40' },
+      { label: 'Centro ops', icon: <LayoutDashboard className="w-5 h-5" />, route: '/saas/lawyer-ops', color: 'text-slate-600', bg: 'bg-slate-50 dark:bg-slate-950/40' },
+      { label: 'Captación', icon: <UserPlus className="w-5 h-5" />, route: '/saas/lawyer-captacion', color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-950/40' },
+      { label: 'Expedientes', icon: <Briefcase className="w-5 h-5" />, route: '/saas/lawyer-cases', color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950/40' },
     ],
     nightclub: [
       { label: 'Eventos', icon: <CalendarCheck className="w-5 h-5" />, route: '/saas/nightclub-events', color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950/40' },
@@ -844,7 +847,12 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
       setDeliveryTpvSessions(tpvSessions || []);
 
       if (pulseStores.length === 0 && (orders || []).length === 0) {
-        setDeliveryMetrics(emptyPortfolioMetrics());
+        const empty = emptyPortfolioMetrics();
+        setDeliveryMetrics(
+          shouldUseAdminDashboardDemo(authUser?.email)
+            ? getAdminUnifiedOpsDemo(businessId, vertical)
+            : empty,
+        );
         setDeliveryOpsPulses({ pulses7d: [], pulsesMonth: [] });
         setDeliveryScope({
           orders: orders || [],
@@ -863,7 +871,13 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
         scopePdvIds.length === 0
           ? emptyPortfolioMetrics()
           : computePortfolioMetrics(orders, scopePdvIds, primaryPdv, todayKey, wcScope);
-      setDeliveryMetrics(applyTpvCashMetrics(baseMetrics, tpvSessions || [], scopePdvIds, todayKey));
+      const withCash = applyTpvCashMetrics(baseMetrics, tpvSessions || [], scopePdvIds, todayKey);
+      const emptyOps = withCash.revenueMonth <= 0 && withCash.revenueToday <= 0 && withCash.ordersMonth <= 0;
+      setDeliveryMetrics(
+        emptyOps && shouldUseAdminDashboardDemo(authUser?.email)
+          ? getAdminUnifiedOpsDemo(businessId, vertical)
+          : withCash,
+      );
       setDeliveryOpsPulses({
         pulses7d: buildPulses(keys7d),
         pulsesMonth: buildPulses(keysMonth),

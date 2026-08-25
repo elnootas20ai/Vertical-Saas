@@ -53,6 +53,19 @@ export const VERTICAL_HIDDEN_MENU_ITEMS: Partial<Record<BusinessType, readonly s
   ],
   /** Inmobiliaria: sin catálogo TPV ni proveedores (cartera = propiedades). */
   realEstate: ['catalog', 'catalog-stock', 'costing', 'suppliers', 'compras-stock'],
+  /** Abogados: sin retail TPV / catálogo / comisiones de venta. */
+  lawyer: [
+    'catalog',
+    'catalog-stock',
+    'costing',
+    'suppliers',
+    'compras-stock',
+    'commissions',
+    'promotions',
+    'sales',
+    'pipeline',
+    'sales-metrics',
+  ],
 };
 
 /** Tienda web / pedidos online (menú + ruta). Restaurante también: entrada «Pág. web». */
@@ -78,11 +91,15 @@ export function isVerticalModuleEnabled(
 }
 
 const EVENTS_HIDDEN_SETTINGS_TABS = new Set(['brands', 'salesPoints', 'tpvPrinter']);
+/** Despacho: sin marcas delivery ni impresora TPV (sí despachos / sedes). */
+const LAWYER_HIDDEN_SETTINGS_TABS = new Set(['brands', 'tpvPrinter']);
 
 export function isSettingsTabVisibleForVertical(
   tabId: string,
   businessType: BusinessType | string | null | undefined,
 ): boolean {
-  if (String(businessType || '').trim() !== 'events') return true;
-  return !EVENTS_HIDDEN_SETTINGS_TABS.has(tabId);
+  const bt = String(businessType || '').trim();
+  if (bt === 'events') return !EVENTS_HIDDEN_SETTINGS_TABS.has(tabId);
+  if (bt === 'lawyer') return !LAWYER_HIDDEN_SETTINGS_TABS.has(tabId);
+  return true;
 }

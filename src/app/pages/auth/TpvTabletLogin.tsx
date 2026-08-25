@@ -12,6 +12,7 @@ import { normalizeTpvTabletCode } from '../../lib/tpvTabletLoginUrl';
 import { getRetailOpsUiCopy } from '../../lib/retailUiCopy';
 import { writeDeliveryOpsSelectedPdvId } from '../../lib/deliveryOpsPdvSelection';
 import { isBrowserOnline } from '../../lib/tpvTabletOffline';
+import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import {
   readTpvTabletBinding,
   writeTpvTabletBinding,
@@ -22,7 +23,7 @@ import { prefetchTabletCajaOpeningHint } from '../../lib/tabletCajaOpeningHint';
 import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
 
 /** Marca visible del front embebido: si la tablet no la muestra, el build es viejo. */
-const TPV_UI_BUILD_STAMP = String(import.meta.env.VITE_BUILD_STAMP || 'caja v4');
+const TPV_UI_BUILD_STAMP = String(import.meta.env.VITE_BUILD_STAMP || 'delivery-no-mesas v5');
 
 export function TpvTabletLogin() {
   const navigate = useNavigate();
@@ -91,6 +92,13 @@ export function TpvTabletLogin() {
     const pdv = result.pointOfSale;
 
     if (terminalBinding) {
+      const businessType = String(
+        (business as { businessType?: string } | undefined)?.businessType || '',
+      ).trim();
+      // Nunca abrir mesas/bar si la empresa del código es delivery.
+      const tpvVertical = isRestaurantBusinessType(businessType)
+        ? 'restaurant'
+        : 'delivery';
       writeTpvTabletBinding({
         terminalCode: terminalBinding.terminalCode,
         pdvId: terminalBinding.pdvId,
@@ -98,8 +106,8 @@ export function TpvTabletLogin() {
         businessId: terminalBinding.businessId,
         dataUserId: terminalBinding.dataUserId,
         authUserId: String(user?.user_id || '').trim() || undefined,
-        tpvVertical: terminalBinding.tpvVertical || 'delivery',
-        salaTerminalId: terminalBinding.salaTerminalId,
+        tpvVertical,
+        salaTerminalId: tpvVertical === 'restaurant' ? terminalBinding.salaTerminalId : undefined,
         pdvName: pdv?.name,
         businessName: business?.name,
       });
@@ -117,7 +125,15 @@ export function TpvTabletLogin() {
     }
 
     const dest =
-      (typeof result.redirectTo === 'string' && result.redirectTo.startsWith('/saas/worker/tpv')
+      (() => {
+        const businessType = String(
+          (business as { businessType?: string } | undefined)?.businessType || '',
+        ).trim();
+        if (isRestaurantBusinessType(businessType)) return '/saas/worker/tpv/restaurant';
+        if (businessType === 'delivery') return '/saas/worker/tpv/delivery';
+        return null;
+      })()
+      || (typeof result.redirectTo === 'string' && result.redirectTo.startsWith('/saas/worker/tpv')
         ? result.redirectTo
         : null)
       || resolveTpvTabletWorkerPath();

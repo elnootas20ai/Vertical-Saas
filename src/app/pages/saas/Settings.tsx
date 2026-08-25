@@ -4293,7 +4293,9 @@ export function Settings() {
                       const tabLabel =
                         tab.id === 'salesPoints' && isRestaurantBusinessType(currentBusiness?.businessType)
                           ? 'Bar/restaurante'
-                          : defaultLabel;
+                          : tab.id === 'salesPoints' && currentBusiness?.businessType === 'lawyer'
+                            ? 'Despachos'
+                            : defaultLabel;
                       const usersTabMeta =
                         tab.id === 'users' && currentBusiness
                           ? `${teamStats.total} ${teamStats.total === 1 ? 'miembro' : 'miembros'} en el equipo${

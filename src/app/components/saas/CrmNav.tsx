@@ -16,6 +16,9 @@ const CRM_TABS: { id: CrmSection; label: string; path: string }[] = [
 /** Inmobiliaria: CRM core sin leads / facturación / alertas en la barra. */
 const REAL_ESTATE_CRM_TAB_IDS = new Set<CrmSection>(['clients', 'quotes', 'promotions']);
 
+/** Abogados: clientes + propuestas (captación cubre leads; sin promos TPV). */
+const LAWYER_CRM_TAB_IDS = new Set<CrmSection>(['clients', 'quotes']);
+
 /** Bar/restaurante: igual que el sidebar — Clientes + Promociones (sin leads/presupuestos). */
 const RESTAURANT_CRM_TAB_IDS = new Set<CrmSection>(['clients', 'promotions']);
 
@@ -33,17 +36,26 @@ export function CrmNav({ active }: CrmNavProps) {
   const navigate = useNavigate();
   const businessType = useBusinessOptional()?.currentBusiness?.businessType;
   const isRealEstate = businessType === 'realEstate';
+  const isLawyer = businessType === 'lawyer';
   const isRestaurant = businessType === 'restaurant';
   const isDelivery = businessType === 'delivery';
   const isEvents = businessType === 'events';
 
   const tabs = useMemo(() => {
-    if (isRealEstate) return CRM_TABS.filter((t) => REAL_ESTATE_CRM_TAB_IDS.has(t.id));
-    if (isRestaurant) return CRM_TABS.filter((t) => RESTAURANT_CRM_TAB_IDS.has(t.id));
-    if (isDelivery) return CRM_TABS.filter((t) => DELIVERY_CRM_TAB_IDS.has(t.id));
-    if (isEvents) return CRM_TABS.filter((t) => EVENTS_CRM_TAB_IDS.has(t.id));
-    return CRM_TABS;
-  }, [isRealEstate, isRestaurant, isDelivery, isEvents]);
+    const base = isLawyer
+      ? CRM_TABS.filter((t) => LAWYER_CRM_TAB_IDS.has(t.id))
+      : isRealEstate
+        ? CRM_TABS.filter((t) => REAL_ESTATE_CRM_TAB_IDS.has(t.id))
+        : isRestaurant
+          ? CRM_TABS.filter((t) => RESTAURANT_CRM_TAB_IDS.has(t.id))
+          : isDelivery
+            ? CRM_TABS.filter((t) => DELIVERY_CRM_TAB_IDS.has(t.id))
+            : isEvents
+              ? CRM_TABS.filter((t) => EVENTS_CRM_TAB_IDS.has(t.id))
+              : CRM_TABS;
+    if (!isLawyer) return base;
+    return base.map((t) => (t.id === 'quotes' ? { ...t, label: 'Propuestas' } : t));
+  }, [isRealEstate, isLawyer, isRestaurant, isDelivery, isEvents]);
 
   return (
     <div className="flex w-full bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">

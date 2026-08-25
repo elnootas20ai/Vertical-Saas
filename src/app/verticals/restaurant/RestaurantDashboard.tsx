@@ -52,6 +52,11 @@ import { listBrandsRequest, type Brand } from '../../lib/brandsApi';
 import { fetchActiveNow, type ActiveMember } from '../../lib/clockinsApi';
 import { RESTAURANT_OPS_HOME_PATH } from '../../lib/retailOpsPaths';
 import {
+  shouldUseAdminDashboardDemo,
+} from '../../lib/adminDashboardDemoGate';
+import { getAdminRestaurantDemoKpis } from '../../lib/adminDashboardDemo';
+import { AdminDemoChip } from '../../components/saas/AdminDemoChip';
+import {
   buildRestaurantOpsSnapshot,
   formatDwellMinutes,
   type RestaurantOpsPipelineKey,
@@ -384,6 +389,44 @@ export function RestaurantDashboard({ onSelectGeneral }: VerticalDashboardProps)
   );
 
   const kpis = serverData?.kpis || null;
+  const adminDemo = useMemo(() => {
+    if (!shouldUseAdminDashboardDemo(user?.email)) return null;
+    if (snapshot.tablesTotal > 0 || snapshot.paidTodayEuro > 0) return null;
+    if (kpis && Number(kpis.salesToday || 0) > 0) return null;
+    return getAdminRestaurantDemoKpis(businessId || 'restaurant');
+  }, [user?.email, snapshot.tablesTotal, snapshot.paidTodayEuro, kpis, businessId]);
+
+  const displayPaidToday = adminDemo?.salesToday ?? snapshot.paidTodayEuro;
+  const displayClosed = adminDemo?.ticketsToday ?? closedTodayCount;
+  const displayAvg = adminDemo?.avgTicket ?? avgTicketToday;
+  const displayGuests = adminDemo ? adminDemo.tablesOccupied * 2 : snapshot.guests;
+  const displayOcc = adminDemo
+    ? Math.round((adminDemo.tablesOccupied / Math.max(1, adminDemo.tablesFree + adminDemo.tablesOccupied)) * 100)
+    : occupancyPct;
+  const displayReservations = adminDemo?.reservationsToday ?? todayReservations.length;
+  const displayWaitlist = adminDemo?.waitlist ?? snapshot.waitlistActive;
+  const displayTablesTotal = adminDemo
+    ? adminDemo.tablesFree + adminDemo.tablesOccupied
+    : snapshot.tablesTotal;
+  const displayPipeline = adminDemo
+    ? {
+        free: adminDemo.tablesFree,
+        occupied: adminDemo.tablesOccupied,
+        kitchen: adminDemo.kitchenPending,
+        ready: 2,
+        to_pay: 3,
+      }
+    : snapshot.pipeline;
+  const displayKpis = adminDemo
+    ? {
+        salesToday: adminDemo.salesToday,
+        salesTodayCount: adminDemo.ticketsToday,
+        salesMonth: Math.round(adminDemo.salesToday * 22),
+        expensesMonth: Math.round(adminDemo.salesToday * 12),
+        estimatedProfit: Math.round(adminDemo.salesToday * 10),
+      }
+    : kpis;
+
   const scoped = useCallback(
     (path: string) => saasPathWithBusinessScope(path, businessId),
     [businessId],
@@ -393,6 +436,7 @@ export function RestaurantDashboard({ onSelectGeneral }: VerticalDashboardProps)
     <Layout title="Dashboard" subtitle={businessName}>
       <div className="relative flex flex-col gap-4 pb-8">
         <div className="flex flex-wrap items-center justify-end gap-1.5 -mt-1">
+          <AdminDemoChip show={Boolean(adminDemo)} />
           <LiveBadge
             live={sseOk}
             refreshing={loading && hasData}
@@ -443,15 +487,15 @@ export function RestaurantDashboard({ onSelectGeneral }: VerticalDashboardProps)
                   icon={Banknote}
                   iconClass="text-emerald-600 dark:text-emerald-400"
                   label="Cobrado hoy"
-                  value={eur(snapshot.paidTodayEuro)}
-                  sub={`${closedTodayCount} cuenta${closedTodayCount === 1 ? '' : 's'} cerrada${closedTodayCount === 1 ? '' : 's'}`}
+                  value={eur(displayPaidToday)}
+                  sub={`${displayClosed} cuenta${displayClosed === 1 ? '' : 's'} cerrada${displayClosed === 1 ? '' : 's'}`}
                   onClick={() => navigate(scoped('/saas/caja'))}
                 />
                 <MiniStat
                   icon={Receipt}
                   iconClass="text-blue-600 dark:text-blue-400"
                   label="Ticket medio"
-                  value={avgTicketToday > 0 ? eur(avgTicketToday) : '—'}
+                  value={displayAvg > 0 ? eur(displayAvg) : '—'}
                   sub="por cuenta cerrada hoy"
                   onClick={() => navigate(scoped('/saas/caja'))}
                 />
@@ -459,15 +503,15 @@ export function RestaurantDashboard({ onSelectGeneral }: VerticalDashboardProps)
                   icon={Armchair}
                   iconClass="text-rose-600 dark:text-rose-400"
                   label="Comensales"
-                  value={String(snapshot.guests)}
-                  sub={`ocupación ${occupancyPct}%`}
+                  value={String(displayGuests)}
+                  sub={`ocupación ${displayOcc}%`}
                   onClick={() => navigate(scoped('/saas/sala'))}
                 />
                 <MiniStat
                   icon={BookmarkCheck}
                   iconClass="text-indigo-600 dark:text-indigo-400"
                   label="Reservas hoy"
-                  value={String(todayReservations.length)}
+                  value={String(displayReservations)}
                   sub="pendientes de sentar"
                   onClick={() => navigate(scoped('/saas/reservations'))}
                 />
@@ -475,9 +519,9 @@ export function RestaurantDashboard({ onSelectGeneral }: VerticalDashboardProps)
                   icon={ListChecks}
                   iconClass="text-amber-600 dark:text-amber-400"
                   label="Lista espera"
-                  value={String(snapshot.waitlistActive)}
+                  value={String(displayWaitlist)}
                   sub="grupos esperando mesa"
-                  warn={snapshot.waitlistActive > 0}
+                  warn={displayWaitlist > 0}
                   onClick={() => navigate(scoped('/saas/lista-espera'))}
                 />
               </div>
@@ -487,12 +531,12 @@ export function RestaurantDashboard({ onSelectGeneral }: VerticalDashboardProps)
             <SectionCard
               icon={UtensilsCrossed}
               title="Sala en vivo"
-              hint={`${snapshot.tablesTotal} mesas en plano`}
+              hint={`${displayTablesTotal} mesas en plano`}
               action={{ label: 'Abrir sala', onClick: () => navigate(scoped('/saas/sala')) }}
             >
               <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-5">
                 {PIPELINE.map((p) => {
-                  const n = snapshot.pipeline[p.key];
+                  const n = displayPipeline[p.key as keyof typeof displayPipeline] ?? 0;
                   const hot = n > 0;
                   return (
                     <button
@@ -755,30 +799,30 @@ export function RestaurantDashboard({ onSelectGeneral }: VerticalDashboardProps)
                     icon={Euro}
                     iconClass="text-blue-600 dark:text-blue-400"
                     label="Ventas hoy"
-                    value={kpis ? eur(kpis.salesToday) : '—'}
-                    sub={kpis ? `${kpis.salesTodayCount} venta${kpis.salesTodayCount === 1 ? '' : 's'}` : undefined}
+                    value={displayKpis ? eur(displayKpis.salesToday) : '—'}
+                    sub={displayKpis ? `${displayKpis.salesTodayCount} venta${displayKpis.salesTodayCount === 1 ? '' : 's'}` : undefined}
                     onClick={() => navigate(scoped('/saas/income-expenses'))}
                   />
                   <MiniStat
                     icon={TrendingUp}
                     iconClass="text-emerald-600 dark:text-emerald-400"
                     label="Ventas mes"
-                    value={kpis ? eur(kpis.salesMonth) : '—'}
+                    value={displayKpis ? eur(displayKpis.salesMonth) : '—'}
                     onClick={() => navigate(scoped('/saas/income-expenses'))}
                   />
                   <MiniStat
                     icon={Wallet}
                     iconClass="text-rose-600 dark:text-rose-400"
                     label="Gastos mes"
-                    value={kpis ? eur(kpis.expensesMonth) : '—'}
+                    value={displayKpis ? eur(displayKpis.expensesMonth) : '—'}
                     onClick={() => navigate(scoped('/saas/income-expenses'))}
                   />
                   <MiniStat
                     icon={Euro}
                     iconClass="text-indigo-600 dark:text-indigo-400"
                     label="Beneficio est."
-                    value={kpis ? eur(kpis.estimatedProfit) : '—'}
-                    warn={!!kpis && kpis.estimatedProfit < 0}
+                    value={displayKpis ? eur(displayKpis.estimatedProfit) : '—'}
+                    warn={!!displayKpis && displayKpis.estimatedProfit < 0}
                     onClick={() => navigate(scoped('/saas/income-expenses'))}
                   />
                 </div>

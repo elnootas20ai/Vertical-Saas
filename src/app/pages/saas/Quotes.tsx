@@ -1297,7 +1297,7 @@ export function Quotes() {
                   Opciones adicionales
                 </span>
                 <span className="text-xs text-slate-400 dark:text-gray-500">
-                  {terms.MARTE}, centro de trabajo
+                  {terms.MARTE}, {currentBusiness?.businessType === 'lawyer' ? 'despacho' : 'centro de trabajo'}
                 </span>
               </button>
               {showExtraOptions && (
@@ -1650,7 +1650,9 @@ export function Quotes() {
               </div>
               <div className="p-6 space-y-3">
                 <p className="text-sm text-slate-600 dark:text-gray-400 mb-4">
-                  Selecciona el tipo de documento que deseas crear a partir de este presupuesto:
+                  {currentBusiness?.businessType === 'lawyer'
+                    ? 'Convierte esta propuesta en factura de honorarios:'
+                    : 'Selecciona el tipo de documento que deseas crear a partir de este presupuesto:'}
                 </p>
 
                 {[
@@ -1661,6 +1663,7 @@ export function Quotes() {
                     desc: `Crea una venta en estado "Reservada" y bloquea el ${terms.MARTE.toLowerCase()}`,
                     color: 'border-amber-200 dark:border-amber-700/50 hover:bg-amber-50 dark:hover:bg-amber-900/20',
                     badge: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300',
+                    hideForLawyer: true,
                   },
                   {
                     target: 'sale' as ConversionTarget,
@@ -1669,16 +1672,22 @@ export function Quotes() {
                     desc: 'Genera directamente una venta cerrada con todos los datos',
                     color: 'border-blue-200 dark:border-blue-700/50 hover:bg-blue-50 dark:hover:bg-blue-900/20',
                     badge: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
+                    hideForLawyer: true,
                   },
                   {
                     target: 'invoice' as ConversionTarget,
                     icon: '🧾',
                     title: 'Factura',
-                    desc: 'Emite una factura al cliente con los importes del presupuesto',
+                    desc: currentBusiness?.businessType === 'lawyer'
+                      ? 'Emite una factura de honorarios con los importes de la propuesta'
+                      : 'Emite una factura al cliente con los importes del presupuesto',
                     color: 'border-emerald-200 dark:border-emerald-700/50 hover:bg-emerald-50 dark:hover:bg-emerald-900/20',
                     badge: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
+                    hideForLawyer: false,
                   },
-                ].map(({ target, icon, title, desc, color, badge }) => (
+                ]
+                  .filter((opt) => !(currentBusiness?.businessType === 'lawyer' && opt.hideForLawyer))
+                  .map(({ target, icon, title, desc, color, badge }) => (
                   <button
                     key={target}
                     onClick={() => handleConvert(selectedQuote, target)}

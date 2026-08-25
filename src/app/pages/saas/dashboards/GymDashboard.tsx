@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Layout } from '../../../components/saas/Layout';
+import { AdminDemoChip } from '../../../components/saas/AdminDemoChip';
 import {
   Users,
   Calendar,
@@ -15,7 +16,8 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 import { useBusinessOptional } from '../../../context/BusinessContext';
-import { createVerticalApi, createVerticalDashboardApi, type VerticalDashboardData } from '../../../lib/verticalApiFactory';
+import { createVerticalApi } from '../../../lib/verticalApiFactory';
+import { useAdminAwareVerticalDashboard } from '../../../hooks/useAdminAwareVerticalDashboard';
 import { localCalendarDayKey } from '../../../lib/tpvCajaScope';
 
 type GymDashboardProps = { onSelectGeneral?: () => void };
@@ -25,48 +27,46 @@ export function GymDashboard({ onSelectGeneral }: GymDashboardProps) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const businessName = useBusinessOptional()?.currentBusiness?.name || t('gymDashboard.fallbackName');
-  const dashApi = useMemo(() => createVerticalDashboardApi('gym'), []);
+  const { dashData, loading, usingDemo } = useAdminAwareVerticalDashboard('gym');
   const membersApi = useMemo(() => createVerticalApi<{ estado?: string }>('gym', 'members'), []);
   const accessApi = useMemo(() => createVerticalApi<{ horaEntrada?: string }>('gym', 'accessLogs'), []);
   const userId = user?.user_id || user?.id || '';
   const dateLocale = i18n.language?.startsWith('en') ? 'en-GB' : i18n.language || 'es-ES';
 
-  const [dashData, setDashData] = useState<VerticalDashboardData | null>(null);
   const [activeMembers, setActiveMembers] = useState(0);
   const [accessToday, setAccessToday] = useState(0);
-  const [loading, setLoading] = useState(true);
-
-  const loadData = useCallback(async () => {
-    if (!userId) {
-      setDashData(null);
-      setActiveMembers(0);
-      setAccessToday(0);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    try {
-      const today = localCalendarDayKey();
-      const [d, members, accessLogs] = await Promise.all([
-        dashApi.load(userId),
-        membersApi.list(userId),
-        accessApi.list(userId).catch(() => []),
-      ]);
-      setDashData(d);
-      setActiveMembers(members.filter((m) => String(m.estado || 'activo') === 'activo').length);
-      setAccessToday(accessLogs.filter((log) => String(log.horaEntrada || '').startsWith(today)).length);
-    } catch {
-      setDashData(null);
-      setActiveMembers(0);
-      setAccessToday(0);
-    } finally {
-      setLoading(false);
-    }
-  }, [dashApi, membersApi, accessApi, userId]);
 
   useEffect(() => {
-    void loadData();
-  }, [loadData]);
+    if (usingDemo) {
+      setActiveMembers(Number(dashData?.counts?.members ?? 312));
+      setAccessToday(Number(dashData?.counts?.checkins ?? 64));
+      return;
+    }
+    if (!userId) {
+      setActiveMembers(0);
+      setAccessToday(0);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const today = localCalendarDayKey();
+        const [members, accessLogs] = await Promise.all([
+          membersApi.list(userId),
+          accessApi.list(userId).catch(() => []),
+        ]);
+        if (cancelled) return;
+        setActiveMembers(members.filter((m) => String(m.estado || 'activo') === 'activo').length);
+        setAccessToday(accessLogs.filter((log) => String(log.horaEntrada || '').startsWith(today)).length);
+      } catch {
+        if (!cancelled) {
+          setActiveMembers(0);
+          setAccessToday(0);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [usingDemo, dashData, userId, membersApi, accessApi]);
 
   const classCount = dashData?.counts?.classes ?? 0;
   const membershipCount = dashData?.counts?.memberships ?? 0;
@@ -115,16 +115,19 @@ export function GymDashboard({ onSelectGeneral }: GymDashboardProps) {
             <h1 className="text-xl font-semibold text-gray-900 dark:text-white">{businessName}</h1>
             <p className="text-sm text-gray-500 dark:text-gray-400">{t('gymDashboard.subtitle')}</p>
           </div>
-          {onSelectGeneral ? (
-            <button
-              type="button"
-              onClick={() => onSelectGeneral()}
-              className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-            >
-              <LayoutGrid className="w-4 h-4" />
-              {t('gymDashboard.generalView')}
-            </button>
-          ) : null}
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            <AdminDemoChip show={usingDemo} />
+            {onSelectGeneral ? (
+              <button
+                type="button"
+                onClick={() => onSelectGeneral()}
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                <LayoutGrid className="w-4 h-4" />
+                {t('gymDashboard.generalView')}
+              </button>
+            ) : null}
+          </div>
         </header>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">

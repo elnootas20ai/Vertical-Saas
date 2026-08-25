@@ -334,6 +334,7 @@ export function DocumentsPage() {
   const { currentBusiness } = useBusiness();
 
   const isCompraventa = currentBusiness?.businessType === 'carDealership';
+  const isLawyer = currentBusiness?.businessType === 'lawyer';
   const userRole = (user as any)?.role || '';
   const isManager = ['Admin', 'Gerente', 'admin', 'gerente', 'owner'].includes(userRole);
   const isWorkerMode = !isManager;
@@ -775,7 +776,13 @@ export function DocumentsPage() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
             <input
               type="text"
-              placeholder={isCompraventa ? "Buscar por matrícula, bastidor, cliente, proveedor..." : "Buscar por nombre, vehículo, centro de coste..."}
+              placeholder={
+                isCompraventa
+                  ? 'Buscar por matrícula, bastidor, cliente, proveedor...'
+                  : isLawyer
+                    ? 'Buscar por expediente, cliente, despacho...'
+                    : 'Buscar por nombre, vehículo, centro de coste...'
+              }
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               className="w-full pl-9 pr-4 py-2.5 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-400 focus:outline-none text-sm transition-all"
@@ -938,7 +945,13 @@ export function DocumentsPage() {
                     <th className={`${thCls} cursor-pointer group/th`} onClick={() => toggleSort('name')}>
                       <span className="flex items-center gap-1">Documento <SortIcon field="name" activeField={sortField} dir={sortDir} /></span>
                     </th>
-                    <th className={thCls}>{isCompraventa ? 'Vehículo / Matrícula' : 'Vehículo / Centro'}</th>
+                    <th className={thCls}>
+                      {isCompraventa
+                        ? 'Vehículo / Matrícula'
+                        : isLawyer
+                          ? 'Expediente / Despacho'
+                          : 'Vehículo / Centro'}
+                    </th>
                     <th className={`${thCls} cursor-pointer group/th`} onClick={() => toggleSort('status')}>
                       <span className="flex items-center gap-1">Estado <SortIcon field="status" activeField={sortField} dir={sortDir} /></span>
                     </th>

@@ -217,10 +217,22 @@ export function createVerticalDashboardApi(vertical: string) {
   return {
     load: async (userId: string, options?: VerticalListOptions): Promise<VerticalDashboardData> => {
       const id = normalizeUserId(userId);
-      const res = await request<{ ok: boolean } & VerticalDashboardData>(
-        `/api/${vertical}/dashboard/${encodeURIComponent(id)}${scopeQuery(options)}`,
-      );
-      return { counts: res.counts, recentActivity: res.recentActivity, total: res.total };
+      let raw: VerticalDashboardData = { counts: {}, recentActivity: [], total: 0 };
+      try {
+        const res = await request<{ ok: boolean } & VerticalDashboardData>(
+          `/api/${vertical}/dashboard/${encodeURIComponent(id)}${scopeQuery(options)}`,
+        );
+        raw = {
+          counts: res.counts || {},
+          recentActivity: res.recentActivity || [],
+          total: res.total ?? 0,
+        };
+      } catch {
+        /* vacío → posible demo admin abajo */
+      }
+      // Mock SOLO uriel@admin.com cuando el vertical no tiene datos reales.
+      const { resolveAdminVerticalDemo } = await import('./adminDashboardDemo');
+      return resolveAdminVerticalDemo(undefined, raw, vertical).data;
     },
   };
 }

@@ -7,6 +7,7 @@ import {
 } from '../lib/clientSessionStorage';
 import { clearForceFreshLogin, mustForceFreshLogin } from '../lib/appInstallStamp';
 import { clearTpvTabletBinding, readTpvTabletBinding } from '../lib/tpvTabletSession';
+import { setAdminDemoSessionEmail } from '../lib/adminDashboardDemoGate';
 import {
   type AccountActivityItem,
   type ActiveSession,
@@ -233,7 +234,7 @@ export interface AuthContextType {
       businessId: string;
       dataUserId: string;
       salaTerminalId?: string;
-      tpvVertical?: 'delivery';
+      tpvVertical?: 'delivery' | 'restaurant';
     };
     needsClockIn?: boolean;
   }>;
@@ -314,7 +315,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(normalized);
     setIsAuthenticated(true);
     persistSession(normalized);
+    setAdminDemoSessionEmail(normalized.email);
   }, []);
+
+  useEffect(() => {
+    setAdminDemoSessionEmail(user?.email ?? null);
+  }, [user?.email]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1375,7 +1381,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       businessId: string;
       dataUserId: string;
       salaTerminalId?: string;
-      tpvVertical?: 'delivery';
+      tpvVertical?: 'delivery' | 'restaurant';
     };
     needsClockIn?: boolean;
   }> => {

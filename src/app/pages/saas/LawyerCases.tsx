@@ -1,18 +1,24 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { createVerticalApi, type VerticalEntity } from '../../lib/verticalApiFactory';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
-  Search, Plus, X, Edit3, Briefcase, Scale, Filter,
-  CheckCircle2, Clock, AlertTriangle, Archive, Gavel,
-  TrendingUp, FolderOpen, Loader2,
+  Search, X, Edit3, Briefcase, Scale, Filter,
+  CheckCircle2, Clock, TrendingUp, FolderOpen, Loader2,
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
-import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
+import { bulkCreateVerticalEntries, entryStr } from '../../lib/bulkVerticalImport';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
+import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
+import {
+  buildLawyerDemoBundle,
+  isLawyerDemoViewer,
+  withLawyerDemoList,
+} from '../../lib/lawyerOpsDemo';
 
 type CaseType = 'civil' | 'penal' | 'laboral' | 'mercantil' | 'administrativo' | 'familia';
 type CaseStatus = 'abierto' | 'en_tramite' | 'vista_oral' | 'cerrado' | 'archivado';
@@ -25,6 +31,9 @@ interface Case extends VerticalEntity {
   estado: CaseStatus;
   abogado: string;
   juzgado: string;
+  leadId?: string;
+  urgencia?: string;
+  notas?: string;
 }
 
 type CaseForm = Omit<Case, keyof VerticalEntity>;
@@ -48,10 +57,12 @@ const JUZGADOS = ['Juzgado 1ª Instancia nº3', 'Juzgado de lo Social nº5', 'Ju
 const emptyForm = (): CaseForm => ({
   expediente: '', tipo: 'civil', cliente: '', fechaApertura: '',
   estado: 'abierto', abogado: ABOGADOS[0], juzgado: JUZGADOS[0],
+  leadId: '', urgencia: '', notas: '',
 });
 
 export function LawyerCases() {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const api = useMemo(() => createVerticalApi<Case>('lawyer', 'cases'), []);
   const userId = user?.user_id || user?.id || '';
 
@@ -74,14 +85,15 @@ export function LawyerCases() {
     setLoading(true);
     try {
       const list = await api.list(userId);
-      setCases(list);
+      const demo = isLawyerDemoViewer(user?.email) ? buildLawyerDemoBundle(userId).cases : [];
+      setCases(withLawyerDemoList(list, demo as Case[], user?.email));
     } finally {
       setLoading(false);
     }
-  }, [userId, api]);
+  }, [userId, user?.email, api]);
 
   useEffect(() => {
-    loadData();
+    void loadData();
   }, [loadData]);
 
   const MODULE_AI_FIELDS: AIFieldDef[] = [
@@ -110,21 +122,21 @@ export function LawyerCases() {
       return;
     }
     const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
-    const caseNumber = entryStr(e, 'caseNumber');
-    if (!caseNumber) return null;
-    return {
-      expediente: entryStr(e, 'expediente') || '',
-      tipo: entryStr(e, 'tipo', 'type') || 'civil',
-      cliente: entryStr(e, 'cliente', 'client') || '',
-      fechaApertura: entryStr(e, 'fechaApertura') || '',
-      estado: entryStr(e, 'estado', 'status') || 'abierto',
-      abogado: entryStr(e, 'abogado'),
-      juzgado: entryStr(e, 'juzgado'),
-    };
+      const caseNumber = entryStr(e, 'caseNumber');
+      if (!caseNumber) return null;
+      return {
+        expediente: entryStr(e, 'expediente') || caseNumber,
+        tipo: entryStr(e, 'tipo', 'type') || 'civil',
+        cliente: entryStr(e, 'cliente', 'client') || '',
+        fechaApertura: entryStr(e, 'fechaApertura') || '',
+        estado: entryStr(e, 'estado', 'status') || 'abierto',
+        abogado: entryStr(e, 'abogado'),
+        juzgado: entryStr(e, 'juzgado'),
+      };
     });
     if (created > 0) {
       await loadData();
-      toast.success(`${created} caso creado(s)`);
+      toast.success(`${created} expediente(s) creado(s)`);
     } else {
       toast.error('No se pudo crear ningún registro');
     }
@@ -135,30 +147,47 @@ export function LawyerCases() {
 
   useModalClose(modalOpen, () => setModalOpen(false));
 
-  const filtered = useMemo(() => cases.filter(c => {
+  const filtered = useMemo(() => cases.filter((c) => {
     const q = search.toLowerCase();
-    const matchSearch = c.expediente.toLowerCase().includes(q) || c.cliente.toLowerCase().includes(q) || c.abogado.toLowerCase().includes(q);
+    const matchSearch = c.expediente.toLowerCase().includes(q) || c.cliente.toLowerCase().includes(q) || (c.abogado || '').toLowerCase().includes(q);
     const matchStatus = !filterStatus || c.estado === filterStatus;
     const matchType = !filterType || c.tipo === filterType;
     return matchSearch && matchStatus && matchType;
   }), [cases, search, filterStatus, filterType]);
 
   const stats = useMemo(() => ({
-    activos: cases.filter(c => c.estado === 'abierto' || c.estado === 'en_tramite' || c.estado === 'vista_oral').length,
-    enTramite: cases.filter(c => c.estado === 'en_tramite').length,
-    cerradosMes: cases.filter(c => c.estado === 'cerrado' && c.fechaApertura >= '2026-03-01').length,
-    tasaExito: Math.round((cases.filter(c => c.estado === 'cerrado').length / Math.max(cases.filter(c => c.estado === 'cerrado' || c.estado === 'archivado').length, 1)) * 100),
+    activos: cases.filter((c) => c.estado === 'abierto' || c.estado === 'en_tramite' || c.estado === 'vista_oral').length,
+    enTramite: cases.filter((c) => c.estado === 'en_tramite').length,
+    cerradosMes: cases.filter((c) => c.estado === 'cerrado' && c.fechaApertura >= '2026-03-01').length,
+    tasaExito: Math.round((cases.filter((c) => c.estado === 'cerrado').length / Math.max(cases.filter((c) => c.estado === 'cerrado' || c.estado === 'archivado').length, 1)) * 100),
   }), [cases]);
 
   const openCreate = () => { setEditing(null); setForm(emptyForm()); setModalOpen(true); };
-  const openEdit = (c: Case) => {
+  const openEdit = useCallback((c: Case) => {
     setEditing(c);
     setForm({
       expediente: c.expediente, tipo: c.tipo, cliente: c.cliente, fechaApertura: c.fechaApertura,
-      estado: c.estado, abogado: c.abogado, juzgado: c.juzgado,
+      estado: c.estado, abogado: c.abogado || ABOGADOS[0], juzgado: c.juzgado || JUZGADOS[0],
+      leadId: c.leadId || '', urgencia: c.urgencia || '', notas: c.notas || '',
     });
     setModalOpen(true);
-  };
+  }, []);
+
+  // Deep-link desde Captación / Archivo: ?open=id&desdeCaptacion=1
+  useEffect(() => {
+    const openId = String(searchParams.get('open') || '').trim();
+    if (!openId || loading) return;
+    const found = cases.find((c) => c._id === openId);
+    if (!found) return;
+    openEdit(found);
+    if (searchParams.get('desdeCaptacion') === '1') {
+      toast.success('Expediente abierto desde captación. Completa hoja de encargo y docs.');
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete('open');
+    next.delete('desdeCaptacion');
+    setSearchParams(next, { replace: true });
+  }, [loading, cases, searchParams, setSearchParams, openEdit]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -171,6 +200,7 @@ export function LawyerCases() {
       }
       await loadData();
       setModalOpen(false);
+      toast.success(editing ? 'Expediente actualizado' : 'Expediente creado');
     } catch {
       /* error shown by fetch layer */
     }
@@ -189,14 +219,14 @@ export function LawyerCases() {
   const labelClass = 'block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5';
 
   return (
-    <Layout title="Expedientes / Casos">
+    <Layout title="Expedientes" subtitle="Apertura, hoja de encargo y documentación inicial">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {[
           { label: 'Casos activos', value: stats.activos, icon: Briefcase, color: 'text-blue-600' },
           { label: 'En trámite', value: stats.enTramite, icon: Clock, color: 'text-amber-600' },
           { label: 'Cerrados este mes', value: stats.cerradosMes, icon: CheckCircle2, color: 'text-green-600' },
           { label: 'Tasa de éxito', value: `${stats.tasaExito}%`, icon: TrendingUp, color: 'text-purple-600' },
-        ].map(s => (
+        ].map((s) => (
           <div key={s.label} className="bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-200 dark:border-gray-700">
             <div className="flex items-center gap-3 mb-2">
               <s.icon className={`w-5 h-5 ${s.color}`} />
@@ -210,28 +240,28 @@ export function LawyerCases() {
       <div className="flex flex-col sm:flex-row gap-3 mb-6">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-          <input type="text" placeholder="Buscar expediente, cliente, abogado..." value={search} onChange={e => setSearch(e.target.value)} disabled={loading} className="w-full pl-10 pr-4 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 outline-none focus:border-gray-900 dark:focus:border-gray-400" />
+          <input type="text" placeholder="Buscar expediente, cliente, abogado..." value={search} onChange={(e) => setSearch(e.target.value)} disabled={loading} className="w-full pl-10 pr-4 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 outline-none focus:border-gray-900 dark:focus:border-gray-400" />
         </div>
         <div className="flex gap-2 flex-wrap">
           <div className="relative">
             <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value as CaseStatus | '')} disabled={loading} className="pl-9 pr-4 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 outline-none appearance-none cursor-pointer">
+            <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as CaseStatus | '')} disabled={loading} className="pl-9 pr-4 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 outline-none appearance-none cursor-pointer">
               <option value="">Todos los estados</option>
               {Object.entries(STATUS_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
             </select>
           </div>
-          <select value={filterType} onChange={e => setFilterType(e.target.value as CaseType | '')} disabled={loading} className="px-4 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 outline-none appearance-none cursor-pointer">
+          <select value={filterType} onChange={(e) => setFilterType(e.target.value as CaseType | '')} disabled={loading} className="px-4 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 outline-none appearance-none cursor-pointer">
             <option value="">Todos los tipos</option>
             {Object.entries(TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
           <AddButtonDropdown
-                label="Nuevo caso"
-                onQuickAdd={openCreate}
-                onAIAdd={() => setShowAIModal(true)}
-                onImport={() => setShowImportModal(true)}
-                quickAddLabel="Alta rápida"
-                quickAddDesc="Formulario de caso"
-              />
+            label="Nuevo expediente"
+            onQuickAdd={openCreate}
+            onAIAdd={() => setShowAIModal(true)}
+            onImport={() => setShowImportModal(true)}
+            quickAddLabel="Alta rápida"
+            quickAddDesc="Formulario de expediente"
+          />
         </div>
       </div>
 
@@ -239,8 +269,8 @@ export function LawyerCases() {
         <table className="w-full text-sm min-w-[900px]">
           <thead>
             <tr className="border-b border-gray-200 dark:border-gray-700 text-left">
-              {['Nº Expediente', 'Tipo', 'Cliente', 'Fecha apertura', 'Estado', 'Abogado', 'Juzgado', ''].map(h => (
-                <th key={h} className="px-4 py-3 font-semibold text-gray-500 dark:text-gray-400 whitespace-nowrap">{h}</th>
+              {['Nº Expediente', 'Tipo', 'Cliente', 'Fecha apertura', 'Estado', 'Abogado', 'Juzgado', ''].map((h) => (
+                <th key={h || 'actions'} className="px-4 py-3 font-semibold text-gray-500 dark:text-gray-400 whitespace-nowrap">{h}</th>
               ))}
             </tr>
           </thead>
@@ -254,7 +284,7 @@ export function LawyerCases() {
                   </span>
                 </td>
               </tr>
-            ) : filtered.map(c => (
+            ) : filtered.map((c) => (
               <tr key={c._id} className="border-b border-gray-100 dark:border-gray-700/50 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
                 <td className="px-4 py-3 font-medium text-gray-900 dark:text-gray-100 flex items-center gap-2"><FolderOpen className="w-4 h-4 text-gray-400 shrink-0" />{c.expediente}</td>
                 <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{TYPE_LABELS[c.tipo]}</td>
@@ -264,8 +294,8 @@ export function LawyerCases() {
                 <td className="px-4 py-3 text-gray-600 dark:text-gray-300 whitespace-nowrap">{c.abogado}</td>
                 <td className="px-4 py-3 text-gray-600 dark:text-gray-300 whitespace-nowrap">{c.juzgado}</td>
                 <td className="px-4 py-3 flex gap-1">
-                  <button onClick={() => openEdit(c)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"><Edit3 className="w-4 h-4 text-gray-500" /></button>
-                  <button onClick={() => void handleDelete(c._id)} className="p-1.5 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"><X className="w-4 h-4 text-red-400" /></button>
+                  <button type="button" onClick={() => openEdit(c)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"><Edit3 className="w-4 h-4 text-gray-500" /></button>
+                  <button type="button" onClick={() => void handleDelete(c._id)} className="p-1.5 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"><X className="w-4 h-4 text-red-400" /></button>
                 </td>
               </tr>
             ))}
@@ -276,60 +306,66 @@ export function LawyerCases() {
 
       {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={() => setModalOpen(false)}>
-          <form onSubmit={handleSave} onClick={e => e.stopPropagation()} className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+          <form onSubmit={(e) => void handleSave(e)} onClick={(e) => e.stopPropagation()} className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
-              <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2"><Scale className="w-5 h-5" />{editing ? 'Editar caso' : 'Nuevo caso'}</h2>
+              <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2"><Scale className="w-5 h-5" />{editing ? 'Editar expediente' : 'Nuevo expediente'}</h2>
               <button type="button" onClick={() => setModalOpen(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl"><X className="w-5 h-5 text-gray-500" /></button>
             </div>
             <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div><label className={labelClass}>Nº Expediente</label><input className={inputClass} value={form.expediente} onChange={e => setForm({ ...form, expediente: e.target.value })} required /></div>
+              <div><label className={labelClass}>Nº Expediente</label><input className={inputClass} value={form.expediente} onChange={(e) => setForm({ ...form, expediente: e.target.value })} required /></div>
               <div>
                 <label className={labelClass}>Tipo</label>
-                <select className={inputClass} value={form.tipo} onChange={e => setForm({ ...form, tipo: e.target.value as CaseType })}>
+                <select className={inputClass} value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value as CaseType })}>
                   {Object.entries(TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
               </div>
-              <div className="sm:col-span-2"><label className={labelClass}>Cliente</label><input className={inputClass} value={form.cliente} onChange={e => setForm({ ...form, cliente: e.target.value })} required /></div>
-              <div><label className={labelClass}>Fecha apertura</label><input type="date" className={inputClass} value={form.fechaApertura} onChange={e => setForm({ ...form, fechaApertura: e.target.value })} /></div>
+              <div className="sm:col-span-2"><label className={labelClass}>Cliente</label><input className={inputClass} value={form.cliente} onChange={(e) => setForm({ ...form, cliente: e.target.value })} required /></div>
+              <div><label className={labelClass}>Fecha apertura</label><input type="date" className={inputClass} value={form.fechaApertura} onChange={(e) => setForm({ ...form, fechaApertura: e.target.value })} /></div>
               <div>
                 <label className={labelClass}>Estado</label>
-                <select className={inputClass} value={form.estado} onChange={e => setForm({ ...form, estado: e.target.value as CaseStatus })}>
+                <select className={inputClass} value={form.estado} onChange={(e) => setForm({ ...form, estado: e.target.value as CaseStatus })}>
                   {Object.entries(STATUS_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                 </select>
               </div>
               <div>
                 <label className={labelClass}>Abogado asignado</label>
-                <select className={inputClass} value={form.abogado} onChange={e => setForm({ ...form, abogado: e.target.value })}>
-                  {ABOGADOS.map(a => <option key={a} value={a}>{a}</option>)}
+                <select className={inputClass} value={form.abogado} onChange={(e) => setForm({ ...form, abogado: e.target.value })}>
+                  {ABOGADOS.map((a) => <option key={a} value={a}>{a}</option>)}
                 </select>
               </div>
               <div>
                 <label className={labelClass}>Juzgado</label>
-                <select className={inputClass} value={form.juzgado} onChange={e => setForm({ ...form, juzgado: e.target.value })}>
-                  {JUZGADOS.map(j => <option key={j} value={j}>{j}</option>)}
+                <select className={inputClass} value={form.juzgado} onChange={(e) => setForm({ ...form, juzgado: e.target.value })}>
+                  {JUZGADOS.map((j) => <option key={j} value={j}>{j}</option>)}
                 </select>
               </div>
+              {(form.notas || form.leadId) ? (
+                <div className="sm:col-span-2">
+                  <label className={labelClass}>Notas (desde captación)</label>
+                  <textarea className={`${inputClass} min-h-[72px]`} value={form.notas || ''} onChange={(e) => setForm({ ...form, notas: e.target.value })} />
+                </div>
+              ) : null}
             </div>
             <div className="sticky bottom-0 bg-white dark:bg-gray-800 flex gap-3 p-6 border-t border-gray-200 dark:border-gray-700 rounded-b-2xl">
-              <button type="button" onClick={() => setModalOpen(false)} className="flex-1 px-4 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">Cancelar</button>
-              <button type="submit" className="flex-1 px-4 py-3 bg-gray-900 hover:bg-black dark:bg-gray-100 dark:hover:bg-white text-white dark:text-gray-900 rounded-xl font-semibold transition-colors">Guardar</button>
+              <button type="button" onClick={() => setModalOpen(false)} className={`${VERTIAL_BTN_SECONDARY} flex-1`}>Cancelar</button>
+              <button type="submit" className={`${VERTIAL_BTN_PRIMARY} flex-1`}>Guardar</button>
             </div>
           </form>
         </div>
       )}
-    
+
       <AIAddModal
         isOpen={showAIModal}
         onClose={() => setShowAIModal(false)}
         module="lawyer_cases"
-        moduleLabel="Casos"
+        moduleLabel="Expedientes"
         fields={MODULE_AI_FIELDS}
         onEntriesParsed={handleAIEntries}
       />
       <GenericImportModal
         isOpen={showImportModal}
         onClose={() => setShowImportModal(false)}
-        moduleLabel="Casos"
+        moduleLabel="Expedientes"
         fields={MODULE_IMPORT_FIELDS}
         onImport={handleImportEntries}
       />
