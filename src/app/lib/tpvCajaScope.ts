@@ -556,7 +556,10 @@ export function canEnterTpvOrderFlow(signals?: {
   registerOpen?: boolean;
   stickyOpen?: boolean;
   boardReady?: boolean;
+  /** Modo consulta: tablero visible sin sesión de caja abierta. */
+  browseOnly?: boolean;
 }): boolean {
+  if (signals?.browseOnly) return false;
   if (signals?.registerOpen || signals?.stickyOpen || signals?.boardReady) return true;
   return hasTpvOpenRegisterLatch();
 }

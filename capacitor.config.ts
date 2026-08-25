@@ -3,17 +3,28 @@ import type { CapacitorConfig } from '@capacitor/cli';
 /**
  * App nativa Vertial (iPad tienda / TestFlight).
  *
- * El WebView sirve el front embebido desde `dist/` (el del `npm run build`
- * en Codemagic o local). Misma cara que el build: para actualizar UI en tablet
- * hace falta un IPA/APK nuevo. El API sigue en vertialapp.com vía
- * VITE_NATIVE_API_ORIGIN en el build nativo.
+ * Por defecto (dev local): WebView sirve `dist/` embebido.
+ *
+ * En CI (Codemagic): CAPACITOR_SERVER_URL=https://vertialapp.com
+ * → la app carga la MISMA web que Safari (caja, fondo, Continuar al día).
+ * El API sigue en vertialapp.com; plugins nativos (impresora, cámara) siguen en el IPA.
  */
+const liveServerUrl = String(
+  process.env.CAPACITOR_SERVER_URL || process.env.VITE_CAPACITOR_SERVER_URL || '',
+).trim();
+
 const config: CapacitorConfig = {
   appId: 'com.vertial.app',
   appName: 'Vertial',
   webDir: 'dist',
   server: {
     androidScheme: 'https',
+    ...(liveServerUrl
+      ? {
+          url: liveServerUrl,
+          cleartext: false,
+        }
+      : {}),
   },
   plugins: {
     Camera: {

@@ -121,7 +121,7 @@ import {
   readRetailScopeCacheForBusiness,
   writeRetailScopeCacheForBusiness,
 } from '../../verticals/retailScopeRegistry';
-import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
+import { isRestaurantBusinessType, isStrictDeliveryBusinessType } from '../../lib/deliveryOpsTypes';
 import { checkRestaurantRegisterClose } from '../../lib/restaurantCloseWarnings';
 import { resolveRestaurantTpvPermissions } from '../../lib/restaurantTpvPermissions';
 import { evaluateTpvClockInGate, tpvClockInBlockMessage } from '../../lib/tpvClockInGate';
@@ -400,6 +400,9 @@ const TpvRegisterContext = createContext<TpvRegisterContextType | null>(null);
 /** true solo cuando el gate ya pasó la apertura de caja y muestra el tablero operativo. */
 const TpvRegisterBoardReadyContext = createContext(false);
 
+/** Tablero visible sin caja abierta (fichaje, impresora, consulta; sin pedidos ni cobros). */
+const TpvRegisterBrowseModeContext = createContext(false);
+
 /** Atajos del vertical (p. ej. delivery) a la izquierda del tick verde / nombre de tienda. */
 export type TpvStatusBarQuickAction = {
   id: string;
@@ -447,6 +450,11 @@ export function useTpvRegisterBoardReady(): boolean {
   return useContext(TpvRegisterBoardReadyContext);
 }
 
+/** true en modo consulta: entró al TPV sin abrir caja (pedidos/cobros bloqueados). */
+export function useTpvRegisterBrowseMode(): boolean {
+  return useContext(TpvRegisterBrowseModeContext);
+}
+
 /** Registra botones junto al tick verde de caja abierta (barra superior). */
 export function useTpvStatusBarQuickActions(): TpvStatusBarQuickActionsApi['setQuickActions'] | null {
   return useContext(TpvStatusBarQuickActionsContext)?.setQuickActions ?? null;
@@ -471,10 +479,12 @@ interface OpeningData {
  * Misma UI: Fichaje | Quién abre | efectivo / fondo | Abrir caja.
  * Si ya hay caja abierta en ESA tienda → Continuar (misma familia de pantalla).
  */
-function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading, openingBusy = false, pointsOfSale, workCenters, workerOptions, registerSessions, restrictedToPdvId, onClearStorePick, isManagerView = false, tabletStoreLabel, tabletWorkCenterId = null, knownOpenSession = null, onOpeningPdvChange, restaurantOpening = false, clockInBusinessId = '', clockInOwnerUserId = '', onClockInChanged, resumeAfterClose = null }: {
+function OpeningScreen({ onOpen, onContinueExistingOpen, onEnterWithoutOpen, loading: parentLoading, openingBusy = false, pointsOfSale, workCenters, workerOptions, registerSessions, restrictedToPdvId, onClearStorePick, isManagerView = false, tabletStoreLabel, tabletWorkCenterId = null, knownOpenSession = null, onOpeningPdvChange, restaurantOpening = false, clockInBusinessId = '', clockInOwnerUserId = '', onClockInChanged, resumeAfterClose = null }: {
   onOpen: (data: OpeningData) => void;
   /** Entrar en una caja ya abierta (aviso proactivo; no al martillar Abrir). */
   onContinueExistingOpen?: (session: TpvRegisterSession) => void;
+  /** Entrar al tablero sin abrir caja (fichaje, impresora, consulta). */
+  onEnterWithoutOpen?: () => void;
   loading: boolean;
   /** Crear sesión en curso: desactiva Abrir y muestra feedback. */
   openingBusy?: boolean;
@@ -1110,9 +1120,9 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
   const continueOpenBusy = openingBusy;
 
   return (
-    <div className="min-h-[100dvh] min-h-screen bg-stone-50 dark:bg-stone-950 flex flex-col">
-      <div className="flex-1 flex items-stretch sm:items-center justify-center p-2 sm:p-3">
-      <div className="relative bg-white dark:bg-stone-900 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-lg w-full max-w-4xl min-h-[min(88dvh,680px)] sm:min-h-0 sm:max-h-[min(88svh,680px)] flex flex-col">
+    <div className="h-[100dvh] max-h-[100dvh] overflow-hidden bg-stone-50 dark:bg-stone-950 flex flex-col">
+      <div className="flex-1 min-h-0 flex flex-col p-2 sm:p-3">
+      <div className="relative bg-white dark:bg-stone-900 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-lg w-full max-w-4xl min-h-0 flex-1 flex flex-col mx-auto">
         <span className="absolute left-3 top-2 z-10 text-[9px] font-mono text-stone-400 pointer-events-none select-none">
           {String(import.meta.env.VITE_BUILD_STAMP || 'caja v5')}
         </span>
@@ -1390,6 +1400,20 @@ function OpeningScreen({ onOpen, onContinueExistingOpen, loading: parentLoading,
                   {openingBusy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Unlock className="w-5 h-5" />}
                   {openingBusy ? 'Abriendo…' : `Abrir caja — ${total.toFixed(2)}€`}
                 </button>
+                {onEnterWithoutOpen ? (
+                  <button
+                    type="button"
+                    onClick={onEnterWithoutOpen}
+                    disabled={!hasResolvedPdv || openActionBusy}
+                    className={`w-full min-h-[44px] rounded-xl font-semibold text-sm transition-all border ${
+                      hasResolvedPdv && !openActionBusy
+                        ? 'border-stone-300 dark:border-stone-600 text-stone-700 dark:text-stone-200 hover:bg-stone-50 dark:hover:bg-stone-800'
+                        : 'border-stone-200 dark:border-stone-700 text-stone-400 cursor-not-allowed'
+                    }`}
+                  >
+                    Entrar sin abrir caja
+                  </button>
+                ) : null}
               </>
             )}
           </div>
@@ -4633,6 +4657,348 @@ function ClockInModal({
   );
 }
 
+// ─── Status Bar (caja cerrada — modo consulta) ───────────────────────────────
+
+function RegisterBrowseStatusBar({
+  storeLabel,
+  browsePdvId = '',
+  onRequestOpen,
+  onRequestClockIn,
+  onRequestPrinterSetup,
+  showNativePrinter = false,
+  nativePrinterReady = false,
+  isTabletMode = false,
+  minimal = false,
+  quickActions = null,
+}: {
+  storeLabel: string;
+  browsePdvId?: string;
+  onRequestOpen: () => void;
+  onRequestClockIn: () => void;
+  onRequestPrinterSetup?: () => void;
+  showNativePrinter?: boolean;
+  nativePrinterReady?: boolean;
+  isTabletMode?: boolean;
+  minimal?: boolean;
+  quickActions?: TpvStatusBarQuickAction[] | null;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [invoiceOcrOpen, setInvoiceOcrOpen] = useState(false);
+  useModalClose(menuOpen, () => setMenuOpen(false));
+  const compact = minimal || isTabletMode;
+
+  const runMenuAction = (action: () => void) => {
+    setMenuOpen(false);
+    action();
+  };
+
+  type TpvMenuEntry = {
+    id: string;
+    label: string;
+    title?: string;
+    danger?: boolean;
+    active?: boolean;
+    tone?: 'default' | 'amber';
+    icon: ReactNode;
+    onClick: () => void;
+  };
+
+  const quickToEntry = (a: TpvStatusBarQuickAction): TpvMenuEntry => ({
+    id: a.id,
+    label: a.label,
+    title: a.title,
+    active: a.active,
+    tone: a.tone,
+    icon: a.icon,
+    onClick: a.onClick,
+  });
+  const equipoQuickEntries = (quickActions || []).filter((a) => a.section === 'equipo').map(quickToEntry);
+  const pedidoEntries = (quickActions || []).filter((a) => a.section !== 'equipo').map(quickToEntry);
+
+  const menuSections: { id: string; label: string; items: TpvMenuEntry[] }[] = [
+    {
+      id: 'equipo',
+      label: 'Equipo',
+      items: [
+        {
+          id: 'clockin',
+          label: 'Fichar equipo',
+          title: 'Fichar entrada del resto del equipo',
+          icon: <UserCheck className="w-5 h-5" />,
+          onClick: onRequestClockIn,
+        },
+        ...equipoQuickEntries,
+      ],
+    },
+    {
+      id: 'caja',
+      label: 'Caja',
+      items: [
+        {
+          id: 'open',
+          label: 'Abrir caja',
+          title: 'Pedidos, cobros y cierre de turno',
+          active: true,
+          icon: <Unlock className="w-5 h-5" />,
+          onClick: onRequestOpen,
+        },
+      ],
+    },
+    {
+      id: 'stock',
+      label: 'Stock',
+      items: [
+        {
+          id: 'stock-review',
+          label: 'Revisión stock',
+          title: 'Pasar lista del inventario de la tienda',
+          icon: <ClipboardCheck className="w-5 h-5" />,
+          onClick: () => requestTpvStockReviewOpen(),
+        },
+        {
+          id: 'invoice-scan',
+          label: 'Escanear factura',
+          title: 'Foto a la factura del proveedor: entra en compras y stock',
+          icon: <ScanLine className="w-5 h-5" />,
+          onClick: () => setInvoiceOcrOpen(true),
+        },
+        {
+          id: 'store-transfer',
+          label: 'Movimiento tienda',
+          title: 'Traspasos de stock entre tiendas',
+          icon: <ArrowRightLeft className="w-5 h-5" />,
+          onClick: () => requestTpvStoreTransfersOpen(),
+        },
+      ],
+    },
+    ...(pedidoEntries.length > 0
+      ? [{ id: 'pedidos', label: 'Pedidos', items: pedidoEntries }]
+      : []),
+    ...(showNativePrinter && onRequestPrinterSetup
+      ? [{
+          id: 'dispositivo',
+          label: 'Dispositivo',
+          items: [{
+            id: 'printer',
+            label: 'Ajustes impresora',
+            title: nativePrinterReady ? 'Ajustes impresora' : 'Configurar impresora WiFi',
+            icon: <Printer className="w-5 h-5" />,
+            onClick: onRequestPrinterSetup,
+          }],
+        }]
+      : []),
+  ];
+
+  const actionBtn = compact
+    ? 'shrink-0 inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3 rounded-lg border border-stone-200 bg-white text-stone-700 text-[11px] font-semibold transition-colors touch-manipulation whitespace-nowrap hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200'
+    : 'px-3 py-1.5 rounded-lg border border-stone-200 bg-white text-stone-700 font-semibold transition-colors flex items-center gap-1 hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200';
+  const openBtn = compact
+    ? 'shrink-0 inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3 sm:px-4 rounded-lg bg-[#2563EB] hover:bg-blue-700 text-white text-[11px] font-bold transition-colors touch-manipulation whitespace-nowrap shadow-sm'
+    : 'px-4 py-1.5 rounded-lg bg-[#2563EB] hover:bg-blue-700 text-white font-bold transition-colors flex items-center gap-1.5 shadow-sm';
+
+  const menuTrigger = (
+    <button
+      type="button"
+      onClick={() => setMenuOpen(true)}
+      title="Abrir menú TPV"
+      aria-label="Abrir menú TPV"
+      aria-expanded={menuOpen}
+      className="shrink-0 inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-lg border border-amber-200 bg-white text-amber-900 transition-colors touch-manipulation hover:bg-amber-50 dark:border-amber-800 dark:bg-stone-900 dark:text-amber-200 dark:hover:bg-amber-950/40"
+    >
+      <MoreVertical className="w-5 h-5" />
+    </button>
+  );
+
+  const menuRowBase =
+    'group w-full flex items-center gap-3 min-h-[52px] px-3 rounded-xl text-left touch-manipulation transition-colors border border-transparent';
+  const menuRowDefault =
+    `${menuRowBase} bg-[var(--v-surface,#f5f7fb)] text-[var(--v-ink,#0b1220)] hover:bg-blue-50/70 hover:border-blue-100 dark:bg-slate-900/80 dark:text-slate-100 dark:hover:bg-blue-950/30 dark:hover:border-blue-900/50`;
+  const menuRowActive =
+    `${menuRowBase} bg-blue-50 border-blue-200 text-[var(--v-blue,#2563eb)] dark:bg-blue-950/40 dark:border-blue-800 dark:text-blue-300`;
+  const menuRowWarn =
+    `${menuRowBase} bg-amber-50/90 border-amber-200/80 text-amber-950 hover:bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900/50 dark:text-amber-100`;
+  const menuRowDanger =
+    `${menuRowBase} bg-rose-50 border-rose-200/80 text-[var(--v-rose,#e11d48)] hover:bg-rose-100/80 dark:bg-rose-950/35 dark:border-rose-900/50 dark:text-rose-200`;
+  const menuIconWell =
+    'shrink-0 flex h-10 w-10 items-center justify-center rounded-xl bg-white border border-slate-200/80 text-slate-600 shadow-sm dark:bg-slate-950 dark:border-slate-700 dark:text-slate-300 [&>svg]:h-5 [&>svg]:w-5';
+
+  const invoiceOcrModal = invoiceOcrOpen ? (
+    <TpvGatePortal>
+      <TpvInvoiceOcrModal
+        pdvId={browsePdvId}
+        storeLabel={storeLabel}
+        onClose={() => setInvoiceOcrOpen(false)}
+      />
+    </TpvGatePortal>
+  ) : null;
+
+  const menuPanel = menuOpen ? (
+    <TpvGatePortal>
+      <div
+        className="fixed inset-0 z-[120] flex vsaas-page"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Menú TPV"
+      >
+        <aside className="relative z-10 flex h-full w-[min(20.5rem,90vw)] shrink-0 flex-col bg-[var(--v-surface-elevated,#fff)] shadow-[var(--v-shadow)] border-r border-[var(--v-border)] dark:bg-[var(--v-surface-elevated)] pt-[max(0px,env(safe-area-inset-top))] pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <div className="vsaas-brand-bar rounded-none opacity-100" />
+          <div className="flex items-start justify-between gap-3 px-4 pt-3.5 pb-3 border-b border-[var(--v-border)]">
+            <div className="min-w-0 flex items-start gap-2.5">
+              <div className="mt-0.5 shrink-0 opacity-90">
+                <VertialLogo size="sm" />
+              </div>
+              <div className="min-w-0">
+                <p className="vsaas-title text-[15px]">Menú TPV</p>
+                <p className="vsaas-subtitle text-[11px] truncate mt-0.5">
+                  {storeLabel || 'Tienda'} · Caja cerrada
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setMenuOpen(false)}
+              className={`${VERTIAL_BTN_SECONDARY} !min-h-11 !min-w-11 !px-0 shrink-0`}
+              aria-label="Cerrar"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-5">
+            {menuSections.map((section) => (
+              <div key={section.id}>
+                <p className="px-1 mb-2 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--v-muted)]">
+                  {section.label}
+                </p>
+                <div className="space-y-1.5">
+                  {section.items.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => runMenuAction(item.onClick)}
+                      className={
+                        item.danger
+                          ? menuRowDanger
+                          : item.active
+                            ? menuRowActive
+                            : item.tone === 'amber'
+                              ? menuRowWarn
+                              : menuRowDefault
+                      }
+                    >
+                      <span
+                        className={`${menuIconWell} ${
+                          item.danger
+                            ? 'border-rose-200 text-[var(--v-rose,#e11d48)] dark:border-rose-800'
+                            : item.active
+                              ? 'border-blue-200 text-[var(--v-blue,#2563eb)] dark:border-blue-800'
+                              : item.tone === 'amber'
+                                ? 'border-amber-200 text-amber-700 dark:border-amber-800 dark:text-amber-300'
+                                : ''
+                        }`}
+                      >
+                        {item.icon}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-bold leading-tight tracking-tight">{item.label}</span>
+                        {item.title && item.title !== item.label ? (
+                          <span className="block text-[11px] font-medium text-[var(--v-muted)] mt-0.5 leading-snug opacity-90">
+                            {item.title}
+                          </span>
+                        ) : null}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </aside>
+        <button
+          type="button"
+          className="min-w-0 flex-1 border-0 bg-[var(--v-ink,#0b1220)]/40 backdrop-blur-[2px] touch-manipulation"
+          aria-label="Cerrar menú"
+          onClick={() => setMenuOpen(false)}
+        />
+      </div>
+    </TpvGatePortal>
+  ) : null;
+
+  if (compact) {
+    return (
+      <>
+        <div className="relative z-20 border-b border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/30 px-2 py-1.5 flex items-center gap-1.5 text-[11px] min-h-[52px] pt-[max(0.375rem,env(safe-area-inset-top))] overflow-visible">
+          {menuTrigger}
+          <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2 py-1 font-semibold text-amber-900 dark:bg-amber-900/40 dark:text-amber-200 shrink-0">
+            <Lock className="w-3.5 h-3.5" />
+            <span className="hidden xs:inline sm:inline">Caja cerrada</span>
+          </span>
+          {storeLabel ? (
+            <span className="min-w-0 flex-1 text-stone-700 dark:text-stone-300 font-medium truncate" title={storeLabel}>
+              {storeLabel}
+            </span>
+          ) : (
+            <span className="flex-1" />
+          )}
+          <button type="button" onClick={onRequestClockIn} title="Fichar equipo" className={actionBtn} aria-label="Fichar equipo">
+            <UserCheck className="w-4 h-4 shrink-0" />
+          </button>
+          <button type="button" onClick={onRequestOpen} className={openBtn}>
+            <Unlock className="w-4 h-4 shrink-0" />
+            <span>Abrir caja</span>
+          </button>
+        </div>
+        {menuPanel}
+        {invoiceOcrModal}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div className="relative z-20 border-b border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/30 flex flex-col gap-2 text-xs pt-[max(0px,env(safe-area-inset-top))] px-3 sm:px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+          {menuTrigger}
+          <span className="inline-flex items-center gap-1.5 rounded-md bg-amber-100 px-2 py-1 font-semibold text-amber-900 dark:bg-amber-900/40 dark:text-amber-200 shrink-0">
+            <Lock className="w-3.5 h-3.5" /> Caja cerrada
+          </span>
+          {storeLabel ? (
+            <span className="text-stone-700 dark:text-stone-300 flex items-center gap-1 min-w-0 font-medium">
+              <MapPin className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate max-w-[180px] sm:max-w-[280px]" title={storeLabel}>{storeLabel}</span>
+            </span>
+          ) : null}
+          <span className="text-[10px] text-amber-800/80 dark:text-amber-200/70 hidden lg:inline">
+            Puedes fichar y revisar. Abre caja para pedidos y cobros.
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0 flex-wrap sm:flex-nowrap">
+          <button type="button" onClick={onRequestClockIn} title="Fichar entrada del equipo" className={actionBtn}>
+            <UserCheck className="w-4 h-4 shrink-0" /> Fichar equipo
+          </button>
+          {showNativePrinter && onRequestPrinterSetup ? (
+            <button
+              type="button"
+              onClick={onRequestPrinterSetup}
+              title={nativePrinterReady ? 'Ajustes impresora' : 'Configurar impresora WiFi'}
+              className={`${actionBtn} relative`}
+            >
+              <Printer className="w-4 h-4 shrink-0" /> Impresora
+              {nativePrinterReady ? (
+                <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-stone-900" />
+              ) : null}
+            </button>
+          ) : null}
+          <button type="button" onClick={onRequestOpen} className={openBtn}>
+            <Unlock className="w-4 h-4 shrink-0" /> Abrir caja
+          </button>
+        </div>
+      </div>
+      {menuPanel}
+      {invoiceOcrModal}
+    </>
+  );
+}
+
 // ─── Status Bar (shown when register is open) ───────────────────────────────
 
 const TPV_CASH_TX_LABELS: Record<string, string> = {
@@ -5177,12 +5543,22 @@ function RegisterStatusBar({
 
 // ─── OCR factura desde TPV: foto → proveedor + artículos + stock de la tienda ─
 
-function TpvInvoiceOcrModal({ session, onClose }: { session: TpvRegisterSession; onClose: () => void }) {
+function TpvInvoiceOcrModal({
+  session,
+  pdvId: pdvIdProp,
+  storeLabel: storeLabelProp,
+  onClose,
+}: {
+  session?: TpvRegisterSession | null;
+  pdvId?: string;
+  storeLabel?: string;
+  onClose: () => void;
+}) {
   const { currentBusiness } = useBusiness();
   const activeStore = useActiveStoreScope();
   const tpvScope = useTpvStockScope({
-    pdvId: String(session.pointOfSaleId || '').trim() || undefined,
-    storeLabel: String(session.pointOfSaleName || '').trim() || undefined,
+    pdvId: String(session?.pointOfSaleId || pdvIdProp || '').trim() || undefined,
+    storeLabel: String(session?.pointOfSaleName || storeLabelProp || '').trim() || undefined,
   });
   const pdv = activeStore.pointsOfSale.find((p) => p._id === tpvScope.pdvId);
   const binding = readTpvTabletBinding();
@@ -5518,6 +5894,7 @@ export function TpvRegisterGate({
     hasTabletStoreCode || isTabletSession || (tabletWorkerRoute && tabletBindingStore);
   const orderFlowActive = useTpvOrderFlowActive();
   const isRestaurantVerticalChrome = isRestaurantBusinessType(currentBusiness?.businessType);
+
   const compactRegisterChrome = isTabletSession || orderFlowActive || isRestaurantVerticalChrome;
   const scopeBusinessId = registerScope.scopeBusinessId;
   const dataUserId = registerScope.effectiveDataUserId;
@@ -5551,6 +5928,11 @@ export function TpvRegisterGate({
     return currentBusiness;
   }, [scopeBusinessId, currentBusiness, businesses, tabletBinding]);
 
+  /** Modo consulta / entrar sin abrir: solo vertical delivery (no restaurante/bar). */
+  const isDeliveryTpvOpening = isStrictDeliveryBusinessType(
+    scopeBusiness?.businessType || currentBusiness?.businessType,
+  );
+
   const [sessions, setSessions] = useState<TpvRegisterSession[]>(() => {
     const binding = readTpvTabletBinding();
     return seedTabletSessionsFromCache(binding?.pdvId);
@@ -5570,7 +5952,17 @@ export function TpvRegisterGate({
    */
   const [openingScreenUnlocked, setOpeningScreenUnlocked] = useState(false);
   const openingScreenUnlockedRef = useRef(false);
+  /** Tablero sin sesión de caja: fichaje, impresora y consulta; sin pedidos ni cobros. */
+  const [browseWithoutOpen, setBrowseWithoutOpen] = useState(false);
+  /** Desde modo consulta: overlay con pantalla de apertura para abrir caja del día. */
+  const [browseOpeningOverlay, setBrowseOpeningOverlay] = useState(false);
   const [openingBusy, setOpeningBusy] = useState(false);
+
+  useEffect(() => {
+    if (!browseWithoutOpen || isDeliveryTpvOpening) return;
+    setBrowseWithoutOpen(false);
+    setBrowseOpeningOverlay(false);
+  }, [browseWithoutOpen, isDeliveryTpvOpening]);
   const [loadTimedOut, setLoadTimedOut] = useState(false);
   const [showClosing, setShowClosing] = useState(false);
   /** Snapshot de la caja a cerrar: el modal no debe desaparecer si activeSession parpadea. */
@@ -6050,7 +6442,7 @@ export function TpvRegisterGate({
 
   // Código / apertura: no mostrar Stock·Salir encima de Abrir caja (antes parpadeaban).
   useTpvSuppressBottomBar(
-    !isTpvRegisterSessionOpen(boardSession) || needsResumeAck,
+    ((!isTpvRegisterSessionOpen(boardSession) && !browseWithoutOpen) || needsResumeAck),
     'gate-register',
   );
 
@@ -6072,6 +6464,8 @@ export function TpvRegisterGate({
     stickyOpenSessionRef.current = null;
     clearTpvRegisterLocalSessionState();
     setAckedOpenSessionId(null);
+    setBrowseWithoutOpen(false);
+    setBrowseOpeningOverlay(false);
     openingScreenUnlockedRef.current = false;
     setOpeningScreenUnlocked(false);
     setOpeningRecoverHold(true);
@@ -6402,7 +6796,7 @@ export function TpvRegisterGate({
   }, [scopeBusinessId]);
 
   useEffect(() => {
-    if (!isTpvRegisterSessionOpen(activeSession)) {
+    if (!isTpvRegisterSessionOpen(activeSession) && !browseWithoutOpen) {
       return;
     }
     if (!activeStoreScope.pdvId) {
@@ -6417,7 +6811,7 @@ export function TpvRegisterGate({
     void refreshClockedInWorkers({ silent: hasWorkers });
     const interval = setInterval(() => void refreshClockedInWorkers({ silent: true }), 60000);
     return () => clearInterval(interval);
-  }, [activeStoreScope.pdvId, activeSession?._id, activeSession?.status, refreshClockedInWorkers]);
+  }, [activeStoreScope.pdvId, activeSession?._id, activeSession?.status, browseWithoutOpen, refreshClockedInWorkers]);
 
   useEffect(() => {
     if (!isTpvRegisterSessionOpen(activeSession)) {
@@ -6837,6 +7231,8 @@ export function TpvRegisterGate({
     if (!prev || !pick) return;
     stickyOpenSessionRef.current = null;
     setAckedOpenSessionId(null);
+    setBrowseWithoutOpen(false);
+    setBrowseOpeningOverlay(false);
     openingScreenUnlockedRef.current = false;
     setOpeningScreenUnlocked(false);
     setOpeningRecoverHold(true);
@@ -6915,6 +7311,8 @@ export function TpvRegisterGate({
     setPostCloseAggregatorRows([]);
     setPostCloseShowDetail(false);
     setOpeningResume(null);
+    setBrowseWithoutOpen(false);
+    setBrowseOpeningOverlay(false);
     setSessions((prev) => {
       const exists = prev.some((s) => s._id === existing._id);
       if (exists) return prev.map((s) => (s._id === existing._id ? existing : s));
@@ -6935,6 +7333,20 @@ export function TpvRegisterGate({
       allowStale: isTpvRegisterSessionStaleOpen(existing),
     });
   }, [attachOpenSession]);
+
+  const handleEnterWithoutOpen = useCallback(() => {
+    const pdvId = String(resolvedStorePickId || '').trim();
+    if (!pdvId) {
+      toast.error('Selecciona la tienda antes de entrar');
+      return;
+    }
+    setBrowseWithoutOpen(true);
+    setBrowseOpeningOverlay(false);
+    openingScreenUnlockedRef.current = true;
+    setOpeningScreenUnlocked(true);
+    setOpeningRecoverHold(false);
+    void refreshClockedInWorkers({ silent: true });
+  }, [resolvedStorePickId, refreshClockedInWorkers]);
 
   const startOpenAnotherAfterClose = useCallback((closed: TpvRegisterSession | null) => {
     const storeId = String(closed?.pointOfSaleId || '').trim();
@@ -7053,6 +7465,8 @@ export function TpvRegisterGate({
       // bloqueado en silencio y hay que pulsar Abrir varias veces.
       stickyOpenSessionRef.current = created;
       setAckedOpenSessionId(created._id);
+      setBrowseWithoutOpen(false);
+      setBrowseOpeningOverlay(false);
       writeTpvOpenRegisterLatch(created);
       if (!isWorkerUser) {
         const bid = resolveBusinessScopeId(currentBusiness);
@@ -7691,7 +8105,8 @@ export function TpvRegisterGate({
     return () => window.clearTimeout(t);
   }, [clockInGate.allowed, clockInGate.reason]);
   const showClockInGateOverlay =
-    clockInGateSettled
+    !browseWithoutOpen
+    && clockInGateSettled
     && !clockInGate.allowed
     && clockInGate.reason !== 'loading'
     && !showClockIn;
@@ -8149,7 +8564,9 @@ export function TpvRegisterGate({
     );
   }
 
-  if (!isTpvRegisterSessionOpen(boardSession) || needsResumeAck) {
+  const boardOperational = isTpvRegisterSessionOpen(boardSession) && !needsResumeAck;
+
+  if (!boardOperational && !browseWithoutOpen) {
     if (isWorkerUser && !isTabletSession && !loading && !resolveEffectiveSalesPointRef({
       employmentSalesPointId: user?.employment?.salesPointId,
       workCenters,
@@ -8235,6 +8652,7 @@ export function TpvRegisterGate({
         }
         onOpen={handleOpen}
         onContinueExistingOpen={handleContinueExistingOpen}
+        onEnterWithoutOpen={isDeliveryTpvOpening ? handleEnterWithoutOpen : undefined}
         loading={loading}
         openingBusy={openingBusy}
         pointsOfSale={pointsOfSale}
@@ -8271,12 +8689,123 @@ export function TpvRegisterGate({
     return wrapShell(openingScreen);
   }
 
+  if (!boardOperational && browseWithoutOpen && isDeliveryTpvOpening) {
+    const browsePdvId = String(resolvedStorePickId || '').trim();
+    const browseStoreLabel =
+      tabletBinding?.pdvName
+      || tabletBinding?.businessName
+      || pointsOfSale.find((p) => p._id === browsePdvId)?.name
+      || workCenters.find((w) => w._id === browsePdvId)?.name
+      || 'Tienda';
+    const tabletEntryLocked = Boolean(isTabletCajaScope || tabletBinding);
+    const browseOpeningScreen = (
+      <OpeningScreen
+        key={`browse-open-${browsePdvId || 'none'}-${openingResume?.key || 0}`}
+        onOpen={handleOpen}
+        onContinueExistingOpen={handleContinueExistingOpen}
+        loading={loading}
+        openingBusy={openingBusy}
+        pointsOfSale={pointsOfSale}
+        workCenters={workCenters}
+        workerOptions={openingWorkerOptions}
+        registerSessions={sessions}
+        isManagerView={!isWorkerUser && !tabletEntryLocked}
+        tabletStoreLabel={browseStoreLabel}
+        tabletWorkCenterId={tabletBinding?.workCenterId || null}
+        knownOpenSession={openingKnownOpenSession}
+        restrictedToPdvId={browsePdvId || null}
+        restaurantOpening={isRestaurantVerticalChrome}
+        onOpeningPdvChange={handleOpeningPdvChange}
+        clockInBusinessId={businessId || ''}
+        clockInOwnerUserId={dataUserId || ''}
+        resumeAfterClose={openingResume}
+        onClockInChanged={() => {
+          void refreshClockedInWorkers({ silent: true });
+        }}
+        onClearStorePick={
+          !isWorkerUser && !tabletEntryLocked
+            ? () => {
+                const bid = resolveBusinessScopeId(currentBusiness);
+                if (bid && dataUserId) writeOpsSelectedPdvId(currentBusiness?.businessType, bid, dataUserId, null);
+                skipManagerAutoPdvRef.current = true;
+                setManagerPdvPickId(null);
+                onManagerStoreCleared?.();
+              }
+            : undefined
+        }
+      />
+    );
+
+    return wrapShell(
+      <TpvRegisterBoardReadyContext.Provider value={true}>
+        <TpvRegisterBrowseModeContext.Provider value={true}>
+          <TpvStatusBarQuickActionsContext.Provider value={statusBarQuickActionsApi}>
+            <div className={tpvFrameClass}>
+              <RegisterBrowseStatusBar
+                storeLabel={browseStoreLabel}
+                browsePdvId={browsePdvId}
+                onRequestOpen={() => setBrowseOpeningOverlay(true)}
+                onRequestClockIn={() => setShowClockIn(true)}
+                onRequestPrinterSetup={() => setShowPrinterSetup(true)}
+                showNativePrinter={isNativeApp}
+                nativePrinterReady={nativePrinterReady}
+                isTabletMode={isTabletSession}
+                minimal={compactRegisterChrome}
+                quickActions={statusBarQuickActions}
+              />
+              <div className="flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden relative">
+                {children}
+              </div>
+            </div>
+            {browseOpeningOverlay ? (
+              <TpvGatePortal>
+                <div className="fixed inset-0 z-[80] bg-stone-950/60 backdrop-blur-[2px] flex flex-col">
+                  <button
+                    type="button"
+                    onClick={() => setBrowseOpeningOverlay(false)}
+                    className="absolute top-3 right-3 z-[90] min-h-[44px] min-w-[44px] rounded-xl bg-white/90 dark:bg-stone-900/90 border border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-300 flex items-center justify-center shadow-lg"
+                    aria-label="Cerrar"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                  <div className="flex-1 min-h-0 overflow-auto p-2 sm:p-4">
+                    {browseOpeningScreen}
+                  </div>
+                </div>
+              </TpvGatePortal>
+            ) : null}
+            {showPrinterSetup ? (
+              <TpvGatePortal>
+                <Suspense
+                  fallback={(
+                    <div className="fixed inset-0 z-[110] flex flex-col items-center justify-center bg-gray-50 dark:bg-gray-950 text-gray-700 dark:text-gray-200">
+                      <p className="text-sm font-semibold">Cargando configuración de impresora…</p>
+                    </div>
+                  )}
+                >
+                  <TpvPrinterSetupModal
+                    scope={printerModalScope}
+                    onClose={() => {
+                      setShowPrinterSetup(false);
+                      setPrinterBarTick((t) => t + 1);
+                    }}
+                  />
+                </Suspense>
+              </TpvGatePortal>
+            ) : null}
+          </TpvStatusBarQuickActionsContext.Provider>
+        </TpvRegisterBrowseModeContext.Provider>
+      </TpvRegisterBoardReadyContext.Provider>,
+    );
+  }
+
   // Tras el guard, boardSession es la caja open (active o sticky).
   const openBoardSession = boardSession!;
   writeTpvOpenRegisterLatch(openBoardSession);
 
   return wrapShell(
     <TpvRegisterBoardReadyContext.Provider value={true}>
+      <TpvRegisterBrowseModeContext.Provider value={false}>
       <TpvStatusBarQuickActionsContext.Provider value={statusBarQuickActionsApi}>
       <div className={tpvFrameClass}>
         <RegisterStatusBar
@@ -8405,6 +8934,7 @@ export function TpvRegisterGate({
         </TpvGatePortal>
       )}
     </TpvStatusBarQuickActionsContext.Provider>
+      </TpvRegisterBrowseModeContext.Provider>
     </TpvRegisterBoardReadyContext.Provider>,
   );
 }

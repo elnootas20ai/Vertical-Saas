@@ -43,6 +43,7 @@ import {
   Star,
   Trash2,
   TrendingUp,
+  UserMinus,
   UserPlus,
   Users,
   UsersRound,
@@ -123,6 +124,35 @@ import { canOwnerPrecedenceRemoveMember } from '../../lib/accountOwnerPrecedence
 
 type TeamTab = 'members' | 'roles' | 'activity' | 'staff-expenses' | 'staff-consumptions' | 'payroll';
 type MemberStatus = 'active' | 'pending' | 'inactive';
+
+function getMemberStatus(member: AuthUser): MemberStatus {
+  return (member.status || 'active') as MemberStatus;
+}
+
+function isInactiveTeamMember(member: AuthUser): boolean {
+  return getMemberStatus(member) === 'inactive';
+}
+
+function formatMemberLastAccess(member: AuthUser): string {
+  if (isInactiveTeamMember(member)) {
+    const endDate = member.employment?.endDate;
+    if (endDate) {
+      const date = new Date(endDate);
+      if (!Number.isNaN(date.getTime())) {
+        return `De baja · ${date.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })}`;
+      }
+    }
+    return 'De baja';
+  }
+  return formatRelativeTime(member.lastLoginAt);
+}
+
+function formatMemberActivityPreview(member: AuthUser): string {
+  if (isInactiveTeamMember(member)) {
+    return 'De baja · fuera del equipo activo';
+  }
+  return member.recentActivity?.[0]?.action || 'Sin actividad reciente';
+}
 
 // ─── Skin System ──────────────────────────────────────────────────────────────
 
@@ -2637,6 +2667,76 @@ function MemberDrawer({
 
 // ─── TeamActivityPanel ────────────────────────────────────────────────────────
 
+function InactiveTeamMembersSection({
+  members,
+  isOpen,
+  onToggle,
+  onOpenMember,
+  businessType,
+}: {
+  members: AuthUser[];
+  isOpen: boolean;
+  onToggle: () => void;
+  onOpenMember: (userId: string) => void;
+  businessType?: string | null;
+}) {
+  if (members.length === 0) return null;
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/40">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left transition-colors hover:bg-gray-100/80 dark:hover:bg-gray-800/60"
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-gray-200/80 dark:bg-gray-700 text-gray-500 dark:text-gray-400">
+            <UserMinus className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+              Bajas del equipo ({members.length})
+            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Trabajadores dados de baja. No aparecen en plantilla activa ni en actividad.
+            </p>
+          </div>
+        </div>
+        <ChevronDown className={`h-4 w-4 flex-shrink-0 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+
+      {isOpen && (
+        <div className="border-t border-gray-200 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-800">
+          {members.map((member) => (
+            <button
+              key={member.user_id}
+              type="button"
+              onClick={() => onOpenMember(member.user_id)}
+              className="flex w-full items-center gap-3 px-5 py-3 text-left transition-colors hover:bg-white/70 dark:hover:bg-gray-800/70"
+            >
+              <Avatar member={member} size="sm" />
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 truncate">{member.fullName}</p>
+                  <StatusBadge status={member.status} />
+                  <RoleBadge role={member.role} businessType={businessType} />
+                </div>
+                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400 truncate">
+                  {formatMemberLastAccess(member)}
+                  {member.employment?.terminationReason
+                    ? ` · ${member.employment.terminationReason}`
+                    : ''}
+                </p>
+              </div>
+              <ChevronRight className="h-4 w-4 flex-shrink-0 text-gray-300 dark:text-gray-600" />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ActivityTimeline({ items }: { items: AccountActivityItem[] }) {
   const TYPE_ICON: Record<string, React.ReactNode> = {
     vehicle: <Car className="w-3.5 h-3.5" />,
@@ -2895,6 +2995,7 @@ export function Team() {
   const [filterStatus, setFilterStatus] = useState<Set<string>>(new Set());
   const [filterRole, setFilterRole] = useState<Set<string>>(new Set());
   const [filterBranch, setFilterBranch] = useState<Set<string>>(new Set());
+  const [inactiveSectionOpen, setInactiveSectionOpen] = useState(false);
   const [teamAlerts, setTeamAlerts] = useState<TeamAlert[]>([]);
   const roleScope = user?.user_id || 'guest';
   const resolvedUserId = user?.id || user?.user_id || '';
@@ -2990,9 +3091,23 @@ export function Team() {
       if (b.status === 'pending' && a.status !== 'pending') {
         return 1;
       }
+      if (a.status === 'inactive' && b.status !== 'inactive') {
+        return 1;
+      }
+      if (b.status === 'inactive' && a.status !== 'inactive') {
+        return -1;
+      }
       return (a.fullName || '').localeCompare(b.fullName || '');
     });
   }, [members, user?.user_id]);
+  const inactiveMembers = useMemo(
+    () => orderedMembers.filter(isInactiveTeamMember),
+    [orderedMembers],
+  );
+  const activeTeamMembers = useMemo(
+    () => orderedMembers.filter((member) => !isInactiveTeamMember(member)),
+    [orderedMembers],
+  );
   const roles = useMemo(() => {
     const base = getFunctionRolesForBusiness(currentBusiness?.businessType, {
       ownDeliveryEnabled: Boolean(currentBusiness?.ownDeliveryEnabled),
@@ -3045,6 +3160,8 @@ export function Team() {
 
     if (filterStatus.size > 0) {
       result = result.filter(m => filterStatus.has(m.status || 'active'));
+    } else {
+      result = result.filter((m) => !isInactiveTeamMember(m));
     }
 
     if (filterRole.size > 0) {
@@ -3315,21 +3432,35 @@ export function Team() {
 
         <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
           {[
-            { label: 'Plantilla total', value: orderedMembers.length, icon: <UsersRound className="w-4 h-4 text-gray-400 dark:text-gray-500" />, color: 'text-gray-900 dark:text-gray-100', border: 'border-gray-200 dark:border-gray-700', sub: '' },
-            { label: 'Activos', value: totalActive, icon: <CheckCircle2 className="w-4 h-4 text-emerald-500" />, color: 'text-emerald-600', border: 'border-gray-200 dark:border-gray-700 border-l-4 border-l-emerald-500', sub: orderedMembers.length > 0 ? `${Math.round(totalActive / orderedMembers.length * 100)}%` : '' },
+            { label: 'Plantilla activa', value: activeTeamMembers.length, icon: <UsersRound className="w-4 h-4 text-gray-400 dark:text-gray-500" />, color: 'text-gray-900 dark:text-gray-100', border: 'border-gray-200 dark:border-gray-700', sub: inactiveMembers.length > 0 ? `+${inactiveMembers.length} baja${inactiveMembers.length !== 1 ? 's' : ''}` : '' },
+            { label: 'Activos', value: totalActive, icon: <CheckCircle2 className="w-4 h-4 text-emerald-500" />, color: 'text-emerald-600', border: 'border-gray-200 dark:border-gray-700 border-l-4 border-l-emerald-500', sub: activeTeamMembers.length > 0 ? `${Math.round(totalActive / activeTeamMembers.length * 100)}%` : '' },
             { label: 'Pendientes', value: totalPending, icon: <AlertCircle className="w-4 h-4 text-amber-500" />, color: 'text-amber-600', border: 'border-gray-200 dark:border-gray-700 border-l-4 border-l-amber-500', sub: 'invitaciones' },
-            { label: 'Inactivos', value: orderedMembers.filter(m => m.status === 'inactive').length, icon: <Users className="w-4 h-4 text-gray-400" />, color: 'text-gray-500', border: 'border-gray-200 dark:border-gray-700 border-l-4 border-l-gray-400', sub: 'bajas' },
+            { label: 'Inactivos', value: inactiveMembers.length, icon: <Users className="w-4 h-4 text-gray-400" />, color: 'text-gray-500', border: 'border-gray-200 dark:border-gray-700 border-l-4 border-l-gray-400', sub: 'bajas', toggleInactive: true },
             { label: 'Alertas', value: teamAlerts.length, icon: <AlertCircle className="w-4 h-4 text-red-500" />, color: teamAlerts.length > 0 ? 'text-red-600' : 'text-gray-400', border: teamAlerts.length > 0 ? 'border-red-200 dark:border-red-800 border-l-4 border-l-red-500' : 'border-gray-200 dark:border-gray-700', sub: teamAlerts.filter(a => a.severity === 'critical').length > 0 ? `${teamAlerts.filter(a => a.severity === 'critical').length} críticas` : '' },
-          ].map((item) => (
-            <div key={item.label} className={`rounded-2xl border bg-white dark:bg-gray-800 p-4 ${item.border}`}>
+          ].map((item) => {
+            const canToggleInactive = 'toggleInactive' in item && item.toggleInactive && inactiveMembers.length > 0;
+            const Wrapper = canToggleInactive ? 'button' : 'div';
+            return (
+            <Wrapper
+              key={item.label}
+              type={canToggleInactive ? 'button' : undefined}
+              onClick={canToggleInactive ? () => setInactiveSectionOpen((open) => !open) : undefined}
+              className={`rounded-2xl border bg-white dark:bg-gray-800 p-4 text-left ${item.border} ${canToggleInactive ? 'cursor-pointer transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/60' : ''}`}
+            >
               <div className="mb-2 flex items-center justify-between">
                 <p className="text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">{item.label}</p>
                 {item.icon}
               </div>
               <p className={`text-2xl font-bold ${item.color}`}>{item.value}</p>
               {item.sub && <p className="text-[11px] text-gray-400 mt-0.5">{item.sub}</p>}
-            </div>
-          ))}
+              {canToggleInactive && (
+                <p className="text-[10px] font-medium text-gray-500 dark:text-gray-400 mt-1">
+                  {inactiveSectionOpen ? 'Ocultar bajas' : 'Ver bajas del equipo'}
+                </p>
+              )}
+            </Wrapper>
+            );
+          })}
         </div>
 
         {/* Team alerts banner */}
@@ -3380,7 +3511,7 @@ export function Team() {
           style={{ scrollbarWidth: 'none' }}
         >
           {[
-            { id: 'members' as const, label: t('team.tabs.members'), count: orderedMembers.length },
+            { id: 'members' as const, label: t('team.tabs.members'), count: activeTeamMembers.length },
             { id: 'roles' as const, label: 'Funciones', count: roles.length },
             { id: 'activity' as const, label: t('team.tabs.activity'), count: null },
             { id: 'staff-expenses' as const, label: t('team.tabs.staffExpenses'), count: null },
@@ -3538,7 +3669,7 @@ export function Team() {
                     )}
                     {hasActiveFilters && (
                       <span className="text-xs text-gray-400 dark:text-gray-500 tabular-nums">
-                        {displayMembers.length} de {orderedMembers.length}
+                        {displayMembers.length} de {filterStatus.has('inactive') ? orderedMembers.length : activeTeamMembers.length}
                       </span>
                     )}
                   </div>
@@ -3664,8 +3795,8 @@ export function Team() {
                                 <span>{summary.totalView} ver · {summary.totalEdit} editar</span>
                               </div>
                             </td>
-                            <td className="px-5 py-4 text-sm text-gray-600 dark:text-gray-400">{member.recentActivity?.[0]?.action || 'Sin actividad reciente'}</td>
-                            <td className="px-5 py-4 text-xs text-gray-400 dark:text-gray-500">{formatRelativeTime(member.lastLoginAt)}</td>
+                            <td className="px-5 py-4 text-sm text-gray-600 dark:text-gray-400">{formatMemberActivityPreview(member)}</td>
+                            <td className="px-5 py-4 text-xs text-gray-400 dark:text-gray-500">{formatMemberLastAccess(member)}</td>
                             <td className="px-5 py-4">
                               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <button type="button" onClick={(e) => { e.stopPropagation(); navigate(`/saas/team/${member.user_id}?tab=clockins`); }} title="Fichajes" className="rounded-lg p-1.5 text-gray-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:text-blue-600 transition-colors">
@@ -3712,7 +3843,7 @@ export function Team() {
                           <RoleBadge role={member.role} businessType={currentBusiness?.businessType} />
                           <StatusBadge status={member.status} />
                         </div>
-                        <span className="text-xs text-gray-400 dark:text-gray-500">{formatRelativeTime(member.lastLoginAt)}</span>
+                        <span className="text-xs text-gray-400 dark:text-gray-500">{formatMemberLastAccess(member)}</span>
                       </div>
                     </div>
                   ))}
@@ -3732,6 +3863,16 @@ export function Team() {
                       Limpiar filtros
                     </button>
                   </div>
+                )}
+
+                {!isLoading && inactiveMembers.length > 0 && !filterStatus.has('inactive') && (
+                  <InactiveTeamMembersSection
+                    members={inactiveMembers}
+                    isOpen={inactiveSectionOpen}
+                    onToggle={() => setInactiveSectionOpen((open) => !open)}
+                    onOpenMember={(userId) => navigate(`/saas/team/${userId}`)}
+                    businessType={currentBusiness?.businessType}
+                  />
                 )}
               </>
             )}
@@ -3754,7 +3895,7 @@ export function Team() {
               </button>
             </div>
             {roles.map((role) => {
-              const roleMembers = orderedMembers.filter((member) => member.role === role.id);
+              const roleMembers = orderedMembers.filter((member) => member.role === role.id && !isInactiveTeamMember(member));
               const taskBundle = getRoleTaskBundle(role.id, currentBusiness?.businessType);
               const accessSummary = formatRoleAccessSummary(
                 role.id,
@@ -3834,7 +3975,7 @@ export function Team() {
         )}
 
         {activeTab === 'activity' && (
-          <TeamActivityPanel members={orderedMembers} />
+          <TeamActivityPanel members={activeTeamMembers} />
         )}
 
         {activeTab === 'staff-expenses' && user && (

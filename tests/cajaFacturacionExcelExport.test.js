@@ -267,6 +267,128 @@ describe('splitSessionCajaAmountsByBillingSheet', () => {
     expect(mm.totalPizza).toBe(57);
   });
 
+  it('ago-22 prod Badalona: por marca — MM y BB reciben lo suyo y suman el cierre', () => {
+    // Datos reales del cierre tpvreg-962b1a2c (LOCAL BADALONA 22/08/2026)
+    const MM_ID = 'brand-96a8d7ce-e9af-459c-b8a9-48ffc55949ec';
+    const BB_ID = 'brand-e99413ea-59df-4382-8a06-1d56fac890e0';
+    const prodSheets = [
+      {
+        id: 'modomio',
+        label: 'MODOMIO',
+        brandIds: [MM_ID],
+        unitColumns: [{ key: 'pizza', header: 'TOTAL PIZZA' }],
+      },
+      {
+        id: 'blackburger',
+        label: 'BLACK BURGER',
+        brandIds: [BB_ID],
+        unitColumns: [
+          { key: 'burger', header: 'TOTAL BURGUER' },
+          { key: 'taco', header: 'TOTAL TACOS' },
+        ],
+      },
+    ];
+    const session = closedSession({
+      summary: {
+        salesByMethod: { efectivo: 174.3, tarjeta: 365.28, bizum: 0, online: 0, otro: 0 },
+        salesByChannel: {},
+        totalSales: 539.58,
+      },
+      closingBrandTpvTotals: {
+        [MM_ID]: { efectivo: 149.1, tarjeta: 365.28 },
+        [BB_ID]: { efectivo: 25.2, tarjeta: 0 },
+      },
+      closingBrandLabels: { [MM_ID]: 'MODOMIO', [BB_ID]: 'BLACKBURGER' },
+      aggregatorClosingTotals: { glovo: 114.19, justeat: 88, ubereats: 33.89, flipdish: 17.2 },
+      aggregatorClosingBrandTotals: {
+        glovo: { [MM_ID]: 114.19 },
+        justeat: { [MM_ID]: 54.28, [BB_ID]: 33.72 },
+        ubereats: { [MM_ID]: 33.89 },
+        flipdish: { [MM_ID]: 17.2 },
+      },
+      productClosingCounts: { pizza: 46, burger: 2, taco: 3 },
+    });
+    const mm = splitSessionCajaAmountsByBillingSheet(session, prodSheets[0], prodSheets);
+    const bb = splitSessionCajaAmountsByBillingSheet(session, prodSheets[1], prodSheets);
+    // Caja 1 por marca tal cual el cierre
+    expect(mm.efectivo).toBeCloseTo(149.1, 2);
+    expect(mm.tpv).toBeCloseTo(365.28, 2);
+    expect(bb.efectivo).toBeCloseTo(25.2, 2);
+    expect(bb.tpv).toBeCloseTo(0, 2);
+    // MM + BB = final de caja tienda
+    expect(mm.efectivo + bb.efectivo).toBeCloseTo(174.3, 2);
+    expect(mm.tpv + bb.tpv).toBeCloseTo(365.28, 2);
+    // Apps por marca
+    expect(mm.glovo).toBeCloseTo(114.19, 2);
+    expect(mm.justEat).toBeCloseTo(54.28, 2);
+    expect(bb.justEat).toBeCloseTo(33.72, 2);
+    expect(mm.uber).toBeCloseTo(33.89, 2);
+    expect(mm.flipdish).toBeCloseTo(17.2, 2);
+    // Unidades a su hoja
+    expect(mm.totalPizza).toBe(46);
+    expect(bb.totalBurger).toBe(2);
+    expect(bb.totalTaco).toBe(3);
+  });
+
+  it('1 sola marca: toda la caja, apps y unidades caen en su única hoja', () => {
+    const soloSheets = [
+      {
+        id: 'modomio',
+        label: 'MODOMIO',
+        brandIds: ['brand-mm'],
+        unitColumns: [{ key: 'pizza', header: 'TOTAL PIZZA' }],
+      },
+    ];
+    // Con Caja 1 guardada
+    const conCaja1 = closedSession({
+      summary: {
+        salesByMethod: { efectivo: 200, tarjeta: 300, bizum: 10, online: 0, otro: 0 },
+        salesByChannel: {},
+        totalSales: 510,
+      },
+      closingBrandTpvTotals: { 'brand-mm': { efectivo: 200, tarjeta: 300 } },
+      closingBrandLabels: { 'brand-mm': 'MODOMIO' },
+      aggregatorClosingTotals: { glovo: 80, justeat: 40 },
+      productClosingCounts: { pizza: 30, burger: 0, taco: 0 },
+    });
+    const solo = splitSessionCajaAmountsByBillingSheet(conCaja1, soloSheets[0], soloSheets);
+    expect(solo.efectivo).toBe(200);
+    expect(solo.tpv).toBe(300);
+    expect(solo.x).toBe(10);
+    expect(solo.glovo).toBe(80);
+    expect(solo.justEat).toBe(40);
+    expect(solo.total).toBe(630);
+    expect(solo.totalPizza).toBe(30);
+
+    // Sin Caja 1 guardada (cierre viejo) → igualmente el 100% a la única hoja
+    const sinCaja1 = closedSession({
+      summary: {
+        salesByMethod: { efectivo: 150, tarjeta: 250, bizum: 0, online: 0, otro: 0 },
+        salesByChannel: {},
+        totalSales: 400,
+      },
+      aggregatorClosingTotals: { ubereats: 60 },
+      productClosingCounts: { pizza: 25, burger: 0, taco: 0 },
+    });
+    const solo2 = splitSessionCajaAmountsByBillingSheet(sinCaja1, soloSheets[0], soloSheets);
+    expect(solo2.efectivo).toBe(150);
+    expect(solo2.tpv).toBe(250);
+    expect(solo2.uber).toBe(60);
+    expect(solo2.total).toBe(460);
+  });
+
+  it('1 sola marca sin ef/tj en filas: closingBrandTpvTotalsFromBillingRows le da todo el cobro tienda', () => {
+    const totals = closingBrandTpvTotalsFromBillingRows(
+      [
+        { brandId: 'brand-mm', name: 'MM', revenue: 500, revenueEfectivo: 0, revenueTarjeta: 0, ownRevenue: 500, sharedAssigned: 0, orderCount: 12, sharePercent: 100, why: '' },
+      ],
+      200,
+      300,
+    );
+    expect(totals['brand-mm'].efectivo).toBe(200);
+    expect(totals['brand-mm'].tarjeta).toBe(300);
+  });
+
   it('enlaza Caja 1 por nombre aunque brandIds de hoja estén vacíos (Modomio Pizza → MODOMIO)', () => {
     const legacy = [
       {

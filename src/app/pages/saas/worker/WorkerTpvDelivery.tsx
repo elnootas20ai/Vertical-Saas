@@ -27,6 +27,7 @@ import { resolvePdvIdFromStoreRef, filterOrdersForActivePdv } from '../../../lib
 import { leaveTpvTabletSession, readTpvTabletBinding } from '../../../lib/tpvTabletSession';
 import {
   useTpvRegisterBoardReady,
+  useTpvRegisterBrowseMode,
   useTpvRegisterIfOpen,
   useTpvStatusBarQuickActions,
   type TpvRegisterContextType,
@@ -86,7 +87,6 @@ import {
   Search,
   X,
   Loader2,
-  RefreshCw,
   ShoppingBag,
   Store,
   Plus,
@@ -1344,7 +1344,6 @@ export function WorkerTpvDelivery({
   const location = useLocation();
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [view, setView] = useState<'board' | 'new-order' | 'staff-consumption'>('board');
   const [editingOrder, setEditingOrder] = useState<DeliveryOrder | null>(null);
   const [fulfillmentFilter, setFulfillmentFilter] = useState<FulfillmentFilter>('all');
@@ -1378,6 +1377,7 @@ export function WorkerTpvDelivery({
   const businessId = registerScope.scopeBusinessId;
   const registerCtx = useTpvRegisterIfOpen();
   const boardReady = useTpvRegisterBoardReady();
+  const browseOnly = useTpvRegisterBrowseMode();
   const setStatusBarQuickActions = useTpvStatusBarQuickActions();
   const orderFlowLock = useTpvOrderFlowLockControls();
   const registerStickyRef = useRef<TpvRegisterContextType | null>(null);
@@ -1405,8 +1405,9 @@ export function WorkerTpvDelivery({
       registerOpen,
       stickyOpen: Boolean(sticky && isTpvRegisterSessionOpen(sticky.session)),
       boardReady,
+      browseOnly,
     };
-  }, [registerOpen, boardReady]);
+  }, [registerOpen, boardReady, browseOnly]);
   // El tablero solo monta tras caja abierta (gate); latch/contexto cubren parpadeos.
   const canUseOrderFlow = canEnterTpvOrderFlow(orderFlowSignals());
   const historySectionRef = useRef<HTMLDivElement | null>(null);
@@ -1497,12 +1498,10 @@ export function WorkerTpvDelivery({
   const loadOrders = useCallback(async (options?: { silent?: boolean }) => {
     if (!userId) return;
     const silent = options?.silent ?? false;
-    if (!silent) setRefreshing(true);
     setDayKey(localCalendarDayKey());
     if (!sessionOpenedAt) {
       setOrders([]);
       setInitialLoading(false);
-      if (!silent) setRefreshing(false);
       return;
     }
     const bounds = orderLoadBoundsForOpenSession(sessionOpenedAt);
@@ -1532,7 +1531,6 @@ export function WorkerTpvDelivery({
       if (!silent) toast.error('Error al cargar pedidos');
     } finally {
       setInitialLoading(false);
-      setRefreshing(false);
     }
   }, [userId, businessId, businesses, scopedPdvId, primaryPdvId, scopedPdvName, scopedPdvWorkCenterId, sessionOpenedAt]);
 
@@ -2135,6 +2133,10 @@ export function WorkerTpvDelivery({
   }, [view, canUseOrderFlow, boardReady, releaseOrderFlowClickLock]);
 
   const startEditOrder = useCallback((order: DeliveryOrder) => {
+    if (browseOnly) {
+      toast.message('Abre la caja para editar o cobrar pedidos', { id: 'tpv-browse-block' });
+      return;
+    }
     // Si el tablero está visible, el gate ya validó caja abierta; no bloquear por Context parpadeante.
     if (!orderFlowClickLockRef.current) {
       orderFlowLock.acquire();
@@ -2143,16 +2145,20 @@ export function WorkerTpvDelivery({
     setSelectedOrder(null);
     setEditingOrder(order);
     setView('new-order');
-  }, [orderFlowLock]);
+  }, [orderFlowLock, browseOnly]);
 
   const startNewOrder = useCallback(() => {
+    if (browseOnly) {
+      toast.message('Abre la caja para crear pedidos', { id: 'tpv-browse-block' });
+      return;
+    }
     if (!orderFlowClickLockRef.current) {
       orderFlowLock.acquire();
       orderFlowClickLockRef.current = true;
     }
     setEditingOrder(null);
     setView('new-order');
-  }, [orderFlowLock]);
+  }, [orderFlowLock, browseOnly]);
 
   const exitTabletTpv = useCallback(() => {
     void leaveTpvTabletSession(logout, { navigate });
@@ -2235,12 +2241,12 @@ export function WorkerTpvDelivery({
 
   useEffect(() => {
     if (!setStatusBarQuickActions) return;
-    if (view !== 'board' || !canUseOrderFlow) {
+    if (view !== 'board' || (!canUseOrderFlow && !browseOnly)) {
       setStatusBarQuickActions(null);
       return;
     }
     const actions = [
-      ...(staffConsumptionEnabled
+      ...(staffConsumptionEnabled && !browseOnly
         ? [{
             id: 'consumo',
             label: 'Consumo del trabajador',
@@ -2260,13 +2266,6 @@ export function WorkerTpvDelivery({
         active: soundEnabled,
         icon: soundEnabled ? <Volume2 /> : <VolumeX />,
         onClick: () => setSoundEnabled((v) => !v),
-      },
-      {
-        id: 'refresh',
-        label: 'Actualizar pedidos',
-        title: 'Recargar la lista de montaje y reparto',
-        icon: <RefreshCw className={refreshing ? 'animate-spin' : ''} />,
-        onClick: () => void loadOrders(),
       },
       {
         id: 'history',
@@ -2292,13 +2291,12 @@ export function WorkerTpvDelivery({
     setStatusBarQuickActions,
     view,
     canUseOrderFlow,
+    browseOnly,
     staffConsumptionEnabled,
     soundEnabled,
-    refreshing,
     showDelivered,
     stats.delivered,
     openOrderHistory,
-    loadOrders,
     ceoMode,
     tabletBinding,
     exitTabletTpv,
@@ -2373,18 +2371,23 @@ export function WorkerTpvDelivery({
       <div className={`shrink-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 ${isTabletUi ? 'px-2 py-1.5' : 'px-4 py-3'}`}>
         {isTabletUi ? (
           <>
-            {/* Una sola fila limpia: Nuevo/Consumo + filtros. Avisos/Actualizar/Historial van al menú ☰ de la barra de caja. */}
+            {/* Una sola fila limpia: Nuevo/Consumo + filtros. Avisos/Historial van al menú ☰ de la barra de caja. */}
             <div className="flex items-stretch gap-1.5 min-w-0">
               <button
                 type="button"
                 onClick={startNewOrder}
-                title="Nuevo pedido"
-                className="flex items-center justify-center gap-1 min-h-[40px] shrink-0 px-3 rounded-xl bg-[var(--v-blue,#2563eb)] hover:bg-[#1d4ed8] text-white font-bold text-xs shadow-sm shadow-blue-900/20 transition-colors touch-manipulation"
+                title={browseOnly ? 'Abre la caja para crear pedidos' : 'Nuevo pedido'}
+                disabled={browseOnly}
+                className={`flex items-center justify-center gap-1 min-h-[40px] shrink-0 px-3 rounded-xl font-bold text-xs shadow-sm transition-colors touch-manipulation ${
+                  browseOnly
+                    ? 'bg-stone-200 dark:bg-stone-700 text-stone-400 cursor-not-allowed'
+                    : 'bg-[var(--v-blue,#2563eb)] hover:bg-[#1d4ed8] text-white shadow-blue-900/20'
+                }`}
               >
                 <Plus className="w-4 h-4" strokeWidth={2.5} />
                 Nuevo
               </button>
-              {staffConsumptionEnabled && (
+              {staffConsumptionEnabled && !browseOnly && (
                 <button
                   type="button"
                   onClick={() => setView('staff-consumption')}
@@ -2469,16 +2472,6 @@ export function WorkerTpvDelivery({
                   {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
                   {soundEnabled ? 'Avisos ON' : 'Avisos OFF'}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => void loadOrders()}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-                  title="Actualizar lista de pedidos"
-                  aria-label="Actualizar pedidos"
-                >
-                  <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-                  Actualizar
-                </button>
               </div>
             </div>
 
@@ -2486,12 +2479,18 @@ export function WorkerTpvDelivery({
               <button
                 type="button"
                 onClick={startNewOrder}
-                className="w-full flex items-center justify-center gap-2.5 min-h-[48px] py-3.5 rounded-2xl bg-[var(--v-blue,#2563eb)] hover:bg-[#1d4ed8] text-white font-bold text-sm sm:text-base shadow-lg shadow-blue-900/25"
+                disabled={browseOnly}
+                title={browseOnly ? 'Abre la caja para crear pedidos' : undefined}
+                className={`w-full flex items-center justify-center gap-2.5 min-h-[48px] py-3.5 rounded-2xl font-bold text-sm sm:text-base ${
+                  browseOnly
+                    ? 'bg-stone-200 dark:bg-stone-700 text-stone-400 cursor-not-allowed'
+                    : 'bg-[var(--v-blue,#2563eb)] hover:bg-[#1d4ed8] text-white shadow-lg shadow-blue-900/25'
+                }`}
               >
                 <Plus className="w-5 h-5" strokeWidth={2.5} />
                 Nuevo pedido
               </button>
-              {staffConsumptionEnabled && (
+              {staffConsumptionEnabled && !browseOnly && (
                 <button
                   type="button"
                   onClick={() => setView('staff-consumption')}

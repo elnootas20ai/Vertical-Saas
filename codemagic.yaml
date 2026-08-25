@@ -25,6 +25,8 @@ workflows:
       vars:
         # El WebView nativo no comparte origen con el backend: URL absoluta del API
         VITE_NATIVE_API_ORIGIN: "https://vertialapp.com"
+        # Tablet iOS: misma UI que Safari (no dist embebido que queda viejo).
+        CAPACITOR_SERVER_URL: "https://vertialapp.com"
     scripts:
       - name: Instalar dependencias
         script: |
@@ -90,9 +92,14 @@ workflows:
             ls -la ios/App/App/ || true
             exit 1
           fi
-          # Sin server.url: el IPA lleva el front de este build (dist/), no vertialapp.com en vivo.
-          if grep -q '"url"' ios/App/App/capacitor.config.json; then
-            echo "ERROR: capacitor.config.json no debe tener server.url (front embebido)"
+          # Tablet TPV: UI en vivo desde vertialapp.com (igual que Safari).
+          if ! grep -q '"url"' ios/App/App/capacitor.config.json; then
+            echo "ERROR: capacitor.config.json debe tener server.url (front en vivo)"
+            cat ios/App/App/capacitor.config.json
+            exit 1
+          fi
+          if ! grep -q 'vertialapp.com' ios/App/App/capacitor.config.json; then
+            echo "ERROR: server.url debe apuntar a vertialapp.com"
             cat ios/App/App/capacitor.config.json
             exit 1
           fi
@@ -116,7 +123,7 @@ workflows:
           set -e
           cd ios/App
           # Marketing: front embebido en IPA (misma cara que el build de este commit).
-          agvtool new-marketing-version 1.16
+          agvtool new-marketing-version 1.17
           # Build: mayor que el último en TestFlight (si no, Apple rechaza el upload).
           LATEST_TF=""
           LATEST_TF=$(app-store-connect get-latest-testflight-build-number com.vertial.app 2>/dev/null || true)

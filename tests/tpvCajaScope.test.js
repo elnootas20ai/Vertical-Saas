@@ -639,4 +639,8 @@ describe('canEnterTpvOrderFlow', () => {
   it('permite entrar con boardReady sin latch', () => {
     expect(canEnterTpvOrderFlow({ boardReady: true })).toBe(true);
   });
+
+  it('bloquea pedidos en modo consulta (sin caja abierta)', () => {
+    expect(canEnterTpvOrderFlow({ boardReady: true, browseOnly: true })).toBe(false);
+  });
 });
