@@ -12,7 +12,7 @@ import {
   getDocument,
   getDeliveryDbName,
 } from './couchdb.js';
-import { emitGlobalAlert, emitPositiveAlert } from './alertEmitter.js';
+import { emitGlobalAlert, emitPositiveAlert, filterManagementRecipientIds } from './alertEmitter.js';
 import logger from './logger.js';
 
 const DELIVERY_CAJA_ROUTE = '/saas/vertical/delivery/caja';
@@ -47,11 +47,10 @@ function resolveCajaRoute(business) {
 }
 
 /**
- * Destinatarios: dueño + admins/gerentes.
+ * Destinatarios: dueño + admins/gerentes. Nunca el trabajador que cerró la caja.
  */
-export function resolveTpvCloseNotificationRecipients(business, closerUserId) {
+export function resolveTpvCloseNotificationRecipients(business) {
   const recipients = new Set();
-  const closer = String(closerUserId || '').trim();
   const ownerId = String(business?.owner_user_id || '').trim();
   if (ownerId) recipients.add(ownerId);
   for (const m of business?.members || []) {
@@ -59,7 +58,6 @@ export function resolveTpvCloseNotificationRecipients(business, closerUserId) {
     if (!uid) continue;
     if (isManagerRole(m.role)) recipients.add(uid);
   }
-  if (closer && recipients.size === 0) recipients.add(closer);
   return Array.from(recipients);
 }
 
@@ -125,10 +123,11 @@ export async function notifyTpvRegisterClosed({ req, dataUserId, actorUserId, se
     const hasDiscrepancy = Math.abs(diff) >= 0.01;
 
     if (!hasDiscrepancy) {
-      const recipients = resolveTpvCloseNotificationRecipients(business, actorUserId);
-      const list = recipients.length
-        ? recipients
-        : [String(business?.owner_user_id || dataUserId || '').trim()].filter(Boolean);
+      const rawRecipients = resolveTpvCloseNotificationRecipients(business);
+      const fallbackOwner = [String(business?.owner_user_id || dataUserId || '').trim()].filter(Boolean);
+      const list = await filterManagementRecipientIds(
+        rawRecipients.length ? rawRecipients : fallbackOwner,
+      );
       if (list.length === 0) return;
 
       await emitPositiveAlert({

@@ -11,10 +11,14 @@ describe('tpvRegisterCloseNotifications recipients', () => {
           { user_id: 'worker-1', role: 'reparto' },
         ],
       },
-      'closer-1',
     );
     expect(ids).toContain('owner-1');
     expect(ids).toContain('mgr-1');
     expect(ids).not.toContain('worker-1');
+  });
+
+  it('no incluye al trabajador que cerró si no hay gerentes', () => {
+    const ids = resolveTpvCloseNotificationRecipients({ members: [] });
+    expect(ids).toHaveLength(0);
   });
 });

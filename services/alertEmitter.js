@@ -37,6 +37,7 @@ import { resolveAlertPlanTier } from './alertPlanTiers.js';
 import { resolvePlanTier } from './subscriptionAddons.js';
 import { ALL_ALERT_RULE_DEFINITIONS } from './alertRulesCatalog.js';
 import { isCeoUrgentMobilePushRule } from './pushAlertPolicy.js';
+import { isWorkerProfileSubject } from './workerProfileCompletion.js';
 
 export const fakeReq = { headers: {} };
 const SETTINGS_DB = 'settings';
@@ -157,16 +158,29 @@ function isManagementInviteRole(role) {
   );
 }
 
+/**
+ * Excluye cuentas de trabajador de piso de alertas/correos de gestión (caja, finanzas, etc.).
+ */
+export async function filterManagementRecipientIds(userIds = []) {
+  const out = [];
+  for (const raw of userIds) {
+    const uid = String(raw || '').trim();
+    if (!uid) continue;
+    try {
+      const account = await findAccountByUserId(fakeReq, uid);
+      if (!account || isWorkerProfileSubject(account)) continue;
+      out.push(uid);
+    } catch {
+      /* cuenta desconocida: no enviar */
+    }
+  }
+  return out;
+}
+
 async function resolveRecipients(businessId, ruleId, category, fallbackUserId, { force = false } = {}) {
   if (!businessId) {
     if (!fallbackUserId) return [];
-    try {
-      const account = await findAccountByUserId(fakeReq, fallbackUserId);
-      if (isWorkerAccountDoc(account)) return [];
-      return [fallbackUserId];
-    } catch {
-      return [];
-    }
+    return filterManagementRecipientIds([fallbackUserId]);
   }
   try {
     // Si la regla está desactivada en el negocio, no emitir (salvo force).
@@ -186,24 +200,12 @@ async function resolveRecipients(businessId, ruleId, category, fallbackUserId, {
       if (!uid) continue;
       if (isManagementInviteRole(m.role)) recipients.add(uid);
     }
-    if (recipients.size > 0) return [...recipients];
-    if (fallbackUserId) {
-      const account = await findAccountByUserId(fakeReq, fallbackUserId);
-      if (isWorkerAccountDoc(account)) return [];
-      return [fallbackUserId];
-    }
+    if (recipients.size > 0) return filterManagementRecipientIds([...recipients]);
+    if (fallbackUserId) return filterManagementRecipientIds([fallbackUserId]);
     return [];
   } catch {
     return [];
   }
-}
-
-/** Cuenta de trabajador de piso (invitado sin rol de gestión). El titular no tiene invitedBy. */
-function isWorkerAccountDoc(account) {
-  if (!account) return false;
-  if (String(account.accountType || '') === 'user') return true;
-  if (String(account.invitedBy || '').trim()) return true;
-  return false;
 }
 
 async function resolveChannels(businessId, ruleId, category, { force = false } = {}) {
@@ -402,7 +404,7 @@ export async function emitGlobalAlert({
         try {
           const { findAccountByUserId } = await import('./couchdb.js');
           const account = await findAccountByUserId(fakeReq, uid);
-          if (account?.email) {
+          if (account?.email && !isWorkerProfileSubject(account)) {
             sendEmail({
               to: account.email,
               subject: `[Alerta] ${sanitized.title}`,
@@ -455,13 +457,13 @@ export async function emitPositiveAlert({
   metadata = {},
   dedupKey = '',
 } = {}) {
-  const recipients = Array.from(
+  const recipients = await filterManagementRecipientIds(Array.from(
     new Set(
       [...(Array.isArray(userIds) ? userIds : []), userId]
         .map((id) => String(id || '').trim())
         .filter(Boolean),
     ),
-  );
+  ));
   if (!recipients.length || !String(title || '').trim()) return [];
 
   const resolvedSource = normalizeSource(source || deriveSourceFromCategory(category));
