@@ -5235,9 +5235,10 @@ export function CatalogPage() {
     setLoading(true);
     const timeoutId = window.setTimeout(() => {
       if (cancelled) return;
+      // Solo desbloquea la UI (p. ej. Almacén vía InventoryPanel). Sin toast:
+      // en prod la carta puede tardar >35s mientras stock/compras ya cargaron por otra ruta.
       setLoading(false);
-      toast.error('La carga está tardando mucho. Comprueba la conexión e inténtalo de nuevo.');
-    }, 35_000);
+    }, 52_000);
 
     void loadCatalog(modules).then((ok) => {
       if (cancelled) return;
