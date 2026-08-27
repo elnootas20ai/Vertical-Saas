@@ -19,8 +19,12 @@ import {
   sanitizeNotification,
   NOTIFICATIONS_DB,
 } from './couchdb.js';
-import { recordMovement } from './stockMovementService.js';
+import { listMovementsByReference, recordMovement } from './stockMovementService.js';
 import { resolveWarehouseIdForSalesPoint } from './storeWarehouseService.js';
+import {
+  assertItemsAvailableInWarehouse,
+  hasStoreTransferLineMovement,
+} from '../shared/stock/storeTransferStock.js';
 import { broadcastToUser, broadcastToBusiness } from './sseService.js';
 import { sendPushToUser } from './pushService.js';
 import logger from './logger.js';
@@ -89,6 +93,61 @@ function pdvLabel(pdv) {
   const code = String(pdv?.code || '').trim();
   if (name && code) return `${name} · ${code}`;
   return name || code || 'Tienda';
+}
+
+/** Re-resuelve almacenes si el doc legacy/corrupto no los tiene. Nunca permite vacío. */
+async function resolveTransferWarehouseIds(req, userId, doc) {
+  let fromWarehouseId = String(doc?.fromWarehouseId || '').trim();
+  let toWarehouseId = String(doc?.toWarehouseId || '').trim();
+  if (!fromWarehouseId && doc?.fromPdvId) {
+    fromWarehouseId = await resolveWarehouseIdForSalesPoint(req, userId, doc.fromPdvId);
+  }
+  if (!toWarehouseId && doc?.toPdvId) {
+    toWarehouseId = await resolveWarehouseIdForSalesPoint(req, userId, doc.toPdvId);
+  }
+  if (!fromWarehouseId) throw new Error('La tienda de origen no tiene almacén');
+  if (!toWarehouseId) throw new Error('La tienda de destino no tiene almacén');
+  return { fromWarehouseId, toWarehouseId };
+}
+
+async function listTransferRefMovements(req, userId, transferId, movementTypes) {
+  return listMovementsByReference(req, userId, transferId, 'store_transfer', {
+    movementTypes,
+    maxDocs: 500,
+  });
+}
+
+async function recordTransferLineIfNeeded(req, userId, {
+  existingMovements,
+  catalogItemId,
+  movementType,
+  quantity,
+  warehouseId,
+  warehouseToId = '',
+  referenceId,
+  notes,
+  performedBy,
+}) {
+  if (
+    hasStoreTransferLineMovement(existingMovements, {
+      movementType,
+      catalogItemId,
+      warehouseId,
+    })
+  ) {
+    return null;
+  }
+  return recordMovement(req, userId, {
+    catalogItemId,
+    movementType,
+    quantity,
+    warehouseId,
+    ...(warehouseToId ? { warehouseToId } : {}),
+    referenceId,
+    referenceType: 'store_transfer',
+    notes,
+    performedBy,
+  });
 }
 
 /**
@@ -237,6 +296,18 @@ export async function createStoreTransfer(req, userId, data = {}) {
   if (!fromWarehouseId) throw new Error('La tienda de origen no tiene almacén');
   if (!toWarehouseId) throw new Error('La tienda de destino no tiene almacén');
 
+  const catalogDb = getCatalogDbName();
+  await ensureDatabase(req, catalogDb);
+  const catalogById = new Map();
+  for (const item of items) {
+    const cat = await getDocument(req, catalogDb, item.catalogItemId).catch(() => null);
+    if (!cat || cat.type !== 'catalog_item' || cat.deletedAt) {
+      throw new Error(`Artículo no encontrado: ${item.name || item.catalogItemId}`);
+    }
+    catalogById.set(item.catalogItemId, cat);
+  }
+  assertItemsAvailableInWarehouse(items, catalogById, fromWarehouseId);
+
   const now = new Date().toISOString();
   const transferId = `stransfer-${uuidv4()}`;
   const doc = {
@@ -265,24 +336,24 @@ export async function createStoreTransfer(req, userId, data = {}) {
     updatedAt: now,
   };
 
-  // Salida del origen al enviar: el stock «en camino» ya no está en la tienda origen.
+  // Doc primero: si falla el put no hay movimientos huérfanos; movimientos son idempotentes por ref.
+  await putDocument(req, catalogDb, doc._id, doc);
+
+  const existingOut = await listTransferRefMovements(req, userId, transferId, ['transfer_out']);
   for (const item of items) {
-    await recordMovement(req, userId, {
+    const mov = await recordTransferLineIfNeeded(req, userId, {
+      existingMovements: existingOut,
       catalogItemId: item.catalogItemId,
       movementType: 'transfer_out',
       quantity: item.quantity,
       warehouseId: fromWarehouseId,
       warehouseToId: toWarehouseId,
       referenceId: transferId,
-      referenceType: 'store_transfer',
       notes: `Traspaso a ${doc.toPdvName}`,
       performedBy,
     });
+    if (mov) existingOut.push(mov);
   }
-
-  const catalogDb = getCatalogDbName();
-  await ensureDatabase(req, catalogDb);
-  await putDocument(req, catalogDb, doc._id, doc);
 
   logger.info(
     { tag: 'STORE_TRANSFER', transferId, fromPdvId, toPdvId, items: items.length, userId },
@@ -304,29 +375,51 @@ async function loadOwnedTransfer(req, userId, transferId) {
 export async function receiveStoreTransfer(req, userId, transferId, data = {}) {
   const doc = await loadOwnedTransfer(req, userId, transferId);
   if (!doc) throw new Error('Traspaso no encontrado');
+  if (doc.status === 'received') return sanitizeStoreTransfer(doc);
   if (doc.status !== 'in_transit') throw new Error('Este traspaso ya no está en camino');
 
   const performedBy = String(data.performedBy || '').trim();
   const items = sanitizeTransferItems(doc.items);
+  const { toWarehouseId, fromWarehouseId } = await resolveTransferWarehouseIds(req, userId, doc);
+
+  const existingIn = await listTransferRefMovements(req, userId, doc._id, ['transfer_in']);
+  const alreadyCancelledRestore = items.some((item) =>
+    hasStoreTransferLineMovement(existingIn, {
+      movementType: 'transfer_in',
+      catalogItemId: item.catalogItemId,
+      warehouseId: fromWarehouseId,
+    }),
+  );
+  if (alreadyCancelledRestore) {
+    throw new Error('Este traspaso fue cancelado; el stock ya volvió al origen');
+  }
 
   for (const item of items) {
-    await recordMovement(req, userId, {
+    const mov = await recordTransferLineIfNeeded(req, userId, {
+      existingMovements: existingIn,
       catalogItemId: item.catalogItemId,
       movementType: 'transfer_in',
       quantity: item.quantity,
-      warehouseId: doc.toWarehouseId,
+      warehouseId: toWarehouseId,
       referenceId: doc._id,
-      referenceType: 'store_transfer',
       notes: `Traspaso desde ${doc.fromPdvName || 'otra tienda'}`,
       performedBy,
     });
+    if (mov) existingIn.push(mov);
   }
 
+  const fresh = await loadOwnedTransfer(req, userId, transferId);
+  if (!fresh) throw new Error('Traspaso no encontrado');
+  if (fresh.status === 'received') return sanitizeStoreTransfer(fresh);
+  if (fresh.status !== 'in_transit') throw new Error('Este traspaso ya no está en camino');
+
   const now = new Date();
-  const sentAtMs = Date.parse(doc.sentAt || doc.createdAt || '') || now.getTime();
+  const sentAtMs = Date.parse(fresh.sentAt || fresh.createdAt || '') || now.getTime();
   const updated = {
-    ...doc,
+    ...fresh,
     status: 'received',
+    fromWarehouseId: String(fresh.fromWarehouseId || fromWarehouseId || '').trim(),
+    toWarehouseId,
     receivedAt: now.toISOString(),
     receivedBy: performedBy,
     transitSeconds: Math.max(0, Math.round((now.getTime() - sentAtMs) / 1000)),
@@ -334,7 +427,15 @@ export async function receiveStoreTransfer(req, userId, transferId, data = {}) {
   };
 
   const db = getCatalogDbName();
-  await putDocument(req, db, updated._id, updated);
+  try {
+    await putDocument(req, db, updated._id, updated);
+  } catch (err) {
+    if (err?.statusCode === 409) {
+      const again = await loadOwnedTransfer(req, userId, transferId);
+      if (again?.status === 'received') return sanitizeStoreTransfer(again);
+    }
+    throw err;
+  }
 
   logger.info(
     { tag: 'STORE_TRANSFER', transferId: updated._id, transitSeconds: updated.transitSeconds, userId },
@@ -348,36 +449,68 @@ export async function receiveStoreTransfer(req, userId, transferId, data = {}) {
 export async function cancelStoreTransfer(req, userId, transferId, data = {}) {
   const doc = await loadOwnedTransfer(req, userId, transferId);
   if (!doc) throw new Error('Traspaso no encontrado');
+  if (doc.status === 'cancelled') return sanitizeStoreTransfer(doc);
   if (doc.status !== 'in_transit') throw new Error('Solo se puede cancelar un traspaso en camino');
 
   const performedBy = String(data.performedBy || '').trim();
   const items = sanitizeTransferItems(doc.items);
+  const { fromWarehouseId, toWarehouseId } = await resolveTransferWarehouseIds(req, userId, doc);
 
-  // El stock vuelve al almacén de origen.
+  const existingIn = await listTransferRefMovements(req, userId, doc._id, ['transfer_in']);
+  const alreadyReceived = items.some((item) =>
+    hasStoreTransferLineMovement(existingIn, {
+      movementType: 'transfer_in',
+      catalogItemId: item.catalogItemId,
+      warehouseId: toWarehouseId,
+    }),
+  );
+  if (alreadyReceived) {
+    throw new Error('El destino ya recibió este traspaso; no se puede cancelar');
+  }
+
   for (const item of items) {
-    await recordMovement(req, userId, {
+    const mov = await recordTransferLineIfNeeded(req, userId, {
+      existingMovements: existingIn,
       catalogItemId: item.catalogItemId,
       movementType: 'transfer_in',
       quantity: item.quantity,
-      warehouseId: doc.fromWarehouseId,
+      warehouseId: fromWarehouseId,
       referenceId: doc._id,
-      referenceType: 'store_transfer',
       notes: `Traspaso cancelado (vuelve a ${doc.fromPdvName || 'origen'})`,
       performedBy,
     });
+    if (mov) existingIn.push(mov);
   }
+
+  const fresh = await loadOwnedTransfer(req, userId, transferId);
+  if (!fresh) throw new Error('Traspaso no encontrado');
+  if (fresh.status === 'cancelled') return sanitizeStoreTransfer(fresh);
+  if (fresh.status !== 'in_transit') throw new Error('Solo se puede cancelar un traspaso en camino');
 
   const now = new Date().toISOString();
   const updated = {
-    ...doc,
+    ...fresh,
     status: 'cancelled',
+    fromWarehouseId,
+    toWarehouseId: String(fresh.toWarehouseId || toWarehouseId || '').trim(),
     cancelledAt: now,
     cancelledBy: performedBy,
     updatedAt: now,
   };
 
   const db = getCatalogDbName();
-  await putDocument(req, db, updated._id, updated);
+  try {
+    await putDocument(req, db, updated._id, updated);
+  } catch (err) {
+    if (err?.statusCode === 409) {
+      const again = await loadOwnedTransfer(req, userId, transferId);
+      if (again?.status === 'cancelled') return sanitizeStoreTransfer(again);
+      if (again?.status === 'received') {
+        throw new Error('El destino ya recibió este traspaso; no se puede cancelar');
+      }
+    }
+    throw err;
+  }
 
   logger.info(
     { tag: 'STORE_TRANSFER', transferId: updated._id, userId },

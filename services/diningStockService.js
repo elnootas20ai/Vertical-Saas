@@ -14,7 +14,12 @@ function flattenDiningItemsForStock(order) {
       const catalogItemId = String(item.productId || '').trim();
       const quantity = Number(item.quantity || 0);
       if (!catalogItemId || !(quantity > 0)) continue;
-      items.push({ catalogItemId, quantity });
+      items.push({
+        catalogItemId,
+        quantity,
+        comboSelections: item.comboSelections,
+        halfHalfPizza: item.halfHalfPizza,
+      });
     }
   }
   return items;

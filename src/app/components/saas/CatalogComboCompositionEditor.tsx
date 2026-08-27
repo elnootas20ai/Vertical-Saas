@@ -2,20 +2,20 @@ import { useEffect, useMemo, useState } from 'react';
 import { Check, ChevronDown, Minus, Plus, Search, Trash2, Zap } from 'lucide-react';
 import type { CatalogComboRef, CatalogItem } from '../../lib/deliveryApi';
 import {
-  COMBO_MENU_PRESETS,
   COMBO_SLOT_META,
-  DEFAULT_COMBO_STRUCTURE,
   buildComboMenuSections,
+  catalogCategoriesForComboPartPicker,
   catalogProductsForCategory,
   catalogProductsForComboSection,
   comboItemsInCatalogSection,
   comboMenuSectionKey,
+  comboMenuSizePresetsForCatalog,
+  defaultComboStructureForCatalog,
   inferComboSlotKind,
   isComboMenuComplete,
   normalizeComboItemsForSave,
   pickComboProductInSection,
   totalUnitsInCatalogSection,
-  uniqueCatalogCategoriesForComboParts,
   unitsNeededInComboSection,
   type ComboMenuCatalogSection,
   type ComboStructureSlot,
@@ -33,13 +33,20 @@ type CatalogComboCompositionEditorProps = {
   onStructureConfirmedChange?: (confirmed: boolean) => void;
   onImportIngredients?: () => void;
   compact?: boolean;
+  restaurantCatalog?: boolean;
 };
 
-const MENU_SIZES = COMBO_MENU_PRESETS.filter((p) =>
-  ['estandar', 'duo', 'familiar'].includes(p.id),
-);
-
 const SECTION_HEADER: Record<string, { emoji: string; bg: string; border: string }> = {
+  'Plato principal': {
+    emoji: '🍽️',
+    bg: 'bg-stone-50 dark:bg-stone-950/25',
+    border: 'border-stone-200 dark:border-stone-800',
+  },
+  Principales: {
+    emoji: '🍽️',
+    bg: 'bg-stone-50 dark:bg-stone-950/25',
+    border: 'border-stone-200 dark:border-stone-800',
+  },
   Pizzas: { emoji: '🍕', bg: 'bg-red-50 dark:bg-red-950/25', border: 'border-red-200 dark:border-red-900' },
   Burgers: { emoji: '🍔', bg: 'bg-orange-50 dark:bg-orange-950/25', border: 'border-orange-200 dark:border-orange-900' },
   'Top Burgers': { emoji: '🍔', bg: 'bg-orange-50 dark:bg-orange-950/25', border: 'border-orange-200 dark:border-orange-900' },
@@ -285,7 +292,7 @@ function ComboPartRow({
         </div>
       ) : (
         <p className="text-[11px] text-gray-500">
-          Parte clásica ({slot.label}). Elige un organizador para usar tus categorías reales.
+          {COMBO_SLOT_META[slot.slotKind]?.hint || 'Elige un organizador de tu carta para esta parte.'}
         </p>
       )}
     </div>
@@ -423,13 +430,19 @@ export function CatalogComboCompositionEditor({
   onStructureConfirmedChange,
   onImportIngredients,
   compact = false,
+  restaurantCatalog = false,
 }: CatalogComboCompositionEditorProps) {
   const structure = useMemo(
     () =>
       comboStructureProp && comboStructureProp.length > 0
         ? comboStructureProp
-        : DEFAULT_COMBO_STRUCTURE.map((s) => ({ ...s })),
-    [comboStructureProp],
+        : defaultComboStructureForCatalog({ restaurant: restaurantCatalog }),
+    [comboStructureProp, restaurantCatalog],
+  );
+
+  const menuSizePresets = useMemo(
+    () => comboMenuSizePresetsForCatalog({ restaurant: restaurantCatalog }),
+    [restaurantCatalog],
   );
 
   useEffect(() => {
@@ -437,8 +450,11 @@ export function CatalogComboCompositionEditor({
   }, [onStructureConfirmedChange]);
 
   const categories = useMemo(
-    () => uniqueCatalogCategoriesForComboParts(catalogItems, excludeItemId),
-    [catalogItems, excludeItemId],
+    () =>
+      catalogCategoriesForComboPartPicker(catalogItems, excludeItemId, {
+        restaurant: restaurantCatalog,
+      }),
+    [catalogItems, excludeItemId, restaurantCatalog],
   );
 
   const emitStructure = (next: ComboStructureSlot[]) => {
@@ -462,15 +478,18 @@ export function CatalogComboCompositionEditor({
   };
 
   const applyPreset = (presetId: string) => {
-    const preset = COMBO_MENU_PRESETS.find((p) => p.id === presetId);
+    const preset = menuSizePresets.find((p) => p.id === presetId);
     if (!preset) return;
     emitStructure(preset.structure.map((s) => ({ ...s })));
     if (comboItems.length > 0) emitChange([]);
   };
 
   const menuSections = useMemo(
-    () => buildComboMenuSections('estandar', catalogItems, structure),
-    [catalogItems, structure],
+    () =>
+      buildComboMenuSections('estandar', catalogItems, structure, {
+        restaurantCatalog,
+      }),
+    [catalogItems, structure, restaurantCatalog],
   );
 
   const visibleSections = menuSections.filter((s) => s.slotQuota > 0 || s.expectedCount > 0);
@@ -491,9 +510,6 @@ export function CatalogComboCompositionEditor({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-base font-bold text-gray-900 dark:text-gray-100">Partes del menú</h3>
-          <p className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">
-            Cada parte es un organizador de tu carta: cuántas unidades y qué productos se pueden elegir.
-          </p>
         </div>
         {onImportIngredients && comboItems.length > 0 && (
           <button
@@ -529,7 +545,7 @@ export function CatalogComboCompositionEditor({
             Añadir parte
           </button>
           <span className="text-[11px] text-gray-400">Plantillas:</span>
-          {MENU_SIZES.map((preset) => (
+          {menuSizePresets.map((preset) => (
             <button
               key={preset.id}
               type="button"

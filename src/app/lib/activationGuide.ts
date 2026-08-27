@@ -118,7 +118,7 @@ export const ACTIVATION_FIELD_GUIDES: Record<string, ActivationFieldGuide> = {
     fieldKey: 'team-invite',
     label: 'Invitar al equipo',
     bannerTitle: 'Invita a alguien',
-    bannerDetail: 'Pulsa «Invitar miembro» en Equipo.',
+    bannerDetail: 'Pulsa «Invitar Trabajador» en Equipo.',
   },
   'sale-new': {
     fieldKey: 'sale-new',
@@ -339,7 +339,7 @@ export const ACTIVATION_SUBSTEP_GUIDES: Record<string, ActivationSubStepGuide> =
   team: {
     fieldKey: 'team-invite',
     route: '/saas/team',
-    clickHint: 'Equipo → Invitar miembro',
+    clickHint: 'Equipo → Invitar Trabajador',
   },
   documents: {
     fieldKey: 'doc-template',

@@ -272,9 +272,19 @@ export interface DiningOrder {
 
 // ─── Tables ──────────────────────────────────────────────────────────────────
 
-export async function listDiningTablesRequest(userId: string) {
+export async function listDiningTablesRequest(
+  userId: string,
+  opts?: { businessId?: string; accountBusinessCount?: number },
+) {
   const uid = normalizeUserId(userId);
-  const data = await request<{ tables: DiningTable[] }>(`/api/sala/tables/${uid}`);
+  const bid = String(opts?.businessId || '').replace(/^business:/, '').trim();
+  const params = new URLSearchParams();
+  if (bid) params.set('businessId', bid);
+  if (opts?.accountBusinessCount != null && opts.accountBusinessCount > 0) {
+    params.set('accountBusinessCount', String(opts.accountBusinessCount));
+  }
+  const qs = params.toString() ? `?${params.toString()}` : '';
+  const data = await request<{ tables: DiningTable[] }>(`/api/sala/tables/${uid}${qs}`);
   return data.tables;
 }
 

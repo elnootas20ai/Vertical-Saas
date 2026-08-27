@@ -186,6 +186,30 @@ const CENTER_TYPE_COLORS: Record<WorkCenterType, string> = {
   custom: 'bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400',
 };
 
+function InviteTeamCenterCard({ onGoToTeam }: { onGoToTeam: () => void }) {
+  return (
+    <div className="rounded-2xl border-2 border-gray-200 dark:border-gray-700 p-4 flex flex-col sm:flex-row sm:items-center gap-4">
+      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gray-100 dark:bg-gray-700">
+        <Users className="w-6 h-6 text-gray-700 dark:text-gray-200" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="font-semibold text-gray-900 dark:text-gray-100 text-sm">Invitar equipo del centro</p>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+          Configura usuarios desde Equipo para que el centro opere correctamente.
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={onGoToTeam}
+        className="shrink-0 inline-flex items-center justify-center gap-2 rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-black dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
+      >
+        Ir a Equipo
+        <ArrowRight className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
+
 // ── Modal crear/editar centro de trabajo ──────────────────────────────────────
 
 export type WorkCenterSaveData = Partial<WorkCenter> & {
@@ -1228,26 +1252,6 @@ function WorkCenterModal({
                 )}
               </div>
 
-              {!simplifyPdvCreate && (
-                <div className="rounded-2xl border-2 border-gray-200 dark:border-gray-700 p-4 flex flex-col sm:flex-row sm:items-center gap-4">
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gray-100 dark:bg-gray-700">
-                    <Users className="w-6 h-6 text-gray-700 dark:text-gray-200" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-semibold text-gray-900 dark:text-gray-100 text-sm">Invitar equipo del centro</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Configura usuarios desde Equipo para que el centro opere correctamente.</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => navigate('/saas/team')}
-                    className="shrink-0 inline-flex items-center justify-center gap-2 rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-black dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
-                  >
-                    Ir a Equipo
-                    <ArrowRight className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
-
               {simplifyPdvCreate &&
                 renderPdvMore(
                   'general',
@@ -1265,20 +1269,6 @@ function WorkCenterModal({
                         </p>
                       </div>
                     )}
-                    <div className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 px-3 py-2 dark:border-gray-700">
-                      <div className="min-w-0">
-                        <p className="text-xs font-semibold text-gray-900 dark:text-gray-100">Equipo del centro</p>
-                        <p className="text-[10px] text-gray-500 dark:text-gray-400">Invita usuarios desde Equipo</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => navigate('/saas/team')}
-                        className="shrink-0 inline-flex items-center gap-1 rounded-lg bg-gray-900 px-2.5 py-1.5 text-[11px] font-semibold text-white dark:bg-gray-100 dark:text-gray-900"
-                      >
-                        Equipo
-                        <ArrowRight className="h-3 w-3" />
-                      </button>
-                    </div>
                   </>,
                 )}
             </div>
@@ -2845,10 +2835,13 @@ export function SalesPointsTab() {
       )}
 
       {filtered.length > 0 && (
-        <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 px-1">
-          <span>{filtered.length} de {workCenters.length} centro{workCenters.length !== 1 ? 's' : ''} de trabajo</span>
-          {search && <button onClick={() => setSearch('')} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 underline">Limpiar búsqueda</button>}
-        </div>
+        <>
+          <InviteTeamCenterCard onGoToTeam={() => navigate('/saas/team')} />
+          <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 px-1">
+            <span>{filtered.length} de {workCenters.length} centro{workCenters.length !== 1 ? 's' : ''} de trabajo</span>
+            {search && <button onClick={() => setSearch('')} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 underline">Limpiar búsqueda</button>}
+          </div>
+        </>
       )}
 
       <WorkCenterModal

@@ -26,6 +26,22 @@ export function findWarehouseForSalesPoint(warehouses, salesPointId) {
 }
 
 /**
+ * Normaliza ref de tienda (PDV `_id`, `wc:…` o workCenterId) al `_id` del PDV.
+ * Sin match → cadena vacía (no inventar ids).
+ */
+export function resolveSalesPointIdFromRef(pointsOfSale, salesPointId) {
+  let r = String(salesPointId || '').trim();
+  if (!r) return '';
+  if (r.startsWith('wc:')) r = r.slice(3).trim();
+  if (!r) return '';
+  const list = (pointsOfSale || []).filter((p) => p && !p.deletedAt);
+  const byId = list.find((p) => String(p._id || '').trim() === r);
+  if (byId) return String(byId._id);
+  const byWc = list.find((p) => String(p?.workCenterId || '').trim() === r);
+  return byWc ? String(byWc._id) : '';
+}
+
+/**
  * Asegura un almacén por cada PDV activo. Idempotente.
  * @returns {Promise<{ warehouses: object[], created: number, linked: number }>}
  */
@@ -115,9 +131,11 @@ export async function ensureStoreWarehouses(req, userId, pointsOfSale) {
 }
 
 export async function resolveWarehouseIdForSalesPoint(req, userId, salesPointId) {
-  const pdvId = String(salesPointId || '').trim();
-  if (!pdvId || !userId) return '';
-  const { warehouses } = await ensureStoreWarehouses(req, userId);
+  const raw = String(salesPointId || '').trim();
+  if (!raw || !userId) return '';
+  const pointsOfSale = await listPointsOfSaleByUser(req, userId).catch(() => []);
+  const pdvId = resolveSalesPointIdFromRef(pointsOfSale, raw) || raw;
+  const { warehouses } = await ensureStoreWarehouses(req, userId, pointsOfSale);
   const hit = findWarehouseForSalesPoint(warehouses, pdvId);
   return hit?._id || '';
 }

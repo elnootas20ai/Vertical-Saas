@@ -122,7 +122,7 @@ export function SAAS__ProfileModal({ isOpen, onClose }: Props) {
     },
     {
       icon: UserPlus,
-      label: 'Invitar miembro',
+      label: 'Invitar Trabajador',
       description: 'Invita a un compañero a tu equipo',
       action: handleOpenInvite,
       color: 'text-orange-600',

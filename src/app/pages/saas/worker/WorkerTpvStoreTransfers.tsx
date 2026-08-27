@@ -38,7 +38,13 @@ import {
   isStoreTransferSoundEnabled,
   playStoreTransferSound,
   setStoreTransferSoundEnabled,
+  storeTransferPdvMatches,
 } from '../../../lib/tpvStoreTransfers';
+import {
+  isTpvTabletBindingAllowedForAuth,
+  readTpvTabletBinding,
+} from '../../../lib/tpvTabletSession';
+import { useBusiness } from '../../../context/BusinessContext';
 import {
   VERTIAL_BTN_DANGER,
   VERTIAL_BTN_PRIMARY,
@@ -95,9 +101,20 @@ function itemsSummary(transfer: StoreTransfer): string {
 
 export function WorkerTpvStoreTransfers({ onBack, scopeOverride }: WorkerTpvStoreTransfersProps) {
   const { user } = useAuth();
+  const { businesses, businessesFetchSettled } = useBusiness();
   const register = useTpvRegisterIfOpen();
   const sessionPdvId = String(register?.session?.pointOfSaleId || '').trim();
   const sessionStoreLabel = String(register?.session?.pointOfSaleName || '').trim();
+  const tabletWorkCenterId = useMemo(() => {
+    const raw = readTpvTabletBinding();
+    const allowed = isTpvTabletBindingAllowedForAuth({
+      binding: raw,
+      authUser: user,
+      businesses,
+      businessesSettled: businessesFetchSettled,
+    });
+    return allowed ? String(raw?.workCenterId || '').trim() : '';
+  }, [user, businesses, businessesFetchSettled]);
 
   const mergedOverride = useMemo<TpvStockScopeOverride | undefined>(() => {
     const dataUserId = scopeOverride?.dataUserId;
@@ -192,12 +209,22 @@ export function WorkerTpvStoreTransfers({ onBack, scopeOverride }: WorkerTpvStor
   }, [view, dataUserId, pdvId]);
 
   const incoming = useMemo(
-    () => transfers.filter((t) => t.status === 'in_transit' && t.toPdvId === pdvId),
-    [transfers, pdvId],
+    () =>
+      transfers.filter(
+        (t) =>
+          t.status === 'in_transit'
+          && storeTransferPdvMatches(t.toPdvId, { pdvId, workCenterId: tabletWorkCenterId }),
+      ),
+    [transfers, pdvId, tabletWorkCenterId],
   );
   const outgoing = useMemo(
-    () => transfers.filter((t) => t.status === 'in_transit' && t.fromPdvId === pdvId),
-    [transfers, pdvId],
+    () =>
+      transfers.filter(
+        (t) =>
+          t.status === 'in_transit'
+          && storeTransferPdvMatches(t.fromPdvId, { pdvId, workCenterId: tabletWorkCenterId }),
+      ),
+    [transfers, pdvId, tabletWorkCenterId],
   );
   const history = useMemo(
     () => transfers.filter((t) => t.status !== 'in_transit').slice(0, 30),
@@ -208,9 +235,10 @@ export function WorkerTpvStoreTransfers({ onBack, scopeOverride }: WorkerTpvStor
     const q = query.trim().toLowerCase();
     return stockItems
       .filter((i) => i.active !== false && !i.deletedAt)
+      .filter((i) => quantityForWarehouse(i, storeWarehouseId) > 0)
       .filter((i) => !q || i.name.toLowerCase().includes(q) || String(i.sku || '').toLowerCase().includes(q))
       .slice(0, 30);
-  }, [stockItems, query]);
+  }, [stockItems, query, storeWarehouseId]);
 
   const selectedCount = useMemo(
     () => Object.values(selected).filter((q) => q > 0).length,
@@ -218,13 +246,15 @@ export function WorkerTpvStoreTransfers({ onBack, scopeOverride }: WorkerTpvStor
   );
 
   const setQty = useCallback((item: CatalogItem, qty: number) => {
+    const available = quantityForWarehouse(item, storeWarehouseId);
+    const capped = Math.min(Math.max(0, Number(qty) || 0), available);
     setSelected((prev) => {
       const next = { ...prev };
-      if (qty <= 0) delete next[item._id];
-      else next[item._id] = qty;
+      if (capped <= 0) delete next[item._id];
+      else next[item._id] = capped;
       return next;
     });
-  }, []);
+  }, [storeWarehouseId]);
 
   const resetCreateForm = useCallback(() => {
     setSelected({});
@@ -240,15 +270,20 @@ export function WorkerTpvStoreTransfers({ onBack, scopeOverride }: WorkerTpvStor
     }
     const items = stockItems
       .filter((i) => (selected[i._id] || 0) > 0)
-      .map((i) => ({
-        catalogItemId: i._id,
-        name: i.name,
-        sku: String(i.sku || ''),
-        unit: String(i.unit || ''),
-        quantity: selected[i._id],
-      }));
+      .map((i) => {
+        const available = quantityForWarehouse(i, storeWarehouseId);
+        const qty = Math.min(selected[i._id], available);
+        return {
+          catalogItemId: i._id,
+          name: i.name,
+          sku: String(i.sku || ''),
+          unit: String(i.unit || ''),
+          quantity: qty,
+        };
+      })
+      .filter((i) => i.quantity > 0);
     if (items.length === 0) {
-      toast.error('Añade al menos un artículo con cantidad');
+      toast.error('Añade al menos un artículo con cantidad disponible');
       return;
     }
     setSending(true);
@@ -274,6 +309,7 @@ export function WorkerTpvStoreTransfers({ onBack, scopeOverride }: WorkerTpvStor
     pdvId,
     toPdvId,
     stockItems,
+    storeWarehouseId,
     selected,
     notes,
     performedBy,
@@ -486,6 +522,7 @@ export function WorkerTpvStoreTransfers({ onBack, scopeOverride }: WorkerTpvStor
                             <button
                               type="button"
                               onClick={() => setQty(item, qty + 1)}
+                              disabled={qty >= available}
                               className={`${VERTIAL_BTN_SECONDARY} !min-h-10 !min-w-10 !px-0`}
                               aria-label="Añadir uno"
                             >

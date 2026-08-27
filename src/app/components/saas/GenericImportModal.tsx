@@ -50,7 +50,7 @@ interface GenericImportModalProps {
   importSheetName?: string;
 }
 
-type ImportStep = 'upload' | 'mapping' | 'preview' | 'importing' | 'results';
+type ImportStep = 'upload' | 'mapping' | 'preview' | 'importing' | 'results' | 'success';
 
 export function GenericImportModal({
   isOpen,
@@ -79,6 +79,7 @@ export function GenericImportModal({
     percent?: number;
   } | null>(null);
   const [importReport, setImportReport] = useState<CatalogImportReport | null>(null);
+  const [importSuccessCount, setImportSuccessCount] = useState(0);
   const [importCancelled, setImportCancelled] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const extraFileRef = useRef<HTMLInputElement>(null);
@@ -87,8 +88,7 @@ export function GenericImportModal({
 
   const normalizedImportLabel = (importLabel || moduleLabel).trim();
 
-  const handleClose = () => {
-    if (importing) return;
+  const resetImportState = () => {
     importAbortRef.current = null;
     importCancelledRef.current = false;
     setImportCancelled(false);
@@ -99,6 +99,12 @@ export function GenericImportModal({
     setImporting(false);
     setImportProgress(null);
     setImportReport(null);
+    setImportSuccessCount(0);
+  };
+
+  const handleClose = () => {
+    if (importing) return;
+    resetImportState();
     onClose();
   };
 
@@ -280,17 +286,19 @@ export function GenericImportModal({
         return;
       }
 
-      // Hay productos guardados → cerrar siempre (el informe vive en la página de Catálogo).
-      // Antes, con avisos, el modal se quedaba en «resultado» y parecía que seguía el importar.
+      setImporting(false);
+      setImportProgress(null);
+      setImportSuccessCount(count);
       if (report && (report.errors.length > 0 || report.warnings.length > 0)) {
+        setImportReport(report);
+        setStep('results');
         toast.success(
-          `${count} entrada(s) importadas. Hay avisos: míralos en el informe de Catálogo.`,
+          `${count} entrada(s) importadas. Revisa los avisos antes de continuar.`,
           { duration: 6000 },
         );
       } else {
-        toast.success(`${count} entrada(s) importadas correctamente`);
+        setStep('success');
       }
-      handleClose();
     } catch (err) {
       if (isImportAbortError(err) || abortController.signal.aborted || importCancelledRef.current) {
         if (!importCancelledRef.current) {
@@ -350,6 +358,7 @@ export function GenericImportModal({
                 {step === 'preview' && `${mappedEntries.length} entradas listas para importar`}
                 {step === 'importing' && (importProgress?.phase || 'Importando datos…')}
                 {step === 'results' && 'Resultado de la importación'}
+                {step === 'success' && 'Importación completada'}
               </p>
             </div>
           </div>
@@ -597,10 +606,56 @@ export function GenericImportModal({
 
           {step === 'results' && importReport && (
             <div className="space-y-4">
+              {importSuccessCount > 0 ? (
+                <div className="flex items-start gap-3 p-4 bg-emerald-50 dark:bg-emerald-900/20 border-2 border-emerald-200 dark:border-emerald-800 rounded-xl">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-300">
+                      {importSuccessCount} entrada(s) importadas
+                    </p>
+                    <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5">
+                      Hay avisos o filas omitidas — revísalos abajo antes de continuar.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-start gap-3 p-4 bg-red-50 dark:bg-red-900/20 border-2 border-red-200 dark:border-red-800 rounded-xl">
+                  <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-red-800 dark:text-red-300">
+                      No se importó ninguna fila
+                    </p>
+                    <p className="text-xs text-red-600 dark:text-red-400 mt-0.5">
+                      Corrige el Excel según el informe e inténtalo de nuevo.
+                    </p>
+                  </div>
+                </div>
+              )}
               <CatalogImportReportPanel report={importReport} compact />
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                También verás este informe en la página de Catálogo hasta que lo cierres.
-              </p>
+              {importSuccessCount > 0 ? (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  También verás este informe en la página de Catálogo hasta que lo cierres.
+                </p>
+              ) : null}
+            </div>
+          )}
+
+          {step === 'success' && (
+            <div className="flex flex-col items-center justify-center py-12 space-y-5 max-w-md mx-auto w-full text-center">
+              <div className="w-16 h-16 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+                <CheckCircle2 className="w-9 h-9 text-emerald-600 dark:text-emerald-400" />
+              </div>
+              <div className="space-y-2">
+                <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
+                  Importación completada
+                </p>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  {importSuccessCount} entrada(s) de {normalizedImportLabel.toLowerCase()} importadas correctamente.
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-500">
+                  Ya puedes continuar con el siguiente paso o cerrar este asistente.
+                </p>
+              </div>
             </div>
           )}
         </div>
@@ -617,7 +672,7 @@ export function GenericImportModal({
             </button>
           </div>
         ) : (
-          <div className="border-t border-gray-200 dark:border-gray-700 p-6 flex gap-3 flex-shrink-0 bg-gray-50 dark:bg-gray-900">
+          <div className={`border-t border-gray-200 dark:border-gray-700 p-6 flex gap-3 flex-shrink-0 bg-gray-50 dark:bg-gray-900 ${step === 'success' ? 'justify-center' : ''}`}>
             {step === 'results' && (
               <>
                 <button
@@ -629,11 +684,19 @@ export function GenericImportModal({
                 <div className="flex-1" />
                 <button
                   onClick={handleClose}
-                  className="px-6 py-2.5 bg-gray-900 hover:bg-black dark:bg-gray-100 dark:hover:bg-white dark:text-gray-900 text-white rounded-xl font-semibold transition-colors"
+                  className="px-6 py-2.5 min-h-11 bg-[#2563EB] hover:bg-blue-700 text-white rounded-xl font-semibold transition-colors"
                 >
-                  Cerrar
+                  {importSuccessCount > 0 ? 'Continuar' : 'Cerrar'}
                 </button>
               </>
+            )}
+            {step === 'success' && (
+              <button
+                onClick={handleClose}
+                className="w-full sm:w-auto sm:min-w-[200px] px-8 py-2.5 min-h-11 bg-[#2563EB] hover:bg-blue-700 text-white rounded-xl font-semibold transition-colors"
+              >
+                Continuar
+              </button>
             )}
             {step === 'upload' && (
               <button onClick={handleClose} className="px-5 py-2.5 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-white dark:hover:bg-gray-800 transition-colors">

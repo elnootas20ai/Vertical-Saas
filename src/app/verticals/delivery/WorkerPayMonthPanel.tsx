@@ -7,6 +7,7 @@ import { Wallet, Users } from 'lucide-react';
 import { formatMoneyEs, formatNumberEs } from '../../lib/formatNumberEs';
 import { DELIVERY_CAJA_PATH } from '../../lib/retailOpsPaths';
 import type { WorkerPayMonthSummary } from './workerPayFromTpv';
+import { DashboardWorkerPaySkeleton } from '../../components/saas/DashboardSectionSkeleton';
 
 type Props = {
   summary: WorkerPayMonthSummary | null;
@@ -27,6 +28,10 @@ export function WorkerPayMonthPanel({ summary, loading = false, compact = false 
   const navigate = useNavigate();
   const titleMonth = summary ? monthLabelEs(summary.monthKey) : 'Mes en curso';
   const empty = !loading && (!summary || (summary.payCount === 0 && summary.payrollDeductionTotal <= 0));
+
+  if (loading && !summary) {
+    return <DashboardWorkerPaySkeleton />;
+  }
 
   return (
     <section className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-700 dark:bg-gray-900 sm:p-3.5">
@@ -56,7 +61,18 @@ export function WorkerPayMonthPanel({ summary, loading = false, compact = false 
       </div>
 
       {loading ? (
-        <p className="mt-3 text-xs text-gray-500">Cargando…</p>
+        <div className="mt-2.5 grid animate-pulse grid-cols-1 gap-2 sm:grid-cols-3" aria-busy="true">
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="rounded-lg border border-gray-100 bg-gray-50/80 px-2.5 py-2.5 dark:border-gray-800 dark:bg-gray-800/40"
+            >
+              <div className="h-2 w-20 rounded bg-gray-100 dark:bg-gray-700" />
+              <div className="mt-2 h-5 w-16 rounded bg-gray-100 dark:bg-gray-700" />
+              <div className="mt-1.5 h-2 w-14 rounded bg-gray-100 dark:bg-gray-700" />
+            </div>
+          ))}
+        </div>
       ) : empty ? (
         <p className="mt-3 rounded-lg border border-dashed border-gray-200 px-3 py-4 text-center text-xs text-gray-500 dark:border-gray-700">
           Aún no hay pagos a trabajadores este mes desde el TPV.

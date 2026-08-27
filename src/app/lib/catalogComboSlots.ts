@@ -81,6 +81,91 @@ export const DEFAULT_COMBO_STRUCTURE: ComboStructureSlot[] = [
   { slotKind: 'drink', label: 'Bebida', required: true, expectedCount: 1 },
 ];
 
+/** Bar/restaurante: plato + complemento + bebida (sin nombres delivery). */
+export const RESTAURANT_DEFAULT_COMBO_STRUCTURE: ComboStructureSlot[] = [
+  { slotKind: 'main', label: 'Plato principal', required: true, expectedCount: 1 },
+  { slotKind: 'side', label: 'Complemento', required: true, expectedCount: 1 },
+  { slotKind: 'drink', label: 'Bebida', required: true, expectedCount: 1 },
+];
+
+const RESTAURANT_COMBO_SECTION_LABEL: Record<Exclude<ComboSlotKind, 'other'>, string> = {
+  main: 'Plato principal',
+  side: 'Complementos',
+  drink: 'Bebidas',
+  dessert: 'Postres',
+};
+
+/** Sugerencias de organizador en partes del menú (carta vacía o parcial). */
+export const RESTAURANT_COMBO_PART_CATEGORY_SUGGESTIONS = [
+  'Tapas',
+  'Raciones',
+  'Principales',
+  'Entrantes',
+  'Bocadillos',
+  'Pinchos',
+  'Complementos',
+  'Bebidas',
+  'Postres',
+] as const;
+
+export function defaultComboStructureForCatalog(options?: { restaurant?: boolean }): ComboStructureSlot[] {
+  const base = options?.restaurant ? RESTAURANT_DEFAULT_COMBO_STRUCTURE : DEFAULT_COMBO_STRUCTURE;
+  return base.map((s) => ({ ...s }));
+}
+
+/** Plantillas 1 / 2 / familia para el editor de menú (paso 2 combo). */
+export function comboMenuSizePresetsForCatalog(options?: { restaurant?: boolean }): ComboMenuPreset[] {
+  if (!options?.restaurant) {
+    return COMBO_MENU_PRESETS.filter((p) => ['estandar', 'duo', 'familiar'].includes(p.id));
+  }
+  return [
+    {
+      id: 'estandar',
+      label: 'Individual',
+      hint: '1 plato + 1 complemento + 1 bebida',
+      structure: RESTAURANT_DEFAULT_COMBO_STRUCTURE.map((s) => ({ ...s })),
+    },
+    {
+      id: 'duo',
+      label: 'Dúo',
+      hint: '2 platos + 1 complemento + 2 bebidas',
+      structure: [
+        { slotKind: 'main', label: 'Plato principal (×2)', required: true, expectedCount: 2 },
+        { slotKind: 'side', label: 'Complemento', required: true, expectedCount: 1 },
+        { slotKind: 'drink', label: 'Bebida (×2)', required: true, expectedCount: 2 },
+      ],
+    },
+    {
+      id: 'familiar',
+      label: 'Familia',
+      hint: '3 platos + 2 complementos + 4 bebidas',
+      structure: [
+        { slotKind: 'main', label: 'Plato principal (×3)', required: true, expectedCount: 3 },
+        { slotKind: 'side', label: 'Complemento (×2)', required: true, expectedCount: 2 },
+        { slotKind: 'drink', label: 'Bebida (×4)', required: true, expectedCount: 4 },
+      ],
+    },
+  ];
+}
+
+export function catalogCategoriesForComboPartPicker(
+  catalog: CatalogItem[],
+  excludeItemId?: string,
+  options?: { restaurant?: boolean },
+): string[] {
+  const fromCatalog = uniqueCatalogCategoriesForComboParts(catalog, excludeItemId);
+  if (!options?.restaurant) return fromCatalog;
+  const seen = new Set(fromCatalog.map((c) => foldCategory(normalizeImportCategory(c))));
+  const merged = [...fromCatalog];
+  for (const suggestion of RESTAURANT_COMBO_PART_CATEGORY_SUGGESTIONS) {
+    const key = foldCategory(normalizeImportCategory(suggestion));
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(suggestion);
+  }
+  return merged.sort((a, b) => a.localeCompare(b, 'es'));
+}
+
 /** Orden visual al definir y rellenar el menú. */
 export const COMBO_MENU_SECTION_ORDER: ComboSlotKind[] = ['main', 'side', 'drink', 'dessert', 'other'];
 
@@ -408,7 +493,7 @@ export function buildComboMenuSections(
   presetId: string,
   catalog: CatalogItem[],
   structureOverride?: ComboStructureSlot[] | null,
-  options?: { comboName?: string },
+  options?: { comboName?: string; restaurantCatalog?: boolean },
 ): ComboMenuCatalogSection[] {
   const structure =
     Array.isArray(structureOverride) && structureOverride.length > 0
@@ -437,10 +522,26 @@ export function buildComboMenuSections(
       continue;
     }
 
+    if (options?.restaurantCatalog && slot.slotKind === 'main') {
+      sections.push({
+        catalogCategory: slot.label || RESTAURANT_COMBO_SECTION_LABEL.main,
+        slotKind: 'main',
+        expectedCount: quota,
+        required: slot.required,
+        slotQuota: quota,
+        groupBySlotKind: true,
+      });
+      continue;
+    }
+
     const categories = uniqueCatalogCategoriesForSlotKind(slot.slotKind, catalog);
     if (categories.length === 0) {
+      const fallbackLabel = options?.restaurantCatalog
+        ? RESTAURANT_COMBO_SECTION_LABEL[slot.slotKind as keyof typeof RESTAURANT_COMBO_SECTION_LABEL] ??
+          slot.label
+        : DEFAULT_SECTION_LABEL[slot.slotKind as keyof typeof DEFAULT_SECTION_LABEL] ?? slot.label;
       sections.push({
-        catalogCategory: DEFAULT_SECTION_LABEL[slot.slotKind as keyof typeof DEFAULT_SECTION_LABEL] ?? slot.label,
+        catalogCategory: fallbackLabel,
         slotKind: slot.slotKind,
         expectedCount: slot.slotKind === 'main' ? quota : 0,
         required: slot.required,

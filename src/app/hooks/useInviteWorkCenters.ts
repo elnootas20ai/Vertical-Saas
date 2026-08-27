@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { Business } from '../lib/businessApi';
 
@@ -42,6 +42,8 @@ export function useInviteWorkCenters(
 
   const [error, setError] = useState<string | null>(null);
 
+  const loadSeqRef = useRef(0);
+
 
 
   const reload = useCallback(async () => {
@@ -58,9 +60,15 @@ export function useInviteWorkCenters(
 
     }
 
+    const seq = loadSeqRef.current + 1;
+
+    loadSeqRef.current = seq;
+
     setLoading(true);
 
     setError(null);
+
+    setOptions([]);
 
     try {
 
@@ -72,9 +80,13 @@ export function useInviteWorkCenters(
 
       });
 
+      if (seq !== loadSeqRef.current) return;
+
       setOptions(next);
 
     } catch (err) {
+
+      if (seq !== loadSeqRef.current) return;
 
       setOptions([]);
 
@@ -82,7 +94,7 @@ export function useInviteWorkCenters(
 
     } finally {
 
-      setLoading(false);
+      if (seq === loadSeqRef.current) setLoading(false);
 
     }
 

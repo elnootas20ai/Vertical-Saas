@@ -4,14 +4,15 @@ import {
   reservationTableIds,
   type RestaurantReservation,
 } from './restaurantReservationTypes';
-import { createVerticalApi } from './verticalApiFactory';
+import { listReservations, type ReservationScopeOptions } from './restaurantReservationsApi';
 import { localCalendarDayKey } from './tpvCajaScope';
 
-const reservationsApi = createVerticalApi<RestaurantReservation>('restaurant', 'reservations');
-
 /** Listado ligero para plano TPV (sin dependencias CRM). */
-export function listFloorReservations(userId: string): Promise<RestaurantReservation[]> {
-  return reservationsApi.list(userId);
+export function listFloorReservations(
+  userId: string,
+  scope?: ReservationScopeOptions,
+): Promise<RestaurantReservation[]> {
+  return listReservations(userId, scope);
 }
 
 export type TableReservationHint = {

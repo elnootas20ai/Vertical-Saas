@@ -9,6 +9,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   ArrowLeftRight,
+  Ban,
   CalendarDays,
   ChefHat,
   LayoutGrid,
@@ -25,6 +26,7 @@ import { RestaurantSeatGuestsModal } from '../../components/saas/restaurant/Rest
 import { RestaurantTpvReservationsStrip } from '../../components/saas/restaurant/RestaurantTpvReservationsStrip';
 import { RestaurantTpvReservationsPanel } from '../../components/saas/restaurant/RestaurantTpvReservationsPanel';
 import {
+  cancelDiningOrderRequest,
   changeTableStatusRequest,
   getFloorConfigRequest,
   listDiningOrdersRequest,
@@ -57,8 +59,10 @@ import {
   formatReservationSeatPlace,
   type RestaurantReservation,
 } from '../../lib/restaurantReservationTypes';
-import { resolveBusinessScopeId } from '../../lib/deliverySetup';
+import { filterSalaTablesByBusinessScope } from '../../lib/salaBusinessScope';
+import { resolveBusinessScopeId, normalizeBusinessScopeId } from '../../lib/deliverySetup';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { resolveRestaurantTpvPermissions } from '../../lib/restaurantTpvPermissions';
 import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
 import { readTpvTabletBinding } from '../../lib/tpvTabletSession';
 import { useLiveClock } from '../../hooks/useLiveClock';
@@ -188,14 +192,7 @@ function occupiedMinutes(table: DiningTable, nowMs: number): number | null {
 }
 
 function normalizeBusinessId(value: string | null | undefined): string {
-  return String(value || '').replace(/^business:/, '').trim();
-}
-
-function tablesForBusiness(tables: DiningTable[], businessId: string): DiningTable[] {
-  return (tables || []).filter((t) => {
-    const bid = normalizeBusinessId(t.businessId);
-    return !bid || bid === businessId;
-  });
+  return normalizeBusinessScopeId(value);
 }
 
 function tablesForRoom(tables: DiningTable[], room: SalaRoom): DiningTable[] {
@@ -239,7 +236,7 @@ export function RestaurantTpvFloorBoard({
   onChangeStore,
 }: Props) {
   const { user } = useAuth();
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, businesses } = useBusiness();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const orderFlowLock = useTpvOrderFlowLockControls();
@@ -267,9 +264,15 @@ export function RestaurantTpvFloorBoard({
 
   const userId = resolveBusinessDataUserId(user, currentBusiness) || user?.user_id || user?.id || '';
   const businessId = resolveBusinessScopeId(currentBusiness) || normalizeBusinessId(currentBusiness?.business_id);
+  const accountBusinessCount = businesses.length || 1;
+  const salaScope = useMemo(
+    () => ({ businessId, accountBusinessCount }),
+    [businessId, accountBusinessCount],
+  );
   const nowMs = useLiveClock(30_000);
   const actorName =
     String((user as { fullName?: string } | null)?.fullName || user?.name || user?.email || 'TPV sala').trim();
+  const permissions = useMemo(() => resolveRestaurantTpvPermissions(user), [user]);
   // Código de tienda / tablet: solo operar el TPV. Cambiar local e Ir a Sala son de CEO.
   const isTabletOrCodeSession = tabletMode || Boolean(readTpvTabletBinding()?.pdvId);
   const showCeoFloorActions = !isTabletOrCodeSession;
@@ -295,7 +298,10 @@ export function RestaurantTpvFloorBoard({
   const autoOpenDoneRef = useRef(false);
 
   const urlTableId = String(searchParams.get('mesa') || '').trim();
-  const { todayReservations, reloadReservations } = useTodayReservationsPoll(userId || null);
+  const { todayReservations, reloadReservations } = useTodayReservationsPoll(userId || null, {
+    businessId,
+    accountBusinessCount: businesses.length || 1,
+  });
 
   const reservationByTableId = useMemo(
     () => upcomingReservationsByTableId(todayReservations),
@@ -311,11 +317,11 @@ export function RestaurantTpvFloorBoard({
     try {
       const [config, listed, orders] = await Promise.all([
         getFloorConfigRequest(userId, { businessId }).catch(() => null),
-        listDiningTablesRequest(userId).catch(() => []),
+        listDiningTablesRequest(userId, salaScope).catch(() => []),
         listDiningOrdersRequest(userId).catch(() => []),
       ]);
       const nextRooms = Array.isArray(config?.rooms) ? (config.rooms as SalaRoom[]) : [];
-      const nextTables = tablesForBusiness(listed || [], businessId);
+      const nextTables = filterSalaTablesByBusinessScope(listed || [], businessId, accountBusinessCount);
       const scopedOrders = (orders || []).filter((o) => {
         const bid = normalizeBusinessId(o.businessId);
         return !bid || bid === businessId;
@@ -333,7 +339,7 @@ export function RestaurantTpvFloorBoard({
     } finally {
       if (!opts?.silent) setLoading(false);
     }
-  }, [userId, businessId]);
+  }, [userId, businessId, accountBusinessCount, salaScope]);
 
   useEffect(() => {
     void loadFloor();
@@ -549,9 +555,9 @@ export function RestaurantTpvFloorBoard({
           businessId,
         );
         const partySize = parseInt(String(reservation.partySize || '2'), 10) || 2;
-        const listed = await listDiningTablesRequest(userId).catch(() => tables);
+        const listed = await listDiningTablesRequest(userId, salaScope).catch(() => tables);
         const nextTable =
-          tablesForBusiness(listed || [], businessId).find(
+          filterSalaTablesByBusinessScope(listed || [], businessId, accountBusinessCount).find(
             (t) => String(t._id || t.id) === result.tableId,
           )
           || tables.find((t) => String(t._id || t.id) === result.tableId);
@@ -653,6 +659,46 @@ export function RestaurantTpvFloorBoard({
     // Ocupada / cuenta / cualquier otro estado operativo → TPV core.
     void openAccount(table);
   };
+
+  const handleVoidAccount = useCallback(
+    async (table: DiningTable, order: DiningOrder) => {
+      if (!userId) return;
+      if (!permissions.canVoidComanda) {
+        toast.error('No tienes permiso para anular la cuenta');
+        return;
+      }
+      const tableId = String(table._id || table.id || '').trim();
+      const tableTitle = table.name?.trim() || `Mesa ${table.number}`;
+      const reason = window.prompt(
+        `Anular cuenta de ${tableTitle} · Motivo:`,
+        'Anulada desde plano de mesas',
+      );
+      if (reason == null) return;
+      if (!reason.trim()) {
+        toast.error('Indica un motivo para anular la cuenta');
+        return;
+      }
+      if (
+        !window.confirm(
+          `¿Anular la cuenta de ${tableTitle} y liberar la mesa? No se registra cobro en caja.`,
+        )
+      ) {
+        return;
+      }
+      setBusyId(tableId);
+      try {
+        await cancelDiningOrderRequest(userId, order._id, reason.trim());
+        toast.success('Cuenta anulada · mesa libre');
+        await loadFloor({ silent: true });
+        void reloadReservations();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'No se pudo anular la cuenta');
+      } finally {
+        setBusyId('');
+      }
+    },
+    [userId, permissions.canVoidComanda, loadFloor, reloadReservations],
+  );
 
   const handleBackFromAccount = () => {
     if (accountLockHeldRef.current) {
@@ -1093,35 +1139,54 @@ export function RestaurantTpvFloorBoard({
                                 </button>
                               </div>
                             ) : visualStatus !== 'unavailable' ? (
-                              <div className="mt-3 grid grid-cols-2 gap-2">
-                                <button
-                                  type="button"
-                                  disabled={busy}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    void openAccount(table, undefined, 'order');
-                                  }}
-                                  className={`${VERTIAL_BTN_SECONDARY} !px-3`}
-                                >
-                                  <Plus className="h-4 w-4 shrink-0" strokeWidth={2} />
-                                  Añadir
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={busy || !ticket || ticket.itemCount <= 0 || ticket.due <= 0}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (!ticket || ticket.itemCount <= 0) {
-                                      toast.message('Añade productos antes de cobrar');
-                                      return;
-                                    }
-                                    void openAccount(table, undefined, 'pay');
-                                  }}
-                                  className={`${VERTIAL_BTN_PRIMARY} !px-3`}
-                                >
-                                  <Wallet className="h-4 w-4 shrink-0" strokeWidth={2} />
-                                  Cobrar
-                                </button>
+                              <div className="mt-3 space-y-2">
+                                <div className="grid grid-cols-2 gap-2">
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      void openAccount(table, undefined, 'order');
+                                    }}
+                                    className={`${VERTIAL_BTN_SECONDARY} !px-3`}
+                                  >
+                                    <Plus className="h-4 w-4 shrink-0" strokeWidth={2} />
+                                    Añadir
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={busy || !ticket || ticket.itemCount <= 0 || ticket.due <= 0}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (!ticket || ticket.itemCount <= 0) {
+                                        toast.message('Añade productos antes de cobrar');
+                                        return;
+                                      }
+                                      void openAccount(table, undefined, 'pay');
+                                    }}
+                                    className={`${VERTIAL_BTN_PRIMARY} !px-3`}
+                                  >
+                                    <Wallet className="h-4 w-4 shrink-0" strokeWidth={2} />
+                                    Cobrar
+                                  </button>
+                                </div>
+                                {permissions.canVoidComanda && openOrder ? (
+                                  <div className="flex justify-center pt-0.5">
+                                    <button
+                                      type="button"
+                                      disabled={busy}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        void handleVoidAccount(table, openOrder);
+                                      }}
+                                      className="inline-flex items-center gap-1 rounded-lg border border-rose-200 px-2 py-1 text-[10px] font-semibold text-rose-700 transition-colors hover:bg-rose-50 disabled:opacity-50 dark:border-rose-900 dark:text-rose-300 dark:hover:bg-rose-950/30"
+                                      title="Anular cuenta y liberar mesa"
+                                    >
+                                      <Ban className="h-3 w-3 shrink-0" strokeWidth={2} />
+                                      Anular
+                                    </button>
+                                  </div>
+                                ) : null}
                               </div>
                             ) : null}
                           </div>

@@ -217,7 +217,7 @@ const RESERVATION_UPCOMING_STATUSES = new Set(['pending', 'confirmed', 'arrived'
 export function RestaurantDashboard({ onSelectGeneral }: VerticalDashboardProps) {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, businesses } = useBusiness();
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
   const businessId = resolveBusinessScopeId(currentBusiness);
   const businessName = String(currentBusiness?.name || '').trim() || 'Bar / restaurante';
@@ -261,7 +261,10 @@ export function RestaurantDashboard({ onSelectGeneral }: VerticalDashboardProps)
           businessId
             ? getFloorConfigRequest(dataUserId, { businessId }).catch(() => null)
             : Promise.resolve(null),
-          listReservations(dataUserId).catch(() => [] as RestaurantReservation[]),
+          listReservations(dataUserId, {
+            businessId,
+            accountBusinessCount: businesses.length || 1,
+          }).catch(() => [] as RestaurantReservation[]),
           businessId ? fetchActiveNow(businessId).catch(() => []) : Promise.resolve([]),
         ]);
       if (seq !== loadSeqRef.current) return;
@@ -281,12 +284,12 @@ export function RestaurantDashboard({ onSelectGeneral }: VerticalDashboardProps)
     } finally {
       if (seq === loadSeqRef.current) setLoading(false);
     }
-  }, [dataUserId, businessId]);
+  }, [dataUserId, businessId, businesses.length]);
 
   useEffect(() => {
     setHasData(false);
     setLoading(true);
-  }, [dataUserId, businessId]);
+  }, [dataUserId, businessId, businesses.length]);
 
   useEffect(() => {
     void load();

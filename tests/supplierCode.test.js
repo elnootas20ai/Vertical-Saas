@@ -28,15 +28,16 @@ describe('supplierCode', () => {
   });
 
   it('sugiere código desde el nombre y evita duplicados', () => {
-    expect(suggestSupplierCodeFromName('Makro', [])).toBe('MAKRO');
-    expect(suggestSupplierCodeFromName('Makro', [{ code: 'MAKRO' }])).toBe('MAKRO-2');
+    expect(suggestSupplierCodeFromName('Makro', [])).toBe('MAK-001');
+    expect(suggestSupplierCodeFromName('Makro', [{ code: 'MAK-001' }])).toBe('MAK-002');
+    expect(suggestSupplierCodeFromName('Makro', [{ code: 'MAK-001' }, { code: 'MAK-003' }])).toBe('MAK-004');
     expect(suggestSupplierCodeFromName('', [])).toBe('PROV-001');
   });
 
   it('sugiere PROV-001 y sigue la secuencia', () => {
     expect(suggestNextSupplierCode([])).toBe('PROV-001');
     expect(suggestNextSupplierCode([{ code: 'PROV-001' }, { code: 'PROV-003' }])).toBe('PROV-004');
-    expect(suggestNextSupplierCode([{ code: 'PROV7' }])).toBe('PROV-008');
+    expect(suggestNextSupplierCode([{ code: 'PROV-007' }])).toBe('PROV-008');
   });
 
   it('detecta códigos duplicados', () => {

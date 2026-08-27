@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
+  AlertTriangle,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -18,18 +19,25 @@ import { useBusiness } from '../../context/BusinessContext';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import {
   dedupePointsOfSale,
+  listPointsOfSaleRequest,
   pointOfSaleDisplayLabel,
   type PointOfSale,
 } from '../../lib/deliveryApi';
 import {
+  dedupeRetailWorkCentersForBusiness,
   filterPointsOfSaleForWorkCenters,
   filterWorkCentersForBusinessScope,
+  knownBusinessIdsFromList,
   repairMissingRetailDeliveryPdvs,
+  rescueRetailForBusinessWithoutStores,
   resolveBusinessScopeId,
 } from '../../lib/deliverySetup';
 import { coerceSelectedPdvId } from '../../lib/deliveryOpsPdvSelection';
 import { loadRetailStoresForBusiness } from '../../verticals/retailScopeRegistry';
 import type { Business } from '../../lib/businessApi';
+import { readRetailScopeCache } from '../../lib/retailScopeCache';
+import { readSidebarRetailCache } from '../../lib/sidebarRetailCache';
+import { listWorkCentersForDelivery } from '../../lib/workCentersApi';
 import {
   getSupplierInvoiceEmailConfig,
   listSupplierInvoicePdvEmailConfigs,
@@ -41,6 +49,84 @@ import {
 } from '../../lib/supplierInvoiceApi';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
+import type { WorkCenter } from '../../lib/workCentersApi';
+
+function scopedActivePdvs(
+  workCenters: WorkCenter[],
+  pointsOfSale: PointOfSale[],
+  businessId: string,
+  accountBusinessCount?: number,
+): PointOfSale[] {
+  if (!businessId) return [];
+  const centers = filterWorkCentersForBusinessScope(workCenters || [], businessId, {
+    accountBusinessCount,
+  });
+  return dedupePointsOfSale(
+    filterPointsOfSaleForWorkCenters(pointsOfSale || [], centers, {
+      businessId,
+    }  ).filter((p) => p.active !== false),
+  );
+}
+
+function readCachedStoresForBusiness(
+  businessId: string,
+  accountBusinessCount?: number,
+): PointOfSale[] {
+  if (!businessId) return [];
+  const opts =
+    accountBusinessCount !== undefined ? { accountBusinessCount } : undefined;
+  const cached = readRetailScopeCache(businessId, opts);
+  if (cached) {
+    const fromCache = scopedActivePdvs(
+      cached.retailWorkCenters,
+      cached.allPointsOfSale,
+      businessId,
+      accountBusinessCount,
+    );
+    if (fromCache.length > 0) return fromCache;
+  }
+  const sidebarCached = readSidebarRetailCache(businessId, opts);
+  if (sidebarCached) {
+    const fromSidebar = scopedActivePdvs(
+      sidebarCached.retailWorkCenters,
+      sidebarCached.allPointsOfSale,
+      businessId,
+      accountBusinessCount,
+    );
+    if (fromSidebar.length > 0) return fromSidebar;
+  }
+  return [];
+}
+
+async function fetchScopedActivePdvsFallback(
+  dataUserId: string,
+  business: Business,
+  businessId: string,
+  businesses: Business[],
+  accountBusinessCount: number,
+): Promise<PointOfSale[]> {
+  const [rawPdvs, allWcs] = await Promise.all([
+    listPointsOfSaleRequest(dataUserId).catch(() => [] as PointOfSale[]),
+    listWorkCentersForDelivery(dataUserId, business).catch(() => [] as WorkCenter[]),
+  ]);
+  const knownIds = knownBusinessIdsFromList(businesses);
+  const preparedWcs = rescueRetailForBusinessWithoutStores(allWcs, businessId, knownIds);
+  const scopedWcs = filterWorkCentersForBusinessScope(preparedWcs, businessId, {
+    accountBusinessCount,
+  });
+  const retail = dedupeRetailWorkCentersForBusiness(scopedWcs).filter(
+    (wc) =>
+      !wc.deletedAt &&
+      (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
+  );
+  let pdvs = filterPointsOfSaleForWorkCenters(rawPdvs, retail, { businessId });
+  let scoped = scopedActivePdvs(retail, pdvs, businessId, accountBusinessCount);
+  if (scoped.length === 0 && retail.length > 0) {
+    pdvs = await repairMissingRetailDeliveryPdvs(dataUserId, retail, pdvs, business);
+    scoped = scopedActivePdvs(retail, pdvs, businessId, accountBusinessCount);
+  }
+  return scoped;
+}
 
 type PageTab = 'pdvs' | 'config';
 type MailProvider = 'gmail' | 'outlook' | 'other';
@@ -75,10 +161,20 @@ function detectProvider(host: string, user: string): MailProvider {
  */
 export function SupplierInvoiceEmailPage() {
   const navigate = useNavigate();
-  const { currentBusiness, businesses } = useBusiness();
+  const [searchParams] = useSearchParams();
+  const pdvFromUrl = searchParams.get('pdv');
+  const { currentBusiness, businesses, businessesFetchSettled } = useBusiness();
   const { user } = useAuth();
-  const { activeSalesPointId, activePreferenceRaw, setActiveSalesPoint, refresh } =
-    useActiveStoreScope();
+  const {
+    activeSalesPointId,
+    activePreferenceRaw,
+    setActiveSalesPoint,
+    refresh,
+    pointsOfSale: scopePdvs,
+    allPointsOfSale: scopeAllPdvs,
+    retailWorkCenters: scopeCenters,
+    loading: scopeLoading,
+  } = useActiveStoreScope();
 
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
   const currentBizId = resolveBusinessScopeId(currentBusiness as Business | null);
@@ -86,8 +182,13 @@ export function SupplierInvoiceEmailPage() {
 
   const [pageTab, setPageTab] = useState<PageTab>('pdvs');
   const [stores, setStores] = useState<PointOfSale[]>([]);
-  const [loadingStores, setLoadingStores] = useState(true);
+  /** Revalidación en segundo plano (sin tapar la página si ya hay PDVs). */
+  const [refreshingStores, setRefreshingStores] = useState(false);
+  /** Primer intento de carga remota terminado (evita «sin PDVs» mientras llega el scope). */
+  const [storesFetchSettled, setStoresFetchSettled] = useState(false);
   const [pdvStatuses, setPdvStatuses] = useState<SupplierInvoicePdvEmailStatus[]>([]);
+  const [legacyAccountConnected, setLegacyAccountConnected] = useState(false);
+  const [legacyAccountEmail, setLegacyAccountEmail] = useState('');
   const [selectedPdvId, setSelectedPdvId] = useState('');
 
   const [imapDraft, setImapDraft] = useState<Partial<SupplierInvoiceEmailConfig>>({});
@@ -111,15 +212,45 @@ export function SupplierInvoiceEmailPage() {
     [businessList],
   );
 
+  /** Primera pintura: scope / caché local (sin esperar red). */
+  useEffect(() => {
+    if (!currentBizId) {
+      setStores([]);
+      setStoresFetchSettled(false);
+      return;
+    }
+    setStoresFetchSettled(false);
+    const accountCount = businessList.length || undefined;
+    const fromScope = scopedActivePdvs(
+      scopeCenters,
+      scopeAllPdvs.length > 0 ? scopeAllPdvs : scopePdvs,
+      currentBizId,
+      accountCount,
+    );
+    if (fromScope.length > 0) {
+      setStores(fromScope);
+      return;
+    }
+    const fromCache = readCachedStoresForBusiness(currentBizId, accountCount);
+    if (fromCache.length > 0) {
+      setStores(fromCache);
+    }
+  }, [currentBizId, businessList.length, scopeCenters, scopeAllPdvs, scopePdvs]);
+
   const loadStores = useCallback(async () => {
-    setLoadingStores(true);
+    if (!user || !currentBusiness || !currentBizId) {
+      setStores([]);
+      setStoresFetchSettled(true);
+      setRefreshingStores(false);
+      return;
+    }
+
+    const accountCount = businessList.length || 1;
+    setRefreshingStores(true);
+    void refresh().catch(() => undefined);
+
     try {
-      await refresh().catch(() => undefined);
-      if (!user || !currentBusiness || !currentBizId) {
-        setStores([]);
-        return;
-      }
-      let state = await loadRetailStoresForBusiness(
+      const state = await loadRetailStoresForBusiness(
         user,
         currentBusiness as Business,
         businesses as Business[],
@@ -132,30 +263,67 @@ export function SupplierInvoiceEmailPage() {
           knownBusinessIds,
         },
       );
-      if (state.dataUserId) {
-        state = {
-          ...state,
-          pointsOfSale: await repairMissingRetailDeliveryPdvs(
-            state.dataUserId,
-            state.workCenters,
-            state.pointsOfSale,
-            currentBusiness as Business,
-          ),
-        };
-      }
-      const centers = filterWorkCentersForBusinessScope(state.workCenters || [], currentBizId, {
-        accountBusinessCount: businessList.length,
-      });
-      const scoped = dedupePointsOfSale(
-        filterPointsOfSaleForWorkCenters(state.pointsOfSale || [], centers, {
-          businessId: currentBizId,
-        }).filter((p) => p.active !== false),
+      let scoped = scopedActivePdvs(
+        state.workCenters || [],
+        state.pointsOfSale || [],
+        currentBizId,
+        businessList.length,
       );
-      setStores(scoped);
+
+      if (scoped.length === 0 && state.dataUserId) {
+        scoped = await fetchScopedActivePdvsFallback(
+          state.dataUserId,
+          currentBusiness as Business,
+          currentBizId,
+          businesses as Business[],
+          accountCount,
+        );
+      }
+
+      if (scoped.length > 0) {
+        setStores(scoped);
+      }
+
+      if (state.dataUserId && scoped.length > 0) {
+        void repairMissingRetailDeliveryPdvs(
+          state.dataUserId,
+          state.workCenters,
+          state.pointsOfSale,
+          currentBusiness as Business,
+        )
+          .then((repaired) => {
+            const next = scopedActivePdvs(
+              state.workCenters || [],
+              repaired,
+              currentBizId,
+              businessList.length,
+            );
+            if (next.length > 0) setStores(next);
+          })
+          .catch(() => undefined);
+      } else if (state.dataUserId && scoped.length === 0) {
+        void repairMissingRetailDeliveryPdvs(
+          state.dataUserId,
+          state.workCenters,
+          state.pointsOfSale,
+          currentBusiness as Business,
+        )
+          .then((repaired) => {
+            const next = scopedActivePdvs(
+              state.workCenters || [],
+              repaired,
+              currentBizId,
+              businessList.length,
+            );
+            if (next.length > 0) setStores(next);
+          })
+          .catch(() => undefined);
+      }
     } catch {
-      setStores([]);
+      setStores((prev) => prev);
     } finally {
-      setLoadingStores(false);
+      setRefreshingStores(false);
+      setStoresFetchSettled(true);
     }
   }, [
     user,
@@ -167,30 +335,61 @@ export function SupplierInvoiceEmailPage() {
     refresh,
   ]);
 
+  const pdvLoadPending = useMemo(() => {
+    if (stores.length > 0) return false;
+    if (!currentBizId) return false;
+    return (
+      !businessesFetchSettled
+      || scopeLoading
+      || refreshingStores
+      || !storesFetchSettled
+    );
+  }, [
+    stores.length,
+    currentBizId,
+    businessesFetchSettled,
+    scopeLoading,
+    refreshingStores,
+    storesFetchSettled,
+  ]);
+
   const reloadPdvStatuses = useCallback(async () => {
     if (!dataUserId) {
       setPdvStatuses([]);
+      setLegacyAccountConnected(false);
+      setLegacyAccountEmail('');
       return;
     }
     try {
-      const { pdvs } = await listSupplierInvoicePdvEmailConfigs(dataUserId);
+      const { pdvs, legacyAccount } = await listSupplierInvoicePdvEmailConfigs(dataUserId);
       setPdvStatuses(
         currentBizId
           ? pdvs.filter((p) => !p.businessId || p.businessId === currentBizId)
           : pdvs,
       );
+      setLegacyAccountConnected(Boolean(legacyAccount?.connected || legacyAccount?.config?.enabled));
+      setLegacyAccountEmail(String(legacyAccount?.config?.imapUser || '').trim());
     } catch {
       setPdvStatuses([]);
+      setLegacyAccountConnected(false);
+      setLegacyAccountEmail('');
     }
   }, [dataUserId, currentBizId]);
 
   useEffect(() => {
     void loadStores();
-  }, [loadStores]);
+  }, [currentBizId, user?.user_id]);
 
   useEffect(() => {
     void reloadPdvStatuses();
   }, [reloadPdvStatuses]);
+
+  useEffect(() => {
+    const id = String(pdvFromUrl || '').trim();
+    if (!id || !stores.some((s) => s._id === id)) return;
+    setSelectedPdvId(id);
+    setPageTab('pdvs');
+  }, [pdvFromUrl, stores]);
 
   const resolvedPdvId = useMemo(() => {
     if (selectedPdvId && stores.some((s) => s._id === selectedPdvId)) return selectedPdvId;
@@ -212,6 +411,30 @@ export function SupplierInvoiceEmailPage() {
     () => stores.filter((s) => statusById.get(s._id)?.connected).length,
     [stores, statusById],
   );
+
+  const duplicateEmailWarnings = useMemo(() => {
+    const byEmail = new Map<string, { email: string; pdvIds: string[] }>();
+    for (const status of pdvStatuses) {
+      if (!status.connected) continue;
+      const email = String(status.imapUser || '').trim().toLowerCase();
+      if (!email) continue;
+      const row = byEmail.get(email) || { email: status.imapUser, pdvIds: [] };
+      row.pdvIds.push(status.pdvId);
+      byEmail.set(email, row);
+    }
+    return [...byEmail.values()].filter((row) => row.pdvIds.length > 1);
+  }, [pdvStatuses]);
+
+  const pdvLabelById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const store of stores) map.set(store._id, pointOfSaleDisplayLabel(store));
+    for (const status of pdvStatuses) {
+      if (!map.has(status.pdvId)) {
+        map.set(status.pdvId, pointOfSaleDisplayLabel({ name: status.name, code: status.code }));
+      }
+    }
+    return map;
+  }, [stores, pdvStatuses]);
 
   useEffect(() => {
     if (!dataUserId || !resolvedPdvId || pageTab !== 'pdvs') {
@@ -415,16 +638,24 @@ export function SupplierInvoiceEmailPage() {
         toast.message(msg, { duration: 8000 });
         return;
       }
+      const duplicates = Number(summary.duplicates) || 0;
       let msg = `${processed} emails · ${created} facturas nuevas`;
       if (processed === 0) {
         msg = '0 emails nuevos. Envía un PDF a este buzón y vuelve a sincronizar.';
         setPollSummary(msg);
         toast.message(msg, { duration: 7000 });
+      } else if (duplicates > 0 && created === 0) {
+        msg = `${processed} email(s) · ${duplicates} PDF(s) repetidos (mismo nº de factura, no se crean otra vez).`;
+        setPollSummary(msg);
+        toast.warning(msg, { duration: 8000 });
       } else if (created === 0) {
         msg = `${processed} emails revisados, 0 facturas creadas.`;
         setPollSummary(msg);
         toast.warning(msg);
       } else {
+        if (duplicates > 0) {
+          msg = `${processed} emails · ${created} nuevas · ${duplicates} repetidas (mismo nº)`;
+        }
         setPollSummary(msg);
         toast.success(msg);
       }
@@ -449,6 +680,30 @@ export function SupplierInvoiceEmailPage() {
       subtitle={`${businessName} · un buzón por PDV activo`}
     >
       <div className="mx-auto max-w-4xl space-y-4 pb-10">
+        {legacyAccountConnected ? (
+          <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <p>
+              Hay un correo guardado a nivel <strong>cuenta global</strong>
+              {legacyAccountEmail ? ` (${legacyAccountEmail})` : ''}. Configura un buzón
+              distinto en <strong>cada PDV</strong> para no mezclar facturas entre tiendas.
+            </p>
+          </div>
+        ) : null}
+        {duplicateEmailWarnings.length > 0 ? (
+          <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <div className="space-y-1">
+              <p className="font-semibold">El mismo correo está en varias tiendas</p>
+              {duplicateEmailWarnings.map((row) => (
+                <p key={row.email} className="text-amber-900/90 dark:text-amber-100/90">
+                  <strong>{row.email}</strong> en{' '}
+                  {row.pdvIds.map((id) => pdvLabelById.get(id) || id).join(' · ')}
+                </p>
+              ))}
+            </div>
+          </div>
+        ) : null}
         {/* Tabs principales */}
         <div className="flex gap-1 border-b border-stone-200 dark:border-stone-800">
           {pageTabs.map((tab) => {
@@ -475,8 +730,18 @@ export function SupplierInvoiceEmailPage() {
         {/* ── Tab PDVs ── */}
         {pageTab === 'pdvs' ? (
           <div className="space-y-4">
-            {loadingStores ? (
-              <p className="text-sm text-stone-400">Cargando PDVs de la empresa…</p>
+            {refreshingStores && stores.length > 0 ? (
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-stone-400">
+                Actualizando PDVs…
+              </p>
+            ) : null}
+            {pdvLoadPending ? (
+              <div className="rounded-2xl border border-stone-200 bg-white p-6 dark:border-stone-800 dark:bg-stone-900 space-y-3">
+                <p className="text-sm text-stone-500 dark:text-stone-400">
+                  Preparando la página… los PDVs llegan en segundo plano.
+                </p>
+                <div className="h-2 w-40 animate-pulse rounded-full bg-stone-200 dark:bg-stone-700" />
+              </div>
             ) : stores.length === 0 ? (
               <div className="rounded-2xl border border-stone-200 bg-white p-6 dark:border-stone-800 dark:bg-stone-900 space-y-3">
                 <p className="text-sm text-stone-600 dark:text-stone-400">
@@ -502,20 +767,31 @@ export function SupplierInvoiceEmailPage() {
                         key={pdv._id}
                         type="button"
                         onClick={() => handleSelectPdv(pdv._id)}
-                        className={`inline-flex items-center gap-2 rounded-xl border-2 px-3.5 py-2 text-sm font-semibold transition-colors ${
+                        className={`inline-flex max-w-full flex-col items-start gap-0.5 rounded-xl border-2 px-3.5 py-2 text-left transition-colors ${
                           active
                             ? 'border-gray-900 bg-gray-900 text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900'
                             : 'border-stone-200 bg-white text-stone-700 hover:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200'
                         }`}
                       >
-                        {pointOfSaleDisplayLabel(pdv)}
-                        {st?.connected ? (
-                          <CheckCircle2
-                            className={`h-3.5 w-3.5 shrink-0 ${
-                              active ? 'text-emerald-300 dark:text-emerald-700' : 'text-emerald-600'
-                            }`}
-                          />
-                        ) : null}
+                        <span className="inline-flex items-center gap-1.5 text-sm font-semibold">
+                          {pointOfSaleDisplayLabel(pdv)}
+                          {st?.connected ? (
+                            <CheckCircle2
+                              className={`h-3.5 w-3.5 shrink-0 ${
+                                active ? 'text-emerald-300 dark:text-emerald-700' : 'text-emerald-600'
+                              }`}
+                            />
+                          ) : null}
+                        </span>
+                        <span
+                          className={`text-[10px] font-medium truncate max-w-[220px] ${
+                            active ? 'text-white/80 dark:text-gray-700' : 'text-stone-500 dark:text-stone-400'
+                          }`}
+                        >
+                          {st?.connected
+                            ? st.imapUser || 'Conectado'
+                            : 'Sin correo — configura este PDV'}
+                        </span>
                       </button>
                     );
                   })}
@@ -533,8 +809,11 @@ export function SupplierInvoiceEmailPage() {
                             {pointOfSaleDisplayLabel(selectedPdv)}
                           </h2>
                           <p className="text-xs text-stone-500 mt-0.5">
-                            Correo y sincronización de facturas de este PDV
+                            Configuración de <strong>esta tienda</strong> — no se comparte con otros PDVs
                           </p>
+                          {selectedPdv.code ? (
+                            <p className="text-[11px] text-stone-400 mt-0.5 font-mono">{selectedPdv.code}</p>
+                          ) : null}
                         </div>
                         {isConnected ? (
                           <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
@@ -809,8 +1088,8 @@ export function SupplierInvoiceEmailPage() {
                   Estado por PDV
                 </h3>
               </div>
-              {loadingStores ? (
-                <p className="p-4 text-sm text-stone-400">Cargando…</p>
+              {pdvLoadPending ? (
+                <p className="p-4 text-sm text-stone-400">Cargando PDVs en segundo plano…</p>
               ) : stores.length === 0 ? (
                 <p className="p-4 text-sm text-stone-500">Sin PDVs activos en esta empresa.</p>
               ) : (
@@ -827,7 +1106,9 @@ export function SupplierInvoiceEmailPage() {
                             {pointOfSaleDisplayLabel(pdv)}
                           </p>
                           <p className="text-xs text-stone-500 truncate mt-0.5">
-                            {st?.connected ? st.imapUser || 'Conectado' : 'Sin correo configurado'}
+                            {st?.connected
+                              ? `${st.imapUser || 'Conectado'}${st.imapHost ? ` · ${st.imapHost}` : ''}`
+                              : 'Sin correo configurado'}
                           </p>
                         </div>
                         <button

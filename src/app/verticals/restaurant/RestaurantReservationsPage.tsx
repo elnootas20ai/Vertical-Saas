@@ -137,16 +137,27 @@ function weekDays(dateStr: string): string[] {
 
 export function RestaurantReservationsPage() {
   const { user } = useAuth();
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, businesses } = useBusiness();
   const navigate = useNavigate();
   const userId = user?.user_id || user?.id || '';
   const userName = user?.fullName || user?.email || 'Usuario';
   const businessId = currentBusiness?.business_id || '';
   const businessScopeId = resolveBusinessScopeId(currentBusiness);
   const clientSearchBusinessId = resolveClientSearchBusinessId(currentBusiness, businessScopeId);
+  const reservationScope = useMemo(
+    () => ({
+      businessId: businessScopeId,
+      accountBusinessCount: businesses.length || 1,
+    }),
+    [businessScopeId, businesses.length],
+  );
   const clientScope = useMemo(
-    () => ({ businessId, searchBusinessId: clientSearchBusinessId }),
-    [businessId, clientSearchBusinessId],
+    () => ({
+      businessId: businessScopeId,
+      searchBusinessId: clientSearchBusinessId,
+      accountBusinessCount: businesses.length || 1,
+    }),
+    [businessScopeId, clientSearchBusinessId, businesses.length],
   );
 
   const [reservations, setReservations] = useState<RestaurantReservation[]>([]);
@@ -213,9 +224,9 @@ export function RestaurantReservationsPage() {
     if (!silent) setLoading(true);
     try {
       const [resList, tableList, floorConfig] = await Promise.all([
-        listReservations(userId),
-        listDiningTablesRequest(userId),
-        getFloorConfigRequest(userId, businessId ? { businessId } : undefined),
+        listReservations(userId, reservationScope),
+        listDiningTablesRequest(userId, businessScopeId ? { businessId: businessScopeId } : undefined),
+        getFloorConfigRequest(userId, businessScopeId ? { businessId: businessScopeId } : undefined),
       ]);
       setReservations(resList);
       setTables(tableList);
@@ -236,7 +247,7 @@ export function RestaurantReservationsPage() {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [userId, businessId]);
+  }, [userId, businessScopeId, reservationScope]);
 
   useEffect(() => {
     void loadData();

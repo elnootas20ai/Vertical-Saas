@@ -3,7 +3,13 @@ import { listFloorReservations, todayFloorReservations } from '../lib/restaurant
 import type { RestaurantReservation } from '../lib/restaurantReservationTypes';
 
 /** Reservas de hoy para alertas TPV (independiente del panel de mesas). */
-export function useTodayReservationsPoll(userId: string | null) {
+export function useTodayReservationsPoll(
+  userId: string | null,
+  scope?: { businessId?: string | null; accountBusinessCount?: number },
+) {
+  const businessId = scope?.businessId ?? null;
+  const accountBusinessCount = scope?.accountBusinessCount ?? 1;
+
   const [todayReservations, setTodayReservations] = useState<RestaurantReservation[]>([]);
 
   const reloadReservations = useCallback(async () => {
@@ -11,9 +17,12 @@ export function useTodayReservationsPoll(userId: string | null) {
       setTodayReservations([]);
       return;
     }
-    const all = await listFloorReservations(userId).catch(() => []);
+    const all = await listFloorReservations(userId, {
+      businessId,
+      accountBusinessCount,
+    }).catch(() => []);
     setTodayReservations(todayFloorReservations(all));
-  }, [userId]);
+  }, [userId, businessId, accountBusinessCount]);
 
   useEffect(() => {
     void reloadReservations();

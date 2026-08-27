@@ -23,6 +23,7 @@ import {
   buildPurchaseListFromStockCount,
   createPurchaseOrdersFromStockList,
 } from '../services/stockPurchaseListService.js';
+import { quantityForWarehouse } from '../shared/stock/warehouseStockQty.js';
 
 async function applyCountAdjustments(req, userId, existing) {
   const lines = existing.lines || [];
@@ -176,8 +177,9 @@ export async function createStockCount(req, res) {
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
     const catalogItems = await listCatalogItemsByUser(req, userId);
+    const warehouseId = String(stockCount.warehouseId || '').trim();
     let itemsToCount = filterStockInventoryItems(catalogItems).filter(
-      (item) => Number(item.stockQuantity || 0) > 0,
+      (item) => quantityForWarehouse(item, warehouseId) > 0,
     );
 
     if (stockCount.countType === 'partial' && Array.isArray(stockCount.filterCategories) && stockCount.filterCategories.length > 0) {
@@ -196,7 +198,7 @@ export async function createStockCount(req, res) {
       unit: item.unit || 'ud',
       costPrice: Number(item.costPrice || 0),
       minStock: Number(item.minStock || 0),
-      theoreticalStock: Number(item.stockQuantity || 0),
+      theoreticalStock: quantityForWarehouse(item, warehouseId),
       countedStock: null,
       notes: '',
       countedBy: '',

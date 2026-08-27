@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
@@ -57,6 +57,7 @@ import {
   type ProductRecipeLine,
 } from '../../lib/catalogCosting';
 import { downloadEscandalloProductsExcel } from '../../lib/escandalloExcelExport';
+import { syncFullStockAutomationAfterCatalogImport } from '../../lib/deliveryCatalogImport';
 import {
   Calculator,
   ChevronDown,
@@ -68,6 +69,7 @@ import {
   Loader2,
   Minus,
   Plus,
+  Sparkles,
   Trash2,
   X,
 } from 'lucide-react';
@@ -475,37 +477,49 @@ export function ProductCostingModal({
   );
 }
 
-export function EscandalloPanel() {
+export function EscandalloPanel({
+  seedCatalogItems,
+  seedStoreIngredients,
+  seedBrands,
+  onCostingUpdated,
+}: {
+  seedCatalogItems?: CatalogItem[];
+  seedStoreIngredients?: StoreIngredient[];
+  seedBrands?: Array<{ _id: string; deliveryLineKind?: string }>;
+  /** Tras generar escandallo: refrescar catálogo padre (evita datos obsoletos en seed). */
+  onCostingUpdated?: () => void;
+} = {}) {
   const { user } = useAuth();
   const { businessId, dataUserId, accountBusinessCount, businessType } = useActiveBusinessScope();
-  const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
-  const [storeIngredients, setStoreIngredients] = useState<StoreIngredient[]>([]);
-  const [brands, setBrands] = useState<Array<{ _id: string; deliveryLineKind?: string }>>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadDetail, setLoadDetail] = useState('Cargando escandallo…');
+  const hasCatalogSeed = (seedCatalogItems?.length ?? 0) > 0;
+  const [catalogItems, setCatalogItems] = useState<CatalogItem[]>(() => seedCatalogItems ?? []);
+  const [storeIngredients, setStoreIngredients] = useState<StoreIngredient[]>(
+    () => seedStoreIngredients ?? [],
+  );
+  const [brands, setBrands] = useState<Array<{ _id: string; deliveryLineKind?: string }>>(
+    () => seedBrands ?? [],
+  );
+  const [loading, setLoading] = useState(!hasCatalogSeed);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  /**
-   * Categorías abiertas. Vacío al montar → al cargar datos se abren todas
-   * para ver productos/escandallos de golpe (como antes).
-   */
+  /** Categorías abiertas. Vacío = todas cerradas al entrar (el usuario abre la que quiera). */
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
-  const categoriesBootstrappedRef = useRef(false);
   const [editingProduct, setEditingProduct] = useState<CatalogItem | null>(null);
   const [showCategoryPanel, setShowCategoryPanel] = useState(false);
+  const [generatingCosting, setGeneratingCosting] = useState(false);
 
   const ingredientsById = useMemo(() => storeIngredientsById(storeIngredients), [storeIngredients]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
     const uid = dataUserId || user?.id;
     if (!uid) {
       setLoading(false);
       return;
     }
-    setLoading(true);
-    setLoadDetail('1/3 · productos de carta');
+    const silent = opts?.silent === true;
+    if (!silent) setLoading(true);
     try {
       const brandsPromise = businessId
         ? listBrandsRequest(businessId).catch(() => [])
@@ -515,7 +529,6 @@ export function EscandalloPanel() {
         getDeliveryConfigRequest(uid),
         brandsPromise,
       ]);
-      setLoadDetail('2/3 · ingredientes y costes');
       const lineBrands: Brand[] = businessId
         ? sortBrandsForDisplay(commercialLineBrands(rawBrands))
         : [];
@@ -527,7 +540,6 @@ export function EscandalloPanel() {
           })
         : items;
 
-      setLoadDetail('3/3 · preparando lista');
       setBrands(lineBrands);
       setCatalogItems(
         dedupeCatalogItemsForDisplay(visibleItems.filter(isCatalogCostingProduct), businessId),
@@ -536,17 +548,30 @@ export function EscandalloPanel() {
       const normalized = normalizeStoreIngredients(unifyStoreIngredientsFromConfig(config, brandIds));
       const { items: withDefaults } = applyVertialDefaultsToStoreIngredients(normalized, lineBrands);
       setStoreIngredients(withDefaults);
-    } catch {
-      toast.error('No se pudo cargar el catálogo');
+    } catch (err) {
+      // Si ya hay seed en pantalla, no molestar con toast (fallo de refresco en segundo plano).
+      if (!silent) {
+        const msg = err instanceof Error && err.message.trim()
+          ? err.message
+          : 'No se pudo cargar el catálogo';
+        toast.error(msg);
+      }
     } finally {
-      setLoading(false);
-      setLoadDetail('');
+      if (!silent) setLoading(false);
     }
   }, [user?.id, dataUserId, businessId, accountBusinessCount, businessType]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    // DeliveryCatalog ya pasa seed → pintar al instante y refrescar en silencio.
+    void load({ silent: hasCatalogSeed });
+  }, [load, hasCatalogSeed]);
+
+  // Seed solo para pintar rápido antes del fetch; no sustituye al catálogo del servidor.
+  useEffect(() => {
+    if (!hasCatalogSeed) return;
+    if (seedBrands?.length) setBrands(seedBrands);
+    if (seedStoreIngredients?.length) setStoreIngredients(seedStoreIngredients);
+  }, [hasCatalogSeed, seedBrands, seedStoreIngredients]);
 
   const categories = useMemo(() => {
     const set = new Set<string>();
@@ -583,14 +608,6 @@ export function EscandalloPanel() {
     }
     return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0], 'es'));
   }, [filteredProducts]);
-
-  // Primera carga: abrir todas las categorías para ver productos/escandallos (como antes).
-  useEffect(() => {
-    if (categoriesBootstrappedRef.current) return;
-    if (groupedProducts.length === 0) return;
-    categoriesBootstrappedRef.current = true;
-    setExpandedCategories(new Set(groupedProducts.map(([cat]) => cat)));
-  }, [groupedProducts]);
 
   const toggleCategory = (cat: string) => {
     setExpandedCategories((prev) => {
@@ -644,6 +661,31 @@ export function EscandalloPanel() {
       toast.error('No se pudo generar el Excel de escandallo');
     }
   }, [brands, catalogItems, storeIngredients]);
+
+  const handleGenerateEscandallos = useCallback(async () => {
+    const uid = dataUserId || user?.id;
+    if (!uid || !businessId) return;
+    setGeneratingCosting(true);
+    try {
+      const automation = await syncFullStockAutomationAfterCatalogImport(uid, businessId);
+      const { costing } = automation;
+      if (costing.updated <= 0) {
+        toast.message(
+          'No se pudo inferir escandallo automático. Revisa la pestaña Ingredientes o configura cada producto a mano.',
+        );
+      } else {
+        toast.success(
+          `Escandallo generado: ${costing.recipe} con receta, ${costing.fixed} con coste fijo${costing.failed ? ` · ${costing.failed} error(es)` : ''}`,
+        );
+      }
+      await load({ silent: true });
+      onCostingUpdated?.();
+    } catch {
+      toast.error('No se pudo generar el escandallo automático');
+    } finally {
+      setGeneratingCosting(false);
+    }
+  }, [businessId, dataUserId, load, onCostingUpdated, user?.id]);
 
   if (!isDeliveryOpsBusinessType(businessType) && !isRestaurantBusinessType(businessType)) {
     const escandalloCopy = getRetailOpsUiCopy(businessType);
@@ -707,6 +749,16 @@ export function EscandalloPanel() {
             }
             right={
               <>
+                {kpis.none > 0 ? (
+                  <SaasTabPrimaryButton onClick={() => void handleGenerateEscandallos()} disabled={generatingCosting}>
+                    {generatingCosting ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="w-3.5 h-3.5" />
+                    )}
+                    Generar escandallos
+                  </SaasTabPrimaryButton>
+                ) : null}
                 {catalogItems.length > 0 ? (
                   <SaasTabSecondaryButton onClick={handleDownloadEscandalloExcel}>
                     <Download className="w-3.5 h-3.5" />
@@ -736,7 +788,7 @@ export function EscandalloPanel() {
         >
           <div className="min-w-0">
         {loading ? (
-          <CatalogCoreLoadingState kind="escandallo" detail={loadDetail || undefined} compact />
+          <CatalogCoreLoadingState kind="escandallo" compact />
         ) : filteredProducts.length === 0 ? (
           <SaasTabEmpty
             icon={<Calculator className="w-10 h-10" />}
@@ -749,6 +801,13 @@ export function EscandalloPanel() {
           />
         ) : (
           <div className="p-3 space-y-3">
+            {kpis.none > 0 ? (
+              <p className="text-xs text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-900/50 rounded-xl px-3 py-2.5">
+                <strong>{kpis.none} producto{kpis.none === 1 ? '' : 's'} sin coste.</strong> El escandallo no se crea solo al
+                añadir productos al catálogo: hay que generarlo (botón «Generar escandallos»), usar ingredientes en la ficha del
+                producto o configurarlo producto a producto. Abre cada categoría para ver el detalle.
+              </p>
+            ) : null}
             {groupedProducts.map(([category, products]) => {
               const isCollapsed = !expandedCategories.has(category);
               const pendingCount = products.filter((p) => productCostingStatus(p) === 'none').length;
@@ -772,7 +831,7 @@ export function EscandalloPanel() {
                 <span className="text-xs text-gray-400 dark:text-gray-500 tabular-nums">{products.length}</span>
                 {pendingCount > 0 ? (
                   <span className="ml-auto text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-                    {pendingCount} sin coste
+                    {pendingCount} sin escandallo
                   </span>
                 ) : (
                   <span className="ml-auto text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
@@ -914,7 +973,10 @@ export function EscandalloPanel() {
                               Coste fijo: <strong>{formatMoney(unitCost)}</strong>
                             </p>
                           ) : (
-                            <p className="text-sm text-gray-500">Este producto aún no tiene coste configurado.</p>
+                            <p className="text-sm text-gray-500">
+                              Sin escandallo. Pulsa «Configurar coste» o usa «Generar escandallos» arriba para crearlo
+                              automáticamente desde Ingredientes.
+                            </p>
                           )}
 
                           <SaasTabSecondaryButton onClick={() => setEditingProduct(product)}>

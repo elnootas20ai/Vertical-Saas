@@ -22,6 +22,7 @@ import {
   CalendarRange,
   Target,
   Building2,
+  Calculator,
   Filter,
   Info,
   Truck,
@@ -115,6 +116,7 @@ const ENTRY_ICON: Partial<Record<DeliveryInformeEntry['id'], LucideIcon>> = {
   'stock-punto-pedido': Target,
   'stock-escandallo': FileText,
   'stock-reductores': Percent,
+  'stock-gerencial': Calculator,
 };
 
 function NivelBadge({ nivel }: { nivel?: DeliveryInformeNivel }) {

@@ -48,9 +48,11 @@ export function useClientDuplicateSearch({
   const [dismissed, setDismissed] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
-  const debouncedPhone = useDebounce(phone, debounceMs);
-  const debouncedEmail = useDebounce(email, debounceMs);
-  const debouncedDni = useDebounce(dni, debounceMs);
+  /** Sin debounce al cerrar el modal: evita buscar el teléfono/email del alta anterior. */
+  const debounceDelay = enabled ? debounceMs : 0;
+  const debouncedPhone = useDebounce(phone, debounceDelay);
+  const debouncedEmail = useDebounce(email, debounceDelay);
+  const debouncedDni = useDebounce(dni, debounceDelay);
 
   const clearDuplicates = useCallback(() => {
     setDuplicates([]);
@@ -63,7 +65,12 @@ export function useClientDuplicateSearch({
   }, []);
 
   useEffect(() => {
-    if (!enabled || !userId) return;
+    if (!enabled || !userId) {
+      setDuplicates([]);
+      setMatchedField(null);
+      setIsSearching(false);
+      return;
+    }
 
     const phoneDigits = extractDigits(debouncedPhone);
     const searches: { field: MatchField; value: string }[] = [];

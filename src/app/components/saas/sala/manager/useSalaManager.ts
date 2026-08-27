@@ -715,7 +715,13 @@ export function useSalaManager(
     setDirty(true);
   }, [pushHistory, tables, userId]);
 
-  const roomStatsFor = useCallback((roomId: string) => computeRoomStats(tables, roomId), [tables]);
+  const roomStatsFor = useCallback(
+    (roomId: string) => {
+      const room = rooms.find((r) => r.id === roomId);
+      return computeRoomStats(tables, roomId, room?.name);
+    },
+    [tables, rooms],
+  );
 
   const parentPdv = useMemo(
     () => resolveParentPdvFromScope(parentPdvId, rooms, retailScope?.pointsOfSale || []),

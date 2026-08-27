@@ -19,16 +19,32 @@ import {
 } from './restaurantReservationTypes';
 import { ensureReservationCrmClient } from './restaurantReservationClientSync';
 import { diningTableDisplayName } from './restaurantTableSelectUi';
+import { normalizeBusinessScopeId } from './deliverySetup';
+import { filterPurchaseDocsByBusinessScope } from './purchaseBusinessScope';
+import type { VerticalListOptions } from './verticalApiFactory';
 
 const api = createVerticalApi<RestaurantReservation>('restaurant', 'reservations');
 
-type ReservationClientScope = {
-  businessId?: string;
+export type ReservationScopeOptions = {
+  businessId?: string | null;
+  accountBusinessCount?: number;
+};
+
+type ReservationClientScope = ReservationScopeOptions & {
   searchBusinessId?: string;
 };
 
-export function listReservations(userId: string) {
-  return api.list(userId);
+function reservationApiScope(scope?: ReservationScopeOptions): VerticalListOptions | undefined {
+  const bid = normalizeBusinessScopeId(scope?.businessId || '');
+  return bid ? { businessId: bid } : undefined;
+}
+
+export function listReservations(userId: string, scope?: ReservationScopeOptions) {
+  const bid = normalizeBusinessScopeId(scope?.businessId || '');
+  const accountBusinessCount = scope?.accountBusinessCount ?? 1;
+  return api
+    .list(userId, bid ? { businessId: bid } : undefined)
+    .then((items) => filterPurchaseDocsByBusinessScope(items, bid, accountBusinessCount));
 }
 
 function appendHistory(
@@ -285,19 +301,24 @@ export async function updateReservation(
     actorName: actor.userName,
   }).catch(() => reservation.clientId || '');
 
-  const item = await api.update(userId, reservation._id, {
-    ...form,
-    clientId,
-    history,
-    ...(form.tableIds !== undefined || form.tableId !== undefined
-      ? {
-          tableId: selection.tableId,
-          tableName: selection.tableName,
-          tableNumber: selection.tableNumber,
-          tableIds: selection.tableIds,
-        }
-      : {}),
-  });
+  const item = await api.update(
+    userId,
+    reservation._id,
+    {
+      ...form,
+      clientId,
+      history,
+      ...(form.tableIds !== undefined || form.tableId !== undefined
+        ? {
+            tableId: selection.tableId,
+            tableName: selection.tableName,
+            tableNumber: selection.tableNumber,
+            tableIds: selection.tableIds,
+          }
+        : {}),
+    },
+    reservationApiScope(clientScope),
+  );
 
   const nextSet = new Set(selection.tableIds);
   const oldSet = new Set(oldIds);
@@ -513,7 +534,10 @@ export async function seatGuest(
     throw new Error('Asigna una mesa antes de sentar al cliente');
   }
 
-  const tables = await listDiningTablesRequest(userId);
+  const tables = await listDiningTablesRequest(
+    userId,
+    businessId ? { businessId: normalizeBusinessScopeId(businessId) } : undefined,
+  );
   const table = tables.find((t) => t._id === primaryId);
   if (!table) throw new Error('Mesa no encontrada');
   if (isTableOccupied(table) && table.status !== 'reserved') {

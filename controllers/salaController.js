@@ -96,7 +96,12 @@ export async function listTables(req, res) {
   try {
     const { userId } = req.params;
     if (!userId) return badRequest(res, 'Falta userId');
-    const tables = await listDiningTablesByUser(req, userId);
+    const businessId = String(req.query?.businessId || '').trim();
+    const accountBusinessCount = Number(req.query?.accountBusinessCount) || 1;
+    const tables = await listDiningTablesByUser(req, userId, {
+      businessId: businessId || undefined,
+      accountBusinessCount,
+    });
     return res.json({ ok: true, tables: tables.map(sanitizeDiningTable) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al cargar mesas' });
@@ -878,7 +883,67 @@ export async function cancelOrder(req, res) {
     }
 
     const sanitized = sanitizeDiningOrder({ ...doc, _rev: saved.rev });
+
+    // Cocina KDS: avisar comanda a comanda (no solo el pedido cerrado).
+    const kitchenStatuses = new Set(['sent_to_kitchen', 'in_preparation', 'ready', 'served']);
+    for (const comanda of (existing.comandas || [])) {
+      if (comanda.status === 'cancelled' || comanda.status === 'draft') continue;
+      if (!kitchenStatuses.has(comanda.status)) continue;
+      broadcastToUser(userId, 'sala:comanda_cancelled', {
+        orderId: doc._id,
+        comandaId: comanda.id,
+        reason: reason || '',
+        tableNumber: existing.tableNumber,
+        tableName: existing.tableName,
+      });
+    }
+
     broadcastToUser(userId, 'sala:order_cancelled', sanitized);
+
+    // Centro de alertas: incidencia registrada (no borrar en silencio).
+    void (async () => {
+      try {
+        const account = await findAccountByUserId(req, userId);
+        const bid = String(existing.businessId || account?.business_id || account?.businessId || '')
+          .replace(/^business:/, '')
+          .trim();
+        if (!bid) return;
+        const tableLabel = existing.tableName || `Mesa ${existing.tableNumber || ''}`;
+        const total = Number(existing.total || 0);
+        await emitGlobalAlert({
+          businessId: bid,
+          userId,
+          source: 'restaurant',
+          ruleId: 'sala_incident',
+          category: 'sala_incident',
+          priority: 'medium',
+          level: 'warning',
+          title: `Cuenta anulada · ${tableLabel}`,
+          message: [
+            `Cuenta de ${tableLabel} anulada desde TPV.`,
+            `Motivo: ${reason}.`,
+            total > 0 ? `Importe: ${total.toFixed(2)}€.` : '',
+          ].filter(Boolean).join(' '),
+          entityId: doc._id,
+          entityType: 'dining_order',
+          route: '/saas/caja/tpv',
+          dedupKey: `sala-void-${doc._id}-${now}`,
+          force: true,
+          metadata: {
+            tableNumber: existing.tableNumber,
+            tableName: existing.tableName,
+            cancelReason: reason,
+            total,
+            eventType: 'sala_account_voided',
+          },
+        });
+      } catch (err) {
+        logger.warn(
+          { tag: 'SALA_CANCEL_ORDER', err: err?.message, orderId: doc._id },
+          'No se pudo emitir alerta de cuenta anulada',
+        );
+      }
+    })();
 
     return res.json({ ok: true, order: sanitized });
   } catch (error) {

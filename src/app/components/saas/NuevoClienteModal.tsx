@@ -13,10 +13,13 @@ import { mergeClientRequest, mergeLeadRequest } from '../../lib/crmApi';
 import { useModalClose } from '../../hooks/useModalClose';
 import { useClientDuplicateSearch } from '../../hooks/useClientDuplicateSearch';
 import {
+  getCifError,
   getCifErrorWhileTyping,
+  getDniOrNieError,
   getDniOrNieErrorWhileTyping,
   normalizeSpanishTaxId,
 } from '../../lib/dniCifValidator';
+import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { listTeamAgentOptions, resolveTeamAgent } from '../../lib/realEstateTeamAgents';
@@ -145,6 +148,9 @@ export function NuevoClienteModal({
     businessIdProp || resolveBusinessScopeId(currentBusiness) || '',
   ).trim();
   const isRealEstate = currentBusiness?.businessType === 'realEstate';
+  const isRestaurant = isRestaurantBusinessType(currentBusiness?.businessType);
+  /** Bar/restaurante: CRM de sala (nombre + teléfono); DNI solo para factura avanzada. */
+  const isBarSalaClient = isRestaurant;
   const effectivePerfil: Perfil = perfilProp || (MANAGER_ROLES.includes(user?.role || '') ? 'gerente' : 'trabajador');
   const isGerente = effectivePerfil === 'gerente';
   const canPickAgent = isRealEstate && (isGerente || MANAGER_ROLES.includes(user?.role || ''));
@@ -214,24 +220,26 @@ export function NuevoClienteModal({
     }
   }, [open, initialData]);
 
-  // ─── Reset on close ────────────────────────────────────────────────────
+  // ─── Reset on close + limpiar duplicados al abrir ───────────────────────
   useEffect(() => {
-    if (!open) {
-      setClientType('particular');
-      setName('');
-      setPhone('');
-      setEmail('');
-      setDni('');
-      setPaymentMethod('');
-      setNotes('');
-      setAddresses([emptyAddress()]);
-      setErrors({});
-      setSaving(false);
-      setShowExtraAddresses(false);
-      setShowMergeModal(false);
-      setResponsibleUserId('');
+    if (open) {
       clearDuplicates();
+      return;
     }
+    setClientType('particular');
+    setName('');
+    setPhone('');
+    setEmail('');
+    setDni('');
+    setPaymentMethod('');
+    setNotes('');
+    setAddresses([emptyAddress()]);
+    setErrors({});
+    setSaving(false);
+    setShowExtraAddresses(false);
+    setShowMergeModal(false);
+    setResponsibleUserId('');
+    clearDuplicates();
   }, [open, clearDuplicates]);
 
   // ─── Focus name on open + default agent (inmobiliaria → yo) ────────────
@@ -289,10 +297,20 @@ export function NuevoClienteModal({
       else if (!/^[\d\s+\-().]+$/.test(phone.trim())) e.phone = 'El teléfono contiene caracteres no válidos';
     }
 
-    if (!addresses[0]?.street.trim()) e['address.0.street'] = 'La calle es obligatoria';
+    if (!addresses[0]?.street.trim() && !isBarSalaClient) {
+      e['address.0.street'] = 'La calle es obligatoria';
+    }
 
     if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
       e.email = 'Email no válido';
+    }
+
+    if (!isBarSalaClient && isGerente && dni.trim()) {
+      const normalized = normalizeSpanishTaxId(dni);
+      const taxErr = clientType === 'empresa'
+        ? getCifError(normalized)
+        : getDniOrNieError(normalized);
+      if (taxErr) e.dni = taxErr;
     }
 
     addresses.forEach((addr, i) => {
@@ -312,7 +330,7 @@ export function NuevoClienteModal({
       return false;
     }
     return true;
-  }, [name, phone, email, addresses]);
+  }, [name, phone, email, addresses, isBarSalaClient, isGerente, dni, clientType]);
 
   // ─── Use existing client ───────────────────────────────────────────────
   const handleUseExisting = (existingClient: Client) => {
@@ -383,8 +401,11 @@ export function NuevoClienteModal({
       };
 
       if (isGerente) {
-        clientData.dni = normalizeSpanishTaxId(dni);
         clientData.defaultPaymentMethod = paymentMethod;
+        if (!isBarSalaClient) {
+          const normalizedDni = normalizeSpanishTaxId(dni);
+          if (normalizedDni) clientData.dni = normalizedDni;
+        }
       }
 
       (clientData as Record<string, unknown>).stats = {
@@ -444,7 +465,9 @@ export function NuevoClienteModal({
             <div>
               <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">{ctx.title}</h2>
               <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-                Obligatorio: nombre, teléfono y calle. El resto es opcional.
+                {isBarSalaClient
+                  ? 'Obligatorio: nombre y teléfono. Dirección y resto opcionales (sin DNI).'
+                  : 'Obligatorio: nombre, teléfono y calle. El resto es opcional.'}
               </p>
             </div>
             <button
@@ -619,11 +642,12 @@ export function NuevoClienteModal({
               </div>
             )}
 
-            {/* DNI + Payment (gerente only) */}
+            {/* DNI + Payment (gerente; sin DNI en bar/restaurante) */}
             {isGerente && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className={`grid grid-cols-1 ${isBarSalaClient ? '' : 'sm:grid-cols-2'} gap-3`}>
+                {!isBarSalaClient && (
                 <div>
-                  <Label>{clientType === 'empresa' ? 'CIF' : 'DNI / NIE'}</Label>
+                  <Label>{clientType === 'empresa' ? 'CIF (opcional)' : 'DNI / NIE (opcional)'}</Label>
                   <InputWithIcon
                     icon={FileText}
                     placeholder={clientType === 'empresa' ? 'B12345678' : '12345678Z'}
@@ -633,16 +657,23 @@ export function NuevoClienteModal({
                       const normalized = normalizeSpanishTaxId(dni);
                       if (normalized !== dni) setDni(normalized);
                     }}
+                    error={errors.dni}
                     suffix={dniValidation ? (
                       dniValidation.valid
-                        ? <Check className="w-4 h-4 text-emerald-500" />
+                        ? <Check className="w-4 h-4 text-emerald-500" title="Formato válido (no verifica identidad real)" />
                         : <X className="w-4 h-4 text-red-400" />
                     ) : null}
                   />
                   {dniValidation && !dniValidation.valid && (
                     <FieldError message={dniValidation.message} />
                   )}
+                  {dniValidation?.valid ? (
+                    <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500">
+                      Formato correcto · no comprueba identidad real
+                    </p>
+                  ) : null}
                 </div>
+                )}
                 <div>
                   <Label>Forma de pago habitual</Label>
                   <div className="relative">
@@ -666,11 +697,11 @@ export function NuevoClienteModal({
           {/* ── Address ── */}
           <div className="space-y-3">
             <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-              Dirección principal
+              {isBarSalaClient ? 'Dirección (opcional)' : 'Dirección principal'}
             </p>
 
             <div>
-              <Label required>Calle</Label>
+              <Label required={!isBarSalaClient}>Calle</Label>
               <InputWithIcon
                 icon={MapPin}
                 placeholder="Calle Mayor 15, 3ºB"
@@ -839,7 +870,7 @@ export function NuevoClienteModal({
           <button
             type="button"
             onClick={onClose}
-            className="px-5 py-2.5 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 transition-colors"
+            className="px-4 py-2.5 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 transition-colors"
           >
             Cancelar
           </button>

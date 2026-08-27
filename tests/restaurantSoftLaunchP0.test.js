@@ -97,6 +97,53 @@ describe('restaurant soft-launch P0', () => {
     expect(src).toMatch(/tableName: 'Mostrador'/);
   });
 
+  it('sala restaurante enlaza PDV con bootstrap (no crear local manual)', () => {
+    const sala = readFileSync(
+      join(process.cwd(), 'src/app/verticals/restaurant/RestaurantSalaPage.tsx'),
+      'utf8',
+    );
+    expect(sala).toMatch(/bootstrapRestaurantCeoTpvStores/);
+    expect(sala).toMatch(/needsCeoTpvStoreBootstrap/);
+    expect(sala).not.toMatch(/Créalo en Ajustes → Tienda\./);
+  });
+
+  it('bar/restaurante: sin almacén auto ni pestaña inventario', () => {
+    const policy = readFileSync(
+      join(process.cwd(), 'src/app/verticals/restaurant/restaurantWarehousePolicy.ts'),
+      'utf8',
+    );
+    const sidebar = readFileSync(
+      join(process.cwd(), 'src/app/components/saas/Sidebar.tsx'),
+      'utf8',
+    );
+    const catalog = readFileSync(
+      join(process.cwd(), 'src/app/pages/saas/DeliveryCatalog.tsx'),
+      'utf8',
+    );
+    const inventory = readFileSync(
+      join(process.cwd(), 'src/app/components/saas/InventoryPanel.tsx'),
+      'utf8',
+    );
+    expect(policy).toMatch(/restaurantWarehouseViaExcelOnly/);
+    expect(sidebar).toMatch(/catalog-stock-tpv/);
+    expect(sidebar).toMatch(
+      /isRestaurantVertical\s*\?\s*\[\s*'catalog-carta',\s*'catalog-purchases'/,
+    );
+    expect(catalog).toMatch(/tab === 'stock'\) return 'catalog'/);
+    expect(catalog).toMatch(/isRestaurantCatalog[\s\S]*\[\]/);
+    expect(inventory).toMatch(/restaurantWarehouseViaExcelOnly/);
+  });
+
+  it('CRM bar: modal nuevo cliente compacto sin DNI', () => {
+    const modal = readFileSync(
+      join(process.cwd(), 'src/app/components/saas/NuevoClienteModal.tsx'),
+      'utf8',
+    );
+    expect(modal).toMatch(/isBarSalaClient/);
+    expect(modal).toMatch(/!isBarSalaClient/);
+    expect(modal).not.toMatch(/Nombre y teléfono · sin DNI ni dirección/);
+  });
+
   it('PDV restaurant usa storage propio (no deliveryOps)', () => {
     const sel = readFileSync(
       join(process.cwd(), 'src/app/verticals/restaurant/restaurantOpsPdvSelection.ts'),
@@ -148,9 +195,48 @@ describe('restaurant soft-launch P0', () => {
     expect(src).not.toMatch(/notifyDeliveryWorkCentersChanged/);
   });
 
+  it('bar/restaurante: categorías de marca solo desde catálogo, no preset del asistente', () => {
+    const policy = readFileSync(
+      join(process.cwd(), 'src/app/verticals/restaurant/restaurantBrandCatalogPolicy.ts'),
+      'utf8',
+    );
+    const marca = readFileSync(
+      join(process.cwd(), 'src/app/components/saas/settings/CompanyMarcaSettings.tsx'),
+      'utf8',
+    );
+    const template = readFileSync(
+      join(process.cwd(), 'src/app/lib/deliveryCatalogExcelTemplate.ts'),
+      'utf8',
+    );
+    expect(policy).toMatch(/restaurantBrandCategoriesFromCatalogOnly/);
+    expect(marca).toMatch(/catalogCategories: isRestaurant \? f\.catalogCategories/);
+    expect(template).toMatch(/Bar\/restaurante: plantilla genérica/);
+    expect(template).not.toMatch(/fromTapas/);
+  });
+
+  it('bar/restaurante: combo sin nombres pizza/burger en partes del menú', () => {
+    const slots = readFileSync(join(process.cwd(), 'src/app/lib/catalogComboSlots.ts'), 'utf8');
+    const editor = readFileSync(
+      join(process.cwd(), 'src/app/components/saas/CatalogComboCompositionEditor.tsx'),
+      'utf8',
+    );
+    expect(slots).toMatch(/RESTAURANT_DEFAULT_COMBO_STRUCTURE/);
+    expect(slots).toMatch(/Plato principal/);
+    expect(slots).toMatch(/restaurantCatalog/);
+    expect(editor).toMatch(/restaurantCatalog/);
+    expect(editor).toMatch(/catalogCategoriesForComboPartPicker/);
+  });
+
   it('rutas sala endurecen permiso sala', () => {
     const src = readFileSync(join(process.cwd(), 'src/app/routes.tsx'), 'utf8');
     expect(src).toMatch(/lista-espera[\s\S]*permission="sala"/);
     expect(src).toMatch(/sala\/setup[\s\S]*permission=\{\['sala', 'reservations'\]\}/);
+  });
+
+  it('reservas restaurante persisten clientId, tableIds y businessId', () => {
+    const cfg = readFileSync(join(process.cwd(), 'verticalConfigs/all.js'), 'utf8');
+    expect(cfg).toMatch(/reservations:\s*\{[\s\S]*clientId/);
+    expect(cfg).toMatch(/reservations:\s*\{[\s\S]*tableIds/);
+    expect(cfg).toMatch(/reservations:\s*\{[\s\S]*businessId/);
   });
 });

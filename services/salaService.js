@@ -33,6 +33,22 @@ export function getSalaDbName() {
   return normalizeDbName(process.env.VITE_SALA_DB || `${getDbPrefix()}-sala`);
 }
 
+/** Mango por type+user_id (evita _all_docs con miles de pedidos/comandas). */
+async function findSalaDocsByType(req, db, type, userId) {
+  await ensureSalaTypeUserIndex(req, db);
+  const uid = String(userId || '').trim();
+  const docType = String(type || '').trim();
+  try {
+    const selector = uid ? { type: docType, user_id: uid } : { type: docType };
+    return await findDocuments(req, db, selector, { pageSize: 500, maxDocs: 10_000 });
+  } catch {
+    const all = await getAllDocuments(req, db);
+    return all.filter(
+      (doc) => doc?.type === docType && (!uid || doc?.user_id === uid),
+    );
+  }
+}
+
 // ─── DINING TABLE ────────────────────────────────────────────────────────────
 
 const VALID_TABLE_STATUSES = ['available', 'occupied', 'pending_order', 'served', 'pending_payment', 'unavailable', 'reserved', 'hidden'];
@@ -128,13 +144,25 @@ export function sanitizeDiningTable(doc) {
   };
 }
 
-export async function listDiningTablesByUser(req, userId) {
+export async function listDiningTablesByUser(req, userId, options = {}) {
+  const uid = String(userId || '').trim();
   const db = getSalaDbName();
   await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
-  return docs
-    .filter((doc) => doc?.type === 'dining_table' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
-    .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0) || (a.number || 0) - (b.number || 0));
+  const docs = await findSalaDocsByType(req, db, 'dining_table', uid);
+  let tables = docs
+    .filter((doc) => doc?.type === 'dining_table' && !doc?.deletedAt && (!uid || doc?.user_id === uid));
+  const bid = normalizeSalaBusinessId(options.businessId);
+  const accountBusinessCount = Number(options.accountBusinessCount) || 1;
+  if (bid) {
+    tables = tables.filter((t) => {
+      const tb = normalizeSalaBusinessId(t.businessId);
+      if (!tb) return accountBusinessCount <= 1;
+      return tb === bid;
+    });
+  }
+  return tables.sort(
+    (a, b) => (a.sortOrder || 0) - (b.sortOrder || 0) || (a.number || 0) - (b.number || 0),
+  );
 }
 
 // ─── DINING WALL ─────────────────────────────────────────────────────────────
@@ -187,11 +215,12 @@ export function sanitizeDiningWall(doc) {
 }
 
 export async function listDiningWallsByUser(req, userId) {
+  const uid = String(userId || '').trim();
   const db = getSalaDbName();
   await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
+  const docs = await findSalaDocsByType(req, db, 'dining_wall', uid);
   return docs
-    .filter((doc) => doc?.type === 'dining_wall' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .filter((doc) => doc?.type === 'dining_wall' && !doc?.deletedAt && (!uid || doc?.user_id === uid))
     .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
 }
 
@@ -269,11 +298,12 @@ function normalizeSalaBusinessId(value) {
 }
 
 export async function getFloorConfigByUser(req, userId, businessId = '') {
+  const uid = String(userId || '').trim();
   const db = getSalaDbName();
   await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
+  const docs = await findSalaDocsByType(req, db, 'dining_floor_config', uid);
   const configs = docs.filter(
-    (doc) => doc?.type === 'dining_floor_config' && !doc?.deletedAt && doc?.user_id === userId,
+    (doc) => doc?.type === 'dining_floor_config' && !doc?.deletedAt && (!uid || doc?.user_id === uid),
   );
   const bid = normalizeSalaBusinessId(businessId);
   if (bid) {
@@ -708,11 +738,13 @@ export function sanitizeDiningTableTicketStat(doc) {
 }
 
 export async function listDiningTableTicketStatsByUser(req, userId, filters = {}) {
+  const uid = String(userId || '').trim();
   const db = getSalaDbName();
   await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
+  const docs = await findSalaDocsByType(req, db, 'dining_table_ticket_stat', uid);
   let rows = docs.filter(
-    (doc) => doc?.type === 'dining_table_ticket_stat' && !doc?.deletedAt && doc?.user_id === userId,
+    (doc) =>
+      doc?.type === 'dining_table_ticket_stat' && !doc?.deletedAt && (!uid || doc?.user_id === uid),
   );
 
   if (filters.businessId) {

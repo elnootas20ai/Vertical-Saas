@@ -33,14 +33,17 @@ export function SalaManagerPreviewModal({ open, onClose, rooms, tables }: Props)
   }, [visibleTables]);
 
   const roomStats = useMemo(
-    () => (roomId: string) => computeRoomStats(visibleTables, roomId),
-    [visibleTables],
+    () => (roomId: string) => {
+      const room = rooms.find((r) => r.id === roomId);
+      return computeRoomStats(visibleTables, roomId, room?.name);
+    },
+    [visibleTables, rooms],
   );
 
   const resolvedRoomId = activeRoomId || rooms[0]?.id || null;
   const activeRoom = rooms.find((r) => r.id === resolvedRoomId) || rooms[0] || null;
   const roomTables = activeRoom
-    ? tablesForRoom(visibleTables, activeRoom.id).sort((a, b) => a.number - b.number)
+    ? tablesForRoom(visibleTables, activeRoom.id, activeRoom.name).sort((a, b) => a.number - b.number)
     : [];
 
   if (!open) return null;

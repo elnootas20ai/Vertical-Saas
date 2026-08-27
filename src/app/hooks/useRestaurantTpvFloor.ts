@@ -21,9 +21,10 @@ import type { RestaurantReservation } from '../lib/restaurantReservationTypes';
 export function useRestaurantTpvFloor(
   userId: string | null,
   businessId: string | null,
-  options?: { paused?: boolean },
+  options?: { paused?: boolean; accountBusinessCount?: number },
 ) {
   const paused = options?.paused ?? false;
+  const accountBusinessCount = options?.accountBusinessCount ?? 1;
   const [rooms, setRooms] = useState<SalaRoom[]>([]);
   const [tables, setTables] = useState<ExtendedDiningTable[]>([]);
   const [liveByTableId, setLiveByTableId] = useState<Map<string, RestaurantTableLiveInfo>>(new Map());
@@ -45,10 +46,13 @@ export function useRestaurantTpvFloor(
       const dayStart = new Date();
       dayStart.setHours(0, 0, 0, 0);
       const [tablesData, config, ordersToday, reservationsToday] = await Promise.all([
-        listDiningTablesRequest(userId),
+        listDiningTablesRequest(userId, businessId ? { businessId, accountBusinessCount } : undefined),
         getFloorConfigRequest(userId, businessId ? { businessId } : undefined),
         listDiningOrdersRequest(userId, { dateFrom: dayStart.toISOString() }).catch(() => []),
-        listFloorReservations(userId).catch(() => []),
+        listFloorReservations(userId, {
+          businessId,
+          accountBusinessCount,
+        }).catch(() => []),
       ]);
       const loadedRooms = roomsFromFloorConfig(config);
       let extended = assignDefaultRoomIds(tablesData.map(extendTable), loadedRooms);
@@ -80,7 +84,7 @@ export function useRestaurantTpvFloor(
     } finally {
       setLoading(false);
     }
-  }, [userId, businessId]);
+  }, [userId, businessId, accountBusinessCount]);
 
   useEffect(() => {
     if (paused) return;
@@ -99,8 +103,11 @@ export function useRestaurantTpvFloor(
   );
 
   const roomStats = useCallback(
-    (roomId: string) => computeRoomStats(tables, roomId),
-    [tables],
+    (roomId: string) => {
+      const room = rooms.find((r) => r.id === roomId);
+      return computeRoomStats(tables, roomId, room?.name);
+    },
+    [tables, rooms],
   );
 
   const tablesInRoom = useCallback(

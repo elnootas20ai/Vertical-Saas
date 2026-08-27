@@ -22,7 +22,7 @@ import { useClientPhoneSearch } from '../../../hooks/useClientPhoneSearch';
 import { useBusiness } from '../../../context/BusinessContext';
 import type { Client } from '../../../context/AppContext';
 import { resolveClientSearchBusinessId } from '../../../lib/clientSearchScope';
-import { resolveBusinessScopeId } from '../../../lib/deliverySetup';
+import { normalizeBusinessScopeId, resolveBusinessScopeId } from '../../../lib/deliverySetup';
 import { localCalendarDayKey } from '../../../lib/tpvCajaScope';
 import { listFloorReservations, reservationMinutesUntil } from '../../../lib/restaurantFloorReservations';
 import {
@@ -106,13 +106,24 @@ export function RestaurantTpvReservationsPanel({
   onChanged,
   startCreate = false,
 }: Props) {
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, businesses } = useBusiness();
   const today = localCalendarDayKey();
-  const businessScopeId = resolveBusinessScopeId(currentBusiness);
+  const businessScopeId = resolveBusinessScopeId(currentBusiness) || normalizeBusinessScopeId(businessId);
   const clientSearchBusinessId = resolveClientSearchBusinessId(currentBusiness, businessScopeId);
+  const reservationScope = useMemo(
+    () => ({
+      businessId: businessScopeId,
+      accountBusinessCount: businesses.length || 1,
+    }),
+    [businessScopeId, businesses.length],
+  );
   const clientScope = useMemo(
-    () => ({ businessId, searchBusinessId: clientSearchBusinessId }),
-    [businessId, clientSearchBusinessId],
+    () => ({
+      businessId: businessScopeId,
+      searchBusinessId: clientSearchBusinessId,
+      accountBusinessCount: businesses.length || 1,
+    }),
+    [businessScopeId, clientSearchBusinessId, businesses.length],
   );
 
   const [loading, setLoading] = useState(false);
@@ -152,12 +163,12 @@ export function RestaurantTpvReservationsPanel({
     }
     setLoading(true);
     try {
-      const all = await listFloorReservations(userId).catch(() => []);
+      const all = await listFloorReservations(userId, reservationScope).catch(() => []);
       setItems(todayReservationsForTpv(all, today));
     } finally {
       setLoading(false);
     }
-  }, [userId, today]);
+  }, [userId, today, reservationScope]);
 
   useEffect(() => {
     if (!open) return;

@@ -1,5 +1,6 @@
 import { createClientRequest, searchClientsByPhoneRequest } from './crmApi';
 import type { Client } from '../context/AppContext';
+import { normalizeBusinessScopeId } from './deliverySetup';
 
 export type EnsureReservationClientInput = {
   userId: string;
@@ -51,10 +52,11 @@ export async function ensureReservationCrmClient(input: EnsureReservationClientI
     return (exact || matches.clients[0]).id;
   }
 
+  const bid = normalizeBusinessScopeId(businessId || '');
   const clientPayload = {
     type: 'client' as const,
     user_id: userId,
-    ...(businessId ? { businessId, business_id: businessId } : {}),
+    ...(bid ? { businessId: bid, business_id: bid } : {}),
     clientType: 'particular' as const,
     name,
     phone: phoneDigits,

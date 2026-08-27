@@ -64,6 +64,7 @@ import {
   EMPTY_CART_CUSTOMIZATION,
   buildOrderExtras,
   buildOrderIngredients,
+  buildOrderStructuredCustomization,
   cartLineTotal,
   cartLineUnitPrice,
   cartLineExtrasUnitPrice,
@@ -2898,6 +2899,7 @@ export function TpvRapidoOrderFlow({
               brands,
               catalog,
             ),
+            ...buildOrderStructuredCustomization(ci.customization),
           };
         });
 
@@ -3164,6 +3166,7 @@ export function TpvRapidoOrderFlow({
             brands,
             catalog,
           ),
+          ...buildOrderStructuredCustomization(ci.customization),
         };
       });
 

@@ -86,6 +86,48 @@ async function syncInventoryFromStoreIngredients(
   }
 }
 
+/** Ingredientes maestros + bases Vertial (mozzarella, masa…) y persistencia en config. */
+export async function ensureStoreIngredientsForStockSync(
+  userId: string,
+  businessId: string,
+): Promise<{
+  storeIngredients: ReturnType<typeof normalizeStoreIngredients>;
+  brands: Brand[];
+  businessType: string;
+  basesAdded: number;
+}> {
+  const uid = String(userId || '').trim();
+  const bid = String(businessId || '').trim();
+  if (!uid || !bid) {
+    return { storeIngredients: [], brands: [], businessType: 'delivery', basesAdded: 0 };
+  }
+
+  const brands = commercialLineBrands(await listBrandsRequest(bid).catch(() => [] as Brand[]));
+  const brandIds = brands.map((b) => b._id);
+  const cfg = await getDeliveryConfigRequest(uid).catch(() => null);
+  const existing = unifyStoreIngredientsFromConfig(cfg, brandIds);
+  const { items: withBases, added: basesAdded } = ensureVertialEscandalloBaseStoreIngredients(
+    normalizeStoreIngredients(existing),
+    brands,
+  );
+
+  if (basesAdded > 0 && cfg) {
+    await updateDeliveryConfigRequest(uid, {
+      _id: cfg._id || `dlvconf-${normalizeTenantUserId(uid)}`,
+      _rev: cfg._rev,
+      storeIngredients: withBases,
+    });
+    notifyDeliveryConfigChanged();
+  }
+
+  return {
+    storeIngredients: withBases,
+    brands,
+    businessType: inferInventoryBusinessType(brands),
+    basesAdded,
+  };
+}
+
 export type { ImportBrandLike } from './deliveryCatalogImportLogic';
 export {
   allCommercialLineBrands,
@@ -353,47 +395,53 @@ export async function syncAutoCostingAfterCatalogImport(
   userId: string,
   businessId: string,
   catalogItems: CatalogItem[],
-  options?: { fullCatalog?: CatalogItem[] },
+  _options?: { fullCatalog?: CatalogItem[] },
 ): Promise<{ updated: number; recipe: number; fixed: number; skipped: number; failed: number }> {
   const uid = String(userId || '').trim();
   const bid = String(businessId || '').trim();
-  if (!uid || !bid || catalogItems.length === 0) {
+  if (!uid || !bid) {
     return { updated: 0, recipe: 0, fixed: 0, skipped: 0, failed: 0 };
   }
 
-  const brands = commercialLineBrands(await listBrandsRequest(bid).catch(() => [] as Brand[]));
-  const brandIds = brands.map((b) => b._id);
-  const cfg = await getDeliveryConfigRequest(uid).catch(() => null);
-  const existing = unifyStoreIngredientsFromConfig(cfg, brandIds);
-  const { items: withBases, added: basesAdded } = ensureVertialEscandalloBaseStoreIngredients(
-    normalizeStoreIngredients(existing),
-    brands,
-  );
+  const result = await syncFullStockAutomationAfterCatalogImport(uid, bid, {
+    costingTargets: catalogItems.length > 0 ? catalogItems : undefined,
+  });
+  return result.costing;
+}
 
-  if (basesAdded > 0 && cfg) {
-    await updateDeliveryConfigRequest(uid, {
-      _id: cfg._id || `dlvconf-${normalizeTenantUserId(uid)}`,
-      _rev: cfg._rev,
-      storeIngredients: withBases,
-    });
-    notifyDeliveryConfigChanged();
+/** Pipeline completo tras import: inventario + escandallo Vertial + recetas CouchDB. */
+export async function syncFullStockAutomationAfterCatalogImport(
+  userId: string,
+  businessId: string,
+  options?: {
+    /** Si se omite, costea todo el catálogo de carta que aún no tenga coste. */
+    costingTargets?: CatalogItem[];
+  },
+) {
+  const uid = String(userId || '').trim();
+  const bid = String(businessId || '').trim();
+  if (!uid || !bid) {
+    return {
+      inventory: { created: 0, updated: 0, skipped: 0, candidates: 0 },
+      costing: { updated: 0, recipe: 0, fixed: 0, skipped: 0, failed: 0 },
+      recipes: { created: 0, updated: 0, skipped: 0 },
+    };
   }
 
-  const result = await runVertialStockAutomationPipeline(uid, {
-    businessType: inferInventoryBusinessType(brands),
+  const fullCatalog = await listCatalogItemsRequest(uid).catch(() => [] as CatalogItem[]);
+  const { storeIngredients, brands, businessType } = await ensureStoreIngredientsForStockSync(uid, bid);
+
+  return runVertialStockAutomationPipeline(uid, {
+    businessType,
     businessId: bid,
-    storeIngredients: withBases,
+    storeIngredients,
     brands,
-    catalogItems: options?.fullCatalog,
-    costingTargets: catalogItems,
+    catalogItems: fullCatalog,
+    costingTargets: options?.costingTargets,
     upgradeAutoFixedFood: true,
-    mode: 'costing',
+    mode: 'full',
     updateCatalogItem: (item) => updateCatalogItemRequest(uid, item),
   });
-
-  await syncInventoryFromStoreIngredients(uid, bid, withBases, brands);
-
-  return result.costing;
 }
 
 /** Repara pizzas/burgers/tacos que quedaron con coste fijo sin escandallo tras un import antiguo. */
@@ -462,36 +510,6 @@ export async function repairVertialFoodEscandallo(
   };
 }
 
-/** Pipeline completo: inventario + escandallo (packaging) + recetas CouchDB. */
-export async function syncFullStockAutomationAfterCatalogImport(
-  userId: string,
-  businessId: string,
-  catalogItems: CatalogItem[],
-) {
-  const uid = String(userId || '').trim();
-  const bid = String(businessId || '').trim();
-  if (!uid || !bid) {
-    return {
-      inventory: { created: 0, updated: 0, skipped: 0, candidates: 0 },
-      costing: { updated: 0, recipe: 0, fixed: 0, skipped: 0, failed: 0 },
-      recipes: { created: 0, updated: 0, skipped: 0 },
-    };
-  }
-
-  const brands = commercialLineBrands(await listBrandsRequest(bid).catch(() => [] as Brand[]));
-  const brandIds = brands.map((b) => b._id);
-  const cfg = await getDeliveryConfigRequest(uid).catch(() => null);
-  const storeIngredients = normalizeStoreIngredients(unifyStoreIngredientsFromConfig(cfg, brandIds));
-
-  return runVertialStockAutomationPipeline(uid, {
-    businessType: 'delivery',
-    businessId: bid,
-    storeIngredients,
-    brands,
-    costingTargets: catalogItems.length > 0 ? catalogItems : undefined,
-    updateCatalogItem: (item) => updateCatalogItemRequest(uid, item),
-  });
-}
 
 /** Resuelve ítems del lote importado (por _id, sku o nombre+categoría) contra el catálogo actual. */
 export function resolveImportedCatalogItemsForCosting(

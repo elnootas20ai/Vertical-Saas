@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  explicitMarkedStockItemsForSupplier,
   groupSuggestionsForVertial,
   stockItemsForOrganizer,
   stockItemsForSupplierOrder,
@@ -112,6 +113,25 @@ describe('groupSuggestionsForVertial', () => {
     expect(groups).toHaveLength(1);
     expect(groups[0].matchedBy).toBe('none');
   });
+
+  it('mantiene grupos separados aunque el nombre de proveedor se repita', () => {
+    const groups = groupSuggestionsForVertial(
+      [
+        suggestion({ _id: 'a', supplierId: 'sup-1', estimatedCost: 5 }),
+        suggestion({ _id: 'b', supplierId: 'sup-2', estimatedCost: 7, name: 'Queso' }),
+      ],
+      [
+        catalogItem({ _id: 'a' }),
+        catalogItem({ _id: 'b', supplierId: 'sup-2' }),
+      ],
+      [
+        supplier({ _id: 'sup-1', name: 'Makro' }),
+        supplier({ _id: 'sup-2', name: 'Makro' }),
+      ],
+    );
+    expect(groups).toHaveLength(2);
+    expect(groups.map((g) => g.supplierId).sort()).toEqual(['sup-1', 'sup-2']);
+  });
 });
 
 describe('stockItemsForSupplierOrder', () => {
@@ -187,6 +207,43 @@ describe('stockItemsForSupplierOrder', () => {
     expect(items.map((i) => i._id)).toEqual(['cola']);
   });
 
+  it('con Bebidas marcadas y Complementos añadido sin marcar, incluye ambas categorías', () => {
+    const cola = catalogItem({
+      _id: 'cola',
+      name: 'Cola',
+      module: 'stock',
+      isStockItem: true,
+      stockCategory: 'beverage',
+      category: 'Bebidas',
+      customFields: { inventoryOrganizerId: 'beverages' },
+    });
+    const fanta = catalogItem({
+      _id: 'fanta',
+      name: 'Fanta',
+      module: 'stock',
+      isStockItem: true,
+      stockCategory: 'beverage',
+      category: 'Bebidas',
+      customFields: { inventoryOrganizerId: 'beverages' },
+    });
+    const nuggets = catalogItem({
+      _id: 'nuggets',
+      name: 'Nuggets',
+      module: 'stock',
+      isStockItem: true,
+      stockCategory: 'finished_product',
+      category: 'Complementos',
+    });
+    const items = explicitMarkedStockItemsForSupplier(
+      [cola, fanta, nuggets],
+      supplier({
+        organizerIds: ['beverages', 'complements'],
+        catalogItemIds: ['cola'],
+      }),
+    );
+    expect(items.map((i) => i._id).sort()).toEqual(['cola', 'nuggets']);
+  });
+
   it('sin proveedor muestra el almacén completo, no la carta', () => {
     const pizza = catalogItem({
       _id: 'pizza-1',
@@ -260,5 +317,47 @@ describe('stockItemsForOrganizer', () => {
     });
     const items = stockItemsForOrganizer([drink, box, pizza], 'packaging');
     expect(items.map((i) => i._id)).toEqual(['box-1']);
+  });
+
+  it('incluye ingredientes TPV del Excel/manual aunque aún no tengan fila de almacén', () => {
+    const brands = [{ _id: 'brand-pizza', name: 'Pizza House', deliveryLineKind: 'pizza' }];
+    const stockMozzarella = catalogItem({
+      _id: 'stock-moz',
+      name: 'Mozzarella',
+      module: 'stock',
+      category: 'Ingredientes',
+      isStockItem: true,
+      stockCategory: 'ingredient',
+      customFields: { storeIngredientId: 'ing-moz' },
+    });
+    const storeIngredients = [
+      {
+        id: 'ing-moz',
+        name: 'Mozzarella',
+        brandIds: ['brand-pizza'],
+        productParts: ['pizzas'],
+      },
+      {
+        id: 'ing-tomate',
+        name: 'Tomate',
+        brandIds: ['brand-pizza'],
+        productParts: ['pizzas'],
+      },
+    ];
+    const byBrand = stockItemsForOrganizer(
+      [stockMozzarella],
+      'brand-pizza',
+      storeIngredients,
+      brands,
+    );
+    expect(byBrand.map((i) => i.name).sort()).toEqual(['Mozzarella', 'Tomate']);
+
+    const byCategory = stockItemsForOrganizer(
+      [stockMozzarella],
+      'cat:ingredientes',
+      storeIngredients,
+      brands,
+    );
+    expect(byCategory.map((i) => i.name).sort()).toEqual(['Mozzarella', 'Tomate']);
   });
 });

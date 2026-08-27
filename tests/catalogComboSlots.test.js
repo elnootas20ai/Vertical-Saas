@@ -193,6 +193,29 @@ describe('catalogComboSlots', () => {
     expect(totalUnitsInComboSlot('main', comboItems, catalog)).toBe(3);
   });
 
+  it('buildComboMenuSections bar/restaurante usa Plato principal, Complementos y Bebidas', () => {
+    const catalog = [
+      item({ _id: 't1', name: 'Patatas bravas', category: 'Tapas' }),
+      item({ _id: 'c1', name: 'Patatas fritas', category: 'Complementos' }),
+      item({ _id: 'b1', name: 'Caña', category: 'Bebidas' }),
+    ];
+    const structure = [
+      { slotKind: 'main', label: 'Plato principal', required: true, expectedCount: 1 },
+      { slotKind: 'side', label: 'Complemento', required: true, expectedCount: 1 },
+      { slotKind: 'drink', label: 'Bebida', required: true, expectedCount: 1 },
+    ];
+    const sections = buildComboMenuSections('estandar', catalog, structure, {
+      restaurantCatalog: true,
+    });
+    expect(sections.find((s) => s.catalogCategory === 'Plato principal')?.groupBySlotKind).toBe(true);
+    expect(sections.find((s) => s.catalogCategory === 'Pizzas')).toBeUndefined();
+    expect(sections.find((s) => s.catalogCategory === 'Burgers')).toBeUndefined();
+    expect(sections.find((s) => s.catalogCategory === 'Complementos')?.slotQuota).toBe(1);
+    expect(sections.find((s) => s.catalogCategory === 'Bebidas')?.slotQuota).toBe(1);
+    const mainSection = sections.find((s) => s.slotKind === 'main');
+    expect(catalogProductsForComboSection(mainSection, catalog).map((p) => p._id)).toEqual(['t1']);
+  });
+
   it('buildComboMenuSections usa nombres del Excel (Complementos, Bebidas)', () => {
     const catalog = [
       item({ _id: 'p1', name: 'Margarita', category: 'Pizzas' }),

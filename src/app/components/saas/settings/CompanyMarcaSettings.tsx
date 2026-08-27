@@ -29,7 +29,6 @@ import {
   brandTint,
   brandStoreAssignment,
   brandStoreLabel,
-  DEFAULT_BRAND_NAME_SUGGESTIONS,
   canDeactivateBrand,
   getBrandSetupPending,
   isBrandActive,
@@ -74,7 +73,6 @@ import { BrandLogoPreview, isExtremeWideLogo } from './BrandLogoPreview';
 import { BrandBillingSettingsPanel } from './BrandBillingSettingsPanel';
 import { SettingsWizardFooter, SettingsWizardShell, type SettingsWizardStep } from './SettingsWizardShell';
 import {
-  settingsChipChoiceClass,
   settingsChoiceCardSpaciousClass,
   settingsDashedCtaClass,
   settingsEmptyStateClass,
@@ -133,6 +131,7 @@ interface BrandLineModalProps {
   editingBrand: Brand | null;
   retailStores: WorkCenter[];
   isDelivery?: boolean;
+  isRestaurant?: boolean;
   activationHighlight?: string | null;
 }
 
@@ -143,6 +142,7 @@ function BrandLineModal({
   editingBrand,
   retailStores,
   isDelivery = false,
+  isRestaurant = false,
   activationHighlight = null,
 }: BrandLineModalProps) {
   const [step, setStep] = useState<WizardStep>('identidad');
@@ -204,7 +204,7 @@ function BrandLineModal({
       return {
         ...f,
         deliveryLineKind: kindId,
-        catalogCategories: [...preset.typicalCategories],
+        catalogCategories: isRestaurant ? f.catalogCategories : [...preset.typicalCategories],
         name: nextName,
         description: !f.description.trim() ? preset.description : f.description,
         shortCode: nextShortCode,
@@ -213,14 +213,6 @@ function BrandLineModal({
       };
     });
   };
-
-  const nameSuggestions = useMemo(() => {
-    if (editingBrand && !isDefault) return [];
-    const preset = getDeliveryBrandLinePreset(form.deliveryLineKind);
-    const fromPreset = preset ? [preset.suggestedName, ...preset.typicalCategories.slice(0, 2)] : [];
-    const merged = [...fromPreset, ...DEFAULT_BRAND_NAME_SUGGESTIONS];
-    return [...new Set(merged.map((s) => s.trim()).filter(Boolean))].slice(0, 8);
-  }, [isDefault, editingBrand, form.deliveryLineKind]);
 
   const defaultNameUnset =
     isDefault && (!form.name.trim() || isDefaultBrandNamePlaceholder(form.name));
@@ -483,7 +475,7 @@ function BrandLineModal({
                   {retailStores.length === 0 ? '—' : previewStoreCount === retailStores.length ? 'Todas' : previewStoreCount}
                 </dd>
               </div>
-              {isDelivery && form.catalogCategories.length > 0 ? (
+              {isDelivery && !isRestaurant && form.catalogCategories.length > 0 ? (
                 <div className="flex justify-between gap-2">
                   <dt className="text-gray-500">Categorías</dt>
                   <dd className="font-semibold text-gray-900 dark:text-gray-100">{form.catalogCategories.length}</dd>
@@ -516,7 +508,8 @@ function BrandLineModal({
             {step === 'negocio' && showDeliveryWizard && (
               <div className={settingsWizardSectionCompactClass}>
                 <p className="text-sm text-gray-600 dark:text-gray-400 leading-snug">
-                  Elige el tipo de carta. En el siguiente paso podrás ajustar nombre, color y categorías.
+                  Elige el tipo de carta. En el siguiente paso podrás ajustar nombre y color
+                  {isRestaurant ? '.' : ' y categorías.'}
                 </p>
                 <div className={settingsChoiceGridClass}>
                   {DELIVERY_BRAND_LINE_PRESETS_PICKER.map((preset) => {
@@ -585,30 +578,6 @@ function BrandLineModal({
                     />
                   </div>
                 </ActivationFieldWrap>
-                  {(isDefault || !editingBrand) && nameSuggestions.length > 0 ? (
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {nameSuggestions.map((suggestion) => {
-                        const active = form.name.trim() === suggestion;
-                        return (
-                          <button
-                            key={suggestion}
-                            type="button"
-                            onClick={() =>
-                              setForm((f) => {
-                                const nextShortCode = syncShortCodeFromName(suggestion);
-                                return nextShortCode
-                                  ? { ...f, name: suggestion, shortCode: nextShortCode }
-                                  : { ...f, name: suggestion };
-                              })
-                            }
-                            className={settingsChipChoiceClass(active)}
-                          >
-                            {suggestion}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : null}
                   {fieldErrors.name ? <p className="mt-1 text-xs text-red-600">{fieldErrors.name}</p> : null}
                 <div>
                   <label className={settingsLabelClass}>Descripción</label>
@@ -1452,6 +1421,7 @@ export function CompanyMarcaSettings() {
         editingBrand={editingBrand}
         retailStores={retailStores}
         isDelivery={showCommercialLineWizard}
+        isRestaurant={isRestaurant}
         activationHighlight={modalActivationHighlight}
       />
 

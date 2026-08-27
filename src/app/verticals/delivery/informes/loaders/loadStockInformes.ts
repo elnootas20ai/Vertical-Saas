@@ -1,7 +1,6 @@
 import {
   listCatalogItemsRequest,
 } from '../../../../lib/deliveryApi';
-import { listRecipesRequest } from '../../../../lib/recipeApi';
 import {
   getLowStockReportRequest,
   getSalesForecastRequest,
@@ -9,7 +8,8 @@ import {
   listPurchaseOrdersRequest,
   getPurchaseKpisRequest,
 } from '../../../../lib/purchaseOrderApi';
-import { getWasteSummaryRequest, listWasteRequest } from '../../../../lib/wasteApi';
+import { getWasteSummaryRequest } from '../../../../lib/wasteApi';
+import { fetchStockAnalyticsReport } from '../../../../lib/stockAnalyticsApi';
 import { inventoryStatus, inventoryStatusLabel, computeInventoryStats } from '../../../../lib/inventoryUtils';
 import { getTopSuppliersBySpend } from '../../../../lib/purchasesFinanceIntegration';
 import { listFinanceMovements } from '../../../../lib/financeApi';
@@ -21,6 +21,7 @@ import {
   round2,
   lastDaysRange,
   emptyResult,
+  informePeriodRange,
 } from './informeTypes';
 
 export async function loadStockInforme(
@@ -142,41 +143,119 @@ export async function loadStockInforme(
   }
 
   if (id === 'stock-escandallo') {
-    const recipes = await listRecipesRequest(ctx.userId);
-    if (!recipes.length) return emptyResult('No hay escandallos/recetas registrados.');
-    const rows = recipes.map((r: any) => ({
-      Receta: r.name || r.productName || r.id,
-      Coste: round2(r.totalCost || r.cost || r.unitCost || 0),
-      PVP: round2(r.salePrice || r.pvp || 0),
-      MargenPct: round2(r.marginPct || r.foodCostPercent || 0),
-      Porciones: r.portions || r.yield || '',
-      Activa: r.active === false ? 'No' : 'Sí',
-    }));
-    return {
-      rows,
-      summary: `Escandallos: ${rows.length} recetas con coste/margen.`,
-    };
+    try {
+      ctx.onProgress?.(40, 'Calculando escandallo e inventario…');
+      const range = ctx.period ? informePeriodRange(ctx.period) : lastDaysRange(30);
+      const report = await fetchStockAnalyticsReport(
+        ctx.userId,
+        'escandallo',
+        { dateFrom: range.from, dateTo: range.to, businessId: ctx.businessId },
+        ctx.signal,
+      );
+      const table = report.dashboard.tables?.find((t) => t.id === 'escandallo_table')
+        || report.dashboard.tables?.[0];
+      const rows = (table?.rows || []).map((r) => ({
+        Producto: r.name,
+        'Food cost %': r.foodCostPct,
+        'Margen %': r.marginPct,
+        'Coste €': r.unitCost,
+        'PVP €': r.salePrice,
+      }));
+      return {
+        rows,
+        summary: report.summary,
+        dashboard: report.dashboard,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error al cargar escandallo';
+      return emptyResult(msg);
+    }
   }
 
   if (id === 'stock-reductores') {
-    const { from, to } = lastDaysRange(30);
     try {
-      const summary = await getWasteSummaryRequest(ctx.userId, { dateFrom: from, dateTo: to });
-      const list = await listWasteRequest(ctx.userId, { dateFrom: from, dateTo: to } as any);
-      const rows = (list || []).map((w: any) => ({
-        Fecha: w.date || w.createdAt || '',
-        Articulo: w.itemName || w.name || '',
-        Cantidad: w.quantity ?? w.qty ?? '',
-        Coste: round2(w.cost || w.totalCost || 0),
-        Motivo: w.reason || w.motive || '',
+      ctx.onProgress?.(40, 'Calculando mermas y tasas…');
+      const range = ctx.period ? informePeriodRange(ctx.period) : lastDaysRange(30);
+      const report = await fetchStockAnalyticsReport(
+        ctx.userId,
+        'reductores',
+        { dateFrom: range.from, dateTo: range.to, businessId: ctx.businessId },
+        ctx.signal,
+      );
+      const wasteTable = report.dashboard.tables?.find((t) => t.id === 'waste_ingredient_rate')
+        || report.dashboard.tables?.find((t) => t.id === 'waste_top')
+        || report.dashboard.tables?.[0];
+      const rows = (wasteTable?.rows || []).map((r) => ({
+        Artículo: r.name,
+        'Coste €': r.wasteCost ?? r.totalCost,
+        Consumo: r.consumptionQty,
+        Merma: r.wasteQty ?? r.totalQuantity,
+        'Tasa %': r.wasteRatePct,
+        Registros: r.count,
       }));
-      const totalCost = rows.reduce((s, r) => s + Number(r.Coste), 0);
       return {
         rows,
-        summary: `Mermas/reductores 30d: ${rows.length} regs · coste ${euro(totalCost)} €${summary ? ` · resumen cargado` : ''}.`,
+        summary: report.summary,
+        dashboard: report.dashboard,
       };
     } catch {
-      return emptyResult('No hay datos de mermas/reductores en el periodo.');
+      const { from, to } = lastDaysRange(30);
+      try {
+        const summary = await getWasteSummaryRequest(ctx.userId, { dateFrom: from, dateTo: to });
+        return {
+          rows: (summary.topItems || []).map((it) => ({
+            Artículo: it.name,
+            'Coste €': round2(it.totalCost),
+            Cantidad: round2(it.totalQuantity),
+            Registros: it.count,
+          })),
+          summary: `Mermas 30d: ${euro(summary.totalCost)} € · ${summary.totalRecords} registros.`,
+        };
+      } catch {
+        return emptyResult('No hay datos de mermas/reductores en el periodo.');
+      }
+    }
+  }
+
+  if (id === 'stock-gerencial') {
+    try {
+      ctx.onProgress?.(40, 'Calculando informe gerencial…');
+      const range = ctx.period ? informePeriodRange(ctx.period) : lastDaysRange(30);
+      const report = await fetchStockAnalyticsReport(
+        ctx.userId,
+        'gerencial',
+        { dateFrom: range.from, dateTo: range.to, businessId: ctx.businessId },
+        ctx.signal,
+      );
+      const cmpTable = report.dashboard.tables?.find((t) => t.id === 'period_comparison');
+      const pdvTable = report.dashboard.tables?.find((t) => t.id === 'pdv_pnl');
+      const exportRows = report.exportRows?.length
+        ? report.exportRows
+        : [
+            ...(cmpTable?.rows || []).map((r) => ({
+              Sección: 'Comparativa',
+              Metrica: r.metric,
+              Actual: r.actual,
+              Anterior: r.previous,
+              Variacion: r.delta,
+            })),
+            ...(pdvTable?.rows || []).map((r) => ({
+              Sección: 'Tienda',
+              Metrica: r.name,
+              Actual: `${r.sales} € ventas`,
+              Anterior: `${r.foodCostPct ?? '—'} % FC`,
+              Variacion: `${r.operatingMargin} € margen op.`,
+            })),
+          ];
+      const rows = exportRows.filter((r) => String(r.Sección || '') !== '');
+      return {
+        rows,
+        summary: report.summary,
+        dashboard: report.dashboard,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error al cargar informe gerencial';
+      return emptyResult(msg);
     }
   }
 

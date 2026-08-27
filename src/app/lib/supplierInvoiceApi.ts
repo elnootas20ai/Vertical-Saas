@@ -1,16 +1,46 @@
-import { authFetch, getAuthHeaders } from './authApi';
+import { authFetch, extractApiErrorMessage, getAuthHeaders } from './authApi';
 import { getApiBase } from './apiBase';
 
 const API_BASE = getApiBase();
+
+function supplierInvoiceApiErrorMessage(
+  status: number,
+  payload: Record<string, unknown>,
+  rawText: string,
+): string {
+  const fromPayload = extractApiErrorMessage(payload);
+  if (fromPayload) return fromPayload;
+  const plain = rawText.replace(/\s+/g, ' ').trim();
+  if (plain && !plain.startsWith('<')) return plain.slice(0, 240);
+  if (status === 504 || status === 502) {
+    return 'La operación tardó demasiado (correo con muchos mensajes). Espera un minuto y reintenta.';
+  }
+  if (status === 500) {
+    return 'Error del servidor al conectar con el correo. Revisa la contraseña de aplicación del PDV.';
+  }
+  return `No se pudo completar la acción (${status})`;
+}
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await authFetch(`${API_BASE}${path}`, {
     headers: { 'Content-Type': 'application/json', ...getAuthHeaders(), ...(init?.headers || {}) },
     ...init,
   });
-  const data = (await res.json().catch(() => ({}))) as T & { ok?: boolean; error?: string };
+  const rawText = await res.text();
+  let data = {} as T & { ok?: boolean; error?: unknown; message?: string };
+  if (rawText) {
+    try {
+      data = JSON.parse(rawText) as typeof data;
+    } catch {
+      data = { ok: false, error: rawText.slice(0, 300) } as typeof data;
+    }
+  }
   if (res.status === 401) throw new Error('Sesión expirada');
-  if (!res.ok) throw new Error((data as { error?: string }).error || `Error ${res.status}`);
+  if (!res.ok) {
+    throw new Error(
+      supplierInvoiceApiErrorMessage(res.status, data as Record<string, unknown>, rawText),
+    );
+  }
   return data;
 }
 

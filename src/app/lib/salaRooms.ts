@@ -68,8 +68,18 @@ export function assignDefaultRoomIds(
   }));
 }
 
-export function tablesForRoom(tables: ExtendedDiningTable[], roomId: string): ExtendedDiningTable[] {
-  return tables.filter((t) => (t.roomId || '') === roomId);
+export function tablesForRoom(
+  tables: ExtendedDiningTable[],
+  roomId: string,
+  roomName?: string,
+): ExtendedDiningTable[] {
+  const zoneName = String(roomName || '').trim();
+  return tables.filter((t) => {
+    if (t.active === false || t.status === 'hidden') return false;
+    const rid = String(t.roomId || '').trim();
+    if (rid) return rid === roomId;
+    return zoneName ? String(t.zone || '').trim() === zoneName : false;
+  });
 }
 
 export function nextTableNumber(tables: ExtendedDiningTable[]): number {
@@ -94,8 +104,12 @@ export function computeRestaurantSummary(
   };
 }
 
-export function computeRoomStats(tables: ExtendedDiningTable[], roomId: string): RoomStats {
-  const roomTables = tablesForRoom(tables, roomId).filter((t) => t.status !== 'hidden');
+export function computeRoomStats(
+  tables: ExtendedDiningTable[],
+  roomId: string,
+  roomName?: string,
+): RoomStats {
+  const roomTables = tablesForRoom(tables, roomId, roomName).filter((t) => t.status !== 'hidden');
   const occupied = roomTables.filter((t) =>
     !['available', 'unavailable', 'hidden', 'reserved'].includes(t.status),
   );

@@ -188,6 +188,7 @@ import {
   playStoreTransferSound,
   unlockStoreTransferAudio,
   isStoreTransferSoundEnabled,
+  storeTransferPdvMatches,
   type StoreTransferLiveEvent,
 } from '../../lib/tpvStoreTransfers';
 import {
@@ -6423,7 +6424,11 @@ export function TpvRegisterGate({
 
   // Traspasos entre tiendas: el PDV activo se resuelve más abajo (activeStoreScope);
   // el handler solo lo lee cuando llega un evento SSE, por eso basta un ref.
-  const storeTransferPdvIdRef = useRef('');
+  const storeTransferScopeRef = useRef<{
+    pdvId: string;
+    workCenterId: string;
+    pointsOfSale: Array<{ _id?: string; workCenterId?: string }>;
+  }>({ pdvId: '', workCenterId: '', pointsOfSale: [] });
   const seenStoreTransferEventsRef = useRef<Set<string>>(new Set());
   const applyStoreTransferLive = useCallback((raw: unknown) => {
     const data = raw as StoreTransferLiveEvent | null;
@@ -6438,9 +6443,11 @@ export function TpvRegisterGate({
 
     emitStoreTransferSync(data);
 
-    const myPdvId = storeTransferPdvIdRef.current;
-    if (!myPdvId) return;
-    if (data.kind === 'incoming' && data.toPdvId === myPdvId) {
+    const scope = storeTransferScopeRef.current;
+    if (!scope.pdvId) return;
+    const matchesTo = storeTransferPdvMatches(data.toPdvId, scope, scope.pointsOfSale);
+    const matchesFrom = storeTransferPdvMatches(data.fromPdvId, scope, scope.pointsOfSale);
+    if (data.kind === 'incoming' && matchesTo) {
       if (isStoreTransferSoundEnabled()) playStoreTransferSound();
       toast.info(
         `Traspaso en camino desde ${data.fromPdvName || 'otra tienda'}`,
@@ -6452,9 +6459,9 @@ export function TpvRegisterGate({
           },
         },
       );
-    } else if (data.kind === 'received' && data.fromPdvId === myPdvId) {
+    } else if (data.kind === 'received' && matchesFrom) {
       toast.success(`${data.toPdvName || 'La otra tienda'} recibió el traspaso`);
-    } else if (data.kind === 'cancelled' && data.toPdvId === myPdvId) {
+    } else if (data.kind === 'cancelled' && matchesTo) {
       toast.message(`${data.fromPdvName || 'La otra tienda'} canceló el traspaso en camino`);
     }
   }, []);
@@ -6492,7 +6499,11 @@ export function TpvRegisterGate({
     pointsOfSale,
     tabletBinding?.workCenterId,
   ]);
-  storeTransferPdvIdRef.current = activeStoreScope.pdvId;
+  storeTransferScopeRef.current = {
+    pdvId: activeStoreScope.pdvId,
+    workCenterId: activeStoreScope.workCenterId,
+    pointsOfSale,
+  };
 
   const printerStores = useMemo(() => {
     const active = pointsOfSale.filter((p) => p.active !== false);

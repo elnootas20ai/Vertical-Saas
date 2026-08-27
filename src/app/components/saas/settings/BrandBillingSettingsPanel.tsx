@@ -25,8 +25,7 @@ import {
 } from '../../../lib/brandBillingConfig';
 import { deliveryBrandLineKindLabel } from '../../../lib/deliveryBrandLineKinds';
 
-const saveBtnClass =
-  'inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-gray-900 bg-gray-900 px-2.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-black dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900';
+const saveBtnClass = 'vsaas-btn-advance px-4 py-2 text-sm';
 
 function ActiveRuleSummary({
   monoOn,
@@ -239,20 +238,14 @@ export function BrandBillingSettingsPanel({
 
   return (
     <section className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-700 dark:bg-gray-900 sm:p-3.5">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-xs font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
-            <Receipt className="h-3.5 w-3.5 text-gray-500" />
-            Facturación
-          </p>
-          <p className="mt-0.5 max-w-xl text-[11px] leading-snug text-gray-500 dark:text-gray-400">
-            Hojas Excel y reglas de cruce. Cada marca solo en una hoja.
-          </p>
-        </div>
-        <button type="button" onClick={() => void handleSave()} className={saveBtnClass} disabled={loading || saving}>
-          <Save className="h-3.5 w-3.5" />
-          {saving ? '…' : 'Guardar'}
-        </button>
+      <div className="min-w-0">
+        <p className="text-xs font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
+          <Receipt className="h-3.5 w-3.5 text-gray-500" />
+          Facturación
+        </p>
+        <p className="mt-0.5 max-w-xl text-[11px] leading-snug text-gray-500 dark:text-gray-400">
+          Hojas Excel y reglas de cruce. Cada marca solo en una hoja.
+        </p>
       </div>
 
       {loading ? (
@@ -582,6 +575,18 @@ export function BrandBillingSettingsPanel({
           </div>
         </div>
       )}
+
+      <div className="mt-4 flex justify-end border-t border-gray-100 pt-3 dark:border-gray-800">
+        <button
+          type="button"
+          onClick={() => void handleSave()}
+          className={saveBtnClass}
+          disabled={loading || saving}
+        >
+          <Save className={`h-4 w-4 ${saving ? 'animate-spin' : ''}`} />
+          {saving ? 'Guardando…' : 'Guardar'}
+        </button>
+      </div>
     </section>
   );
 }

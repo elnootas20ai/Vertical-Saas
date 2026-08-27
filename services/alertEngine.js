@@ -220,6 +220,11 @@ function getAlertConfig(account) {
     // Pedidos de compra
     purchaseOrderDelayedEnabled: cfg.purchaseOrderDelayedEnabled !== false,
 
+    // Escandallo / merma (delivery stock)
+    highWasteEnabled: cfg.highWasteEnabled !== false,
+    highWastePctThreshold: Number(cfg.highWastePctThreshold || 4),
+    recipeMissingSoldEnabled: cfg.recipeMissingSoldEnabled !== false,
+
     // Facturas proveedor por email
     supplierInvoicePendingReviewEnabled: cfg.supplierInvoicePendingReviewEnabled !== false,
     supplierInvoicePendingReviewDays: Number(cfg.supplierInvoicePendingReviewDays || 3),
@@ -339,6 +344,101 @@ async function checkLowStock(ctx, items, config, catalogInfraDocs = []) {
     }
   }
   return alerts.filter(Boolean);
+}
+
+function orderCountsForStockAlert(order) {
+  const st = String(order?.status || '').toLowerCase();
+  if (st === 'cancelled' || st === 'devuelto') return false;
+  if (st === 'entregado') return true;
+  if (order?.paymentStatus === 'paid' || order?.paymentCollected === true) return true;
+  const paid = Number(order?.paidAmount || 0);
+  const total = Number(order?.totalAmount || 0);
+  return total > 0 && paid + 0.02 >= total;
+}
+
+function catalogItemHasCostingRecipe(item) {
+  const cf = item?.customFields || {};
+  if (cf.costingType === 'fixed' && Number(cf.fixedCost || item?.costPrice || 0) > 0) return true;
+  if (Array.isArray(cf.costingRecipe) && cf.costingRecipe.length > 0) return true;
+  return false;
+}
+
+async function checkHighWaste(ctx, catalogInfraDocs, deliveryOrders, config) {
+  if (config.highWasteEnabled === false) return [];
+  const threshold = Number(config.highWastePctThreshold || 4);
+  const today = new Date().toISOString().slice(0, 10);
+  const fromDate = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+
+  let wasteCost = 0;
+  for (const doc of catalogInfraDocs || []) {
+    if (doc?.type !== 'stock_movement' || doc.movementType !== 'waste') continue;
+    const day = String(doc.createdAt || '').slice(0, 10);
+    if (day < fromDate || day > today) continue;
+    const q = Math.abs(Number(doc.quantity || 0));
+    const unit = Number(doc.unitCost || 0);
+    wasteCost += q * (unit > 0 ? unit : 0);
+  }
+
+  let sales = 0;
+  for (const order of deliveryOrders || []) {
+    const day = String(order.createdAt || '').slice(0, 10);
+    if (day < fromDate || day > today) continue;
+    if (!orderCountsForStockAlert(order)) continue;
+    sales += Number(order.totalAmount || 0);
+  }
+
+  if (!(sales > 0)) return [];
+  const wastePct = (wasteCost / sales) * 100;
+  if (wastePct <= threshold) return [];
+
+  return [await emit({
+    ...ctx,
+    dedupKey: `high-waste-7d-${today}`,
+    level: wastePct > threshold * 1.5 ? 'alert' : 'warning',
+    category: 'high_waste',
+    ruleId: 'high_waste',
+    source: 'stock',
+    title: 'Merma alta',
+    message: `Merma ${wastePct.toFixed(1)} % sobre ventas (7 días). Umbral: ${threshold} %. Coste ~${wasteCost.toFixed(2)} €.`,
+    route: '/saas/reports?category=stock',
+    metadata: { wastePct: Math.round(wastePct * 10) / 10, wasteCost, sales, threshold },
+  })].filter(Boolean);
+}
+
+async function checkRecipeMissingSold(ctx, catalogItems, deliveryOrders, config) {
+  if (config.recipeMissingSoldEnabled === false) return [];
+  const today = new Date().toISOString().slice(0, 10);
+  const soldWithout = new Map();
+
+  for (const order of deliveryOrders || []) {
+    if (String(order.createdAt || '').slice(0, 10) !== today) continue;
+    if (!orderCountsForStockAlert(order)) continue;
+    for (const item of order.items || []) {
+      const productId = String(item.catalogItemId || item.productId || '').trim();
+      if (!productId) continue;
+      const cat = (catalogItems || []).find((c) => c._id === productId);
+      if (!cat || cat.module === 'stock') continue;
+      if (catalogItemHasCostingRecipe(cat)) continue;
+      soldWithout.set(productId, cat.name || item.name || productId);
+    }
+  }
+
+  if (soldWithout.size === 0) return [];
+  const sample = [...soldWithout.values()].slice(0, 4).join(', ');
+  const extra = soldWithout.size > 4 ? ` (+${soldWithout.size - 4})` : '';
+
+  return [await emit({
+    ...ctx,
+    dedupKey: `recipe-missing-sold-${today}`,
+    level: 'warning',
+    category: 'recipe_missing_sold',
+    ruleId: 'recipe_missing_sold',
+    source: 'stock',
+    title: 'Ventas sin escandallo hoy',
+    message: `${soldWithout.size} producto(s) cobrados hoy sin receta: ${sample}${extra}.`,
+    route: '/saas/delivery-catalog?tab=escandallo',
+    metadata: { count: soldWithout.size, productIds: [...soldWithout.keys()].slice(0, 10) },
+  })].filter(Boolean);
 }
 
 async function checkPartsLowStock(ctx, parts, config) {
@@ -1652,6 +1752,10 @@ async function runAlertsForBusiness(business) {
   results.push(...await checkLowStock(ctx, catalogItems, config, catalogInfraDocs));
   results.push(...await checkPartsLowStock(ctx, parts, config));
   results.push(...await checkNegativeStock(ctx, catalogItems, config, catalogInfraDocs));
+  if (canEmitCatalogStockAlerts(catalogItems, catalogInfraDocs)) {
+    results.push(...await checkHighWaste(ctx, catalogInfraDocs, deliveryOrders, config));
+    results.push(...await checkRecipeMissingSold(ctx, catalogItems, deliveryOrders, config));
+  }
 
   // Finanzas
   if (financeReady) {
@@ -3099,6 +3203,10 @@ async function runAlertsForUser(userId) {
   results.push(...await checkLowStock(ctx, catalogItems, config, catalogInfraDocs));
   results.push(...await checkPartsLowStock(ctx, parts, config));
   results.push(...await checkNegativeStock(ctx, catalogItems, config, catalogInfraDocs));
+  if (canEmitCatalogStockAlerts(catalogItems, catalogInfraDocs)) {
+    results.push(...await checkHighWaste(ctx, catalogInfraDocs, deliveryOrders, config));
+    results.push(...await checkRecipeMissingSold(ctx, catalogItems, deliveryOrders, config));
+  }
   if (financeReady) {
     results.push(...await checkOverdueInvoices(ctx, purchaseInvoices, config));
     results.push(...await checkHighPayables(ctx, purchaseInvoices, config));

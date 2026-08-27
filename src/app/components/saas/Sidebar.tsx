@@ -1295,7 +1295,15 @@ function SidebarInner({
       if (usesDeliverySidebarCore || isRestaurantVertical || isEventsVertical) {
         // TPV: Carta · Almacén · Compras · Facturas · Consumo equipo · Correo facturas (abajo).
         // Eventos: misma carta TPV, sin consumos de staff.
-        itemIds = isEventsVertical
+        itemIds = isRestaurantVertical
+          ? [
+              'catalog-carta',
+              'catalog-purchases',
+              'catalog-invoices',
+              'catalog-consumos',
+              'catalog-invoice-email',
+            ]
+          : isEventsVertical
           ? [
               'catalog-carta',
               'catalog-stock-tpv',

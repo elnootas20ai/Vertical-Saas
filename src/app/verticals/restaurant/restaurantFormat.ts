@@ -73,7 +73,7 @@ export function emptyRestaurantNeedsForFormat(
   const f = resolveRestaurantFormat(format);
   const base: DeliveryNeedsSelection = {
     tpv: true,
-    catalogStock: true,
+    catalogStock: false,
     deliveryOrders: true,
     autoShipping: false,
     clients: false,

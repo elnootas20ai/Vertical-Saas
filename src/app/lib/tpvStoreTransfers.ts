@@ -22,6 +22,41 @@ export type StoreTransferLiveEvent = {
   updatedAt?: string;
 };
 
+type StoreTransferPdvRef = {
+  _id?: string;
+  workCenterId?: string;
+};
+
+/**
+ * ¿El PDV del evento es esta tablet/caja?
+ * Acepta `_id` de PDV o `workCenterId` (sesión/tablet a veces lleva uno u otro).
+ */
+export function storeTransferPdvMatches(
+  eventPdvId: string | null | undefined,
+  local: { pdvId?: string | null; workCenterId?: string | null },
+  pointsOfSale?: StoreTransferPdvRef[] | null,
+): boolean {
+  const eventId = String(eventPdvId || '').trim();
+  const myPdv = String(local.pdvId || '').trim();
+  const myWc = String(local.workCenterId || '').trim();
+  if (!eventId || !myPdv) return false;
+  if (eventId === myPdv || (myWc && eventId === myWc)) return true;
+
+  const list = Array.isArray(pointsOfSale) ? pointsOfSale : [];
+  const eventPdv = list.find((p) => {
+    const id = String(p?._id || '').trim();
+    const wc = String(p?.workCenterId || '').trim();
+    return id === eventId || (wc && wc === eventId);
+  });
+  if (!eventPdv) return false;
+
+  const eventCanon = String(eventPdv._id || '').trim();
+  const eventWc = String(eventPdv.workCenterId || '').trim();
+  if (eventCanon && (eventCanon === myPdv || (myWc && eventCanon === myWc))) return true;
+  if (eventWc && (eventWc === myPdv || (myWc && eventWc === myWc))) return true;
+  return false;
+}
+
 export function requestTpvStoreTransfersOpen(): void {
   window.dispatchEvent(new CustomEvent(TPV_OPEN_STORE_TRANSFERS_EVENT));
 }

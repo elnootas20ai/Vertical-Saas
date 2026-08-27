@@ -54,6 +54,7 @@ export const PRIORITY_TO_LEVEL = {
 
 export const CATEGORY_TO_SOURCE = {
   out_of_stock: 'stock',
+  supplier_price_changed: 'stock',
   low_stock: 'stock',
   stock_inventory_discrepancy: 'stock',
   stock_count_worker_progress: 'stock',

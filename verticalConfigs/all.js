@@ -252,9 +252,9 @@ export const restaurantConfig = {
       type: 'rst_reservation',
       idPrefix: 'rsr',
       fields: [
-        'guestName', 'phone', 'email', 'date', 'time', 'partySize',
-        'preferredZone', 'tableId', 'tableName', 'tableNumber', 'notes',
-        'status', 'history', 'orderId',
+        'guestName', 'phone', 'email', 'clientId', 'date', 'time', 'partySize',
+        'preferredZone', 'tableId', 'tableName', 'tableNumber', 'tableIds', 'notes',
+        'status', 'history', 'orderId', 'businessId',
       ],
       required: ['guestName', 'date', 'time'],
     },

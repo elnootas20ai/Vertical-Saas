@@ -53,10 +53,11 @@ import {
   ShieldAlert, PieChart, Zap, Building2, FileBarChart, Boxes,
   ArrowUpRight, ArrowDownRight, Minus, CalendarRange, BookmarkCheck, Receipt,
   LayoutGrid, LayoutDashboard, Scale, UtensilsCrossed, ListChecks, Banknote,
-  UserPlus, UserMinus,
+  UserPlus, UserMinus, Calculator,
 } from 'lucide-react';
 import { DashboardFinanceWidget } from '../../components/saas/finance/DashboardFinanceWidget';
 import { DashboardLazyPanel } from '../../components/saas/DashboardLazyPanel';
+import { StockCostAnalyticsPanel } from '../../components/saas/stock/StockCostAnalyticsPanel';
 import { LiveBadge } from '../../components/saas/LiveBadge';
 import { GeneralDashboard } from '../../components/saas/GeneralDashboard';
 import { useDashboardView } from '../../context/DashboardViewContext';
@@ -91,6 +92,15 @@ import {
 } from '../../lib/portfolioMetrics';
 import { PortfolioOpsPulse } from '../../components/saas/PortfolioOpsPulse';
 import { CompanyBrandPerformancePanel } from '../../components/saas/CompanyBrandPerformancePanel';
+import {
+  DashboardOpsPulseSkeleton,
+  DashboardBrandsSkeleton,
+  DashboardWorkerPaySkeleton,
+  DashboardLazyHeaderSkeleton,
+  DashboardChartsSkeleton,
+  DashboardKpiGridSkeleton,
+  DashboardQuickFinanceSkeleton,
+} from '../../components/saas/DashboardSectionSkeleton';
 import { localCalendarDayKey, localDayBoundsForKey } from '../../lib/tpvCajaScope';
 import {
   buildSoldProductDailySeries,
@@ -1448,21 +1458,27 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
   const quickAccessItems = useMemo(() => getQuickAccessItems(vertical), [vertical]);
 
   // ── Loading state progresivo (por ola / panel) ──
-  // Con ola 0 pintada (metrics !== null) no bloqueamos marcas/insights en skeleton eterno:
-  // muestran datos parciales y el refresh sigue mientras waveBusy.
+  // Cada sección muestra skeleton de su forma; al llegar la ola se sustituye por datos.
   const baseDataLoading = isLoadingVehicles || isLoadingClients;
   const deliveryDataLoading = isDeliveryVertical && deliveryMetrics === null;
+  const deliveryOpsLoading =
+    isDeliveryVertical && (deliveryPanelStage < 1 || (deliveryWaveBusy && !deliveryOpsPulses));
   const deliveryBrandsLoading =
-    isDeliveryVertical && deliveryDataLoading && deliveryPanelStage < 1;
+    isDeliveryVertical && deliveryPanelStage >= 2 && deliveryWaveBusy && deliveryDataLoading;
+  const deliveryBrandsAwaiting =
+    isDeliveryVertical && deliveryWaveBusy && deliveryPanelStage >= 1 && deliveryPanelStage < 2;
   const deliveryWorkerLoading =
-    isDeliveryVertical
-    && deliveryPanelStage < 3
-    && deliveryWaveBusy
-    && !workerPayMonth;
+    isDeliveryVertical && deliveryPanelStage >= 3 && deliveryWaveBusy && !workerPayMonth;
+  const deliveryWorkerAwaiting =
+    isDeliveryVertical && deliveryWaveBusy && deliveryPanelStage >= 2 && deliveryPanelStage < 3;
+  const deliveryLazyAwaiting =
+    isDeliveryVertical && deliveryWaveBusy && deliveryPanelStage >= 3 && deliveryPanelStage < 4;
   const deliveryInsightsLoading =
-    isDeliveryVertical && deliveryDataLoading && deliveryPanelStage < 1;
-  const alertsLoading = serverLoading && !serverData;
+    isDeliveryVertical && deliveryPanelStage >= 4 && deliveryWaveBusy && deliveryDataLoading;
   const chartsLoading = isDeliveryVertical ? deliveryDataLoading : baseDataLoading;
+  const operativeLoading = isDeliveryVertical
+    ? crmClientsCount == null && (serverLoading || deliveryDataLoading)
+    : serverLoading || verticalKpiLoading;
 
   // ── Funnel totals ──
   const funnelTotal = funnelCounts['new'] || 0;
@@ -1558,18 +1574,10 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
         ) : null}
 
         {/* Resumen operativo por tienda (solo empresa delivery) — ola 1 */}
-        {isDeliveryVertical && deliveryPanelStage < 1 ? (
-          <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800 sm:rounded-2xl sm:p-5">
-            <div className="mb-3 h-3.5 w-44 animate-pulse rounded bg-gray-100 dark:bg-gray-700" />
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {[0, 1, 2, 3].map((i) => (
-                <div key={i} className="h-16 animate-pulse rounded-xl bg-gray-50 dark:bg-gray-900/50" />
-              ))}
-            </div>
-            <p className="mt-3 text-[11px] text-gray-400">Cargando resumen operativo…</p>
-          </section>
+        {isDeliveryVertical && deliveryOpsLoading ? (
+          <DashboardOpsPulseSkeleton />
         ) : null}
-        {isDeliveryVertical && deliveryPanelStage >= 1 && deliveryOpsPulses && (
+        {isDeliveryVertical && !deliveryOpsLoading && deliveryOpsPulses ? (
           <PortfolioOpsPulse
             pulses7d={deliveryOpsPulses.pulses7d}
             pulsesMonth={deliveryOpsPulses.pulsesMonth}
@@ -1590,8 +1598,12 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
               </button>
             }
           />
-        )}
+        ) : null}
 
+        {/* Marcas — skeleton mientras llega la ola 2 */}
+        {isDeliveryVertical && deliveryBrandsAwaiting ? (
+          <DashboardBrandsSkeleton />
+        ) : null}
         {isDeliveryVertical && businessId && deliveryPanelStage >= 2 ? (
           <CompanyBrandPerformancePanel
             businessId={businessId}
@@ -1621,11 +1633,39 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
           </DashboardLazyPanel>
         ) : null}
 
+        {/* Pagos trabajadores — skeleton ola 3 */}
+        {isDeliveryVertical && deliveryWorkerAwaiting ? (
+          <DashboardWorkerPaySkeleton />
+        ) : null}
         {isDeliveryVertical && deliveryPanelStage >= 3 ? (
           <WorkerPayMonthPanel
             summary={workerPayMonth}
             loading={deliveryWorkerLoading}
           />
+        ) : null}
+
+        {/* Costes + tiempos — cabeceras skeleton mientras llega ola 4 */}
+        {isDeliveryVertical && deliveryLazyAwaiting ? (
+          <div className="space-y-2">
+            <DashboardLazyHeaderSkeleton titleWidth="w-48" />
+            <DashboardLazyHeaderSkeleton titleWidth="w-36" />
+          </div>
+        ) : null}
+
+        {isDeliveryVertical && deliveryPanelStage >= 4 ? (
+          <DashboardLazyPanel
+            title="Costes, escandallo y merma"
+            hint="Food cost, merma e inventario · abrir para cargar paso a paso"
+            icon={<Calculator className="w-4 h-4" />}
+            storageKey={`dash_lazy_stock_analytics:${dashboardConfigScope}`}
+          >
+            {financeUserId ? (
+              <StockCostAnalyticsPanel
+                userId={financeUserId}
+                businessId={businessId}
+              />
+            ) : null}
+          </DashboardLazyPanel>
         ) : null}
 
         {isDeliveryVertical && deliveryPanelStage >= 4 ? (
@@ -1688,18 +1728,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                 storageKey={`dash_lazy_charts:${dashboardConfigScope}`}
               >
                 {chartsLoading ? (
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 animate-pulse">
-                    {[...Array(2)].map((_, i) => (
-                      <div key={i} className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
-                        <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-800">
-                          <div className="h-4 w-40 bg-gray-100 dark:bg-gray-700 rounded" />
-                        </div>
-                        <div className="p-4 h-48">
-                          <div className="w-full h-full rounded-xl bg-gray-100 dark:bg-gray-700" />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                  <DashboardChartsSkeleton />
                 ) : (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                   {/* Cobrado / ventas 14 días */}
@@ -1888,6 +1917,17 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                 icon={isDeliveryVertical ? <Users className="w-4 h-4" /> : <Activity className="w-4 h-4" />}
                 storageKey={`dash_lazy_ops:${dashboardConfigScope}`}
               >
+                {operativeLoading ? (
+                  <DashboardKpiGridSkeleton
+                    count={
+                      isDeliveryVertical
+                        ? 4
+                        : serverData?.salesClosure
+                          ? 5
+                          : 4
+                    }
+                  />
+                ) : (
                 <div className={`grid grid-cols-2 gap-3 ${
                   isDeliveryVertical
                     ? 'lg:grid-cols-4'
@@ -1905,22 +1945,19 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                     cobrosCount={cobrosCount}
                     activeWorkers={activeWorkers}
                     pendingDeliveries={pendingDeliveriesKpi}
-                    loading={
-                      isDeliveryVertical
-                        ? (crmClientsCount == null && (serverLoading || deliveryDataLoading))
-                        : (serverLoading || verticalKpiLoading)
-                    }
+                    loading={false}
                     salesClosure={serverData?.salesClosure}
                     verticalKpi={verticalKpi}
                   />
                 </div>
+                )}
               </DashboardLazyPanel>
             </DraggableWidget>
           </div>
         )}
 
         {/* ═══ BLOQUE FINANCIERO RÁPIDO (colapsado) ═══ */}
-        {isVisible('quick_finance') && quickFinance && (
+        {isVisible('quick_finance') && (quickFinance || (serverLoading && !quickFinance)) ? (
           <div style={{ order: getWidgetOrder('quick_finance') }}>
             <DraggableWidget id="quick_finance" {...dragProps}>
               <DashboardLazyPanel
@@ -1929,6 +1966,9 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                 icon={<Euro className="w-4 h-4" />}
                 storageKey={`dash_lazy_qfin:${dashboardConfigScope}`}
               >
+                {!quickFinance ? (
+                  <DashboardQuickFinanceSkeleton />
+                ) : (
                 <div className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
                   <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
                     <div className="flex items-center gap-2">
@@ -1971,10 +2011,11 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                     </div>
                   </div>
                 </div>
+                )}
               </DashboardLazyPanel>
             </DraggableWidget>
           </div>
-        )}
+        ) : null}
 
         {financeUserId && canViewFinanceWidget && (
           <div style={{ order: getWidgetOrder('quick_finance') + 1 }}>

@@ -2,6 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, Plus, Trash2 } from 'lucide-react';
 import {
   listInventoryOrganizerChoices,
+  ORGANIZER_BEVERAGES,
+  ORGANIZER_COMPLEMENTS,
+  ORGANIZER_CLEANING,
+  ORGANIZER_PACKAGING,
+  ORGANIZER_VARIOS,
   type InventoryCommercialBrand,
 } from '../../lib/inventoryUtils';
 import {
@@ -40,8 +45,155 @@ type Props = {
   catalogItems?: CatalogItem[];
   storeIngredients?: StoreIngredient[];
   labelClassName?: string;
+  businessType?: string | null;
 };
 
+export function supplierOrganizerFieldSessionKey(
+  supplier: { _id?: string; id?: string } | null | undefined,
+  isOpen = true,
+): string {
+  if (!isOpen) return '';
+  const id = String(supplier?._id || supplier?.id || '').trim();
+  return id || '__new__';
+}
+
+/** Huella de los datos del proveedor para saber cuándo reinicializar el formulario. */
+export function supplierFormInitFingerprint(
+  supplier: {
+    _id?: string;
+    id?: string;
+    updatedAt?: string;
+    organizerIds?: string[];
+    catalogItemIds?: string[];
+  } | null | undefined,
+  catalogItemsLength = 0,
+): string {
+  const id = String(supplier?._id || supplier?.id || '').trim() || '__new__';
+  const orgs = (Array.isArray(supplier?.organizerIds) ? supplier!.organizerIds : [])
+    .map((x) => String(x || '').trim())
+    .filter(Boolean)
+    .sort()
+    .join(',');
+  const items = (Array.isArray(supplier?.catalogItemIds) ? supplier!.catalogItemIds : [])
+    .map((x) => String(x || '').trim())
+    .filter(Boolean)
+    .sort()
+    .join(',');
+  return `${id}|${catalogItemsLength}|${String(supplier?.updatedAt || '')}|${orgs}|${items}`;
+}
+
+function organizerLabelKey(label: string): string {
+  return String(label || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+}
+
+/** Todas las categorías del catálogo + almacén (sin filtrar por selección). */
+export function buildSupplierOrganizerChoices(
+  brands: BrandLike[] = [],
+  catalogItems: CatalogItem[] = [],
+  options?: { businessType?: string | null },
+): Array<{ id: string; label: string }> {
+  const commercialBrands = commercialLineBrands(brands) as InventoryCommercialBrand[];
+  const categories = listCatalogCategoryOrganizerChoices(brands, catalogItems, options);
+  const catalogLabelKeys = new Set(categories.map((c) => organizerLabelKey(c.label)));
+  const warehouse = listInventoryOrganizerChoices(commercialBrands, {
+    omitBrandInFoodLabels: true,
+  }).filter((c) => {
+    if (c.id === ORGANIZER_BEVERAGES || c.id === ORGANIZER_COMPLEMENTS) {
+      return !catalogLabelKeys.has(organizerLabelKey(c.label));
+    }
+    return true;
+  });
+  const seen = new Set(warehouse.map((c) => c.id));
+  const merged = [...warehouse];
+  for (const c of categories) {
+    if (seen.has(c.id)) continue;
+    seen.add(c.id);
+    merged.push(c);
+  }
+  return merged;
+}
+
+function organizerIdsForMarkedItems(
+  catalogItemIds: string[],
+  catalogItems: CatalogItem[],
+  storeIngredients: StoreIngredient[],
+  commercialBrands: InventoryCommercialBrand[],
+  choiceIds: string[],
+): string[] {
+  const marked = new Set(catalogItemIds.map((id) => String(id || '').trim()).filter(Boolean));
+  if (marked.size === 0) return [];
+  const found: string[] = [];
+  for (const orgId of choiceIds) {
+    const items = stockItemsForOrganizer(catalogItems, orgId, storeIngredients, commercialBrands);
+    if (items.some((item) => marked.has(item._id))) found.push(orgId);
+  }
+  return found;
+}
+
+/** Organizadores guardados + los que cubren productos marcados (al reabrir el formulario). */
+export function initialSupplierOrganizerIds(
+  supplier: { organizerIds?: string[]; catalogItemIds?: string[]; _id?: string } | null | undefined,
+  catalogItems: CatalogItem[],
+  storeIngredients: StoreIngredient[] = [],
+  brands: BrandLike[] = [],
+): string[] {
+  const ids = new Set(
+    (Array.isArray(supplier?.organizerIds) ? supplier.organizerIds : [])
+      .map((id) => String(id || '').trim())
+      .filter(Boolean),
+  );
+  const catalogItemIds = initialSupplierCatalogItemIds(supplier, catalogItems);
+  const commercialBrands = commercialLineBrands(brands) as InventoryCommercialBrand[];
+  const choiceIds = buildSupplierOrganizerChoices(brands, catalogItems).map((c) => c.id);
+  for (const orgId of organizerIdsForMarkedItems(
+    catalogItemIds,
+    catalogItems,
+    storeIngredients,
+    commercialBrands,
+    choiceIds,
+  )) {
+    ids.add(orgId);
+  }
+  return [...ids];
+}
+
+/** Asegura que categorías añadidas y con productos marcados se persisten al guardar. */
+export function resolveSupplierOrganizerIdsForSave(
+  organizerIds: string[],
+  catalogItemIds: string[],
+  catalogItems: CatalogItem[],
+  storeIngredients: StoreIngredient[] = [],
+  brands: BrandLike[] = [],
+): string[] {
+  const ids = new Set(
+    (organizerIds || []).map((id) => String(id || '').trim()).filter(Boolean),
+  );
+  const commercialBrands = commercialLineBrands(brands) as InventoryCommercialBrand[];
+  const choiceIds = buildSupplierOrganizerChoices(brands, catalogItems).map((c) => c.id);
+  for (const orgId of organizerIdsForMarkedItems(
+    catalogItemIds,
+    catalogItems,
+    storeIngredients,
+    commercialBrands,
+    choiceIds,
+  )) {
+    ids.add(orgId);
+  }
+  return [...ids];
+}
+
+/** Organizadores de almacén que un proveedor puede tener sin artículos todavía. */
+const SUPPLIER_ORGANIZER_ALWAYS = new Set([
+  ORGANIZER_BEVERAGES,
+  ORGANIZER_COMPLEMENTS,
+  ORGANIZER_PACKAGING,
+  ORGANIZER_CLEANING,
+  ORGANIZER_VARIOS,
+]);
 /**
  * Alta de proveedor: eliges un organizador del Excel/almacén
  * y marcas los productos que ese proveedor te vende.
@@ -57,27 +209,21 @@ export function SupplierOrganizersField({
   catalogItems = [],
   storeIngredients = [],
   labelClassName = 'block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5',
+  businessType = null,
 }: Props) {
   const [pickId, setPickId] = useState('');
   const [openOrganizerId, setOpenOrganizerId] = useState('');
   const pickRef = useRef<HTMLSelectElement>(null);
+  const prevSelectedOrgCountRef = useRef(0);
 
   const commercialBrands = useMemo(
     () => commercialLineBrands(brands) as InventoryCommercialBrand[],
     [brands],
   );
-  const allChoices = useMemo(() => {
-    const warehouse = listInventoryOrganizerChoices(commercialBrands);
-    const categories = listCatalogCategoryOrganizerChoices(brands, catalogItems);
-    const seen = new Set(warehouse.map((c) => c.id));
-    const merged = [...warehouse];
-    for (const c of categories) {
-      if (seen.has(c.id)) continue;
-      seen.add(c.id);
-      merged.push(c);
-    }
-    return merged;
-  }, [commercialBrands, brands, catalogItems]);
+  const allChoices = useMemo(
+    () => buildSupplierOrganizerChoices(brands, catalogItems, { businessType }),
+    [brands, catalogItems, businessType],
+  );
   const selectedOrgSet = useMemo(
     () => new Set((organizerIds || []).map((id) => String(id || '').trim()).filter(Boolean)),
     [organizerIds],
@@ -86,9 +232,8 @@ export function SupplierOrganizersField({
     () =>
       allChoices.filter((c) => {
         if (selectedOrgSet.has(c.id)) return true;
-        // Categorías del producto: salen siempre (aunque aún no haya ítems).
         if (String(c.id).startsWith('cat:')) return true;
-        // Organizadores de almacén: solo si ya tienen artículos.
+        if (SUPPLIER_ORGANIZER_ALWAYS.has(c.id)) return true;
         return stockItemsForOrganizer(catalogItems, c.id, storeIngredients, commercialBrands).length > 0;
       }),
     [allChoices, catalogItems, storeIngredients, commercialBrands, selectedOrgSet],
@@ -106,16 +251,22 @@ export function SupplierOrganizersField({
     [catalogItemIds],
   );
   const remaining = useMemo(
-    () => choices.filter((c) => !selectedOrgs.includes(c.id)),
+    () =>
+      choices
+        .filter((c) => !selectedOrgs.includes(c.id))
+        .sort((a, b) => a.label.localeCompare(b.label, 'es')),
     [choices, selectedOrgs],
   );
 
-  // Al editar: abrir el primer organizador para ver productos sin un clic extra.
+  // Al editar o al añadir el primer organizador: abrir uno para ver productos.
+  // No reabrir si el usuario cerró manualmente (antes reabría al poner openOrganizerId '').
   useEffect(() => {
-    if (!openOrganizerId && selectedOrgs.length > 0) {
+    const count = selectedOrgs.length;
+    if (count > 0 && prevSelectedOrgCountRef.current === 0) {
       setOpenOrganizerId(selectedOrgs[0]);
     }
-  }, [selectedOrgs, openOrganizerId]);
+    prevSelectedOrgCountRef.current = count;
+  }, [selectedOrgs]);
 
   const emit = (nextOrgs: string[], nextItems: Set<string>, nextCosts = itemCosts) => {
     const costs: Record<string, string> = {};
@@ -180,12 +331,35 @@ export function SupplierOrganizersField({
     emit(selectedOrgs, next, nextCosts);
   };
 
+  const openCategoryPicker = () => {
+    const el = pickRef.current;
+    if (!el || remaining.length === 0) return;
+    el.focus({ preventScroll: true });
+    try {
+      if (typeof el.showPicker === 'function') {
+        el.showPicker();
+        return;
+      }
+    } catch {
+      // showPicker puede fallar en algunos navegadores; fallback abajo.
+    }
+    el.click();
+  };
+
+  const handleAddCategoryClick = () => {
+    if (pickId) {
+      addOrganizer(pickId);
+      return;
+    }
+    openCategoryPicker();
+  };
+
   return (
     <div className="space-y-3">
       <div>
         <label className={labelClassName}>Qué te vende</label>
         <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-          Elige una categoría del catálogo (las mismas chips del producto), marca lo que te vende y pon el precio €/ud. Eso sale luego en el pedido / lista de la compra.
+          Elige una categoría del desplegable (se añade al elegir) o pulsa <span className="font-semibold">Añadir otro</span> para elegir otra. Marca lo que te vende y pon el precio €/ud.
         </p>
         <div className="flex flex-col sm:flex-row gap-2">
           <select
@@ -207,16 +381,16 @@ export function SupplierOrganizersField({
           </select>
           <button
             type="button"
-            onClick={() => {
-              if (pickId) {
-                addOrganizer(pickId);
-                return;
-              }
-              pickRef.current?.focus();
-            }}
+            onClick={handleAddCategoryClick}
             disabled={remaining.length === 0}
             className={VERTIAL_BTN_SECONDARY}
-            title="Añadir otra categoría"
+            title={
+              remaining.length === 0
+                ? 'Ya tienes todas las categorías'
+                : pickId
+                  ? 'Añadir la categoría elegida'
+                  : 'Elegir otra categoría'
+            }
           >
             <Plus className="w-4 h-4" />
             Añadir otro
@@ -367,7 +541,9 @@ export function labelsForSupplierOrganizerIds(
   if (ids.length === 0) return [];
   const lines = commercialLineBrands(brands) as InventoryCommercialBrand[];
   const byId = new Map([
-    ...listInventoryOrganizerChoices(lines).map((c) => [c.id, c.label] as const),
+    ...listInventoryOrganizerChoices(lines, { omitBrandInFoodLabels: true }).map(
+      (c) => [c.id, c.label] as const,
+    ),
     ...listCatalogCategoryOrganizerChoices(brands, catalogItems).map((c) => [c.id, c.label] as const),
   ]);
   return ids.map((id) => byId.get(id) || id);

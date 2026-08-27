@@ -2123,6 +2123,35 @@ export function buildOrderExtras(customization: CartLineCustomization): string[]
   return out;
 }
 
+/** Campos estructurados de personalización TPV para persistir en el pedido (descuento stock). */
+export function buildOrderStructuredCustomization(
+  customization: CartLineCustomization,
+): Pick<import('./deliveryApi').DeliveryOrderItem, 'comboSelections' | 'halfHalfPizza'> {
+  const comboSelections = (customization.comboSelections ?? [])
+    .filter((ref) => ref.productId && ref.quantity > 0)
+    .map((ref) => ({
+      productId: ref.productId,
+      productName: ref.productName || '',
+      quantity: ref.quantity,
+      ...(ref.slotKind ? { slotKind: ref.slotKind } : {}),
+      ...(ref.instanceId ? { instanceId: ref.instanceId } : {}),
+    }));
+  const hh = customization.halfHalfPizza;
+  const halfHalfPizza =
+    hh?.firstProductId && hh?.secondProductId
+      ? {
+          firstProductId: hh.firstProductId,
+          firstProductName: hh.firstProductName || '',
+          secondProductId: hh.secondProductId,
+          secondProductName: hh.secondProductName || '',
+        }
+      : undefined;
+  return {
+    ...(comboSelections.length > 0 ? { comboSelections } : {}),
+    ...(halfHalfPizza ? { halfHalfPizza } : {}),
+  };
+}
+
 export function buildOrderIngredients(
   item: CatalogItem,
   customization: CartLineCustomization,

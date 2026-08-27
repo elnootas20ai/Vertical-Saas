@@ -28,7 +28,12 @@ import {
 import { broadcastToUser } from './sseService.js';
 import { sendPushToUser } from './pushService.js';
 import { enrichOcrLinesForUser, reconcilePurchaseInvoiceFromOcr } from './ocrPurchasePipeline.js';
-import { parseSupplierInvoicePdfBuffer } from './supplierInvoicePdfParse.js';
+import {
+  mergeSupplierInvoiceOcr,
+  ocrHasUsefulLines,
+  parseSupplierInvoicePdfBuffer,
+  reconstructTextFromPdfItems,
+} from './supplierInvoicePdfParse.js';
 
 const fakeReq = { headers: {} };
 
@@ -209,8 +214,8 @@ async function ensureImapCursorBaseline(overrides) {
 
 // ─── OCR interno (reutiliza la misma lógica de /api/ocr/scan) ────────────────
 
-const OCR_JSON_SYSTEM = `Eres un experto en OCR de facturas de proveedor. Extrae toda la información.
-Responde SOLO con JSON válido, sin markdown ni texto adicional.
+const OCR_JSON_SYSTEM = `Eres un experto en OCR de facturas y albaranes de proveedor (España).
+Extrae TODA la información útil. Responde SOLO con JSON válido, sin markdown ni texto adicional.
 {
   "documentType": "factura_proveedor",
   "emitter": "Nombre del emisor/empresa proveedora",
@@ -219,21 +224,26 @@ Responde SOLO con JSON válido, sin markdown ni texto adicional.
   "receiverCIF": "CIF/NIF del receptor",
   "date": "YYYY-MM-DD",
   "dueDate": "YYYY-MM-DD o null",
-  "documentNumber": "Número de factura",
+  "documentNumber": "Número de factura/albarán",
   "subtotal": 0.00,
   "taxRate": 21,
   "taxAmount": 0.00,
   "total": 0.00,
   "currency": "EUR",
   "lines": [
-    { "description": "Concepto", "quantity": 1, "unitPrice": 0.00, "total": 0.00 }
+    { "description": "Nombre del artículo/concepto", "quantity": 1, "unitPrice": 0.00, "total": 0.00 }
   ],
   "paymentTerms": "Condiciones de pago si aparecen",
   "bankAccount": "IBAN si aparece",
   "confidenceScore": 85,
   "notes": "Observaciones relevantes"
 }
-Si algún campo no se puede determinar, usa null.`;
+REGLAS OBLIGATORIAS:
+- "lines" debe incluir TODAS las líneas de producto/servicio (no solo totales).
+- Cada línea: description (texto legible), quantity, unitPrice (sin IVA si se ve), total de línea.
+- No inventes artículos. Si no hay tabla de líneas, "lines": [].
+- Fechas en YYYY-MM-DD. Importes numéricos con punto decimal.
+- Si un campo no se puede determinar, usa null.`;
 
 function parseOcrJsonContent(rawContent) {
   try {
@@ -267,7 +277,7 @@ async function convertPdfToImageBase64(pdfBase64) {
   }
 }
 
-/** Fallback Windows/VPS sin poppler: texto embebido del PDF → GPT. */
+/** Fallback Windows/VPS sin poppler: texto embebido del PDF → GPT (con saltos de línea reales). */
 async function extractPdfText(buffer) {
   const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const data = Buffer.isBuffer(buffer)
@@ -277,18 +287,44 @@ async function extractPdfText(buffer) {
       : new Uint8Array(buffer || []);
   const loadingTask = getDocument({ data, useSystemFonts: true, disableWorker: true });
   const pdf = await loadingTask.promise;
-  const maxPages = Math.min(pdf.numPages || 1, 4);
+  const maxPages = Math.min(pdf.numPages || 1, 8);
   const parts = [];
   for (let pageNum = 1; pageNum <= maxPages; pageNum += 1) {
     const page = await pdf.getPage(pageNum);
     const content = await page.getTextContent();
-    const line = (content.items || [])
-      .map((it) => (typeof it?.str === 'string' ? it.str : ''))
-      .filter(Boolean)
-      .join(' ');
-    if (line.trim()) parts.push(line.trim());
+    const pageText = reconstructTextFromPdfItems(content.items || []);
+    if (pageText.trim()) parts.push(pageText.trim());
   }
   return parts.join('\n').trim();
+}
+
+function normalizeOcrLines(ocrData) {
+  if (!ocrData || typeof ocrData !== 'object') return ocrData;
+  const raw = Array.isArray(ocrData.lines) ? ocrData.lines : [];
+  ocrData.lines = raw
+    .map((line) => {
+      const description = String(line?.description || line?.itemName || line?.catalogItemName || '').trim();
+      const quantity = Number(line?.quantity);
+      const qty = Number.isFinite(quantity) && quantity > 0 ? quantity : 1;
+      let unitPrice = Number(line?.unitPrice ?? line?.unitCost ?? 0);
+      let total = Number(line?.total ?? line?.lineTotal ?? line?.amount ?? 0);
+      if (!Number.isFinite(unitPrice) || unitPrice < 0) unitPrice = 0;
+      if (!Number.isFinite(total) || total < 0) total = 0;
+      if (total <= 0 && unitPrice > 0) total = Math.round(qty * unitPrice * 100) / 100;
+      if (unitPrice <= 0 && total > 0 && qty > 0) unitPrice = Math.round((total / qty) * 100) / 100;
+      return {
+        description,
+        itemName: description,
+        quantity: qty,
+        unitPrice: Math.round(unitPrice * 100) / 100,
+        total: Math.round(total * 100) / 100,
+        catalogItemId: String(line?.catalogItemId || ''),
+        catalogItemName: String(line?.catalogItemName || ''),
+        sku: String(line?.sku || ''),
+      };
+    })
+    .filter((l) => l.description && (l.total > 0 || l.unitPrice > 0 || l.quantity > 0));
+  return ocrData;
 }
 
 async function callOpenAiOcr(messages) {
@@ -306,7 +342,7 @@ async function callOpenAiOcr(messages) {
     },
     body: JSON.stringify({
       model: 'gpt-4o',
-      max_tokens: 3000,
+      max_tokens: 6000,
       messages,
     }),
   });
@@ -329,75 +365,113 @@ async function runOcrOnBuffer(buffer, mimeType) {
     || buf.toString('base64').substring(0, 10).startsWith('JVBE');
 
   if (isPdf) {
+    let local = null;
     // 1) Parser local (sin OpenAI) — PDF con texto
     try {
-      const local = await parseSupplierInvoicePdfBuffer(buf);
-      const usable =
+      local = await parseSupplierInvoicePdfBuffer(buf);
+      const usableHeader =
         !local.parseError
         && (
           Number(local.total) > 0
           || String(local.documentNumber || '').trim()
           || String(local.emitterCIF || '').trim()
         );
-      if (usable) {
+      const hasLines = ocrHasUsefulLines(local);
+      if (usableHeader && hasLines) {
         logger.info(
           {
             tag: 'SINV_PROC',
             method: 'pdf_text_rules',
             total: local.total,
             documentNumber: local.documentNumber,
+            lines: local.lines?.length || 0,
             confidenceScore: local.confidenceScore,
           },
-          'Factura PDF parseada en local (sin OpenAI)',
+          'Factura PDF parseada en local (cabecera + líneas)',
         );
-        return local;
+        return normalizeOcrLines(local);
       }
       logger.warn(
-        { tag: 'SINV_PROC', confidenceScore: local.confidenceScore },
-        'Parser PDF local con poca confianza; se intenta OpenAI si hay clave',
+        {
+          tag: 'SINV_PROC',
+          confidenceScore: local.confidenceScore,
+          hasHeader: usableHeader,
+          lines: local.lines?.length || 0,
+        },
+        usableHeader && !hasLines
+          ? 'Parser PDF local: cabecera OK pero sin líneas — se intenta OpenAI para completar'
+          : 'Parser PDF local incompleto; se intenta OpenAI si hay clave',
       );
     } catch (localErr) {
       logger.warn({ tag: 'SINV_PROC', err: localErr.message, code: localErr.code }, 'Parser PDF local falló');
-      if (localErr.code === 'PDF_NO_TEXT') {
-        // Escaneo: intentar imagen+OpenAI si hay poppler/clave
-      } else {
-        // seguir a OpenAI si hay
-      }
     }
 
-    // 2) OpenAI opcional (si la clave funciona)
+    // 2) OpenAI opcional (si la clave funciona) — obligatorio si faltan líneas
     const openAiApiKey = process.env.OPENAI_API_KEY || process.env.VITE_OPENAI_KEY || '';
     if (!openAiApiKey) {
+      if (local && !local.parseError && Number(local.total) > 0) {
+        logger.warn(
+          { tag: 'SINV_PROC', lines: local.lines?.length || 0 },
+          'Sin OPENAI_API_KEY: se guarda factura con cabecera; líneas pueden faltar',
+        );
+        return normalizeOcrLines(local);
+      }
       throw new Error(
         'PDF no parseado en local y no hay OPENAI_API_KEY. Usa un PDF con texto seleccionable o configura OpenAI.',
       );
     }
+
+    let openaiResult = null;
     try {
       const pngBase64 = await convertPdfToImageBase64(buf.toString('base64'));
-      return await callOpenAiOcr([
+      openaiResult = await callOpenAiOcr([
         { role: 'system', content: OCR_JSON_SYSTEM },
         {
           role: 'user',
           content: [
-            { type: 'text', text: 'Analiza esta factura de proveedor y extrae toda la información financiera.' },
+            {
+              type: 'text',
+              text: 'Analiza esta factura de proveedor. Extrae cabecera, totales Y todas las líneas de artículos.',
+            },
             { type: 'image_url', image_url: { url: `data:image/png;base64,${pngBase64}`, detail: 'high' } },
           ],
         },
       ]);
+      openaiResult.parseMethod = openaiResult.parseMethod || 'openai_vision';
     } catch (imgErr) {
       logger.warn({ tag: 'SINV_PROC', err: imgErr.message }, 'PDF→imagen/OpenAI falló; texto→OpenAI');
     }
-    const text = await extractPdfText(buf);
-    if (!text || text.length < 20) {
-      throw new Error('No se pudo leer el PDF (sin texto y sin OCR de imagen).');
+    if (!openaiResult) {
+      const text = await extractPdfText(buf);
+      if (!text || text.length < 20) {
+        if (local && !local.parseError) return normalizeOcrLines(local);
+        throw new Error('No se pudo leer el PDF (sin texto y sin OCR de imagen).');
+      }
+      openaiResult = await callOpenAiOcr([
+        { role: 'system', content: OCR_JSON_SYSTEM },
+        {
+          role: 'user',
+          content: `Analiza este texto de factura PDF. Extrae cabecera, totales Y todas las líneas de artículos:\n\n${text.slice(0, 14000)}`,
+        },
+      ]);
+      openaiResult.parseMethod = openaiResult.parseMethod || 'openai_text';
     }
-    return callOpenAiOcr([
-      { role: 'system', content: OCR_JSON_SYSTEM },
-      {
-        role: 'user',
-        content: `Analiza este texto extraído de una factura PDF y responde con el JSON pedido:\n\n${text.slice(0, 12000)}`,
-      },
-    ]);
+
+    openaiResult = normalizeOcrLines(openaiResult);
+    if (local && !local.parseError) {
+      const merged = normalizeOcrLines(mergeSupplierInvoiceOcr(local, openaiResult));
+      logger.info(
+        {
+          tag: 'SINV_PROC',
+          method: merged.parseMethod,
+          total: merged.total,
+          lines: merged.lines?.length || 0,
+        },
+        'Factura PDF: merge local + OpenAI',
+      );
+      return merged;
+    }
+    return openaiResult;
   }
 
   // Imágenes: OpenAI si hay clave
@@ -407,16 +481,21 @@ async function runOcrOnBuffer(buffer, mimeType) {
   }
   const detectedMime = mimeType || 'image/png';
   const dataUrl = `data:${detectedMime};base64,${buf.toString('base64')}`;
-  return callOpenAiOcr([
+  const imageResult = await callOpenAiOcr([
     { role: 'system', content: OCR_JSON_SYSTEM },
     {
       role: 'user',
       content: [
-        { type: 'text', text: 'Analiza esta factura de proveedor y extrae toda la información financiera.' },
+        {
+          type: 'text',
+          text: 'Analiza esta factura de proveedor. Extrae cabecera, totales Y todas las líneas de artículos.',
+        },
         { type: 'image_url', image_url: { url: dataUrl, detail: 'high' } },
       ],
     },
   ]);
+  imageResult.parseMethod = imageResult.parseMethod || 'openai_vision';
+  return normalizeOcrLines(imageResult);
 }
 
 function suggestNextSupplierCodeFromDocs(suppliers) {
@@ -841,6 +920,15 @@ async function processSingleEmail(userId, email, scope = {}) {
       }
     }
 
+    let priceVarianceHit = false;
+    try {
+      const { applySupplierPriceVarianceCheck } = await import('./supplierPriceVarianceAlert.js');
+      const withVar = await applySupplierPriceVarianceCheck(fakeReq, userId, { ...doc, _rev: saved.rev });
+      priceVarianceHit = Boolean(withVar?.priceVariance?.hasVariance || withVar?.flags?.priceVariance);
+    } catch (priceErr) {
+      logger.warn({ tag: 'SINV_PROC', invoiceId: doc._id, err: priceErr?.message }, 'Variación de precio no comprobada');
+    }
+
     // Guardar el archivo PDF/imagen como adjunto en CouchDB
     try {
       await saveAttachment(doc._id, attachment.filename, attachment.content, attachment.mimeType);
@@ -859,6 +947,9 @@ async function processSingleEmail(userId, email, scope = {}) {
     if (ocrFailed) {
       result.alerts.push({ type: 'ocr_failed', data: { invoiceId: doc._id, from: email.from, filename: attachment.filename } });
     }
+    if (priceVarianceHit) {
+      result.alerts.push({ type: 'price_variance', data: { invoiceId: doc._id, supplierName: doc.supplierName || '' } });
+    }
   }
 
   return result;
@@ -866,9 +957,20 @@ async function processSingleEmail(userId, email, scope = {}) {
 
 // ─── Alertas en tiempo real ───────────────────────────────────────────────────
 
-async function emitRealtimeAlert(userId, { title, message, level, route, invoiceId, metadata }) {
+async function emitRealtimeAlert(userId, { title, message, level, route, invoiceId, metadata, alertType }) {
   try {
-    const dedupKey = `sinv:${invoiceId || Date.now()}:${new Date().toISOString().slice(0, 10)}`;
+    const md = metadata && typeof metadata === 'object' ? metadata : {};
+    const stableKey = invoiceId
+      ? `inv:${invoiceId}`
+      : [
+          alertType || title || 'alert',
+          md.from || '',
+          md.filename || '',
+          md.invoiceNumber || md.subject || '',
+        ]
+          .join('|')
+          .slice(0, 160);
+    const dedupKey = `sinv:${stableKey}:${new Date().toISOString().slice(0, 10)}`;
     const notification = buildNotificationDocument({
       userId,
       level: level || 'warning',
@@ -978,6 +1080,7 @@ async function processIncomingEmailsForTarget(userId, resolvedImap) {
             invoiceId: alert.data.invoiceId,
             route: `/saas/catalog?tab=invoices&invoiceId=${alert.data.invoiceId}`,
             metadata: alert.data,
+            alertType: 'duplicate',
           });
         } else if (alert.type === 'no_attachment') {
           continue;
@@ -989,6 +1092,7 @@ async function processIncomingEmailsForTarget(userId, resolvedImap) {
             invoiceId: alert.data.invoiceId,
             route: `/saas/catalog?tab=invoices&invoiceId=${alert.data.invoiceId}`,
             metadata: alert.data,
+            alertType: 'unknown_supplier',
           });
         } else if (alert.type === 'ocr_failed') {
           await emitRealtimeAlert(userId, {
@@ -998,6 +1102,7 @@ async function processIncomingEmailsForTarget(userId, resolvedImap) {
             invoiceId: alert.data.invoiceId,
             route: `/saas/catalog?tab=invoices&invoiceId=${alert.data.invoiceId}`,
             metadata: alert.data,
+            alertType: 'ocr_failed',
           });
         }
       }

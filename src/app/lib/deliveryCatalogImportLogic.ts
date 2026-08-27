@@ -9,6 +9,8 @@ import {
   type TpvCategoryTemplateKey,
 } from './catalogCustomization';
 import type { CatalogItem } from './deliveryApi';
+import { getDeliveryBrandLinePreset, UNIVERSAL_CATALOG_CATEGORIES } from './deliveryBrandLineKinds';
+import { restaurantBrandCategoriesFromCatalogOnly } from '../verticals/restaurant/restaurantBrandCatalogPolicy';
 import { normalizeSubfamilyCategory, resolveTpvFamilyKey } from './tpvCatalogFamilies';
 
 export type ImportBrandLike = {
@@ -235,9 +237,11 @@ export function catalogCategoryKeyFromOrganizerId(organizerId: string): string {
  * Misma conexión que chips al crear producto → desplegable del proveedor.
  */
 export function listCatalogCategoryOrganizerChoices(
-  brands: Array<{ catalogCategories?: string[] } | null | undefined> = [],
+  brands: Array<{ catalogCategories?: string[]; deliveryLineKind?: string } | null | undefined> = [],
   catalogItems: Array<{ category?: string; active?: boolean; deletedAt?: string | null } | null | undefined> = [],
+  options?: { businessType?: string | null },
 ): Array<{ id: string; label: string }> {
+  const skipLineKindPresets = restaurantBrandCategoriesFromCatalogOnly(options?.businessType);
   const labelByKey = new Map<string, string>();
   const add = (raw: string) => {
     const label = normalizeImportCategory(raw);
@@ -246,8 +250,13 @@ export function listCatalogCategoryOrganizerChoices(
     if (!key) return;
     if (!labelByKey.has(key)) labelByKey.set(key, label);
   };
+  for (const u of UNIVERSAL_CATALOG_CATEGORIES) add(u);
   for (const b of brands || []) {
     for (const c of b?.catalogCategories ?? []) add(String(c || ''));
+    if (!skipLineKindPresets) {
+      const preset = getDeliveryBrandLinePreset(String(b?.deliveryLineKind || '').trim());
+      for (const c of preset?.typicalCategories ?? []) add(String(c || ''));
+    }
   }
   for (const item of catalogItems || []) {
     if (!item || item.deletedAt || item.active === false) continue;

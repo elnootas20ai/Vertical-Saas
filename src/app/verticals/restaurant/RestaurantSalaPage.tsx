@@ -16,7 +16,15 @@ import { useBusiness } from '../../context/BusinessContext';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import { TpvChromeScope } from '../../context/TpvChromeContext';
 import { isStrictDeliveryBusinessType } from '../../lib/deliveryOpsTypes';
+import { needsCeoTpvStoreBootstrap } from '../../lib/ceoTpvStoreBootstrap';
 import { coerceSelectedPdvId } from '../../lib/deliveryOpsPdvSelection';
+import type { PointOfSale } from '../../lib/deliveryApi';
+import type { WorkCenter } from '../../lib/workCentersApi';
+import {
+  bootstrapRestaurantCeoTpvStores,
+  buildRestaurantCeoTpvStoreRows,
+} from './ceoTpvStores';
+import { readRestaurantRetailCache } from './restaurantRetailCache';
 import {
   consumeSalaSetupPending,
   peekSalaSetupPending,
@@ -51,6 +59,7 @@ import {
   markRestaurantSalaRemountWiped,
   shouldForceRestaurantSalaRemount,
 } from './restaurantSalaRemount';
+import { filterSalaTablesByBusinessScope } from '../../lib/salaBusinessScope';
 
 type ViewState = 'loading' | 'no_pdv' | 'setup' | 'live';
 
@@ -58,21 +67,11 @@ function normalizeBusinessId(value: string | null | undefined): string {
   return String(value || '').replace(/^business:/, '').trim();
 }
 
-function tablesForBusiness(
-  tables: DiningTable[],
-  businessId: string,
-): DiningTable[] {
-  return (tables || []).filter((t) => {
-    const bid = normalizeBusinessId(t.businessId);
-    return !bid || bid === businessId;
-  });
-}
-
 export function RestaurantSalaPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
-  const { currentBusiness, businesses } = useBusiness();
+  const { currentBusiness, businesses, businessesFetchSettled } = useBusiness();
   const {
     activeSalesPointId,
     displayLabelForActive,
@@ -85,6 +84,11 @@ export function RestaurantSalaPage() {
 
   const userId = user?.user_id || '';
   const businessId = normalizeBusinessId(currentBusiness?.business_id);
+  const accountBusinessCount = businesses.length || 1;
+  const salaScope = useMemo(
+    () => ({ businessId, accountBusinessCount }),
+    [businessId, accountBusinessCount],
+  );
   const urlPdvId = String(searchParams.get('pdv') || '').trim();
   const wantReset = searchParams.get('reset') === '1';
 
@@ -93,11 +97,41 @@ export function RestaurantSalaPage() {
     return peekSalaSetupPending(businessId) || '';
   });
 
+  const [storeBootstrapLoading, setStoreBootstrapLoading] = useState(false);
+  const [bootstrappedPdvs, setBootstrappedPdvs] = useState<PointOfSale[]>([]);
+  const [bootstrappedRetail, setBootstrappedRetail] = useState<WorkCenter[]>([]);
+  const storeBootstrapDoneRef = useRef(false);
+  const storeBootstrapInflightRef = useRef(false);
+  const lastStoreBootstrapBusinessRef = useRef('');
+
+  const scopedActivePdvs = useMemo(() => {
+    const fromScope = allPointsOfSale.filter((p) => p.active !== false);
+    if (fromScope.length > 0) return fromScope;
+    return bootstrappedPdvs.filter((p) => p.active !== false);
+  }, [allPointsOfSale, bootstrappedPdvs]);
+
+  const scopedRetail = useMemo(() => {
+    if (retailWorkCenters.length > 0) return retailWorkCenters;
+    return bootstrappedRetail;
+  }, [retailWorkCenters, bootstrappedRetail]);
+
+  const storeRows = useMemo(
+    () =>
+      buildRestaurantCeoTpvStoreRows(
+        scopedRetail,
+        scopedActivePdvs,
+        currentBusiness,
+        businesses,
+      ),
+    [scopedRetail, scopedActivePdvs, currentBusiness, businesses],
+  );
+
   const parentPdvId = useMemo(() => {
-    const pdvs = allPointsOfSale.filter((p) => p.active !== false);
-    const fromScope = pdvs.length > 0 ? coerceSelectedPdvId(pdvs, activeSalesPointId) : '';
+    const pdvs = scopedActivePdvs;
+    const preferred = activeSalesPointId || pendingPdvId || urlPdvId;
+    const fromScope = pdvs.length > 0 ? coerceSelectedPdvId(pdvs, preferred) : '';
     return fromScope || pendingPdvId || urlPdvId || '';
-  }, [allPointsOfSale, activeSalesPointId, pendingPdvId, urlPdvId]);
+  }, [scopedActivePdvs, activeSalesPointId, pendingPdvId, urlPdvId]);
 
   const [view, setView] = useState<ViewState>('loading');
   const [saving, setSaving] = useState(false);
@@ -109,12 +143,125 @@ export function RestaurantSalaPage() {
   const [accountLoading, setAccountLoading] = useState(false);
   const bootRef = useRef('');
 
+  useEffect(() => {
+    if (!businessId) return;
+    if (lastStoreBootstrapBusinessRef.current === businessId) return;
+    lastStoreBootstrapBusinessRef.current = businessId;
+    storeBootstrapDoneRef.current = false;
+    storeBootstrapInflightRef.current = false;
+    setBootstrappedPdvs([]);
+    setBootstrappedRetail([]);
+  }, [businessId]);
+
+  // Hidratar PDV/tienda desde caché local → no esperar bootstrap en red.
+  useEffect(() => {
+    if (!businessId || !currentBusiness) return;
+    if (allPointsOfSale.length > 0 || retailWorkCenters.length > 0) return;
+    if (bootstrappedPdvs.length > 0 || bootstrappedRetail.length > 0) return;
+    const cached = readRestaurantRetailCache(businessId, currentBusiness, businesses);
+    if (!cached) return;
+    setBootstrappedPdvs(cached.allPointsOfSale.filter((p) => p.active !== false));
+    setBootstrappedRetail(cached.retailWorkCenters);
+  }, [
+    businessId,
+    currentBusiness,
+    businesses,
+    allPointsOfSale.length,
+    retailWorkCenters.length,
+    bootstrappedPdvs.length,
+    bootstrappedRetail.length,
+  ]);
+
   // Solo refrescar tiendas: force:false (como sidebar). force:true puede
   // pisar la lista buena con un fetch vacío → «No encontramos el local».
   useEffect(() => {
     if (!businessId) return;
     void refreshStore({ force: false });
   }, [businessId, refreshStore]);
+
+  const shouldBootstrapStores = useMemo(() => {
+    if (!businessesFetchSettled || !businessId || !user || !currentBusiness) return false;
+    if (storeBootstrapDoneRef.current || storeBootstrapInflightRef.current) return false;
+    if (scopedActivePdvs.length > 0) {
+      return needsCeoTpvStoreBootstrap(scopedRetail, scopedActivePdvs, storeRows);
+    }
+    return true;
+  }, [
+    businessesFetchSettled,
+    businessId,
+    user,
+    currentBusiness,
+    scopedActivePdvs,
+    scopedRetail,
+    storeRows,
+  ]);
+
+  // Igual que TPV sala: enlazar PDV huérfano / tienda sin PDV (demo bar, WC sin enlace).
+  useEffect(() => {
+    if (!shouldBootstrapStores || !user || !currentBusiness) return;
+
+    let cancelled = false;
+    storeBootstrapInflightRef.current = true;
+    setStoreBootstrapLoading(true);
+
+    void (async () => {
+      try {
+        const state = await bootstrapRestaurantCeoTpvStores(user, currentBusiness, businesses, {
+          accountBusinessCount: businesses.length,
+        });
+        if (cancelled) return;
+
+        const nextRows = buildRestaurantCeoTpvStoreRows(
+          state.workCenters || [],
+          state.pointsOfSale || [],
+          currentBusiness,
+          businesses,
+        );
+        const rowPdvIds = new Set(
+          nextRows.map((r) => String(r.pdvId || '').trim()).filter(Boolean),
+        );
+        const nextPdvs = (state.pointsOfSale || []).filter((p) => {
+          if (p.active === false) return false;
+          if (rowPdvIds.size === 0) return true;
+          return rowPdvIds.has(String(p._id || '').trim());
+        });
+
+        setBootstrappedPdvs(nextPdvs);
+        setBootstrappedRetail(state.workCenters || []);
+        storeBootstrapDoneRef.current = true;
+
+        const pick = coerceSelectedPdvId(
+          nextPdvs,
+          activeSalesPointId || pendingPdvId || urlPdvId,
+        );
+        if (pick) {
+          setActiveSalesPoint(pick);
+          if (!pendingPdvId && !urlPdvId) setPendingPdvId(pick);
+        }
+
+        void refreshStore({ force: false }).catch(() => null);
+      } catch {
+        storeBootstrapDoneRef.current = true;
+      } finally {
+        storeBootstrapInflightRef.current = false;
+        if (!cancelled) setStoreBootstrapLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    shouldBootstrapStores,
+    user,
+    currentBusiness,
+    businesses,
+    activeSalesPointId,
+    pendingPdvId,
+    urlPdvId,
+    setActiveSalesPoint,
+    refreshStore,
+  ]);
 
   useEffect(() => {
     if (!businessId) return;
@@ -128,7 +275,7 @@ export function RestaurantSalaPage() {
 
   useEffect(() => {
     if (storeLoading || !businessId) return;
-    const pdvs = allPointsOfSale.filter((p) => p.active !== false);
+    const pdvs = scopedActivePdvs;
     if (pdvs.length === 0) return;
     const pdvId = coerceSelectedPdvId(pdvs, activeSalesPointId || pendingPdvId);
     if (!pdvId || activeSalesPointId === pdvId) return;
@@ -136,7 +283,7 @@ export function RestaurantSalaPage() {
   }, [
     storeLoading,
     businessId,
-    allPointsOfSale,
+    scopedActivePdvs,
     activeSalesPointId,
     pendingPdvId,
     setActiveSalesPoint,
@@ -150,11 +297,11 @@ export function RestaurantSalaPage() {
   }, [wantReset, searchParams, setSearchParams]);
 
   const hasStoreInScope = useMemo(() => {
-    const hasPdv = allPointsOfSale.some((p) => p.active !== false);
-    const hasRetail = retailWorkCenters.some((wc) => !wc.deletedAt && wc.active !== false);
+    const hasPdv = scopedActivePdvs.length > 0;
+    const hasRetail = scopedRetail.some((wc) => !wc.deletedAt && wc.active !== false);
     const hasPending = Boolean(pendingPdvId || urlPdvId || peekSalaSetupPending(businessId));
     return hasPdv || hasRetail || hasPending;
-  }, [allPointsOfSale, retailWorkCenters, pendingPdvId, urlPdvId, businessId]);
+  }, [scopedActivePdvs, scopedRetail, pendingPdvId, urlPdvId, businessId]);
 
   const runFreshStart = useCallback(async (opts?: { clearDraft?: boolean }) => {
     if (!userId || !businessId) return;
@@ -203,10 +350,10 @@ export function RestaurantSalaPage() {
       // Primero el mapa de ESTA empresa (no el del bar u otra vertical).
       const [config, listed] = await Promise.all([
         getFloorConfigRequest(userId, { businessId }).catch(() => null),
-        listDiningTablesRequest(userId).catch(() => []),
+        listDiningTablesRequest(userId, salaScope).catch(() => []),
       ]);
 
-      const tablesHere = tablesForBusiness(listed || [], businessId);
+      const tablesHere = filterSalaTablesByBusinessScope(listed || [], businessId, accountBusinessCount);
       const nextRooms = Array.isArray(config?.rooms) ? config.rooms : [];
       // Solo mapa real (mesas o zonas). El flag «setup complete» solo no basta:
       // si no hay mapa, hay que mostrar el asistente (alta de bar/restaurante).
@@ -236,16 +383,30 @@ export function RestaurantSalaPage() {
     wantReset,
     runFreshStart,
     enterLive,
+    salaScope,
+    accountBusinessCount,
   ]);
 
   useEffect(() => {
     if (storeLoading || !businessId) return;
+    const blockForBootstrap =
+      storeBootstrapLoading && scopedActivePdvs.length === 0 && !hasStoreInScope;
+    if (blockForBootstrap) return;
     const force = shouldForceRestaurantSalaRemount(businessId, wantReset);
-    const bootKey = `${businessId}:${force ? 'force' : 'keep'}`;
+    const bootKey = `${businessId}:${force ? 'force' : 'keep'}:${parentPdvId || 'no-pdv'}`;
     if (bootRef.current === bootKey) return;
     bootRef.current = bootKey;
     void reload();
-  }, [storeLoading, businessId, wantReset, reload]);
+  }, [
+    storeLoading,
+    storeBootstrapLoading,
+    scopedActivePdvs.length,
+    hasStoreInScope,
+    businessId,
+    wantReset,
+    reload,
+    parentPdvId,
+  ]);
 
   // Si caímos en “Crear local” por scope vacío y luego aparece el PDV, reintentar.
   useEffect(() => {
@@ -256,11 +417,43 @@ export function RestaurantSalaPage() {
   }, [view, storeLoading, businessId, hasStoreInScope, reload]);
 
   const handleSubmit = async (drafts: SalaQuickSetupRoomDraft[]) => {
-    const effectivePdv = parentPdvId || pendingPdvId || urlPdvId;
-    if (!userId || !businessId || !effectivePdv) {
-      toast.error('No encontramos el PDV del local. Créalo en Ajustes → Tienda.');
+    if (!userId || !businessId || !currentBusiness) {
+      toast.error('Falta sesión de empresa');
       return;
     }
+
+    let effectivePdv = parentPdvId || pendingPdvId || urlPdvId;
+    let submitRetail = scopedRetail;
+    let submitPdvs = allPointsOfSale.length > 0 ? allPointsOfSale : bootstrappedPdvs;
+
+    if (!effectivePdv) {
+      try {
+        const state = await bootstrapRestaurantCeoTpvStores(user, currentBusiness, businesses, {
+          accountBusinessCount: businesses.length,
+        });
+        submitRetail = state.workCenters || [];
+        submitPdvs = state.pointsOfSale || [];
+        effectivePdv = coerceSelectedPdvId(
+          submitPdvs.filter((p) => p.active !== false),
+          pendingPdvId || urlPdvId || activeSalesPointId,
+        );
+        if (effectivePdv) {
+          setBootstrappedPdvs(submitPdvs.filter((p) => p.active !== false));
+          setBootstrappedRetail(submitRetail);
+          setActiveSalesPoint(effectivePdv);
+          setPendingPdvId(effectivePdv);
+          void refreshStore({ force: false });
+        }
+      } catch {
+        /* toast abajo */
+      }
+    }
+
+    if (!effectivePdv) {
+      toast.error('No encontramos el PDV del local. Revisa Ajustes → Tienda o pulsa Reintentar.');
+      return;
+    }
+
     setSaving(true);
     try {
       clearRestaurantClientCaches(businessId);
@@ -271,8 +464,8 @@ export function RestaurantSalaPage() {
         drafts,
         business: currentBusiness,
         businesses,
-        workCenters: retailWorkCenters,
-        pointsOfSale: allPointsOfSale,
+        workCenters: submitRetail,
+        pointsOfSale: submitPdvs,
       });
       consumeSalaSetupPending(businessId);
       setPendingPdvId('');
@@ -291,8 +484,8 @@ export function RestaurantSalaPage() {
       parentPdvId: parentPdvId || pendingPdvId || urlPdvId || undefined,
       business: currentBusiness,
       businesses,
-      workCenters: retailWorkCenters,
-      pointsOfSale: allPointsOfSale,
+      workCenters: scopedRetail,
+      pointsOfSale: allPointsOfSale.length > 0 ? allPointsOfSale : bootstrappedPdvs,
     }),
     [
       parentPdvId,
@@ -300,8 +493,9 @@ export function RestaurantSalaPage() {
       urlPdvId,
       currentBusiness,
       businesses,
-      retailWorkCenters,
+      scopedRetail,
       allPointsOfSale,
+      bootstrappedPdvs,
     ],
   );
 
@@ -437,12 +631,12 @@ export function RestaurantSalaPage() {
     setAccountOrder(null);
     setAccountLoading(false);
     if (!userId || !businessId) return;
-    void listDiningTablesRequest(userId)
+    void listDiningTablesRequest(userId, salaScope)
       .then((listed) => {
-        setTables(tablesForBusiness(listed || [], businessId));
+        setTables(filterSalaTablesByBusinessScope(listed || [], businessId, accountBusinessCount));
       })
       .catch(() => undefined);
-  }, [userId, businessId]);
+  }, [userId, businessId, salaScope, accountBusinessCount]);
 
   const handleOpenTableAccount = useCallback(
     async (table: DiningTable, orderId?: string) => {
@@ -489,7 +683,10 @@ export function RestaurantSalaPage() {
 
   const accountPdvId = parentPdvId || activeSalesPointId || undefined;
 
-  if (view === 'loading' || storeLoading) {
+  const blockUiForBootstrap =
+    storeBootstrapLoading && scopedActivePdvs.length === 0 && !hasStoreInScope;
+
+  if (view === 'loading' || storeLoading || blockUiForBootstrap) {
     return (
       <Layout title="Sala" noPadding>
         <div className="flex min-h-[50vh] items-center justify-center gap-3 text-stone-500">

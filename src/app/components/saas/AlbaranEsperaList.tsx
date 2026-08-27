@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { Loader2, ScanLine, Upload } from 'lucide-react';
 import type { PurchaseOrder } from '../../lib/purchaseOrderApi';
+import { pendingLinesFromPurchaseOrder } from '../../lib/albaranReceptionCompare';
 import { formatMoneyEs, formatQtyEs } from '../../lib/formatNumberEs';
 import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
 
@@ -8,16 +9,20 @@ export function AlbaranEsperaList({
   orders,
   selectedId,
   ocrBusy,
+  replenishing = false,
   onSelect,
   onPickFile,
   onComprobar,
+  onReplenishPending,
 }: {
   orders: PurchaseOrder[];
   selectedId: string;
   ocrBusy: boolean;
+  replenishing?: boolean;
   onSelect: (orderId: string) => void;
   onPickFile: (order: PurchaseOrder, file: File) => void;
   onComprobar: (order: PurchaseOrder) => void;
+  onReplenishPending?: (order: PurchaseOrder) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
@@ -32,6 +37,8 @@ export function AlbaranEsperaList({
       <ul className="divide-y divide-stone-100 dark:divide-stone-800 rounded-xl border border-amber-200/80 dark:border-amber-900/50 overflow-hidden bg-amber-50/40 dark:bg-amber-950/20">
         {orders.map((order) => {
           const selected = selectedId === order._id;
+          const pendingLines =
+            order.status === 'partial' ? pendingLinesFromPurchaseOrder(order) : [];
           return (
             <li key={order._id}>
               <button
@@ -52,7 +59,7 @@ export function AlbaranEsperaList({
                     {order.status === 'draft'
                       ? 'creado'
                       : order.status === 'partial'
-                        ? 'parcial'
+                        ? `incompleto · faltan ${pendingLines.length}`
                         : order.status === 'sent'
                           ? 'enviado'
                           : 'pendiente'}
@@ -64,22 +71,58 @@ export function AlbaranEsperaList({
               </button>
               {selected ? (
                 <div className="px-4 pb-3 space-y-3 border-t border-amber-200/60 dark:border-amber-900/40 bg-white/70 dark:bg-stone-950/40">
-                  <ul className="pt-2 space-y-1">
-                    {(order.items || []).slice(0, 8).map((item) => (
-                      <li
-                        key={item.id || item.catalogItemId}
-                        className="flex justify-between gap-2 text-xs text-stone-600 dark:text-stone-400"
-                      >
-                        <span className="truncate">{item.name}</span>
-                        <span className="tabular-nums shrink-0">
-                          {formatQtyEs(item.quantity)} · {formatMoneyEs(item.unitCost)}€
-                        </span>
-                      </li>
-                    ))}
-                    {(order.items || []).length > 8 ? (
-                      <li className="text-[11px] text-stone-400">+{(order.items || []).length - 8} más</li>
-                    ) : null}
-                  </ul>
+                  {order.status === 'partial' && pendingLines.length > 0 ? (
+                    <div className="pt-2 space-y-2">
+                      <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">
+                        Pendiente de pedir de nuevo:
+                      </p>
+                      <ul className="space-y-1">
+                        {pendingLines.map((line) => (
+                          <li
+                            key={`${line.catalogItemId}-${line.name}`}
+                            className="flex justify-between gap-2 text-xs text-stone-600 dark:text-stone-400"
+                          >
+                            <span className="truncate">{line.name}</span>
+                            <span className="tabular-nums shrink-0 font-semibold">
+                              {formatQtyEs(line.pendingQty)}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                      {onReplenishPending ? (
+                        <button
+                          type="button"
+                          disabled={replenishing || ocrBusy}
+                          onClick={() => onReplenishPending(order)}
+                          className={`${VERTIAL_BTN_PRIMARY} !min-h-0 w-full px-3 py-2 text-xs inline-flex items-center justify-center gap-2`}
+                        >
+                          {replenishing ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : null}
+                          Generar pedido automático
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <ul className="pt-2 space-y-1">
+                      {(order.items || []).slice(0, 8).map((item) => (
+                        <li
+                          key={item.id || item.catalogItemId}
+                          className="flex justify-between gap-2 text-xs text-stone-600 dark:text-stone-400"
+                        >
+                          <span className="truncate">{item.name}</span>
+                          <span className="tabular-nums shrink-0">
+                            {formatQtyEs(item.quantity)} · {formatMoneyEs(item.unitCost)}€
+                          </span>
+                        </li>
+                      ))}
+                      {(order.items || []).length > 8 ? (
+                        <li className="text-[11px] text-stone-400">
+                          +{(order.items || []).length - 8} más
+                        </li>
+                      ) : null}
+                    </ul>
+                  )}
                   <input
                     ref={fileRef}
                     type="file"
@@ -110,7 +153,11 @@ export function AlbaranEsperaList({
                       onClick={() => cameraRef.current?.click()}
                       className={`${VERTIAL_BTN_PRIMARY} !min-h-0 px-3 py-2 text-xs`}
                     >
-                      {ocrBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ScanLine className="w-3.5 h-3.5" />}
+                      {ocrBusy ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <ScanLine className="w-3.5 h-3.5" />
+                      )}
                       OCR albarán
                     </button>
                     <button

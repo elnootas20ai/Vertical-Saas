@@ -381,7 +381,7 @@ const CLEANING_TOUR_STEPS: OnboardingTourStep[] = [
     iconBg: 'bg-gradient-to-br from-indigo-500 to-blue-600',
     title: 'Invita a tu equipo',
     description: 'Añade operarios o administradores para asignar servicios y rutas.',
-    hint: 'Equipo → «Invitar usuario».',
+    hint: 'Equipo → «Invitar Trabajador».',
     route: '/saas/equipo',
     checklist: ['Al menos un miembro del equipo invitado'],
   },

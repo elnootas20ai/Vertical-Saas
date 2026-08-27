@@ -572,6 +572,10 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
   const [lookupResult, setLookupResult] = useState<InviteLookupResult | null>(null);
   const lookupSeqRef = useRef(0);
   const lookupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Nombre rellenado por lookup del email anterior — se limpia al cambiar de email. */
+  const lookupFilledNameRef = useRef('');
+  const lookupEmailRef = useRef('');
+  const shiftTemplatesSeqRef = useRef(0);
 
   // Step 2
   const [contractType, setContractType] = useState<string | null>(null);
@@ -602,6 +606,7 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
   useEffect(() => {
     setWorkCenterId(null);
     setScheduleTemplateId(null);
+    setShiftTemplates([]);
   }, [selectedBusinessId]);
 
   useEffect(() => {
@@ -611,16 +616,20 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
       return;
     }
     let cancelled = false;
+    const seq = ++shiftTemplatesSeqRef.current;
+    setShiftTemplates([]);
     setTemplatesLoading(true);
     listShiftTemplates(businessId)
       .then((list) => {
-        if (!cancelled) setShiftTemplates(list);
+        if (cancelled || seq !== shiftTemplatesSeqRef.current) return;
+        setShiftTemplates(list);
       })
       .catch(() => {
-        if (!cancelled) setShiftTemplates([]);
+        if (cancelled || seq !== shiftTemplatesSeqRef.current) return;
+        setShiftTemplates([]);
       })
       .finally(() => {
-        if (!cancelled) setTemplatesLoading(false);
+        if (!cancelled && seq === shiftTemplatesSeqRef.current) setTemplatesLoading(false);
       });
     return () => { cancelled = true; };
   }, [selectedBusinessId, currentBusinessId, inviteBusiness?.business_id]);
@@ -629,11 +638,21 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
     const activeId = selectedBusinessId || currentBusinessId || inviteBusiness?.business_id || '';
     const reload = () => {
       if (!activeId) return;
+      const seq = ++shiftTemplatesSeqRef.current;
+      setShiftTemplates([]);
       setTemplatesLoading(true);
       listShiftTemplates(activeId)
-        .then((list) => setShiftTemplates(list))
-        .catch(() => setShiftTemplates([]))
-        .finally(() => setTemplatesLoading(false));
+        .then((list) => {
+          if (seq !== shiftTemplatesSeqRef.current) return;
+          setShiftTemplates(list);
+        })
+        .catch(() => {
+          if (seq !== shiftTemplatesSeqRef.current) return;
+          setShiftTemplates([]);
+        })
+        .finally(() => {
+          if (seq === shiftTemplatesSeqRef.current) setTemplatesLoading(false);
+        });
     };
     const onChanged = (event: Event) => {
       const detail = (event as CustomEvent<{ businessId?: string }>).detail;
@@ -646,7 +665,7 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
   }, [selectedBusinessId, currentBusinessId, inviteBusiness?.business_id]);
 
   useEffect(() => {
-    if (!workCenterId || templatesLoading) return;
+    if (!workCenterId || templatesLoading || shiftTemplates.length === 0) return;
     const label = loadedWorkCenterOptions.find((wc) => wc.id === workCenterId)?.label || '';
     const matchId = pickShiftTemplateIdForWorkCenter(shiftTemplates, workCenterId, label);
     if (matchId) setScheduleTemplateId(matchId);
@@ -689,6 +708,18 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
     lookupSeqRef.current = seq;
 
     lookupTimerRef.current = setTimeout(async () => {
+      const normalizedEmail = trimmed.toLowerCase();
+      if (normalizedEmail !== lookupEmailRef.current.toLowerCase()) {
+        setName((prev) => {
+          if (lookupFilledNameRef.current && prev.trim() === lookupFilledNameRef.current) {
+            return '';
+          }
+          return prev;
+        });
+        lookupFilledNameRef.current = '';
+      }
+      lookupEmailRef.current = trimmed;
+
       const result = await onLookupEmail(trimmed, selectedBusinessId || currentBusinessId || '');
       if (seq !== lookupSeqRef.current) return;
 
@@ -719,8 +750,10 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
       }
       setEmailStatus('ready');
       setLookupResult(result);
-      if (result.fullName && !name.trim()) {
-        setName(result.fullName);
+      if (result.fullName) {
+        const nextName = result.fullName.trim();
+        lookupFilledNameRef.current = nextName;
+        setName(nextName);
       }
     }, 450);
 
@@ -897,11 +930,13 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
   function handleInviteAnother() {
     setName(''); setEmail(''); setPhonePrefix('+34'); setPhoneNumber('');
     setContractType(null); setGrossSalary(''); setPayPeriodsPerYear('14'); setWorkCenterId(null);
-    setRole(null); setScheduleTemplateId(null);
+    setRole(null); setScheduleTemplateId(null); setShiftTemplates([]);
     setSelectedBusinessId(currentBusinessId || businesses?.[0]?.business_id || null);
     setErrors({}); setTouched({}); setSuccess(false); setSubmitError(null);
     setInviteResult(null); setStep(1);
     setEmailStatus('idle'); setLookupResult(null);
+    lookupFilledNameRef.current = '';
+    lookupEmailRef.current = '';
   }
 
   const legacyWcOptions = (workCenters || [])

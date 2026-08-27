@@ -41,7 +41,7 @@ export async function loadVerticalKpiSnapshot(
       }
       case 'restaurant': {
         const today = localCalendarDayKey();
-        const reservations = await listReservations(userId).catch(() => []);
+        const reservations = await listReservations(userId, businessId ? { businessId } : undefined).catch(() => []);
         const todayCount = reservations.filter((r) => String(r.date || r.fecha || '').startsWith(today)).length;
         return {
           label: 'Reservas hoy',

@@ -61,7 +61,7 @@ export function SaasTabWorkspace({
         <div className="px-3 py-2 border-b border-gray-100 dark:border-gray-700 text-xs">{banner}</div>
       ) : null}
       {toolbar ? (
-        <div className="relative z-20 px-3 py-2.5 border-b border-gray-100 dark:border-gray-700 space-y-2 overflow-visible">
+        <div className="relative z-20 px-3 py-2 border-b border-gray-100 dark:border-gray-700 overflow-visible">
           {toolbar}
         </div>
       ) : null}
@@ -95,10 +95,21 @@ export function SaasTabSearch({
 }
 
 export function SaasTabToolbarRow({ left, right }: { left?: ReactNode; right?: ReactNode }) {
+  const hasLeft = left != null && left !== false && left !== true;
+  const hasRight = right != null && right !== false && right !== true;
+  if (!hasLeft && !hasRight) return null;
   return (
-    <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-      <div className="flex flex-wrap items-center gap-1.5 min-w-0 flex-1">{left}</div>
-      <div className="flex flex-wrap items-center gap-1.5 lg:justify-end shrink-0">{right}</div>
+    <div
+      className={`flex flex-wrap items-center gap-1.5 ${
+        hasLeft && hasRight ? 'justify-between' : ''
+      }`}
+    >
+      {hasLeft ? <div className="flex min-w-0 flex-wrap items-center gap-1.5">{left}</div> : null}
+      {hasRight ? (
+        <div className={`flex flex-wrap items-center gap-1.5 shrink-0 ${hasLeft ? 'ml-auto' : ''}`}>
+          {right}
+        </div>
+      ) : null}
     </div>
   );
 }

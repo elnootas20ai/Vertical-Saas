@@ -35,6 +35,7 @@ import { isStrictDeliveryBusinessType } from '../../lib/deliveryOpsTypes';
 import { diningOrderDueAmount, countDiningOrderItems, ensureOpenDiningOrder } from '../../lib/restaurantDiningTpv';
 import { openOrdersByTableId, resolveTpvFloorVisualStatus } from '../../lib/restaurantTableDisplay';
 import { cancelActiveReservationsForTable } from '../../lib/restaurantReservationsApi';
+import { filterSalaTablesByBusinessScope } from '../../lib/salaBusinessScope';
 import { tableStatusOnOpen } from '../../lib/restaurantTableStatus';
 import { DELIVERY_CEO_TPV_PATH, RESTAURANT_CEO_TPV_PATH } from '../../lib/retailOpsPaths';
 import { writeSalaTpvOpenTable } from '../../lib/salaTpvLaunch';
@@ -352,8 +353,13 @@ export function RestaurantSalaLiveView({
 }: Props) {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, businesses } = useBusiness();
   const isDeliverySala = isStrictDeliveryBusinessType(currentBusiness?.businessType);
+  const accountBusinessCount = businesses.length || 1;
+  const salaScope = useMemo(
+    () => ({ businessId, accountBusinessCount }),
+    [businessId, accountBusinessCount],
+  );
   const sortedRooms = useMemo(
     () => [...rooms].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)),
     [rooms],
@@ -397,18 +403,12 @@ export function RestaurantSalaLiveView({
   const softReloadTables = useCallback(() => {
     if (!userId || editMode) return;
     reloadFloorOrders();
-    void listDiningTablesRequest(userId)
+    void listDiningTablesRequest(userId, salaScope)
       .then((rows) => {
-        const scoped = businessId
-          ? rows.filter((t) => {
-              const bid = String((t as { businessId?: string }).businessId || '').trim();
-              return !bid || bid === businessId;
-            })
-          : rows;
-        onTablesChange(scoped);
+        onTablesChange(filterSalaTablesByBusinessScope(rows, businessId, accountBusinessCount));
       })
       .catch(() => undefined);
-  }, [userId, businessId, editMode, onTablesChange, reloadFloorOrders]);
+  }, [userId, businessId, accountBusinessCount, salaScope, editMode, onTablesChange, reloadFloorOrders]);
 
   const salaSseHandlers = useMemo(
     () => ({
@@ -522,11 +522,12 @@ export function RestaurantSalaLiveView({
     sortedRooms.find((r) => r.id === activeRoomId) || sortedRooms[0] || null;
   const roomTables = activeRoom ? tablesForRoom(tables, activeRoom) : [];
   const visibleTables = tables.filter((t) => t.active !== false && t.status !== 'hidden');
-  const freeCount = visibleTables.filter((t) => visualOf(t) === 'available').length;
-  const toChargeCount = visibleTables.filter((t) => visualOf(t) === 'pending_payment').length;
-  const occupiedCount = visibleTables.filter((t) => isOccupiedStatus(visualOf(t))).length - toChargeCount;
-  const reservedCount = visibleTables.filter((t) => t.status === 'reserved').length;
-  const cleaningCount = visibleTables.filter((t) => t.status === 'unavailable').length;
+  const statsTables = activeRoom ? roomTables : visibleTables;
+  const freeCount = statsTables.filter((t) => visualOf(t) === 'available').length;
+  const toChargeCount = statsTables.filter((t) => visualOf(t) === 'pending_payment').length;
+  const occupiedCount = statsTables.filter((t) => isOccupiedStatus(visualOf(t))).length - toChargeCount;
+  const reservedCount = statsTables.filter((t) => visualOf(t) === 'reserved').length;
+  const cleaningCount = statsTables.filter((t) => visualOf(t) === 'unavailable').length;
 
   const openEditTable = (table: DiningTable) => {
     setEditTable(table);
@@ -818,7 +819,7 @@ export function RestaurantSalaLiveView({
             {sortedRooms.map((room) => {
               const zoneTables = tablesForRoom(tables, room);
               const count = zoneTables.length;
-              const zoneFree = zoneTables.filter((t) => t.status === 'available').length;
+              const zoneFree = zoneTables.filter((t) => visualOf(t) === 'available').length;
               const selected = (activeRoom?.id || '') === room.id;
               return (
                 <button

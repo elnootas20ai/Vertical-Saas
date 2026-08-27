@@ -196,7 +196,8 @@ function isComplementStockItem(item: CatalogItem): boolean {
   return false;
 }
 
-function foodLineLabel(brand: InventoryCommercialBrand): string {
+function foodLineLabel(brand: InventoryCommercialBrand, opts?: { omitBrandName?: boolean }): string {
+  if (opts?.omitBrandName) return 'Ingredientes';
   const name = String(brand.name || '').trim() || 'Línea';
   return `Ingredientes · ${name}`;
 }
@@ -207,7 +208,7 @@ function labelForOrganizerGroup(id: string, commercialBrands: InventoryCommercia
   if (id === ORGANIZER_PACKAGING) return 'Envases';
   if (id === ORGANIZER_CLEANING) return 'Limpieza';
   if (id === ORGANIZER_VARIOS) return 'Varios';
-  if (id === ORGANIZER_TOTAL) return 'Sin clasificar';
+  if (id === ORGANIZER_TOTAL) return 'Ingredientes';
   const brand = commercialBrands.find((b) => b._id === id);
   if (brand) {
     if (brand.deliveryLineKind === 'drinks_desserts') {
@@ -218,7 +219,8 @@ function labelForOrganizerGroup(id: string, commercialBrands: InventoryCommercia
   return 'Otros';
 }
 
-function resolveFoodLineOrganizerId(
+/** Organizador de almacén al que pertenece un ingrediente TPV (marca/línea). */
+export function resolveStoreIngredientOrganizerId(
   ing: StoreIngredient,
   commercialBrands: InventoryCommercialBrand[],
 ): string | null {
@@ -255,7 +257,7 @@ function resolveFoodLineOrganizerId(
  */
 export function listInventoryOrganizerChoices(
   commercialBrands: InventoryCommercialBrand[] = [],
-  opts?: { inUseOrganizerIds?: string[] },
+  opts?: { inUseOrganizerIds?: string[]; omitBrandInFoodLabels?: boolean },
 ): Array<{ id: string; label: string; inUse: boolean }> {
   const foodBrands = commercialBrands
     .filter((b) => b.deliveryLineKind !== 'drinks_desserts')
@@ -277,7 +279,11 @@ export function listInventoryOrganizerChoices(
   const genericInUse = (id: string) => (inUseIds ? inUseIds.has(id) : true);
 
   return [
-    ...foodBrands.map((b) => ({ id: b._id, label: foodLineLabel(b), inUse: true })),
+    ...foodBrands.map((b) => ({
+      id: b._id,
+      label: foodLineLabel(b, { omitBrandName: opts?.omitBrandInFoodLabels }),
+      inUse: true,
+    })),
     { id: ORGANIZER_BEVERAGES, label: 'Bebidas', inUse: genericInUse(ORGANIZER_BEVERAGES) },
     { id: ORGANIZER_COMPLEMENTS, label: 'Complementos', inUse: genericInUse(ORGANIZER_COMPLEMENTS) },
     { id: ORGANIZER_PACKAGING, label: 'Envases', inUse: genericInUse(ORGANIZER_PACKAGING) },
@@ -324,7 +330,7 @@ export function resolveInventoryOrganizerId(
     storeIngredientsByName.get(foldIngredientKey(item.name));
 
   if (ing) {
-    const lineId = resolveFoodLineOrganizerId(ing, commercialBrands);
+    const lineId = resolveStoreIngredientOrganizerId(ing, commercialBrands);
     if (lineId) return lineId;
   }
 

@@ -5,6 +5,7 @@ import {
   buildCatalogImportIndexes,
   catalogImportIdentityKey,
   catalogLooseIdentityKey,
+  findCatalogItemByDuplicateName,
   resolveExistingCatalogItemForImport,
 } from '../shared/catalog/catalogItemIdentity.js';
 
@@ -50,6 +51,13 @@ describe('catalogItemIdentity', () => {
     };
     expect(catalogLooseIdentityKey(legacy)).toBe(catalogLooseIdentityKey(imported));
     expect(catalogImportIdentityKey(legacy)).not.toBe(catalogImportIdentityKey(imported));
+  });
+
+  it('findCatalogItemByDuplicateName ignora mayúsculas y acentos', () => {
+    const items = [{ _id: '1', module: 'catalog', name: 'Piña Colada' }];
+    expect(
+      findCatalogItemByDuplicateName(items, 'pina colada')?._id,
+    ).toBe('1');
   });
 
   it('resolveExistingCatalogItemForImport encuentra legacy por nombre+categoría', () => {

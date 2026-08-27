@@ -1288,7 +1288,7 @@ export function TpvTab({ userName, userId, view }: TpvTabProps) {
               type="button"
               onClick={() => setShowInviteModal(true)}
               disabled={!currentBusiness?.business_id || teamLoading}
-              title="Invitar miembro al equipo"
+              title="Invitar Trabajador"
               className="shrink-0 w-12 flex items-center justify-center rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 hover:border-gray-900 dark:hover:border-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/80 disabled:opacity-50 disabled:pointer-events-none transition-colors"
             >
               <Plus className="w-5 h-5" />

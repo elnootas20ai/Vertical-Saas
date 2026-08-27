@@ -410,7 +410,24 @@ export function DeliveryOpsInsightsPanel({
       </div>
 
       {loading ? (
-        <p className="mt-2 text-xs text-gray-500">Cargando…</p>
+        <div className="mt-2.5 space-y-2 animate-pulse" aria-busy="true" aria-label="Cargando tiempos">
+          {[0, 1].map((i) => (
+            <div
+              key={i}
+              className="rounded-xl border border-gray-100 bg-gray-50/60 px-3 py-2.5 dark:border-gray-800 dark:bg-gray-800/40"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="h-3 w-28 rounded bg-gray-200 dark:bg-gray-700" />
+                <div className="h-3 w-12 rounded bg-gray-200 dark:bg-gray-700" />
+              </div>
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                <div className="h-8 rounded-lg bg-gray-100 dark:bg-gray-800" />
+                <div className="h-8 rounded-lg bg-gray-100 dark:bg-gray-800" />
+                <div className="h-8 rounded-lg bg-gray-100 dark:bg-gray-800" />
+              </div>
+            </div>
+          ))}
+        </div>
       ) : (
         <div className="mt-2 space-y-2">
           <div className="space-y-1.5">

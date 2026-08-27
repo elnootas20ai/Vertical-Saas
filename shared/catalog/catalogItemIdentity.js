@@ -20,30 +20,39 @@ export function catalogImportIdentityKey(item) {
   return `${moduleKey}|${businessKey}|name|${name}::${category}`;
 }
 
-/** Clave laxa para dedupe UI: mismo producto de carta (nombre + categoría + módulo). */
+/** Clave laxa para dedupe UI: un producto de carta por nombre (mismo módulo). */
 export function catalogLooseIdentityKey(item) {
   const moduleKey = String(item?.module || 'catalog');
   const name = normalizeCatalogItemIdentityValue(item?.name);
-  const category = normalizeCatalogItemIdentityValue(item?.category);
-  return `${moduleKey}|name|${name}::${category}`;
+  return `${moduleKey}|name|${name}`;
 }
 
-/** ¿Mismo producto importable/legacy (ignora SKU distinto o business_id vacío)? */
+/** ¿Mismo producto importable/legacy (mismo nombre en el mismo ámbito)? */
 export function isSameLooseCatalogProduct(a, b) {
   if (!a || !b) return false;
   if (String(a?.module || 'catalog') !== String(b?.module || 'catalog')) return false;
   if (normalizeCatalogItemIdentityValue(a?.name) !== normalizeCatalogItemIdentityValue(b?.name)) {
     return false;
   }
-  if (
-    normalizeCatalogItemIdentityValue(a?.category) !== normalizeCatalogItemIdentityValue(b?.category)
-  ) {
-    return false;
-  }
   const aBiz = String(a?.business_id || a?.businessId || '').trim();
   const bBiz = String(b?.business_id || b?.businessId || '').trim();
   if (aBiz && bBiz && aBiz !== bBiz) return false;
   return true;
+}
+
+/** Busca un artículo de carta con el mismo nombre (normalizado). */
+export function findCatalogItemByDuplicateName(items, name, options = {}) {
+  const nameKey = normalizeCatalogItemIdentityValue(name);
+  if (!nameKey) return null;
+  const moduleKey = String(options.module || 'catalog');
+  const excludeId = String(options.excludeId || '').trim();
+  for (const item of items || []) {
+    if (!item || item.deletedAt) continue;
+    if (String(item.module || 'catalog') !== moduleKey) continue;
+    if (excludeId && String(item._id || '') === excludeId) continue;
+    if (normalizeCatalogItemIdentityValue(item.name) === nameKey) return item;
+  }
+  return null;
 }
 
 export function buildCatalogImportIndexes(existingItems) {

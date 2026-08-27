@@ -3,7 +3,7 @@
  * Carga catálogo/ingredientes solo al montar (lazy panel).
  */
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Layers, Loader2 } from 'lucide-react';
+import { AlertTriangle, Layers } from 'lucide-react';
 import { listBrandsRequest, type Brand } from '../../lib/brandsApi';
 import { commercialLineBrands } from '../../lib/deliveryCatalogImportLogic';
 import { sortBrandsForDisplay } from '../../lib/brandUtils';
@@ -198,9 +198,32 @@ export function DeliverySoldProductMarginPanel({
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center gap-2 py-10 text-sm text-gray-500">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Cargando costes de escandallo…
+        <div className="animate-pulse space-y-3 py-2" aria-busy="true" aria-label="Cargando ranking de margen">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {[0, 1, 2, 3].map((i) => (
+              <div
+                key={i}
+                className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/40"
+              >
+                <div className="h-2.5 w-14 rounded bg-gray-200 dark:bg-gray-700" />
+                <div className="mt-2 h-4 w-16 rounded bg-gray-200 dark:bg-gray-700" />
+              </div>
+            ))}
+          </div>
+          <div className="space-y-2">
+            {[0, 1, 2, 3, 4].map((i) => (
+              <div
+                key={i}
+                className="flex items-center justify-between gap-2 rounded-xl border border-gray-100 px-3 py-2.5 dark:border-gray-700"
+              >
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  <div className="h-3 w-40 rounded bg-gray-200 dark:bg-gray-700" />
+                  <div className="h-2 w-24 rounded bg-gray-100 dark:bg-gray-800" />
+                </div>
+                <div className="h-4 w-14 rounded bg-gray-200 dark:bg-gray-700" />
+              </div>
+            ))}
+          </div>
         </div>
       ) : error ? (
         <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-3 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300">

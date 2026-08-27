@@ -47,8 +47,13 @@ export const DELIVERY_CATALOG_OPTIONAL_COLUMNS = [
   'unit',
 ] as const;
 
+/** Escandallo: coste unitario y % merma (misma convención que eventos). */
+export const DELIVERY_CATALOG_ESCANDALLO_COLUMNS = ['costPrice', 'mermaPct'] as const;
+
 export const DELIVERY_CATALOG_IMPORT_LABELS: Record<
-  (typeof DELIVERY_CATALOG_IMPORT_COLUMNS)[number] | (typeof DELIVERY_CATALOG_OPTIONAL_COLUMNS)[number],
+  (typeof DELIVERY_CATALOG_IMPORT_COLUMNS)[number] |
+    (typeof DELIVERY_CATALOG_ESCANDALLO_COLUMNS)[number] |
+    (typeof DELIVERY_CATALOG_OPTIONAL_COLUMNS)[number],
   string
 > = {
   name: 'nombre',
@@ -56,6 +61,8 @@ export const DELIVERY_CATALOG_IMPORT_LABELS: Record<
   category: 'categoria',
   linea: 'linea',
   price: 'precio',
+  costPrice: 'coste',
+  mermaPct: 'merma_pct',
   ingredients: 'ingredientes',
   description: 'descripcion',
   tipo_menu: 'tipo_menu',
@@ -67,14 +74,16 @@ export const DELIVERY_CATALOG_IMPORT_LABELS: Record<
   unit: 'unidad',
 };
 
-/** Cabeceras exactas de la hoja «catalogo» (core + opcionales). No renombrar. */
+/** Cabeceras exactas de la hoja «catalogo» (core + escandallo + opcionales). No renombrar. */
 export const DELIVERY_CATALOG_TEMPLATE_HEADERS = [
-  ...DELIVERY_CATALOG_IMPORT_COLUMNS.map((key) => DELIVERY_CATALOG_IMPORT_LABELS[key]),
+  ...DELIVERY_CATALOG_IMPORT_COLUMNS.slice(0, 5).map((key) => DELIVERY_CATALOG_IMPORT_LABELS[key]),
+  ...DELIVERY_CATALOG_ESCANDALLO_COLUMNS.map((key) => DELIVERY_CATALOG_IMPORT_LABELS[key]),
+  ...DELIVERY_CATALOG_IMPORT_COLUMNS.slice(5).map((key) => DELIVERY_CATALOG_IMPORT_LABELS[key]),
   ...DELIVERY_CATALOG_OPTIONAL_COLUMNS.map((key) => DELIVERY_CATALOG_IMPORT_LABELS[key]),
 ];
 
 /** Versión de la plantilla (solo cambiar si hay migración acordada). */
-export const DELIVERY_CATALOG_TEMPLATE_VERSION = 5;
+export const DELIVERY_CATALOG_TEMPLATE_VERSION = 6;
 
 export const DELIVERY_CATALOG_TEMPLATE_FILENAME = 'plantilla_catalogo_tpv.xlsx';
 export const HELADERIA_CATALOG_TEMPLATE_FILENAME = 'plantilla_catalogo_heladeria.xlsx';
@@ -119,6 +128,11 @@ export const RESTAURANT_WAREHOUSE_CATEGORIES = ['Envases', 'Limpieza', 'Varios']
 /** @deprecated Incluidas en DELIVERY_CATALOG_OPTIONAL_COLUMNS / plantilla v5. */
 export const HELADERIA_CATALOG_EXTRA_HEADERS = ['alergenos', 'formato'] as const;
 
+const CATALOG_ESCANDALLO_IMPORT_FIELDS: ImportFieldDef[] = [
+  { key: 'costPrice', label: 'coste', example: '2.80' },
+  { key: 'mermaPct', label: 'merma_pct', example: '5' },
+];
+
 const CATALOG_OPTIONAL_IMPORT_FIELDS: ImportFieldDef[] = [
   { key: 'tipo_menu', label: 'tipo_menu', example: 'estandar' },
   { key: 'taxRate', label: 'iva', example: '10' },
@@ -135,6 +149,7 @@ export const DELIVERY_CATALOG_IMPORT_FIELDS: ImportFieldDef[] = [
   { key: 'category', label: 'categoria', required: true, example: 'Pizzas' },
   { key: 'linea', label: 'linea', example: 'modomio' },
   { key: 'price', label: 'precio', required: true, example: '9.50' },
+  ...CATALOG_ESCANDALLO_IMPORT_FIELDS,
   { key: 'ingredients', label: 'ingredientes', example: 'Tomate, Mozzarella, Albahaca' },
   { key: 'description', label: 'descripcion', example: '' },
   ...CATALOG_OPTIONAL_IMPORT_FIELDS,
@@ -146,6 +161,7 @@ export const HELADERIA_CATALOG_IMPORT_FIELDS: ImportFieldDef[] = [
   { key: 'category', label: 'categoria', required: true, example: 'Sabores' },
   { key: 'linea', label: 'linea', example: 'Heladería' },
   { key: 'price', label: 'precio', required: true, example: '2.80' },
+  ...CATALOG_ESCANDALLO_IMPORT_FIELDS,
   { key: 'ingredients', label: 'ingredientes', example: 'Leche, nata, vainilla' },
   { key: 'description', label: 'descripcion', example: 'Helado artesano' },
   ...CATALOG_OPTIONAL_IMPORT_FIELDS.map((f) =>
@@ -164,6 +180,7 @@ export const RESTAURANT_CATALOG_IMPORT_FIELDS: ImportFieldDef[] = [
   { key: 'category', label: 'categoria', required: true, example: 'Tapas' },
   { key: 'linea', label: 'linea', example: 'Tu marca' },
   { key: 'price', label: 'precio', required: true, example: '4.50' },
+  ...CATALOG_ESCANDALLO_IMPORT_FIELDS,
   { key: 'ingredients', label: 'ingredientes', example: 'Patata, Aceite, Pimentón' },
   { key: 'description', label: 'descripcion', example: '' },
   ...CATALOG_OPTIONAL_IMPORT_FIELDS.map((f) =>
@@ -304,25 +321,16 @@ export function lineCategoriesForCatalogTemplate(
     return [...HELADERIA_CATALOG_CATEGORIES];
   }
 
+  // Bar/restaurante: plantilla genérica; categorías de marca solo tras import (brand.catalogCategories).
+  if (isRestaurantCatalogVertical(vertical)) {
+    return [...RESTAURANT_CATALOG_CATEGORIES];
+  }
+
   const kind = String(brand.deliveryLineKind || '').trim();
   const preset = getDeliveryBrandLinePreset(kind);
   const fromPreset = (preset?.typicalCategories ?? [])
     .map((c) => normalizeImportCategory(c))
     .filter((c) => c && !shouldClearBrandForCategory(c));
-
-  // Bar/restaurante: no inventar Pizzas/Burgers si la marca no trae categorías.
-  // Solo usar preset delivery (pizza/burger/…) si el tipo de línea es explícito.
-  if (isRestaurantCatalogVertical(vertical)) {
-    if (fromPreset.length > 0 && kind && kind !== 'mixed_restaurant') {
-      return [...fromPreset, 'Combos'];
-    }
-    const tapas = getDeliveryBrandLinePreset('tapas_bar');
-    const fromTapas = (tapas?.typicalCategories ?? [])
-      .map((c) => normalizeImportCategory(c))
-      .filter((c) => c && !shouldClearBrandForCategory(c));
-    if (fromTapas.length > 0) return [...fromTapas, 'Combos'];
-    return [...RESTAURANT_CATALOG_CATEGORIES];
-  }
 
   if (fromPreset.length > 0) return [...fromPreset, 'Combos'];
 
@@ -414,6 +422,8 @@ export function buildDeliveryCatalogSampleRows(
           cat,
           lineName,
           price,
+          '',
+          '',
           ingredients,
           i === 0 ? `Ejemplo · borra y pon tus productos · linea=${lineName}` : '',
         ], vertical),
@@ -427,6 +437,8 @@ export function buildDeliveryCatalogSampleRows(
         'Combos',
         lineName,
         restaurant ? '12.90' : '14.90',
+        '',
+        '',
         '',
         'Menú TPV · borra o duplica',
         'estandar',
@@ -449,6 +461,8 @@ export function buildDeliveryCatalogSampleRows(
         '',
         cat === 'Bebidas' ? '2.50' : cat === 'Complementos' ? '3.00' : '4.50',
         '',
+        '',
+        '',
         note,
       ], vertical),
     );
@@ -457,21 +471,21 @@ export function buildDeliveryCatalogSampleRows(
   if (lines.length === 0) {
     if (restaurant) {
       return [
-        padCatalogTemplateRow(['Patatas bravas', 'TAP-001', 'Tapas', '', '4.50', 'Patata, Aceite, Pimentón', 'Ejemplo · crea tu marca en Ajustes y ponla en linea', '', '10', 'gluten'], vertical),
-        padCatalogTemplateRow(['Bocadillo mixto', 'BOC-001', 'Bocadillos', '', '5.50', 'Pan barra, Jamón serrano, Queso', '', '', '10', 'gluten'], vertical),
-        padCatalogTemplateRow(['Caña', 'BEB-001', 'Bebidas', '', '1.80', '', 'linea vacía en bebidas', '', '10'], vertical),
-        padCatalogTemplateRow(['Patatas fritas', 'COM-001', 'Complementos', '', '3.00', '', '', '', '10'], vertical),
-        padCatalogTemplateRow(['Tarta de queso', 'POS-001', 'Postres', '', '4.50', '', '', '', '10', 'leche'], vertical),
-        padCatalogTemplateRow(['Papel higiénico', 'ALM-001', 'Limpieza', '', '0', '', 'Almacén · no sale en TPV', '', '21', '', '', '24', '5', 'ud'], vertical),
-        padCatalogTemplateRow(['Vasos de plástico', 'ALM-002', 'Envases', '', '0', '', 'Almacén · packaging', '', '21', '', '', '100', '20', 'ud'], vertical),
-        padCatalogTemplateRow(['Guantes desechables', 'ALM-003', 'Varios', '', '0', '', 'Almacén · consumible', '', '21', '', '', '50', '10', 'ud'], vertical),
+        padCatalogTemplateRow(['Patatas bravas', 'TAP-001', 'Tapas', '', '4.50', '1.80', '5', 'Patata, Aceite, Pimentón', 'Ejemplo · crea tu marca en Ajustes y ponla en linea', '', '10', 'gluten'], vertical),
+        padCatalogTemplateRow(['Bocadillo mixto', 'BOC-001', 'Bocadillos', '', '5.50', '2.20', '5', 'Pan barra, Jamón serrano, Queso', '', '', '10', 'gluten'], vertical),
+        padCatalogTemplateRow(['Caña', 'BEB-001', 'Bebidas', '', '1.80', '0.35', '2', '', 'linea vacía en bebidas', '', '10'], vertical),
+        padCatalogTemplateRow(['Patatas fritas', 'COM-001', 'Complementos', '', '3.00', '0.80', '5', '', '', '', '10'], vertical),
+        padCatalogTemplateRow(['Tarta de queso', 'POS-001', 'Postres', '', '4.50', '1.50', '5', '', '', '', '10', 'leche'], vertical),
+        padCatalogTemplateRow(['Papel higiénico', 'ALM-001', 'Limpieza', '', '0', '', '', '', 'Almacén · no sale en TPV', '', '21', '', '', '24', '5', 'ud'], vertical),
+        padCatalogTemplateRow(['Vasos de plástico', 'ALM-002', 'Envases', '', '0', '', '', '', 'Almacén · packaging', '', '21', '', '', '100', '20', 'ud'], vertical),
+        padCatalogTemplateRow(['Guantes desechables', 'ALM-003', 'Varios', '', '0', '', '', '', 'Almacén · consumible', '', '21', '', '', '50', '10', 'ud'], vertical),
       ];
     }
     return [
-      padCatalogTemplateRow(['Pizza Margarita', 'PIZ-001', 'Pizzas', '', '9.50', 'Tomate, Mozzarella', 'Ejemplo · crea tu marca en Ajustes y ponla en linea', '', '10'], vertical),
-      padCatalogTemplateRow(['Agua 50cl', 'BEB-001', 'Bebidas', '', '1.80', '', 'linea vacía', '', '10'], vertical),
-      padCatalogTemplateRow(['Patatas fritas', 'COM-001', 'Complementos', '', '3.00', '', '', '', '10'], vertical),
-      padCatalogTemplateRow(['Tarta de queso', 'POS-001', 'Postres', '', '4.50', '', '', '', '10'], vertical),
+      padCatalogTemplateRow(['Pizza Margarita', 'PIZ-001', 'Pizzas', '', '9.50', '2.80', '5', 'Tomate, Mozzarella', 'Ejemplo · crea tu marca en Ajustes y ponla en linea', '', '10'], vertical),
+      padCatalogTemplateRow(['Agua 50cl', 'BEB-001', 'Bebidas', '', '1.80', '0.35', '2', '', 'linea vacía', '', '10'], vertical),
+      padCatalogTemplateRow(['Patatas fritas', 'COM-001', 'Complementos', '', '3.00', '0.80', '5', '', '', '', '10'], vertical),
+      padCatalogTemplateRow(['Tarta de queso', 'POS-001', 'Postres', '', '4.50', '1.50', '5', '', '', '', '10'], vertical),
     ];
   }
 
@@ -601,8 +615,13 @@ function instructionLines(
       'RELLENA desde la fila 2. Las filas vacías no se importan.',
       '',
       'OBLIGATORIO: nombre · categoria · precio',
-      'RECOMENDADO: codigo · linea · ingredientes · descripcion',
+      'RECOMENDADO: codigo · linea · coste · merma_pct · ingredientes · descripcion',
       'OPCIONAL (ya en el Excel): tipo_menu · iva · alergenos · formato · stock · stock_minimo · unidad',
+      '',
+      'ESCANDALLO (columnas coste · merma_pct · ingredientes):',
+      '  · coste — coste unitario del producto (€). Si vacío, Vertial puede estimarlo al importar',
+      '  · merma_pct — % merma esperada (5 = 5%)',
+      '  · ingredientes — Leche, nata, vainilla… (receta en texto)',
       '',
       'HELADERÍA:',
       '  · Sabores — bola / sabor a granel (precio por bola o unidad)',
@@ -616,7 +635,6 @@ function instructionLines(
       'RECOMENDADO:',
       '  · codigo — HEL-VAI-01 (mismo código = actualiza sin duplicar)',
       '  · linea — pestaña TPV: ' + namesText,
-      '  · ingredientes — Leche, nata, vainilla… (escandallo / coste)',
       '',
       'Consulta «columnas», «referencia_tpv» y «valores_validos».',
     ];
@@ -638,8 +656,13 @@ function instructionLines(
       'Lo que pongas en el Excel es lo que se monta en el TPV (categorías y productos).',
       '',
       'OBLIGATORIO: nombre · categoria · precio',
-      'RECOMENDADO: codigo · linea · ingredientes · descripcion',
+      'RECOMENDADO: codigo · linea · coste · merma_pct · ingredientes · descripcion',
       'OPCIONAL (ya en el Excel): tipo_menu · iva · alergenos · formato · stock · stock_minimo · unidad',
+      '',
+      'ESCANDALLO (columnas coste · merma_pct · ingredientes):',
+      '  · coste — coste unitario (€). Si vacío, Vertial puede estimarlo al importar',
+      '  · merma_pct — % merma esperada (5 = 5%)',
+      '  · ingredientes — Patata, Aceite, Jamón, Pan barra… (solo carta)',
       '',
       'BAR / TAPAS / RESTAURANTE:',
       '  · categorias carta (TPV): Tapas, Raciones, Bocadillos, Pinchos, Complementos, Bebidas, Postres',
@@ -649,7 +672,6 @@ function instructionLines(
       '      · Varios — otros consumibles de local',
       '  · en almacén: deja linea vacía y precio 0 (o vacío). Rellena stock / stock_minimo / unidad si quieres',
       '  · NO uses categorías de delivery (Pizzas, Burgers, Tacos) salvo que las vendas de verdad',
-      '  · ingredientes — Patata, Aceite, Jamón, Pan barra… (escandallo; solo carta)',
       '  · IVA vacío → 10% al importar',
       '',
       'MENÚS / COMBOS (categoria = Combos):',
@@ -680,12 +702,16 @@ function instructionLines(
     'RELLENA desde la fila 2. Las filas vacías no se importan.',
     '',
     'OBLIGATORIO: nombre · categoria · precio',
-    'RECOMENDADO: codigo · linea · ingredientes · descripcion',
+    'RECOMENDADO: codigo · linea · coste · merma_pct · ingredientes · descripcion',
     'OPCIONAL (ya en el Excel): tipo_menu · iva · alergenos · formato · stock · stock_minimo · unidad',
+    '',
+    'ESCANDALLO (columnas coste · merma_pct · ingredientes):',
+    '  · coste — coste unitario (€). Si vacío, Vertial puede estimarlo al importar',
+    '  · merma_pct — % merma esperada (5 = 5%)',
+    '  · ingredientes — Tomate, Mozzarella, Jamón… (receta en texto)',
     '',
     'DELIVERY:',
     '  · categorias habituales: Pizzas, Burgers, Tacos, Complementos, Bebidas, Postres',
-    '  · ingredientes — Tomate, Mozzarella, Jamón… (escandallo / coste)',
     '  · IVA vacío → 10% al importar',
     '',
     'MENÚS / COMBOS (categoria = Combos):',
@@ -742,6 +768,10 @@ function legendPurposeForField(key: string, vertical?: string | null): string {
       return 'Marca comercial exacta (Ajustes → Marca). Vacía en Bebidas/Complementos/Postres';
     case 'price':
       return 'Precio de venta. Número (9.50). En almacén puedes poner 0';
+    case 'costPrice':
+      return 'Coste unitario (escandallo / coste fijo €). Si vacío, Vertial puede estimarlo al importar';
+    case 'mermaPct':
+      return '% merma esperada al vender (5 = 5%). Afecta descuento de stock';
     case 'ingredients':
       return 'Ingredientes separados por coma (escandallo). Vacío en Combos';
     case 'description':
@@ -766,17 +796,39 @@ function legendPurposeForField(key: string, vertical?: string | null): string {
 }
 
 export function isOfficialCatalogTemplateHeaders(headers: string[]): boolean {
-  const coreHeaders = DELIVERY_CATALOG_CORE_COLUMNS.map((key) => DELIVERY_CATALOG_IMPORT_LABELS[key]);
-  if (headers.length < coreHeaders.length) return false;
-  // Heladería puede traer columnas extra (alergenos, formato) tras el core.
-  return coreHeaders.every((expected, idx) => {
-    const actual = normalizeImportHeader(String(headers[idx] ?? ''));
+  const baseKeys = ['name', 'sku', 'category', 'linea', 'price'] as const;
+  if (headers.length < baseKeys.length + 2) return false;
+
+  for (let i = 0; i < baseKeys.length; i++) {
+    const key = baseKeys[i];
+    const expected = DELIVERY_CATALOG_IMPORT_LABELS[key];
+    const actual = normalizeImportHeader(String(headers[i] ?? ''));
     const exp = normalizeImportHeader(expected);
-    if (DELIVERY_CATALOG_CORE_COLUMNS[idx] === 'sku') {
-      return actual === exp || actual === 'sku';
+    if (key === 'sku') {
+      if (actual !== exp && actual !== 'sku') return false;
+    } else if (actual !== exp) {
+      return false;
     }
-    return actual === exp;
-  });
+  }
+
+  let offset = baseKeys.length;
+  const hCoste = normalizeImportHeader(String(headers[offset] ?? ''));
+  const hMerma = normalizeImportHeader(String(headers[offset + 1] ?? ''));
+  if (
+    hCoste === normalizeImportHeader(DELIVERY_CATALOG_IMPORT_LABELS.costPrice) &&
+    hMerma === normalizeImportHeader(DELIVERY_CATALOG_IMPORT_LABELS.mermaPct)
+  ) {
+    offset += 2;
+  }
+
+  const tailKeys = ['ingredients', 'description'] as const;
+  if (headers.length < offset + tailKeys.length) return false;
+  for (let i = 0; i < tailKeys.length; i++) {
+    const expected = DELIVERY_CATALOG_IMPORT_LABELS[tailKeys[i]];
+    const actual = normalizeImportHeader(String(headers[offset + i] ?? ''));
+    if (actual !== normalizeImportHeader(expected)) return false;
+  }
+  return true;
 }
 
 export function buildDeliveryCatalogImportWorkbook(
@@ -792,8 +844,8 @@ export function buildDeliveryCatalogImportWorkbook(
   const catalogSheet = XLSX.utils.aoa_to_sheet(catalogRows);
   catalogSheet['!cols'] = [
     { wch: 28 }, { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 10 },
-    { wch: 28 }, { wch: 22 }, { wch: 12 }, { wch: 8 }, { wch: 16 },
-    { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 10 },
+    { wch: 10 }, { wch: 10 }, { wch: 28 }, { wch: 22 }, { wch: 12 }, { wch: 8 },
+    { wch: 16 }, { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 10 },
   ];
   catalogSheet['!autofilter'] = { ref: `A1:${lastCol}1` };
   catalogSheet['!freeze'] = { xSplit: 0, ySplit: 1, topLeftCell: 'A2', activePane: 'bottomLeft', state: 'frozen' };

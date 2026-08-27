@@ -13,6 +13,11 @@ import {
 } from './recipeOrderExpansion.js';
 import { recordMovement } from './stockMovementService.js';
 import { isStockInventoryItem, filterStockInventoryItems } from './stockInventoryScope.js';
+import {
+  aggregateNetQtyByCatalogItem,
+  netQtyByItemWarehousePair,
+  parseMovementNetKey,
+} from '../shared/stock/movementNetQty.js';
 import logger from './logger.js';
 
 export async function findActiveRecipeForItem(req, userId, catalogItemId) {
@@ -361,21 +366,13 @@ async function loadUserCatalogById(req, userId) {
 }
 
 function netQtyByMovementPair(movements, outboundType, inboundType) {
-  const map = Object.create(null);
-  for (const m of movements) {
-    const id = m.catalogItemId;
-    if (!id) continue;
-    const q = Number(m.quantity || 0);
-    if (q <= 0) continue;
-    if (m.movementType === outboundType) map[id] = (map[id] || 0) + q;
-    else if (m.movementType === inboundType) map[id] = (map[id] || 0) - q;
-  }
-  return map;
+  return netQtyByItemWarehousePair(movements, outboundType, inboundType);
 }
 
 /**
  * Revierte movimientos de stock pendientes para un pedido delivery (venta + consumos de receta),
  * usando los movimientos ya registrados (simétrico al descuento). Idempotente si se llama dos veces.
+ * Restaura en el mismo warehouseId de cada movimiento original.
  */
 export async function restoreDeliveryOrderStockFromMovements(req, userId, {
   orderId,
@@ -389,45 +386,39 @@ export async function restoreDeliveryOrderStockFromMovements(req, userId, {
   const restored = [];
   const warnings = [];
 
-  for (const catalogItemId of Object.keys(saleNet)) {
-    const net = saleNet[catalogItemId];
-    if (net <= 1e-9) continue;
-    try {
-      const mov = await recordMovement(req, userId, {
-        catalogItemId,
-        movementType: 'sale_reversal',
-        quantity: net,
-        referenceId: orderId,
-        referenceType: orderType,
-        performedBy,
-        notes: 'Devolución / salida de entregado — reverso venta (delivery)',
-      });
-      restored.push(mov);
-    } catch (err) {
-      warnings.push(`sale_reversal ${catalogItemId}: ${err?.message || err}`);
-      logger.warn({ tag: 'RECIPE_STOCK', orderId, catalogItemId, err: err?.message }, 'Error reverso venta delivery');
+  async function reverseNetMap(netMap, movementType, notes) {
+    for (const [key, net] of Object.entries(netMap)) {
+      if (!(net > 1e-9)) continue;
+      const { catalogItemId, warehouseId } = parseMovementNetKey(key);
+      if (!catalogItemId) continue;
+      try {
+        const mov = await recordMovement(req, userId, {
+          catalogItemId,
+          movementType,
+          quantity: net,
+          warehouseId,
+          referenceId: orderId,
+          referenceType: orderType,
+          performedBy,
+          notes,
+        });
+        restored.push(mov);
+      } catch (err) {
+        warnings.push(`${movementType} ${catalogItemId}: ${err?.message || err}`);
+        logger.warn(
+          { tag: 'RECIPE_STOCK', orderId, catalogItemId, warehouseId, err: err?.message },
+          `Error reverso ${movementType} delivery`,
+        );
+      }
     }
   }
 
-  for (const catalogItemId of Object.keys(recipeNet)) {
-    const net = recipeNet[catalogItemId];
-    if (net <= 1e-9) continue;
-    try {
-      const mov = await recordMovement(req, userId, {
-        catalogItemId,
-        movementType: 'recipe_consumption_reversal',
-        quantity: net,
-        referenceId: orderId,
-        referenceType: orderType,
-        performedBy,
-        notes: 'Devolución / salida de entregado — reverso consumo receta (delivery)',
-      });
-      restored.push(mov);
-    } catch (err) {
-      warnings.push(`recipe_consumption_reversal ${catalogItemId}: ${err?.message || err}`);
-      logger.warn({ tag: 'RECIPE_STOCK', orderId, catalogItemId, err: err?.message }, 'Error reverso receta delivery');
-    }
-  }
+  await reverseNetMap(saleNet, 'sale_reversal', 'Devolución / salida de entregado — reverso venta (delivery)');
+  await reverseNetMap(
+    recipeNet,
+    'recipe_consumption_reversal',
+    'Devolución / salida de entregado — reverso consumo receta (delivery)',
+  );
 
   if (restored.length === 0) {
     logger.info({ tag: 'RECIPE_STOCK', orderId }, 'Sin stock neto a revertir para este pedido');
@@ -456,7 +447,9 @@ export async function deductOrderByRecipe(req, userId, {
   const inventoryItems = filterStockInventoryItems([...catalogById.values()]);
 
   const movements = await listDeliveryOrderRefMovements(req, userId, orderId, orderType);
-  const saleNet = netQtyByMovementPair(movements, 'sale', 'sale_reversal');
+  const saleNet = aggregateNetQtyByCatalogItem(
+    netQtyByMovementPair(movements, 'sale', 'sale_reversal'),
+  );
 
   const allDeducted = [];
   const allWarnings = [];

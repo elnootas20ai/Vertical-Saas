@@ -108,6 +108,7 @@ import { alertRouter } from './routers/alertRouter.js';
 import { recipeRouter } from './routers/recipeRouter.js';
 import { wasteRouter } from './routers/wasteRouter.js';
 import { stockCountRouter } from './routers/stockCountRouter.js';
+import { stockAnalyticsRouter } from './routers/stockAnalyticsRouter.js';
 import { butcherRouter } from './routers/butcherRouter.js';
 import { deliveryAlertRouter } from './routers/deliveryAlertRouter.js';
 import { deliveryReportsRouter } from './routers/deliveryReportsRouter.js';
@@ -1071,6 +1072,7 @@ const internalRouters = [
   ['/api/recipes',         ...saasAuthGate, recipeRouter],
   ['/api/waste',           ...saasAuthGate, wasteRouter],
   ['/api/stock-counts',    ...saasAuthGate, stockCountRouter],
+  ['/api/stock-analytics', ...saasAuthGate, stockAnalyticsRouter],
   ['/api/stock-movements', ...saasAuthGate, stockMovementRouter],
   ['/api/store-transfers', ...saasAuthGate, storeTransferRouter],
   ['/api/setup-progress',  ...saasAuthGate, setupProgressRouter],

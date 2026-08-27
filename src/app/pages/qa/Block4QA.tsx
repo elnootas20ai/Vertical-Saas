@@ -106,7 +106,7 @@ const items: QAItem[] = [
   },
   {
     module: 'SAAS__ Team',
-    feature: 'Botón "Invitar miembro"',
+    feature: 'Botón "Invitar Trabajador"',
     status: 'ok'
   },
   {

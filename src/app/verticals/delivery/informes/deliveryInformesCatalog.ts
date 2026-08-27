@@ -79,7 +79,8 @@ export type DeliveryInformeId =
   | 'stock-dependencia-proveedores'
   | 'stock-punto-pedido'
   | 'stock-escandallo'
-  | 'stock-reductores';
+  | 'stock-reductores'
+  | 'stock-gerencial';
 
 export type DeliveryInformeEntry = {
   id: DeliveryInformeId;
@@ -444,16 +445,24 @@ export const DELIVERY_INFORMES_CATALOG: DeliveryInformeEntry[] = [
     category: 'stock',
     title: 'Escandallo',
     description: 'Coste de receta / escandallo vs ventas.',
-    nivel: 'pro',
-    kind: 'skeleton',
+    nivel: 'normal',
+    kind: 'live',
   },
   {
     id: 'stock-reductores',
     category: 'stock',
     title: 'Reductores',
     description: 'Mermas, reductores y pérdidas de stock.',
+    nivel: 'normal',
+    kind: 'live',
+  },
+  {
+    id: 'stock-gerencial',
+    category: 'stock',
+    title: 'Informe gerencial',
+    description: 'Comparativa, evolución semanal y P&L por tienda.',
     nivel: 'pro',
-    kind: 'skeleton',
+    kind: 'live',
   },
 
   // ── Equipo (captura hub — 8) ─────────────────────────────────────────────

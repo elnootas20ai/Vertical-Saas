@@ -158,12 +158,15 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
     Array.isArray(seedStockItems) && filterStockInventoryItems(seedStockItems).length > 0,
   );
 
+  const scopeSalesPointId = String(scopeInput?.salesPointId || '').trim();
   const activeSalesPointId = String(activeStore.activeSalesPointId || '').trim();
+  /** TPV abierto manda sobre el PDV del sidebar (Disponible / traspasos). */
+  const resolvedSalesPointId = scopeSalesPointId || activeSalesPointId;
 
   const storeLabel = useMemo(() => {
     if (scopeInput?.storeLabel) return scopeInput.storeLabel;
-    if (activeSalesPointId) {
-      const pdv = activeStore.pointsOfSale.find((p) => p._id === activeSalesPointId);
+    if (resolvedSalesPointId) {
+      const pdv = activeStore.pointsOfSale.find((p) => p._id === resolvedSalesPointId);
       if (pdv?.name) return storeWarehouseDisplayName(pdv.name);
     }
     if (activeStore.displayLabelForActive) return storeWarehouseDisplayName(activeStore.displayLabelForActive);
@@ -171,7 +174,7 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
     return 'Almacén';
   }, [
     scopeInput?.storeLabel,
-    activeSalesPointId,
+    resolvedSalesPointId,
     activeStore.pointsOfSale,
     activeStore.displayLabelForActive,
     currentBusiness?.name,
@@ -179,14 +182,14 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
 
   const storeWarehouseId = useMemo(() => {
     const activeWh = warehouses.filter((w) => w.active !== false);
-    if (activeSalesPointId) {
-      const linked = findWarehouseForSalesPoint(activeWh, activeSalesPointId);
+    if (resolvedSalesPointId) {
+      const linked = findWarehouseForSalesPoint(activeWh, resolvedSalesPointId);
       if (linked) return linked._id;
     }
     const label = storeLabel.toLowerCase();
     const byName = activeWh.find((w) => label && w.name.toLowerCase().includes(label.split(/\s+/)[0] || ''));
     return byName?._id || activeWh.find((w) => w.isDefault)?._id || activeWh[0]?._id || '';
-  }, [warehouses, storeLabel, activeSalesPointId]);
+  }, [warehouses, storeLabel, resolvedSalesPointId]);
 
   const stockItems = useMemo(() => filterStockInventoryItems(items), [items]);
 
