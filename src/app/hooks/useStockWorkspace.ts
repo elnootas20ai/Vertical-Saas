@@ -16,6 +16,7 @@ import {
 } from '../lib/warehouseApi';
 import { quantityForWarehouse, storeWarehouseDisplayName } from '../lib/warehouseStockQty';
 import type { BusinessType } from '../lib/businessApi';
+import { restaurantWarehouseViaExcelOnly } from '../verticals/restaurant/restaurantWarehousePolicy';
 
 export type StockWorkspaceScopeInput = {
   dataUserId?: string;
@@ -220,6 +221,10 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
       setLoading(true);
       setLoadDetail('Leyendo almacén…');
     }
+    const watchdog = window.setTimeout(() => {
+      setLoading(false);
+      setLoadDetail('');
+    }, 45_000);
     try {
       const needBrands = Boolean(businessId) && businesses.length > 1;
       const [stockCatalog, wh, brands] = await Promise.all([
@@ -238,6 +243,9 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
       hasPaintedRef.current = true;
       setLoading(false);
       setLoadDetail('');
+      if (restaurantWarehouseViaExcelOnly(businessType)) {
+        return;
+      }
       const pos = pointsOfSaleRef.current || [];
       if (!warehousesCoverAllStores(wh, pos)) {
         void ensureClientStoreWarehouses(dataUserId, pos, wh).then((ensured) => {
@@ -251,6 +259,8 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
       }
       setLoading(false);
       setLoadDetail('');
+    } finally {
+      window.clearTimeout(watchdog);
     }
   }, [
     businessId,

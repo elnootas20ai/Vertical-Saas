@@ -40,7 +40,18 @@ function getCouchHeaders(): Record<string, string> {
 
 type DeliveryRequestOptions = {
   suppressLogout?: boolean;
+  timeoutMs?: number;
 };
+
+const DELIVERY_API_TIMEOUT_MS = 50_000;
+
+function deliveryRequestSignal(init?: RequestInit, timeoutMs = DELIVERY_API_TIMEOUT_MS): AbortSignal | undefined {
+  if (init?.signal) return init.signal;
+  if (typeof AbortSignal?.timeout === 'function') {
+    return AbortSignal.timeout(timeoutMs);
+  }
+  return undefined;
+}
 
 function deliveryRequestErrorMessage(payload: { error?: unknown; message?: unknown }, fallback: string): string {
   const err = payload?.error;
@@ -54,8 +65,10 @@ function deliveryRequestErrorMessage(payload: { error?: unknown; message?: unkno
 }
 
 async function request<T>(path: string, init?: RequestInit, options?: DeliveryRequestOptions): Promise<T> {
+  const timeoutMs = options?.timeoutMs ?? DELIVERY_API_TIMEOUT_MS;
   const response = await authFetch(`${API_BASE}${path}`, {
     ...init,
+    signal: deliveryRequestSignal(init, timeoutMs),
     headers: {
       'Content-Type': 'application/json',
       ...getCouchHeaders(),

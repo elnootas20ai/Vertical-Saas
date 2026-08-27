@@ -21,13 +21,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`${API_BASE}${path}`, {
+      ...init,
       headers: {
         'Content-Type': 'application/json',
         ...getAuthHeaders(),
         ...getCouchHeaders(),
         ...(init?.headers || {}),
       },
-      ...init,
+      signal:
+        init?.signal ??
+        (typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(50_000) : undefined),
     });
   } catch (err) {
     throw new Error(

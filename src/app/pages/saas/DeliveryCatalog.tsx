@@ -5069,15 +5069,20 @@ export function CatalogPage() {
   const loadSuppliers = useCallback(async () => {
     if (!dataUserId) return;
     setSuppliersLoading(true);
+    const watchdog = window.setTimeout(() => {
+      setSuppliersLoading(false);
+      suppliersLoadStartedRef.current = false;
+      toast.error('La carga de proveedores está tardando demasiado. Inténtalo de nuevo.');
+    }, 45_000);
     try {
       const data = await listSuppliersRequest(dataUserId);
       setSuppliers(data);
       suppliersFetchedRef.current = true;
     } catch {
-      // Permitir reintento al volver a la pestaña (p. ej. tras caída del backend local).
       suppliersLoadStartedRef.current = false;
       toast.error('Error al cargar proveedores');
     } finally {
+      window.clearTimeout(watchdog);
       setSuppliersLoading(false);
     }
   }, [dataUserId]);
@@ -5085,6 +5090,11 @@ export function CatalogPage() {
   const loadInvoices = useCallback(async () => {
     if (!dataUserId) return;
     setInvoicesHydrating(true);
+    const watchdog = window.setTimeout(() => {
+      setInvoicesHydrating(false);
+      invoicesLoadStartedRef.current = false;
+      toast.error('La carga de facturas está tardando demasiado. Inténtalo de nuevo.');
+    }, 45_000);
     try {
       const data = await listPurchaseInvoicesRequest(dataUserId, {
         businessId: businessId || undefined,
@@ -5096,6 +5106,7 @@ export function CatalogPage() {
       invoicesLoadStartedRef.current = false;
       toast.error('Error al cargar facturas');
     } finally {
+      window.clearTimeout(watchdog);
       setInvoicesHydrating(false);
     }
   }, [dataUserId, businessId, accountBusinessCount]);
@@ -5262,11 +5273,15 @@ export function CatalogPage() {
   }, [loadCatalog]);
 
   useEffect(() => {
-    if (!catalogDataReady || !dataUserId) return;
+    if (!dataUserId) return;
 
     const isComprasTab = COMPRAS_TAB_IDS.has(activeTab);
 
-    if (!suppliersFetchedRef.current && !suppliersLoadStartedRef.current) {
+    if (
+      isComprasTab
+      && !suppliersFetchedRef.current
+      && !suppliersLoadStartedRef.current
+    ) {
       suppliersLoadStartedRef.current = true;
       void loadSuppliers();
     }
@@ -5289,7 +5304,6 @@ export function CatalogPage() {
       void loadPurchaseOrdersForAlbaran();
     }
   }, [
-    catalogDataReady,
     dataUserId,
     activeTab,
     loadSuppliers,

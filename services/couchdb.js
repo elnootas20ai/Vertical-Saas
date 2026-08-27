@@ -11684,6 +11684,9 @@ export async function listCatalogItemsByUser(req, userId, { module: filterModule
   await ensureDatabase(req, db);
   await ensureCatalogTypeUserIndex(req, db);
 
+  const maxDocs =
+    filterModule === 'stock' ? 12_000 : filterModule === 'catalog' ? 12_000 : 20_000;
+
   // Mango por type+user_id: no leer el catálogo compartido entero (_all_docs)
   // solo para listar la carta de un titular (aunque tenga 0 productos).
   let docs;
@@ -11707,17 +11710,16 @@ export async function listCatalogItemsByUser(req, userId, { module: filterModule
     } else {
       selector = { type: 'catalog_item' };
     }
-    docs = await findDocuments(req, db, selector, { pageSize: 1000, maxDocs: 50_000 });
+    docs = await findDocuments(req, db, selector, { pageSize: 500, maxDocs });
   } catch {
     // Nunca caer a _all_docs del catálogo compartido (puede tardar decenas de segundos).
-    // Si el selector con module falla, listar solo por type+user_id (índice estable) y filtrar abajo.
     if (uid) {
       try {
         docs = await findDocuments(
           req,
           db,
           { type: 'catalog_item', user_id: uid },
-          { pageSize: 1000, maxDocs: 50_000 },
+          { pageSize: 500, maxDocs },
         );
       } catch {
         docs = [];
@@ -11828,14 +11830,15 @@ export async function listSuppliersByUser(req, userId) {
   await ensureCatalogTypeUserIndex(req, db);
 
   let docs;
+  const selector = uid ? { type: 'supplier', user_id: uid } : { type: 'supplier' };
   try {
-    const selector = uid ? { type: 'supplier', user_id: uid } : { type: 'supplier' };
-    docs = await findDocuments(req, db, selector, { pageSize: 200, maxDocs: 5_000 });
+    docs = await findDocuments(req, db, selector, { pageSize: 200, maxDocs: 3_000 });
   } catch {
-    const all = await getCatalogDatabaseDocumentsInflight(req);
-    docs = all.filter(
-      (doc) => doc?.type === 'supplier' && !doc?.deletedAt && (!uid || doc?.user_id === uid),
-    );
+    try {
+      docs = await findDocuments(req, db, selector, { pageSize: 200, maxDocs: 3_000 });
+    } catch {
+      docs = [];
+    }
   }
 
   return docs
@@ -12106,14 +12109,18 @@ export async function listPurchaseInvoicesByUser(req, userId, options = {}) {
       sort,
     });
   } catch {
-    const all = await getCatalogDatabaseDocumentsInflight(req);
-    docs = all
-      .filter(
-        (doc) =>
-          doc?.type === 'purchase_invoice' && !doc?.deletedAt && (!uid || doc?.user_id === uid),
-      )
-      .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
-      .slice(0, listLimit);
+    try {
+      docs = await findDocuments(req, db, selector, { pageSize: 200, maxDocs: listLimit });
+      docs = docs
+        .filter(
+          (doc) =>
+            doc?.type === 'purchase_invoice' && !doc?.deletedAt && (!uid || doc?.user_id === uid),
+        )
+        .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
+        .slice(0, listLimit);
+    } catch {
+      docs = [];
+    }
   }
 
   let invoices = docs.filter(
@@ -12393,14 +12400,18 @@ export async function listPurchaseOrdersByUser(req, userId, options = {}) {
       sort,
     });
   } catch {
-    const all = await getCatalogDatabaseDocumentsInflight(req);
-    docs = all
-      .filter(
-        (doc) =>
-          doc?.type === 'purchase_order' && !doc?.deletedAt && (!uid || doc?.user_id === uid),
-      )
-      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
-      .slice(0, listLimit);
+    try {
+      docs = await findDocuments(req, db, selector, { pageSize: 200, maxDocs: listLimit });
+      docs = docs
+        .filter(
+          (doc) =>
+            doc?.type === 'purchase_order' && !doc?.deletedAt && (!uid || doc?.user_id === uid),
+        )
+        .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+        .slice(0, listLimit);
+    } catch {
+      docs = [];
+    }
   }
 
   let orders = docs.filter(
