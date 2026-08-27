@@ -1570,7 +1570,23 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
           />
         }
       >
-        {scopedItems.length === 0 ? (
+        {refreshing && scopedItems.length === 0 ? (
+          <div className="px-3 py-6 space-y-3" aria-busy="true" aria-live="polite">
+            <div className="flex items-center gap-2 text-sm text-stone-500 dark:text-stone-400">
+              <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+              {loadDetail || 'Cargando artículos del almacén…'}
+            </div>
+            <div className="space-y-2">
+              {[0, 1, 2, 3, 4].map((i) => (
+                <div
+                  key={i}
+                  className="h-11 rounded-xl bg-stone-100 dark:bg-gray-800/80 animate-pulse"
+                  style={{ opacity: 1 - i * 0.12 }}
+                />
+              ))}
+            </div>
+          </div>
+        ) : scopedItems.length === 0 ? (
           <SaasTabEmpty
             icon={<Boxes className="w-10 h-10" />}
             title="Sin artículos en inventario"

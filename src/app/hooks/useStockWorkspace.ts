@@ -142,15 +142,21 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
     [seedStockItems],
   );
 
-  const [items, setItems] = useState<CatalogItem[]>(() =>
-    Array.isArray(seedStockItems) ? filterStockInventoryItems(seedStockItems) : [],
-  );
+  const [items, setItems] = useState<CatalogItem[]>(() => {
+    if (!Array.isArray(seedStockItems)) return [];
+    return filterStockInventoryItems(seedStockItems);
+  });
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [loading, setLoading] = useState(() => !Array.isArray(seedStockItems));
-  const [loadDetail, setLoadDetail] = useState('Leyendo almacén…');
+  const [loading, setLoading] = useState(() => {
+    if (!Array.isArray(seedStockItems)) return true;
+    return filterStockInventoryItems(seedStockItems).length === 0;
+  });
+  const [loadDetail, setLoadDetail] = useState('Cargando artículos del almacén…');
   const pointsOfSaleRef = useRef(activeStore.pointsOfSale);
   pointsOfSaleRef.current = activeStore.pointsOfSale;
-  const hasPaintedRef = useRef(Array.isArray(seedStockItems));
+  const hasPaintedRef = useRef(
+    Array.isArray(seedStockItems) && filterStockInventoryItems(seedStockItems).length > 0,
+  );
 
   const activeSalesPointId = String(activeStore.activeSalesPointId || '').trim();
 
@@ -202,10 +208,12 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
 
   useEffect(() => {
     if (!Array.isArray(seedStockItems)) return;
-    // Solo pintura inicial: si el padre refresca con datos viejos (carga lenta en prod),
-    // no reponer artículos ya eliminados del almacén.
+    // Solo pintura inicial con seed con datos. Un [] del padre (aún cargando)
+    // no cuenta como «ya cargado» — si no, sale «Sin artículos» y luego aparecen.
     if (hasPaintedRef.current) return;
-    setItems(filterStockInventoryItems(seedStockItems));
+    const seeded = filterStockInventoryItems(seedStockItems);
+    if (seeded.length === 0) return;
+    setItems(seeded);
     setLoading(false);
     setLoadDetail('');
     hasPaintedRef.current = true;
@@ -219,10 +227,10 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
       setLoadDetail('');
       return;
     }
-    const hasSeed = hasPaintedRef.current;
-    // No bloquear la UI con «Cargando…»: pintar shell vacío y rellenar al llegar datos.
-    if (!hasSeed) {
-      setLoadDetail('Actualizando…');
+    const alreadyHasItems = hasPaintedRef.current;
+    if (!alreadyHasItems) {
+      setLoading(true);
+      setLoadDetail('Cargando artículos del almacén…');
     }
     const watchdog = window.setTimeout(() => {
       setLoading(false);
@@ -259,6 +267,8 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
         setItems([]);
         setWarehouses([]);
       }
+      // Tras error: ya no estamos «cargando»; si no hay items, mostrar vacío real.
+      hasPaintedRef.current = true;
       setLoading(false);
       setLoadDetail('');
     } finally {
