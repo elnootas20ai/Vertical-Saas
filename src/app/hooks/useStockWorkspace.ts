@@ -229,11 +229,10 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
       setLoadDetail('');
     }, 45_000);
     try {
-      const needBrands = Boolean(businessId) && businesses.length > 1;
       const [stockCatalog, wh, brands] = await Promise.all([
         listCatalogItemsRequest(dataUserId, 'stock'),
         listWarehousesRequest(dataUserId).catch(() => [] as Warehouse[]),
-        needBrands ? listBrandsRequest(businessId!).catch(() => []) : Promise.resolve([]),
+        businessId ? listBrandsRequest(businessId).catch(() => []) : Promise.resolve([]),
       ]);
       const scoped = businessId
         ? filterCatalogItemsForBusinessScope(stockCatalog, businessId, brands, {

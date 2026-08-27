@@ -11131,29 +11131,27 @@ export async function listBrandsByBusiness(req, businessId) {
 
   const promise = (async () => {
     await ensureCatalogBrandIndex(req, db);
+    const selector = { type: 'brand', business_id: bid };
+    let docs = [];
     try {
-      const docs = await findDocuments(
-        req,
-        db,
-        { type: 'brand', business_id: bid },
-        { pageSize: 200, maxDocs: 500 },
-      );
-      return docs
-        .filter((doc) => doc && !doc.deletedAt)
-        .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+      docs = await findDocuments(req, db, selector, { pageSize: 200, maxDocs: 500 });
     } catch {
-      // Fallback si _find falla (índice aún no listo, etc.).
-      const docs = await getCatalogDatabaseDocumentsInflight(req);
-      return docs
-        .filter((doc) => {
-          if (!doc || doc.type !== 'brand' || doc.deletedAt) return false;
-          const docBid = String(doc.business_id || doc.businessId || '')
-            .replace(/^business:/, '')
-            .trim();
-          return docBid === bid;
-        })
-        .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+      // Nunca caer a _all_docs del catálogo (satura prod). Reintentar _find una vez.
+      try {
+        docs = await findDocuments(req, db, selector, { pageSize: 200, maxDocs: 500 });
+      } catch {
+        docs = [];
+      }
     }
+    return docs
+      .filter((doc) => {
+        if (!doc || doc.type !== 'brand' || doc.deletedAt) return false;
+        const docBid = String(doc.business_id || doc.businessId || '')
+          .replace(/^business:/, '')
+          .trim();
+        return docBid === bid;
+      })
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
   })().finally(() => {
     brandsByBusinessInflight.delete(inflightKey);
   });

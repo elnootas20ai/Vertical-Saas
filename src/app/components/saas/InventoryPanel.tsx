@@ -1163,7 +1163,10 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
         return;
       }
       try {
-        const brandList = await listBrandsRequest(businessId).catch(() => []);
+        const [brandList, cfg] = await Promise.all([
+          listBrandsRequest(businessId).catch(() => []),
+          dataUserId ? getDeliveryConfigRequest(dataUserId).catch(() => null) : Promise.resolve(null),
+        ]);
         if (cancelled) return;
         const commercial = commercialLineBrands(brandList);
         setCommercialBrands(
@@ -1179,9 +1182,7 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
             .map((b) => ({ id: b._id || b.id, name: String(b.name || '').trim() }))
             .filter((b) => b.id && b.name),
         );
-        if (dataUserId) {
-          const cfg = await getDeliveryConfigRequest(dataUserId).catch(() => null);
-          if (cancelled) return;
+        if (cfg) {
           const brandIds = commercial.map((b) => b._id);
           setStoreIngredients(
             normalizeStoreIngredients(unifyStoreIngredientsFromConfig(cfg, brandIds)),

@@ -32,9 +32,8 @@ export async function listBrands(req, res) {
     const { businessId } = req.params;
     if (!businessId) return badRequest(res, 'Falta businessId');
 
-    const business = await findBusinessById(req, businessId);
-    if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
-
+    // Listado ligero: no bloquear marcas esperando empresa (auth ya acota el acceso).
+    // Si la empresa no existe, devolver lista vacía en vez de 404 lento/ruidoso.
     const brands = await listBrandsByBusiness(req, businessId);
     return res.json({ ok: true, brands: brands.map(sanitizeBrand) });
   } catch (error) {

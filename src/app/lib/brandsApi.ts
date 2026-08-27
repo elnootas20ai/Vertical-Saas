@@ -6,6 +6,10 @@ const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env |
 
 const API_BASE = getApiBase();
 
+const BRANDS_CACHE_TTL_MS = 60_000;
+const brandsListCache = new Map<string, { at: number; data: Brand[] }>();
+const brandsListInflight = new Map<string, Promise<Brand[]>>();
+
 function getCouchHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
   return headers;
@@ -66,34 +70,75 @@ export interface Brand {
   deletedAt?: string | null;
 }
 
+function normalizeBusinessId(businessId: string): string {
+  return String(businessId || '').replace(/^business:/, '').trim();
+}
+
+export function invalidateBrandsListCache(businessId?: string): void {
+  const id = normalizeBusinessId(businessId || '');
+  if (!id) {
+    brandsListCache.clear();
+    brandsListInflight.clear();
+    return;
+  }
+  brandsListCache.delete(id);
+  brandsListInflight.delete(id);
+}
+
 export async function listBrandsRequest(businessId: string): Promise<Brand[]> {
-  const payload = await request<{ ok: boolean; brands: Brand[] }>(
-    `/api/brands/${encodeURIComponent(businessId)}`,
-  );
-  return payload.brands || [];
+  const id = normalizeBusinessId(businessId);
+  if (!id) return [];
+
+  const cached = brandsListCache.get(id);
+  if (cached && Date.now() - cached.at < BRANDS_CACHE_TTL_MS) {
+    return cached.data;
+  }
+
+  const inflight = brandsListInflight.get(id);
+  if (inflight) return inflight;
+
+  const promise = (async () => {
+    const payload = await request<{ ok: boolean; brands: Brand[] }>(
+      `/api/brands/${encodeURIComponent(id)}`,
+    );
+    const brands = payload.brands || [];
+    brandsListCache.set(id, { at: Date.now(), data: brands });
+    return brands;
+  })().finally(() => {
+    brandsListInflight.delete(id);
+  });
+
+  brandsListInflight.set(id, promise);
+  return promise;
 }
 
 export async function createBrandRequest(businessId: string, data: Partial<Brand>): Promise<Brand> {
+  const id = normalizeBusinessId(businessId);
   const result = await request<{ ok: boolean; brand: Brand }>(
-    `/api/brands/${encodeURIComponent(businessId)}`,
+    `/api/brands/${encodeURIComponent(id)}`,
     { method: 'POST', body: JSON.stringify({ brand: data }) },
   );
   if (!result.brand) throw new Error('Respuesta inválida del servidor');
+  invalidateBrandsListCache(id);
   return result.brand;
 }
 
 export async function updateBrandRequest(businessId: string, brand: Brand): Promise<Brand> {
+  const id = normalizeBusinessId(businessId);
   const result = await request<{ ok: boolean; brand: Brand }>(
-    `/api/brands/${encodeURIComponent(businessId)}/${encodeURIComponent(brand._id)}`,
+    `/api/brands/${encodeURIComponent(id)}/${encodeURIComponent(brand._id)}`,
     { method: 'PUT', body: JSON.stringify({ brand }) },
   );
   if (!result.brand) throw new Error('Respuesta inválida del servidor');
+  invalidateBrandsListCache(id);
   return result.brand;
 }
 
 export async function deleteBrandRequest(businessId: string, brandId: string): Promise<void> {
+  const id = normalizeBusinessId(businessId);
   await request(
-    `/api/brands/${encodeURIComponent(businessId)}/${encodeURIComponent(brandId)}`,
+    `/api/brands/${encodeURIComponent(id)}/${encodeURIComponent(brandId)}`,
     { method: 'DELETE' },
   );
+  invalidateBrandsListCache(id);
 }
