@@ -19,9 +19,9 @@ export async function listMovements(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
-    const { catalogItemId, warehouseId, movementType, dateFrom, dateTo } = req.query;
+    const { catalogItemId, warehouseId, movementType, dateFrom, dateTo, limit } = req.query;
     const movements = await listMovementsByUser(req, userId, {
-      catalogItemId, warehouseId, movementType, dateFrom, dateTo,
+      catalogItemId, warehouseId, movementType, dateFrom, dateTo, limit,
     });
 
     return res.json({ ok: true, movements, total: movements.length });
@@ -36,7 +36,8 @@ export async function getMovementsByItem(req, res) {
     const { userId, catalogItemId } = req.params;
     if (!userId || !catalogItemId) return badRequest(res, 'Faltan userId o catalogItemId');
 
-    const movements = await listMovementsByUser(req, userId, { catalogItemId });
+    const limit = req.query?.limit;
+    const movements = await listMovementsByUser(req, userId, { catalogItemId, limit });
     return res.json({ ok: true, movements, total: movements.length });
   } catch (error) {
     logger.error({ tag: 'STOCK_MOVEMENT', err: error?.message }, 'Error listando movimientos por artículo');
@@ -49,7 +50,8 @@ export async function getMovementsByWarehouse(req, res) {
     const { userId, warehouseId } = req.params;
     if (!userId || !warehouseId) return badRequest(res, 'Faltan userId o warehouseId');
 
-    const movements = await listMovementsByUser(req, userId, { warehouseId });
+    const limit = req.query?.limit;
+    const movements = await listMovementsByUser(req, userId, { warehouseId, limit });
     return res.json({ ok: true, movements, total: movements.length });
   } catch (error) {
     logger.error({ tag: 'STOCK_MOVEMENT', err: error?.message }, 'Error listando movimientos por almacén');

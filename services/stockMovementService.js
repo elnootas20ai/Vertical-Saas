@@ -3,7 +3,8 @@ import {
   ensureDatabase,
   getDocument,
   putDocument,
-  getAllDocuments,
+  findDocuments,
+  ensureIndex,
 } from './couchdb.js';
 import { applyWarehouseStockDelta } from '../shared/stock/warehouseStockQty.js';
 import logger from './logger.js';
@@ -32,6 +33,26 @@ const VALID_MOVEMENT_TYPES = [
 
 const INBOUND_TYPES = new Set(['purchase_reception', 'adjustment_in', 'return_customer', 'initial', 'sale_reversal', 'recipe_consumption_reversal', 'material_return', 'transfer_in']);
 const OUTBOUND_TYPES = new Set(['sale', 'internal_consumption', 'adjustment_out', 'return_supplier', 'recipe_consumption', 'waste', 'material_delivery', 'transfer_out']);
+
+const stockMovementIndexReady = new Set();
+
+async function ensureStockMovementListIndex(req, dbName) {
+  if (stockMovementIndexReady.has(dbName)) return;
+  const safeDb = String(dbName || '').replace(/[^a-z0-9]+/g, '-');
+  await ensureIndex(req, dbName, ['type', 'user_id', 'createdAt'], `idx-${safeDb}-stock-mov-user-date`).catch(
+    () => null,
+  );
+  await ensureIndex(req, dbName, ['type', 'user_id', 'catalogItemId', 'createdAt'], `idx-${safeDb}-stock-mov-item-date`).catch(
+    () => null,
+  );
+  stockMovementIndexReady.add(dbName);
+}
+
+function normalizeMovementListLimit(limit) {
+  const n = Number(limit);
+  if (!Number.isFinite(n) || n <= 0) return 120;
+  return Math.min(Math.max(Math.floor(n), 1), 500);
+}
 
 function buildStockMovementDocument(userId, data = {}) {
   const now = new Date().toISOString();
@@ -191,19 +212,49 @@ export async function recordMovement(req, userId, movementData) {
 }
 
 export async function listMovementsByUser(req, userId, filters = {}) {
+  const uid = String(userId || '').trim();
   const db = getCatalogDbName();
   await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
+  await ensureStockMovementListIndex(req, db);
+
+  const listLimit = normalizeMovementListLimit(filters.limit);
+  const catalogItemId = String(filters.catalogItemId || '').trim();
+  const warehouseId = String(filters.warehouseId || '').trim();
+
+  const selector = uid
+    ? catalogItemId
+      ? { type: 'stock_movement', user_id: uid, catalogItemId }
+      : { type: 'stock_movement', user_id: uid }
+    : { type: 'stock_movement' };
+
+  const sort =
+    catalogItemId && uid
+      ? [{ type: 'asc' }, { user_id: 'asc' }, { catalogItemId: 'asc' }, { createdAt: 'desc' }]
+      : uid
+        ? [{ type: 'asc' }, { user_id: 'asc' }, { createdAt: 'desc' }]
+        : [{ type: 'asc' }, { createdAt: 'desc' }];
+
+  const maxDocs = warehouseId ? Math.min(listLimit * 4, 2000) : listLimit;
+
+  let docs;
+  try {
+    docs = await findDocuments(req, db, selector, { pageSize: 200, maxDocs, sort });
+  } catch {
+    try {
+      docs = await findDocuments(req, db, selector, { pageSize: 200, maxDocs });
+    } catch {
+      docs = [];
+    }
+  }
 
   let movements = docs.filter(
-    (doc) => doc?.type === 'stock_movement' && doc?.user_id === userId,
+    (doc) => doc?.type === 'stock_movement' && (!uid || doc?.user_id === uid),
   );
 
-  if (filters.catalogItemId) {
-    movements = movements.filter((m) => m.catalogItemId === filters.catalogItemId);
-  }
-  if (filters.warehouseId) {
-    movements = movements.filter((m) => m.warehouseId === filters.warehouseId || m.warehouseToId === filters.warehouseId);
+  if (warehouseId) {
+    movements = movements.filter(
+      (m) => m.warehouseId === warehouseId || m.warehouseToId === warehouseId,
+    );
   }
   if (filters.movementType) {
     movements = movements.filter((m) => m.movementType === filters.movementType);
@@ -217,11 +268,15 @@ export async function listMovementsByUser(req, userId, filters = {}) {
 
   return movements
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+    .slice(0, listLimit)
     .map(sanitizeStockMovement);
 }
 
 export async function getMovementsSummary(req, userId, filters = {}) {
-  const movements = await listMovementsByUser(req, userId, filters);
+  const movements = await listMovementsByUser(req, userId, {
+    ...filters,
+    limit: filters.limit ?? 2000,
+  });
 
   let totalIn = 0;
   let totalOut = 0;
@@ -249,4 +304,4 @@ export async function getMovementsSummary(req, userId, filters = {}) {
   };
 }
 
-export { sanitizeStockMovement, VALID_MOVEMENT_TYPES, INBOUND_TYPES, OUTBOUND_TYPES };
+export { sanitizeStockMovement, VALID_MOVEMENT_TYPES, INBOUND_TYPES, OUTBOUND_TYPES, normalizeMovementListLimit };

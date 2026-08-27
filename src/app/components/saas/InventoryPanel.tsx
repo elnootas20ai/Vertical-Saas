@@ -32,6 +32,7 @@ import { filterStockInventoryItems } from '../../lib/stockInventoryScope';
 import {
   createAdjustmentRequest,
   getMovementsByItemRequest,
+  stockMovementUserMessage,
   type StockMovement,
 } from '../../lib/stockMovementApi';
 import { useStockWorkspace } from '../../hooks/useStockWorkspace';
@@ -851,8 +852,9 @@ function InventoryItemDetailModal({
     try {
       const rows = await getMovementsByItemRequest(userId, item._id);
       setMovements([...rows].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))));
-    } catch {
+    } catch (err) {
       setMovements([]);
+      toast.error(stockMovementUserMessage(err));
     } finally {
       setLoadingMovements(false);
     }

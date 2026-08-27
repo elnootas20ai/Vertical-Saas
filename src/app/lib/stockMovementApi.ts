@@ -1,10 +1,12 @@
-import { getAuthHeaders } from './authApi';
+import { authFetch } from './authApi';
 import { getApiBase } from './apiBase';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
-
 const API_BASE = getApiBase();
+
+const STOCK_MOVEMENT_TIMEOUT_MS = 25_000;
+const STOCK_MOVEMENT_LIST_LIMIT = 120;
 
 function normalizeUserId(userId: string): string {
   const value = String(userId || '').trim();
@@ -16,19 +18,55 @@ function getCouchHeaders(): Record<string, string> {
   return headers;
 }
 
+function stockMovementRequestSignal(init?: RequestInit): AbortSignal | undefined {
+  if (init?.signal) return init.signal;
+  if (typeof AbortSignal?.timeout === 'function') {
+    return AbortSignal.timeout(STOCK_MOVEMENT_TIMEOUT_MS);
+  }
+  return undefined;
+}
+
+function stockMovementRequestErrorMessage(
+  payload: { error?: unknown; message?: unknown },
+  fallback: string,
+): string {
+  const err = payload?.error;
+  if (typeof err === 'string' && err.trim()) return err.trim();
+  if (err && typeof err === 'object') {
+    const msg = (err as { message?: unknown }).message;
+    if (typeof msg === 'string' && msg.trim()) return msg.trim();
+  }
+  if (typeof payload?.message === 'string' && payload.message.trim()) return payload.message.trim();
+  return fallback;
+}
+
+export function stockMovementUserMessage(err: unknown, fallback = 'No se pudo cargar el historial'): string {
+  if (err instanceof Error) {
+    if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+      return 'La carga del historial tardó demasiado. Inténtalo de nuevo.';
+    }
+    const msg = err.message?.trim();
+    if (msg && /timed out|timeout/i.test(msg)) {
+      return 'La carga del historial tardó demasiado. Inténtalo de nuevo.';
+    }
+    if (msg) return msg;
+  }
+  return fallback;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await authFetch(`${API_BASE}${path}`, {
+    ...init,
+    signal: stockMovementRequestSignal(init),
     headers: {
       'Content-Type': 'application/json',
-      ...getAuthHeaders(),
       ...getCouchHeaders(),
       ...(init?.headers || {}),
     },
-    ...init,
-  });
-  const payload = (await response.json().catch(() => ({}))) as T & { error?: string };
+  }, 0, false, { suppressLogout: true });
+  const payload = (await response.json().catch(() => ({}))) as T & { error?: unknown; message?: unknown };
   if (!response.ok) {
-    throw new Error(payload?.error || 'Error inesperado en stock movement API');
+    throw new Error(stockMovementRequestErrorMessage(payload, 'Error inesperado en stock movement API'));
   }
   return payload;
 }
@@ -85,7 +123,14 @@ export interface MovementsSummary {
 
 export async function listStockMovementsRequest(
   userId: string,
-  filters?: { catalogItemId?: string; warehouseId?: string; movementType?: string; dateFrom?: string; dateTo?: string },
+  filters?: {
+    catalogItemId?: string;
+    warehouseId?: string;
+    movementType?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    limit?: number;
+  },
 ): Promise<StockMovement[]> {
   const id = normalizeUserId(userId);
   const params = new URLSearchParams();
@@ -94,6 +139,7 @@ export async function listStockMovementsRequest(
   if (filters?.movementType) params.set('movementType', filters.movementType);
   if (filters?.dateFrom) params.set('dateFrom', filters.dateFrom);
   if (filters?.dateTo) params.set('dateTo', filters.dateTo);
+  if (filters?.limit) params.set('limit', String(filters.limit));
   const qs = params.toString() ? `?${params.toString()}` : '';
   const payload = await request<{ ok: boolean; movements: StockMovement[] }>(
     `/api/stock-movements/${encodeURIComponent(id)}${qs}`,
@@ -101,18 +147,32 @@ export async function listStockMovementsRequest(
   return payload.movements || [];
 }
 
-export async function getMovementsByItemRequest(userId: string, catalogItemId: string): Promise<StockMovement[]> {
+export async function getMovementsByItemRequest(
+  userId: string,
+  catalogItemId: string,
+  limit = STOCK_MOVEMENT_LIST_LIMIT,
+): Promise<StockMovement[]> {
   const id = normalizeUserId(userId);
+  const params = new URLSearchParams();
+  if (limit > 0) params.set('limit', String(limit));
+  const qs = params.toString() ? `?${params.toString()}` : '';
   const payload = await request<{ ok: boolean; movements: StockMovement[] }>(
-    `/api/stock-movements/${encodeURIComponent(id)}/item/${encodeURIComponent(catalogItemId)}`,
+    `/api/stock-movements/${encodeURIComponent(id)}/item/${encodeURIComponent(catalogItemId)}${qs}`,
   );
   return payload.movements || [];
 }
 
-export async function getMovementsByWarehouseRequest(userId: string, warehouseId: string): Promise<StockMovement[]> {
+export async function getMovementsByWarehouseRequest(
+  userId: string,
+  warehouseId: string,
+  limit = STOCK_MOVEMENT_LIST_LIMIT,
+): Promise<StockMovement[]> {
   const id = normalizeUserId(userId);
+  const params = new URLSearchParams();
+  if (limit > 0) params.set('limit', String(limit));
+  const qs = params.toString() ? `?${params.toString()}` : '';
   const payload = await request<{ ok: boolean; movements: StockMovement[] }>(
-    `/api/stock-movements/${encodeURIComponent(id)}/warehouse/${encodeURIComponent(warehouseId)}`,
+    `/api/stock-movements/${encodeURIComponent(id)}/warehouse/${encodeURIComponent(warehouseId)}${qs}`,
   );
   return payload.movements || [];
 }
