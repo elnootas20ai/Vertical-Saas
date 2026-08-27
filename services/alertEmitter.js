@@ -137,8 +137,8 @@ async function businessOwnerMeetsAlertRule(business, ruleId, category) {
 }
 
 /**
- * Destinatarios de alertas: titular + Admin/Gerente invitados del negocio.
- * Trabajadores de piso (sin rol de gestión) NO reciben alertas ni push.
+ * Destinatarios in-app/push: titular + Admin/Gerente (panel).
+ * Encargado y trabajadores de piso NO reciben alertas, push ni email.
  */
 function isManagementInviteRole(role) {
   const r = String(role || '')
@@ -152,10 +152,48 @@ function isManagementInviteRole(role) {
     || r === 'gerente'
     || r === 'gerentogrupo'
     || r === 'manager'
-    || r === 'encargado'
     || r === 'gestor'
     || r === 'superadmin'
   );
+}
+
+function isEncargadoRole(role) {
+  const r = String(role || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  return r === 'encargado';
+}
+
+/** Correos de alerta: solo creador (owner) y Admin — no Encargado ni trabajadores. */
+export function isAlertEmailAdminRole(role) {
+  const r = String(role || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  return (
+    r === 'admin'
+    || r === 'administrador'
+    || r === 'owner'
+    || r === 'superadmin'
+  );
+}
+
+export function canReceiveBusinessAlertEmail(account, business) {
+  if (!account?.email) return false;
+  const uid = String(account.user_id || account.userId || '').trim();
+  if (!uid) return false;
+  const ownerId = String(business?.owner_user_id || '').trim();
+  if (ownerId && uid === ownerId) return true;
+  const member = (Array.isArray(business?.members) ? business.members : []).find(
+    (m) => String(m?.user_id || '').trim() === uid,
+  );
+  if (member && isAlertEmailAdminRole(member.role)) return true;
+  // Sin negocio resuelto: solo cuenta empresa con rol admin
+  if (!business && account.accountType === 'company' && isAlertEmailAdminRole(account.role)) {
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -169,6 +207,8 @@ export async function filterManagementRecipientIds(userIds = []) {
     try {
       const account = await findAccountByUserId(fakeReq, uid);
       if (!account || isWorkerProfileSubject(account)) continue;
+      // Encargado: operativa en tienda, no destinatario de alertas/push/email de gestión
+      if (isEncargadoRole(account.role)) continue;
       out.push(uid);
     } catch {
       /* cuenta desconocida: no enviar */
@@ -377,6 +417,15 @@ export async function emitGlobalAlert({
     const alreadyPushed = Boolean(saved?.mobilePushSentAt);
     let didQueuePush = false;
 
+    let businessForEmail = null;
+    if (businessId && channels.includes('email')) {
+      try {
+        businessForEmail = await findBusinessById(fakeReq, businessId);
+      } catch {
+        businessForEmail = null;
+      }
+    }
+
     for (const uid of recipientUserIds) {
       broadcastToUser(uid, 'notification', sanitized);
 
@@ -402,9 +451,8 @@ export async function emitGlobalAlert({
 
       if ((!quiet || bypassQuiet) && channels.includes('email')) {
         try {
-          const { findAccountByUserId } = await import('./couchdb.js');
           const account = await findAccountByUserId(fakeReq, uid);
-          if (account?.email && !isWorkerProfileSubject(account)) {
+          if (canReceiveBusinessAlertEmail(account, businessForEmail)) {
             sendEmail({
               to: account.email,
               subject: `[Alerta] ${sanitized.title}`,

@@ -2111,12 +2111,38 @@ function getLockoutThresholds() {
 }
 
 /**
+ * Cuenta de trabajador / invitado (no titular de empresa).
+ * No se les aplica bloqueo por intentos fallidos: la baja (status inactive) corta el acceso.
+ */
+export function isWorkerLikeAccount(account) {
+  if (!account) return false;
+  if (account.accountType === 'user') return true;
+  if (String(account.invitedBy || '').trim()) return true;
+  return false;
+}
+
+/**
+ * Lockout por contraseña fallida: solo cuentas de empresa/admin en producción (o si LOGIN_LOCKOUT_ENABLED=true).
+ * Trabajadores: nunca.
+ */
+export function isLoginLockoutEnabledForAccount(account) {
+  if (isWorkerLikeAccount(account)) return false;
+  if (process.env.LOGIN_LOCKOUT_ENABLED === 'true') return true;
+  if (process.env.LOGIN_LOCKOUT_ENABLED === 'false') return false;
+  return process.env.NODE_ENV === 'production';
+}
+
+/**
  * Devuelve el estado de bloqueo de una cuenta.
  * - locked: true  → bloqueo activo
  * - locked: false, wasExpired: true → había bloqueo pero ya expiró (requiere limpieza lazy)
  * - locked: false, wasExpired: false → sin bloqueo previo
+ * Trabajadores nunca quedan locked aunque tengan lockUntil residual.
  */
 export function isAccountLocked(account) {
+  if (!isLoginLockoutEnabledForAccount(account)) {
+    return { locked: false, wasExpired: false };
+  }
   if (!account?.lockUntil) return { locked: false, wasExpired: false };
   const lockUntil = new Date(account.lockUntil);
   if (lockUntil > new Date()) {
@@ -2142,6 +2168,16 @@ export function shouldSkipFailedLoginIncrement(freshAccount, attemptStartedAt) {
 export async function incrementFailedLoginAttempts(req, account, options = {}) {
   const attemptStartedAt = options.attemptStartedAt || null;
   const fresh = (await findAccountByUserId(req, account.user_id)) || account;
+
+  if (!isLoginLockoutEnabledForAccount(fresh)) {
+    return {
+      account: fresh,
+      justLocked: false,
+      lockUntil: null,
+      failedLoginAttempts: fresh.failedLoginAttempts || 0,
+      skipped: true,
+    };
+  }
 
   if (shouldSkipFailedLoginIncrement(fresh, attemptStartedAt)) {
     return {

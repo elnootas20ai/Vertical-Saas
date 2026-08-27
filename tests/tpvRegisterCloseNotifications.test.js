@@ -8,12 +8,14 @@ describe('tpvRegisterCloseNotifications recipients', () => {
         owner_user_id: 'owner-1',
         members: [
           { user_id: 'mgr-1', role: 'gerente' },
+          { user_id: 'enc-1', role: 'Encargado' },
           { user_id: 'worker-1', role: 'reparto' },
         ],
       },
     );
     expect(ids).toContain('owner-1');
     expect(ids).toContain('mgr-1');
+    expect(ids).not.toContain('enc-1');
     expect(ids).not.toContain('worker-1');
   });
 

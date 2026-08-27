@@ -2345,6 +2345,7 @@ function shouldNotifyForFlag(flag, clockinPrefs) {
 /**
  * Resuelve a quién hay que avisar cuando un trabajador ficha:
  * Admin/Gerente del negocio + el owner (excluyendo al propio fichador).
+ * Encargado no recibe estas notificaciones.
  * Devuelve una lista única de user_ids.
  */
 function resolveClockinNotificationRecipients(business, memberId) {
@@ -2354,7 +2355,13 @@ function resolveClockinNotificationRecipients(business, memberId) {
   }
   for (const m of business?.members || []) {
     if (!m.user_id || m.user_id === memberId) continue;
-    if (isManagerRole(m.role)) recipients.add(m.user_id);
+    if (!isManagerRole(m.role)) continue;
+    const r = String(m.role || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+    if (r === 'encargado') continue;
+    recipients.add(m.user_id);
   }
   return Array.from(recipients);
 }

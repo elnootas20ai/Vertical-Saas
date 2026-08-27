@@ -32,7 +32,7 @@ function getEventsDbName() {
   return `${prefix}-events`;
 }
 
-/** Roles de gestión (panel): reciben avisos de negocio. */
+/** Roles de gestión (panel): reciben avisos de negocio. Encargado no. */
 function isManagementInviteRole(role) {
   const r = String(role || '')
     .toLowerCase()
@@ -45,7 +45,6 @@ function isManagementInviteRole(role) {
     || r === 'gerente'
     || r === 'gerentogrupo'
     || r === 'manager'
-    || r === 'encargado'
     || r === 'gestor'
     || r === 'superadmin'
   );

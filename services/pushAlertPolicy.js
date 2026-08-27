@@ -24,7 +24,6 @@ function isManagementInviteRole(role) {
     || r === 'gerente'
     || r === 'gerentogrupo'
     || r === 'manager'
-    || r === 'encargado'
     || r === 'gestor'
     || r === 'superadmin'
   );

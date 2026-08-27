@@ -51,6 +51,7 @@ import {
   putDocument,
   incrementFailedLoginAttempts,
   isAccountLocked,
+  isWorkerLikeAccount,
   listAllBusinesses,
   listBusinessesByUser,
   listInvitationsByBusiness,
@@ -179,6 +180,18 @@ function resolveLoginOtpDestination(account) {
 /** Mensaje genérico al cliente: nunca revelar a qué correo se envía el código. */
 const LOGIN_OTP_CLIENT_MESSAGE =
   'Te hemos enviado un código por email. Caduca en 10 minutos.';
+
+/** Trabajador de baja: no puede entrar hasta reactivación o nueva invitación. */
+function rejectIfWorkerInactive(account, res) {
+  if (!isWorkerLikeAccount(account)) return false;
+  if (account.status !== 'inactive' && !account.deletedAt) return false;
+  res.status(403).json({
+    ok: false,
+    error: 'Tu acceso está de baja. Contacta con tu empresa o pide que te inviten a otra.',
+    code: 'ACCOUNT_INACTIVE',
+  });
+  return true;
+}
 
 function maskEmailForHint(email) {
   const e = String(email || '').trim();
@@ -686,6 +699,8 @@ export async function googleLogin(req, res) {
       });
     }
 
+    if (rejectIfWorkerInactive(account, res)) return;
+
     const updatedAccount = {
       ...account,
       firstName: googleUser.firstName || account.firstName,
@@ -820,6 +835,8 @@ export async function appleLogin(req, res) {
       });
     }
 
+    if (rejectIfWorkerInactive(account, res)) return;
+
     const updatedAccount = {
       ...account,
       firstName: appleUser.firstName || account.firstName,
@@ -912,7 +929,10 @@ export async function login(req, res) {
       return res.status(401).json({ ok: false, error: 'Email o contraseña incorrectos' });
     }
 
-    // S-03: Verificar bloqueo temporal
+    // Trabajador de baja: no entra (ni se bloquea por intentos). Reactivar o invitar a otra empresa.
+    if (rejectIfWorkerInactive(account, res)) return;
+
+    // S-03: Verificar bloqueo temporal (solo cuentas empresa/admin; trabajadores nunca)
     const lockStatus = isAccountLocked(account);
     if (lockStatus.locked) {
       const remainingMin = Math.ceil(lockStatus.remainingMs / 60000);
@@ -936,7 +956,7 @@ export async function login(req, res) {
 
     const attemptStartedAt = new Date().toISOString();
 
-    // S-03: Verificar contraseña — si falla, incrementar contador
+    // S-03: Verificar contraseña — si falla, incrementar contador (no aplica a trabajadores)
     if (!verifyPassword(password, account.passwordHash)) {
       const { justLocked, lockUntil, failedLoginAttempts } = await incrementFailedLoginAttempts(req, account, {
         attemptStartedAt,
@@ -1159,6 +1179,8 @@ export async function verifyLoginCode(req, res) {
         error: 'Código inválido o expirado. Solicita uno nuevo.',
       });
     }
+
+    if (rejectIfWorkerInactive(account, res)) return;
 
     let savedAccount = await resetFailedLoginAttempts(req, account);
     savedAccount = await clearLoginOtp(req, savedAccount);
@@ -2598,6 +2620,7 @@ export async function acceptInvitation(req, res) {
       ...account,
       // Tras aceptar equipo: siempre cuenta trabajador (evita Gate / panel empresa).
       accountType: 'user',
+      status: 'active',
       fullName: resolvedFullName,
       phone: resolvedPhone,
       linkedBusinessId: business.business_id,
@@ -2611,6 +2634,9 @@ export async function acceptInvitation(req, res) {
       pendingTeamInvite: null,
       inviteStatus: 'accepted',
       posPinHash: invitation.posPinHash || account.posPinHash || '',
+      // Baja previa: limpiar bloqueo residual al reincorporarse / cambiar de empresa
+      failedLoginAttempts: 0,
+      lockUntil: null,
       updatedAt: now,
     });
 
@@ -4509,6 +4535,8 @@ export async function teamLogin(req, res) {
     if (!account) {
       return res.status(401).json({ ok: false, error: 'Código de empresa, usuario o contraseña incorrectos' });
     }
+
+    if (rejectIfWorkerInactive(account, res)) return;
 
     const lockStatus = isAccountLocked(account);
     if (lockStatus.locked) {

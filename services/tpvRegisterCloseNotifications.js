@@ -34,7 +34,6 @@ function isManagerRole(role) {
     || r === 'gerente'
     || r === 'gerentogrupo'
     || r === 'manager'
-    || r === 'encargado'
     || r === 'gestor'
     || r === 'superadmin'
   );
@@ -48,6 +47,7 @@ function resolveCajaRoute(business) {
 
 /**
  * Destinatarios: dueño + admins/gerentes. Nunca el trabajador que cerró la caja.
+ * Encargado no recibe avisos de cierre/descuadre.
  */
 export function resolveTpvCloseNotificationRecipients(business) {
   const recipients = new Set();
