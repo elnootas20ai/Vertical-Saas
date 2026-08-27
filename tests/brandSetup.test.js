@@ -56,4 +56,17 @@ describe('brand setup completeness', () => {
     };
     expect(getBrandSetupPending(brand, deliveryCtx)).toContain('display_name');
   });
+
+  it('nombre personalizado sin inferencia no exige tipo de línea', () => {
+    const brand = {
+      name: 'Hoype Camos Badalona',
+      isDefault: false,
+      active: true,
+      deliveryLineKind: '',
+      catalogCategories: [],
+      salesPointIds: [],
+    };
+    expect(getBrandSetupPending(brand, deliveryCtx)).toEqual([]);
+    expect(isBrandSetupComplete(brand, deliveryCtx)).toBe(true);
+  });
 });

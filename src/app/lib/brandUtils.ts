@@ -125,11 +125,15 @@ export type BrandSetupContext = {
 function effectiveDeliveryLineKind(
   brand: Pick<Brand, 'name' | 'deliveryLineKind'>,
 ): string {
-  return (
-    String(brand.deliveryLineKind || '').trim() ||
-    inferDeliveryLineKindFromBrandName(String(brand.name || '')) ||
-    ''
-  );
+  const explicit = String(brand.deliveryLineKind || '').trim();
+  if (explicit) return explicit;
+  const inferred = inferDeliveryLineKindFromBrandName(String(brand.name || ''));
+  if (inferred) return inferred;
+  // Nombre real sin preset inferible: no bloquear cuentas ya operativas.
+  if (!isDefaultBrandNamePlaceholder(brand.name)) {
+    return 'other';
+  }
+  return '';
 }
 
 function effectiveCatalogCategories(

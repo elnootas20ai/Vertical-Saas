@@ -4915,7 +4915,7 @@ export function CatalogPage() {
     try {
       setBrands(await listBrandsRequest(businessId));
     } catch {
-      setBrands([]);
+      /* Mantener marcas previas: evita «Marca sin completar» por fallo de red/API. */
     } finally {
       setBrandsLoading(false);
     }
@@ -8066,6 +8066,7 @@ export function CatalogPage() {
 
   const brandReady = useMemo(() => {
     if (!usesTpvCatalogUi) return true;
+    if (catalogMenuItems.some((i) => i.active)) return true;
     if (brands.length === 0) return false;
     // Bar/restaurante: basta con una marca activa con nombre real (sin reglas delivery).
     if (isRestaurantCatalog) {
@@ -8074,7 +8075,7 @@ export function CatalogPage() {
       );
     }
     return isDeliveryBrandActivationComplete(brands, brandSetupCtx);
-  }, [usesTpvCatalogUi, isRestaurantCatalog, brands, brandSetupCtx]);
+  }, [usesTpvCatalogUi, isRestaurantCatalog, brands, brandSetupCtx, catalogMenuItems]);
 
   /** No mostrar el aviso hasta tener marcas + tiendas cargadas (evita flash al entrar). */
   const brandCheckReady =
