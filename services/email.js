@@ -682,6 +682,39 @@ export function buildWelcomeTrialEmail(email, name, planOrTrialDays = 'Básico')
 }
 
 /**
+ * Bienvenida al crear cuenta de trabajador (Acceso empleado), antes de unirse a una empresa.
+ * Sin plan/suscripción: el plan es de la empresa, no del empleado.
+ */
+export function buildWorkerAccountReadyEmail({ name = '' } = {}) {
+  const baseUrl = getAppBaseUrl();
+  const loginUrl = `${baseUrl}/auth/worker-login`;
+  const displayName = name ? String(name).trim().split(/\s+/)[0] : '';
+
+  return {
+    subject: 'Tu cuenta de trabajador en Vertial está lista',
+    html: wrapAccountEmail({
+      bodyHtml: `
+          <h2 style="margin:0 0 16px;color:${EMAIL_BRAND.text};font-size:22px;font-weight:700;">¡Hola${displayName ? `, ${escapeHtml(displayName)}` : ''}!</h2>
+          <p style="color:#52525b;margin:0 0 16px;line-height:1.6;">
+            Tu <strong>cuenta de trabajador</strong> en Vertial ya está verificada.
+            Cuando tu empresa te invite al equipo, podrás fichar, ver turnos y usar el TPV según tu rol.
+          </p>
+          <div style="background:${EMAIL_BRAND.softBg};border:1px solid ${EMAIL_BRAND.softBorder};border-radius:12px;padding:16px;margin:0 0 24px;">
+            <p style="margin:0 0 8px;color:${EMAIL_BRAND.softText};font-size:13px;font-weight:600;">Importante</p>
+            <p style="margin:0;color:#1e3a8a;font-size:13px;line-height:1.5;">
+              Esta cuenta no incluye un plan de suscripción. El plan (Básico, Mediano o Pro) lo contrata la empresa;
+              tú entras como empleado de su equipo.
+            </p>
+          </div>
+          ${emailCtaButton(loginUrl, 'Entrar como trabajador')}
+          <p style="color:${EMAIL_BRAND.muted};font-size:13px;margin:24px 0 0;line-height:1.5;">
+            Si aún no te han invitado, pide a tu responsable que te envíe la invitación desde Equipo en Vertial.
+          </p>`,
+    }),
+  };
+}
+
+/**
  * Bienvenida al trabajador cuando queda enlazado a una empresa.
  */
 export function buildWorkerWelcomeEmail({

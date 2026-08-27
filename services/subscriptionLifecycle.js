@@ -66,10 +66,20 @@ function daysBetween(dateA, dateB) {
 
 /**
  * Sends a welcome email for a new company account (plan / suscripción).
+ * Nunca para trabajadores (accountType=user): ellos reciben invitación + bienvenida de equipo.
  * Call this from the registration flow after creating the account.
  */
 export async function sendWelcomeEmail(account) {
   try {
+    const accountType = String(account?.accountType || 'company').trim();
+    const inviteSource = String(account?.onboardingData?.source || '').trim();
+    if (accountType === 'user' || inviteSource === 'team-invite' || account?.invitedBy) {
+      logger.info(
+        { tag: 'LIFECYCLE', userId: account?.user_id, accountType, inviteSource },
+        'Welcome company email omitido (cuenta trabajador / invitación)',
+      );
+      return;
+    }
     const { subject, html } = buildCompanyWelcomeEmail(
       account.email,
       account.fullName || account.firstName || '',

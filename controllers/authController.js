@@ -120,6 +120,7 @@ import {
   buildSuspensionEmail,
   buildSetupWelcomeEmail,
   buildWorkerWelcomeEmail,
+  buildWorkerAccountReadyEmail,
 } from '../services/email.js';
 import { sendWelcomeEmail } from '../services/subscriptionLifecycle.js';
 import { isVertialSuperAdminEmail } from '../utils/superAdmin.js';
@@ -3499,7 +3500,24 @@ export async function verifyEmail(req, res) {
         entityLabel: savedAccount.fullName,
       });
 
-      sendWelcomeEmail(savedAccount).catch(() => null);
+      const accountType = String(savedAccount.accountType || 'company').trim();
+      const inviteSource = String(savedAccount.onboardingData?.source || '').trim();
+      const isWorkerAccount =
+        accountType === 'user'
+        || inviteSource === 'team-invite'
+        || Boolean(savedAccount.invitedBy);
+
+      if (isWorkerAccount) {
+        // Trabajador: nunca el correo de «Plan Básico» (eso es de empresa).
+        sendEmail({
+          to: savedAccount.email,
+          ...buildWorkerAccountReadyEmail({
+            name: savedAccount.fullName || savedAccount.firstName || '',
+          }),
+        }).catch(() => null);
+      } else {
+        sendWelcomeEmail(savedAccount).catch(() => null);
+      }
     }
 
     const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
