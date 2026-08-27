@@ -21,6 +21,7 @@ import {
   createCatalogItemRequest,
   deleteCatalogItemRequest,
   getDeliveryConfigRequest,
+  isCatalogDuplicateError,
   listCatalogItemsRequest,
   updateCatalogItemRequest,
 } from '../../lib/deliveryApi';
@@ -180,6 +181,7 @@ function AddInventoryItemModal({
   onClose,
   onCreated,
   userId,
+  businessId,
   businessType,
   commercialBrands,
   productBrands,
@@ -188,8 +190,9 @@ function AddInventoryItemModal({
 }: {
   isOpen: boolean;
   onClose: () => void;
-  onCreated: () => void;
+  onCreated: (item?: CatalogItem) => void;
   userId: string;
+  businessId?: string;
   businessType: string;
   commercialBrands: InventoryCommercialBrand[];
   /** Marcas activas de la empresa (las que hayas creado en Marcas). */
@@ -259,12 +262,13 @@ function AddInventoryItemModal({
     const fields = stockFieldsForOrganizer(form.organizerId);
     setSubmitting(true);
     try {
-      await createCatalogItemRequest(userId, {
+      const created = await createCatalogItemRequest(userId, {
         name: form.name.trim(),
         category: fields.category,
         module: 'stock',
         itemType: 'product',
         vertical: businessType,
+        business_id: businessId || undefined,
         stockCategory: fields.stockCategory,
         isStockItem: true,
         unit: form.unit,
@@ -281,8 +285,14 @@ function AddInventoryItemModal({
       });
       toast.success('Artículo añadido al inventario');
       onClose();
-      onCreated();
+      onCreated(created);
     } catch (err) {
+      if (isCatalogDuplicateError(err) && err.existingItem) {
+        toast.message(`«${err.existingItem.name}» ya estaba en el almacén. Lo mostramos.`);
+        onClose();
+        onCreated(err.existingItem);
+        return;
+      }
       toast.error(err instanceof Error ? err.message : 'No se pudo crear el artículo');
     } finally {
       setSubmitting(false);
@@ -578,6 +588,7 @@ function StockEntryPickerModal({
   items,
   userId,
   warehouseId,
+  businessId,
   businessType,
   commercialBrands,
   defaultOrganizerId,
@@ -589,6 +600,7 @@ function StockEntryPickerModal({
   items: CatalogItem[];
   userId: string;
   warehouseId: string;
+  businessId?: string;
   businessType: string;
   commercialBrands: InventoryCommercialBrand[];
   defaultOrganizerId?: string | null;
@@ -669,25 +681,36 @@ function StockEntryPickerModal({
     const fields = stockFieldsForOrganizer(newForm.organizerId);
     setSubmitting(true);
     try {
-      const created = await createCatalogItemRequest(userId, {
-        name: newForm.name.trim(),
-        category: fields.category,
-        module: 'stock',
-        itemType: 'product',
-        vertical: businessType,
-        stockCategory: fields.stockCategory,
-        isStockItem: true,
-        unit: newForm.unit,
-        minStock: 0,
-        costPrice: Number(newForm.costPrice.replace(',', '.')) || 0,
-        stockQuantity: 0,
-        active: true,
-        available: true,
-        webVisible: false,
-        customFields: {
-          inventoryOrganizerId: newForm.organizerId.trim(),
-        },
-      });
+      let created: CatalogItem;
+      try {
+        created = await createCatalogItemRequest(userId, {
+          name: newForm.name.trim(),
+          category: fields.category,
+          module: 'stock',
+          itemType: 'product',
+          vertical: businessType,
+          business_id: businessId || undefined,
+          stockCategory: fields.stockCategory,
+          isStockItem: true,
+          unit: newForm.unit,
+          minStock: 0,
+          costPrice: Number(newForm.costPrice.replace(',', '.')) || 0,
+          stockQuantity: 0,
+          active: true,
+          available: true,
+          webVisible: false,
+          customFields: {
+            inventoryOrganizerId: newForm.organizerId.trim(),
+          },
+        });
+      } catch (err) {
+        if (isCatalogDuplicateError(err) && err.existingItem) {
+          created = err.existingItem;
+          toast.message(`«${created.name}» ya existía. Registramos la entrada sobre ese artículo.`);
+        } else {
+          throw err;
+        }
+      }
       const movement = await createAdjustmentRequest(userId, {
         catalogItemId: created._id,
         quantity: qty,
@@ -697,12 +720,12 @@ function StockEntryPickerModal({
           newForm.notes.trim() ||
           `Alta + entrada: +${qty} ${newForm.unit || 'ud'}`,
       });
-      toast.success('Ingrediente creado y entrada registrada');
+      toast.success('Entrada registrada');
       onDone({
         movement,
         warehouseId,
         createdItem: applyMovementToCatalogItem(
-          { ...created, stockQuantity: 0, warehouseStock: [] },
+          { ...created, stockQuantity: Number(created.stockQuantity || 0), warehouseStock: created.warehouseStock || [] },
           movement,
           warehouseId,
         ),
@@ -1907,8 +1930,22 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
       <AddInventoryItemModal
         isOpen={showAdd}
         onClose={() => setShowAdd(false)}
-        onCreated={() => void refreshAll()}
+        onCreated={(item) => {
+          if (item?._id) {
+            patchStockItem(item._id, item);
+            stockPatchRef.current.set(item._id, item);
+            setLocalItems((prev) => {
+              if (prev.some((p) => p._id === item._id)) {
+                return prev.map((p) => (p._id === item._id ? { ...p, ...item } : p));
+              }
+              return [...prev, item];
+            });
+            setSelectedId(item._id);
+          }
+          scheduleStockReload();
+        }}
         userId={dataUserId}
+        businessId={businessId}
         businessType={businessType}
         commercialBrands={commercialBrands}
         productBrands={productBrands}
@@ -1921,6 +1958,7 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
           items={scopedItems}
           userId={dataUserId}
           warehouseId={storeWarehouseId}
+          businessId={businessId}
           businessType={businessType}
           commercialBrands={commercialBrands}
           defaultOrganizerId={typeFilter}

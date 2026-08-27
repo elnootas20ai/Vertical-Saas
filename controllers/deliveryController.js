@@ -411,40 +411,26 @@ function isSameCatalogScope(base, candidate) {
 }
 
 async function findCatalogDuplicate(req, userId, itemCandidate, excludeId = '') {
-  const items = await listCatalogItemsByUser(req, userId, { module: itemCandidate.module || 'catalog' });
+  const uid = String(userId || '').trim();
+  const module = itemCandidate.module || 'catalog';
   const candidateSku = normalizeDuplicateValue(itemCandidate.sku);
+  const candidateName = normalizeDuplicateValue(itemCandidate.name);
   const excluded = String(excludeId || '').trim();
+  if (!candidateName && !candidateSku) return null;
 
-  if (!String(itemCandidate.name || '').trim() && !candidateSku) return null;
-
+  // Búsqueda acotada (no escanear 12k docs) — suficiente para alta manual.
+  const items = await listCatalogItemsByUser(req, uid, { module });
   for (const item of items) {
     if (!item || String(item._id || '') === excluded) continue;
     if (!isSameCatalogScope(itemCandidate, item)) continue;
-    if (excluded) {
-      const sameSku = !!candidateSku && normalizeDuplicateValue(item.sku) === candidateSku;
-      if (sameSku) {
-        return { item, duplicatedField: 'sku' };
-      }
-      const sameName =
-        !!normalizeDuplicateValue(itemCandidate.name) &&
-        normalizeDuplicateValue(item.name) === normalizeDuplicateValue(itemCandidate.name);
-      if (sameName) {
-        return { item, duplicatedField: 'name' };
-      }
-      continue;
-    }
-    const sameName =
-      !!normalizeDuplicateValue(itemCandidate.name) &&
-      normalizeDuplicateValue(item.name) === normalizeDuplicateValue(itemCandidate.name);
-    if (sameName) {
+    if (item.deletedAt) continue;
+    if (candidateName && normalizeDuplicateValue(item.name) === candidateName) {
       return { item, duplicatedField: 'name' };
     }
-    const sameSku = !!candidateSku && normalizeDuplicateValue(item.sku) === candidateSku;
-    if (sameSku) {
+    if (candidateSku && normalizeDuplicateValue(item.sku) === candidateSku) {
       return { item, duplicatedField: 'sku' };
     }
   }
-
   return null;
 }
 
@@ -1887,9 +1873,28 @@ export async function createCatalogItem(req, res) {
     const doc = buildCatalogItemDocument(userId, item);
     const duplicate = await findCatalogDuplicate(req, userId, doc);
     if (duplicate) {
+      let existing = duplicate.item;
+      // Almacén: si el duplicado no tenía empresa, sellar business_id para que vuelva a verse.
+      const wantBiz = String(doc.business_id || '').trim();
+      const haveBiz = String(existing.business_id || '').trim();
+      if (doc.module === 'stock' && wantBiz && !haveBiz && existing._id) {
+        try {
+          const stamped = buildCatalogItemDocument(
+            userId,
+            { business_id: wantBiz, vertical: doc.vertical || existing.vertical },
+            existing,
+          );
+          const saved = await putDocument(req, db, stamped._id, stamped);
+          existing = { ...stamped, _rev: saved.rev };
+        } catch {
+          /* best-effort */
+        }
+      }
       return res.status(409).json({
         ok: false,
+        code: 'CATALOG_DUPLICATE',
         error: `Ya existe un artículo con ese ${duplicate.duplicatedField === 'sku' ? 'código' : 'nombre'}`,
+        existingItem: sanitizeCatalogItem(existing),
       });
     }
     const saved = await putDocument(req, db, doc._id, doc);
@@ -4741,7 +4746,7 @@ export async function createStaffConsumption(req, res) {
     const catalogItemId = String(body.catalogItemId || '').trim();
     const quantity = Math.max(1, Number(body.quantity || 1));
     const paymentMode = String(body.paymentMode || '').trim();
-    const salesPointId = String(body.salesPointId || '').trim();
+    let salesPointId = String(body.salesPointId || '').trim();
     const salesPointName = String(body.salesPointName || '').trim();
     const registerSessionId = String(body.registerSessionId || '').trim();
     const paymentMethod = String(body.paymentMethod || 'efectivo').trim();
@@ -4751,6 +4756,17 @@ export async function createStaffConsumption(req, res) {
     if (!catalogItemId) return badRequest(res, 'Falta catalogItemId');
     if (!['cash_now', 'payroll_deduction'].includes(paymentMode)) {
       return badRequest(res, 'paymentMode inválido (cash_now | payroll_deduction)');
+    }
+
+    const pdvs = await listScopedPointsOfSaleForUser(req, userId);
+    const resolvedPdvId = resolvePdvIdFromRef(pdvs, salesPointId);
+    if (resolvedPdvId) salesPointId = resolvedPdvId;
+    if (!salesPointId) {
+      const active = (pdvs || []).filter((p) => p && p.active !== false && !p.deletedAt);
+      if (active.length > 1) {
+        return badRequest(res, 'Indica la tienda (salesPointId) del consumo');
+      }
+      if (active.length === 1) salesPointId = String(active[0]._id || '').trim();
     }
 
     const staffCfg = await loadDeliveryStaffConsumptionConfig(req, userId);
@@ -4843,6 +4859,13 @@ export async function createStaffConsumption(req, res) {
     let stockDeducted = 0;
     const stockWarnings = [];
     try {
+      let warehouseId = '';
+      try {
+        const { resolveWarehouseIdForSalesPoint } = await import('../services/storeWarehouseService.js');
+        warehouseId = await resolveWarehouseIdForSalesPoint(req, userId, salesPointId);
+      } catch {
+        warehouseId = '';
+      }
       const stockResult = await deductStaffConsumptionStock(req, userId, {
         catalogItemId,
         quantity,
@@ -4850,6 +4873,7 @@ export async function createStaffConsumption(req, res) {
         workerId,
         workerName,
         itemName: catalogItem.name || '',
+        warehouseId,
         performedBy: recordedBy,
       });
       stockDeducted = stockResult.deducted?.length ?? 0;

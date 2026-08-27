@@ -784,15 +784,75 @@ export async function listCatalogItemsRequest(
   );
 }
 
+export class CatalogDuplicateError extends Error {
+  code = 'CATALOG_DUPLICATE' as const;
+  existingItem: CatalogItem | null;
+
+  constructor(message: string, existingItem: CatalogItem | null = null) {
+    super(message);
+    this.name = 'CatalogDuplicateError';
+    this.existingItem = existingItem;
+  }
+}
+
+export function isCatalogDuplicateError(err: unknown): err is CatalogDuplicateError {
+  return (
+    err instanceof CatalogDuplicateError ||
+    (typeof err === 'object' &&
+      err !== null &&
+      (err as { code?: string }).code === 'CATALOG_DUPLICATE')
+  );
+}
+
 export async function createCatalogItemRequest(userId: string, data: Partial<CatalogItem>): Promise<CatalogItem> {
   const id = normalizeUserId(userId);
-  const result = await request<{ ok: boolean; item: CatalogItem }>(
-    `/api/delivery/catalog/${encodeURIComponent(id)}`,
-    { method: 'POST', body: JSON.stringify({ item: data }) },
-  );
-  invalidateCatalogListCache(id);
-  if (!result.item) throw new Error('Respuesta inválida del servidor');
-  return result.item;
+  const path = `/api/delivery/catalog/${encodeURIComponent(id)}`;
+  try {
+    const response = await authFetch(
+      `${API_BASE}${path}`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ item: data }),
+        signal: deliveryRequestSignal(undefined, DELIVERY_LIST_TIMEOUT_MS),
+        headers: {
+          'Content-Type': 'application/json',
+          ...getCouchHeaders(),
+        },
+      },
+      0,
+      false,
+      { suppressLogout: true },
+    );
+    const payload = (await response.json().catch(() => ({}))) as {
+      ok?: boolean;
+      item?: CatalogItem;
+      existingItem?: CatalogItem;
+      error?: unknown;
+      message?: unknown;
+      code?: string;
+    };
+    if (response.status === 409 || payload.code === 'CATALOG_DUPLICATE') {
+      throw new CatalogDuplicateError(
+        deliveryRequestErrorMessage(payload, 'Ya existe un artículo con ese nombre'),
+        payload.existingItem || null,
+      );
+    }
+    if (!response.ok) {
+      throw new Error(deliveryRequestErrorMessage(payload, 'No se pudo crear el artículo'));
+    }
+    invalidateCatalogListCache(id);
+    if (!payload.item) throw new Error('Respuesta inválida del servidor');
+    return payload.item;
+  } catch (err) {
+    if (err instanceof CatalogDuplicateError) throw err;
+    if (err instanceof Error) {
+      const name = err.name;
+      if (name === 'TimeoutError' || name === 'AbortError' || /timed out|timeout/i.test(err.message)) {
+        throw new Error('La creación está tardando demasiado. Inténtalo de nuevo.');
+      }
+    }
+    throw err;
+  }
 }
 
 export interface BulkCreateResult {

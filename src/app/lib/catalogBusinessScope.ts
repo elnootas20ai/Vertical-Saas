@@ -11,6 +11,7 @@ import {
 import {
   catalogImportIdentityKey,
   catalogLooseIdentityKey,
+  findCatalogItemByDuplicateName,
 } from '../../../shared/catalog/catalogItemIdentity.js';
 
 export type CatalogBusinessScopeOptions = {
@@ -70,6 +71,13 @@ export function catalogItemBelongsToBusinessScope(
     return itemBusinessId === bid;
   }
 
+  // Almacén legacy sin business_id: no ocultarlo en multi-empresa (si no, «ya existe»
+  // al recrear y el artículo no se ve en la lista).
+  if (String(item.module || '') === 'stock') {
+    if (!itemVertical || !activeType) return true;
+    return itemVertical === activeType;
+  }
+
   if (itemVertical && activeType && itemVertical === activeType) {
     return true;
   }
@@ -122,11 +130,32 @@ export function catalogItemIdentityKey(
   return catalogImportIdentityKey(item);
 }
 
-/** Clave laxa (nombre + categoría) tras filtrar por empresa activa. */
+/** Clave laxa (nombre) tras filtrar por empresa activa. */
 export function catalogItemLooseIdentityKey(
-  item: Pick<CatalogItem, 'name' | 'category' | 'module'>,
+  item: Pick<CatalogItem, 'name' | 'module'>,
 ): string {
   return catalogLooseIdentityKey(item);
+}
+
+const CATALOG_DUPLICATE_NAME_MESSAGE =
+  'Ya existe un producto con ese nombre en la carta. Cambia el nombre o edita el existente.';
+
+/** Devuelve el artículo duplicado por nombre en carta (módulo catalog). */
+export function findCatalogDuplicateByName(
+  items: CatalogItem[],
+  name: string,
+  options?: { excludeId?: string },
+): CatalogItem | null {
+  return findCatalogItemByDuplicateName(items, name, {
+    module: 'catalog',
+    excludeId: options?.excludeId,
+  });
+}
+
+export function formatCatalogDuplicateNameError(existing?: Pick<CatalogItem, 'name'> | null): string {
+  const label = String(existing?.name || '').trim();
+  if (!label) return CATALOG_DUPLICATE_NAME_MESSAGE;
+  return `Ya existe «${label}» en la carta. Cambia el nombre o edita ese producto.`;
 }
 
 function isCatalogMenuItem(item: CatalogItem): boolean {

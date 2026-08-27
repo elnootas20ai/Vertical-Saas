@@ -5,6 +5,7 @@ import {
   dedupeCatalogItemsForDisplay,
   expandCatalogItemsForDeletion,
   filterCatalogItemsForBusinessScope,
+  findCatalogDuplicateByName,
 } from '../src/app/lib/catalogBusinessScope.ts';
 
 const brandA = { _id: 'brand-a', name: 'Modomio' };
@@ -178,6 +179,52 @@ describe('catalogBusinessScope', () => {
     const deduped = dedupeCatalogItemsForDisplay(items, 'biz-a');
     expect(deduped).toHaveLength(1);
     expect(deduped[0]._id).toBe('imported');
+  });
+
+  it('dedupeCatalogItemsForDisplay colapsa el mismo nombre aunque cambie marca o categoría', () => {
+    const items = [
+      {
+        _id: 'a1',
+        name: 'Margarita',
+        category: 'Pizzas',
+        brandIds: ['brand-a'],
+        business_id: 'biz-a',
+      },
+      {
+        _id: 'b1',
+        name: 'Margarita',
+        category: 'Especialidades',
+        brandIds: ['brand-b'],
+        business_id: 'biz-a',
+      },
+    ];
+    const deduped = dedupeCatalogItemsForDisplay(items, 'biz-a');
+    expect(deduped).toHaveLength(1);
+  });
+
+  it('findCatalogDuplicateByName detecta nombre repetido', () => {
+    const items = [
+      { _id: '1', module: 'catalog', name: 'Caña' },
+      { _id: '2', module: 'catalog', name: 'Tapa bravas' },
+    ];
+    expect(findCatalogDuplicateByName(items, 'caña')?._id).toBe('1');
+    expect(findCatalogDuplicateByName(items, 'Tapa bravas', { excludeId: '2' })).toBeNull();
+  });
+
+  it('almacén legacy sin business_id se ve en multi-empresa', () => {
+    const item = {
+      _id: 'masa-1',
+      name: 'Masa',
+      module: 'stock',
+      vertical: 'delivery',
+    };
+    const brandIds = new Set(['brand-a']);
+    expect(
+      catalogItemBelongsToBusinessScope(item, 'biz-a', brandIds, {
+        accountBusinessCount: 3,
+        activeBusinessType: 'delivery',
+      }),
+    ).toBe(true);
   });
 
   it('expandCatalogItemsForDeletion incluye duplicados legacy con la misma identidad', () => {
