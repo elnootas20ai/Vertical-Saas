@@ -244,19 +244,23 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
       setLoadDetail('');
     }, 45_000);
     try {
-      const [stockCatalog, wh, brands] = await Promise.all([
-        listCatalogItemsRequest(dataUserId, 'stock'),
+      // Todo el catálogo y luego inventario: si solo pedimos module=stock
+      // no salen bebidas de carta con isStockItem (p. ej. Coca-Cola) y el chip
+      // «Bebidas» se queda a medias (solo las creadas como almacén puro).
+      const [allCatalog, wh, brands] = await Promise.all([
+        listCatalogItemsRequest(dataUserId),
         listWarehousesRequest(dataUserId).catch(() => [] as Warehouse[]),
         businessId ? listBrandsRequest(businessId).catch(() => []) : Promise.resolve([]),
       ]);
       // Ignorar respuestas viejas si hubo otro reload/entrada después.
       if (gen !== reloadGenRef.current) return;
+      const inventory = filterStockInventoryItems(allCatalog);
       const scoped = businessId
-        ? filterCatalogItemsForBusinessScope(stockCatalog, businessId, brands, {
+        ? filterCatalogItemsForBusinessScope(inventory, businessId, brands, {
             accountBusinessCount: businesses.length,
             activeBusinessType: currentBusiness?.businessType,
           })
-        : stockCatalog;
+        : inventory;
       setItems(scoped);
       setWarehouses(wh);
       hasPaintedRef.current = true;
