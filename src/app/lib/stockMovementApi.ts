@@ -43,13 +43,10 @@ function stockMovementRequestErrorMessage(
 
 export function stockMovementUserMessage(err: unknown, fallback = 'No se pudo cargar el historial'): string {
   if (err instanceof Error) {
-    if (err.name === 'TimeoutError' || err.name === 'AbortError') {
-      return 'La carga del historial tardó demasiado. Inténtalo de nuevo.';
+    if (err.name === 'TimeoutError' || err.name === 'AbortError' || /timed out|timeout|signal/i.test(err.message)) {
+      return 'No se pudo cargar el historial ahora. Prueba de nuevo en unos segundos.';
     }
     const msg = err.message?.trim();
-    if (msg && /timed out|timeout/i.test(msg)) {
-      return 'La carga del historial tardó demasiado. Inténtalo de nuevo.';
-    }
     if (msg) return msg;
   }
   return fallback;
@@ -57,13 +54,10 @@ export function stockMovementUserMessage(err: unknown, fallback = 'No se pudo ca
 
 export function stockMovementSaveMessage(err: unknown, fallback = 'No se pudo registrar el movimiento'): string {
   if (err instanceof Error) {
-    if (err.name === 'TimeoutError' || err.name === 'AbortError') {
-      return 'El servidor tardó demasiado en guardar. Revisa si el movimiento quedó registrado o inténtalo de nuevo.';
+    if (err.name === 'TimeoutError' || err.name === 'AbortError' || /timed out|timeout|signal/i.test(err.message)) {
+      return 'No se pudo guardar ahora. Revisa el stock e inténtalo de nuevo.';
     }
     const msg = err.message?.trim();
-    if (msg && /timed out|timeout/i.test(msg)) {
-      return 'El servidor tardó demasiado en guardar. Revisa si el movimiento quedó registrado o inténtalo de nuevo.';
-    }
     if (msg) return msg;
   }
   return fallback;

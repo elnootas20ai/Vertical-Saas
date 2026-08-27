@@ -44,9 +44,11 @@ type DeliveryRequestOptions = {
 };
 
 const DELIVERY_API_TIMEOUT_MS = 50_000;
+const DELIVERY_LIST_TIMEOUT_MS = 90_000;
 
 function deliveryRequestSignal(init?: RequestInit, timeoutMs = DELIVERY_API_TIMEOUT_MS): AbortSignal | undefined {
   if (init?.signal) return init.signal;
+  if (!(timeoutMs > 0)) return undefined;
   if (typeof AbortSignal?.timeout === 'function') {
     return AbortSignal.timeout(timeoutMs);
   }
@@ -66,20 +68,30 @@ function deliveryRequestErrorMessage(payload: { error?: unknown; message?: unkno
 
 async function request<T>(path: string, init?: RequestInit, options?: DeliveryRequestOptions): Promise<T> {
   const timeoutMs = options?.timeoutMs ?? DELIVERY_API_TIMEOUT_MS;
-  const response = await authFetch(`${API_BASE}${path}`, {
-    ...init,
-    signal: deliveryRequestSignal(init, timeoutMs),
-    headers: {
-      'Content-Type': 'application/json',
-      ...getCouchHeaders(),
-      ...(init?.headers || {}),
-    },
-  }, 0, false, { suppressLogout: options?.suppressLogout });
-  const payload = (await response.json().catch(() => ({}))) as T & { error?: unknown; message?: unknown };
-  if (!response.ok) {
-    throw new Error(deliveryRequestErrorMessage(payload, 'No se pudo completar la acción'));
+  try {
+    const response = await authFetch(`${API_BASE}${path}`, {
+      ...init,
+      signal: deliveryRequestSignal(init, timeoutMs),
+      headers: {
+        'Content-Type': 'application/json',
+        ...getCouchHeaders(),
+        ...(init?.headers || {}),
+      },
+    }, 0, false, { suppressLogout: options?.suppressLogout });
+    const payload = (await response.json().catch(() => ({}))) as T & { error?: unknown; message?: unknown };
+    if (!response.ok) {
+      throw new Error(deliveryRequestErrorMessage(payload, 'No se pudo completar la acción'));
+    }
+    return payload;
+  } catch (err) {
+    if (err instanceof Error) {
+      const name = err.name;
+      if (name === 'TimeoutError' || name === 'AbortError' || /timed out|timeout/i.test(err.message)) {
+        throw new Error('La petición ha tardado demasiado. Inténtalo de nuevo.');
+      }
+    }
+    throw err;
   }
-  return payload;
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -762,6 +774,8 @@ export async function listCatalogItemsRequest(
       const qs = params.toString() ? `?${params.toString()}` : '';
       const payload = await request<{ ok: boolean; items: CatalogItem[] }>(
         `/api/delivery/catalog/${encodeURIComponent(id)}${qs}`,
+        undefined,
+        { timeoutMs: DELIVERY_LIST_TIMEOUT_MS },
       );
       return payload.items || [];
     },

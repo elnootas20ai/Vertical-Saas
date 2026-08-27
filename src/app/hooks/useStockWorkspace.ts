@@ -220,9 +220,9 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
       return;
     }
     const hasSeed = hasPaintedRef.current;
+    // No bloquear la UI con «Cargando…»: pintar shell vacío y rellenar al llegar datos.
     if (!hasSeed) {
-      setLoading(true);
-      setLoadDetail('Leyendo almacén…');
+      setLoadDetail('Actualizando…');
     }
     const watchdog = window.setTimeout(() => {
       setLoading(false);
@@ -285,7 +285,10 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
     warehouses,
     stockItems,
     stockedCount,
-    loading: !ready || loading,
+    /** Solo true mientras aún no hay user/scope; nunca bloquea con pantalla llena. */
+    loading: !ready,
+    /** true mientras llega el listado (UI ya visible). */
+    refreshing: ready && loading,
     loadDetail,
     reload,
   };

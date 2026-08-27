@@ -730,6 +730,10 @@ export async function authFetch(
       headers,
     });
   } catch (err) {
+    const name = err instanceof Error ? err.name : '';
+    if (name === 'TimeoutError' || name === 'AbortError') {
+      throw new Error('La petición ha tardado demasiado. Inténtalo de nuevo.');
+    }
     const isNetwork = err instanceof TypeError
       || (err instanceof Error && /failed to fetch|network|load failed/i.test(err.message));
     if (isNetwork && attempt < 2) {
@@ -759,7 +763,7 @@ export async function authFetch(
 
 // ── Cliente HTTP con renovación automática de token ───────────────────────────
 
-function extractApiErrorMessage(payload: Record<string, unknown> | ApiEnvelope<unknown>): string {
+export function extractApiErrorMessage(payload: Record<string, unknown> | ApiEnvelope<unknown>): string {
   const err = payload.error;
   if (typeof err === 'string' && err.trim()) return err.trim();
   if (err && typeof err === 'object') {

@@ -14,7 +14,6 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { CatalogCoreLoadingState } from './CatalogCoreLoadingState';
 import { CatalogDeleteGuardModal } from './CatalogDeleteGuardModal';
 import { useModalClose } from '../../hooks/useModalClose';
 import type { CatalogItem } from '../../lib/deliveryApi';
@@ -33,7 +32,6 @@ import {
   createAdjustmentRequest,
   getMovementsByItemRequest,
   stockMovementSaveMessage,
-  stockMovementUserMessage,
   type StockMovement,
 } from '../../lib/stockMovementApi';
 import { useStockWorkspace } from '../../hooks/useStockWorkspace';
@@ -907,9 +905,8 @@ function InventoryItemDetailModal({
     try {
       const rows = await getMovementsByItemRequest(userId, item._id);
       setMovements([...rows].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))));
-    } catch (err) {
+    } catch {
       setMovements([]);
-      toast.error(stockMovementUserMessage(err));
     } finally {
       setLoadingMovements(false);
     }
@@ -1115,10 +1112,12 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
     storeLabel,
     storeWarehouseId,
     stockItems,
-    loading,
+    loading: _loadingUnused,
+    refreshing,
     loadDetail,
     reload,
   } = useStockWorkspace({ seedStockItems });
+  void _loadingUnused;
   const { currentBusiness } = useBusiness();
   const businessId = String(
     currentBusiness?.business_id || currentBusiness?.id || '',
@@ -1501,10 +1500,6 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
     [dataUserId, businessId, businessType, refreshAll],
   );
 
-  if (loading && scopedItems.length === 0) {
-    return <CatalogCoreLoadingState kind="stock" />;
-  }
-
   return (
     <>
       <SaasTabWorkspace
@@ -1536,6 +1531,11 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
               <p className="text-xs font-medium text-amber-800 dark:text-amber-300 flex items-center gap-2">
                 <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
                 {syncDetail || 'Sincronizando inventario…'}
+              </p>
+            ) : refreshing && scopedItems.length === 0 ? (
+              <p className="text-xs text-stone-500 dark:text-stone-400 flex items-center gap-2">
+                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                {loadDetail || 'Actualizando almacén…'}
               </p>
             ) : null}
           </div>

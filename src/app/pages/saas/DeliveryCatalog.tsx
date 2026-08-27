@@ -4384,11 +4384,16 @@ export function CatalogPage() {
   }, [catalogItems, brands, activeWorkCenterId]);
 
   const storeWarehouseId = useMemo(() => {
-    const activeWh = warehouses.filter((w) => w.active);
+    const activeWh = warehouses.filter((w) => w.active !== false);
+    const pdvId = String(activeStore.activeSalesPointId || '').trim();
+    if (pdvId) {
+      const linked = activeWh.find((w) => String(w.salesPointId || '').trim() === pdvId);
+      if (linked) return linked._id;
+    }
     const label = storeLabel.toLowerCase();
     const byName = activeWh.find((w) => label && w.name.toLowerCase().includes(label.split(/\s+/)[0] || ''));
     return byName?._id || activeWh.find((w) => w.isDefault)?._id || activeWh[0]?._id || '';
-  }, [warehouses, storeLabel]);
+  }, [warehouses, storeLabel, activeStore.activeSalesPointId]);
 
   // Catalog state
   const [showCreateItem, setShowCreateItem] = useState(false);
@@ -5090,7 +5095,6 @@ export function CatalogPage() {
     const watchdog = window.setTimeout(() => {
       setSuppliersLoading(false);
       suppliersLoadStartedRef.current = false;
-      toast.error('La carga de proveedores está tardando demasiado. Inténtalo de nuevo.');
     }, 45_000);
     try {
       const data = await listSuppliersRequest(dataUserId);
@@ -5098,7 +5102,6 @@ export function CatalogPage() {
       suppliersFetchedRef.current = true;
     } catch {
       suppliersLoadStartedRef.current = false;
-      toast.error('Error al cargar proveedores');
     } finally {
       window.clearTimeout(watchdog);
       setSuppliersLoading(false);
@@ -5111,7 +5114,6 @@ export function CatalogPage() {
     const watchdog = window.setTimeout(() => {
       setInvoicesHydrating(false);
       invoicesLoadStartedRef.current = false;
-      toast.error('La carga de facturas está tardando demasiado. Inténtalo de nuevo.');
     }, 45_000);
     try {
       const data = await listPurchaseInvoicesRequest(dataUserId, {
@@ -5122,7 +5124,6 @@ export function CatalogPage() {
       invoicesFetchedRef.current = true;
     } catch {
       invoicesLoadStartedRef.current = false;
-      toast.error('Error al cargar facturas');
     } finally {
       window.clearTimeout(watchdog);
       setInvoicesHydrating(false);
@@ -6411,10 +6412,10 @@ export function CatalogPage() {
       }
     >
       {/* Secciones por categoría */}
-      {loading && catalogItems.length > 0 && (
+      {(loading) && (
         <div className="flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 px-3 py-2 text-sm text-gray-600 dark:text-gray-400">
           <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-          Actualizando catálogo…
+          {catalogItems.length > 0 ? 'Actualizando catálogo…' : 'Cargando productos…'}
         </div>
       )}
       {!loading && isCatalogEmpty ? (
@@ -6431,7 +6432,7 @@ export function CatalogPage() {
             onImport={openCatalogImport}
           />
         </ActivationFieldWrap>
-      ) : !loading && isSearchEmpty ? (
+      ) : isSearchEmpty ? (
         <SaasTabEmpty
           icon={<Search className="w-10 h-10" />}
           title="Sin resultados"
@@ -6442,7 +6443,7 @@ export function CatalogPage() {
             </SaasTabSecondaryButton>
           }
         />
-      ) : !loading ? (
+      ) : catalogMenuItems.length > 0 || filteredCatalog.length > 0 ? (
         (() => {
           const searchActive = Boolean(searchCatalog.trim());
           const groups = catalogGroupedByCategory;
@@ -6982,8 +6983,11 @@ export function CatalogPage() {
         </SaasTabPrimaryButton>
       }
     >
-      {suppliersLoading ? (
-        <CatalogCoreLoadingState kind="suppliers" compact />
+      {suppliersLoading && suppliers.length === 0 ? (
+        <div className="flex items-center gap-2 px-3 py-6 text-sm text-gray-500">
+          <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+          Actualizando proveedores…
+        </div>
       ) : suppliers.length === 0 ? (
         <SaasTabEmpty
           icon={<Truck className="w-10 h-10" />}
@@ -8208,24 +8212,16 @@ export function CatalogPage() {
 
         <CatalogModuleNav groups={navGroups} activeTab={activeTab} onChange={setActiveTab} />
 
-        {activeTab === 'catalog' && (
-          catalogBusy ? <CatalogTabLoadingState phase="catalog" /> : renderCatalogTab()
-        )}
+        {activeTab === 'catalog' && renderCatalogTab()}
 
         {activeTab === 'ingredientes' && !isRestaurantCatalog && renderIngredientesTab()}
 
         {activeTab === 'stock' && !isRestaurantCatalog && (
-          loading && filterStockInventoryItems(catalogItems).length === 0
-            ? <CatalogTabLoadingState phase="stock" />
-            : (
-              <InventoryPanel seedStockItems={filterStockInventoryItems(catalogItems)} />
-            )
+          <InventoryPanel seedStockItems={filterStockInventoryItems(catalogItems)} />
         )}
 
         {activeTab === 'staff-consumption' && (
-          catalogBusy ? (
-            <CatalogTabLoadingState phase="catalog" />
-          ) : dataUserId && user ? (
+          dataUserId && user ? (
             <StaffConsumptionTabPanel
               userId={dataUserId}
               catalogItems={catalogItems}
@@ -8235,11 +8231,7 @@ export function CatalogPage() {
           ) : null
         )}
 
-        {activeTab === 'suppliers' && (
-          suppliersLoading && suppliers.length === 0
-            ? <CatalogTabLoadingState phase="suppliers" />
-            : renderSuppliersTab()
-        )}
+        {activeTab === 'suppliers' && renderSuppliersTab()}
 
         {activeTab === 'purchase-orders' && (
           <PurchaseOrdersPage
