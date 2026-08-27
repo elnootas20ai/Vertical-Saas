@@ -219,6 +219,8 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
     hasPaintedRef.current = true;
   }, [seedKey]);
 
+  const reloadGenRef = useRef(0);
+
   const reload = useCallback(async () => {
     if (!dataUserId) {
       setItems([]);
@@ -227,12 +229,14 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
       setLoadDetail('');
       return;
     }
+    const gen = ++reloadGenRef.current;
     const alreadyHasItems = hasPaintedRef.current;
     if (!alreadyHasItems) {
       setLoading(true);
       setLoadDetail('Cargando artículos del almacén…');
     }
     const watchdog = window.setTimeout(() => {
+      if (gen !== reloadGenRef.current) return;
       setLoading(false);
       setLoadDetail('');
     }, 45_000);
@@ -242,6 +246,8 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
         listWarehousesRequest(dataUserId).catch(() => [] as Warehouse[]),
         businessId ? listBrandsRequest(businessId).catch(() => []) : Promise.resolve([]),
       ]);
+      // Ignorar respuestas viejas si hubo otro reload/entrada después.
+      if (gen !== reloadGenRef.current) return;
       const scoped = businessId
         ? filterCatalogItemsForBusinessScope(stockCatalog, businessId, brands, {
             accountBusinessCount: businesses.length,
@@ -259,15 +265,16 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
       const pos = pointsOfSaleRef.current || [];
       if (!warehousesCoverAllStores(wh, pos)) {
         void ensureClientStoreWarehouses(dataUserId, pos, wh).then((ensured) => {
+          if (gen !== reloadGenRef.current) return;
           setWarehouses(ensured);
         });
       }
     } catch {
+      if (gen !== reloadGenRef.current) return;
       if (!hasPaintedRef.current) {
         setItems([]);
         setWarehouses([]);
       }
-      // Tras error: ya no estamos «cargando»; si no hay items, mostrar vacío real.
       hasPaintedRef.current = true;
       setLoading(false);
       setLoadDetail('');
@@ -281,6 +288,21 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
     dataUserId,
     posKey,
   ]);
+
+  const patchStockItem = useCallback((itemId: string, patch: CatalogItem) => {
+    const id = String(itemId || '').trim();
+    if (!id) return;
+    hasPaintedRef.current = true;
+    setItems((prev) => {
+      const idx = prev.findIndex((i) => i._id === id);
+      if (idx < 0) return [...prev, patch];
+      const next = [...prev];
+      next[idx] = { ...next[idx], ...patch, _id: id };
+      return next;
+    });
+    setLoading(false);
+    setLoadDetail('');
+  }, []);
 
   useEffect(() => {
     if (!ready) return;
@@ -301,5 +323,6 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
     refreshing: ready && loading,
     loadDetail,
     reload,
+    patchStockItem,
   };
 }

@@ -393,6 +393,7 @@ function AddInventoryItemModal({
 type StockMovementDone = {
   movement: StockMovement;
   warehouseId: string;
+  createdItem?: CatalogItem;
 };
 
 function applyMovementToCatalogItem(
@@ -400,9 +401,14 @@ function applyMovementToCatalogItem(
   movement: StockMovement,
   warehouseId: string,
 ): CatalogItem {
-  const wh = String(warehouseId || '').trim();
+  const wh = String(warehouseId || movement.warehouseId || '').trim();
+  const now = new Date().toISOString();
   if (!wh) {
-    return { ...item, stockQuantity: movement.newStock };
+    return {
+      ...item,
+      stockQuantity: movement.newStock,
+      updatedAt: now,
+    };
   }
   const rows = normalizeWarehouseStockRows(item.warehouseStock);
   const idx = rows.findIndex((row) => row.warehouseId === wh);
@@ -435,6 +441,7 @@ function applyMovementToCatalogItem(
     ...item,
     warehouseStock: nextRows,
     stockQuantity: sumWarehouseStockQuantities(nextRows),
+    updatedAt: now,
   };
 }
 
@@ -588,7 +595,7 @@ function StockEntryPickerModal({
   inUseOrganizerIds?: string[];
   onClose: () => void;
   onSelect: (item: CatalogItem) => void;
-  onDone: () => void;
+  onDone: (result?: StockMovementDone) => void;
 }) {
   useModalClose(true, onClose);
   const { config: verticalConfig } = useVerticalCatalog();
@@ -681,7 +688,7 @@ function StockEntryPickerModal({
           inventoryOrganizerId: newForm.organizerId.trim(),
         },
       });
-      await createAdjustmentRequest(userId, {
+      const movement = await createAdjustmentRequest(userId, {
         catalogItemId: created._id,
         quantity: qty,
         type: 'in',
@@ -691,7 +698,15 @@ function StockEntryPickerModal({
           `Alta + entrada: +${qty} ${newForm.unit || 'ud'}`,
       });
       toast.success('Ingrediente creado y entrada registrada');
-      onDone();
+      onDone({
+        movement,
+        warehouseId,
+        createdItem: applyMovementToCatalogItem(
+          { ...created, stockQuantity: 0, warehouseStock: [] },
+          movement,
+          warehouseId,
+        ),
+      });
       onClose();
     } catch (err) {
       toast.error(stockMovementSaveMessage(err, 'No se pudo registrar la entrada'));
@@ -1116,6 +1131,7 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
     refreshing,
     loadDetail,
     reload,
+    patchStockItem,
   } = useStockWorkspace({ seedStockItems });
   void _loadingUnused;
   const { currentBusiness } = useBusiness();
@@ -1148,9 +1164,39 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
   const deleteOpRef = useRef<InventoryDeleteOp>(null);
   deleteOpRef.current = deleteGuard;
 
+  const stockPatchRef = useRef(new Map<string, CatalogItem>());
+  const reloadDebounceRef = useRef<number | null>(null);
+
   useEffect(() => {
-    setLocalItems(stockItems);
-  }, [stockItems]);
+    setLocalItems((prev) => {
+      const prevById = new Map(prev.map((i) => [i._id, i]));
+      const merged = stockItems.map((serverItem) => {
+        const id = serverItem._id;
+        const patched = stockPatchRef.current.get(id);
+        const local = prevById.get(id);
+        const candidate = patched || local;
+        if (!candidate) return serverItem;
+
+        const serverTs = Date.parse(String(serverItem.updatedAt || '')) || 0;
+        const localTs = Date.parse(String(candidate.updatedAt || '')) || 0;
+        const serverQ = quantityForWarehouse(serverItem, storeWarehouseId);
+        const localQ = quantityForWarehouse(candidate, storeWarehouseId);
+        // Mantener parche solo si el listado del servidor aún no refleja la entrada.
+        if (localTs > serverTs && Math.abs(localQ - serverQ) > 1e-9) {
+          return candidate;
+        }
+        stockPatchRef.current.delete(id);
+        return serverItem;
+      });
+      const mergedIds = new Set(merged.map((i) => i._id));
+      for (const item of prev) {
+        if (!mergedIds.has(item._id) && stockPatchRef.current.has(item._id)) {
+          merged.push(item);
+        }
+      }
+      return merged;
+    });
+  }, [stockItems, storeWarehouseId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1284,28 +1330,57 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
   }, [selectedId, selectedItem]);
 
   const applyLocalStockFromMovement = useCallback((result: StockMovementDone) => {
-    const { movement, warehouseId: wh } = result;
-    const itemId = movement.catalogItemId;
+    const { movement, warehouseId: wh, createdItem } = result;
+    const itemId = movement.catalogItemId || createdItem?._id || '';
     if (!itemId) return;
-    setLocalItems((prev) =>
-      prev.map((item) =>
-        item._id === itemId ? applyMovementToCatalogItem(item, movement, wh) : item,
-      ),
-    );
-  }, []);
+    const whId = wh || storeWarehouseId;
+
+    setLocalItems((prev) => {
+      const idx = prev.findIndex((item) => item._id === itemId);
+      let nextItem: CatalogItem;
+      if (idx < 0) {
+        if (!createdItem) return prev;
+        nextItem = createdItem;
+        stockPatchRef.current.set(itemId, nextItem);
+        patchStockItem(itemId, nextItem);
+        return [...prev, nextItem];
+      }
+      nextItem = applyMovementToCatalogItem(prev[idx], movement, whId);
+      stockPatchRef.current.set(itemId, nextItem);
+      patchStockItem(itemId, nextItem);
+      const next = [...prev];
+      next[idx] = nextItem;
+      return next;
+    });
+    setEntryItem((prev) => {
+      if (!prev || prev._id !== itemId) return prev;
+      return applyMovementToCatalogItem(prev, movement, whId);
+    });
+  }, [patchStockItem, storeWarehouseId]);
 
   const refreshAll = useCallback(async () => {
     invalidateCatalogListCache(dataUserId);
     await reload();
   }, [reload, dataUserId]);
 
+  const scheduleStockReload = useCallback(() => {
+    invalidateCatalogListCache(dataUserId);
+    if (reloadDebounceRef.current != null) {
+      window.clearTimeout(reloadDebounceRef.current);
+    }
+    // Debounce: varias entradas seguidas → un solo refresh, sin pisar stock local.
+    reloadDebounceRef.current = window.setTimeout(() => {
+      reloadDebounceRef.current = null;
+      void reload();
+    }, 450);
+  }, [dataUserId, reload]);
+
   const onMovementDone = useCallback(
     (result?: StockMovementDone) => {
       if (result) applyLocalStockFromMovement(result);
-      invalidateCatalogListCache(dataUserId);
-      void reload();
+      scheduleStockReload();
     },
-    [applyLocalStockFromMovement, dataUserId, reload],
+    [applyLocalStockFromMovement, scheduleStockReload],
   );
 
   const selectedCount = selectedIds.size;
@@ -1851,7 +1926,7 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
           defaultOrganizerId={typeFilter}
           inUseOrganizerIds={typeGroups.map((g) => g.id)}
           onClose={() => setShowEntryPicker(false)}
-          onDone={() => void refreshAll()}
+          onDone={(result) => onMovementDone(result)}
           onSelect={(item) => {
             setShowEntryPicker(false);
             setEntryItem(item);
