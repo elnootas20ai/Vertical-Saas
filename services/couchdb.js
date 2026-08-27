@@ -6722,7 +6722,7 @@ export function buildDeliveryConfigDocument(userId, data = {}, existing = null) 
   };
 }
 
-function sanitizeInventorySyncExcludedKeys(raw: unknown): string[] {
+function sanitizeInventorySyncExcludedKeys(raw) {
   if (!Array.isArray(raw)) return [];
   const seen = new Set();
   const out = [];
