@@ -532,6 +532,18 @@ function orderIsPaidForStock(doc) {
   return doc.paymentStatus === 'paid' || doc.paymentCollected === true;
 }
 
+function scheduleDeliveryStockDeduction(req, userId, doc, previousStatus) {
+  setImmediate(() => {
+    void maybeDeductRecipeStockForDeliveredOrder(req, userId, doc, previousStatus).catch((err) => {
+      logger.warn({
+        tag: 'DELIVERY_STOCK',
+        err: err?.message,
+        orderId: doc?._id,
+      }, 'Error descuento stock delivery en background');
+    });
+  });
+}
+
 async function maybeDeductRecipeStockForDeliveredOrder(req, userId, doc, previousStatus) {
   if (!doc) return;
   const shouldDeduct = doc.status === 'entregado' || orderIsPaidForStock(doc);
@@ -707,7 +719,7 @@ export async function createDeliveryOrder(req, res) {
       logger.warn({ err: vfErr, orderId: savedDoc._id }, 'Verifactu auto (TPV) omitido');
     }
 
-    await maybeDeductRecipeStockForDeliveredOrder(req, userId, savedDoc, null);
+    scheduleDeliveryStockDeduction(req, userId, savedDoc, null);
     await maybeSyncDeliveryOrderFinance(req, userId, savedDoc);
     let cajaRegistration = await maybeRegisterTpvSaleOnTpvChannelOrderCreate(
       req, userId, savedDoc, account,
@@ -775,7 +787,7 @@ export async function updateDeliveryOrder(req, res) {
     });
 
     await maybeRestoreRecipeStockAfterLeavingDelivered(req, userId, doc, existing.status);
-    await maybeDeductRecipeStockForDeliveredOrder(req, userId, doc, existing.status);
+    scheduleDeliveryStockDeduction(req, userId, doc, existing.status);
     await maybeSyncDeliveryOrderFinance(req, userId, { ...doc, _rev: saved.rev });
     const cajaRegistration = await maybeRegisterDeliveryPaymentInTpvSession(
       req, userId, doc, existing, account.fullName, req.callerAccount || account,
@@ -1586,7 +1598,7 @@ export async function registerPayment(req, res) {
 
     const sanitized = sanitizeDeliveryOrder({ ...doc, _rev: saved.rev });
     broadcastDeliveryPaymentLive(account, userId, { ...doc, _rev: saved.rev });
-    await maybeDeductRecipeStockForDeliveredOrder(req, userId, { ...doc, _rev: saved.rev }, existing.status);
+    scheduleDeliveryStockDeduction(req, userId, { ...doc, _rev: saved.rev }, existing.status);
     await maybeSyncDeliveryOrderFinance(req, userId, { ...doc, _rev: saved.rev });
     return res.json({ ok: true, order: sanitized, cajaRegistration });
   } catch (error) {

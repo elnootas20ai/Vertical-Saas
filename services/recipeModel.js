@@ -3,7 +3,23 @@ import {
   getCatalogDbName,
   ensureDatabase,
   getAllDocuments,
+  findDocuments,
+  ensureIndex,
 } from './couchdb.js';
+
+const recipeCatalogItemIndexReady = new Set();
+
+async function ensureRecipeCatalogItemIndex(req, dbName) {
+  if (recipeCatalogItemIndexReady.has(dbName)) return;
+  const safeDb = String(dbName || '').replace(/[^a-z0-9]+/g, '-');
+  await ensureIndex(
+    req,
+    dbName,
+    ['type', 'user_id', 'catalogItemId'],
+    `idx-${safeDb}-recipe-catalog-item`,
+  ).catch(() => null);
+  recipeCatalogItemIndexReady.add(dbName);
+}
 
 const VALID_RECIPE_STOCK_CATEGORIES = ['ingredient', 'beverage', 'packaging', 'cleaning', 'consumable', 'other'];
 
@@ -118,10 +134,31 @@ export async function listRecipesByUser(req, userId) {
 }
 
 export async function findRecipeByCatalogItem(req, userId, catalogItemId) {
+  const uid = String(userId || '').trim();
+  const cid = String(catalogItemId || '').trim();
+  if (!uid || !cid) return [];
+
   const db = getCatalogDbName();
   await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
+  await ensureRecipeCatalogItemIndex(req, db);
+
+  let docs;
+  try {
+    docs = await findDocuments(
+      req,
+      db,
+      { type: 'recipe', user_id: uid, catalogItemId: cid },
+      { pageSize: 50, maxDocs: 50 },
+    );
+  } catch {
+    docs = [];
+  }
+
   return docs.filter(
-    (doc) => doc?.type === 'recipe' && !doc?.deletedAt && doc?.user_id === userId && doc?.catalogItemId === catalogItemId
+    (doc) =>
+      doc?.type === 'recipe' &&
+      !doc?.deletedAt &&
+      doc?.user_id === uid &&
+      doc?.catalogItemId === cid,
   );
 }

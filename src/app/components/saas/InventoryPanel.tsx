@@ -32,6 +32,7 @@ import { filterStockInventoryItems } from '../../lib/stockInventoryScope';
 import {
   createAdjustmentRequest,
   getMovementsByItemRequest,
+  stockMovementSaveMessage,
   stockMovementUserMessage,
   type StockMovement,
 } from '../../lib/stockMovementApi';
@@ -59,7 +60,7 @@ import {
   ORGANIZER_TOTAL,
   type InventoryCommercialBrand,
 } from '../../lib/inventoryUtils';
-import { quantityForWarehouse } from '../../lib/warehouseStockQty';
+import { quantityForWarehouse, normalizeWarehouseStockRows, sumWarehouseStockQuantities } from '../../lib/warehouseStockQty';
 import { CatalogUnitChip, StockQtyWithUnit } from './CatalogUnitChip';
 import {
   SaasTabEmpty,
@@ -391,6 +392,54 @@ function AddInventoryItemModal({
   );
 }
 
+type StockMovementDone = {
+  movement: StockMovement;
+  warehouseId: string;
+};
+
+function applyMovementToCatalogItem(
+  item: CatalogItem,
+  movement: StockMovement,
+  warehouseId: string,
+): CatalogItem {
+  const wh = String(warehouseId || '').trim();
+  if (!wh) {
+    return { ...item, stockQuantity: movement.newStock };
+  }
+  const rows = normalizeWarehouseStockRows(item.warehouseStock);
+  const idx = rows.findIndex((row) => row.warehouseId === wh);
+  let nextRows;
+  if (idx >= 0) {
+    nextRows = rows.map((row, i) =>
+      i === idx ? { ...row, quantity: movement.newStock } : row,
+    );
+  } else if (rows.length === 0) {
+    nextRows = [
+      {
+        warehouseId: wh,
+        warehouseName: '',
+        quantity: movement.newStock,
+        minStock: Number(item.minStock || 0),
+      },
+    ];
+  } else {
+    nextRows = [
+      ...rows,
+      {
+        warehouseId: wh,
+        warehouseName: '',
+        quantity: movement.newStock,
+        minStock: Number(item.minStock || 0),
+      },
+    ];
+  }
+  return {
+    ...item,
+    warehouseStock: nextRows,
+    stockQuantity: sumWarehouseStockQuantities(nextRows),
+  };
+}
+
 function MovementModal({
   item,
   mode,
@@ -404,7 +453,7 @@ function MovementModal({
   warehouseId: string;
   userId: string;
   onClose: () => void;
-  onDone: () => void;
+  onDone: (result?: StockMovementDone) => void;
 }) {
   const current = Number(item.stockQuantity || 0);
   const [quantity, setQuantity] = useState('');
@@ -416,50 +465,56 @@ function MovementModal({
     mode === 'in' ? 'Entrada de stock' : mode === 'out' ? 'Salida manual' : 'Ajuste de inventario';
 
   const submit = async () => {
+    let payload:
+      | { catalogItemId: string; quantity: number; type: 'in' | 'out'; warehouseId?: string; notes: string }
+      | null = null;
+
+    if (mode === 'adjust') {
+      const target = Number(targetStock.replace(',', '.'));
+      if (!Number.isFinite(target) || target < 0) {
+        toast.error('Indica un stock válido');
+        return;
+      }
+      const delta = target - current;
+      if (delta === 0) {
+        toast.message('Sin cambios');
+        onClose();
+        return;
+      }
+      payload = {
+        catalogItemId: item._id,
+        quantity: Math.abs(delta),
+        type: delta > 0 ? 'in' : 'out',
+        warehouseId: warehouseId || undefined,
+        notes: notes.trim() || `Ajuste a ${target} ${item.unit || 'ud'}`,
+      };
+    } else {
+      const qty = Number(quantity.replace(',', '.'));
+      if (!Number.isFinite(qty) || qty <= 0) {
+        toast.error('Indica una cantidad válida');
+        return;
+      }
+      payload = {
+        catalogItemId: item._id,
+        quantity: qty,
+        type: mode,
+        warehouseId: warehouseId || undefined,
+        notes:
+          notes.trim() ||
+          (mode === 'in'
+            ? `Entrada manual: +${qty} ${item.unit || 'ud'}`
+            : `Salida manual: -${qty} ${item.unit || 'ud'}`),
+      };
+    }
+
     setSaving(true);
     try {
-      if (mode === 'adjust') {
-        const target = Number(targetStock.replace(',', '.'));
-        if (!Number.isFinite(target) || target < 0) {
-          toast.error('Indica un stock válido');
-          return;
-        }
-        const delta = target - current;
-        if (delta === 0) {
-          toast.message('Sin cambios');
-          onClose();
-          return;
-        }
-        await createAdjustmentRequest(userId, {
-          catalogItemId: item._id,
-          quantity: Math.abs(delta),
-          type: delta > 0 ? 'in' : 'out',
-          warehouseId: warehouseId || undefined,
-          notes: notes.trim() || `Ajuste a ${target} ${item.unit || 'ud'}`,
-        });
-      } else {
-        const qty = Number(quantity.replace(',', '.'));
-        if (!Number.isFinite(qty) || qty <= 0) {
-          toast.error('Indica una cantidad válida');
-          return;
-        }
-        await createAdjustmentRequest(userId, {
-          catalogItemId: item._id,
-          quantity: qty,
-          type: mode,
-          warehouseId: warehouseId || undefined,
-          notes:
-            notes.trim() ||
-            (mode === 'in'
-              ? `Entrada manual: +${qty} ${item.unit || 'ud'}`
-              : `Salida manual: -${qty} ${item.unit || 'ud'}`),
-        });
-      }
+      const movement = await createAdjustmentRequest(userId, payload);
       toast.success('Movimiento registrado');
-      onDone();
+      onDone({ movement, warehouseId });
       onClose();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'No se pudo registrar el movimiento');
+      toast.error(stockMovementSaveMessage(err));
     } finally {
       setSaving(false);
     }
@@ -641,7 +696,7 @@ function StockEntryPickerModal({
       onDone();
       onClose();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'No se pudo registrar la entrada');
+      toast.error(stockMovementSaveMessage(err, 'No se pudo registrar la entrada'));
     } finally {
       setSubmitting(false);
     }
@@ -823,7 +878,7 @@ function InventoryItemDetailModal({
   item: CatalogItem;
   userId: string;
   warehouseId: string;
-  onUpdated: () => void;
+  onUpdated: (result?: StockMovementDone) => void;
   onDeleted: (deletedId: string) => void;
   onClose: () => void;
 }) {
@@ -1041,8 +1096,8 @@ function InventoryItemDetailModal({
           warehouseId={warehouseId}
           userId={userId}
           onClose={() => setMovementMode(null)}
-          onDone={() => {
-            onUpdated();
+          onDone={(result) => {
+            onUpdated(result);
             void loadMovements();
           }}
         />
@@ -1228,17 +1283,30 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
     if (selectedId && !selectedItem) setSelectedId(null);
   }, [selectedId, selectedItem]);
 
+  const applyLocalStockFromMovement = useCallback((result: StockMovementDone) => {
+    const { movement, warehouseId: wh } = result;
+    const itemId = movement.catalogItemId;
+    if (!itemId) return;
+    setLocalItems((prev) =>
+      prev.map((item) =>
+        item._id === itemId ? applyMovementToCatalogItem(item, movement, wh) : item,
+      ),
+    );
+  }, []);
+
   const refreshAll = useCallback(async () => {
     invalidateCatalogListCache(dataUserId);
     await reload();
-    if (!dataUserId) return;
-    try {
-      const catalog = await listCatalogItemsRequest(dataUserId, 'stock');
-      setLocalItems(filterStockInventoryItems(catalog));
-    } catch {
-      /* reload already updated stockItems */
-    }
   }, [reload, dataUserId]);
+
+  const onMovementDone = useCallback(
+    (result?: StockMovementDone) => {
+      if (result) applyLocalStockFromMovement(result);
+      invalidateCatalogListCache(dataUserId);
+      void reload();
+    },
+    [applyLocalStockFromMovement, dataUserId, reload],
+  );
 
   const selectedCount = selectedIds.size;
 
@@ -1697,7 +1765,7 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
           item={selectedItem}
           userId={dataUserId}
           warehouseId={storeWarehouseId}
-          onUpdated={() => void refreshAll()}
+          onUpdated={(result) => onMovementDone(result)}
           onDeleted={(deletedId) => {
             setSelectedId(null);
             setLocalItems((prev) => prev.filter((i) => i._id !== deletedId));
@@ -1781,7 +1849,7 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
           warehouseId={storeWarehouseId}
           userId={dataUserId}
           onClose={() => setEntryItem(null)}
-          onDone={() => void refreshAll()}
+          onDone={(result) => onMovementDone(result)}
         />
       ) : null}
 

@@ -1,19 +1,18 @@
-import { getCatalogDbName, ensureDatabase, getAllDocuments } from './couchdb.js';
+import { getCatalogDbName, ensureDatabase, listCatalogItemsByUser } from './couchdb.js';
+import { listMovementsByReference } from './stockMovementService.js';
 import { recordMovement } from './stockMovementService.js';
 import { findVertialStockTemplate, resolveOrderChannelStockRules } from './vertialStockDefaults.js';
 import logger from './logger.js';
 
-async function findStockItemByTemplateId(req, userId, templateId) {
-  const db = getCatalogDbName();
-  await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
-  return docs.find(
+function findStockItemByTemplateId(stockItems, templateId) {
+  const tpl = String(templateId || '').trim();
+  if (!tpl || !Array.isArray(stockItems)) return null;
+  return stockItems.find(
     (doc) =>
       doc?.type === 'catalog_item' &&
-      doc?.user_id === userId &&
       !doc?.deletedAt &&
       doc?.module === 'stock' &&
-      String(doc?.customFields?.vertialStockTemplateId || '') === templateId,
+      String(doc?.customFields?.vertialStockTemplateId || '') === tpl,
   );
 }
 
@@ -27,21 +26,23 @@ export async function deductOrderChannelPackaging(req, userId, {
   deliveryType = 'domicilio',
   warehouseId = '',
   performedBy = '',
+  stockItems = null,
 }) {
   const rules = resolveOrderChannelStockRules(deliveryType);
   if (rules.length === 0) return { deducted: [], warnings: [] };
 
   const db = getCatalogDbName();
   await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
-  const existing = docs.filter(
-    (doc) =>
-      doc?.type === 'stock_movement' &&
-      doc?.user_id === userId &&
-      doc?.referenceId === orderId &&
-      doc?.referenceType === orderType &&
-      doc?.movementType === 'recipe_consumption',
-  );
+
+  const stockCatalog =
+    Array.isArray(stockItems) && stockItems.length > 0
+      ? stockItems
+      : await listCatalogItemsByUser(req, userId, { module: 'stock' });
+
+  const existing = await listMovementsByReference(req, userId, orderId, orderType, {
+    movementTypes: ['recipe_consumption'],
+    maxDocs: 200,
+  });
 
   const deducted = [];
   const warnings = [];
@@ -51,7 +52,7 @@ export async function deductOrderChannelPackaging(req, userId, {
     const already = existing.some((m) => String(m?.notes || '').includes(tplKey));
     if (already) continue;
 
-    const stockItem = await findStockItemByTemplateId(req, userId, rule.templateId);
+    const stockItem = findStockItemByTemplateId(stockCatalog, rule.templateId);
     if (!stockItem) {
       warnings.push(`Packaging canal ${rule.templateId}: artículo de stock no encontrado`);
       continue;

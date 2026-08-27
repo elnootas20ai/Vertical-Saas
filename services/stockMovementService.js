@@ -35,6 +35,7 @@ const INBOUND_TYPES = new Set(['purchase_reception', 'adjustment_in', 'return_cu
 const OUTBOUND_TYPES = new Set(['sale', 'internal_consumption', 'adjustment_out', 'return_supplier', 'recipe_consumption', 'waste', 'material_delivery', 'transfer_out']);
 
 const stockMovementIndexReady = new Set();
+const stockMovementRefIndexReady = new Set();
 
 async function ensureStockMovementListIndex(req, dbName) {
   if (stockMovementIndexReady.has(dbName)) return;
@@ -46,6 +47,18 @@ async function ensureStockMovementListIndex(req, dbName) {
     () => null,
   );
   stockMovementIndexReady.add(dbName);
+}
+
+async function ensureStockMovementReferenceIndex(req, dbName) {
+  if (stockMovementRefIndexReady.has(dbName)) return;
+  const safeDb = String(dbName || '').replace(/[^a-z0-9]+/g, '-');
+  await ensureIndex(
+    req,
+    dbName,
+    ['type', 'user_id', 'referenceId', 'referenceType'],
+    `idx-${safeDb}-stock-mov-ref`,
+  ).catch(() => null);
+  stockMovementRefIndexReady.add(dbName);
 }
 
 function normalizeMovementListLimit(limit) {
@@ -209,6 +222,44 @@ export async function recordMovement(req, userId, movementData) {
       throw err;
     }
   }
+}
+
+export async function listMovementsByReference(req, userId, referenceId, referenceType, options = {}) {
+  const uid = String(userId || '').trim();
+  const refId = String(referenceId || '').trim();
+  const refType = String(referenceType || '').trim();
+  if (!uid || !refId) return [];
+
+  const db = getCatalogDbName();
+  await ensureDatabase(req, db);
+  await ensureStockMovementReferenceIndex(req, db);
+
+  const selector = {
+    type: 'stock_movement',
+    user_id: uid,
+    referenceId: refId,
+    ...(refType ? { referenceType: refType } : {}),
+  };
+  const movementTypes = options.movementTypes;
+  if (Array.isArray(movementTypes) && movementTypes.length > 0) {
+    selector.movementType = { $in: movementTypes };
+  }
+
+  const maxDocs = Math.min(Math.max(Number(options.maxDocs) || 500, 1), 2000);
+  let docs;
+  try {
+    docs = await findDocuments(req, db, selector, { pageSize: 200, maxDocs });
+  } catch {
+    docs = [];
+  }
+
+  return docs.filter(
+    (doc) =>
+      doc?.type === 'stock_movement' &&
+      doc?.user_id === uid &&
+      doc?.referenceId === refId &&
+      (!refType || doc?.referenceType === refType),
+  );
 }
 
 export async function listMovementsByUser(req, userId, filters = {}) {

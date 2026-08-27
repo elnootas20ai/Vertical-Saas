@@ -5,7 +5,8 @@ const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env |
 
 const API_BASE = getApiBase();
 
-const STOCK_MOVEMENT_TIMEOUT_MS = 25_000;
+const STOCK_MOVEMENT_READ_TIMEOUT_MS = 25_000;
+const STOCK_MOVEMENT_WRITE_TIMEOUT_MS = 45_000;
 const STOCK_MOVEMENT_LIST_LIMIT = 120;
 
 function normalizeUserId(userId: string): string {
@@ -18,10 +19,10 @@ function getCouchHeaders(): Record<string, string> {
   return headers;
 }
 
-function stockMovementRequestSignal(init?: RequestInit): AbortSignal | undefined {
+function stockMovementRequestSignal(init?: RequestInit, timeoutMs = STOCK_MOVEMENT_READ_TIMEOUT_MS): AbortSignal | undefined {
   if (init?.signal) return init.signal;
   if (typeof AbortSignal?.timeout === 'function') {
-    return AbortSignal.timeout(STOCK_MOVEMENT_TIMEOUT_MS);
+    return AbortSignal.timeout(timeoutMs);
   }
   return undefined;
 }
@@ -54,10 +55,24 @@ export function stockMovementUserMessage(err: unknown, fallback = 'No se pudo ca
   return fallback;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export function stockMovementSaveMessage(err: unknown, fallback = 'No se pudo registrar el movimiento'): string {
+  if (err instanceof Error) {
+    if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+      return 'El servidor tardó demasiado en guardar. Revisa si el movimiento quedó registrado o inténtalo de nuevo.';
+    }
+    const msg = err.message?.trim();
+    if (msg && /timed out|timeout/i.test(msg)) {
+      return 'El servidor tardó demasiado en guardar. Revisa si el movimiento quedó registrado o inténtalo de nuevo.';
+    }
+    if (msg) return msg;
+  }
+  return fallback;
+}
+
+async function request<T>(path: string, init?: RequestInit, timeoutMs = STOCK_MOVEMENT_READ_TIMEOUT_MS): Promise<T> {
   const response = await authFetch(`${API_BASE}${path}`, {
     ...init,
-    signal: stockMovementRequestSignal(init),
+    signal: stockMovementRequestSignal(init, timeoutMs),
     headers: {
       'Content-Type': 'application/json',
       ...getCouchHeaders(),
@@ -200,6 +215,7 @@ export async function createAdjustmentRequest(
   const payload = await request<{ ok: boolean; movement: StockMovement }>(
     `/api/stock-movements/${encodeURIComponent(id)}/adjustment`,
     { method: 'POST', body: JSON.stringify(data) },
+    STOCK_MOVEMENT_WRITE_TIMEOUT_MS,
   );
   return payload.movement;
 }
@@ -212,6 +228,7 @@ export async function createTransferRequest(
   const payload = await request<{ ok: boolean; movement: StockMovement }>(
     `/api/stock-movements/${encodeURIComponent(id)}/transfer`,
     { method: 'POST', body: JSON.stringify(data) },
+    STOCK_MOVEMENT_WRITE_TIMEOUT_MS,
   );
   return payload.movement;
 }
@@ -224,6 +241,7 @@ export async function createInternalConsumptionRequest(
   const payload = await request<{ ok: boolean; movement: StockMovement }>(
     `/api/stock-movements/${encodeURIComponent(id)}/internal-consumption`,
     { method: 'POST', body: JSON.stringify(data) },
+    STOCK_MOVEMENT_WRITE_TIMEOUT_MS,
   );
   return payload.movement;
 }
