@@ -2516,6 +2516,47 @@ function sleepMs(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function inventorySyncExclusionKeyForCatalogDoc(doc) {
+  if (!doc || doc.type !== 'catalog_item') return '';
+  const cf = doc.customFields && typeof doc.customFields === 'object' ? doc.customFields : {};
+  const storeIngId = String(cf.storeIngredientId || '').trim();
+  const templateId = String(cf.vertialStockTemplateId || '').trim();
+  const linkedCat = String(cf.linkedCatalogItemId || '').trim();
+  if (storeIngId) return `id:${storeIngId}`;
+  if (templateId) return `tpl:${templateId}`;
+  if (linkedCat) return `cat:${linkedCat}`;
+  const name = String(doc.name || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+  return name ? `name:${name}` : '';
+}
+
+async function appendInventorySyncExclusionForCatalogItem(req, userId, doc) {
+  const isStock = doc?.module === 'stock' || doc?.isStockItem === true;
+  if (!isStock) return;
+  const key = inventorySyncExclusionKeyForCatalogDoc(doc);
+  if (!key) return;
+  const db = getDeliveryDbName();
+  await ensureDatabase(req, db);
+  const configId = `dlvconf-${userId}`;
+  let existing = null;
+  try {
+    existing = await getDocument(req, db, configId);
+  } catch {
+    existing = null;
+  }
+  if (!existing || existing.type !== 'delivery_config') {
+    existing = buildDeliveryConfigDocument(userId, {});
+  }
+  const prev = Array.isArray(existing.inventorySyncExcludedKeys) ? existing.inventorySyncExcludedKeys : [];
+  if (prev.includes(key)) return;
+  const next = [...prev, key].slice(-500);
+  const updated = buildDeliveryConfigDocument(userId, { inventorySyncExcludedKeys: next }, existing);
+  await putDocument(req, db, updated._id, updated);
+}
+
 async function removeCatalogItemIdWithRetry(req, userId, itemId, maxAttempts = 4) {
   const id = String(itemId || '').trim();
   if (!id) return { ok: false, error: 'Id vacío', status: 'error' };
@@ -2527,6 +2568,11 @@ async function removeCatalogItemIdWithRetry(req, userId, itemId, maxAttempts = 4
         return { ok: true, status: 'gone' };
       }
       await softDeleteDocument(req, getCatalogDbName(), id);
+      try {
+        await appendInventorySyncExclusionForCatalogItem(req, userId, existing);
+      } catch (exclErr) {
+        logger.warn('[removeCatalogItem] exclusion %s: %s', id, exclErr?.message || exclErr);
+      }
       return { ok: true, status: 'deleted' };
     } catch (error) {
       const message = String(error?.message || error || '').toLowerCase();

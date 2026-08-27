@@ -6,6 +6,7 @@ import {
   collectInventoryCandidates,
   defaultUnitForIngredient,
   foldIngredientKey,
+  inventoryCandidateExclusionKey,
   inventoryItemKey,
   resolveCandidateCost,
   slugInventorySku,
@@ -47,6 +48,8 @@ export async function syncInventoryCatalogFromSources(
     storeIngredients: StoreIngredient[];
     catalogItems?: CatalogItem[];
     brands?: Array<{ _id: string; deliveryLineKind?: string }>;
+    /** Claves de artículos que el usuario eliminó del almacén (no recrear al sincronizar). */
+    inventorySyncExcludedKeys?: string[];
   },
 ): Promise<InventorySyncResult> {
   const uid = String(userId || '').trim();
@@ -66,11 +69,21 @@ export async function syncInventoryCatalogFromSources(
     catalog.map((i) => String(i.sku || '').trim().toLowerCase()).filter(Boolean),
   );
 
+  const excludedKeys = new Set(
+    (options.inventorySyncExcludedKeys || [])
+      .map((k) => String(k || '').trim())
+      .filter(Boolean),
+  );
+
   let created = 0;
   let updated = 0;
   let skipped = 0;
 
   for (const candidate of candidates) {
+    if (excludedKeys.has(inventoryCandidateExclusionKey(candidate))) {
+      skipped += 1;
+      continue;
+    }
     const nameKey = foldIngredientKey(candidate.name);
     const hit =
       (candidate.templateId ? existingByKey.get(`tpl:${candidate.templateId}`) : undefined) ??

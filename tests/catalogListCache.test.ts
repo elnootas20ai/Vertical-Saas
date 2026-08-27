@@ -31,11 +31,21 @@ describe('catalogListCache', () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it('invalidates by userId', async () => {
-    const fetcher = vi.fn(async () => [{ id: 'y' }]);
-    await listCatalogItemsCached('u3', fetcher, 'catalog');
-    invalidateCatalogListCache('u3');
-    await listCatalogItemsCached('u3', fetcher, 'catalog');
-    expect(fetcher).toHaveBeenCalledTimes(2);
+  it('invalidates inflight fetches so stale lists cannot repopulate cache', async () => {
+    let calls = 0;
+    const fetcher = vi.fn(async () => {
+      calls += 1;
+      await new Promise((r) => setTimeout(r, 40));
+      return [{ id: 'stale' }];
+    });
+
+    const pending = listCatalogItemsCached('u4', fetcher, 'stock');
+    invalidateCatalogListCache('u4');
+    const freshFetcher = vi.fn(async () => [{ id: 'fresh' }]);
+    const result = await listCatalogItemsCached('u4', freshFetcher, 'stock');
+    await pending.catch(() => []);
+
+    expect(result).toEqual([{ id: 'fresh' }]);
+    expect(freshFetcher).toHaveBeenCalledTimes(1);
   });
 });

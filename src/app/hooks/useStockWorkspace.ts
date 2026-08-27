@@ -202,6 +202,9 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
 
   useEffect(() => {
     if (!Array.isArray(seedStockItems)) return;
+    // Solo pintura inicial: si el padre refresca con datos viejos (carga lenta en prod),
+    // no reponer artículos ya eliminados del almacén.
+    if (hasPaintedRef.current) return;
     setItems(filterStockInventoryItems(seedStockItems));
     setLoading(false);
     setLoadDetail('');

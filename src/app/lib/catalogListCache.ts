@@ -18,10 +18,14 @@ export function invalidateCatalogListCache(userId?: string): void {
   const uid = String(userId || '').trim();
   if (!uid) {
     memory.clear();
+    inflight.clear();
     return;
   }
   for (const key of [...memory.keys()]) {
     if (key.startsWith(`${uid}|`)) memory.delete(key);
+  }
+  for (const key of [...inflight.keys()]) {
+    if (key.startsWith(`${uid}|`)) inflight.delete(key);
   }
 }
 
@@ -46,11 +50,16 @@ export async function listCatalogItemsCached<T>(
 
   const promise = fetcher()
     .then((items) => {
-      memory.set(key, { items, fetchedAt: Date.now() });
+      // Si invalidateCatalogListCache cortó inflight, no reponer datos obsoletos.
+      if (inflight.get(key) === promise) {
+        memory.set(key, { items, fetchedAt: Date.now() });
+      }
       return items;
     })
     .finally(() => {
-      inflight.delete(key);
+      if (inflight.get(key) === promise) {
+        inflight.delete(key);
+      }
     });
 
   inflight.set(key, promise);

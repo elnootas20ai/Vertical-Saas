@@ -27,6 +27,7 @@ export type StockAutomationPipelineOptions = {
   brands?: Array<{ _id: string; deliveryLineKind?: string }>;
   catalogItems?: CatalogItem[];
   costingTargets?: CatalogItem[];
+  inventorySyncExcludedKeys?: string[];
   updateCatalogItem: (item: CatalogItem) => Promise<CatalogItem>;
   /** inventory = solo stock. costing = escandallo sin inventario/recetas. full = todo. */
   mode?: 'inventory' | 'costing' | 'full';
@@ -65,6 +66,7 @@ export async function runVertialStockAutomationPipeline(
       storeIngredients: options.storeIngredients,
       catalogItems: fullCatalog,
       brands: options.brands,
+      inventorySyncExcludedKeys: options.inventorySyncExcludedKeys,
     });
     if (options.onAfterInventory) {
       await options.onAfterInventory();

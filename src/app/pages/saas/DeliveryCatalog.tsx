@@ -8,7 +8,8 @@ import {
   HELADERIA_OPS_HOME_PATH,
   RESTAURANT_OPS_HOME_PATH,
 } from '../../lib/retailOpsPaths';
-import { notifyDeliveryBrandsChanged, notifyDeliveryCatalogChanged, notifyDeliveryConfigChanged, resolveBusinessScopeId, normalizeBusinessScopeId, DELIVERY_CONFIG_CHANGED } from '../../lib/deliverySetup';
+import { notifyDeliveryBrandsChanged, notifyDeliveryCatalogChanged, notifyDeliveryConfigChanged, resolveBusinessScopeId, normalizeBusinessScopeId, DELIVERY_CONFIG_CHANGED, DELIVERY_CATALOG_CHANGED } from '../../lib/deliverySetup';
+import { invalidateCatalogListCache } from '../../lib/catalogListCache';
 import { formatMoneyEs } from '../../lib/formatNumberEs';
 import { formatDateEs, parseDateEsToIso } from '../../lib/formatDateEs';
 import { toUserFacingMessage } from '../../lib/userFacingError';
@@ -5011,6 +5012,23 @@ export function CatalogPage() {
     if (!businessesFetchSettled) return;
     void loadBrands();
   }, [businessesFetchSettled, businessId, loadBrands]);
+
+  useEffect(() => {
+    if (!dataUserId) return;
+    const onCatalogStockChanged = () => {
+      invalidateCatalogListCache(dataUserId);
+      void listCatalogItemsRequest(dataUserId, 'stock')
+        .then((stockItems) => {
+          setAllCatalogItems((prev) => {
+            const kept = prev.filter((i) => (i.module || 'catalog') !== 'stock');
+            return [...kept, ...stockItems];
+          });
+        })
+        .catch(() => {});
+    };
+    window.addEventListener(DELIVERY_CATALOG_CHANGED, onCatalogStockChanged);
+    return () => window.removeEventListener(DELIVERY_CATALOG_CHANGED, onCatalogStockChanged);
+  }, [dataUserId]);
 
   useEffect(() => {
     if (!pageReady) return;

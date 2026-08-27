@@ -6715,8 +6715,25 @@ export function buildDeliveryConfigDocument(userId, data = {}, existing = null) 
       base.tpvBrandSupplements ?? existing?.tpvBrandSupplements,
     ),
     tpvCategoryTemplates: sanitizeTpvCategoryTemplates(base.tpvCategoryTemplates ?? existing?.tpvCategoryTemplates),
+    inventorySyncExcludedKeys: sanitizeInventorySyncExcludedKeys(
+      base.inventorySyncExcludedKeys ?? existing?.inventorySyncExcludedKeys,
+    ),
     createdAt: existing?.createdAt || now, updatedAt: now,
   };
+}
+
+function sanitizeInventorySyncExcludedKeys(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const entry of raw) {
+    const key = String(entry || '').trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+    if (out.length >= 500) break;
+  }
+  return out;
 }
 
 export function sanitizeStaffConsumptionConfig(raw) {
@@ -6789,6 +6806,7 @@ export function sanitizeDeliveryConfig(doc) {
     tpvBrandIngredients: sanitizeTpvBrandIngredients(doc.tpvBrandIngredients),
     tpvBrandSupplements: sanitizeTpvBrandSupplementsFlat(doc.tpvBrandSupplements),
     tpvCategoryTemplates: sanitizeTpvCategoryTemplates(doc.tpvCategoryTemplates),
+    inventorySyncExcludedKeys: sanitizeInventorySyncExcludedKeys(doc.inventorySyncExcludedKeys),
     createdAt: doc.createdAt || new Date().toISOString(),
     updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
   };

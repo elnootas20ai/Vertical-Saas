@@ -82,6 +82,15 @@ export function resolveCandidateCost(
   return fallback ?? 0;
 }
 
+export function inventoryCandidateExclusionKey(
+  candidate: Pick<InventoryCandidate, 'name' | 'templateId' | 'storeIngredientId' | 'linkedCatalogItemId'>,
+): string {
+  if (candidate.templateId) return `tpl:${candidate.templateId}`;
+  if (candidate.linkedCatalogItemId) return `cat:${candidate.linkedCatalogItemId}`;
+  if (candidate.storeIngredientId) return `id:${candidate.storeIngredientId}`;
+  return `name:${foldIngredientKey(candidate.name)}`;
+}
+
 export function inventoryItemKey(item: Pick<CatalogItem, 'name' | 'customFields'>): string {
   const templateId = String(item.customFields?.vertialStockTemplateId || '').trim();
   if (templateId) return `tpl:${templateId}`;

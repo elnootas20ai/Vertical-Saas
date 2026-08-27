@@ -2692,6 +2692,8 @@ export interface DeliveryConfig {
   tpvBrandIngredients?: TpvBrandIngredientSelection;
   tpvBrandSupplements?: TpvBrandSupplements;
   tpvCategoryTemplates?: TpvCategoryTemplates;
+  /** Ingredientes/stock que el usuario eliminó del almacén (no recrear al sincronizar). */
+  inventorySyncExcludedKeys?: string[];
   cashRegisterAlerts?: {
     registerNotOpenedEnabled?: boolean;
     registerNotOpenedCheckHour?: number;

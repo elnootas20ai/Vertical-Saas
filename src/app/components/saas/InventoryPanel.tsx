@@ -26,6 +26,8 @@ import {
   updateCatalogItemRequest,
 } from '../../lib/deliveryApi';
 import { deleteCatalogItemsRelentlessly } from '../../lib/catalogBulkDelete';
+import { invalidateCatalogListCache } from '../../lib/catalogListCache';
+import { notifyDeliveryCatalogChanged } from '../../lib/deliverySetup';
 import { filterStockInventoryItems } from '../../lib/stockInventoryScope';
 import {
   createAdjustmentRequest,
@@ -821,7 +823,7 @@ function InventoryItemDetailModal({
   userId: string;
   warehouseId: string;
   onUpdated: () => void;
-  onDeleted: () => void;
+  onDeleted: (deletedId: string) => void;
   onClose: () => void;
 }) {
   useModalClose(true, onClose);
@@ -890,8 +892,9 @@ function InventoryItemDetailModal({
     setDeleting(true);
     try {
       await deleteCatalogItemRequest(userId, item._id);
+      invalidateCatalogListCache(userId);
       toast.success('Artículo eliminado del Almacén');
-      onDeleted();
+      onDeleted(item._id);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'No se pudo eliminar');
     } finally {
@@ -1224,6 +1227,7 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
   }, [selectedId, selectedItem]);
 
   const refreshAll = useCallback(async () => {
+    invalidateCatalogListCache(dataUserId);
     await reload();
     if (!dataUserId) return;
     try {
@@ -1324,6 +1328,7 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
         },
       );
       await refreshAll();
+      notifyDeliveryCatalogChanged(dataUserId, businessId || undefined);
       toast.dismiss(toastId);
       exitSelectMode();
       if (result.failed === 0) {
@@ -1341,7 +1346,7 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
     } finally {
       setBulkDeleting(false);
     }
-  }, [dataUserId, exitSelectMode, refreshAll]);
+  }, [dataUserId, businessId, exitSelectMode, refreshAll]);
 
   const runInventorySync = useCallback(
     async (silent = false, full = false) => {
@@ -1350,6 +1355,10 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
       setSyncDetail(full ? 'Inventario + escandallo + recetas…' : 'Sincronizando artículos de almacén…');
       try {
         setSyncDetail('Leyendo marcas e ingredientes…');
+        const deliveryCfg = await getDeliveryConfigRequest(dataUserId).catch(() => null);
+        const inventorySyncExcludedKeys = Array.isArray(deliveryCfg?.inventorySyncExcludedKeys)
+          ? deliveryCfg.inventorySyncExcludedKeys
+          : [];
         const prepared = businessId
           ? await ensureStoreIngredientsForStockSync(dataUserId, businessId)
           : null;
@@ -1375,6 +1384,7 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
           businessId: businessId || undefined,
           storeIngredients: storeIngredientsForSync,
           brands: commercialBrandsList,
+          inventorySyncExcludedKeys,
           mode: full ? 'full' : 'inventory',
           onAfterInventory: () => refreshAll(),
           updateCatalogItem: (item) => updateCatalogItemRequest(dataUserId, item),
@@ -1686,8 +1696,10 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
           userId={dataUserId}
           warehouseId={storeWarehouseId}
           onUpdated={() => void refreshAll()}
-          onDeleted={() => {
+          onDeleted={(deletedId) => {
             setSelectedId(null);
+            setLocalItems((prev) => prev.filter((i) => i._id !== deletedId));
+            notifyDeliveryCatalogChanged(dataUserId, businessId || undefined);
             void refreshAll();
           }}
           onClose={() => setSelectedId(null)}
