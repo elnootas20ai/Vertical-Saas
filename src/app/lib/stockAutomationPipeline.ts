@@ -53,8 +53,9 @@ export async function runVertialStockAutomationPipeline(
   if (!uid) return EMPTY_RESULT;
 
   const mode = options.mode ?? 'full';
-  const fullCatalog =
-    options.catalogItems ?? (await listCatalogItemsRequest(uid).catch(() => [] as CatalogItem[]));
+  const fullCatalog = options.catalogItems?.length
+    ? options.catalogItems
+    : await listCatalogItemsRequest(uid, 'stock').catch(() => [] as CatalogItem[]);
 
   let inventory = { created: 0, updated: 0, skipped: 0, candidates: 0 };
   if (mode !== 'costing') {
@@ -74,10 +75,7 @@ export async function runVertialStockAutomationPipeline(
     return { ...EMPTY_RESULT, inventory };
   }
 
-  const refreshedCatalog =
-    mode === 'costing'
-      ? fullCatalog
-      : await listCatalogItemsRequest(uid).catch(() => fullCatalog);
+  const refreshedCatalog = await listCatalogItemsRequest(uid, 'stock').catch(() => fullCatalog);
   const inventoryItems = pickInventoryForRecipeSync(refreshedCatalog);
   const storeIngredients = prepareStoreIngredientsForImportCosting(
     options.storeIngredients,

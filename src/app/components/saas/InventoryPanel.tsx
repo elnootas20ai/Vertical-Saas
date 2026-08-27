@@ -5,9 +5,9 @@ import {
   ArrowDownCircle,
   ArrowUpCircle,
   Boxes,
+  ChevronDown,
   Loader2,
   PackagePlus,
-  Plus,
   RefreshCw,
   ScanLine,
   SlidersHorizontal,
@@ -35,9 +35,11 @@ import {
 import { useStockWorkspace } from '../../hooks/useStockWorkspace';
 import { useVerticalCatalog } from '../../hooks/useVerticalCatalog';
 import { useBusiness } from '../../context/BusinessContext';
+import { restaurantWarehouseViaExcelOnly } from '../../verticals/restaurant/restaurantWarehousePolicy';
 import { listBrandsRequest } from '../../lib/brandsApi';
-import { unifyStoreIngredientsFromConfig, normalizeStoreIngredients } from '../../lib/catalogCustomization';
+import { unifyStoreIngredientsFromConfig, normalizeStoreIngredients, type StoreIngredient } from '../../lib/catalogCustomization';
 import { runVertialStockAutomationPipeline } from '../../lib/stockAutomationPipeline';
+import { commercialLineBrands, ensureStoreIngredientsForStockSync } from '../../lib/deliveryCatalogImport';
 import {
   buildInventoryOrganizerGroups,
   computeInventoryStats,
@@ -71,6 +73,97 @@ import { SAAS__OcrScanModal } from '../design-system/SAAS__OcrScanModal';
 
 type StatusFilter = 'all' | 'ok' | 'low' | 'out';
 type MovementMode = 'in' | 'out' | 'adjust';
+
+function InventoryWarehouseActionsMenu({
+  disabled,
+  scanDisabled,
+  entryDisabled,
+  onScanInvoice,
+  onAddArticle,
+  onAddEntry,
+}: {
+  disabled?: boolean;
+  scanDisabled?: boolean;
+  entryDisabled?: boolean;
+  onScanInvoice: () => void;
+  onAddArticle: () => void;
+  onAddEntry: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const run = (fn: () => void) => {
+    setOpen(false);
+    fn();
+  };
+
+  const itemClass =
+    'flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm font-medium text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors';
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <SaasTabPrimaryButton
+        onClick={() => setOpen((v) => !v)}
+        disabled={disabled}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        title="Escanear factura, añadir artículo o registrar entrada"
+      >
+        <ScanLine className="w-4 h-4" />
+        Acciones
+        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </SaasTabPrimaryButton>
+      {open ? (
+        <>
+          <div className="fixed inset-0 z-[30]" onClick={() => setOpen(false)} aria-hidden />
+          <div
+            role="menu"
+            className="absolute right-0 top-full z-[40] mt-1.5 min-w-[220px] overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+          >
+            <button
+              type="button"
+              role="menuitem"
+              disabled={scanDisabled}
+              onClick={() => run(onScanInvoice)}
+              className={`${itemClass} bg-blue-50/60 dark:bg-blue-950/30`}
+            >
+              <ScanLine className="w-4 h-4 text-[var(--v-blue,#2563eb)]" />
+              Escanear factura
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              disabled={disabled}
+              onClick={() => run(onAddArticle)}
+              className={itemClass}
+            >
+              <PackagePlus className="w-4 h-4 text-gray-500" />
+              Añadir artículo
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              disabled={entryDisabled}
+              onClick={() => run(onAddEntry)}
+              className={itemClass}
+            >
+              <ArrowDownCircle className="w-4 h-4 text-gray-500" />
+              Añadir entrada
+            </button>
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
 
 const DEFAULT_UNITS = [
   { value: 'kg', label: 'kg' },
@@ -416,6 +509,306 @@ function MovementModal({
   );
 }
 
+type StockEntryModalMode = 'pick' | 'new';
+
+function StockEntryPickerModal({
+  items,
+  userId,
+  warehouseId,
+  businessType,
+  commercialBrands,
+  defaultOrganizerId,
+  inUseOrganizerIds,
+  onClose,
+  onSelect,
+  onDone,
+}: {
+  items: CatalogItem[];
+  userId: string;
+  warehouseId: string;
+  businessType: string;
+  commercialBrands: InventoryCommercialBrand[];
+  defaultOrganizerId?: string | null;
+  inUseOrganizerIds?: string[];
+  onClose: () => void;
+  onSelect: (item: CatalogItem) => void;
+  onDone: () => void;
+}) {
+  useModalClose(true, onClose);
+  const { config: verticalConfig } = useVerticalCatalog();
+  const unitOptions = verticalConfig.units.length > 0 ? verticalConfig.units : DEFAULT_UNITS;
+  const organizerChoices = useMemo(
+    () => listInventoryOrganizerChoices(commercialBrands, { inUseOrganizerIds }),
+    [commercialBrands, inUseOrganizerIds],
+  );
+  const myOrganizers = useMemo(() => organizerChoices.filter((c) => c.inUse), [organizerChoices]);
+  const [mode, setMode] = useState<StockEntryModalMode>(() => (items.length === 0 ? 'new' : 'pick'));
+  const [query, setQuery] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [newForm, setNewForm] = useState({
+    name: '',
+    organizerId: '',
+    unit: unitOptions[0]?.value || 'kg',
+    quantity: '',
+    costPrice: '',
+    notes: '',
+  });
+
+  useEffect(() => {
+    const preferred =
+      defaultOrganizerId &&
+      defaultOrganizerId !== ORGANIZER_TOTAL &&
+      defaultOrganizerId !== 'all' &&
+      organizerChoices.some((c) => c.id === defaultOrganizerId)
+        ? defaultOrganizerId
+        : myOrganizers[0]?.id || organizerChoices[0]?.id || '';
+    setMode(items.length === 0 ? 'new' : 'pick');
+    setQuery('');
+    setNewForm({
+      name: '',
+      organizerId: preferred,
+      unit: unitOptions[0]?.value || 'kg',
+      quantity: '',
+      costPrice: '',
+      notes: '',
+    });
+  }, [items.length, unitOptions, organizerChoices, myOrganizers, defaultOrganizerId]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const list = q ? items.filter((item) => item.name.toLowerCase().includes(q)) : items;
+    return [...list].sort((a, b) => a.name.localeCompare(b.name, 'es')).slice(0, 100);
+  }, [items, query]);
+
+  const openNewMode = () => {
+    const nameFromQuery = query.trim();
+    setNewForm((f) => ({
+      ...f,
+      name: nameFromQuery || f.name,
+    }));
+    setMode('new');
+  };
+
+  const submitNewIngredient = async () => {
+    if (!newForm.name.trim()) {
+      toast.error('El nombre es obligatorio');
+      return;
+    }
+    if (!newForm.organizerId.trim()) {
+      toast.error('Elige una categoría');
+      return;
+    }
+    const qty = Number(newForm.quantity.replace(',', '.'));
+    if (!Number.isFinite(qty) || qty <= 0) {
+      toast.error('Indica la cantidad que entra en almacén');
+      return;
+    }
+    const fields = stockFieldsForOrganizer(newForm.organizerId);
+    setSubmitting(true);
+    try {
+      const created = await createCatalogItemRequest(userId, {
+        name: newForm.name.trim(),
+        category: fields.category,
+        module: 'stock',
+        itemType: 'product',
+        vertical: businessType,
+        stockCategory: fields.stockCategory,
+        isStockItem: true,
+        unit: newForm.unit,
+        minStock: 0,
+        costPrice: Number(newForm.costPrice.replace(',', '.')) || 0,
+        stockQuantity: 0,
+        active: true,
+        available: true,
+        webVisible: false,
+        customFields: {
+          inventoryOrganizerId: newForm.organizerId.trim(),
+        },
+      });
+      await createAdjustmentRequest(userId, {
+        catalogItemId: created._id,
+        quantity: qty,
+        type: 'in',
+        warehouseId: warehouseId || undefined,
+        notes:
+          newForm.notes.trim() ||
+          `Alta + entrada: +${qty} ${newForm.unit || 'ud'}`,
+      });
+      toast.success('Ingrediente creado y entrada registrada');
+      onDone();
+      onClose();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo registrar la entrada');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[210] flex items-center justify-center bg-black/40 p-3" onClick={onClose}>
+      <div
+        className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-md max-h-[85vh] flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
+          <h3 className="text-lg font-bold text-gray-900 dark:text-white">Añadir entrada</h3>
+          <p className="text-sm text-gray-500 mt-1">
+            Registra la llegada de mercancía en un artículo existente o crea un ingrediente nuevo.
+          </p>
+          <div className="mt-3 flex gap-1 rounded-xl bg-gray-100 dark:bg-gray-900/60 p-1">
+            <button
+              type="button"
+              onClick={() => setMode('pick')}
+              className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+                mode === 'pick'
+                  ? 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+              }`}
+            >
+              Existente
+            </button>
+            <button
+              type="button"
+              onClick={() => openNewMode()}
+              className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+                mode === 'new'
+                  ? 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+              }`}
+            >
+              Nuevo ingrediente
+            </button>
+          </div>
+        </div>
+
+        {mode === 'pick' ? (
+          <>
+            <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
+              <SaasTabSearch value={query} onChange={setQuery} placeholder="Buscar artículo…" className="relative w-full" />
+            </div>
+            <ul className="flex-1 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800 min-h-[120px]">
+              {filtered.length === 0 ? (
+                <li className="px-4 py-8 text-sm text-gray-500 text-center space-y-3">
+                  <p>{query.trim() ? 'Ningún artículo coincide.' : 'No hay artículos en el almacén.'}</p>
+                  <SaasTabSecondaryButton onClick={openNewMode} className="!min-h-0 px-3 py-1.5 text-xs">
+                    <PackagePlus className="w-3.5 h-3.5" />
+                    Crear ingrediente nuevo
+                  </SaasTabSecondaryButton>
+                </li>
+              ) : (
+                filtered.map((item) => (
+                  <li key={item._id}>
+                    <button
+                      type="button"
+                      onClick={() => onSelect(item)}
+                      className="w-full text-left px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors"
+                    >
+                      <p className="font-medium text-sm text-gray-900 dark:text-white truncate">{item.name}</p>
+                      <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-2">
+                        <span>
+                          Stock: <strong className="tabular-nums">{item.stockQuantity ?? 0}</strong>
+                        </span>
+                        <CatalogUnitChip unit={item.unit} size="sm" />
+                      </p>
+                    </button>
+                  </li>
+                ))
+              )}
+            </ul>
+            <div className="px-4 py-3 border-t border-gray-100 dark:border-gray-700 flex flex-wrap items-center justify-between gap-2">
+              <SaasTabSecondaryButton onClick={openNewMode} className="!min-h-0 px-3 py-1.5 text-xs">
+                <PackagePlus className="w-3.5 h-3.5" />
+                Nuevo ingrediente
+              </SaasTabSecondaryButton>
+              <SaasTabSecondaryButton onClick={onClose}>Cancelar</SaasTabSecondaryButton>
+            </div>
+          </>
+        ) : (
+          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+            <Field label="Nombre *">
+              <input
+                autoFocus
+                value={newForm.name}
+                onChange={(e) => setNewForm((f) => ({ ...f, name: e.target.value }))}
+                className={inputClass}
+                placeholder="Ej: Mozzarella, Harina, Aceite…"
+              />
+            </Field>
+            <Field label="Categoría *">
+              <select
+                value={newForm.organizerId}
+                onChange={(e) => setNewForm((f) => ({ ...f, organizerId: e.target.value }))}
+                className={inputClass}
+              >
+                {organizerChoices.length === 0 ? (
+                  <option value="">Sin categorías</option>
+                ) : (
+                  organizerChoices.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.label}
+                    </option>
+                  ))
+                )}
+              </select>
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Unidad">
+                <select
+                  value={newForm.unit}
+                  onChange={(e) => setNewForm((f) => ({ ...f, unit: e.target.value }))}
+                  className={inputClass}
+                >
+                  {unitOptions.map((u) => (
+                    <option key={u.value} value={u.value}>
+                      {u.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Cantidad entrada *">
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={newForm.quantity}
+                  onChange={(e) => setNewForm((f) => ({ ...f, quantity: e.target.value }))}
+                  className={inputClass}
+                  placeholder="0"
+                />
+              </Field>
+            </div>
+            <Field label="Coste unitario (opcional)">
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={newForm.costPrice}
+                onChange={(e) => setNewForm((f) => ({ ...f, costPrice: e.target.value }))}
+                className={inputClass}
+                placeholder="0"
+              />
+            </Field>
+            <Field label="Notas (opcional)">
+              <input
+                value={newForm.notes}
+                onChange={(e) => setNewForm((f) => ({ ...f, notes: e.target.value }))}
+                className={inputClass}
+                placeholder="Ej: Albarán Makro 1234"
+              />
+            </Field>
+            <div className="flex justify-end gap-2 pt-2">
+              <SaasTabSecondaryButton onClick={onClose}>Cancelar</SaasTabSecondaryButton>
+              <SaasTabPrimaryButton onClick={() => void submitNewIngredient()} disabled={submitting}>
+                {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Registrar entrada'}
+              </SaasTabPrimaryButton>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function InventoryItemDetailModal({
   item,
   userId,
@@ -536,7 +929,7 @@ function InventoryItemDetailModal({
         </button>
       </div>
 
-      <div className="overflow-y-auto px-4 py-3 space-y-3">
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3">
         <section className="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
           <div className="grid grid-cols-2 gap-2">
             <Field label="Stock mínimo">
@@ -555,23 +948,6 @@ function InventoryItemDetailModal({
             <input type="checkbox" checked={trackStock} onChange={(e) => setTrackStock(e.target.checked)} className="rounded" />
             Controlar inventario
           </label>
-          <button
-            type="button"
-            onClick={() => void saveMeta()}
-            disabled={savingMeta || deleting}
-            className={`${VERTIAL_BTN_SECONDARY} !min-h-0 mt-2 px-3 py-1.5 text-xs`}
-          >
-            {savingMeta ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Guardar'}
-          </button>
-          <button
-            type="button"
-            onClick={() => void deleteItem()}
-            disabled={deleting || savingMeta}
-            className={`${VERTIAL_BTN_DANGER} !min-h-0 mt-2 ml-2 px-3 py-1.5 text-xs`}
-          >
-            {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-            Eliminar
-          </button>
         </section>
 
         <section>
@@ -633,6 +1009,26 @@ function InventoryItemDetailModal({
         </section>
       </div>
 
+      <div className="shrink-0 px-4 py-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-end gap-2">
+        <button
+          type="button"
+          onClick={() => void deleteItem()}
+          disabled={deleting || savingMeta}
+          className={`${VERTIAL_BTN_DANGER} !min-h-0 px-3 py-2 text-xs`}
+        >
+          {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+          Eliminar
+        </button>
+        <button
+          type="button"
+          onClick={() => void saveMeta()}
+          disabled={savingMeta || deleting}
+          className={`${VERTIAL_BTN_SECONDARY} !min-h-0 px-3 py-2 text-xs`}
+        >
+          {savingMeta ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Guardar'}
+        </button>
+      </div>
+
       {movementMode ? (
         <MovementModal
           item={item}
@@ -675,11 +1071,15 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [showInvoiceOcr, setShowInvoiceOcr] = useState(false);
+  const [showEntryPicker, setShowEntryPicker] = useState(false);
+  const [entryItem, setEntryItem] = useState<CatalogItem | null>(null);
   const [localItems, setLocalItems] = useState<CatalogItem[]>([]);
+  const [storeIngredients, setStoreIngredients] = useState<StoreIngredient[]>([]);
   const [commercialBrands, setCommercialBrands] = useState<InventoryCommercialBrand[]>([]);
   const [productBrands, setProductBrands] = useState<{ id: string; name: string }[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [syncDetail, setSyncDetail] = useState('');
+  const autoSyncStartedRef = useRef(false);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [bulkDeleteConfirmStep, setBulkDeleteConfirmStep] = useState(false);
@@ -699,11 +1099,13 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
       if (!businessId) {
         setCommercialBrands([]);
         setProductBrands([]);
+        setStoreIngredients([]);
         return;
       }
       try {
         const brandList = await listBrandsRequest(businessId).catch(() => []);
         if (cancelled) return;
+        const commercial = commercialLineBrands(brandList);
         setCommercialBrands(
           brandList.map((b) => ({
             _id: b._id,
@@ -717,17 +1119,26 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
             .map((b) => ({ id: b._id || b.id, name: String(b.name || '').trim() }))
             .filter((b) => b.id && b.name),
         );
+        if (dataUserId) {
+          const cfg = await getDeliveryConfigRequest(dataUserId).catch(() => null);
+          if (cancelled) return;
+          const brandIds = commercial.map((b) => b._id);
+          setStoreIngredients(
+            normalizeStoreIngredients(unifyStoreIngredientsFromConfig(cfg, brandIds)),
+          );
+        }
       } catch {
         if (!cancelled) {
           setCommercialBrands([]);
           setProductBrands([]);
+          setStoreIngredients([]);
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [businessId]);
+  }, [businessId, dataUserId]);
 
   const activeItems = useMemo(
     () => localItems.filter((i) => i.active !== false && !i.deletedAt),
@@ -746,13 +1157,12 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
   const stats = useMemo(() => computeInventoryStats(scopedItems), [scopedItems]);
 
   const typeGroups = useMemo(
-    () => buildInventoryOrganizerGroups(scopedItems, [], commercialBrands).filter((g) => g.id !== ORGANIZER_TOTAL || g.total > 0),
-    [scopedItems, commercialBrands],
+    () => buildInventoryOrganizerGroups(scopedItems, storeIngredients, commercialBrands).filter((g) => g.id !== ORGANIZER_TOTAL || g.total > 0),
+    [scopedItems, storeIngredients, commercialBrands],
   );
 
   const statusTabs = useMemo(
     () => [
-      { id: 'all', label: 'Todos', count: stats.total },
       { id: 'ok', label: 'Correctos', count: stats.ok },
       { id: 'low', label: 'Stock bajo', count: stats.low },
       { id: 'out', label: 'Sin stock', count: stats.out + stats.negative },
@@ -771,7 +1181,7 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
 
   const filteredItems = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const byType = filterItemsByOrganizer(scopedItems, typeFilter || 'all', [], commercialBrands);
+    const byType = filterItemsByOrganizer(scopedItems, typeFilter || 'all', storeIngredients, commercialBrands);
     return byType
       .filter((item) => {
         const status = inventoryStatus(item);
@@ -802,7 +1212,7 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
         const diff = rank(a) - rank(b);
         return diff !== 0 ? diff : (a.name || '').localeCompare(b.name || '', 'es');
       });
-  }, [scopedItems, search, typeFilter, brandFilter, statusFilter, commercialBrands]);
+  }, [scopedItems, search, typeFilter, brandFilter, statusFilter, commercialBrands, storeIngredients]);
 
   const selectedItem = useMemo(
     () => filteredItems.find((i) => i._id === selectedId) ?? scopedItems.find((i) => i._id === selectedId) ?? null,
@@ -842,18 +1252,41 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
     });
   }, []);
 
+  const enterSelectModeForDelete = useCallback(() => {
+    setSelectedId(null);
+    setSelectMode(true);
+    setBulkDeleteConfirmStep(false);
+    setSelectedIds(new Set());
+  }, []);
+
   const handleDeleteAllFiltered = useCallback(() => {
     if (!dataUserId || bulkDeleting || filteredItems.length === 0) return;
-    setSelectMode(true);
-    setSelectedIds(new Set(filteredItems.map((item) => item._id)));
-    setBulkDeleteConfirmStep(true);
-    toast.warning(
-      search.trim()
-        ? `Almacén: ${filteredItems.length} artículo(s) visibles. Pulsa «Estoy seguro» y confirma.`
-        : `Almacén: ${filteredItems.length} artículo(s). Pulsa «Estoy seguro» y confirma.`,
-      { duration: 8000 },
-    );
-  }, [dataUserId, bulkDeleting, filteredItems, search]);
+    if (!selectMode) {
+      enterSelectModeForDelete();
+      return;
+    }
+    if (!bulkDeleteConfirmStep) {
+      setSelectedIds(new Set(filteredItems.map((item) => item._id)));
+      setBulkDeleteConfirmStep(true);
+      toast.warning(
+        search.trim()
+          ? `Vas a borrar ${filteredItems.length} artículo(s) visibles. Pulsa «Estoy seguro» y confirma.`
+          : `Vas a borrar ${filteredItems.length} artículo(s). Pulsa «Estoy seguro» y confirma.`,
+        { duration: 8000 },
+      );
+      return;
+    }
+    setDeleteGuard({ mode: 'bulk', items: filteredItems });
+    setBulkDeleteConfirmStep(false);
+  }, [
+    dataUserId,
+    bulkDeleting,
+    filteredItems,
+    search,
+    selectMode,
+    bulkDeleteConfirmStep,
+    enterSelectModeForDelete,
+  ]);
 
   const handleBulkDeleteSelected = useCallback(() => {
     if (!dataUserId || bulkDeleting) return;
@@ -917,24 +1350,31 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
       setSyncDetail(full ? 'Inventario + escandallo + recetas…' : 'Sincronizando artículos de almacén…');
       try {
         setSyncDetail('Leyendo marcas e ingredientes…');
-        const commercialBrands = businessId
-          ? await listBrandsRequest(businessId).catch(() => [])
-          : [];
-        const cfg = await getDeliveryConfigRequest(dataUserId);
-        const brandIds = commercialBrands.map((b) => b._id);
-        const storeIngredients = normalizeStoreIngredients(
-          unifyStoreIngredientsFromConfig(cfg, brandIds),
+        const prepared = businessId
+          ? await ensureStoreIngredientsForStockSync(dataUserId, businessId)
+          : null;
+        const commercialBrandsList = prepared?.brands ?? (businessId
+          ? commercialLineBrands(await listBrandsRequest(businessId).catch(() => []))
+          : []);
+        const storeIngredientsForSync = prepared?.storeIngredients ?? normalizeStoreIngredients(
+          unifyStoreIngredientsFromConfig(
+            await getDeliveryConfigRequest(dataUserId),
+            commercialBrandsList.map((b) => b._id),
+          ),
         );
+        if (prepared?.storeIngredients) {
+          setStoreIngredients(prepared.storeIngredients);
+        }
         setSyncDetail(
           full
             ? 'Creando/actualizando stock y recetas (puede tardar)…'
             : 'Creando/actualizando stock desde carta…',
         );
         const pipeline = await runVertialStockAutomationPipeline(dataUserId, {
-          businessType: businessType || 'delivery',
+          businessType: prepared?.businessType || businessType || 'delivery',
           businessId: businessId || undefined,
-          storeIngredients,
-          brands: commercialBrands,
+          storeIngredients: storeIngredientsForSync,
+          brands: commercialBrandsList,
           mode: full ? 'full' : 'inventory',
           onAfterInventory: () => refreshAll(),
           updateCatalogItem: (item) => updateCatalogItemRequest(dataUserId, item),
@@ -942,6 +1382,8 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
         const result = pipeline.inventory;
         if (full) {
           setSyncDetail('Refrescando lista…');
+          await refreshAll();
+        } else {
           await refreshAll();
         }
         if (!silent) {
@@ -960,6 +1402,11 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
           } else {
             toast.message('No hay datos de carta o ingredientes para sincronizar.');
           }
+        } else if (result.created > 0) {
+          toast.message(
+            `Almacén actualizado: ${result.created} ingrediente(s) creados automáticamente.`,
+            { duration: 5000 },
+          );
         }
         return pipeline;
       } catch {
@@ -974,9 +1421,7 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
   );
 
   if (loading && scopedItems.length === 0) {
-    return (
-      <CatalogCoreLoadingState kind="stock" detail={loadDetail || undefined} />
-    );
+    return <CatalogCoreLoadingState kind="stock" />;
   }
 
   return (
@@ -991,10 +1436,21 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
         ]}
         banner={
           <div className="space-y-1">
-            <p className="text-stone-600 dark:text-stone-300">
-              Stock de <strong className="text-stone-900 dark:text-white">{storeLabel || 'Almacén'}</strong>
-              {' · '}mismo catálogo; cantidades por tienda.
-            </p>
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+              <p className="text-stone-600 dark:text-stone-300 min-w-0">
+                Stock de <strong className="text-stone-900 dark:text-white">{storeLabel || 'Almacén'}</strong>
+                {' · '}mismo catálogo; cantidades por tienda.
+              </p>
+              <SaasTabSecondaryButton
+                onClick={() => void runInventorySync(false, true)}
+                disabled={syncing || !dataUserId || bulkDeleting}
+                title="Inventario + escandallo + recetas (puede tardar un minuto)"
+                className="shrink-0"
+              >
+                {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                Sincronizar
+              </SaasTabSecondaryButton>
+            </div>
             {syncing ? (
               <p className="text-xs font-medium text-amber-800 dark:text-amber-300 flex items-center gap-2">
                 <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
@@ -1021,61 +1477,14 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
               </>
             }
             right={
-              <>
-                {!selectMode ? (
-                  <SaasTabSecondaryButton
-                    onClick={handleDeleteAllFiltered}
-                    disabled={bulkDeleting || filteredItems.length === 0 || !dataUserId}
-                    className="!border-red-300 !text-red-700"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    {search.trim()
-                      ? `Eliminar (${filteredItems.length})`
-                      : `Eliminar todo (${filteredItems.length})`}
-                  </SaasTabSecondaryButton>
-                ) : (
-                  <>
-                    <SaasTabSecondaryButton onClick={exitSelectMode} disabled={bulkDeleting}>
-                      Cancelar
-                    </SaasTabSecondaryButton>
-                    <SaasTabSecondaryButton
-                      onClick={handleBulkDeleteSelected}
-                      disabled={bulkDeleting || selectedCount === 0}
-                      className={
-                        bulkDeleteConfirmStep
-                          ? '!bg-red-700 !text-white !border-red-800 hover:!bg-red-800'
-                          : '!border-red-300 !text-red-700'
-                      }
-                    >
-                      <Trash2 className="w-4 h-4" />
-                      {bulkDeleting
-                        ? 'Eliminando…'
-                        : bulkDeleteConfirmStep
-                          ? `Estoy seguro (${selectedCount})`
-                          : `Eliminar (${selectedCount})`}
-                    </SaasTabSecondaryButton>
-                  </>
-                )}
-                <SaasTabSecondaryButton
-                  onClick={() => void runInventorySync(false, true)}
-                  disabled={syncing || !dataUserId || bulkDeleting}
-                  title="Inventario + escandallo + recetas (puede tardar un minuto)"
-                >
-                  {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                  Sincronizar
-                </SaasTabSecondaryButton>
-                <SaasTabSecondaryButton
-                  onClick={() => setShowInvoiceOcr(true)}
-                  disabled={!dataUserId || bulkDeleting}
-                  title="Escanea factura o albarán de proveedor para subir stock"
-                >
-                  <ScanLine className="w-4 h-4" />
-                  Escanear factura
-                </SaasTabSecondaryButton>
-                <SaasTabPrimaryButton onClick={() => setShowAdd(true)} disabled={bulkDeleting}>
-                  <Plus className="w-4 h-4" /> Nuevo artículo
-                </SaasTabPrimaryButton>
-              </>
+              <InventoryWarehouseActionsMenu
+                disabled={bulkDeleting || selectMode}
+                scanDisabled={!dataUserId || bulkDeleting || selectMode}
+                entryDisabled={!dataUserId || bulkDeleting || selectMode}
+                onScanInvoice={() => setShowInvoiceOcr(true)}
+                onAddArticle={() => setShowAdd(true)}
+                onAddEntry={() => setShowEntryPicker(true)}
+              />
             }
           />
         }
@@ -1087,30 +1496,98 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
             description="Se sincronizan automáticamente desde Ingredientes y la columna ingredientes del catálogo. También puedes crearlos a mano."
             action={
               <div className="flex flex-wrap items-center justify-center gap-2">
+                <InventoryWarehouseActionsMenu
+                  disabled={!dataUserId}
+                  scanDisabled={!dataUserId}
+                  entryDisabled={!dataUserId}
+                  onScanInvoice={() => setShowInvoiceOcr(true)}
+                  onAddArticle={() => setShowAdd(true)}
+                  onAddEntry={() => setShowEntryPicker(true)}
+                />
                 <SaasTabSecondaryButton onClick={() => void runInventorySync(false, false)} disabled={syncing || !dataUserId}>
                   {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                   Sincronizar ingredientes
                 </SaasTabSecondaryButton>
-                <SaasTabPrimaryButton onClick={() => setShowAdd(true)}>
-                  <PackagePlus className="w-4 h-4" /> Crear artículo
-                </SaasTabPrimaryButton>
               </div>
             }
           />
         ) : (
           <>
             <div className="px-3 pt-3 pb-2 space-y-2.5 border-b border-gray-100 dark:border-gray-700">
-              <Tabs
-                tabs={statusTabs}
-                activeTab={statusFilter}
-                onChange={(id) => setStatusFilter(id as StatusFilter)}
-              />
+              <div className="flex items-center gap-2 min-w-0">
+                <Tabs
+                  tabs={statusTabs}
+                  activeTab={statusFilter === 'all' ? '' : statusFilter}
+                  onChange={(id) => {
+                    setStatusFilter((prev) => (prev === id ? 'all' : (id as StatusFilter)));
+                  }}
+                />
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {selectMode ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={exitSelectMode}
+                        disabled={bulkDeleting}
+                        className={`${VERTIAL_BTN_SECONDARY} !min-h-0 px-2.5 py-1.5 text-xs rounded-xl shadow-none`}
+                        title="Salir del modo selección"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                      {selectedCount > 0 && selectedCount < filteredItems.length ? (
+                        <button
+                          type="button"
+                          onClick={handleBulkDeleteSelected}
+                          disabled={bulkDeleting}
+                          className={`${VERTIAL_BTN_DANGER} !min-h-0 px-3 py-1.5 text-xs rounded-xl shadow-none inline-flex items-center gap-1.5`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          {bulkDeleting
+                            ? 'Eliminando…'
+                            : bulkDeleteConfirmStep
+                              ? `Estoy seguro (${selectedCount})`
+                              : `Eliminar (${selectedCount})`}
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={handleDeleteAllFiltered}
+                        disabled={bulkDeleting || filteredItems.length === 0 || !dataUserId}
+                        className={`${
+                          bulkDeleteConfirmStep
+                            ? '!bg-red-700 !text-white !border-red-800 hover:!bg-red-800'
+                            : VERTIAL_BTN_DANGER
+                        } !min-h-0 px-3 py-1.5 text-xs rounded-xl shadow-none inline-flex items-center gap-1.5 disabled:opacity-50`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        {bulkDeleting
+                          ? 'Eliminando…'
+                          : bulkDeleteConfirmStep
+                            ? `Estoy seguro (${filteredItems.length})`
+                            : search.trim()
+                              ? `Eliminar (${filteredItems.length})`
+                              : `Eliminar todo (${filteredItems.length})`}
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={enterSelectModeForDelete}
+                      disabled={bulkDeleting || filteredItems.length === 0 || !dataUserId}
+                      className={`${VERTIAL_BTN_SECONDARY} !min-h-0 p-2 rounded-xl shadow-none text-slate-500 hover:!border-red-300 hover:!text-red-700 hover:!bg-red-50/80 dark:hover:!bg-red-950/30 disabled:opacity-50`}
+                      title="Seleccionar artículos para borrar"
+                      aria-label="Seleccionar artículos para borrar"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
               {typeGroups.length > 0 ? (
                 <InventoryTypeFilterRow
                   groups={typeGroups}
                   activeId={typeFilter}
-                  onSelect={setTypeFilter}
-                  totalAll={scopedItems.length}
+                  onSelect={(id) => setTypeFilter((prev) => (prev === id ? '' : id))}
                 />
               ) : null}
             </div>
@@ -1264,6 +1741,35 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
         defaultOrganizerId={typeFilter}
         inUseOrganizerIds={typeGroups.map((g) => g.id)}
       />
+
+      {showEntryPicker && dataUserId ? (
+        <StockEntryPickerModal
+          items={scopedItems}
+          userId={dataUserId}
+          warehouseId={storeWarehouseId}
+          businessType={businessType}
+          commercialBrands={commercialBrands}
+          defaultOrganizerId={typeFilter}
+          inUseOrganizerIds={typeGroups.map((g) => g.id)}
+          onClose={() => setShowEntryPicker(false)}
+          onDone={() => void refreshAll()}
+          onSelect={(item) => {
+            setShowEntryPicker(false);
+            setEntryItem(item);
+          }}
+        />
+      ) : null}
+
+      {entryItem && dataUserId ? (
+        <MovementModal
+          item={entryItem}
+          mode="in"
+          warehouseId={storeWarehouseId}
+          userId={dataUserId}
+          onClose={() => setEntryItem(null)}
+          onDone={() => void refreshAll()}
+        />
+      ) : null}
 
       <CatalogDeleteGuardModal
         open={deleteGuard !== null}

@@ -3,6 +3,7 @@ import {
   buildPurchaseInvoiceDocument,
   sanitizePurchaseInvoice,
   listPurchaseInvoicesByUser,
+  normalizePurchaseListLimit,
   assignPurchaseInvoiceNumber,
   findDuplicatePurchaseInvoice,
   ensureDatabase,
@@ -114,7 +115,9 @@ export async function listSupplierInvoices(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
-    let raw = await listPurchaseInvoicesByUser(req, userId);
+    let raw = await listPurchaseInvoicesByUser(req, userId, {
+      limit: normalizePurchaseListLimit(req.query?.limit),
+    });
 
     const { status, supplierId, source, from, to } = req.query;
     if (status) raw = raw.filter((inv) => inv.status === status);
@@ -123,7 +126,10 @@ export async function listSupplierInvoices(req, res) {
     if (from) raw = raw.filter((inv) => inv.date >= from);
     if (to) raw = raw.filter((inv) => inv.date <= to);
 
-    const { items, meta } = applyQueryOptions(raw.map(sanitizePurchaseInvoice), req.query);
+    const { items, meta } = applyQueryOptions(
+      raw.map((inv) => sanitizePurchaseInvoice(inv, { forList: true })),
+      req.query,
+    );
     return res.json({ ok: true, invoices: items, meta });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al cargar facturas' });
@@ -684,16 +690,20 @@ export async function updateConfig(req, res) {
       pdv.updatedAt = new Date().toISOString();
       await putDocument(req, db, pdv._id, pdv);
 
-      await logAccountActivity(req, {
-        actorUserId: userId,
-        actorName: account.fullName,
-        targetUserId: userId,
-        type: 'supplier_invoice_config',
-        action: `Actualizó correo de facturas del PDV ${pdv.name || pdvId}`,
-        entityId: pdv._id,
-        entityLabel: 'Configuración IMAP PDV',
-        metadata: { enabled: updated.enabled, pdvId },
-      });
+      try {
+        await logAccountActivity(req, {
+          actorUserId: userId,
+          actorName: account.fullName,
+          targetUserId: userId,
+          type: 'supplier_invoice_config',
+          action: `Actualizó correo de facturas del PDV ${pdv.name || pdvId}`,
+          entityId: pdv._id,
+          entityLabel: 'Configuración IMAP PDV',
+          metadata: { enabled: updated.enabled, pdvId },
+        });
+      } catch (logErr) {
+        console.warn('[supplierInvoice] logAccountActivity PDV:', logErr?.message || logErr);
+      }
 
       return res.json({
         ok: true,
@@ -711,16 +721,20 @@ export async function updateConfig(req, res) {
     accountDoc.supplierInvoiceConfig = updated;
     await putDocument(req, ACCOUNTS_DB, accountDoc._id, accountDoc);
 
-    await logAccountActivity(req, {
-      actorUserId: userId,
-      actorName: account.fullName,
-      targetUserId: userId,
-      type: 'supplier_invoice_config',
-      action: `Actualizó configuración de facturas proveedor por email`,
-      entityId: account._id,
-      entityLabel: 'Configuración IMAP',
-      metadata: { enabled: updated.enabled },
-    });
+    try {
+      await logAccountActivity(req, {
+        actorUserId: userId,
+        actorName: account.fullName,
+        targetUserId: userId,
+        type: 'supplier_invoice_config',
+        action: `Actualizó configuración de facturas proveedor por email`,
+        entityId: account._id,
+        entityLabel: 'Configuración IMAP',
+        metadata: { enabled: updated.enabled },
+      });
+    } catch (logErr) {
+      console.warn('[supplierInvoice] logAccountActivity cuenta:', logErr?.message || logErr);
+    }
 
     return res.json({
       ok: true,

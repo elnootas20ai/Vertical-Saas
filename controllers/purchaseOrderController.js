@@ -4,6 +4,7 @@ import {
   buildPurchaseOrderDocument,
   sanitizePurchaseOrder,
   listPurchaseOrdersByUser,
+  normalizePurchaseListLimit,
   assignPurchaseInvoiceNumber,
   listCatalogItemsByUser,
   ensureDatabase,
@@ -58,7 +59,14 @@ export async function listPurchaseOrders(req, res) {
     if (!userId) return badRequest(res, 'Falta userId');
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
-    const orders = await listPurchaseOrdersByUser(req, userId);
+    const businessId = String(req.query?.businessId || '').trim();
+    const accountBusinessCount = Math.max(1, Number(req.query?.accountBusinessCount) || 1);
+    const limit = normalizePurchaseListLimit(req.query?.limit);
+    const orders = await listPurchaseOrdersByUser(req, userId, {
+      businessId: businessId || undefined,
+      accountBusinessCount,
+      limit,
+    });
     const permissions = {
       canCreate: canPerform(req, 'create'),
       canEdit: canPerform(req, 'create'),
@@ -68,8 +76,18 @@ export async function listPurchaseOrders(req, res) {
       canReceive: canPerform(req, 'receive'),
       canAutoGenerate: canPerform(req, 'full'),
     };
-    return res.json({ ok: true, orders: orders.map(sanitizePurchaseOrder), permissions });
+    const safe = [];
+    for (const order of orders) {
+      try {
+        const sanitized = sanitizePurchaseOrder(order);
+        if (sanitized) safe.push(sanitized);
+      } catch (err) {
+        logger.warn('[listPurchaseOrders] sanitize failed %s: %s', order?._id, err?.message || err);
+      }
+    }
+    return res.json({ ok: true, orders: safe, permissions });
   } catch (error) {
+    logger.error('[listPurchaseOrders] %s', error?.message || error);
     return res.status(500).json({ ok: false, error: error.message || 'Error al cargar pedidos de compra' });
   }
 }
@@ -85,7 +103,8 @@ export async function createPurchaseOrder(req, res) {
 
     const db = getCatalogDbName();
     await ensureDatabase(req, db);
-    const existingOrders = await listPurchaseOrdersByUser(req, userId);
+    const bid = String(order.businessId || order.business_id || '').trim();
+    const existingOrders = await listPurchaseOrdersByUser(req, userId, bid ? { businessId: bid } : {});
     const orderNumber = String(order.orderNumber || '').trim()
       || nextPurchaseOrderNumber(existingOrders.map((o) => o.orderNumber));
     const doc = buildPurchaseOrderDocument(userId, { ...order, orderNumber });
@@ -231,7 +250,9 @@ export async function markOrderReceived(req, res) {
       const received = Array.isArray(receivedItems)
         ? receivedItems.find((r) => r.catalogItemId === item.catalogItemId)
         : null;
-      const nextReceived = received ? Number(received.quantity || item.quantity) : item.quantity;
+      const nextReceived = Array.isArray(receivedItems)
+        ? (received ? Number(received.quantity ?? 0) : Number(item.received || 0))
+        : Number(item.quantity || 0);
       const nextUnitCost =
         received && received.unitCost != null && Number(received.unitCost) >= 0
           ? Number(received.unitCost)
@@ -239,7 +260,9 @@ export async function markOrderReceived(req, res) {
       return { ...item, received: nextReceived, unitCost: nextUnitCost };
     });
 
-    const allReceived = updatedItems.every((item) => item.received >= item.quantity);
+    const allReceived = updatedItems.every(
+      (item) => Number(item.received || 0) >= Number(item.quantity || 0),
+    );
 
     const doc = buildPurchaseOrderDocument(userId, {
       ...existing,

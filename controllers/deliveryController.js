@@ -16,6 +16,7 @@ import {
   buildPurchaseInvoiceDocument,
   sanitizePurchaseInvoice,
   listPurchaseInvoicesByUser,
+  normalizePurchaseListLimit,
   assignPurchaseInvoiceNumber,
   findDuplicatePurchaseInvoice,
   normalizePurchaseInvoiceNumber,
@@ -424,9 +425,18 @@ async function findCatalogDuplicate(req, userId, itemCandidate, excludeId = '') 
       if (sameSku) {
         return { item, duplicatedField: 'sku' };
       }
+      const sameName =
+        !!normalizeDuplicateValue(itemCandidate.name) &&
+        normalizeDuplicateValue(item.name) === normalizeDuplicateValue(itemCandidate.name);
+      if (sameName) {
+        return { item, duplicatedField: 'name' };
+      }
       continue;
     }
-    if (isSameLooseCatalogProduct(itemCandidate, item)) {
+    const sameName =
+      !!normalizeDuplicateValue(itemCandidate.name) &&
+      normalizeDuplicateValue(item.name) === normalizeDuplicateValue(itemCandidate.name);
+    if (sameName) {
       return { item, duplicatedField: 'name' };
     }
     const sameSku = !!candidateSku && normalizeDuplicateValue(item.sku) === candidateSku;
@@ -535,6 +545,8 @@ async function maybeDeductRecipeStockForDeliveredOrder(req, userId, doc, previou
       .map((item) => ({
         catalogItemId: item.catalogItemId || item.productId || '',
         quantity: Number(item.quantity || 0),
+        comboSelections: item.comboSelections,
+        halfHalfPizza: item.halfHalfPizza,
       }));
     if (orderItems.length === 0) return;
     let warehouseId = '';
@@ -2670,11 +2682,18 @@ export async function listPurchaseInvoices(req, res) {
     if (!userId) return badRequest(res, 'Falta userId');
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
-    const invoices = await listPurchaseInvoicesByUser(req, userId);
+    const businessId = String(req.query?.businessId || '').trim();
+    const accountBusinessCount = Math.max(1, Number(req.query?.accountBusinessCount) || 1);
+    const limit = normalizePurchaseListLimit(req.query?.limit);
+    const invoices = await listPurchaseInvoicesByUser(req, userId, {
+      businessId: businessId || undefined,
+      accountBusinessCount,
+      limit,
+    });
     const safe = [];
     for (const inv of invoices) {
       try {
-        const sanitized = sanitizePurchaseInvoice(inv);
+        const sanitized = sanitizePurchaseInvoice(inv, { forList: true });
         if (sanitized) safe.push(sanitized);
       } catch (err) {
         console.error('[listPurchaseInvoices] sanitize failed', inv?._id, err?.message || err);
@@ -2761,7 +2780,14 @@ export async function createPurchaseInvoice(req, res) {
     } catch (reconcileErr) {
       console.error('[createPurchaseInvoice] reconcile stock/finance:', reconcileErr?.message || reconcileErr);
     }
-    const fresh = await getDocument(req, db, doc._id).catch(() => ({ ...doc, _rev: saved.rev }));
+    let fresh = await getDocument(req, db, doc._id).catch(() => ({ ...doc, _rev: saved.rev }));
+    try {
+      const { applySupplierPriceVarianceCheck } = await import('../services/supplierPriceVarianceAlert.js');
+      const withVar = await applySupplierPriceVarianceCheck(req, userId, { ...fresh, _rev: fresh._rev || saved.rev });
+      if (withVar) fresh = withVar;
+    } catch (priceErr) {
+      console.warn('[createPurchaseInvoice] price variance:', priceErr?.message || priceErr);
+    }
     return res.status(201).json({
       ok: true,
       invoice: sanitizePurchaseInvoice({ ...fresh, _rev: fresh._rev || saved.rev }),
@@ -2793,7 +2819,15 @@ export async function updatePurchaseInvoice(req, res) {
     } catch (aliasErr) {
       console.warn('[updatePurchaseInvoice] alias remember:', aliasErr?.message || aliasErr);
     }
-    return res.json({ ok: true, invoice: sanitizePurchaseInvoice({ ...doc, _rev: saved.rev }) });
+    let outDoc = { ...doc, _rev: saved.rev };
+    try {
+      const { applySupplierPriceVarianceCheck } = await import('../services/supplierPriceVarianceAlert.js');
+      const withVar = await applySupplierPriceVarianceCheck(req, userId, outDoc);
+      if (withVar) outDoc = withVar;
+    } catch (priceErr) {
+      console.warn('[updatePurchaseInvoice] price variance:', priceErr?.message || priceErr);
+    }
+    return res.json({ ok: true, invoice: sanitizePurchaseInvoice(outDoc) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al actualizar factura' });
   }

@@ -10,6 +10,8 @@ import {
 } from '../../lib/retailOpsPaths';
 import { notifyDeliveryBrandsChanged, notifyDeliveryCatalogChanged, notifyDeliveryConfigChanged, resolveBusinessScopeId, normalizeBusinessScopeId, DELIVERY_CONFIG_CHANGED } from '../../lib/deliverySetup';
 import { formatMoneyEs } from '../../lib/formatNumberEs';
+import { formatDateEs, parseDateEsToIso } from '../../lib/formatDateEs';
+import { toUserFacingMessage } from '../../lib/userFacingError';
 import { canDeletePurchaseDocuments } from '../../lib/accountOwnerPrecedence';
 import {
   isDeliveryOpsBusinessType,
@@ -20,8 +22,9 @@ import {
 } from '../../lib/deliveryOpsTypes';
 import { resolveTpvCatalogBusinessId } from '../../lib/tpvRegisterScope';
 import { getRetailOpsUiCopy } from '../../lib/retailUiCopy';
-import { filterCatalogItemsForBusinessScope, dedupeCatalogItemsForDisplay, expandCatalogItemsForDeletion } from '../../lib/catalogBusinessScope';
+import { filterCatalogItemsForBusinessScope, dedupeCatalogItemsForDisplay, expandCatalogItemsForDeletion, findCatalogDuplicateByName, formatCatalogDuplicateNameError } from '../../lib/catalogBusinessScope';
 import { deleteCatalogItemsRelentlessly } from '../../lib/catalogBulkDelete';
+import { wipeCatalogLeftoversAfterEmptyCarta } from '../../lib/catalogFullWipe';
 import { resolveCatalogProductImage, resolveCatalogProductPlaceholderUrl } from '../../lib/catalogProductPlaceholders';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import { catalogItemOperatesAtWorkCenter } from '../../lib/pdvScope';
@@ -36,11 +39,20 @@ import { SupplierPaymentTermsField } from '../../components/saas/SupplierPayment
 import {
   initialSupplierCatalogItemIds,
   initialSupplierItemCosts,
+  initialSupplierOrganizerIds,
   parseSupplierItemCosts,
+  resolveSupplierOrganizerIdsForSave,
   labelsForSupplierOrganizerIds,
+  supplierFormInitFingerprint,
   SupplierOrganizersField,
+  supplierOrganizerFieldSessionKey,
 } from '../../components/saas/SupplierOrganizersField';
-import { syncSupplierCatalogItemLinks } from '../../lib/supplierCatalogLinks';
+import { syncSupplierCatalogItemLinks, resolveSupplierSelectedStockIds } from '../../lib/supplierCatalogLinks';
+import { explicitMarkedStockItemsForSupplier } from '../../lib/purchaseSuggestions';
+import {
+  detectSupplierPriceVariance,
+  type SupplierPriceVariance,
+} from '../../lib/supplierPriceVariance';
 import {
   normalizeSupplierCode,
   sanitizeSupplierCodeInput,
@@ -58,13 +70,19 @@ import { scanDocument } from '../../lib/ocrApi';
 import { downscaleImageFileToBase64, fileToRawBase64 } from '../../lib/ocrImagePrepare';
 import {
   listPurchaseOrdersRequest,
+  createPurchaseOrderRequest,
   type PurchaseOrder,
 } from '../../lib/purchaseOrderApi';
 import {
   invoiceIsAlbaran,
+  isAlbaranInvoiceIncomplete,
   isPurchaseOrderWaitingAlbaran,
+  buildReplenishPurchaseOrderPayload,
+  pendingLinesFromPurchaseOrder,
+  resolveAlbaranPendingLines,
+  type PendingOrderLine,
 } from '../../lib/albaranReceptionCompare';
-import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
+import { VERTIAL_ACCENT_BG, VERTIAL_ACCENT_BORDER, VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY, VERTIAL_FOCUS_RING } from '../../lib/vertialUiTokens';
 import JSZip from 'jszip';
 import { Layout } from '../../components/saas/Layout';
 import { useModalClose } from '../../hooks/useModalClose';
@@ -88,13 +106,12 @@ import {
   resolveCatalogImportBrandIds,
   shouldClearBrandForCategory,
   activateCommercialLinesAfterCatalogImport,
-  resolveImportedCatalogItemsForCosting,
-  syncAutoCostingAfterCatalogImport,
+  syncFullStockAutomationAfterCatalogImport,
   syncStoreIngredientsFromCatalogImport,
   syncTpvOrganizersAfterCatalogImport,
   removeCatalogCategoryFromBrands,
 } from '../../lib/deliveryCatalogImport';
-import { commercialLineBrands, isWarehouseImportCategory, organizerBrandsForCatalogTemplate } from '../../lib/deliveryCatalogImportLogic';
+import { commercialLineBrands, defaultBrandIdForCatalogImport, isWarehouseImportCategory, organizerBrandsForCatalogTemplate } from '../../lib/deliveryCatalogImportLogic';
 import {
   catalogImportFieldsForVertical,
   catalogHeaderAliasesForVertical,
@@ -103,12 +120,9 @@ import {
   partitionDeliveryCatalogImportEntries,
 } from '../../lib/deliveryCatalogExcelTemplate';
 import {
-  catalogCategorySuggestions,
-  defaultCategoryForSingleBrand,
   deliveryBrandLineKindLabel,
   getDeliveryBrandLinePreset,
   DELIVERY_BRAND_LINE_ICON_BOX,
-  UNIVERSAL_CATALOG_CATEGORIES,
 } from '../../lib/deliveryBrandLineKinds';
 import {
   listCatalogItemsRequest,
@@ -134,6 +148,7 @@ import {
   type Supplier,
   type PurchaseInvoice,
   type PurchaseInvoiceLine,
+  pointOfSaleDisplayLabel,
 } from '../../lib/deliveryApi';
 import { localCalendarDayKey, localDayBoundsForKey } from '../../lib/tpvCajaScope';
 import {
@@ -171,6 +186,8 @@ import {
   ArrowLeft,
   ImagePlus,
   ScanLine,
+  Store,
+  Receipt,
 } from 'lucide-react';
 import { SAAS__OcrScanModal } from '../../components/design-system/SAAS__OcrScanModal';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
@@ -194,7 +211,8 @@ import { useActivationFocus } from '../../hooks/useActivationFocus';
 import { ActivationFieldWrap } from '../../components/saas/ActivationGuideUi';
 import { StaffConsumptionTabPanel } from '../../components/saas/StaffConsumptionTabPanel';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
-import { pollSupplierInvoicesNow, listSupplierInvoicePdvEmailConfigs } from '../../lib/supplierInvoiceApi';
+import { filterPurchaseDocsByBusinessScope } from '../../lib/purchaseBusinessScope';
+import { pollSupplierInvoicesNow, listSupplierInvoicePdvEmailConfigs, type SupplierInvoicePdvEmailStatus } from '../../lib/supplierInvoiceApi';
 import { createMovementFromInvoice, listFinanceMovements } from '../../lib/financeApi';
 import {
   isCatalogTpvConfigurable,
@@ -229,13 +247,21 @@ import {
 } from '../../components/saas/CatalogProductRecipePicker';
 import {
   calculateRecipeTotalCost,
+  isCatalogCostingProduct,
   readProductRecipeLines,
   storeIngredientsById,
   withProductCosting,
 } from '../../lib/catalogCosting';
 import { syncInventoryCatalogFromSources } from '../../lib/inventorySync';
 import { syncRecipesFromCostingCatalog } from '../../lib/recipeSyncFromCosting';
-import { COMBO_SLOT_META, DEFAULT_COMBO_STRUCTURE, comboStructureFromCustomFields, isComboStructureConfirmed, resolveComboRefSlotKind, type ComboStructureSlot } from '../../lib/catalogComboSlots';
+import {
+  COMBO_SLOT_META,
+  comboStructureFromCustomFields,
+  defaultComboStructureForCatalog,
+  isComboStructureConfirmed,
+  resolveComboRefSlotKind,
+  type ComboStructureSlot,
+} from '../../lib/catalogComboSlots';
 import { buildCatalogSalesIndex, computeCatalogItemSalesStats } from '../../lib/catalogItemSalesStats';
 import {
   applyCatalogMoveTarget,
@@ -314,11 +340,16 @@ function CatalogEmptyActions({
 }
 
 function defaultBrandIdForCatalog(brands: Brand[]): string {
-  const sorted = sortBrandsForDisplay(brands.filter((b) => b.active !== false));
-  const pick =
-    sorted.find((b) => isDefaultCommercialBrand(b)) ??
-    sorted[0];
-  return pick?._id ?? '';
+  return defaultBrandIdForCatalogImport(commercialLineBrands(brands));
+}
+
+/** Fusiona listados sin perder filas recién creadas en UI (race con reload). */
+function mergeCatalogItemsById(prev: CatalogItem[], incoming: CatalogItem[]): CatalogItem[] {
+  const byId = new Map(incoming.map((item) => [item._id, item]));
+  for (const item of prev) {
+    if (!item.deletedAt && !byId.has(item._id)) byId.set(item._id, item);
+  }
+  return [...byId.values()];
 }
 
 function catalogItemBrandNames(item: CatalogItem, brands: Brand[]): string {
@@ -356,6 +387,8 @@ interface CreateCatalogItemModalProps {
   catalogCategoriesInUse?: string[];
   /** Catálogo completo (composición de combos). */
   catalogItems?: CatalogItem[];
+  /** Carta visible (validación nombre duplicado). */
+  catalogMenuItemsForDuplicateCheck?: CatalogItem[];
   storeIngredients?: StoreIngredient[];
   brandIngredientSelection?: TpvBrandIngredientSelection;
   /** Bar/restaurante: el paso 2 no es escandallo (eso va en Escandallo). */
@@ -374,6 +407,7 @@ function CreateCatalogItemModal({
   onBrandsChange,
   catalogCategoriesInUse = [],
   catalogItems = [],
+  catalogMenuItemsForDuplicateCheck = [],
   storeIngredients = [],
   brandIngredientSelection = {},
   isRestaurantCatalog = false,
@@ -389,12 +423,19 @@ function CreateCatalogItemModal({
     useState<TpvBrandIngredientSelection>({});
   const [modalIngredientsLoading, setModalIngredientsLoading] = useState(false);
   const [comboItems, setComboItems] = useState<CatalogComboRef[]>([]);
-  const [comboStructure, setComboStructure] = useState<ComboStructureSlot[]>(DEFAULT_COMBO_STRUCTURE);
+  const defaultComboStructure = useMemo(
+    () => defaultComboStructureForCatalog({ restaurant: isRestaurantCatalog }),
+    [isRestaurantCatalog],
+  );
+  const [comboStructure, setComboStructure] = useState<ComboStructureSlot[]>(() =>
+    defaultComboStructureForCatalog({ restaurant: false }),
+  );
   const [comboStructureConfirmed, setComboStructureConfirmed] = useState(false);
   const [recipePicks, setRecipePicks] = useState<CatalogRecipePick[]>([]);
   const [extraCategories, setExtraCategories] = useState<string[]>([]);
   const [addingCategory, setAddingCategory] = useState(false);
   const [newCategoryDraft, setNewCategoryDraft] = useState('');
+  const [dismissedCategoryKeys, setDismissedCategoryKeys] = useState<Set<string>>(() => new Set());
   const [form, setForm] = useState({
     itemType: 'product' as CatalogItem['itemType'],
     name: '',
@@ -430,6 +471,7 @@ function CreateCatalogItemModal({
       setExtraCategories([]);
       setAddingCategory(false);
       setNewCategoryDraft('');
+      setDismissedCategoryKeys(new Set());
       return;
     }
 
@@ -437,7 +479,8 @@ function CreateCatalogItemModal({
     createModalWasOpenRef.current = true;
 
     if (editItem) {
-      setExtraCategories([]);
+      const editCategory = normalizeImportCategory(String(editItem.category || '').trim());
+      setExtraCategories(editCategory ? [editCategory] : []);
       setAddingCategory(false);
       setNewCategoryDraft('');
       setComboItems(Array.isArray(editItem.comboItems) ? [...editItem.comboItems] : []);
@@ -471,7 +514,10 @@ function CreateCatalogItemModal({
         name: editItem.name,
         description: editItem.description,
         category: editItem.category,
-        selectedBrandIds: Array.isArray(editItem.brandIds) ? [...editItem.brandIds] : [],
+        selectedBrandIds: (() => {
+          const ids = Array.isArray(editItem.brandIds) ? editItem.brandIds.filter(Boolean) : [];
+          return ids.length > 0 ? [ids[0]] : [];
+        })(),
         newBrandName: '',
         showNewBrand: false,
         unit: editItem.unit || 'ud',
@@ -515,7 +561,8 @@ function CreateCatalogItemModal({
     setSessionCreated([]);
     setRecipePicks([]);
     setExtraCategories([]);
-    setAddingCategory(false);
+    setDismissedCategoryKeys(new Set());
+    setAddingCategory(catalogCategoriesInUse.length === 0);
     setNewCategoryDraft('');
     const defaultId = defaultBrandIdForCatalog(brands);
 
@@ -527,18 +574,21 @@ function CreateCatalogItemModal({
         slotKind: 'main',
       };
       setComboItems([seedRef]);
-      setComboStructure(DEFAULT_COMBO_STRUCTURE.map((s) => ({ ...s })));
+      setComboStructure(defaultComboStructure.map((s) => ({ ...s })));
       setComboStructureConfirmed(true);
-      const seedBrands = Array.isArray(seedFromProduct.brandIds)
-        ? seedFromProduct.brandIds.filter(Boolean)
-        : [];
       setForm({
         itemType: 'combo',
         name: `Menú con ${seedFromProduct.name}`,
         description: '',
         category: 'Combos',
         unit: 'ud',
-        selectedBrandIds: seedBrands.length > 0 ? seedBrands : defaultId ? [defaultId] : [],
+        selectedBrandIds: (() => {
+          const seedBrands = Array.isArray(seedFromProduct.brandIds)
+            ? seedFromProduct.brandIds.filter(Boolean)
+            : [];
+          if (seedBrands.length > 0) return [seedBrands[0]];
+          return defaultId ? [defaultId] : [];
+        })(),
         newBrandName: '',
         showNewBrand: false,
         unitPrice: '',
@@ -564,7 +614,7 @@ function CreateCatalogItemModal({
     }
 
     setComboItems([]);
-    setComboStructure(DEFAULT_COMBO_STRUCTURE.map((s) => ({ ...s })));
+    setComboStructure(defaultComboStructure.map((s) => ({ ...s })));
     setComboStructureConfirmed(true);
     setForm({
       itemType: 'product', name: '', description: '', category: '', unit: 'ud',
@@ -578,7 +628,7 @@ function CreateCatalogItemModal({
       buildYourOwnAllowedIngredientIds: [],
     });
     setStep(1);
-  }, [editItem, seedFromProduct, isOpen, brands]);
+  }, [editItem, seedFromProduct, isOpen, brands, defaultComboStructure, catalogCategoriesInUse]);
 
   /** Si las marcas cargan después de abrir el modal, preselecciona la línea comercial por defecto. */
   useEffect(() => {
@@ -658,70 +708,54 @@ function CreateCatalogItemModal({
     });
   }, [recipePicks, effectiveStoreIngredients, brands]);
 
-  const categorySuggestions = useMemo(
-    () => catalogCategorySuggestions(brands, form.selectedBrandIds, catalogCategoriesInUse),
-    [brands, form.selectedBrandIds, catalogCategoriesInUse],
-  );
+  const pinCategoryChip = useCallback((raw: string) => {
+    const cat = normalizeImportCategory(String(raw || '').trim());
+    if (!cat) return;
+    const key = cat.toLowerCase();
+    setExtraCategories((prev) => {
+      if (prev.some((c) => c.toLowerCase() === key)) return prev;
+      return [...prev, cat];
+    });
+  }, []);
 
-  /** Categorías que vienen de tus marcas (Ajustes → Marca), normalizadas. */
-  const brandCategoryKeys = useMemo(() => {
-    const relevant =
-      form.selectedBrandIds.length > 0
-        ? brands.filter((b) => form.selectedBrandIds.includes(b._id))
-        : brands;
-    const keys = new Set<string>();
-    for (const b of relevant) {
-      for (const c of b.catalogCategories ?? []) {
-        const cat = normalizeImportCategory(String(c || '').trim());
-        if (cat) keys.add(cat.toLowerCase());
-      }
-    }
-    return keys;
-  }, [brands, form.selectedBrandIds]);
+  const selectCategoryChip = useCallback((cat: string) => {
+    pinCategoryChip(cat);
+    setForm((f) => ({ ...f, category: cat }));
+  }, [pinCategoryChip]);
 
   const categoryChips = useMemo(() => {
-    // Genéricas hardcodeadas (Bebidas, Postres…): solo salen si las usan
-    // productos reales o tus marcas — nada fijo que no se pueda quitar.
-    const universalKeys = new Set(UNIVERSAL_CATALOG_CATEGORIES.map((c) => c.toLowerCase()));
-    const inUseKeys = new Set(
-      catalogCategoriesInUse
-        .map((c) => normalizeImportCategory(String(c || '')).toLowerCase())
-        .filter(Boolean),
-    );
     const seen = new Set<string>();
     const out: string[] = [];
-    for (const raw of [...categorySuggestions, ...extraCategories, form.category]) {
+    const push = (raw: string) => {
       const cat = normalizeImportCategory(String(raw || '').trim());
-      if (!cat) continue;
+      if (!cat) return;
+      if (isWarehouseImportCategory(cat)) return;
       const key = cat.toLowerCase();
-      if (seen.has(key)) continue;
-      if (
-        universalKeys.has(key) &&
-        !inUseKeys.has(key) &&
-        !brandCategoryKeys.has(key) &&
-        !extraCategories.some((c) => c.toLowerCase() === key) &&
-        normalizeImportCategory(form.category).toLowerCase() !== key
-      ) {
-        continue;
-      }
+      if (seen.has(key) || dismissedCategoryKeys.has(key)) return;
       seen.add(key);
       out.push(cat);
-    }
-    return out;
-  }, [categorySuggestions, extraCategories, form.category, catalogCategoriesInUse, brandCategoryKeys]);
+    };
+
+    // Solo categorías reales: las que ya tienen productos o las creadas en esta sesión.
+    for (const raw of catalogCategoriesInUse) push(raw);
+    for (const raw of extraCategories) push(raw);
+    return out.sort((a, b) => a.localeCompare(b, 'es'));
+  }, [catalogCategoriesInUse, extraCategories, dismissedCategoryKeys]);
+
+  const startAddCategory = useCallback(() => {
+    setAddingCategory(true);
+    setNewCategoryDraft('');
+    setForm((f) => ({ ...f, category: '' }));
+  }, []);
 
   const commitNewCategoryChip = () => {
-    const cat = normalizeImportCategory(newCategoryDraft.trim());
-    if (!cat) {
+    const raw = newCategoryDraft.trim().replace(/\s+/g, ' ');
+    if (!raw) {
       toast.error('Escribe el nombre de la categoría');
       return;
     }
-    setExtraCategories((prev) => {
-      if (prev.some((c) => c.toLowerCase() === cat.toLowerCase())) return prev;
-      // Solo saltar si ya está visible como chip (las genéricas ocultas se re-añaden).
-      if (categoryChips.some((c) => c.toLowerCase() === cat.toLowerCase())) return prev;
-      return [...prev, cat];
-    });
+    const cat = raw.replace(/^\w/u, (c) => c.toUpperCase());
+    pinCategoryChip(cat);
     setForm((f) => ({ ...f, category: cat }));
     setNewCategoryDraft('');
     setAddingCategory(false);
@@ -769,6 +803,7 @@ function CreateCatalogItemModal({
     setDeletingCategoryKey(key);
     try {
       setExtraCategories((prev) => prev.filter((c) => c.toLowerCase() !== key));
+      setDismissedCategoryKeys((prev) => new Set(prev).add(key));
       if (normalizeImportCategory(form.category).toLowerCase() === key) {
         setForm((f) => ({ ...f, category: '' }));
       }
@@ -795,32 +830,6 @@ function CreateCatalogItemModal({
     () => sortBrandsForDisplay(brands.filter((b) => b.active !== false)),
     [brands],
   );
-
-  useEffect(() => {
-    if (!isOpen || editItem) return;
-    if (form.selectedBrandIds.length !== 1) return;
-    const suggested = defaultCategoryForSingleBrand(brands, form.selectedBrandIds[0]);
-    if (!suggested) return;
-    setForm((f) => (f.category.trim() ? f : { ...f, category: suggested }));
-  }, [isOpen, editItem, form.selectedBrandIds, brands]);
-
-  useEffect(() => {
-    if (!isOpen || !businessId) return;
-    const brandIds = form.selectedBrandIds.filter(Boolean);
-    const cats = extraCategories.filter((c) => c && !isWarehouseImportCategory(c));
-    if (brandIds.length === 0 || cats.length === 0) return;
-    void syncTpvOrganizersAfterCatalogImport(
-      businessId,
-      cats.map((category) => ({ brandIds, category })),
-    ).then(async (r) => {
-      if (r.updatedBrands <= 0) return;
-      const next = await listBrandsRequest(businessId).catch(() => null);
-      if (next) {
-        onBrandsChange(next);
-        notifyDeliveryBrandsChanged();
-      }
-    });
-  }, [isOpen, businessId, extraCategories, form.selectedBrandIds]);
 
   const normalizedCategory = useMemo(
     () => normalizeImportCategory(form.category),
@@ -938,7 +947,7 @@ function CreateCatalogItemModal({
       onBrandsChange([...brands, created]);
       setForm((f) => ({
         ...f,
-        selectedBrandIds: [...f.selectedBrandIds, created._id],
+        selectedBrandIds: [created._id],
         newBrandName: '',
         showNewBrand: false,
       }));
@@ -948,12 +957,10 @@ function CreateCatalogItemModal({
     }
   };
 
-  const toggleBrand = (brandId: string) => {
+  const selectBrand = (brandId: string) => {
     setForm((f) => ({
       ...f,
-      selectedBrandIds: f.selectedBrandIds.includes(brandId)
-        ? f.selectedBrandIds.filter((id) => id !== brandId)
-        : [...f.selectedBrandIds, brandId],
+      selectedBrandIds: [brandId],
     }));
   };
 
@@ -979,6 +986,16 @@ function CreateCatalogItemModal({
       return;
     }
     if (!validateBuildYourOwnSelection()) {
+      if (!isEditMode) setStep(1);
+      return;
+    }
+    const duplicateByName = findCatalogDuplicateByName(
+      catalogMenuItemsForDuplicateCheck,
+      form.name.trim(),
+      { excludeId: editItem?._id },
+    );
+    if (duplicateByName) {
+      toast.error(formatCatalogDuplicateNameError(duplicateByName));
       if (!isEditMode) setStep(1);
       return;
     }
@@ -1030,7 +1047,7 @@ function CreateCatalogItemModal({
         ...(form.itemType === 'combo' || /combo/i.test(category)
           ? {
               comboStructure:
-                comboStructure.length > 0 ? comboStructure : DEFAULT_COMBO_STRUCTURE.map((s) => ({ ...s })),
+                comboStructure.length > 0 ? comboStructure : defaultComboStructure.map((s) => ({ ...s })),
               comboStructureConfirmed: true,
             }
           : {}),
@@ -1109,7 +1126,7 @@ function CreateCatalogItemModal({
         const savedPrice = Number(form.unitPrice) || 0;
         setSessionCreated((prev) => [...prev, { name: savedName, price: savedPrice }]);
         setComboItems([]);
-        setComboStructure(DEFAULT_COMBO_STRUCTURE.map((s) => ({ ...s })));
+        setComboStructure(defaultComboStructure.map((s) => ({ ...s })));
         setComboStructureConfirmed(true);
         setRecipePicks([]);
         setForm((f) => ({
@@ -1205,7 +1222,7 @@ function CreateCatalogItemModal({
     <div>
       <label className={labelClass}>Marca comercial</label>
       <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-        Misma lógica que en Ajustes → Marca: define la línea de venta y las categorías sugeridas.
+        Elige una sola línea de venta para este producto (categorías y TPV de esa marca).
       </p>
       {activeBrands.length === 0 ? (
         <p className="text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl px-3 py-2">
@@ -1222,7 +1239,7 @@ function CreateCatalogItemModal({
               <button
                 key={b._id}
                 type="button"
-                onClick={() => toggleBrand(b._id)}
+                onClick={() => selectBrand(b._id)}
                 className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all ${
                   selected
                     ? 'border-gray-900 dark:border-gray-100 bg-gray-50 dark:bg-gray-900/50 ring-1 ring-gray-900/10'
@@ -1301,107 +1318,140 @@ function CreateCatalogItemModal({
     );
   };
 
-  const renderCategoryUnit = () => (
-    <div>
-      <label className={labelClass}>Categoría</label>
-      <div className="mb-1 flex flex-wrap gap-1.5">
-        {categoryChips.map((cat) => {
-          const key = cat.toLowerCase();
-          const active = normalizeImportCategory(form.category).toLowerCase() === key;
-          const deleting = deletingCategoryKey === key;
-          return (
-            <span
-              key={cat}
-              className={`inline-flex items-center rounded-full border transition-colors ${
-                active
-                  ? 'border-gray-900 bg-gray-900 text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900'
-                  : 'border-gray-200 bg-gray-50 text-gray-700 hover:border-gray-400 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300'
-              }`}
-            >
-              <button
-                type="button"
-                onClick={() => setForm((f) => ({ ...f, category: cat }))}
-                className="py-1.5 pl-3 pr-1 text-xs font-semibold"
-              >
-                {cat}
+  const renderCategoryUnit = () => {
+    const selectedCategory = normalizeImportCategory(form.category);
+    const selectedKey = selectedCategory.toLowerCase();
+    const pickerCategories = categoryChips.filter((c) => c.toLowerCase() !== selectedKey);
+    const categoryFieldLabel = isRestaurantCatalog ? 'Organizador en la carta' : 'Categoría';
+
+    return (
+      <div
+        className={`rounded-2xl border-2 p-4 space-y-3 ${
+          selectedCategory
+            ? `${VERTIAL_ACCENT_BORDER} ${VERTIAL_ACCENT_BG}`
+            : 'border-stone-200 bg-stone-50/80 dark:border-stone-700 dark:bg-stone-900/40'
+        }`}
+      >
+        <label className="block text-sm font-bold text-stone-900 dark:text-stone-100">
+          {categoryFieldLabel} *
+        </label>
+
+        {addingCategory ? (
+          <div className="rounded-xl border-2 border-dashed border-blue-200 bg-white p-3 space-y-3 dark:border-blue-800 dark:bg-stone-900">
+            <p className="text-sm font-semibold text-stone-900 dark:text-stone-100">Nueva categoría</p>
+            <input
+              className={`${inputClass} ${VERTIAL_FOCUS_RING}`}
+              placeholder={isRestaurantCatalog ? 'Ej. Tapas, Bebidas, Combos…' : 'Nombre de la categoría…'}
+              value={newCategoryDraft}
+              autoFocus
+              onChange={(e) => setNewCategoryDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  commitNewCategoryChip();
+                }
+                if (e.key === 'Escape') {
+                  setAddingCategory(false);
+                  setNewCategoryDraft('');
+                }
+              }}
+            />
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={commitNewCategoryChip} className={`${VERTIAL_BTN_PRIMARY} !min-h-10`}>
+                Crear y usar
               </button>
               <button
                 type="button"
-                disabled={deleting}
-                onClick={() => void handleDeleteCategoryChip(cat)}
-                title={`Eliminar categoría «${cat}»`}
-                aria-label={`Eliminar categoría «${cat}»`}
-                className={`mr-1.5 flex h-5 w-5 items-center justify-center rounded-full transition-colors disabled:opacity-50 ${
-                  active
-                    ? 'text-white/70 hover:bg-white/20 hover:text-white dark:text-gray-900/60 dark:hover:bg-gray-900/10 dark:hover:text-gray-900'
-                    : 'text-gray-400 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/40 dark:hover:text-red-400'
-                }`}
+                onClick={() => {
+                  setAddingCategory(false);
+                  setNewCategoryDraft('');
+                }}
+                className={`${VERTIAL_BTN_SECONDARY} !min-h-10`}
               >
-                {deleting ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  <X className="h-3 w-3" />
-                )}
+                Cancelar
               </button>
-            </span>
-          );
-        })}
-        {!addingCategory ? (
+            </div>
+          </div>
+        ) : (
           <button
             type="button"
-            onClick={() => {
-              setAddingCategory(true);
-              setNewCategoryDraft('');
-            }}
-            className="inline-flex items-center gap-1 rounded-full border border-dashed border-gray-300 dark:border-gray-600 px-3 py-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:border-gray-500 hover:bg-gray-50 dark:hover:bg-gray-900"
+            onClick={startAddCategory}
+            className={`${VERTIAL_BTN_SECONDARY} w-full justify-center border-dashed !min-h-11`}
           >
-            <Plus className="w-3.5 h-3.5" />
+            <Plus className="w-4 h-4" />
             Nueva categoría
           </button>
-        ) : null}
-      </div>
-      {addingCategory ? (
-        <div className="mt-2 flex flex-col sm:flex-row gap-2">
-          <input
-            className={inputClass}
-            placeholder="Nombre de la nueva categoría…"
-            value={newCategoryDraft}
-            autoFocus
-            onChange={(e) => setNewCategoryDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                commitNewCategoryChip();
-              }
-              if (e.key === 'Escape') {
-                setAddingCategory(false);
-                setNewCategoryDraft('');
-              }
-            }}
-          />
-          <div className="flex gap-2 shrink-0">
+        )}
+
+        {selectedCategory && !addingCategory ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-blue-200 bg-white px-3 py-2.5 dark:border-blue-800 dark:bg-stone-900">
+            <span className="text-sm font-bold text-stone-900 dark:text-stone-100">{selectedCategory}</span>
             <button
               type="button"
-              onClick={commitNewCategoryChip}
-              className="px-4 py-2.5 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-semibold"
+              onClick={() => setForm((f) => ({ ...f, category: '' }))}
+              className="text-xs font-semibold text-[var(--v-blue,#2563eb)] hover:underline"
             >
-              Añadir
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setAddingCategory(false);
-                setNewCategoryDraft('');
-              }}
-              className="px-4 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-sm font-medium text-gray-700 dark:text-gray-300"
-            >
-              Cancelar
+              Cambiar
             </button>
           </div>
-        </div>
-      ) : null}
-    </div>
-  );
+        ) : null}
+
+        {pickerCategories.length > 0 ? (
+          <div>
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-stone-400 dark:text-stone-500">
+              {selectedCategory ? 'O elige otra' : 'Ya en tu carta'}
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {pickerCategories.map((cat) => {
+                const key = cat.toLowerCase();
+                const deleting = deletingCategoryKey === key;
+                const canDelete = !categoriesInUseKeys.has(key);
+                return (
+                  <span
+                    key={cat}
+                    className="inline-flex items-center rounded-full border border-stone-200 bg-white text-stone-700 transition-colors hover:border-blue-300 dark:border-stone-600 dark:bg-stone-900 dark:text-stone-300"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => selectCategoryChip(cat)}
+                      className="py-1.5 pl-3 pr-1 text-xs font-semibold"
+                    >
+                      {cat}
+                    </button>
+                    {canDelete ? (
+                      <button
+                        type="button"
+                        disabled={deleting}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteCategoryChip(cat);
+                        }}
+                        title={`Quitar «${cat}» de la lista`}
+                        aria-label={`Quitar categoría «${cat}»`}
+                        className="mr-1.5 flex h-5 w-5 items-center justify-center rounded-full text-stone-400 transition-colors hover:bg-red-100 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-900/40 dark:hover:text-red-400"
+                      >
+                        {deleting ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <X className="h-3 w-3" />
+                        )}
+                      </button>
+                    ) : null}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        ) : !selectedCategory && !addingCategory ? (
+          <p className="text-sm text-stone-500 dark:text-stone-400">
+            {isRestaurantCatalog
+              ? 'Crea la primera categoría arriba o impórtala con Excel.'
+              : 'Crea la primera categoría arriba.'}
+          </p>
+        ) : null}
+      </div>
+    );
+  };
 
   const renderHalfHalfProductToggle = () => {
     if (form.itemType !== 'product') return null;
@@ -1705,6 +1755,7 @@ function CreateCatalogItemModal({
   };
 
   const inputClass = 'w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100';
+  const inputClassInline = 'px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100';
   const labelClass = 'block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5';
 
   const renderComboBuilderSection = () => {
@@ -1713,6 +1764,7 @@ function CreateCatalogItemModal({
       <section>
         <CatalogComboCompositionEditor
           compact
+          restaurantCatalog={isRestaurantCatalog}
           comboItems={comboItems}
           catalogItems={catalogItems}
           excludeItemId={editItem?._id}
@@ -1740,8 +1792,10 @@ function CreateCatalogItemModal({
     return (
           <div className="space-y-3 pt-2">
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className={labelClass}>Extras de pago (ej: más queso)</label>
+              <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
+                <div className="min-w-0">
+                  <label className={labelClass}>Extras de pago</label>
+                </div>
                 <button
                   type="button"
                   onClick={() =>
@@ -1753,46 +1807,71 @@ function CreateCatalogItemModal({
                       ],
                     }))
                   }
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-900"
+                  className="inline-flex shrink-0 items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-900"
                 >
-                  <Plus className="w-3 h-3" />
-                  Añadir
+                  <Plus className="w-3.5 h-3.5" />
+                  Añadir extra
                 </button>
               </div>
               {form.supplements.length === 0 ? (
-                <p className="text-sm text-stone-400">Ninguno. Ejemplo: Extra queso 1,50 €</p>
+                <p className="text-sm text-stone-400 rounded-xl border border-dashed border-gray-200 dark:border-gray-700 px-3 py-3">
+                  Sin extras. Pulsa <span className="font-semibold">Añadir extra</span> para crear uno (ej. «Extra queso» → 1,50 €).
+                </p>
               ) : (
                 <div className="space-y-2">
+                  <div className="hidden sm:grid sm:grid-cols-[minmax(0,1fr)_7rem_2.5rem] gap-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                    <span>Nombre del extra</span>
+                    <span className="text-right">Precio €</span>
+                    <span className="sr-only">Quitar</span>
+                  </div>
                   {form.supplements.map((row, idx) => (
-                    <div key={row.id || idx} className="flex gap-2 items-center">
-                      <input
-                        className={`${inputClass} flex-1`}
-                        placeholder="Nombre suplemento"
-                        value={row.name}
-                        onChange={(e) =>
-                          setForm((f) => ({
-                            ...f,
-                            supplements: f.supplements.map((s, i) =>
-                              i === idx ? { ...s, name: e.target.value } : s,
-                            ),
-                          }))
-                        }
-                      />
-                      <input
-                        type="number"
-                        step="0.01"
-                        className={`${inputClass} w-24`}
-                        placeholder="€"
-                        value={row.price}
-                        onChange={(e) =>
-                          setForm((f) => ({
-                            ...f,
-                            supplements: f.supplements.map((s, i) =>
-                              i === idx ? { ...s, price: e.target.value } : s,
-                            ),
-                          }))
-                        }
-                      />
+                    <div
+                      key={row.id || idx}
+                      className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_7rem_2.5rem] gap-2 items-center"
+                    >
+                      <div className="min-w-0">
+                        <label className="sm:sr-only text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">
+                          Nombre del extra
+                        </label>
+                        <input
+                          className={`${inputClassInline} w-full min-w-0`}
+                          placeholder="Ej. Extra queso"
+                          value={row.name}
+                          onChange={(e) =>
+                            setForm((f) => ({
+                              ...f,
+                              supplements: f.supplements.map((s, i) =>
+                                i === idx ? { ...s, name: e.target.value } : s,
+                              ),
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="flex items-center gap-2 sm:block">
+                        <label className="sm:sr-only text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">
+                          Precio €
+                        </label>
+                        <div className="flex items-center gap-1.5 w-full sm:w-auto">
+                          <span className="text-sm text-gray-400 shrink-0 sm:hidden">€</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            inputMode="decimal"
+                            className={`${inputClassInline} w-full sm:w-full tabular-nums text-right`}
+                            placeholder="0,00"
+                            value={row.price}
+                            onChange={(e) =>
+                              setForm((f) => ({
+                                ...f,
+                                supplements: f.supplements.map((s, i) =>
+                                  i === idx ? { ...s, price: e.target.value } : s,
+                                ),
+                              }))
+                            }
+                          />
+                        </div>
+                      </div>
                       <button
                         type="button"
                         onClick={() =>
@@ -1801,7 +1880,9 @@ function CreateCatalogItemModal({
                             supplements: f.supplements.filter((_, i) => i !== idx),
                           }))
                         }
-                        className="p-2 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30"
+                        className="justify-self-end sm:justify-self-center p-2 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30"
+                        title="Quitar este extra"
+                        aria-label="Quitar este extra"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -2272,43 +2353,13 @@ function CreateCatalogItemModal({
             <div className="space-y-5">
               {showComboBuilder ? (
                 <>
-                  <div>
-                    <h3 className="text-base font-bold text-stone-900 dark:text-stone-100">
-                      Qué incluye este menú
-                    </h3>
-                    <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">
-                      Elige los productos de la carta que forman el combo. Luego puedes añadir extras de pago.
-                    </p>
-                  </div>
                   {renderComboBuilderSection()}
                   {renderSupplementsSection()}
                 </>
               ) : isRestaurantCatalog || form.buildYourOwn ? (
-                <>
-                  <div>
-                    <h3 className="text-base font-bold text-stone-900 dark:text-stone-100">
-                      Extras de pago
-                    </h3>
-                    <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">
-                      {form.buildYourOwn
-                        ? 'Los ingredientes base ya están en el paso 1. Aquí solo extras de pago (más queso, extra bacon…). Si no hay, pulsa Siguiente.'
-                        : 'Opcional. Si en el TPV se puede pedir un extra (más queso, extra hielo…), añádelo aquí. Si no, pulsa Siguiente. El coste de receta se configura en Escandallo.'}
-                    </p>
-                  </div>
-                  {renderSupplementsSection()}
-                </>
+                renderSupplementsSection()
               ) : (
-                <>
-                  <div>
-                    <h3 className="text-base font-bold text-stone-900 dark:text-stone-100">
-                      Ingredientes de este producto
-                    </h3>
-                    <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">
-                      Opcional. Sirve para calcular coste y descontar stock al vender. Si no aplica, pulsa Siguiente.
-                    </p>
-                  </div>
-                  {renderCustomizationSection()}
-                </>
+                renderCustomizationSection()
               )}
             </div>
           ) : (
@@ -2456,11 +2507,14 @@ interface CreateSupplierModalProps {
   onClose: () => void;
   onCreate: (data: Partial<Supplier> & { catalogItemCosts?: Record<string, number> }) => Promise<void>;
   editItem?: Supplier | null;
+  /** Mientras se recarga el proveedor del servidor antes de editar. */
+  editHydrating?: boolean;
   brands?: Brand[];
   catalogItems?: CatalogItem[];
   storeIngredients?: StoreIngredient[];
   /** Para sugerir PROV-001… y avisar si el código ya existe. */
   existingSuppliers?: Supplier[];
+  businessType?: string | null;
 }
 
 function CreateSupplierModal({
@@ -2468,12 +2522,16 @@ function CreateSupplierModal({
   onClose,
   onCreate,
   editItem,
+  editHydrating = false,
   brands = [],
   catalogItems = [],
   storeIngredients = [],
   existingSuppliers = [],
+  businessType = null,
 }: CreateSupplierModalProps) {
   const [submitting, setSubmitting] = useState(false);
+  const [formInitReady, setFormInitReady] = useState(false);
+  const [organizersFieldKey, setOrganizersFieldKey] = useState(0);
   /** Si el usuario toca el código a mano, deja de regenerarlo al escribir el nombre. */
   const [codeManual, setCodeManual] = useState(false);
   const [form, setForm] = useState({
@@ -2491,29 +2549,82 @@ function CreateSupplierModal({
     catalogItemIds: [] as string[],
     itemCosts: {} as Record<string, string>,
   });
+  const supplierFormSessionRef = useRef<{ fingerprint: string } | null>(null);
+  const organizersTouchedRef = useRef(false);
+  const formRef = useRef(form);
+  const editItemRef = useRef(editItem);
+  const catalogItemsRef = useRef(catalogItems);
+  const brandsRef = useRef(brands);
+  const storeIngredientsRef = useRef(storeIngredients);
+  editItemRef.current = editItem;
+  catalogItemsRef.current = catalogItems;
+  brandsRef.current = brands;
+  storeIngredientsRef.current = storeIngredients;
+
+  const applyForm = (next: typeof form | ((prev: typeof form) => typeof form)) => {
+    setForm((prev) => {
+      const merged = typeof next === 'function' ? next(prev) : next;
+      formRef.current = merged;
+      return merged;
+    });
+  };
+  formRef.current = form;
+
+  const editSnapshot = supplierFormInitFingerprint(editItem, catalogItems.length);
 
   useEffect(() => {
-    if (!isOpen) return;
-    setCodeManual(Boolean(editItem?.code));
-    if (editItem) {
-      const catalogItemIds = initialSupplierCatalogItemIds(editItem, catalogItems);
-      setForm({
-        name: editItem.name,
-        code: editItem.code || '',
-        cif: editItem.cif || '',
-        email: editItem.email || '',
-        phone: editItem.phone || '',
-        address: editItem.address || '',
-        contactPerson: editItem.contactPerson || '',
-        category: editItem.category || '',
-        paymentTerms: editItem.paymentTerms || '',
-        notes: editItem.notes || '',
-        organizerIds: Array.isArray(editItem.organizerIds) ? [...editItem.organizerIds] : [],
+    if (!isOpen) {
+      supplierFormSessionRef.current = null;
+      organizersTouchedRef.current = false;
+      setFormInitReady(false);
+      return;
+    }
+    if (editItem && (editHydrating || catalogItems.length === 0)) {
+      setFormInitReady(false);
+      return;
+    }
+
+    const edit = editItemRef.current;
+    const items = catalogItemsRef.current;
+    const fingerprint = supplierFormInitFingerprint(edit, items.length);
+    if (organizersTouchedRef.current && supplierFormSessionRef.current?.fingerprint === fingerprint) {
+      setFormInitReady(true);
+      return;
+    }
+    if (supplierFormSessionRef.current?.fingerprint === fingerprint) {
+      setFormInitReady(true);
+      return;
+    }
+
+    supplierFormSessionRef.current = { fingerprint };
+
+    setCodeManual(Boolean(edit?.code));
+    if (edit) {
+      const catalogItemIds = initialSupplierCatalogItemIds(edit, items);
+      const nextForm = {
+        name: edit.name,
+        code: edit.code || '',
+        cif: edit.cif || '',
+        email: edit.email || '',
+        phone: edit.phone || '',
+        address: edit.address || '',
+        contactPerson: edit.contactPerson || '',
+        category: edit.category || '',
+        paymentTerms: edit.paymentTerms || '',
+        notes: edit.notes || '',
+        organizerIds: initialSupplierOrganizerIds(
+          edit,
+          items,
+          storeIngredientsRef.current,
+          brandsRef.current,
+        ),
         catalogItemIds,
-        itemCosts: initialSupplierItemCosts(catalogItemIds, catalogItems),
-      });
+        itemCosts: initialSupplierItemCosts(catalogItemIds, items),
+      };
+      formRef.current = nextForm;
+      setForm(nextForm);
     } else {
-      setForm({
+      const nextForm = {
         name: '',
         code: suggestNextSupplierCode(existingSuppliers),
         cif: '',
@@ -2524,12 +2635,16 @@ function CreateSupplierModal({
         category: '',
         paymentTerms: '',
         notes: '',
-        organizerIds: [],
-        catalogItemIds: [],
-        itemCosts: {},
-      });
+        organizerIds: [] as string[],
+        catalogItemIds: [] as string[],
+        itemCosts: {} as Record<string, string>,
+      };
+      formRef.current = nextForm;
+      setForm(nextForm);
     }
-  }, [editItem, isOpen, catalogItems, existingSuppliers]);
+    setOrganizersFieldKey((k) => k + 1);
+    setFormInitReady(true);
+  }, [isOpen, editSnapshot, editHydrating, catalogItems.length, existingSuppliers]);
   useModalClose(isOpen, onClose);
 
   const handleNameChange = (name: string) => {
@@ -2551,11 +2666,12 @@ function CreateSupplierModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.name.trim()) {
+    const current = formRef.current;
+    if (!current.name.trim()) {
       toast.error('El nombre es obligatorio');
       return;
     }
-    const code = normalizeSupplierCode(form.code);
+    const code = normalizeSupplierCode(current.code);
     if (!code) {
       toast.error('El código del proveedor es obligatorio');
       return;
@@ -2564,23 +2680,39 @@ function CreateSupplierModal({
       toast.error(`Ya existe un proveedor con el código ${code}`);
       return;
     }
+    const priorOrganizers = (editItem?.organizerIds || []).filter(Boolean).length;
+    if (
+      editItem &&
+      priorOrganizers > 0 &&
+      current.organizerIds.length === 0 &&
+      !organizersTouchedRef.current
+    ) {
+      toast.error('Las categorías no se cargaron bien. Cierra y vuelve a abrir el proveedor.');
+      return;
+    }
     setSubmitting(true);
     try {
-      // Solo campos del formulario: no esparcir editItem (_id/_rev) en el alta.
+      const organizerIds = resolveSupplierOrganizerIdsForSave(
+        current.organizerIds,
+        current.catalogItemIds,
+        catalogItemsRef.current,
+        storeIngredientsRef.current,
+        brandsRef.current,
+      );
       await onCreate({
-        name: form.name,
+        name: current.name,
         code,
-        cif: form.cif,
-        email: form.email,
-        phone: form.phone,
-        address: form.address,
-        contactPerson: form.contactPerson,
-        category: form.category,
-        paymentTerms: form.paymentTerms,
-        notes: form.notes,
-        organizerIds: form.organizerIds,
-        catalogItemIds: form.catalogItemIds,
-        catalogItemCosts: parseSupplierItemCosts(form.itemCosts),
+        cif: current.cif,
+        email: current.email,
+        phone: current.phone,
+        address: current.address,
+        contactPerson: current.contactPerson,
+        category: current.category,
+        paymentTerms: current.paymentTerms,
+        notes: current.notes,
+        organizerIds,
+        catalogItemIds: current.catalogItemIds,
+        catalogItemCosts: parseSupplierItemCosts(current.itemCosts),
         active: editItem?.active ?? true,
       });
     } finally {
@@ -2621,13 +2753,13 @@ function CreateSupplierModal({
               <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Código *</label>
               <input
                 className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-mono uppercase"
-                placeholder="MAKRO"
+                placeholder="MAK-001"
                 maxLength={SUPPLIER_CODE_MAX_LEN}
                 value={form.code}
                 onChange={(e) => handleCodeChange(e.target.value)}
               />
               <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
-                Se rellena solo con el nombre (ej. Makro → MAKRO). Puedes editarlo. Máx. {SUPPLIER_CODE_MAX_LEN} caracteres: A–Z, 0–9 y guión.
+                Se rellena solo con el nombre (ej. Makro → MAK-001). Puedes editarlo. Máx. {SUPPLIER_CODE_MAX_LEN} caracteres: A–Z, 0–9 y guión.
               </p>
             </div>
           </div>
@@ -2685,17 +2817,28 @@ function CreateSupplierModal({
             />
           </div>
 
-          <SupplierOrganizersField
-            organizerIds={form.organizerIds}
-            catalogItemIds={form.catalogItemIds}
-            itemCosts={form.itemCosts}
-            onChange={({ organizerIds, catalogItemIds, itemCosts }) =>
-              setForm((f) => ({ ...f, organizerIds, catalogItemIds, itemCosts }))
-            }
-            brands={brands}
-            catalogItems={catalogItems}
-            storeIngredients={storeIngredients}
-          />
+          {formInitReady ? (
+            <SupplierOrganizersField
+              key={`supplier-organizers-${organizersFieldKey}`}
+              organizerIds={form.organizerIds}
+              catalogItemIds={form.catalogItemIds}
+              itemCosts={form.itemCosts}
+              onChange={({ organizerIds, catalogItemIds, itemCosts }) => {
+                organizersTouchedRef.current = true;
+                applyForm((f) => ({ ...f, organizerIds, catalogItemIds, itemCosts }));
+              }}
+              brands={brands}
+              catalogItems={catalogItems}
+              storeIngredients={storeIngredients}
+              businessType={businessType}
+            />
+          ) : (
+            <div className="rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700 px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+              {editItem && (editHydrating || catalogItems.length === 0)
+                ? 'Cargando categorías y productos del proveedor…'
+                : 'Preparando el formulario…'}
+            </div>
+          )}
 
           <SupplierPaymentTermsField
             value={form.paymentTerms}
@@ -2744,8 +2887,12 @@ interface CreateInvoiceModalProps {
   suppliers: Supplier[];
   invoices?: PurchaseInvoice[];
   editItem?: PurchaseInvoice | null;
+  purchaseOrders?: PurchaseOrder[];
   onReloadInvoices?: () => Promise<PurchaseInvoice[] | void> | void;
   onSelectExisting?: (invoice: PurchaseInvoice) => void;
+  onGoToPurchaseOrders?: () => void;
+  onReplenishPending?: () => void | Promise<void>;
+  replenishing?: boolean;
 }
 
 function normalizeInvoiceCode(value: string): string {
@@ -2757,6 +2904,71 @@ function normalizeInvoiceCode(value: string): string {
     .replace(/[\s.\-_/#+]+/g, '');
 }
 
+function invoiceDisplayNumber(inv: PurchaseInvoice): string {
+  return String(inv.invoiceNumber || inv.ocrData?.documentNumber || '').trim();
+}
+
+/** Fragmentos OCR del PDF (p. ej. «tutra» leído de «factura»). */
+function looksLikeRealInvoiceNumber(value: string): boolean {
+  const v = String(value || '').trim();
+  if (!v) return false;
+  if (/^(factura|fac|tura|tutra|albaran|alb|iva|eur|total|neto)$/i.test(v)) return false;
+  if (/^[AF]-\d{4}$/i.test(v)) return true;
+  if (/\d/.test(v)) return v.length >= 3;
+  return v.length >= 8;
+}
+
+function invoiceTableNumber(inv: PurchaseInvoice): { primary: string; hint?: string } {
+  const raw = invoiceDisplayNumber(inv);
+  const attachmentName = String(inv.attachments?.[0]?.filename || '')
+    .replace(/\.(pdf|png|jpe?g)$/i, '')
+    .trim();
+  if (looksLikeRealInvoiceNumber(raw)) return { primary: raw };
+  if (attachmentName) {
+    return {
+      primary: attachmentName,
+      hint: raw && raw.toLowerCase() !== attachmentName.toLowerCase() ? `OCR leyó «${raw}»` : undefined,
+    };
+  }
+  return {
+    primary: raw || 'Sin número',
+    hint: raw ? 'Número no fiable del OCR' : undefined,
+  };
+}
+
+function invoiceMatchesCode(inv: PurchaseInvoice, code: string): boolean {
+  const needle = normalizeInvoiceCode(code);
+  if (!needle) return false;
+  return (
+    normalizeInvoiceCode(inv.invoiceNumber) === needle ||
+    normalizeInvoiceCode(inv.ocrData?.documentNumber || '') === needle
+  );
+}
+
+/** yyyy-mm-dd para <input type="date"> (ISO, DD/MM/YYYY o timestamp). */
+function invoiceDateToInputValue(raw: string | null | undefined): string {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const es = parseDateEsToIso(s.replace(/-/g, '/'));
+  if (es) return es;
+  const dt = new Date(s);
+  if (!Number.isNaN(dt.getTime())) {
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, '0');
+    const d = String(dt.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return '';
+}
+
+function invoiceDateLabel(
+  inv: Pick<PurchaseInvoice, 'date' | 'ocrData' | 'sourceEmailDate'>,
+): string {
+  const iso = invoiceDateToInputValue(inv.date || inv.ocrData?.date || inv.sourceEmailDate);
+  return iso ? formatDateEs(iso) : '—';
+}
+
 function isAlbaranInvoice(inv: PurchaseInvoice): boolean {
   return (
     inv.documentKind === 'albaran' ||
@@ -2764,8 +2976,11 @@ function isAlbaranInvoice(inv: PurchaseInvoice): boolean {
   );
 }
 
-/** Líneas del documento o, si vienen vacías (OCR/correo), las del OCR. */
-function invoiceFormLinesFromDoc(inv: PurchaseInvoice): { itemName: string; quantity: string; unitPrice: string }[] {
+/** Líneas del documento, OCR o —si faltan— del pedido vinculado. */
+function invoiceFormLinesFromDoc(
+  inv: PurchaseInvoice,
+  linkedOrder?: PurchaseOrder | null,
+): { itemName: string; quantity: string; unitPrice: string }[] {
   const raw =
     Array.isArray(inv.lines) && inv.lines.length > 0
       ? inv.lines
@@ -2781,8 +2996,16 @@ function invoiceFormLinesFromDoc(inv: PurchaseInvoice): { itemName: string; quan
           '',
       ).trim();
       const quantity = Number((l as { quantity?: number | null }).quantity ?? 0);
-      const unitPrice = Number((l as { unitPrice?: number | null }).unitPrice ?? 0);
-      const total = Number((l as { total?: number | null }).total ?? 0);
+      const unitPrice = Number(
+        (l as { unitPrice?: number | null }).unitPrice ??
+          (l as { unitCost?: number | null }).unitCost ??
+          0,
+      );
+      const total = Number(
+        (l as { total?: number | null }).total ??
+          (l as { lineTotal?: number | null }).lineTotal ??
+          0,
+      );
       const qty = quantity > 0 ? quantity : total > 0 && unitPrice > 0 ? 1 : quantity || 1;
       const price =
         unitPrice > 0
@@ -2799,7 +3022,24 @@ function invoiceFormLinesFromDoc(inv: PurchaseInvoice): { itemName: string; quan
       };
     })
     .filter((l) => l.itemName || Number(l.unitPrice) > 0 || Number(l.quantity) > 0);
-  return mapped.length > 0 ? mapped : [{ itemName: '', quantity: '', unitPrice: '' }];
+  if (mapped.length > 0) return mapped;
+  const orderItems = Array.isArray(linkedOrder?.items) ? linkedOrder!.items : [];
+  if (orderItems.length > 0) {
+    return orderItems.map((item) => ({
+      itemName: String(item.name || '').trim(),
+      quantity: String(item.quantity || ''),
+      unitPrice: item.unitCost ? String(Math.round(item.unitCost * 100) / 100) : '',
+    }));
+  }
+  return [{ itemName: '', quantity: '', unitPrice: '' }];
+}
+
+function invoiceStoredTotalsFromDoc(inv: PurchaseInvoice) {
+  return {
+    subtotal: Number(inv.subtotal || inv.ocrData?.subtotal || 0),
+    taxAmount: Number(inv.taxAmount || inv.ocrData?.taxAmount || 0),
+    total: Number(inv.total || inv.ocrData?.total || 0),
+  };
 }
 
 function CreateInvoiceModal({
@@ -2809,8 +3049,12 @@ function CreateInvoiceModal({
   suppliers,
   invoices = [],
   editItem,
+  purchaseOrders = [],
   onReloadInvoices,
   onSelectExisting,
+  onGoToPurchaseOrders,
+  onReplenishPending,
+  replenishing = false,
 }: CreateInvoiceModalProps) {
   const [submitting, setSubmitting] = useState(false);
   const [loadingAlbaran, setLoadingAlbaran] = useState(false);
@@ -2836,21 +3080,21 @@ function CreateInvoiceModal({
 
   useEffect(() => {
     if (editItem) {
+      const linked = editItem.linkedPurchaseOrderId
+        ? purchaseOrders.find((o) => o._id === editItem.linkedPurchaseOrderId) || null
+        : null;
+      const ocrDue = (editItem.ocrData as { dueDate?: string | null } | undefined)?.dueDate;
       setForm({
-        albaranNumber: editItem.invoiceNumber || '',
-        supplierName: editItem.supplierName || '',
+        albaranNumber: invoiceDisplayNumber(editItem),
+        supplierName: editItem.supplierName || editItem.ocrData?.emitter || '',
         supplierId: editItem.supplierId || '',
-        date: editItem.date ? editItem.date.slice(0, 10) : '',
-        dueDate: editItem.dueDate ? editItem.dueDate.slice(0, 10) : '',
+        date: invoiceDateToInputValue(editItem.date || editItem.ocrData?.date || editItem.sourceEmailDate),
+        dueDate: invoiceDateToInputValue(editItem.dueDate || ocrDue),
         taxRate: String(editItem.taxRate ?? editItem.ocrData?.taxRate ?? 21),
-        notes: editItem.notes || '',
+        notes: editItem.notes || editItem.ocrData?.notes || '',
       });
-      setLines(invoiceFormLinesFromDoc(editItem));
-      setStoredTotals({
-        subtotal: Number(editItem.subtotal || editItem.ocrData?.subtotal || 0),
-        taxAmount: Number(editItem.taxAmount || editItem.ocrData?.taxAmount || 0),
-        total: Number(editItem.total || editItem.ocrData?.total || 0),
-      });
+      setLines(invoiceFormLinesFromDoc(editItem, linked));
+      setStoredTotals(invoiceStoredTotalsFromDoc(editItem));
       setLinkedAlbaranId(editItem._id || '');
     } else {
       setForm({
@@ -2866,27 +3110,27 @@ function CreateInvoiceModal({
       setStoredTotals(null);
       setLinkedAlbaranId('');
     }
-  }, [editItem, isOpen]);
+  }, [editItem, isOpen, purchaseOrders]);
   useModalClose(isOpen, onClose);
 
   if (!isOpen) return null;
 
   const applyAlbaranToForm = (inv: PurchaseInvoice) => {
+    const linked = inv.linkedPurchaseOrderId
+      ? purchaseOrders.find((o) => o._id === inv.linkedPurchaseOrderId) || null
+      : null;
+    const ocrDue = (inv.ocrData as { dueDate?: string | null } | undefined)?.dueDate;
     setForm({
-      albaranNumber: inv.invoiceNumber || '',
-      supplierName: inv.supplierName || '',
+      albaranNumber: invoiceDisplayNumber(inv),
+      supplierName: inv.supplierName || inv.ocrData?.emitter || '',
       supplierId: inv.supplierId || '',
-      date: inv.date ? inv.date.slice(0, 10) : '',
-      dueDate: inv.dueDate ? inv.dueDate.slice(0, 10) : '',
+      date: invoiceDateToInputValue(inv.date || inv.ocrData?.date || inv.sourceEmailDate),
+      dueDate: invoiceDateToInputValue(inv.dueDate || ocrDue),
       taxRate: String(inv.taxRate ?? inv.ocrData?.taxRate ?? 21),
-      notes: inv.notes || '',
+      notes: inv.notes || inv.ocrData?.notes || '',
     });
-    setLines(invoiceFormLinesFromDoc(inv));
-    setStoredTotals({
-      subtotal: Number(inv.subtotal || inv.ocrData?.subtotal || 0),
-      taxAmount: Number(inv.taxAmount || inv.ocrData?.taxAmount || 0),
-      total: Number(inv.total || inv.ocrData?.total || 0),
-    });
+    setLines(invoiceFormLinesFromDoc(inv, linked));
+    setStoredTotals(invoiceStoredTotalsFromDoc(inv));
     setLinkedAlbaranId(inv._id);
   };
 
@@ -2900,17 +3144,23 @@ function CreateInvoiceModal({
     try {
       const fresh = onReloadInvoices ? await onReloadInvoices() : undefined;
       const pool = Array.isArray(fresh) && fresh.length ? fresh : invoices;
-      const needle = normalizeInvoiceCode(code);
+      if (editItem && invoiceMatchesCode(editItem, code)) {
+        const self = pool.find((inv) => inv._id === editItem._id) || editItem;
+        applyAlbaranToForm(self);
+        onSelectExisting?.(self);
+        toast.success('Datos del documento actualizados');
+        return;
+      }
       const match =
         pool.find(
           (inv) =>
             isAlbaranInvoice(inv) &&
-            normalizeInvoiceCode(inv.invoiceNumber) === needle &&
+            invoiceMatchesCode(inv, code) &&
             (!editItem || inv._id !== editItem._id),
         ) ||
         pool.find(
           (inv) =>
-            normalizeInvoiceCode(inv.invoiceNumber) === needle &&
+            invoiceMatchesCode(inv, code) &&
             (!editItem || inv._id !== editItem._id),
         );
       if (!match) {
@@ -2973,6 +3223,17 @@ function CreateInvoiceModal({
   const supplierInList = Boolean(
     form.supplierId && suppliers.some((s) => s._id === form.supplierId),
   );
+  const linkedOrder = editItem?.linkedPurchaseOrderId
+    ? purchaseOrders.find((o) => o._id === editItem.linkedPurchaseOrderId) || null
+    : null;
+  const albaranPendingLines =
+    editItem && isAlbaranInvoice(editItem)
+      ? resolveAlbaranPendingLines(editItem, linkedOrder)
+      : [];
+  const albaranIncomplete =
+    editItem && isAlbaranInvoice(editItem)
+      ? isAlbaranInvoiceIncomplete(editItem, linkedOrder)
+      : false;
 
   const handleSelectSupplier = (supplierId: string) => {
     const supplier = suppliers.find((s) => s._id === supplierId);
@@ -3046,14 +3307,75 @@ function CreateInvoiceModal({
         </div>
 
         <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-5">
+          {albaranIncomplete && albaranPendingLines.length > 0 ? (
+            <div className="rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50/80 dark:bg-amber-950/30 p-4 space-y-3">
+              <div>
+                <p className="text-sm font-bold text-amber-900 dark:text-amber-200">Pedido incompleto</p>
+                <p className="text-xs text-amber-800 dark:text-amber-300 mt-1">
+                  No han llegado (o falta cantidad) de estos productos del pedido
+                  {editItem?.linkedPurchaseOrderNumber
+                    ? ` ${editItem.linkedPurchaseOrderNumber}`
+                    : ''}
+                  :
+                </p>
+              </div>
+              <ul className="space-y-1 text-sm text-amber-900 dark:text-amber-100">
+                {albaranPendingLines.map((line) => (
+                  <li key={`${line.catalogItemId}-${line.name}`} className="flex justify-between gap-3">
+                    <span className="truncate">{line.name}</span>
+                    <span className="shrink-0 tabular-nums font-semibold">
+                      pendiente {formatQtyEs(line.pendingQty)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {onReplenishPending ? (
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void onReplenishPending()}
+                    disabled={replenishing}
+                    className={`${VERTIAL_BTN_PRIMARY} !min-h-0 w-full sm:w-auto inline-flex items-center gap-2`}
+                  >
+                    {replenishing ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                    Generar pedido automático
+                  </button>
+                  {onGoToPurchaseOrders ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onGoToPurchaseOrders();
+                      }}
+                      className={`${VERTIAL_BTN_SECONDARY} !min-h-0 w-full sm:w-auto`}
+                    >
+                      Ver pedidos
+                    </button>
+                  ) : null}
+                </div>
+              ) : onGoToPurchaseOrders ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onGoToPurchaseOrders();
+                  }}
+                  className={`${VERTIAL_BTN_PRIMARY} !min-h-0 w-full sm:w-auto`}
+                >
+                  Ir a pedidos para reponer
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className="rounded-xl border-2 border-gray-900/10 dark:border-gray-100/10 bg-gray-50 dark:bg-gray-900/40 p-3 sm:p-4">
             <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-              Nº Albarán *
+              {editItem ? 'Nº documento *' : 'Nº Albarán *'}
             </label>
             <div className="flex flex-col sm:flex-row gap-2">
               <input
                 className="w-full flex-1 px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-mono"
-                placeholder="Ej. ALB-2026-014"
+                placeholder={editItem ? 'Ej. FAC-2026-014' : 'Ej. ALB-2026-014'}
                 value={form.albaranNumber}
                 onChange={(e) => setForm((f) => ({ ...f, albaranNumber: e.target.value }))}
                 onKeyDown={(e) => {
@@ -3071,11 +3393,13 @@ function CreateInvoiceModal({
                 className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gray-900 hover:bg-black text-white text-sm font-semibold disabled:opacity-50 disabled:cursor-wait shrink-0"
               >
                 {loadingAlbaran ? <Loader2 className="w-4 h-4 animate-spin" /> : <PackageCheck className="w-4 h-4" />}
-                Cargar albarán
+                {editItem ? 'Recargar datos' : 'Cargar albarán'}
               </button>
             </div>
             <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-              Al cargar, se refrescan proveedor, fechas, IVA, líneas y totales del albarán.
+              {editItem
+                ? 'Vuelve a leer proveedor, fechas, IVA, líneas y totales del documento guardado.'
+                : 'Al cargar, se refrescan proveedor, fechas, IVA, líneas y totales del albarán.'}
             </p>
           </div>
 
@@ -3249,6 +3573,419 @@ function CreateInvoiceModal({
   );
 }
 
+// ─── Purchase invoice view (solo lectura) ─────────────────────────────────────
+
+interface PurchaseInvoiceViewModalProps {
+  invoice: PurchaseInvoice | null;
+  isOpen: boolean;
+  onClose: () => void;
+  purchaseOrders?: PurchaseOrder[];
+  catalogItems?: CatalogItem[];
+  financeLinked?: boolean;
+  canDelete?: boolean;
+  onTogglePaid: (invoice: PurchaseInvoice) => void | Promise<void>;
+  onLoadWarehouse?: (invoice: PurchaseInvoice, options?: { force?: boolean }) => void | Promise<void>;
+  onLinkFinance?: (invoice: PurchaseInvoice) => void | Promise<void>;
+  onDelete?: (invoice: PurchaseInvoice) => void | Promise<void>;
+  onEditManual?: (invoice: PurchaseInvoice) => void;
+}
+
+function invoiceDetailLines(inv: PurchaseInvoice) {
+  const raw =
+    Array.isArray(inv.lines) && inv.lines.length > 0
+      ? inv.lines
+      : Array.isArray(inv.ocrData?.lines)
+        ? inv.ocrData!.lines!
+        : [];
+  return raw
+    .map((l) => {
+      const name = String(
+        (l as { itemName?: string }).itemName ||
+          (l as { catalogItemName?: string }).catalogItemName ||
+          (l as { description?: string }).description ||
+          '',
+      ).trim();
+      const qty = Number((l as { quantity?: number }).quantity ?? 0);
+      const unit = Number(
+        (l as { unitPrice?: number }).unitPrice ??
+          (l as { unitCost?: number }).unitCost ??
+          0,
+      );
+      const total = Number((l as { total?: number }).total ?? 0) || qty * unit;
+      const catalogItemId = String((l as { catalogItemId?: string }).catalogItemId || '').trim();
+      return { name: name || '—', qty, unit, total, catalogItemId };
+    })
+    .filter((l) => l.name !== '—' || l.total > 0 || l.qty > 0);
+}
+
+function resolveInvoicePriceVariance(
+  invoice: PurchaseInvoice,
+  catalogItems: CatalogItem[],
+  purchaseOrders: PurchaseOrder[],
+): SupplierPriceVariance | null {
+  const linkedOrder = invoice.linkedPurchaseOrderId
+    ? purchaseOrders.find((o) => o._id === invoice.linkedPurchaseOrderId)
+    : null;
+  if (catalogItems.length > 0 || linkedOrder) {
+    const detected = detectSupplierPriceVariance({
+      lines: invoice.lines?.length ? invoice.lines : invoice.ocrData?.lines || [],
+      catalogItems,
+      orderItems: linkedOrder?.items || [],
+    });
+    if (detected.hasVariance) return detected;
+  }
+  if (invoice.priceVariance?.hasVariance && Array.isArray(invoice.priceVariance.lines)) {
+    return invoice.priceVariance;
+  }
+  return null;
+}
+
+function PurchaseInvoiceViewModal({
+  invoice,
+  isOpen,
+  onClose,
+  purchaseOrders = [],
+  catalogItems = [],
+  financeLinked = false,
+  canDelete = false,
+  onTogglePaid,
+  onLoadWarehouse,
+  onLinkFinance,
+  onDelete,
+  onEditManual,
+}: PurchaseInvoiceViewModalProps) {
+  useModalClose(isOpen, onClose);
+  if (!isOpen || !invoice) return null;
+
+  const displayStatus = invoiceDisplayStatus(invoice);
+  const statusCfg = INVOICE_STATUS_CONFIG[displayStatus] || INVOICE_STATUS_CONFIG.pending;
+  const num = invoiceTableNumber(invoice);
+  const lines = invoiceDetailLines(invoice);
+  const linkedOrder = invoice.linkedPurchaseOrderId
+    ? purchaseOrders.find((o) => o._id === invoice.linkedPurchaseOrderId) || null
+    : null;
+  const priceVariance = resolveInvoicePriceVariance(invoice, catalogItems, purchaseOrders);
+  const varianceByKey = new Map<string, NonNullable<SupplierPriceVariance['lines']>[number]>();
+  for (const vl of priceVariance?.lines || []) {
+    const id = String(vl.catalogItemId || '').trim();
+    if (id) varianceByKey.set(id, vl);
+    const nameKey = String(vl.name || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '')
+      .trim();
+    if (nameKey) varianceByKey.set(`n:${nameKey}`, vl);
+  }
+  const totals = invoiceStoredTotalsFromDoc(invoice);
+  const isManual = invoice.entryMethod === 'manual' && invoice.source !== 'email';
+  const attachmentName = invoice.attachments?.[0]?.filename;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/40 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[95vh] sm:max-h-[90vh] overflow-y-auto flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 font-mono truncate">
+                {num.primary}
+              </h2>
+              <span className={`px-2 py-0.5 text-xs font-semibold rounded-full border shrink-0 ${statusCfg.badgeClass}`}>
+                {statusCfg.label}
+              </span>
+            </div>
+            {num.hint ? (
+              <p className="text-xs text-amber-700 dark:text-amber-300 mt-1 flex items-center gap-1">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                {num.hint}
+              </p>
+            ) : null}
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+              Factura de compra · {invoice.supplierName || 'Proveedor sin nombre'}
+            </p>
+            {attachmentName ? (
+              <p className="text-xs text-gray-400 mt-1 truncate flex items-center gap-1">
+                <FileText className="w-3.5 h-3.5 shrink-0" />
+                {attachmentName}
+              </p>
+            ) : null}
+            {invoice.ocrStockReceivedAt ? (
+              <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1 flex items-center gap-1">
+                <PackageCheck className="w-3.5 h-3.5 shrink-0" />
+                Stock cargado en almacén
+              </p>
+            ) : null}
+            {priceVariance?.hasVariance ? (
+              <p className="text-xs text-rose-700 dark:text-rose-300 mt-1 flex items-center gap-1 font-semibold">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                {priceVariance.lines.length} precio
+                {priceVariance.lines.length === 1 ? '' : 's'} distinto
+                {priceVariance.lines.length === 1 ? '' : 's'} al coste esperado
+              </p>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors shrink-0"
+          >
+            <X className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+          </button>
+        </div>
+
+        <div className="p-4 sm:p-6 space-y-5 flex-1">
+          {priceVariance?.hasVariance ? (
+            <div className="rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/80 dark:bg-rose-950/30 px-3 py-2.5 text-sm text-rose-900 dark:text-rose-100">
+              <p className="font-semibold flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                Precio distinto al coste del proveedor
+              </p>
+              <p className="text-xs text-rose-800/90 dark:text-rose-200/90 mt-1">
+                El documento llega con precio unitario diferente al que tienes guardado en Proveedores
+                (coste esperado). Revisa las líneas marcadas.
+              </p>
+            </div>
+          ) : null}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+            <div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Fecha</p>
+              <p className="font-semibold text-gray-900 dark:text-gray-100">{invoiceDateLabel(invoice)}</p>
+            </div>
+            {invoice.dueDate ? (
+              <div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Vencimiento</p>
+                <p className="font-semibold text-gray-900 dark:text-gray-100">
+                  {formatDateEs(invoiceDateToInputValue(invoice.dueDate) || invoice.dueDate)}
+                </p>
+              </div>
+            ) : null}
+            <div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">IVA</p>
+              <p className="font-semibold text-gray-900 dark:text-gray-100">{invoice.taxRate ?? 21}%</p>
+            </div>
+            {linkedOrder ? (
+              <div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Pedido</p>
+                <p className="font-semibold text-gray-900 dark:text-gray-100 font-mono text-xs">
+                  {linkedOrder.orderNumber || invoice.linkedPurchaseOrderNumber || '—'}
+                </p>
+              </div>
+            ) : null}
+            {invoice.supplierCif || invoice.ocrData?.emitterCIF ? (
+              <div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">CIF proveedor</p>
+                <p className="font-semibold text-gray-900 dark:text-gray-100 font-mono text-xs">
+                  {invoice.supplierCif || invoice.ocrData?.emitterCIF}
+                </p>
+              </div>
+            ) : null}
+            {invoice.ocrData?.bankAccount ? (
+              <div className="col-span-2">
+                <p className="text-xs text-gray-500 dark:text-gray-400">IBAN</p>
+                <p className="font-semibold text-gray-900 dark:text-gray-100 font-mono text-xs break-all">
+                  {invoice.ocrData.bankAccount}
+                </p>
+              </div>
+            ) : null}
+            {invoice.ocrData?.paymentTerms ? (
+              <div className="col-span-2">
+                <p className="text-xs text-gray-500 dark:text-gray-400">Pago</p>
+                <p className="font-semibold text-gray-900 dark:text-gray-100 text-xs">
+                  {invoice.ocrData.paymentTerms}
+                </p>
+              </div>
+            ) : null}
+          </div>
+
+          <div>
+            <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Líneas</p>
+            {lines.length > 0 ? (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 dark:bg-gray-900/50 text-xs text-gray-500 dark:text-gray-400">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-semibold">Artículo</th>
+                      <th className="text-right px-3 py-2 font-semibold w-16">Cant.</th>
+                      <th className="text-right px-3 py-2 font-semibold w-28">Precio</th>
+                      <th className="text-right px-3 py-2 font-semibold w-24">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                    {lines.map((line, idx) => {
+                      const nameKey = String(line.name || '')
+                        .toLowerCase()
+                        .normalize('NFD')
+                        .replace(/\p{M}/gu, '')
+                        .trim();
+                      const variance =
+                        (line.catalogItemId && varianceByKey.get(line.catalogItemId)) ||
+                        (nameKey ? varianceByKey.get(`n:${nameKey}`) : undefined);
+                      return (
+                        <tr
+                          key={idx}
+                          className={
+                            variance
+                              ? 'bg-rose-50/70 dark:bg-rose-950/25'
+                              : undefined
+                          }
+                        >
+                          <td className="px-3 py-2 text-gray-900 dark:text-gray-100">
+                            <span>{line.name}</span>
+                            {variance ? (
+                              <span className="ml-1.5 inline-flex px-1.5 py-0.5 text-[10px] font-semibold rounded-md border border-rose-200 dark:border-rose-800 bg-rose-100 dark:bg-rose-950/50 text-rose-800 dark:text-rose-200">
+                                Precio distinto
+                              </span>
+                            ) : null}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-300">
+                            {line.qty || '—'}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums">
+                            {line.unit ? (
+                              <div
+                                className={
+                                  variance
+                                    ? 'font-semibold text-rose-800 dark:text-rose-200'
+                                    : 'text-gray-700 dark:text-gray-300'
+                                }
+                              >
+                                {formatMoneyEs(line.unit)}
+                              </div>
+                            ) : (
+                              <span className="text-gray-700 dark:text-gray-300">—</span>
+                            )}
+                            {variance ? (
+                              <div className="text-[10px] text-rose-700/90 dark:text-rose-300/90 mt-0.5">
+                                esperado {formatMoneyEs(variance.expectedUnitCost)}
+                              </div>
+                            ) : null}
+                          </td>
+                          <td
+                            className={`px-3 py-2 text-right tabular-nums font-semibold ${
+                              variance
+                                ? 'text-rose-900 dark:text-rose-100'
+                                : 'text-gray-900 dark:text-gray-100'
+                            }`}
+                          >
+                            {formatMoneyEs(line.total)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500 dark:text-gray-400 rounded-xl border border-dashed border-gray-200 dark:border-gray-700 px-4 py-6 text-center">
+                Sin líneas legibles en el documento
+              </p>
+            )}
+          </div>
+
+          <div className="rounded-xl bg-gray-50 dark:bg-gray-900/40 p-4 text-sm space-y-1">
+            <div className="flex justify-between text-gray-600 dark:text-gray-400">
+              <span>Base imponible</span>
+              <span className="tabular-nums">{formatMoneyEs(totals.subtotal)}</span>
+            </div>
+            <div className="flex justify-between text-gray-600 dark:text-gray-400">
+              <span>IVA</span>
+              <span className="tabular-nums">{formatMoneyEs(totals.taxAmount)}</span>
+            </div>
+            <div className="flex justify-between font-bold text-gray-900 dark:text-gray-100 pt-2 border-t border-gray-200 dark:border-gray-700">
+              <span>Total</span>
+              <span className="tabular-nums">{formatMoneyEs(totals.total)}</span>
+            </div>
+          </div>
+
+          {invoice.notes ? (
+            <div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Notas</p>
+              <p className="text-sm text-gray-700 dark:text-gray-300">{invoice.notes}</p>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="sticky bottom-0 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 sm:p-6 flex flex-wrap gap-2 rounded-b-2xl">
+          {invoice.status !== 'paid' ? (
+            <button
+              type="button"
+              onClick={() => void onTogglePaid(invoice)}
+              className={`${VERTIAL_BTN_PRIMARY} !min-h-0 inline-flex items-center gap-2`}
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              Marcar como pagada
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void onTogglePaid(invoice)}
+              className={`${VERTIAL_BTN_SECONDARY} !min-h-0 inline-flex items-center gap-2`}
+            >
+              <Clock className="w-4 h-4" />
+              Marcar como pendiente
+            </button>
+          )}
+          {onLoadWarehouse ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (
+                  invoice.ocrStockReceivedAt &&
+                  !window.confirm(
+                    '¿Forzar carga al almacén? Úsalo si el stock no subió. Si ya entró, se puede duplicar.',
+                  )
+                ) {
+                  return;
+                }
+                void onLoadWarehouse(invoice, { force: Boolean(invoice.ocrStockReceivedAt) });
+              }}
+              className={`${VERTIAL_BTN_SECONDARY} !min-h-0 inline-flex items-center gap-2`}
+            >
+              <PackageCheck className="w-4 h-4 text-emerald-600" />
+              {invoice.ocrStockReceivedAt ? 'Forzar carga al almacén' : 'Cargar al almacén'}
+            </button>
+          ) : null}
+          {!financeLinked && onLinkFinance ? (
+            <button
+              type="button"
+              onClick={() => void onLinkFinance(invoice)}
+              className={`${VERTIAL_BTN_SECONDARY} !min-h-0 inline-flex items-center gap-2`}
+            >
+              <Wallet className="w-4 h-4 text-violet-600" />
+              Registrar en finanzas
+            </button>
+          ) : null}
+          {isManual && onEditManual ? (
+            <button
+              type="button"
+              onClick={() => onEditManual(invoice)}
+              className={`${VERTIAL_BTN_SECONDARY} !min-h-0 inline-flex items-center gap-2`}
+            >
+              <Edit3 className="w-4 h-4" />
+              Corregir datos
+            </button>
+          ) : null}
+          {canDelete && onDelete ? (
+            <button
+              type="button"
+              onClick={() => void onDelete(invoice)}
+              className="ml-auto px-4 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl transition-colors inline-flex items-center gap-2"
+            >
+              <Trash2 className="w-4 h-4" />
+              Eliminar
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Stock Adjustment Modal ───────────────────────────────────────────────────
 
 interface StockAdjustModalProps {
@@ -3325,54 +4062,22 @@ function StockAdjustModal({ isOpen, onClose, item, onAdjust }: StockAdjustModalP
   );
 }
 
-// ─── Loading state (progresivo por pasos) ─────────────────────────────────────
+// ─── Loading state ────────────────────────────────────────────────────────────
 
-const CATALOG_LOAD_STEPS = [
-  'Sesión',
-  'Datos',
-  'Listo',
-] as const;
-
-type CatalogLoadPhase = 'session' | 'catalog' | 'suppliers' | 'invoices' | 'pdv';
+type CatalogLoadPhase = 'session' | 'catalog' | 'suppliers' | 'pdv';
 
 function CatalogTabLoadingState({ phase }: { phase: CatalogLoadPhase }) {
-  const step = phase === 'session' || phase === 'pdv' ? 0 : 1;
-  const kind =
-    phase === 'suppliers' ? 'suppliers' : phase === 'catalog' ? 'catalog' : 'generic';
   const message =
     phase === 'session'
       ? 'Preparando tu espacio de trabajo…'
       : phase === 'pdv'
         ? 'Comprobando tienda activa…'
-        : phase === 'invoices'
-          ? 'Cargando facturas de compra…'
-          : undefined;
+        : phase === 'suppliers'
+          ? 'Cargando proveedores…'
+          : 'Cargando carta…';
 
-  return (
-    <div className="space-y-2">
-      <CatalogCoreLoadingState kind={kind} message={message} />
-      <div className="flex items-center justify-center gap-2 pb-6">
-        {CATALOG_LOAD_STEPS.map((label, idx) => (
-          <span
-            key={label}
-            className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors ${
-              idx < step
-                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
-                : idx === step
-                  ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900'
-                  : 'bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-500'
-            }`}
-          >
-            {label}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
+  return <CatalogCoreLoadingState message={message} />;
 }
-
-/** Inventario carga solo (module=stock). Pedidos/consumos sí necesitan catálogo padre. */
-const TABS_NEED_CATALOG = new Set(['catalog', 'staff-consumption', 'purchase-orders']);
 
 /** Orden de secciones en la pestaña Catálogo (delivery / TPV). */
 const CATALOG_SECTION_ORDER = [
@@ -3472,6 +4177,21 @@ export function CatalogPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const CATALOG_TABS = ['catalog', 'ingredientes', 'escandallo', 'stock', 'suppliers', 'purchase-orders', 'albaranes', 'invoices', 'staff-consumption'] as const;
+  const COMPRAS_TAB_IDS = new Set(['suppliers', 'purchase-orders', 'albaranes', 'invoices']);
+
+  type CatalogLoadModules = { carta?: boolean; stock?: boolean };
+
+  const catalogModulesForTab = useCallback(
+    (tab: string, createSupplierOpen: boolean): CatalogLoadModules => {
+      if (tab === 'stock') return { carta: false, stock: true };
+      if (tab === 'catalog' || tab === 'escandallo' || tab === 'staff-consumption') {
+        return { carta: true, stock: false };
+      }
+      if (tab === 'suppliers' && createSupplierOpen) return { carta: false, stock: true };
+      return { carta: false, stock: false };
+    },
+    [],
+  );
   const { user } = useAuth();
   const { currentBusiness, businessesFetchSettled, businesses } = useBusiness();
   const activeStore = useActiveStoreScope();
@@ -3532,6 +4252,25 @@ export function CatalogPage() {
     [catalogMenuItemsRaw, businessId],
   );
 
+  const escandalloSeedItems = useMemo(
+    () =>
+      dedupeCatalogItemsForDisplay(
+        catalogMenuItemsRaw.filter(isCatalogCostingProduct),
+        businessId,
+      ),
+    [catalogMenuItemsRaw, businessId],
+  );
+
+  const escandalloSeedBrands = useMemo(
+    () =>
+      sortBrandsForDisplay(commercialLineBrands(brands)).map((b) => ({
+        _id: b._id,
+        deliveryLineKind: b.deliveryLineKind,
+      })),
+    [brands],
+  );
+  const inventoryCommercialBrands = useMemo(() => commercialLineBrands(brands), [brands]);
+
   /** Catálogo de carta para armar menús/combos (sin ingredientes de almacén). */
   const catalogForComboEditor = useMemo(
     () =>
@@ -3543,20 +4282,18 @@ export function CatalogPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [invoices, setInvoices] = useState<PurchaseInvoice[]>([]);
   /** Solo facturas/albaranes de la empresa activa (no mezclar otras verticales/empresas). */
-  const scopedInvoices = useMemo(() => {
-    const bid = normalizeBusinessScopeId(businessId);
-    if (!bid) return invoices;
-    return invoices.filter((inv) => {
-      const invBid = normalizeBusinessScopeId(
-        String(inv.businessId || (inv as { business_id?: string }).business_id || ''),
-      );
-      // Legacy sin empresa: solo si la cuenta tiene una sola empresa.
-      if (!invBid) return accountBusinessCount <= 1;
-      return invBid === bid;
-    });
-  }, [invoices, businessId, accountBusinessCount]);
+  const scopedInvoices = useMemo(
+    () => filterPurchaseDocsByBusinessScope(invoices, businessId, accountBusinessCount),
+    [invoices, businessId, accountBusinessCount],
+  );
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  /** Solo pedidos de compra de la empresa activa. */
+  const scopedPurchaseOrders = useMemo(
+    () => filterPurchaseDocsByBusinessScope(purchaseOrders, businessId, accountBusinessCount),
+    [purchaseOrders, businessId, accountBusinessCount],
+  );
   const [purchaseOrdersLoading, setPurchaseOrdersLoading] = useState(false);
+  const [replenishingOrder, setReplenishingOrder] = useState(false);
   const [albaranCorroborate, setAlbaranCorroborate] = useState<{
     order: PurchaseOrder;
     invoice?: PurchaseInvoice | null;
@@ -3565,27 +4302,70 @@ export function CatalogPage() {
   const [albaranOcrBusy, setAlbaranOcrBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [suppliersLoading, setSuppliersLoading] = useState(false);
-  const [invoicesLoading, setInvoicesLoading] = useState(false);
+  const [invoicesHydrating, setInvoicesHydrating] = useState(false);
   const [syncingEmailInvoices, setSyncingEmailInvoices] = useState(false);
-  /** Correo de facturas conectado en algún PDV → auto-lectura en esta pestaña. */
-  const [invoiceEmailConnected, setInvoiceEmailConnected] = useState(false);
-  const emailAutoSyncBusyRef = useRef(false);
+  const [invoiceEmailPdvs, setInvoiceEmailPdvs] = useState<SupplierInvoicePdvEmailStatus[]>([]);
+  const [invoiceEmailLegacyConnected, setInvoiceEmailLegacyConnected] = useState(false);
   const [invoiceFinanceLinks, setInvoiceFinanceLinks] = useState<Set<string>>(new Set());
   const suppliersFetchedRef = useRef(false);
   const invoicesFetchedRef = useRef(false);
   const suppliersLoadStartedRef = useRef(false);
   const invoicesLoadStartedRef = useRef(false);
+  const purchaseOrdersLoadStartedRef = useRef(false);
+  const purchaseOrdersFetchedRef = useRef(false);
+  const catalogCartaLoadedRef = useRef(false);
+  const catalogStockLoadedRef = useRef(false);
   const catalogLoadedRef = useRef(false);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const activeTab = useMemo(() => {
     const raw = searchParams.get('tab') || 'catalog';
     const tab = raw === 'tpv-templates' ? 'ingredientes' : raw;
-    // Bar/restaurante: ingredientes van dentro de cada producto de Carta (sin pestaña aparte).
+    // Bar/restaurante: sin pestaña Almacén (stock vía Excel en Carta).
+    if (isRestaurantCatalog && tab === 'stock') return 'catalog';
     if (isRestaurantCatalog && tab === 'ingredientes') return 'catalog';
     return (CATALOG_TABS as readonly string[]).includes(tab) ? tab : 'catalog';
   }, [searchParams, isRestaurantCatalog]);
   const setActiveTab = useCallback((tab: string) => setSearchParams({ tab }), [setSearchParams]);
 
+  const reloadInvoiceEmailStatus = useCallback(async () => {
+    if (!dataUserId) {
+      setInvoiceEmailPdvs([]);
+      setInvoiceEmailLegacyConnected(false);
+      return;
+    }
+    try {
+      const { pdvs, legacyAccount } = await listSupplierInvoicePdvEmailConfigs(dataUserId);
+      const bid = normalizeBusinessScopeId(businessId);
+      const scoped = (Array.isArray(pdvs) ? pdvs : []).filter((p) => {
+        if (!bid) return true;
+        const pdvBid = normalizeBusinessScopeId(String(p.businessId || ''));
+        return !pdvBid || pdvBid === bid;
+      });
+      setInvoiceEmailPdvs(scoped);
+      setInvoiceEmailLegacyConnected(Boolean(legacyAccount?.connected || legacyAccount?.config?.enabled));
+    } catch {
+      setInvoiceEmailPdvs([]);
+      setInvoiceEmailLegacyConnected(false);
+    }
+  }, [dataUserId, businessId]);
+
+  const invoiceEmailPdvsForUi = useMemo(() => {
+    const storeById = new Map(activeStore.pointsOfSale.map((p) => [p._id, p]));
+    return invoiceEmailPdvs.map((pdv) => {
+      const store = storeById.get(pdv.pdvId);
+      return {
+        ...pdv,
+        label: store
+          ? pointOfSaleDisplayLabel(store)
+          : pointOfSaleDisplayLabel({ name: pdv.name, code: pdv.code }),
+      };
+    });
+  }, [invoiceEmailPdvs, activeStore.pointsOfSale]);
+
+  const invoiceEmailConnectedCount = useMemo(
+    () => invoiceEmailPdvsForUi.filter((p) => p.connected).length,
+    [invoiceEmailPdvsForUi],
+  );
   const storeLabel = activeStore.displayLabelForActive || 'Tienda activa';
   const activeWorkCenterId = useMemo(() => {
     const pdv = activeStore.pointsOfSale.find((p) => p._id === activeStore.activeSalesPointId);
@@ -3644,10 +4424,35 @@ export function CatalogPage() {
   // Supplier state
   const [showCreateSupplier, setShowCreateSupplier] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+  const [supplierModalHydrating, setSupplierModalHydrating] = useState(false);
+
+  const openSupplierEditor = useCallback(
+    async (supplier: Supplier | null) => {
+      setEditingSupplier(supplier);
+      setShowCreateSupplier(true);
+      if (!supplier?._id || !dataUserId) {
+        setSupplierModalHydrating(false);
+        return;
+      }
+      setSupplierModalHydrating(true);
+      try {
+        const freshSuppliers = await listSuppliersRequest(dataUserId);
+        setSuppliers(freshSuppliers);
+        const fresh = freshSuppliers.find((s) => s._id === supplier._id);
+        if (fresh) setEditingSupplier(fresh);
+      } catch {
+        /* se usa el proveedor de la lista local */
+      } finally {
+        setSupplierModalHydrating(false);
+      }
+    },
+    [dataUserId],
+  );
 
   // Invoice state
   const [showCreateInvoice, setShowCreateInvoice] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<PurchaseInvoice | null>(null);
+  const [viewingInvoice, setViewingInvoice] = useState<PurchaseInvoice | null>(null);
   const [showInvoiceOcr, setShowInvoiceOcr] = useState(false);
   const [showInvoiceOcrStorePicker, setShowInvoiceOcrStorePicker] = useState(false);
   const [invoiceOcrWorkCenter, setInvoiceOcrWorkCenter] = useState<{ id: string; name: string } | null>(null);
@@ -3893,31 +4698,52 @@ export function CatalogPage() {
       });
     }
 
-    const runPostImport = async () => {
-      if (!businessId || totalOk <= 0) return;
+    const runPostImport = async (): Promise<{
+      costing: { updated: number; recipe: number; fixed: number };
+      inventory: { created: number; updated: number };
+    } | null> => {
+      if (!businessId || totalOk <= 0) return null;
       try {
         throwIfAborted(signal);
+        progress('Actualizando marcas y organizadores…', { percent: 82 });
         await syncTpvOrganizersAfterCatalogImport(businessId, items);
         await activateCommercialLinesAfterCatalogImport(businessId, items);
         await loadBrands();
-        if (withIngredients > 0) {
-          await syncStoreIngredientsFromCatalogImport(dataUserId, businessId, items);
-        }
-        const costingTargets = resolveImportedCatalogItemsForCosting(items, savedItems);
-        if (costingTargets.length > 0) {
-          await syncAutoCostingAfterCatalogImport(dataUserId, businessId, costingTargets, {
-            fullCatalog: savedItems,
-          });
-        }
+
+        progress('Sincronizando ingredientes…', { percent: 88 });
+        await syncStoreIngredientsFromCatalogImport(dataUserId, businessId, items);
+
+        progress('Generando escandallos y stock automático…', {
+          percent: 94,
+          detail: 'Recetas, costes y almacén — un momento',
+        });
+        const automation = await syncFullStockAutomationAfterCatalogImport(dataUserId, businessId);
+        return {
+          costing: {
+            updated: automation.costing.updated,
+            recipe: automation.costing.recipe,
+            fixed: automation.costing.fixed,
+          },
+          inventory: {
+            created: automation.inventory.created,
+            updated: automation.inventory.updated,
+          },
+        };
       } catch (err) {
         if (!isImportAbortError(err)) {
-          console.warn('[catalog-import] post-proceso en segundo plano:', err);
+          console.warn('[catalog-import] post-proceso:', err);
+          toast.error(
+            'El Excel se guardó, pero falló el escandallo automático. Abre Escandallo → «Generar escandallos».',
+            { duration: 12000 },
+          );
         }
+        throw err;
       } finally {
         void loadCatalog();
       }
     };
 
+    let postImportSummary: Awaited<ReturnType<typeof runPostImport>> = null;
     if (totalOk > 0) {
       if (!recoveredFromTimeout) {
         const importedWithImage = items.filter((i) => Boolean(i.image)).length;
@@ -3930,10 +4756,27 @@ export function CatalogPage() {
             (withIngredients > 0 ? ` · ${withIngredients} fila(s) con ingredientes en Excel` : ''),
         );
       }
-      void runPostImport();
+      try {
+        postImportSummary = await runPostImport();
+      } catch (err) {
+        if (isImportAbortError(err)) throw err;
+      }
     }
 
-    progress('Importación completada', { percent: 100, detail: `${totalOk} producto(s) procesados` });
+    progress('Importación completada', {
+      percent: 100,
+      detail:
+        postImportSummary && postImportSummary.costing.updated > 0
+          ? `${totalOk} producto(s) · escandallo: ${postImportSummary.costing.recipe} recetas, ${postImportSummary.costing.fixed} costes fijos`
+          : `${totalOk} producto(s) procesados`,
+    });
+
+    if (postImportSummary && postImportSummary.costing.updated > 0) {
+      toast.success(
+        `Escandallo automático: ${postImportSummary.costing.recipe} recetas y ${postImportSummary.costing.fixed} costes fijos listos`,
+        { duration: 9000 },
+      );
+    }
 
     const bulkReport = catalogImportReportFromBulkErrors(
       result.errorDetails,
@@ -4174,31 +5017,47 @@ export function CatalogPage() {
     void loadTpvIngredients();
   }, [pageReady, loadTpvIngredients]);
 
-  const loadCatalog = useCallback(async (): Promise<boolean> => {
+  const loadCatalog = useCallback(async (modules?: CatalogLoadModules): Promise<boolean> => {
     if (!dataUserId || !businessId) return false;
+    const wantCarta = modules?.carta ?? true;
+    const wantStock = modules?.stock ?? true;
+    if (!wantCarta && !wantStock) return true;
+
     const requestUserId = dataUserId;
     const requestBusinessId = businessId;
     const stillSameScope = () =>
       requestUserId === resolveBusinessDataUserId(user, currentBusiness)
       && requestBusinessId === resolveBusinessScopeId(currentBusiness);
     try {
-      // Carta + almacén en paralelo (module filtrado): más rápido que un listado sin filtro.
-      const [carta, stock] = await Promise.all([
-        listCatalogItemsRequest(requestUserId, 'catalog'),
-        listCatalogItemsRequest(requestUserId, 'stock').catch(() => [] as CatalogItem[]),
-      ]);
+      const fetches: Promise<CatalogItem[]>[] = [];
+      if (wantCarta) fetches.push(listCatalogItemsRequest(requestUserId, 'catalog'));
+      if (wantStock) {
+        fetches.push(listCatalogItemsRequest(requestUserId, 'stock').catch(() => [] as CatalogItem[]));
+      }
+      const results = await Promise.all(fetches);
       if (!stillSameScope()) return false;
-      setAllCatalogItems([...carta, ...stock]);
 
-      void listWarehousesRequest(requestUserId)
-        .then((wh) => {
-          if (!stillSameScope()) return;
-          setWarehouses(wh);
-        })
-        .catch(() => {
-          if (!stillSameScope()) return;
-          setWarehouses([]);
-        });
+      let idx = 0;
+      const carta = wantCarta ? results[idx++] : [];
+      const stock = wantStock ? results[idx++] : [];
+      setAllCatalogItems((prev) => mergeCatalogItemsById(prev, [...carta, ...stock]));
+
+      if (wantCarta) catalogCartaLoadedRef.current = true;
+      if (wantStock) catalogStockLoadedRef.current = true;
+      catalogLoadedRef.current =
+        catalogCartaLoadedRef.current && catalogStockLoadedRef.current;
+
+      if (wantStock) {
+        void listWarehousesRequest(requestUserId)
+          .then((wh) => {
+            if (!stillSameScope()) return;
+            setWarehouses(wh);
+          })
+          .catch(() => {
+            if (!stillSameScope()) return;
+            setWarehouses([]);
+          });
+      }
 
       return true;
     } catch {
@@ -4223,21 +5082,23 @@ export function CatalogPage() {
     }
   }, [dataUserId]);
 
-  const loadInvoices = useCallback(async (opts?: { silent?: boolean }) => {
+  const loadInvoices = useCallback(async () => {
     if (!dataUserId) return;
-    const silent = opts?.silent === true;
-    if (!silent) setInvoicesLoading(true);
+    setInvoicesHydrating(true);
     try {
-      const data = await listPurchaseInvoicesRequest(dataUserId);
+      const data = await listPurchaseInvoicesRequest(dataUserId, {
+        businessId: businessId || undefined,
+        accountBusinessCount,
+      });
       setInvoices(data);
       invoicesFetchedRef.current = true;
-    } catch (err) {
+    } catch {
       invoicesLoadStartedRef.current = false;
-      if (!silent) toast.error(err instanceof Error ? err.message : 'Error al cargar facturas');
+      toast.error('Error al cargar facturas');
     } finally {
-      if (!silent) setInvoicesLoading(false);
+      setInvoicesHydrating(false);
     }
-  }, [dataUserId]);
+  }, [dataUserId, businessId, accountBusinessCount]);
 
   const loadInvoiceFinanceLinks = useCallback(async () => {
     if (!dataUserId) return;
@@ -4264,7 +5125,11 @@ export function CatalogPage() {
     try {
       const summary = await pollSupplierInvoicesNow(dataUserId);
       if (!silent) {
-        if (summary.baselined || summary.message) {
+        if ((summary.errors || 0) > 0 && (summary.created || 0) === 0) {
+          toast.warning(
+            'Correo revisado con errores. Comprueba la contraseña de aplicación de cada PDV en Correo facturas.',
+          );
+        } else if (summary.baselined || summary.message) {
           toast.message(
             String(summary.message || 'Punto de partida del correo listo. Envía un PDF nuevo y sincroniza.'),
             { duration: 9000 },
@@ -4282,70 +5147,21 @@ export function CatalogPage() {
         } else {
           toast.message('0 emails nuevos desde que conectaste el correo.');
         }
-      } else if ((summary.created || 0) > 0) {
-        toast.success(`${summary.created} factura(s) nuevas desde el correo`);
-      } else if (summary.message && /No hay correo/i.test(String(summary.message))) {
-        // Auto: no spamear; el badge «Correo activo» ya indica el estado.
       }
-      await loadInvoices({ silent: true });
+      await loadInvoices();
       await loadInvoiceFinanceLinks();
+      await reloadInvoiceEmailStatus();
     } catch (err) {
       if (!silent) toast.error(err instanceof Error ? err.message : 'Error al sincronizar correo');
     } finally {
       setSyncingEmailInvoices(false);
     }
-  }, [dataUserId, loadInvoices, loadInvoiceFinanceLinks]);
+  }, [dataUserId, loadInvoices, loadInvoiceFinanceLinks, reloadInvoiceEmailStatus]);
 
-  // Si hay correo de facturas conectado, mientras estás en Facturas se lee solo cada minuto.
   useEffect(() => {
-    if (activeTab !== 'invoices' || !dataUserId) {
-      setInvoiceEmailConnected(false);
-      return;
-    }
-    let cancelled = false;
-    const refreshConnected = async () => {
-      try {
-        const { pdvs, legacyAccount } = await listSupplierInvoicePdvEmailConfigs(dataUserId);
-        if (cancelled) return;
-        const connected =
-          (Array.isArray(pdvs) && pdvs.some((p) => p.connected || p.enabled))
-          || Boolean(legacyAccount?.connected || legacyAccount?.config?.enabled);
-        setInvoiceEmailConnected(connected);
-        return connected;
-      } catch {
-        if (!cancelled) setInvoiceEmailConnected(false);
-        return false;
-      }
-    };
-
-    const runAuto = async () => {
-      if (cancelled || emailAutoSyncBusyRef.current) return;
-      emailAutoSyncBusyRef.current = true;
-      try {
-        const connected = await refreshConnected();
-        if (cancelled || !connected) return;
-        // Poll puede tardar (IMAP); la lista ya se carga en paralelo.
-        await syncInvoicesFromEmail({ silent: true });
-      } catch {
-        /* silencioso: reintento en el siguiente ciclo */
-      } finally {
-        emailAutoSyncBusyRef.current = false;
-      }
-    };
-
-    // Primero pintar la lista; el correo a los ~1.5s para no competir con el load inicial.
-    const bootId = window.setTimeout(() => {
-      void runAuto();
-    }, 1_500);
-    const id = window.setInterval(() => {
-      void runAuto();
-    }, 60_000);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(bootId);
-      window.clearInterval(id);
-    };
-  }, [activeTab, dataUserId, syncInvoicesFromEmail]);
+    if (!catalogDataReady || !dataUserId) return;
+    void reloadInvoiceEmailStatus();
+  }, [catalogDataReady, dataUserId, reloadInvoiceEmailStatus]);
 
   useEffect(() => {
     if (activeTab === 'invoices' && dataUserId) {
@@ -4355,22 +5171,54 @@ export function CatalogPage() {
 
   useEffect(() => {
     catalogLoadedRef.current = false;
+    catalogCartaLoadedRef.current = false;
+    catalogStockLoadedRef.current = false;
     suppliersFetchedRef.current = false;
     invoicesFetchedRef.current = false;
+    purchaseOrdersFetchedRef.current = false;
     suppliersLoadStartedRef.current = false;
     invoicesLoadStartedRef.current = false;
+    purchaseOrdersLoadStartedRef.current = false;
     setAllCatalogItems([]);
     setSuppliers([]);
     setInvoices([]);
+    setPurchaseOrders([]);
+    setInvoicesHydrating(false);
+    setInvoiceEmailPdvs([]);
+    setInvoiceEmailLegacyConnected(false);
     setInvoiceFinanceLinks(new Set());
     setWarehouses([]);
     setLoading(false);
   }, [businessId, dataUserId]);
 
+  const loadPurchaseOrdersForAlbaran = useCallback(async () => {
+    if (!dataUserId) return;
+    setPurchaseOrdersLoading(true);
+    try {
+      const orders = await listPurchaseOrdersRequest(dataUserId, {
+        businessId: businessId || undefined,
+        accountBusinessCount,
+      });
+      setPurchaseOrders(orders);
+      purchaseOrdersFetchedRef.current = true;
+    } catch (err) {
+      purchaseOrdersLoadStartedRef.current = false;
+      toast.error(err instanceof Error ? err.message : 'Error al cargar pedidos de compra');
+    } finally {
+      setPurchaseOrdersLoading(false);
+    }
+  }, [dataUserId, businessId, accountBusinessCount]);
+
   useEffect(() => {
     if (!catalogDataReady) return;
-    if (!TABS_NEED_CATALOG.has(activeTab)) return;
-    if (catalogLoadedRef.current) return;
+
+    const modules = catalogModulesForTab(activeTab, showCreateSupplier);
+    const needsCarta = modules.carta && !catalogCartaLoadedRef.current;
+    const needsStock = modules.stock && !catalogStockLoadedRef.current;
+    if (!needsCarta && !needsStock) {
+      setLoading(false);
+      return;
+    }
 
     let cancelled = false;
     setLoading(true);
@@ -4378,12 +5226,17 @@ export function CatalogPage() {
       if (cancelled) return;
       setLoading(false);
       toast.error('La carga está tardando mucho. Comprueba la conexión e inténtalo de nuevo.');
-    }, 25_000);
+    }, 35_000);
 
-    void loadCatalog().then((ok) => {
+    void loadCatalog(modules).then((ok) => {
       if (cancelled) return;
       window.clearTimeout(timeoutId);
-      if (ok) catalogLoadedRef.current = true;
+      if (ok) {
+        if (modules.carta) catalogCartaLoadedRef.current = true;
+        if (modules.stock) catalogStockLoadedRef.current = true;
+        catalogLoadedRef.current =
+          catalogCartaLoadedRef.current && catalogStockLoadedRef.current;
+      }
       setLoading(false);
     });
 
@@ -4391,58 +5244,58 @@ export function CatalogPage() {
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [catalogDataReady, activeTab, dataUserId, loadCatalog]);
+  }, [
+    catalogDataReady,
+    dataUserId,
+    activeTab,
+    showCreateSupplier,
+    loadCatalog,
+    catalogModulesForTab,
+  ]);
 
   useEffect(() => {
-    const onStoreChange = () => { void loadCatalog(); };
+    const onStoreChange = () => {
+      void loadCatalog({ carta: true, stock: true });
+    };
     window.addEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStoreChange);
     return () => window.removeEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStoreChange);
   }, [loadCatalog]);
 
-  // Al abrir el modal de proveedor hace falta el almacén para listar productos del organizador.
   useEffect(() => {
-    if (!showCreateSupplier || !catalogDataReady) return;
-    if (catalogLoadedRef.current) return;
-    void loadCatalog().then((ok) => {
-      if (ok) catalogLoadedRef.current = true;
-    });
-  }, [showCreateSupplier, catalogDataReady, loadCatalog]);
+    if (!catalogDataReady || !dataUserId) return;
 
-  useEffect(() => {
-    if (!pageReady || !dataUserId) return;
-    if (activeTab !== 'suppliers' && activeTab !== 'invoices' && activeTab !== 'purchase-orders') return;
-    if (suppliersFetchedRef.current || suppliersLoadStartedRef.current) return;
-    suppliersLoadStartedRef.current = true;
-    void loadSuppliers();
-  }, [pageReady, dataUserId, activeTab, loadSuppliers]);
+    const isComprasTab = COMPRAS_TAB_IDS.has(activeTab);
 
-  useEffect(() => {
-    if (!pageReady || !dataUserId) return;
-    if (activeTab !== 'invoices' && activeTab !== 'albaranes' && !showCreateInvoice) return;
-    if (invoicesFetchedRef.current || invoicesLoadStartedRef.current) return;
-    invoicesLoadStartedRef.current = true;
-    // preload invoices for albarán lookup
-    void loadInvoices();
-  }, [pageReady, dataUserId, activeTab, showCreateInvoice, loadInvoices]);
-
-  const loadPurchaseOrdersForAlbaran = useCallback(async () => {
-    if (!dataUserId) return;
-    setPurchaseOrdersLoading(true);
-    try {
-      const orders = await listPurchaseOrdersRequest(dataUserId);
-      setPurchaseOrders(orders);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Error al cargar pedidos de compra');
-    } finally {
-      setPurchaseOrdersLoading(false);
+    if (!suppliersFetchedRef.current && !suppliersLoadStartedRef.current) {
+      suppliersLoadStartedRef.current = true;
+      void loadSuppliers();
     }
-  }, [dataUserId]);
 
-  useEffect(() => {
-    if (!pageReady || !dataUserId) return;
-    if (activeTab !== 'albaranes' && activeTab !== 'purchase-orders') return;
-    void loadPurchaseOrdersForAlbaran();
-  }, [pageReady, dataUserId, activeTab, loadPurchaseOrdersForAlbaran]);
+    if (
+      isComprasTab
+      && !invoicesFetchedRef.current
+      && !invoicesLoadStartedRef.current
+    ) {
+      invoicesLoadStartedRef.current = true;
+      void loadInvoices();
+    }
+
+    if (
+      activeTab === 'albaranes'
+      && !purchaseOrdersFetchedRef.current
+      && !purchaseOrdersLoadStartedRef.current
+    ) {
+      purchaseOrdersLoadStartedRef.current = true;
+      void loadPurchaseOrdersForAlbaran();
+    }
+  }, [
+    catalogDataReady,
+    dataUserId,
+    activeTab,
+    loadSuppliers,
+    loadInvoices,
+    loadPurchaseOrdersForAlbaran,
+  ]);
 
   const handleAlbaranOcrFile = async (order: PurchaseOrder, file: File) => {
     setAlbaranOcrBusy(true);
@@ -4461,11 +5314,49 @@ export function CatalogPage() {
       setAlbaranCorroborate({ order, invoice: draft });
       toast.success('Albarán leído. Revisa cantidades y pulsa Confirmar pedido.');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'No se pudo escanear el albarán');
+      toast.error(toUserFacingMessage(err, 'No se pudo escanear el albarán'));
     } finally {
       setAlbaranOcrBusy(false);
     }
   };
+
+  const handleReplenishPendingOrder = useCallback(async (
+    sourceOrder: PurchaseOrder,
+    pendingLines?: PendingOrderLine[],
+  ) => {
+    if (!dataUserId) return;
+    const pending = pendingLines?.length ? pendingLines : pendingLinesFromPurchaseOrder(sourceOrder);
+    if (pending.length === 0) {
+      toast.message('No hay productos pendientes de pedir');
+      return;
+    }
+    const payload = buildReplenishPurchaseOrderPayload(sourceOrder, pending);
+    if (!payload) {
+      toast.error('No se pudo preparar el pedido de reposición');
+      return;
+    }
+    setReplenishingOrder(true);
+    try {
+      const created = await createPurchaseOrderRequest(dataUserId, {
+        ...payload,
+        businessId: businessId || payload.businessId || '',
+        businessName: currentBusiness?.name || payload.businessName || '',
+      });
+      setPurchaseOrders((prev) =>
+        [created, ...prev].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))),
+      );
+      toast.success(
+        `Pedido ${created.orderNumber || ''} creado con lo pendiente (${pending.length} producto(s))`,
+      );
+      setShowCreateInvoice(false);
+      setEditingInvoice(null);
+      setSearchParams({ tab: 'purchase-orders' });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo crear el pedido automático');
+    } finally {
+      setReplenishingOrder(false);
+    }
+  }, [dataUserId, setSearchParams]);
 
   const loadDeliveryOrders = useCallback(async () => {
     if (!dataUserId) return;
@@ -4521,10 +5412,19 @@ export function CatalogPage() {
     const payload: Partial<CatalogItem> = {
       ...data,
       module: 'catalog',
-      ...(usesTpvCatalogUi
-        ? { vertical: catalogVertical, business_id: businessId || undefined }
+      ...(businessId
+        ? { vertical: catalogVertical, business_id: businessId }
         : {}),
     };
+    const duplicateByName = findCatalogDuplicateByName(
+      catalogMenuItemsRaw,
+      String(data.name || '').trim(),
+      { excludeId: editingItem?._id },
+    );
+    if (duplicateByName) {
+      toast.error(formatCatalogDuplicateNameError(duplicateByName));
+      throw new Error('duplicate_name');
+    }
     try {
       let savedItem: CatalogItem | null = null;
       if (editingItem) {
@@ -4536,7 +5436,10 @@ export function CatalogPage() {
       } else {
         const created = await createCatalogItemRequest(dataUserId, payload as CatalogItem);
         savedItem = created;
-        setAllCatalogItems(prev => [created, ...prev]);
+        setAllCatalogItems((prev) => [created, ...prev]);
+        if (created.category?.trim()) {
+          setActiveCatalogCategory(normalizeImportCategory(created.category));
+        }
         if (!options?.keepOpen) {
           toast.success('Artículo creado');
         }
@@ -4567,7 +5470,7 @@ export function CatalogPage() {
           if (bid && createdOrUpdated && ingredientsText) {
             await syncStoreIngredientsFromCatalogImport(uid, bid, [createdOrUpdated]).catch(() => null);
           }
-          if (createdOrUpdated && needsRecipeStock) {
+          if (createdOrUpdated && needsRecipeStock && !isRestaurantCatalog) {
             const bizType = currentBusiness?.businessType || 'delivery';
             await syncInventoryCatalogFromSources(uid, {
               businessType: String(bizType),
@@ -4580,7 +5483,7 @@ export function CatalogPage() {
             if (refreshed) {
               const inventory = filterStockInventoryItems(refreshed);
               await syncRecipesFromCostingCatalog(uid, [createdOrUpdated], inventory);
-              setAllCatalogItems(refreshed);
+              setAllCatalogItems((prev) => mergeCatalogItemsById(prev, refreshed));
             }
           }
         } catch {
@@ -4642,9 +5545,9 @@ export function CatalogPage() {
     setBulkDeleteConfirmStep(true);
     toast.warning(
       searchCatalog.trim()
-        ? `Carta: ${deleteCount} producto(s) visibles. Pulsa «Estoy seguro» y confirma. No borra el Almacén puro.`
-        : `Carta: ${deleteCount} producto(s) (${catalogMenuItems.length} visibles). Pulsa «Estoy seguro» y confirma. No borra el Almacén puro.`,
-      { duration: 8000 },
+        ? `Carta: ${deleteCount} producto(s) visibles. Pulsa «Estoy seguro» y confirma.`
+        : `Eliminar TODO: ${deleteCount} de Carta + almacén sync, ingredientes TPV y recetas. Queda vacío (la plantilla Excel sigue). Pulsa «Estoy seguro» y confirma.`,
+      { duration: 9000 },
     );
   };
 
@@ -4703,13 +5606,49 @@ export function CatalogPage() {
 
       await loadCatalog();
       notifyDeliveryCatalogChanged(dataUserId, businessId);
+
+      // Carta vacía → limpiar restos del Excel (almacén sync, ingredientes TPV, recetas, organizadores).
+      let leftovers: Awaited<ReturnType<typeof wipeCatalogLeftoversAfterEmptyCarta>> | null = null;
+      const stillMenu = (await listCatalogItemsRequest(dataUserId, 'catalog').catch(() => []))
+        .filter((item) => (item.module || 'catalog') === 'catalog' && !item.deletedAt);
+      const stillScoped = businessId
+        ? filterCatalogItemsForBusinessScope(stillMenu, businessId, brands, {
+            accountBusinessCount,
+            activeBusinessType: businessType,
+          })
+        : stillMenu;
+
+      if (stillScoped.length === 0 && result.failed === 0) {
+        toast.loading('Limpiando almacén, ingredientes y restos…', { id: toastId });
+        leftovers = await wipeCatalogLeftoversAfterEmptyCarta(dataUserId, businessId, {
+          brands,
+          accountBusinessCount,
+          businessType,
+        });
+        setStoreIngredients([]);
+        if (businessId) {
+          try {
+            setBrands(await listBrandsRequest(businessId));
+          } catch {
+            /* ignore */
+          }
+        }
+        await loadCatalog();
+      }
+
       toast.dismiss(toastId);
 
       if (result.failed === 0) {
+        const extraParts: string[] = [];
+        if (leftovers?.stockDeleted) extraParts.push(`${leftovers.stockDeleted} almacén`);
+        if (leftovers?.ingredientsCleared) extraParts.push('ingredientes TPV');
+        if (leftovers?.recipesDeleted) extraParts.push(`${leftovers.recipesDeleted} recetas`);
+        if (leftovers?.organizersDeleted) extraParts.push(`${leftovers.organizersDeleted} organizadores`);
+        const extra = extraParts.length > 0 ? ` · también ${extraParts.join(', ')}` : '';
         toast.success(
           categoryLabel
-            ? `Organizador «${categoryLabel}» eliminado (${result.deleted} producto${result.deleted !== 1 ? 's' : ''})`
-            : `${result.deleted} artículo(s) eliminado(s)`,
+            ? `Organizador «${categoryLabel}» eliminado (${result.deleted} producto${result.deleted !== 1 ? 's' : ''})${extra}`
+            : `${result.deleted} artículo(s) eliminado(s)${extra}`,
         );
       } else {
         toast.error(
@@ -4724,7 +5663,15 @@ export function CatalogPage() {
       setBulkDeletingCatalog(false);
       exitCatalogSelectMode();
     }
-  }, [dataUserId, loadCatalog, exitCatalogSelectMode, businessId]);
+  }, [
+    dataUserId,
+    loadCatalog,
+    exitCatalogSelectMode,
+    businessId,
+    brands,
+    accountBusinessCount,
+    businessType,
+  ]);
 
   const handleToggleField = async (item: CatalogItem, field: 'webVisible' | 'available' | 'active') => {
     if (!dataUserId) return;
@@ -4810,22 +5757,51 @@ export function CatalogPage() {
 
   const handleCreateSupplier = async (data: Partial<Supplier> & { catalogItemCosts?: Record<string, number> }) => {
     if (!dataUserId) { toast.error('Sesión no válida. Recarga la página e inicia sesión de nuevo.'); return; }
-    const { catalogItemCosts, ...supplierData } = data;
+    const { catalogItemCosts, ...rest } = data;
+    const resolvedCatalogItemIds = resolveSupplierSelectedStockIds(
+      rest.catalogItemIds || [],
+      catalogItems,
+      storeIngredients,
+    );
+    const resolvedCosts: Record<string, number> = {};
+    for (const [rawId, cost] of Object.entries(catalogItemCosts || {})) {
+      const mapped = resolveSupplierSelectedStockIds([rawId], catalogItems, storeIngredients)[0];
+      if (mapped) resolvedCosts[mapped] = cost;
+    }
+    const organizerIds = [
+      ...new Set(
+        (Array.isArray(rest.organizerIds) ? rest.organizerIds : [])
+          .map((id) => String(id || '').trim())
+          .filter(Boolean),
+      ),
+    ];
+    const supplierData = {
+      ...rest,
+      organizerIds,
+      catalogItemIds: resolvedCatalogItemIds,
+    };
     try {
       if (editingSupplier) {
-        const updated = await updateSupplierRequest(dataUserId, { ...editingSupplier, ...supplierData } as Supplier);
+        const updated = await updateSupplierRequest(dataUserId, {
+          ...editingSupplier,
+          ...supplierData,
+          organizerIds,
+          catalogItemIds: resolvedCatalogItemIds,
+        } as Supplier);
         const linked = await syncSupplierCatalogItemLinks(
           dataUserId,
           updated,
           supplierData.catalogItemIds || [],
           catalogItems,
-          catalogItemCosts,
+          resolvedCosts,
+          storeIngredients,
         );
         if (linked.length > 0) {
           const byId = new Map(linked.map((i) => [i._id, i]));
           setAllCatalogItems((prev) => prev.map((i) => byId.get(i._id) ?? i));
         }
-        setSuppliers(prev => prev.map(s => s._id === updated._id ? { ...updated, ...supplierData, _id: updated._id } : s));
+        const freshSuppliers = await listSuppliersRequest(dataUserId);
+        setSuppliers(freshSuppliers);
         toast.success('Proveedor actualizado');
       } else {
         const created = await createSupplierRequest(dataUserId, supplierData);
@@ -4834,16 +5810,15 @@ export function CatalogPage() {
           created,
           supplierData.catalogItemIds || [],
           catalogItems,
-          catalogItemCosts,
+          resolvedCosts,
+          storeIngredients,
         );
         if (linked.length > 0) {
           const byId = new Map(linked.map((i) => [i._id, i]));
           setAllCatalogItems((prev) => prev.map((i) => byId.get(i._id) ?? i));
         }
-        setSuppliers(prev => {
-          const withoutDup = prev.filter((s) => s._id !== created._id);
-          return [created, ...withoutDup];
-        });
+        const freshSuppliers = await listSuppliersRequest(dataUserId);
+        setSuppliers(freshSuppliers);
         toast.success('Proveedor creado');
       }
       setShowCreateSupplier(false);
@@ -5003,7 +5978,7 @@ export function CatalogPage() {
         void loadCatalog();
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'No se pudo cargar al almacén');
+      toast.error(toUserFacingMessage(err, 'No se pudo cargar al almacén'));
     }
   };
 
@@ -5220,6 +6195,25 @@ export function CatalogPage() {
     }, 0),
   }), [catalogMenuItems, catalogMenuItemsRaw.length]);
 
+  const catalogTabStats = useMemo(() => {
+    const stats: Array<{ label: string; value: number | string; tone?: 'red' | 'default' }> = [
+      { label: 'artículos', value: catalogKpis.totalItems },
+    ];
+    if (catalogKpis.lowStock > 0) {
+      stats.push({ label: 'stock bajo', value: catalogKpis.lowStock, tone: 'red' });
+    }
+    if (catalogKpis.categories > 0) {
+      stats.push({ label: 'categorías', value: catalogKpis.categories });
+    }
+    if (catalogKpis.inventoryValue > 0) {
+      stats.push({
+        label: 'valor €',
+        value: catalogKpis.inventoryValue.toLocaleString('es-ES', { maximumFractionDigits: 0 }),
+      });
+    }
+    return stats;
+  }, [catalogKpis]);
+
   const supplierKpis = useMemo(() => ({
     total: suppliers.length,
     active: suppliers.filter(s => s.active).length,
@@ -5253,15 +6247,7 @@ export function CatalogPage() {
 
   const renderCatalogTab = () => (
     <SaasTabWorkspace
-      stats={[
-        { label: 'artículos', value: catalogKpis.totalItems },
-        { label: 'stock bajo', value: catalogKpis.lowStock, tone: 'red' },
-        { label: 'categorías', value: catalogKpis.categories },
-        {
-          label: 'valor €',
-          value: catalogKpis.inventoryValue.toLocaleString('es-ES', { maximumFractionDigits: 0 }),
-        },
-      ]}
+      stats={catalogTabStats}
       toolbar={
         <SaasTabToolbarRow
           left={
@@ -5931,21 +6917,36 @@ export function CatalogPage() {
 
   // ── Tab: Proveedores ────────────────────────────────────────────────────────
 
-  const renderSuppliersTab = () => (
+  const renderSuppliersTab = () => {
+    const purchaseHistory = [...scopedInvoices]
+      .filter((inv) => !invoiceIsAlbaran(inv))
+      .sort((a, b) => {
+        const da = Date.parse(String(a.createdAt || a.date || 0)) || 0;
+        const db = Date.parse(String(b.createdAt || b.date || 0)) || 0;
+        return db - da;
+      });
+    const recentOrders = [...scopedPurchaseOrders]
+      .sort((a, b) => {
+        const da = Date.parse(String(a.createdAt || 0)) || 0;
+        const db = Date.parse(String(b.createdAt || 0)) || 0;
+        return db - da;
+      })
+      .slice(0, 30);
+    const historyTotal = purchaseHistory.reduce((s, i) => s + Number(i.total || 0), 0);
+
+    return (
     <SaasTabWorkspace
       stats={[
         { label: 'proveedores', value: supplierKpis.total },
         { label: 'activos', value: supplierKpis.active, tone: 'emerald' },
+        { label: 'compras', value: purchaseHistory.length },
+        { label: 'importe', value: formatMoneyEs(historyTotal) },
       ]}
-      toolbar={
-        <SaasTabToolbarRow
-          right={
-            <SaasTabPrimaryButton onClick={() => { setEditingSupplier(null); setShowCreateSupplier(true); }}>
-              <Plus className="w-3.5 h-3.5" />
-              Nuevo proveedor
-            </SaasTabPrimaryButton>
-          }
-        />
+      statsTrailing={
+        <SaasTabPrimaryButton onClick={() => { void openSupplierEditor(null); }}>
+          <Plus className="w-3.5 h-3.5" />
+          Nuevo proveedor
+        </SaasTabPrimaryButton>
       }
     >
       {suppliersLoading ? (
@@ -5956,7 +6957,7 @@ export function CatalogPage() {
           title="Sin proveedores registrados"
           description="Añade el primer proveedor"
           action={
-            <SaasTabPrimaryButton onClick={() => { setEditingSupplier(null); setShowCreateSupplier(true); }}>
+            <SaasTabPrimaryButton onClick={() => { void openSupplierEditor(null); }}>
               <Plus className="w-3.5 h-3.5" />
               Nuevo proveedor
             </SaasTabPrimaryButton>
@@ -5996,7 +6997,7 @@ export function CatalogPage() {
                 </div>
                 <div className="flex items-center shrink-0">
                   <button
-                    onClick={() => { setEditingSupplier(supplier); setShowCreateSupplier(true); }}
+                    onClick={() => { void openSupplierEditor(supplier); }}
                     className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
                     title="Editar"
                   >
@@ -6027,56 +7028,68 @@ export function CatalogPage() {
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
               {suppliers.map(supplier => (
-                <tr key={supplier._id} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors align-top">
-                  <td className="px-3 py-3">
-                    <div className="font-semibold text-gray-900 dark:text-gray-100 text-sm break-words">{supplier.name}</div>
+                <tr key={supplier._id} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                  <td className="px-3 py-2.5 align-middle">
+                    <div className="font-semibold text-gray-900 dark:text-gray-100 text-sm truncate" title={supplier.name}>
+                      {supplier.name}
+                    </div>
                     {supplier.code ? (
                       <div className="text-[11px] font-mono font-semibold text-gray-500 dark:text-gray-400 mt-0.5">{supplier.code}</div>
                     ) : null}
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 break-words">
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate" title={[supplier.cif, supplier.contactPerson, supplier.phone, supplier.email, supplier.category].filter(Boolean).join(' · ')}>
                       {[supplier.cif, supplier.contactPerson, supplier.phone, supplier.email, supplier.category]
                         .filter(Boolean)
                         .join(' · ') || 'Sin datos de contacto'}
                     </div>
-                    {supplier.address ? (
-                      <div className="text-[11px] text-gray-400 mt-0.5 break-words">{supplier.address}</div>
-                    ) : null}
                   </td>
-                  <td className="px-3 py-3">
+                  <td className="px-3 py-2.5 align-middle">
                     {(() => {
-                      const linked = catalogItems.filter((i) => i.supplierId === supplier._id && i.active && !i.deletedAt);
+                      const linked = explicitMarkedStockItemsForSupplier(
+                        catalogItems,
+                        supplier,
+                        storeIngredients,
+                        inventoryCommercialBrands,
+                      );
                       const names = linked.map((i) => i.name).filter(Boolean);
                       const labels = labelsForSupplierOrganizerIds(supplier.organizerIds, brands, catalogItems);
                       if (linked.length === 0 && labels.length === 0) {
                         return <span className="text-gray-400 text-sm">—</span>;
                       }
                       return (
-                        <div className="space-y-1">
+                        <div className="space-y-1 min-w-0">
                           {linked.length > 0 ? (
-                            <p className="text-sm text-gray-900 dark:text-gray-100 break-words">
-                              <span className="font-bold tabular-nums">{linked.length}</span>
+                            <p
+                              className="text-xs font-semibold text-gray-800 dark:text-gray-200"
+                              title={names.length > 0 ? names.join(', ') : undefined}
+                            >
+                              <span className="tabular-nums">{linked.length}</span>
                               {' '}
                               {linked.length === 1 ? 'artículo' : 'artículos'}
-                              {names.length > 0 ? `: ${names.join(', ')}` : ''}
                             </p>
                           ) : null}
                           {labels.length > 0 ? (
-                            <div className="flex flex-wrap gap-1">
-                              {labels.map((label) => (
+                            <div className="flex flex-wrap gap-1 max-h-12 overflow-hidden">
+                              {labels.slice(0, 4).map((label) => (
                                 <span
                                   key={label}
-                                  className="px-2 py-0.5 bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300 text-[11px] font-medium rounded-lg border border-sky-200 dark:border-sky-800"
+                                  title={label}
+                                  className="px-1.5 py-0.5 bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300 text-[10px] font-medium rounded-md border border-sky-200 dark:border-sky-800 max-w-[7rem] truncate"
                                 >
                                   {label}
                                 </span>
                               ))}
+                              {labels.length > 4 ? (
+                                <span className="px-1.5 py-0.5 text-[10px] font-semibold text-gray-500 dark:text-gray-400">
+                                  +{labels.length - 4}
+                                </span>
+                              ) : null}
                             </div>
                           ) : null}
                         </div>
                       );
                     })()}
                   </td>
-                  <td className="px-3 py-3">
+                  <td className="px-3 py-2.5 align-middle">
                     <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full border ${
                       supplier.active
                         ? 'bg-green-100 text-green-700 border-green-200'
@@ -6085,7 +7098,7 @@ export function CatalogPage() {
                       {supplier.active ? 'Activo' : 'Inactivo'}
                     </span>
                   </td>
-                  <td className="px-3 py-3">
+                  <td className="px-3 py-2.5 align-middle">
                     <div className="flex flex-wrap items-center gap-1">
                       <button
                         onClick={() => setSearchParams({ tab: 'purchase-orders', supplier: supplier._id })}
@@ -6096,7 +7109,7 @@ export function CatalogPage() {
                         Pedir
                       </button>
                       <button
-                        onClick={() => { setEditingSupplier(supplier); setShowCreateSupplier(true); }}
+                        onClick={() => { void openSupplierEditor(supplier); }}
                         className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
                         title="Editar"
                       >
@@ -6118,20 +7131,124 @@ export function CatalogPage() {
         </div>
         </>
       )}
+
+      {/* Historial de compras (facturas + pedidos recientes) */}
+      <div className="border-t border-gray-200 dark:border-gray-700 mt-2">
+        <div className="px-3 py-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Historial de compras</h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Facturas y pedidos de tus proveedores
+            </p>
+          </div>
+          <SaasTabSecondaryButton type="button" onClick={() => setActiveTab('invoices')}>
+            <Receipt className="w-3.5 h-3.5" />
+            Ver facturas
+          </SaasTabSecondaryButton>
+        </div>
+
+        {invoicesHydrating && purchaseHistory.length === 0 ? (
+          <p className="px-3 pb-4 text-xs text-gray-500">Cargando historial…</p>
+        ) : purchaseHistory.length === 0 && recentOrders.length === 0 ? (
+          <p className="px-3 pb-4 text-sm text-gray-500 dark:text-gray-400">
+            Aún no hay compras. Cuando sincronicéis el correo o creéis pedidos, saldrán aquí.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px]">
+              <thead>
+                <tr className="bg-gray-50 dark:bg-gray-800/80 border-y border-gray-200 dark:border-gray-700">
+                  <th className="px-3 py-2 text-left text-[11px] font-semibold text-gray-500 uppercase">Fecha</th>
+                  <th className="px-3 py-2 text-left text-[11px] font-semibold text-gray-500 uppercase">Tipo</th>
+                  <th className="px-3 py-2 text-left text-[11px] font-semibold text-gray-500 uppercase">Documento</th>
+                  <th className="px-3 py-2 text-left text-[11px] font-semibold text-gray-500 uppercase">Proveedor</th>
+                  <th className="px-3 py-2 text-right text-[11px] font-semibold text-gray-500 uppercase">Importe</th>
+                  <th className="px-3 py-2 text-left text-[11px] font-semibold text-gray-500 uppercase">Estado</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                {purchaseHistory.slice(0, 40).map((inv) => {
+                  const status = invoiceDisplayStatus(inv);
+                  const statusCfg = INVOICE_STATUS_CONFIG[status] || INVOICE_STATUS_CONFIG.pending;
+                  const num = invoiceTableNumber(inv);
+                  return (
+                    <tr
+                      key={`inv-${inv._id}`}
+                      className="hover:bg-gray-50 dark:hover:bg-gray-800/60 cursor-pointer transition-colors"
+                      onClick={() => setViewingInvoice(inv)}
+                    >
+                      <td className="px-3 py-2.5 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                        {invoiceDateLabel(inv)}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <span className="inline-flex px-2 py-0.5 text-[10px] font-semibold rounded-full border bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800">
+                          Factura
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 text-sm font-mono font-semibold text-gray-900 dark:text-gray-100">
+                        {num.primary}
+                      </td>
+                      <td className="px-3 py-2.5 text-sm text-gray-700 dark:text-gray-300 truncate max-w-[12rem]">
+                        {inv.supplierName || '—'}
+                      </td>
+                      <td className="px-3 py-2.5 text-sm font-semibold tabular-nums text-right text-gray-900 dark:text-gray-100">
+                        {formatMoneyEs(inv.total || 0)}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <span className={`inline-flex px-2 py-0.5 text-[10px] font-semibold rounded-full border ${statusCfg.badgeClass}`}>
+                          {statusCfg.label}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {recentOrders.slice(0, 15).map((order) => (
+                  <tr
+                    key={`po-${order._id}`}
+                    className="hover:bg-gray-50 dark:hover:bg-gray-800/60 cursor-pointer transition-colors"
+                    onClick={() => setSearchParams({ tab: 'purchase-orders', order: order._id })}
+                  >
+                    <td className="px-3 py-2.5 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                      {order.createdAt
+                        ? formatDateEs(String(order.createdAt).slice(0, 10))
+                        : '—'}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <span className="inline-flex px-2 py-0.5 text-[10px] font-semibold rounded-full border bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-900/40 dark:text-slate-300 dark:border-slate-700">
+                        Pedido
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5 text-sm font-mono font-semibold text-gray-900 dark:text-gray-100">
+                      {order.orderNumber || order._id.slice(0, 8)}
+                    </td>
+                    <td className="px-3 py-2.5 text-sm text-gray-700 dark:text-gray-300 truncate max-w-[12rem]">
+                      {order.supplierName || '—'}
+                    </td>
+                    <td className="px-3 py-2.5 text-sm font-semibold tabular-nums text-right text-gray-900 dark:text-gray-100">
+                      {formatMoneyEs(order.total || 0)}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <span className="inline-flex px-2 py-0.5 text-[10px] font-semibold rounded-full border bg-gray-100 text-gray-600 border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700">
+                        {order.status || '—'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </SaasTabWorkspace>
-  );
+    );
+  };
 
   // ── Tab: Albarán ────────────────────────────────────────────────────────────
 
   const renderAlbaranesTab = () => {
     const albaranes = scopedInvoices.filter((inv) => invoiceIsAlbaran(inv));
-    const linkedReceivedIds = new Set(
-      albaranes
-        .filter((a) => a.ocrStockReceivedAt && a.linkedPurchaseOrderId)
-        .map((a) => a.linkedPurchaseOrderId as string),
-    );
-    const waitingOrders = purchaseOrders.filter(
-      (o) => isPurchaseOrderWaitingAlbaran(o) && !linkedReceivedIds.has(o._id),
+    const waitingOrders = scopedPurchaseOrders.filter(
+      (o) => isPurchaseOrderWaitingAlbaran(o) && o.status !== 'received',
     );
     const pendingAlbaranes = albaranes.filter((a) => !a.ocrStockReceivedAt);
     const loadedAlbaranes = albaranes.filter((a) => a.ocrStockReceivedAt);
@@ -6143,8 +7260,8 @@ export function CatalogPage() {
 
     const openCorroborateForInvoice = (inv: PurchaseInvoice) => {
       const linked =
-        purchaseOrders.find((o) => o._id === inv.linkedPurchaseOrderId) ||
-        purchaseOrders.find(
+        scopedPurchaseOrders.find((o) => o._id === inv.linkedPurchaseOrderId) ||
+        scopedPurchaseOrders.find(
           (o) =>
             isPurchaseOrderWaitingAlbaran(o) &&
             o.supplierId &&
@@ -6184,13 +7301,15 @@ export function CatalogPage() {
           },
         ]}
       >
-        {(invoicesLoading || purchaseOrdersLoading) && empty ? (
-          <CatalogCoreLoadingState kind="suppliers" message="Cargando albaranes…" compact />
-        ) : empty ? (
+        {empty ? (
           <SaasTabEmpty
             icon={<Package className="w-10 h-10" />}
             title="Sin albaranes ni pedidos en espera"
-            description="Cuando crees un pedido de compra aparecerá aquí en espera. Ábrelo, escanea el albarán (OCR) y al comprobar queda en histórico."
+            description={
+              invoicesHydrating || purchaseOrdersLoading
+                ? 'Actualizando en segundo plano…'
+                : 'Cuando crees un pedido de compra aparecerá aquí en espera. Ábrelo, escanea el albarán (OCR) y al comprobar queda en histórico.'
+            }
           />
         ) : (
           <div className="space-y-4 p-3">
@@ -6199,9 +7318,11 @@ export function CatalogPage() {
                 orders={waitingOrders}
                 selectedId={waitingAlbaranOrderId}
                 ocrBusy={albaranOcrBusy}
+                replenishing={replenishingOrder}
                 onSelect={setWaitingAlbaranOrderId}
                 onPickFile={(order, file) => void handleAlbaranOcrFile(order, file)}
                 onComprobar={(order) => setAlbaranCorroborate({ order, invoice: null })}
+                onReplenishPending={(order) => void handleReplenishPendingOrder(order)}
               />
             )}
 
@@ -6222,13 +7343,13 @@ export function CatalogPage() {
                           {inv.invoiceNumber || 'Sin código'} · {inv.supplierName || 'Proveedor'}
                         </p>
                         <p className="text-xs text-stone-500 mt-0.5">
-                          {inv.date ? new Date(inv.date).toLocaleDateString('es-ES') : '—'}
+                          {invoiceDateLabel(inv)}
                           {inv.linkedPurchaseOrderNumber
                             ? ` · pedido ${inv.linkedPurchaseOrderNumber}`
                             : ' · sin pedido enlazado'}
                         </p>
                       </button>
-                      <div className="flex shrink-0 items-center gap-2">
+                      <div className="flex shrink-0 items-center gap-2 ml-auto">
                         <button
                           type="button"
                           onClick={() => openInvoice(inv)}
@@ -6275,8 +7396,13 @@ export function CatalogPage() {
                   Histórico
                 </h3>
                 <ul className="divide-y divide-stone-100 dark:divide-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 overflow-hidden bg-white dark:bg-stone-900">
-                  {loadedAlbaranes.map((inv) => (
-                    <li key={inv._id} className="px-4 py-3 flex items-center justify-between gap-3">
+                  {loadedAlbaranes.map((inv) => {
+                    const linkedOrder =
+                      scopedPurchaseOrders.find((o) => o._id === inv.linkedPurchaseOrderId) || null;
+                    const incomplete = isAlbaranInvoiceIncomplete(inv, linkedOrder);
+                    const pendingLines = resolveAlbaranPendingLines(inv, linkedOrder);
+                    return (
+                    <li key={inv._id} className="px-4 py-3 flex items-center gap-3">
                       <button
                         type="button"
                         onClick={() => openInvoice(inv)}
@@ -6286,13 +7412,39 @@ export function CatalogPage() {
                           {inv.invoiceNumber || 'Sin código'} · {inv.supplierName || 'Proveedor'}
                         </p>
                         <p className="text-xs text-stone-500 mt-0.5">
-                          {inv.date ? new Date(inv.date).toLocaleDateString('es-ES') : '—'}
+                          {invoiceDateLabel(inv)}
                           {inv.linkedPurchaseOrderNumber
                             ? ` · pedido ${inv.linkedPurchaseOrderNumber}`
                             : ''}
+                          {incomplete
+                            ? ` · ${pendingLines.length} producto(s) pendiente(s)`
+                            : ''}
                         </p>
                       </button>
-                      <div className="flex shrink-0 items-center gap-2">
+                      {incomplete ? (
+                        <span className="hidden sm:inline-flex text-xs font-semibold text-amber-700 dark:text-amber-300 items-center gap-1 shrink-0">
+                          <AlertTriangle className="w-3.5 h-3.5" /> Incompleto
+                        </span>
+                      ) : (
+                        <span className="hidden sm:inline-flex text-xs font-medium text-emerald-600 items-center gap-1 shrink-0">
+                          <PackageCheck className="w-3.5 h-3.5" /> Cargado
+                        </span>
+                      )}
+                      <div className="flex shrink-0 items-center gap-2 ml-auto">
+                        {incomplete && linkedOrder ? (
+                          <button
+                            type="button"
+                            disabled={replenishingOrder}
+                            onClick={() => void handleReplenishPendingOrder(linkedOrder, pendingLines)}
+                            className={`${VERTIAL_BTN_PRIMARY} !min-h-0 px-3 py-2 text-xs inline-flex items-center gap-1`}
+                            title="Crear borrador con lo que falta"
+                          >
+                            {replenishingOrder ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : null}
+                            Generar pedido
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           onClick={() => openInvoice(inv)}
@@ -6319,12 +7471,10 @@ export function CatalogPage() {
                             <Trash2 className="w-4 h-4" />
                           </button>
                         ) : null}
-                        <span className="text-xs font-medium text-emerald-600 flex items-center gap-1">
-                          <PackageCheck className="w-3.5 h-3.5" /> Cargado
-                        </span>
                       </div>
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
               </section>
             )}
@@ -6402,10 +7552,22 @@ export function CatalogPage() {
       return groups;
     })();
 
+    const openInvoiceView = (inv: PurchaseInvoice) => {
+      setViewingInvoice(inv);
+    };
+
     const renderInvoiceActions = (originalInvoice: PurchaseInvoice, compact: boolean) => {
       const pad = compact ? 'p-1.5' : 'p-2';
+      const isManual = originalInvoice.entryMethod === 'manual' && originalInvoice.source !== 'email';
       return (
-        <div className="flex items-center shrink-0 gap-0.5">
+        <div className="flex items-center shrink-0 gap-0.5" onClick={(e) => e.stopPropagation()}>
+          <button
+            onClick={() => openInvoiceView(originalInvoice)}
+            className={`${pad} hover:bg-blue-50 dark:hover:bg-blue-950/30 rounded-lg transition-colors`}
+            title="Ver factura"
+          >
+            <Eye className="w-4 h-4 text-blue-600" />
+          </button>
           {!originalInvoice.ocrStockReceivedAt && (
             <button
               onClick={() => handleLoadInvoiceToWarehouse(originalInvoice)}
@@ -6441,13 +7603,15 @@ export function CatalogPage() {
               <Clock className="w-4 h-4 text-amber-600" />
             </button>
           )}
-          <button
-            onClick={() => { setEditingInvoice(originalInvoice); setShowCreateInvoice(true); }}
-            className={`${pad} hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors`}
-            title="Editar"
-          >
-            <Edit3 className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-          </button>
+          {isManual ? (
+            <button
+              onClick={() => { setEditingInvoice(originalInvoice); setShowCreateInvoice(true); }}
+              className={`${pad} hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors`}
+              title="Corregir datos manuales"
+            >
+              <Edit3 className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+            </button>
+          ) : null}
           <button
             onClick={(e) => void handleDeleteInvoice(originalInvoice, e)}
             className={`${pad} hover:bg-red-100 rounded-lg transition-colors`}
@@ -6462,18 +7626,39 @@ export function CatalogPage() {
     const renderMobileInvoiceCard = (invoice: InvRow) => {
       const statusCfg = INVOICE_STATUS_CONFIG[invoice.displayStatus] || INVOICE_STATUS_CONFIG.pending;
       const originalInvoice = scopedInvoices.find((i) => i._id === invoice._id)!;
+      const num = invoiceTableNumber(originalInvoice);
       return (
-        <div key={invoice._id} className="px-3 py-2.5">
+        <div
+          key={invoice._id}
+          className="px-3 py-2.5 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors"
+          onClick={() => openInvoiceView(originalInvoice)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              openInvoiceView(originalInvoice);
+            }
+          }}
+        >
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <p className="font-mono text-sm font-bold text-gray-900 dark:text-gray-100 truncate">
-                  {invoice.invoiceNumber || '—'}
+                  {num.primary}
                 </p>
                 <span className={`px-2 py-0.5 text-[10px] font-semibold rounded-full border shrink-0 ${statusCfg.badgeClass}`}>
                   {statusCfg.label}
                 </span>
+                {(originalInvoice.flags?.priceVariance || originalInvoice.priceVariance?.hasVariance) ? (
+                  <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full border shrink-0 bg-rose-100 text-rose-800 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800">
+                    Precio distinto
+                  </span>
+                ) : null}
               </div>
+              {num.hint ? (
+                <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5 truncate">{num.hint}</p>
+              ) : null}
               {Array.isArray(originalInvoice.attachments) && originalInvoice.attachments[0]?.filename && (
                 <p className="text-[10px] text-gray-400 mt-0.5 truncate">
                   {originalInvoice.attachments[0].filename}
@@ -6483,8 +7668,8 @@ export function CatalogPage() {
                 {invoice.supplierName}
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
-                {invoice.date ? new Date(invoice.date).toLocaleDateString('es-ES') : '—'}
-                {invoice.dueDate ? ` · vence ${new Date(invoice.dueDate).toLocaleDateString('es-ES')}` : ''}
+                {invoiceDateLabel(invoice)}
+                {invoice.dueDate ? ` · vence ${formatDateEs(invoiceDateToInputValue(invoice.dueDate) || invoice.dueDate)}` : ''}
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 tabular-nums">
                 Base {(invoice.subtotal || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })}€
@@ -6505,17 +7690,31 @@ export function CatalogPage() {
     const renderDesktopInvoiceRow = (invoice: InvRow, grouped: boolean) => {
       const statusCfg = INVOICE_STATUS_CONFIG[invoice.displayStatus] || INVOICE_STATUS_CONFIG.pending;
       const originalInvoice = scopedInvoices.find((i) => i._id === invoice._id)!;
+      const num = invoiceTableNumber(originalInvoice);
       return (
         <tr
           key={invoice._id}
-          className={`hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors ${
+          className={`hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors cursor-pointer ${
             grouped ? 'bg-teal-50/40 dark:bg-teal-950/20' : ''
           }`}
+          onClick={() => openInvoiceView(originalInvoice)}
         >
           <td className={`px-3 py-3 ${grouped ? 'border-l-2 border-teal-500/70 dark:border-teal-400/50' : ''}`}>
             <div className="font-mono text-sm font-bold text-gray-900 dark:text-gray-100">
-              {invoice.invoiceNumber || '—'}
+              {num.primary}
             </div>
+            {(originalInvoice.flags?.priceVariance || originalInvoice.priceVariance?.hasVariance) ? (
+              <div className="mt-0.5">
+                <span className="inline-flex px-1.5 py-0.5 text-[10px] font-semibold rounded-md border bg-rose-100 text-rose-800 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800">
+                  Precio distinto
+                </span>
+              </div>
+            ) : null}
+            {num.hint ? (
+              <div className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5 truncate max-w-[180px]" title={num.hint}>
+                {num.hint}
+              </div>
+            ) : null}
             {Array.isArray(originalInvoice.attachments) && originalInvoice.attachments[0]?.filename && (
               <div className="text-[10px] text-gray-400 mt-0.5 truncate max-w-[180px]" title={originalInvoice.attachments[0].filename}>
                 {originalInvoice.attachments[0].filename}
@@ -6523,7 +7722,7 @@ export function CatalogPage() {
             )}
             {invoice.dueDate && (
               <div className={`text-[10px] mt-0.5 ${invoice.displayStatus === 'overdue' ? 'text-red-600 font-semibold' : 'text-gray-400'}`}>
-                Vence {new Date(invoice.dueDate).toLocaleDateString('es-ES')}
+                Vence {formatDateEs(invoiceDateToInputValue(invoice.dueDate) || invoice.dueDate)}
               </div>
             )}
           </td>
@@ -6532,7 +7731,7 @@ export function CatalogPage() {
           </td>
           <td className="px-3 py-3">
             <span className="text-sm text-gray-700 dark:text-gray-300">
-              {invoice.date ? new Date(invoice.date).toLocaleDateString('es-ES') : '—'}
+              {invoiceDateLabel(invoice)}
             </span>
           </td>
           <td className="px-3 py-3">
@@ -6575,13 +7774,61 @@ export function CatalogPage() {
           },
         ]}
         toolbar={
-          <SaasTabToolbarRow
+          <div className="space-y-2 w-full">
+            {(invoiceEmailPdvsForUi.length > 0 || invoiceEmailLegacyConnected) ? (
+              <div className="rounded-xl border border-stone-200 dark:border-stone-700 bg-white/90 dark:bg-stone-900/60 px-3 py-2.5">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-stone-400 shrink-0">
+                    Correo por tienda
+                  </span>
+                  {invoiceEmailPdvsForUi.map((pdv) => (
+                    <button
+                      key={pdv.pdvId}
+                      type="button"
+                      onClick={() => navigate(`/saas/correo-facturas?pdv=${encodeURIComponent(pdv.pdvId)}`)}
+                      title={
+                        pdv.connected
+                          ? `${pdv.label} · ${pdv.imapUser || 'conectado'}`
+                          : `${pdv.label} · sin correo configurado`
+                      }
+                      className={`inline-flex max-w-full items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors ${
+                        pdv.connected
+                          ? 'border-teal-200 bg-teal-50 text-teal-900 hover:border-teal-300 dark:border-teal-800 dark:bg-teal-950/40 dark:text-teal-100'
+                          : 'border-amber-200 bg-amber-50 text-amber-900 hover:border-amber-300 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100'
+                      }`}
+                    >
+                      <Store className="h-3 w-3 shrink-0 opacity-70" />
+                      <span className="truncate">{pdv.label}</span>
+                      <span className="truncate opacity-80">
+                        {pdv.connected ? pdv.imapUser || 'conectado' : 'sin correo'}
+                      </span>
+                    </button>
+                  ))}
+                  {invoiceEmailLegacyConnected ? (
+                    <span className="text-[11px] text-amber-700 dark:text-amber-300">
+                      Cuenta global (legado) — configura cada tienda
+                    </span>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => navigate('/saas/correo-facturas')}
+                    className="text-[11px] font-semibold text-[var(--v-blue,#2563eb)] hover:underline"
+                  >
+                    Gestionar correos
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            <SaasTabToolbarRow
             right={
               <div className="flex flex-wrap items-center gap-2">
-                {invoiceEmailConnected ? (
+                {invoiceEmailConnectedCount > 0 || syncingEmailInvoices || invoicesHydrating ? (
                   <span className="text-[11px] text-teal-700 dark:text-teal-300 font-medium tabular-nums">
-                    Correo activo · auto cada 1 min
-                    {syncingEmailInvoices ? ' · leyendo…' : ''}
+                    {invoiceEmailConnectedCount > 0
+                      ? `${invoiceEmailConnectedCount} tienda(s) con correo`
+                      : ''}
+                    {invoiceEmailConnectedCount > 0 && (syncingEmailInvoices || invoicesHydrating) ? ' · ' : ''}
+                    {syncingEmailInvoices ? 'sincronizando…' : invoicesHydrating ? 'actualizando…' : ''}
                   </span>
                 ) : null}
                 <SaasTabSecondaryButton
@@ -6611,15 +7858,18 @@ export function CatalogPage() {
               </div>
             }
           />
+          </div>
         }
       >
-        {invoicesLoading ? (
-          <CatalogCoreLoadingState kind="suppliers" message="Cargando facturas de compra…" compact />
-        ) : invoicesWithDisplay.length === 0 ? (
+        {invoicesWithDisplay.length === 0 ? (
           <SaasTabEmpty
             icon={<FileText className="w-10 h-10" />}
             title="Sin facturas de compra"
-            description="Registra la primera factura de proveedor"
+            description={
+              invoicesHydrating
+                ? 'Actualizando lista en segundo plano…'
+                : 'Registra la primera factura de proveedor'
+            }
             action={
               <div className="flex flex-wrap items-center justify-center gap-2">
                 <SaasTabSecondaryButton
@@ -6756,13 +8006,17 @@ export function CatalogPage() {
         label: 'Carta',
         tabs: cartaTabs,
       },
-      {
-        id: 'almacen',
-        label: 'Almacén',
-        tabs: [
-          { id: 'stock', label: 'Inventario', count: stockTabCount || undefined },
-        ],
-      },
+      ...(isRestaurantCatalog
+        ? []
+        : [
+            {
+              id: 'almacen',
+              label: 'Almacén',
+              tabs: [
+                { id: 'stock', label: 'Inventario', count: stockTabCount || undefined },
+              ],
+            },
+          ]),
       {
         id: 'compras',
         label: 'Compras',
@@ -6926,8 +8180,12 @@ export function CatalogPage() {
 
         {activeTab === 'ingredientes' && !isRestaurantCatalog && renderIngredientesTab()}
 
-        {activeTab === 'stock' && (
-          <InventoryPanel seedStockItems={filterStockInventoryItems(catalogItems)} />
+        {activeTab === 'stock' && !isRestaurantCatalog && (
+          loading && filterStockInventoryItems(catalogItems).length === 0
+            ? <CatalogTabLoadingState phase="stock" />
+            : (
+              <InventoryPanel seedStockItems={filterStockInventoryItems(catalogItems)} />
+            )
         )}
 
         {activeTab === 'staff-consumption' && (
@@ -6952,23 +8210,33 @@ export function CatalogPage() {
         {activeTab === 'purchase-orders' && (
           <PurchaseOrdersPage
             dataUserId={dataUserId}
+            businessId={businessId || undefined}
+            businessName={currentBusiness?.name}
+            accountBusinessCount={accountBusinessCount}
             suppliers={suppliers}
             catalogItems={catalogItems}
             storeIngredients={storeIngredients}
             commercialBrands={commercialLines}
+            onGoToAlbaranes={() => setActiveTab('albaranes')}
             onGoToInvoices={() => setActiveTab('invoices')}
           />
         )}
 
         {activeTab === 'albaranes' && renderAlbaranesTab()}
 
-        {activeTab === 'invoices' && (
-          invoicesLoading && scopedInvoices.length === 0
-            ? <CatalogTabLoadingState phase="invoices" />
-            : renderInvoicesTab()
-        )}
+        {activeTab === 'invoices' && renderInvoicesTab()}
 
-        {activeTab === 'escandallo' && <EscandalloPanel />}
+        {activeTab === 'escandallo' && (
+          <EscandalloPanel
+            seedCatalogItems={escandalloSeedItems}
+            seedStoreIngredients={storeIngredients}
+            seedBrands={escandalloSeedBrands}
+            onCostingUpdated={() => {
+              notifyDeliveryCatalogChanged(dataUserId, businessId);
+              void loadCatalog();
+            }}
+          />
+        )}
           </>
         )}
       </div>
@@ -6989,6 +8257,7 @@ export function CatalogPage() {
         onBrandsChange={setBrands}
         catalogCategoriesInUse={categories}
         catalogItems={catalogForComboEditor}
+        catalogMenuItemsForDuplicateCheck={catalogMenuItemsRaw}
         storeIngredients={storeIngredients}
         brandIngredientSelection={brandIngredientSelection}
         isRestaurantCatalog={isRestaurantCatalog}
@@ -7022,13 +8291,15 @@ export function CatalogPage() {
 
       <CreateSupplierModal
         isOpen={showCreateSupplier}
-        onClose={() => { setShowCreateSupplier(false); setEditingSupplier(null); }}
+        onClose={() => { setShowCreateSupplier(false); setEditingSupplier(null); setSupplierModalHydrating(false); }}
         onCreate={handleCreateSupplier}
         editItem={editingSupplier}
+        editHydrating={supplierModalHydrating}
         brands={brands}
         catalogItems={catalogItems}
         storeIngredients={storeIngredients}
         existingSuppliers={suppliers}
+        businessType={currentBusiness?.businessType}
       />
 
       {showInvoiceOcrStorePicker ? (
@@ -7096,7 +8367,7 @@ export function CatalogPage() {
         onDocumentCreated={async (payload) => {
           setShowInvoiceOcr(false);
           setInvoiceOcrWorkCenter(null);
-          await loadInvoices({ silent: true });
+          await loadInvoices();
           void loadCatalog();
           const fx = payload?.sideEffects as {
             stockUpdated?: number;
@@ -7135,6 +8406,20 @@ export function CatalogPage() {
         suppliers={suppliers}
         invoices={scopedInvoices}
         editItem={editingInvoice}
+        purchaseOrders={scopedPurchaseOrders}
+        onGoToPurchaseOrders={() => setSearchParams({ tab: 'purchase-orders' })}
+        onReplenishPending={
+          editingInvoice && isAlbaranInvoice(editingInvoice)
+            ? (() => {
+                const linked =
+                  scopedPurchaseOrders.find((o) => o._id === editingInvoice.linkedPurchaseOrderId) || null;
+                const pending = resolveAlbaranPendingLines(editingInvoice, linked);
+                if (!linked || pending.length === 0) return undefined;
+                return () => handleReplenishPendingOrder(linked, pending);
+              })()
+            : undefined
+        }
+        replenishing={replenishingOrder}
         onReloadInvoices={async () => {
           if (!dataUserId) return [];
           const data = await listPurchaseInvoicesRequest(dataUserId);
@@ -7143,6 +8428,32 @@ export function CatalogPage() {
           return data;
         }}
         onSelectExisting={(inv) => setEditingInvoice(inv)}
+      />
+
+      <PurchaseInvoiceViewModal
+        invoice={
+          viewingInvoice
+            ? scopedInvoices.find((i) => i._id === viewingInvoice._id) || viewingInvoice
+            : null
+        }
+        isOpen={Boolean(viewingInvoice)}
+        onClose={() => setViewingInvoice(null)}
+        purchaseOrders={scopedPurchaseOrders}
+        catalogItems={catalogItems}
+        financeLinked={viewingInvoice ? invoiceFinanceLinks.has(viewingInvoice._id) : false}
+        canDelete={canDeletePurchaseDocs}
+        onTogglePaid={handleToggleInvoiceStatus}
+        onLoadWarehouse={handleLoadInvoiceToWarehouse}
+        onLinkFinance={handleLinkInvoiceToFinance}
+        onDelete={async (inv) => {
+          await handleDeleteInvoice(inv);
+          setViewingInvoice(null);
+        }}
+        onEditManual={(inv) => {
+          setViewingInvoice(null);
+          setEditingInvoice(inv);
+          setShowCreateInvoice(true);
+        }}
       />
 
       {albaranCorroborate && dataUserId ? (

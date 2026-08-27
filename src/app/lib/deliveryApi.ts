@@ -11,6 +11,7 @@ import {
 } from './deliveryOrderFinanceSync';
 import { notifyDeliveryOpsLive } from './deliveryOpsLive';
 import { invalidateCatalogListCache, listCatalogItemsCached } from './catalogListCache';
+import { purchaseListQuery } from './purchaseBusinessScope';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -94,6 +95,15 @@ export interface DeliveryOrderItem {
   ingredients?: { name: string; quantity: string }[];
   outOfStock?: boolean;
   outOfStockAt?: string;
+  /** Componentes elegidos al vender un menú/combo (TPV). */
+  comboSelections?: CatalogComboRef[];
+  /** Pizza mitad y mitad: sabores elegidos en TPV. */
+  halfHalfPizza?: {
+    firstProductId: string;
+    firstProductName: string;
+    secondProductId: string;
+    secondProductName: string;
+  };
 }
 
 export interface DeliveryStageEvent {
@@ -389,6 +399,22 @@ export interface PurchaseInvoiceLine {
   catalogItemName?: string;
 }
 
+export interface SupplierPriceVarianceLine {
+  catalogItemId: string;
+  name: string;
+  expectedUnitCost: number;
+  invoiceUnitCost: number;
+  deltaAbs: number;
+  deltaPct: number;
+}
+
+export interface SupplierPriceVariance {
+  hasVariance: boolean;
+  checkedAt: string;
+  thresholdPct: number;
+  lines: SupplierPriceVarianceLine[];
+}
+
 export interface OcrData {
   documentType: string | null;
   documentTypeLabel: string | null;
@@ -434,6 +460,7 @@ export interface PurchaseInvoice {
   ocrImageBase64?: string;
   entryMethod?: 'ocr' | 'manual' | 'email';
   documentKind?: string;
+  source?: string;
   sourceEmailId?: string;
   sourceEmailFrom?: string;
   sourceEmailSubject?: string;
@@ -449,7 +476,20 @@ export interface PurchaseInvoice {
     supplierNotFound?: boolean;
     ocrFailed?: boolean;
     manualReview?: boolean;
+    orderIncomplete?: boolean;
+    priceVariance?: boolean;
   };
+  /** Diferencias entre precio de factura/albarán y coste esperado del proveedor. */
+  priceVariance?: SupplierPriceVariance | null;
+  /** Líneas del pedido que no vinieron o faltan cantidad (recepción parcial). */
+  pendingOrderLines?: Array<{
+    catalogItemId: string;
+    name: string;
+    sku: string;
+    orderedQty: number;
+    receivedQty: number;
+    pendingQty: number;
+  }>;
 
   businessId?: string;
   businessName?: string;
@@ -898,9 +938,8 @@ export async function deleteCatalogItemRequest(userId: string, itemId: string): 
 
 export async function listSuppliersRequest(userId: string): Promise<Supplier[]> {
   const id = normalizeUserId(userId);
-  // Cache-bust: un GET cacheado tras el 1.º alta hacía parecer que "solo hay 1 proveedor".
   const payload = await request<{ ok: boolean; suppliers: Supplier[] }>(
-    `/api/delivery/suppliers/${encodeURIComponent(id)}?_=${Date.now()}`,
+    `/api/delivery/suppliers/${encodeURIComponent(id)}`,
   );
   return payload.suppliers || [];
 }
@@ -941,10 +980,14 @@ export async function deleteSupplierRequest(userId: string, supplierId: string):
 
 // ─── Purchase Invoices API ────────────────────────────────────────────────────
 
-export async function listPurchaseInvoicesRequest(userId: string): Promise<PurchaseInvoice[]> {
+export async function listPurchaseInvoicesRequest(
+  userId: string,
+  opts?: { businessId?: string; accountBusinessCount?: number },
+): Promise<PurchaseInvoice[]> {
   const id = normalizeUserId(userId);
+  const qs = purchaseListQuery(opts?.businessId, opts?.accountBusinessCount);
   const payload = await request<{ ok: boolean; invoices: PurchaseInvoice[] }>(
-    `/api/delivery/invoices/${encodeURIComponent(id)}`,
+    `/api/delivery/invoices/${encodeURIComponent(id)}${qs}`,
   );
   return payload.invoices || [];
 }

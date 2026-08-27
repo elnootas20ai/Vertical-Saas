@@ -476,6 +476,9 @@ export async function findDocuments(req, dbName, selector, options = {}) {
     };
     if (bookmark) body.bookmark = bookmark;
     if (options.use_index) body.use_index = options.use_index;
+    if (Array.isArray(options.sort) && options.sort.length > 0) {
+      body.sort = options.sort;
+    }
 
     const response = await couchRequest(req, `/${encodedDbName}/_find`, {
       method: 'POST',
@@ -6090,22 +6093,53 @@ export function buildDeliveryOrderDocument(userId, data = {}, existing = null) {
       ? clientOrderNumber
       : `PED-${Date.now().toString(36).toUpperCase().slice(-6)}`);
 
-  const items = Array.isArray(data.items) ? data.items.map((i) => ({
-    id: i.id || '',
-    name: i.name || '',
-    quantity: Number(i.quantity || 0),
-    unitPrice: Number(i.unitPrice || 0),
-    total: Number(i.total || 0),
-    notes: i.notes || '',
-    catalogItemId: i.catalogItemId || '',
-    category: i.category || '',
-    brandIds: Array.isArray(i.brandIds) ? i.brandIds.map((b) => String(b || '').trim()).filter(Boolean) : [],
-    extras: Array.isArray(i.extras) ? i.extras : [],
-    allergens: Array.isArray(i.allergens) ? i.allergens : [],
-    ingredients: Array.isArray(i.ingredients) ? i.ingredients : [],
-    outOfStock: Boolean(i.outOfStock),
-    outOfStockAt: i.outOfStockAt || '',
-  })) : (existing?.items || []);
+  const items = Array.isArray(data.items) ? data.items.map((i) => {
+    const comboSelections = Array.isArray(i.comboSelections)
+      ? i.comboSelections
+        .map((ref) => {
+          const productId = String(ref?.productId || ref?.catalogItemId || '').trim();
+          const quantity = Number(ref?.quantity || 0);
+          if (!productId || !(quantity > 0)) return null;
+          return {
+            productId,
+            productName: String(ref?.productName || '').trim(),
+            quantity,
+            ...(ref?.slotKind ? { slotKind: ref.slotKind } : {}),
+            ...(ref?.instanceId ? { instanceId: String(ref.instanceId) } : {}),
+          };
+        })
+        .filter(Boolean)
+      : [];
+    const hh = i.halfHalfPizza && typeof i.halfHalfPizza === 'object' ? i.halfHalfPizza : null;
+    const halfHalfPizza = hh
+      && String(hh.firstProductId || '').trim()
+      && String(hh.secondProductId || '').trim()
+      ? {
+        firstProductId: String(hh.firstProductId).trim(),
+        firstProductName: String(hh.firstProductName || '').trim(),
+        secondProductId: String(hh.secondProductId).trim(),
+        secondProductName: String(hh.secondProductName || '').trim(),
+      }
+      : undefined;
+    return {
+      id: i.id || '',
+      name: i.name || '',
+      quantity: Number(i.quantity || 0),
+      unitPrice: Number(i.unitPrice || 0),
+      total: Number(i.total || 0),
+      notes: i.notes || '',
+      catalogItemId: i.catalogItemId || '',
+      category: i.category || '',
+      brandIds: Array.isArray(i.brandIds) ? i.brandIds.map((b) => String(b || '').trim()).filter(Boolean) : [],
+      extras: Array.isArray(i.extras) ? i.extras : [],
+      allergens: Array.isArray(i.allergens) ? i.allergens : [],
+      ingredients: Array.isArray(i.ingredients) ? i.ingredients : [],
+      outOfStock: Boolean(i.outOfStock),
+      outOfStockAt: i.outOfStockAt || '',
+      ...(comboSelections.length > 0 ? { comboSelections } : {}),
+      ...(halfHalfPizza ? { halfHalfPizza } : {}),
+    };
+  }) : (existing?.items || []);
   const itemsSubtotal = items.reduce((s, i) => s + Number(i.total || 0), 0);
   const roundMoney = (n) => Math.round(Number(n) * 100) / 100;
   const deliveryFeeRaw = data.deliveryFee != null && data.deliveryFee !== ''
@@ -7552,6 +7586,18 @@ export async function listActiveWorkCenterIds(req) {
 
 function normalizeBusinessScopeId(value) {
   return String(value || '').replace(/^business:/, '').trim();
+}
+
+/** Compras/facturas: aislar por empresa (multi-cuenta en mismo user_id). */
+function filterCatalogDocsByBusinessScope(docs, businessId, accountBusinessCount = 1) {
+  const bid = normalizeBusinessScopeId(businessId);
+  if (!bid) return docs;
+  const n = Math.max(1, Number(accountBusinessCount) || 1);
+  return (docs || []).filter((doc) => {
+    const docBid = normalizeBusinessScopeId(doc?.businessId || doc?.business_id || '');
+    if (!docBid) return n <= 1;
+    return docBid === bid;
+  });
 }
 
 function normalizeAccountUserId(value) {
@@ -11014,7 +11060,27 @@ export function sanitizeBrand(doc) {
 
 const catalogBrandIndexReady = new Set();
 const catalogTypeUserIndexReady = new Set();
+const purchaseInvoiceListIndexReady = new Set();
+const purchaseOrderListIndexReady = new Set();
 const brandsByBusinessInflight = new Map();
+
+async function ensurePurchaseInvoiceListIndex(req, dbName) {
+  if (purchaseInvoiceListIndexReady.has(dbName)) return;
+  const safeDb = String(dbName || '').replace(/[^a-z0-9]+/g, '-');
+  await ensureIndex(req, dbName, ['type', 'user_id', 'date'], `idx-${safeDb}-purchase-invoice-list`).catch(
+    () => null,
+  );
+  purchaseInvoiceListIndexReady.add(dbName);
+}
+
+async function ensurePurchaseOrderListIndex(req, dbName) {
+  if (purchaseOrderListIndexReady.has(dbName)) return;
+  const safeDb = String(dbName || '').replace(/[^a-z0-9]+/g, '-');
+  await ensureIndex(req, dbName, ['type', 'user_id', 'createdAt'], `idx-${safeDb}-purchase-order-list`).catch(
+    () => null,
+  );
+  purchaseOrderListIndexReady.add(dbName);
+}
 
 async function ensureCatalogTypeUserIndex(req, dbName) {
   if (catalogTypeUserIndexReady.has(dbName)) return;
@@ -11889,6 +11955,14 @@ export function buildPurchaseInvoiceDocument(userId, data = {}, existing = null)
     ocrImageBase64: data.ocrImageBase64 || existing?.ocrImageBase64 || '',
     ocrStockReceivedAt: String(data.ocrStockReceivedAt || existing?.ocrStockReceivedAt || ''),
     ocrStockLinesReceived: Number(data.ocrStockLinesReceived ?? existing?.ocrStockLinesReceived ?? 0) || 0,
+    pendingOrderLines: Array.isArray(data.pendingOrderLines)
+      ? data.pendingOrderLines
+      : (Array.isArray(existing?.pendingOrderLines) ? existing.pendingOrderLines : []),
+    priceVariance: data.priceVariance && typeof data.priceVariance === 'object'
+      ? data.priceVariance
+      : (existing?.priceVariance && typeof existing.priceVariance === 'object'
+        ? existing.priceVariance
+        : null),
     flags: {
       ...((existing?.flags && typeof existing.flags === 'object' && !Array.isArray(existing.flags))
         ? existing.flags
@@ -11907,8 +11981,9 @@ function normalizePurchaseInvoiceStatus(value) {
   return allowed.includes(String(value || '')) ? String(value) : 'pending';
 }
 
-export function sanitizePurchaseInvoice(doc) {
+export function sanitizePurchaseInvoice(doc, options = {}) {
   if (!doc || typeof doc !== 'object') return null;
+  const forList = options?.forList === true;
   const flags = doc.flags && typeof doc.flags === 'object' && !Array.isArray(doc.flags)
     ? doc.flags
     : {};
@@ -11916,7 +11991,7 @@ export function sanitizePurchaseInvoice(doc) {
   const status = ['paid', 'pending', 'overdue', 'draft', 'partial'].includes(statusRaw)
     ? statusRaw
     : 'pending';
-  return {
+  const sanitized = {
     _id: doc._id,
     _rev: doc._rev,
     type: 'purchase_invoice',
@@ -11962,10 +12037,18 @@ export function sanitizePurchaseInvoice(doc) {
     sourceEmailDate: doc.sourceEmailDate || '',
     attachments: Array.isArray(doc.attachments) ? doc.attachments : [],
     ocrData: doc.ocrData || null,
-    ocrImageBase64: doc.ocrImageBase64 || '',
     ocrConfidence: doc.ocrConfidence || '',
     ocrStockReceivedAt: doc.ocrStockReceivedAt || '',
     ocrStockLinesReceived: Number(doc.ocrStockLinesReceived || 0) || 0,
+    pendingOrderLines: Array.isArray(doc.pendingOrderLines) ? doc.pendingOrderLines : [],
+    priceVariance: doc.priceVariance && typeof doc.priceVariance === 'object'
+      ? {
+          hasVariance: Boolean(doc.priceVariance.hasVariance),
+          checkedAt: String(doc.priceVariance.checkedAt || ''),
+          thresholdPct: Number(doc.priceVariance.thresholdPct || 0.02),
+          lines: Array.isArray(doc.priceVariance.lines) ? doc.priceVariance.lines : [],
+        }
+      : null,
     flags: {
       duplicate: Boolean(flags.duplicate),
       duplicateOf: flags.duplicateOf || '',
@@ -11974,6 +12057,8 @@ export function sanitizePurchaseInvoice(doc) {
       ocrFailed: Boolean(flags.ocrFailed),
       manualReview: Boolean(flags.manualReview),
       stockPending: Boolean(flags.stockPending),
+      orderIncomplete: Boolean(flags.orderIncomplete),
+      priceVariance: Boolean(flags.priceVariance || doc.priceVariance?.hasVariance),
     },
     reviewNotes: doc.reviewNotes || '',
     reviewedBy: doc.reviewedBy || '',
@@ -11986,34 +12071,66 @@ export function sanitizePurchaseInvoice(doc) {
     updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
     deletedAt: doc.deletedAt || null,
   };
+  if (!forList) {
+    sanitized.ocrImageBase64 = doc.ocrImageBase64 || '';
+  }
+  return sanitized;
 }
 
-export async function listPurchaseInvoicesByUser(req, userId) {
+export function normalizePurchaseListLimit(limit) {
+  const n = Number(limit);
+  if (!Number.isFinite(n) || n <= 0) return 400;
+  return Math.min(Math.max(Math.floor(n), 1), 2000);
+}
+
+export async function listPurchaseInvoicesByUser(req, userId, options = {}) {
   const uid = String(userId || '').trim();
+  const listLimit = normalizePurchaseListLimit(options.limit);
   const db = getCatalogDbName();
   await ensureDatabase(req, db);
   await ensureCatalogTypeUserIndex(req, db);
+  await ensurePurchaseInvoiceListIndex(req, db);
+
+  const selector = uid
+    ? { type: 'purchase_invoice', user_id: uid }
+    : { type: 'purchase_invoice' };
+  const sort = uid
+    ? [{ type: 'asc' }, { user_id: 'asc' }, { date: 'desc' }]
+    : [{ type: 'asc' }, { date: 'desc' }];
 
   let docs;
   try {
-    const selector = uid
-      ? { type: 'purchase_invoice', user_id: uid }
-      : { type: 'purchase_invoice' };
-    docs = await findDocuments(req, db, selector, { pageSize: 200, maxDocs: 20_000 });
+    docs = await findDocuments(req, db, selector, {
+      pageSize: 200,
+      maxDocs: listLimit,
+      sort,
+    });
   } catch {
     const all = await getCatalogDatabaseDocumentsInflight(req);
-    docs = all.filter(
-      (doc) =>
-        doc?.type === 'purchase_invoice' && !doc?.deletedAt && (!uid || doc?.user_id === uid),
+    docs = all
+      .filter(
+        (doc) =>
+          doc?.type === 'purchase_invoice' && !doc?.deletedAt && (!uid || doc?.user_id === uid),
+      )
+      .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
+      .slice(0, listLimit);
+  }
+
+  let invoices = docs.filter(
+    (doc) =>
+      doc?.type === 'purchase_invoice' && !doc?.deletedAt && (!uid || doc?.user_id === uid),
+  );
+  if (options.businessId) {
+    invoices = filterCatalogDocsByBusinessScope(
+      invoices,
+      options.businessId,
+      options.accountBusinessCount ?? 1,
     );
   }
 
-  return docs
-    .filter(
-      (doc) =>
-        doc?.type === 'purchase_invoice' && !doc?.deletedAt && (!uid || doc?.user_id === uid),
-    )
-    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  return invoices
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
+    .slice(0, listLimit);
 }
 
 /** Asigna A-0001 / F-0001 si no hay nº de proveedor. */
@@ -12184,6 +12301,8 @@ export function buildPurchaseOrderDocument(userId, data = {}, existing = null) {
     total: Number(item.quantity || 0) * Number(item.unitCost || 0),
     received: Number(item.received ?? 0),
     notes: String(item.notes || ''),
+    supplierId: String(item.supplierId || ''),
+    supplierName: String(item.supplierName || ''),
   })) : (existing?.items || []);
 
   const subtotal = items.reduce((s, l) => s + Number(l.total || 0), 0);
@@ -12210,6 +12329,12 @@ export function buildPurchaseOrderDocument(userId, data = {}, existing = null) {
     expectedDate: String(data.expectedDate || existing?.expectedDate || ''),
     sentAt: String(data.sentAt || existing?.sentAt || ''),
     receivedAt: String(data.receivedAt || existing?.receivedAt || ''),
+    businessId: normalizeBusinessScopeId(
+      data.businessId || data.business_id || existing?.businessId || existing?.business_id || '',
+    ),
+    businessName: String(
+      data.businessName || data.business_name || existing?.businessName || existing?.business_name || '',
+    ).trim(),
     createdAt: existing?.createdAt || now,
     updatedAt: now,
   };
@@ -12237,19 +12362,62 @@ export function sanitizePurchaseOrder(doc) {
     expectedDate: doc.expectedDate || '',
     sentAt: doc.sentAt || '',
     receivedAt: doc.receivedAt || '',
+    businessId: normalizeBusinessScopeId(doc.businessId || doc.business_id || '') || undefined,
+    businessName: doc.businessName || doc.business_name || '',
     createdAt: doc.createdAt || new Date().toISOString(),
     updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
     deletedAt: doc.deletedAt || null,
   };
 }
 
-export async function listPurchaseOrdersByUser(req, userId) {
+export async function listPurchaseOrdersByUser(req, userId, options = {}) {
+  const uid = String(userId || '').trim();
+  const listLimit = normalizePurchaseListLimit(options.limit);
   const db = getCatalogDbName();
   await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
-  return docs
-    .filter((doc) => doc?.type === 'purchase_order' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
-    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  await ensureCatalogTypeUserIndex(req, db);
+  await ensurePurchaseOrderListIndex(req, db);
+
+  const selector = uid
+    ? { type: 'purchase_order', user_id: uid }
+    : { type: 'purchase_order' };
+  const sort = uid
+    ? [{ type: 'asc' }, { user_id: 'asc' }, { createdAt: 'desc' }]
+    : [{ type: 'asc' }, { createdAt: 'desc' }];
+
+  let docs;
+  try {
+    docs = await findDocuments(req, db, selector, {
+      pageSize: 200,
+      maxDocs: listLimit,
+      sort,
+    });
+  } catch {
+    const all = await getCatalogDatabaseDocumentsInflight(req);
+    docs = all
+      .filter(
+        (doc) =>
+          doc?.type === 'purchase_order' && !doc?.deletedAt && (!uid || doc?.user_id === uid),
+      )
+      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+      .slice(0, listLimit);
+  }
+
+  let orders = docs.filter(
+    (doc) =>
+      doc?.type === 'purchase_order' && !doc?.deletedAt && (!uid || doc?.user_id === uid),
+  );
+  if (options.businessId) {
+    orders = filterCatalogDocsByBusinessScope(
+      orders,
+      options.businessId,
+      options.accountBusinessCount ?? 1,
+    );
+  }
+
+  return orders
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+    .slice(0, listLimit);
 }
 
 // ─── WAREHOUSES (Almacenes) ──────────────────────────────────────────────────

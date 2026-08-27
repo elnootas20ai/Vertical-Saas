@@ -1,5 +1,6 @@
-import { getAuthHeaders } from './authApi';
+import { extractApiErrorMessage, getAuthHeaders } from './authApi';
 import { getApiBase } from './apiBase';
+import { toUserFacingMessage } from './userFacingError';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -17,18 +18,31 @@ function getCouchHeaders(): Record<string, string> {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...getAuthHeaders(),
-      ...getCouchHeaders(),
-      ...(init?.headers || {}),
-    },
-    ...init,
-  });
-  const payload = (await response.json().catch(() => ({}))) as T & { error?: string };
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders(),
+        ...getCouchHeaders(),
+        ...(init?.headers || {}),
+      },
+      ...init,
+    });
+  } catch (err) {
+    throw new Error(
+      toUserFacingMessage(
+        err,
+        'Sin conexión con el servidor. Comprueba que el backend esté en marcha e inténtalo de nuevo.',
+      ),
+    );
+  }
+  const payload = (await response.json().catch(() => ({}))) as T & { error?: unknown; message?: string };
   if (!response.ok) {
-    throw new Error(payload?.error || 'Error inesperado en purchase order API');
+    const msg = extractApiErrorMessage(payload as Record<string, unknown>);
+    throw new Error(
+      toUserFacingMessage(msg || `No se pudo completar el pedido (${response.status})`),
+    );
   }
   return payload;
 }
@@ -47,6 +61,9 @@ export interface PurchaseOrderItem {
   total: number;
   received: number;
   notes: string;
+  /** Proveedor de esta línea (pedido multi-proveedor). */
+  supplierId?: string;
+  supplierName?: string;
 }
 
 export type PurchaseOrderUrgency = 'normal' | 'high' | 'critical';
@@ -80,6 +97,8 @@ export interface PurchaseOrder {
   approvedAt: string;
   purchaseInvoiceId: string;
   financeMovementId: string;
+  businessId?: string;
+  businessName?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -100,12 +119,18 @@ export interface LowStockItem {
   workCenterName: string;
 }
 
+import { purchaseListQuery } from './purchaseBusinessScope';
+
 // ─── Purchase Orders API ──────────────────────────────────────────────────────
 
-export async function listPurchaseOrdersRequest(userId: string): Promise<PurchaseOrder[]> {
+export async function listPurchaseOrdersRequest(
+  userId: string,
+  opts?: { businessId?: string; accountBusinessCount?: number },
+): Promise<PurchaseOrder[]> {
   const id = normalizeUserId(userId);
+  const qs = purchaseListQuery(opts?.businessId, opts?.accountBusinessCount);
   const payload = await request<{ ok: boolean; orders: PurchaseOrder[] }>(
-    `/api/purchase-orders/${encodeURIComponent(id)}`,
+    `/api/purchase-orders/${encodeURIComponent(id)}${qs}`,
   );
   return payload.orders || [];
 }

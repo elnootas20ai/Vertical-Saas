@@ -614,7 +614,7 @@ export async function searchInvoices(req, res) {
     const filtered = q
       ? invoices.filter((i) => i.invoiceNumber?.toLowerCase().includes(q) || i.supplierName?.toLowerCase().includes(q)).slice(0, 20)
       : invoices.slice(0, 20);
-    return res.json({ ok: true, invoices: filtered.map(sanitizePurchaseInvoice) });
+    return res.json({ ok: true, invoices: filtered.map((inv) => sanitizePurchaseInvoice(inv, { forList: true })) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error?.message || 'Error buscando facturas' });
   }

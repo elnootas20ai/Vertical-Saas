@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useModalClose } from '../../hooks/useModalClose';
@@ -10,6 +10,7 @@ import {
   deleteSupplierRequest,
   listCatalogItemsRequest,
   listPurchaseInvoicesRequest,
+  getDeliveryConfigRequest,
   type Supplier,
   type CatalogItem,
   type PurchaseInvoice,
@@ -53,11 +54,17 @@ import { SupplierPaymentTermsField } from '../../components/saas/SupplierPayment
 import {
   initialSupplierCatalogItemIds,
   initialSupplierItemCosts,
+  initialSupplierOrganizerIds,
   parseSupplierItemCosts,
+  resolveSupplierOrganizerIdsForSave,
   labelsForSupplierOrganizerIds,
+  supplierFormInitFingerprint,
   SupplierOrganizersField,
 } from '../../components/saas/SupplierOrganizersField';
-import { syncSupplierCatalogItemLinks } from '../../lib/supplierCatalogLinks';
+import { syncSupplierCatalogItemLinks, resolveSupplierSelectedStockIds } from '../../lib/supplierCatalogLinks';
+import { explicitMarkedStockItemsForSupplier } from '../../lib/purchaseSuggestions';
+import { commercialLineBrands } from '../../lib/deliveryCatalogImportLogic';
+import { unifyStoreIngredientsFromConfig } from '../../lib/catalogCustomization';
 import {
   normalizeSupplierCode,
   sanitizeSupplierCodeInput,
@@ -71,12 +78,14 @@ import { useBusinessOptional } from '../../context/BusinessContext';
 import { listBrandsRequest, type Brand } from '../../lib/brandsApi';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { filterPurchaseDocsByBusinessScope } from '../../lib/purchaseBusinessScope';
 
 interface CreateSupplierModalProps {
   isOpen: boolean;
   onClose: () => void;
   onCreate: (data: Partial<Supplier> & { catalogItemCosts?: Record<string, number> }) => Promise<void>;
   editItem?: Supplier | null;
+  editHydrating?: boolean;
   brands?: Brand[];
   catalogItems?: CatalogItem[];
   storeIngredients?: StoreIngredient[];
@@ -88,12 +97,15 @@ function CreateSupplierModal({
   onClose,
   onCreate,
   editItem,
+  editHydrating = false,
   brands = [],
   catalogItems = [],
   storeIngredients = [],
   existingSuppliers = [],
 }: CreateSupplierModalProps) {
   const [submitting, setSubmitting] = useState(false);
+  const [formInitReady, setFormInitReady] = useState(false);
+  const [organizersFieldKey, setOrganizersFieldKey] = useState(0);
   const [codeManual, setCodeManual] = useState(false);
   const [form, setForm] = useState({
     name: '', code: '', cif: '', email: '', phone: '', address: '',
@@ -102,29 +114,86 @@ function CreateSupplierModal({
     catalogItemIds: [] as string[],
     itemCosts: {} as Record<string, string>,
   });
+  const supplierFormSessionRef = useRef<{ fingerprint: string } | null>(null);
+  const organizersTouchedRef = useRef(false);
+  const formRef = useRef(form);
+  const editItemRef = useRef(editItem);
+  const catalogItemsRef = useRef(catalogItems);
+  const brandsRef = useRef(brands);
+  const storeIngredientsRef = useRef(storeIngredients);
+  editItemRef.current = editItem;
+  catalogItemsRef.current = catalogItems;
+  brandsRef.current = brands;
+  storeIngredientsRef.current = storeIngredients;
+
+  const applyForm = (next: typeof form | ((prev: typeof form) => typeof form)) => {
+    setForm((prev) => {
+      const merged = typeof next === 'function' ? next(prev) : next;
+      formRef.current = merged;
+      return merged;
+    });
+  };
+  formRef.current = form;
+
+  const editSnapshot = supplierFormInitFingerprint(editItem, catalogItems.length);
 
   useEffect(() => {
-    if (!isOpen) return;
-    setCodeManual(Boolean(editItem?.code));
-    if (editItem) {
-      const catalogItemIds = initialSupplierCatalogItemIds(editItem, catalogItems);
-      setForm({
-        name: editItem.name, code: editItem.code || '', cif: editItem.cif || '', email: editItem.email || '',
-        phone: editItem.phone || '', address: editItem.address || '',
-        contactPerson: editItem.contactPerson || '', category: editItem.category || '',
-        paymentTerms: editItem.paymentTerms || '', notes: editItem.notes || '',
-        organizerIds: Array.isArray(editItem.organizerIds) ? [...editItem.organizerIds] : [],
-        catalogItemIds,
-        itemCosts: initialSupplierItemCosts(catalogItemIds, catalogItems),
-      });
-    } else {
-      setForm({
-        name: '', code: suggestNextSupplierCode(existingSuppliers), cif: '', email: '', phone: '', address: '', contactPerson: '',
-        category: '', paymentTerms: '', notes: '', organizerIds: [], catalogItemIds: [],
-        itemCosts: {},
-      });
+    if (!isOpen) {
+      supplierFormSessionRef.current = null;
+      organizersTouchedRef.current = false;
+      setFormInitReady(false);
+      return;
     }
-  }, [editItem, isOpen, catalogItems, existingSuppliers]);
+    if (editItem && (editHydrating || catalogItems.length === 0)) {
+      setFormInitReady(false);
+      return;
+    }
+
+    const edit = editItemRef.current;
+    const items = catalogItemsRef.current;
+    const fingerprint = supplierFormInitFingerprint(edit, items.length);
+    if (organizersTouchedRef.current && supplierFormSessionRef.current?.fingerprint === fingerprint) {
+      setFormInitReady(true);
+      return;
+    }
+    if (supplierFormSessionRef.current?.fingerprint === fingerprint) {
+      setFormInitReady(true);
+      return;
+    }
+
+    supplierFormSessionRef.current = { fingerprint };
+
+    setCodeManual(Boolean(edit?.code));
+    if (edit) {
+      const catalogItemIds = initialSupplierCatalogItemIds(edit, items);
+      const nextForm = {
+        name: edit.name, code: edit.code || '', cif: edit.cif || '', email: edit.email || '',
+        phone: edit.phone || '', address: edit.address || '',
+        contactPerson: edit.contactPerson || '', category: edit.category || '',
+        paymentTerms: edit.paymentTerms || '', notes: edit.notes || '',
+        organizerIds: initialSupplierOrganizerIds(
+          edit,
+          items,
+          storeIngredientsRef.current,
+          brandsRef.current,
+        ),
+        catalogItemIds,
+        itemCosts: initialSupplierItemCosts(catalogItemIds, items),
+      };
+      formRef.current = nextForm;
+      setForm(nextForm);
+    } else {
+      const nextForm = {
+        name: '', code: suggestNextSupplierCode(existingSuppliers), cif: '', email: '', phone: '', address: '', contactPerson: '',
+        category: '', paymentTerms: '', notes: '', organizerIds: [] as string[], catalogItemIds: [] as string[],
+        itemCosts: {} as Record<string, string>,
+      };
+      formRef.current = nextForm;
+      setForm(nextForm);
+    }
+    setOrganizersFieldKey((k) => k + 1);
+    setFormInitReady(true);
+  }, [isOpen, editSnapshot, editHydrating, catalogItems.length, existingSuppliers]);
   useModalClose(isOpen, onClose);
 
   const handleNameChange = (name: string) => {
@@ -146,29 +215,47 @@ function CreateSupplierModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.name.trim()) { toast.error('El nombre es obligatorio'); return; }
-    const code = normalizeSupplierCode(form.code);
+    const current = formRef.current;
+    if (!current.name.trim()) { toast.error('El nombre es obligatorio'); return; }
+    const code = normalizeSupplierCode(current.code);
     if (!code) { toast.error('El código del proveedor es obligatorio'); return; }
     if (supplierCodeAlreadyUsed(code, existingSuppliers, editItem?._id)) {
       toast.error(`Ya existe un proveedor con el código ${code}`);
       return;
     }
+    const priorOrganizers = (editItem?.organizerIds || []).filter(Boolean).length;
+    if (
+      editItem &&
+      priorOrganizers > 0 &&
+      current.organizerIds.length === 0 &&
+      !organizersTouchedRef.current
+    ) {
+      toast.error('Las categorías no se cargaron bien. Cierra y vuelve a abrir el proveedor.');
+      return;
+    }
     setSubmitting(true);
     try {
+      const organizerIds = resolveSupplierOrganizerIdsForSave(
+        current.organizerIds,
+        current.catalogItemIds,
+        catalogItemsRef.current,
+        storeIngredientsRef.current,
+        brandsRef.current,
+      );
       await onCreate({
-        name: form.name,
+        name: current.name,
         code,
-        cif: form.cif,
-        email: form.email,
-        phone: form.phone,
-        address: form.address,
-        contactPerson: form.contactPerson,
-        category: form.category,
-        paymentTerms: form.paymentTerms,
-        notes: form.notes,
-        organizerIds: form.organizerIds,
-        catalogItemIds: form.catalogItemIds,
-        catalogItemCosts: parseSupplierItemCosts(form.itemCosts),
+        cif: current.cif,
+        email: current.email,
+        phone: current.phone,
+        address: current.address,
+        contactPerson: current.contactPerson,
+        category: current.category,
+        paymentTerms: current.paymentTerms,
+        notes: current.notes,
+        organizerIds,
+        catalogItemIds: current.catalogItemIds,
+        catalogItemCosts: parseSupplierItemCosts(current.itemCosts),
         active: editItem?.active ?? true,
       });
     } finally {
@@ -197,9 +284,9 @@ function CreateSupplierModal({
             </div>
             <div>
               <label className={labelClass}>Código *</label>
-              <input className={`${inputClass} font-mono uppercase`} placeholder="MAKRO" maxLength={SUPPLIER_CODE_MAX_LEN} value={form.code} onChange={(e) => handleCodeChange(e.target.value)} />
+              <input className={`${inputClass} font-mono uppercase`} placeholder="MAK-001" maxLength={SUPPLIER_CODE_MAX_LEN} value={form.code} onChange={(e) => handleCodeChange(e.target.value)} />
               <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
-                Se rellena solo con el nombre (ej. Makro → MAKRO). Puedes editarlo. Máx. {SUPPLIER_CODE_MAX_LEN} caracteres: A–Z, 0–9 y guión.
+                Se rellena solo con el nombre (ej. Makro → MAK-001). Puedes editarlo. Máx. {SUPPLIER_CODE_MAX_LEN} caracteres: A–Z, 0–9 y guión.
               </p>
             </div>
           </div>
@@ -215,18 +302,29 @@ function CreateSupplierModal({
             </div>
           </div>
           <div><label className={labelClass}>Dirección</label><input className={inputClass} placeholder="Dirección del proveedor" value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} /></div>
-          <SupplierOrganizersField
-            organizerIds={form.organizerIds}
-            catalogItemIds={form.catalogItemIds}
-            itemCosts={form.itemCosts}
-            onChange={({ organizerIds, catalogItemIds, itemCosts }) =>
-              setForm((f) => ({ ...f, organizerIds, catalogItemIds, itemCosts }))
-            }
-            brands={brands}
-            catalogItems={catalogItems}
-            storeIngredients={storeIngredients}
-            labelClassName={labelClass}
-          />
+          {formInitReady ? (
+            <SupplierOrganizersField
+              key={`supplier-organizers-${organizersFieldKey}`}
+              organizerIds={form.organizerIds}
+              catalogItemIds={form.catalogItemIds}
+              itemCosts={form.itemCosts}
+              onChange={({ organizerIds, catalogItemIds, itemCosts }) => {
+                organizersTouchedRef.current = true;
+                applyForm((f) => ({ ...f, organizerIds, catalogItemIds, itemCosts }));
+              }}
+              brands={brands}
+              catalogItems={catalogItems}
+              storeIngredients={storeIngredients}
+              labelClassName={labelClass}
+              businessType={businessCtx?.currentBusiness?.businessType}
+            />
+          ) : (
+            <div className="rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700 px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+              {editItem && (editHydrating || catalogItems.length === 0)
+                ? 'Cargando categorías y productos del proveedor…'
+                : 'Preparando el formulario…'}
+            </div>
+          )}
           <SupplierPaymentTermsField
             value={form.paymentTerms}
             onChange={(paymentTerms) => setForm((f) => ({ ...f, paymentTerms }))}
@@ -262,6 +360,7 @@ export function SuppliersPage() {
   const { user } = useAuth();
   const businessCtx = useBusinessOptional();
   const businessId = resolveBusinessScopeId(businessCtx?.currentBusiness);
+  const accountBusinessCount = businessCtx?.businesses?.length ?? 1;
   const dataUserId = resolveBusinessDataUserId(user, businessCtx?.currentBusiness);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -270,13 +369,39 @@ export function SuppliersPage() {
   const [invoices, setInvoices] = useState<PurchaseInvoice[]>([]);
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
+  const [storeIngredients, setStoreIngredients] = useState<StoreIngredient[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateSupplier, setShowCreateSupplier] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+  const [supplierModalHydrating, setSupplierModalHydrating] = useState(false);
   const [searchSupplier, setSearchSupplier] = useState('');
   const [showAIModal, setShowAIModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [quickFilter, setQuickFilter] = useState<QuickFilter>('all');
+  const inventoryCommercialBrands = useMemo(() => commercialLineBrands(brands), [brands]);
+
+  const openSupplierEditor = useCallback(
+    async (supplier: Supplier | null) => {
+      setEditingSupplier(supplier);
+      setShowCreateSupplier(true);
+      if (!supplier?._id || !dataUserId) {
+        setSupplierModalHydrating(false);
+        return;
+      }
+      setSupplierModalHydrating(true);
+      try {
+        const freshSuppliers = await listSuppliersRequest(dataUserId);
+        setSuppliers(freshSuppliers);
+        const fresh = freshSuppliers.find((s) => s._id === supplier._id);
+        if (fresh) setEditingSupplier(fresh);
+      } catch {
+        /* se usa el proveedor de la lista local */
+      } finally {
+        setSupplierModalHydrating(false);
+      }
+    },
+    [dataUserId],
+  );
 
   const SUPPLIER_AI_FIELDS: AIFieldDef[] = [
     { key: 'name', label: 'Nombre' },
@@ -330,32 +455,57 @@ export function SuppliersPage() {
 
   const loadData = useCallback(async () => {
     if (!dataUserId) return;
+    setLoading(true);
     try {
-      const [sups, items, invs, ords] = await Promise.all([
-        listSuppliersRequest(dataUserId),
-        listCatalogItemsRequest(dataUserId),
-        listPurchaseInvoicesRequest(dataUserId),
-        listPurchaseOrdersRequest(dataUserId),
-      ]);
+      const sups = await listSuppliersRequest(dataUserId);
       setSuppliers(sups);
-      setCatalogItems(items);
-      setInvoices(invs);
-      setOrders(ords);
-      if (businessId) {
-        try {
-          setBrands(await listBrandsRequest(businessId));
-        } catch {
-          setBrands([]);
-        }
-      } else {
-        setBrands([]);
-      }
     } catch {
       toast.error('Error al cargar proveedores');
-    } finally {
       setLoading(false);
+      return;
     }
-  }, [businessId, dataUserId]);
+    setLoading(false);
+
+    void (async () => {
+      try {
+        const [items, invs, ords] = await Promise.all([
+          listCatalogItemsRequest(dataUserId, 'stock'),
+          listPurchaseInvoicesRequest(dataUserId, {
+            businessId: businessId || undefined,
+            accountBusinessCount,
+          }),
+          listPurchaseOrdersRequest(dataUserId, {
+            businessId: businessId || undefined,
+            accountBusinessCount,
+          }),
+        ]);
+        setCatalogItems(items);
+        setInvoices(filterPurchaseDocsByBusinessScope(invs, businessId, accountBusinessCount));
+        setOrders(filterPurchaseDocsByBusinessScope(ords, businessId, accountBusinessCount));
+        let loadedBrands: Brand[] = [];
+        if (businessId) {
+          try {
+            loadedBrands = await listBrandsRequest(businessId);
+            setBrands(loadedBrands);
+          } catch {
+            loadedBrands = [];
+            setBrands([]);
+          }
+        } else {
+          setBrands([]);
+        }
+        try {
+          const config = await getDeliveryConfigRequest(dataUserId);
+          const brandIds = commercialLineBrands(loadedBrands).map((b) => b._id);
+          setStoreIngredients(unifyStoreIngredientsFromConfig(config, brandIds));
+        } catch {
+          setStoreIngredients([]);
+        }
+      } catch {
+        /* KPIs secundarios: la lista de proveedores ya está visible */
+      }
+    })();
+  }, [businessId, accountBusinessCount, dataUserId]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -364,45 +514,72 @@ export function SuppliersPage() {
     if (!editId || suppliers.length === 0) return;
     const found = suppliers.find(s => s._id === editId);
     if (!found) return;
-    setEditingSupplier(found);
-    setShowCreateSupplier(true);
+    void openSupplierEditor(found);
     // Quitar ?edit= al abrir: si queda, cada alta reabre el mismo proveedor.
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       next.delete('edit');
       return next;
     }, { replace: true });
-  }, [searchParams, suppliers, setSearchParams]);
+  }, [searchParams, suppliers, setSearchParams, openSupplierEditor]);
 
   useEffect(() => {
     const action = searchParams.get('action');
     if (!action) return;
     if (action === 'new') {
-      setEditingSupplier(null);
-      setShowCreateSupplier(true);
+      void openSupplierEditor(null);
     } else if (action === 'import') setShowImportModal(true);
     else if (action === 'ai') setShowAIModal(true);
     setSearchParams({}, { replace: true });
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams, openSupplierEditor]);
 
   const handleCreateSupplier = async (data: Partial<Supplier> & { catalogItemCosts?: Record<string, number> }) => {
     if (!dataUserId) { toast.error('Sesión no válida. Recarga la página e inicia sesión de nuevo.'); return; }
-    const { catalogItemCosts, ...supplierData } = data;
+    const { catalogItemCosts, ...rest } = data;
+    const resolvedCatalogItemIds = resolveSupplierSelectedStockIds(
+      rest.catalogItemIds || [],
+      catalogItems,
+      storeIngredients,
+    );
+    const resolvedCosts: Record<string, number> = {};
+    for (const [rawId, cost] of Object.entries(catalogItemCosts || {})) {
+      const mapped = resolveSupplierSelectedStockIds([rawId], catalogItems, storeIngredients)[0];
+      if (mapped) resolvedCosts[mapped] = cost;
+    }
+    const organizerIds = [
+      ...new Set(
+        (Array.isArray(rest.organizerIds) ? rest.organizerIds : [])
+          .map((id) => String(id || '').trim())
+          .filter(Boolean),
+      ),
+    ];
+    const supplierData = {
+      ...rest,
+      organizerIds,
+      catalogItemIds: resolvedCatalogItemIds,
+    };
     try {
       if (editingSupplier) {
-        const updated = await updateSupplierRequest(dataUserId, { ...editingSupplier, ...supplierData } as Supplier);
+        const updated = await updateSupplierRequest(dataUserId, {
+          ...editingSupplier,
+          ...supplierData,
+          organizerIds,
+          catalogItemIds: resolvedCatalogItemIds,
+        } as Supplier);
         const linked = await syncSupplierCatalogItemLinks(
           dataUserId,
           updated,
           supplierData.catalogItemIds || [],
           catalogItems,
-          catalogItemCosts,
+          resolvedCosts,
+          storeIngredients,
         );
         if (linked.length > 0) {
           const byId = new Map(linked.map((i) => [i._id, i]));
           setCatalogItems((prev) => prev.map((i) => byId.get(i._id) ?? i));
         }
-        setSuppliers(prev => prev.map(s => s._id === updated._id ? { ...updated, ...supplierData, _id: updated._id } : s));
+        const freshSuppliers = await listSuppliersRequest(dataUserId);
+        setSuppliers(freshSuppliers);
         toast.success('Proveedor actualizado');
       } else {
         const created = await createSupplierRequest(dataUserId, supplierData);
@@ -411,13 +588,15 @@ export function SuppliersPage() {
           created,
           supplierData.catalogItemIds || [],
           catalogItems,
-          catalogItemCosts,
+          resolvedCosts,
+          storeIngredients,
         );
         if (linked.length > 0) {
           const byId = new Map(linked.map((i) => [i._id, i]));
           setCatalogItems((prev) => prev.map((i) => byId.get(i._id) ?? i));
         }
-        setSuppliers(prev => [created, ...prev.filter((s) => s._id !== created._id)]);
+        const freshSuppliers = await listSuppliersRequest(dataUserId);
+        setSuppliers(freshSuppliers);
         toast.success('Proveedor creado');
       }
       setShowCreateSupplier(false);
@@ -559,7 +738,7 @@ export function SuppliersPage() {
           </div>
           <AddButtonDropdown
             label="Nuevo proveedor"
-            onQuickAdd={() => { setEditingSupplier(null); setShowCreateSupplier(true); }}
+            onQuickAdd={() => { void openSupplierEditor(null); }}
             onAIAdd={() => setShowAIModal(true)}
             onImport={() => setShowImportModal(true)}
             quickAddLabel="Alta rápida"
@@ -637,13 +816,18 @@ export function SuppliersPage() {
             <p className="font-semibold">{quickFilter !== 'all' ? 'Sin resultados para este filtro' : 'Sin proveedores registrados'}</p>
             <p className="text-sm mt-1">{quickFilter !== 'all' ? 'Cambia el filtro o la búsqueda' : 'Añade el primer proveedor'}</p>
             {quickFilter === 'all' && (
-              <button onClick={() => { setEditingSupplier(null); setShowCreateSupplier(true); }} className="mt-4 px-4 py-2 bg-gray-900 dark:bg-gray-100 dark:text-gray-900 text-white rounded-xl text-sm font-medium">+ Nuevo proveedor</button>
+              <button onClick={() => { void openSupplierEditor(null); }} className="mt-4 px-4 py-2 bg-gray-900 dark:bg-gray-100 dark:text-gray-900 text-white rounded-xl text-sm font-medium">+ Nuevo proveedor</button>
             )}
           </div>
         ) : (
           <div className="space-y-3">
             {filteredSuppliers.map(supplier => {
-              const productCount = catalogItems.filter(i => i.supplierId === supplier._id).length;
+              const productCount = explicitMarkedStockItemsForSupplier(
+                catalogItems,
+                supplier,
+                storeIngredients,
+                inventoryCommercialBrands,
+              ).length;
               const invoiceCount = invoices.filter(i => i.supplierId === supplier._id).length;
               const orderCount = orders.filter(o => o.supplierId === supplier._id).length;
               const overdueCount = suppliersWithOverdue.get(supplier._id) || 0;
@@ -724,7 +908,7 @@ export function SuppliersPage() {
                           <Shield className="w-4 h-4 text-green-600" />
                         </button>
                       )}
-                      <button onClick={e => { e.stopPropagation(); setEditingSupplier(supplier); setShowCreateSupplier(true); }} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors" title="Editar"><Edit3 className="w-4 h-4 text-gray-600 dark:text-gray-400" /></button>
+                      <button onClick={e => { e.stopPropagation(); void openSupplierEditor(supplier); }} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors" title="Editar"><Edit3 className="w-4 h-4 text-gray-600 dark:text-gray-400" /></button>
                       <button onClick={e => { e.stopPropagation(); handleDeleteSupplier(supplier); }} className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors" title="Eliminar"><Trash2 className="w-4 h-4 text-red-500" /></button>
                     </div>
                   </div>
@@ -736,11 +920,13 @@ export function SuppliersPage() {
 
       <CreateSupplierModal
         isOpen={showCreateSupplier}
-        onClose={() => { setShowCreateSupplier(false); setEditingSupplier(null); }}
+        onClose={() => { setShowCreateSupplier(false); setEditingSupplier(null); setSupplierModalHydrating(false); }}
         onCreate={handleCreateSupplier}
         editItem={editingSupplier}
+        editHydrating={supplierModalHydrating}
         brands={brands}
         catalogItems={catalogItems}
+        storeIngredients={storeIngredients}
         existingSuppliers={suppliers}
       />
 
