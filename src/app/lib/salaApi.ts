@@ -197,6 +197,21 @@ export interface DiningOrderItem {
   cancelledBy: string;
   /** Marcas del producto de carta (misma lógica que delivery). */
   brandIds?: string[];
+  /** Mitad y mitad: 2 sabores elegidos en TPV (misma estructura que delivery). */
+  halfHalfPizza?: {
+    firstProductId: string;
+    firstProductName: string;
+    secondProductId: string;
+    secondProductName: string;
+  };
+  /** Selecciones de combo/menú (misma estructura que delivery). */
+  comboSelections?: Array<{
+    productId: string;
+    productName?: string;
+    quantity: number;
+    slotKind?: string;
+    instanceId?: string;
+  }>;
 }
 
 export interface DiningComanda {

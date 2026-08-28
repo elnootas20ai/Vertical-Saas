@@ -107,3 +107,25 @@ test('buildInventoryOrganizerGroups no mete el resto en un Total que no filtra',
   assert.equal(filtered.length, 1);
   assert.equal(filtered[0].name, 'Cola');
 });
+
+test('buildInventoryOrganizerGroups lista todas las marcas comerciales aunque estén vacías', () => {
+  const pizza = { _id: 'brand-pizza-1', name: 'Modomio', deliveryLineKind: 'pizza', primaryColor: '#dc2626' };
+  const burger = { _id: 'brand-burger-1', name: 'Black Burger', deliveryLineKind: 'burger_fastfood' };
+  const items = [
+    {
+      name: 'Masa',
+      stockQuantity: 4,
+      minStock: 1,
+      customFields: { inventoryOrganizerId: pizza._id },
+    },
+  ];
+  const groups = buildInventoryOrganizerGroups(items, [], [pizza, burger]);
+  const modomio = groups.find((g) => g.id === pizza._id);
+  const black = groups.find((g) => g.id === burger._id);
+  assert.ok(modomio);
+  assert.equal(modomio.label, 'Modomio');
+  assert.equal(modomio.total, 1);
+  assert.ok(black);
+  assert.equal(black.label, 'Black Burger');
+  assert.equal(black.total, 0);
+});

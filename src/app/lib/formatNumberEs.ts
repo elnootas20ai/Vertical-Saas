@@ -42,12 +42,14 @@ export function formatMoneyEs(value: number | string | null | undefined): string
   return `${formatted} €`;
 }
 
-/** Días / cantidades con hasta 1 decimal si hace falta: 2,5 · 10 */
+/** Días / cantidades con hasta N decimales si hace falta: 2,5 · 10 · -0,27 */
 export function formatQtyEs(value: number | string | null | undefined, maxFraction = 1): string {
   const n = toFiniteNumber(value);
   if (n == null) return value == null ? '' : String(value);
-  const isInt = Math.abs(n - Math.round(n)) < 1e-9;
-  return n.toLocaleString('es-ES', {
+  const factor = 10 ** Math.max(0, Math.min(8, Math.floor(maxFraction)));
+  const rounded = Math.round(n * factor) / factor;
+  const isInt = Math.abs(rounded - Math.round(rounded)) < 1e-9;
+  return rounded.toLocaleString('es-ES', {
     useGrouping: true,
     minimumFractionDigits: 0,
     maximumFractionDigits: isInt ? 0 : maxFraction,

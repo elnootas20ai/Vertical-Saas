@@ -34,6 +34,17 @@ import { DELIVERY_ACTIVE_STORE_CHANGED } from '../../lib/deliveryOpsPdvSelection
 import { listWarehousesRequest, type Warehouse } from '../../lib/warehouseApi';
 import { useVerticalCatalog } from '../../hooks/useVerticalCatalog';
 import { InventoryPanel } from '../../components/saas/InventoryPanel';
+import { CatalogServiceRulesFields } from '../../components/saas/CatalogServiceRulesFields';
+import {
+  brandIdsForCatalogServiceSave,
+  CATALOG_SERVICE_CATEGORY,
+  DEFAULT_CATALOG_SERVICE_RULES,
+  mergeCatalogServiceRulesIntoCustomFields,
+  readCatalogServiceRules,
+  summarizeCatalogServiceRules,
+  validateCatalogServiceRules,
+  type CatalogServiceRules,
+} from '../../lib/catalogServiceRules';
 import { CatalogCoreLoadingState } from '../../components/saas/CatalogCoreLoadingState';
 import { CatalogUnitChip, StockQtyWithUnit } from '../../components/saas/CatalogUnitChip';
 import { SupplierPaymentTermsField } from '../../components/saas/SupplierPaymentTermsField';
@@ -93,11 +104,14 @@ import {
   SaasTabSearch,
   SaasTabSecondaryButton,
   SaasTabToolbarRow,
-  SaasTabWorkspace,
 } from '../../components/saas/SaasTabWorkspace';
+import { CatalogTabShell } from '../../components/saas/CatalogTabShell';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
-import { listBrandsRequest, createBrandRequest, deleteBrandRequest, type Brand } from '../../lib/brandsApi';
+import { listBrandsRequest, deleteBrandRequest, type Brand } from '../../lib/brandsApi';
+import { countCommercialBrands, useTenantEntitlements } from '../../hooks/useTenantEntitlements';
+import { writeBillingSelection } from '../../lib/billingSelection';
+import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
 import {
   formatUnmatchedCommercialBrandWarning,
   mapImportEntryToCatalogItem,
@@ -112,7 +126,7 @@ import {
   syncTpvOrganizersAfterCatalogImport,
   removeCatalogCategoryFromBrands,
 } from '../../lib/deliveryCatalogImport';
-import { commercialLineBrands, defaultBrandIdForCatalogImport, isWarehouseImportCategory, organizerBrandsForCatalogTemplate } from '../../lib/deliveryCatalogImportLogic';
+import { commercialLineBrands, isWarehouseImportCategory, organizerBrandsForCatalogTemplate } from '../../lib/deliveryCatalogImportLogic';
 import {
   catalogImportFieldsForVertical,
   catalogHeaderAliasesForVertical,
@@ -149,7 +163,6 @@ import {
   type Supplier,
   type PurchaseInvoice,
   type PurchaseInvoiceLine,
-  pointOfSaleDisplayLabel,
 } from '../../lib/deliveryApi';
 import { localCalendarDayKey, localDayBoundsForKey } from '../../lib/tpvCajaScope';
 import {
@@ -187,8 +200,8 @@ import {
   ArrowLeft,
   ImagePlus,
   ScanLine,
-  Store,
   Receipt,
+  Settings2,
 } from 'lucide-react';
 import { SAAS__OcrScanModal } from '../../components/design-system/SAAS__OcrScanModal';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
@@ -211,20 +224,22 @@ import { VehicleConfirmDialog } from '../../components/saas/vehicles/VehicleConf
 import { useActivationFocus } from '../../hooks/useActivationFocus';
 import { ActivationFieldWrap } from '../../components/saas/ActivationGuideUi';
 import { StaffConsumptionTabPanel } from '../../components/saas/StaffConsumptionTabPanel';
-import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { resolveBusinessDataUserId, normalizeTenantUserId } from '../../lib/tenantUserId';
 import { filterPurchaseDocsByBusinessScope } from '../../lib/purchaseBusinessScope';
 import { pollSupplierInvoicesNow, listSupplierInvoicePdvEmailConfigs, type SupplierInvoicePdvEmailStatus } from '../../lib/supplierInvoiceApi';
 import { createMovementFromInvoice, listFinanceMovements } from '../../lib/financeApi';
 import {
   isCatalogTpvConfigurable,
   catalogBuildYourOwnIngredientOptions,
-  catalogPizzaCandidatesForHalfHalf,
+  catalogHalfHalfFlavorCandidates,
   isBuildYourOwnIngredientSelectionInvalid,
   isHalfHalfFlavorSelectionInvalid,
   mergeComboProductIngredients,
   normalizeBuildYourOwnAllowedIngredientIds,
   normalizeCatalogSupplementsForSave,
   normalizeHalfHalfAllowedProductIds,
+  normalizeHalfHalfBrandId,
+  productBrandIdsFromItem,
   parseCatalogSupplements,
   parseIngredientsBulkText,
   normalizeCatalogFichaIngredientsForSave,
@@ -234,9 +249,14 @@ import {
   ingredientChargesExtra,
   normalizeTpvDefaultExtraPrice,
   inferTpvDefaultExtraPrice,
+  normalizeStoreIngredients,
+  withStoreIngredientTpvFlags,
+  resolveBrandTpvCategoryKeys,
   type StoreIngredient,
   type TpvBrandIngredientSelection,
+  type TpvCategoryTemplateKey,
 } from '../../lib/catalogCustomization';
+import { withVertialDefaultBaseCost } from '../../lib/vertialDefaultCosts';
 import { StoreIngredientsPanel } from '../../components/saas/StoreIngredientsPanel';
 import { CatalogItemDetailModal } from '../../components/saas/CatalogItemDetailModal';
 import { CatalogComboCompositionEditor } from '../../components/saas/CatalogComboCompositionEditor';
@@ -246,6 +266,7 @@ import {
   recipePicksToTpvIngredientsText,
   type CatalogRecipePick,
 } from '../../components/saas/CatalogProductRecipePicker';
+import { CatalogSupplementPicker } from '../../components/saas/CatalogSupplementPicker';
 import {
   calculateRecipeTotalCost,
   isCatalogCostingProduct,
@@ -296,7 +317,7 @@ const ALLERGEN_OPTIONS = [
   'Lácteos', 'Frutos de cáscara', 'Apio', 'Mostaza', 'Sésamo', 'Sulfitos', 'Moluscos', 'Altramuces',
 ];
 
-const CREATE_STEP_LABELS = ['Producto y precio', 'Ingredientes y composición', 'Foto y publicación'];
+const CREATE_STEP_LABELS = ['Producto', 'Ingredientes y composición', 'Foto y publicación'];
 /** Cuadrado recomendado para carta / web / TPV (calidad). */
 const CATALOG_PRODUCT_IMAGE_PX = 1024;
 
@@ -338,10 +359,6 @@ function CatalogEmptyActions({
       </div>
     </div>
   );
-}
-
-function defaultBrandIdForCatalog(brands: Brand[]): string {
-  return defaultBrandIdForCatalogImport(commercialLineBrands(brands));
 }
 
 /** Fusiona listados sin perder filas recién creadas en UI (race con reload). */
@@ -413,6 +430,11 @@ function CreateCatalogItemModal({
   brandIngredientSelection = {},
   isRestaurantCatalog = false,
 }: CreateCatalogItemModalProps) {
+  const navigate = useNavigate();
+  const commercialBrandCount = useMemo(() => countCommercialBrands(brands), [brands]);
+  const brandEntitlements = useTenantEntitlements({ commercialBrandCount });
+  const canAddCommercialBrand =
+    brands.length === 0 || brandEntitlements.canCreateCommercialBrand;
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [sessionCreated, setSessionCreated] = useState<Array<{ name: string; price: number }>>([]);
@@ -437,6 +459,11 @@ function CreateCatalogItemModal({
   const [addingCategory, setAddingCategory] = useState(false);
   const [newCategoryDraft, setNewCategoryDraft] = useState('');
   const [dismissedCategoryKeys, setDismissedCategoryKeys] = useState<Set<string>>(() => new Set());
+  const [showCreateByoIngredient, setShowCreateByoIngredient] = useState(false);
+  const [newByoIngredientName, setNewByoIngredientName] = useState('');
+  const [creatingByoIngredient, setCreatingByoIngredient] = useState(false);
+  const [creatingRecipeIngredient, setCreatingRecipeIngredient] = useState(false);
+  const [fieldErrorsShown, setFieldErrorsShown] = useState(false);
   const [form, setForm] = useState({
     itemType: 'product' as CatalogItem['itemType'],
     name: '',
@@ -462,7 +489,9 @@ function CreateCatalogItemModal({
     halfHalf: false,
     buildYourOwn: false,
     halfHalfAllowedProductIds: [] as string[],
+    halfHalfBrandId: '',
     buildYourOwnAllowedIngredientIds: [] as string[],
+    serviceRules: { ...DEFAULT_CATALOG_SERVICE_RULES } as CatalogServiceRules,
   });
 
   useEffect(() => {
@@ -473,11 +502,22 @@ function CreateCatalogItemModal({
       setAddingCategory(false);
       setNewCategoryDraft('');
       setDismissedCategoryKeys(new Set());
+      setShowCreateByoIngredient(false);
+      setNewByoIngredientName('');
+      setCreatingByoIngredient(false);
+      setFieldErrorsShown(false);
       return;
     }
 
     const justOpened = !createModalWasOpenRef.current;
     createModalWasOpenRef.current = true;
+
+    if (justOpened) {
+      setShowCreateByoIngredient(false);
+      setNewByoIngredientName('');
+      setCreatingByoIngredient(false);
+      setFieldErrorsShown(false);
+    }
 
     if (editItem) {
       const editCategory = normalizeImportCategory(String(editItem.category || '').trim());
@@ -549,9 +589,14 @@ function CreateCatalogItemModal({
         halfHalfAllowedProductIds: normalizeHalfHalfAllowedProductIds(
           editItem.customFields?.halfHalfAllowedProductIds,
         ),
+        halfHalfBrandId:
+          normalizeHalfHalfBrandId(editItem.customFields?.halfHalfBrandId) ||
+          productBrandIdsFromItem(editItem)[0] ||
+          '',
         buildYourOwnAllowedIngredientIds: normalizeBuildYourOwnAllowedIngredientIds(
           editItem.customFields?.buildYourOwnAllowedIngredientIds,
         ),
+        serviceRules: readCatalogServiceRules(editItem.customFields),
       });
       setStep(1);
       return;
@@ -565,7 +610,6 @@ function CreateCatalogItemModal({
     setDismissedCategoryKeys(new Set());
     setAddingCategory(catalogCategoriesInUse.length === 0);
     setNewCategoryDraft('');
-    const defaultId = defaultBrandIdForCatalog(brands);
 
     if (seedFromProduct) {
       const seedRef: CatalogComboRef = {
@@ -587,8 +631,7 @@ function CreateCatalogItemModal({
           const seedBrands = Array.isArray(seedFromProduct.brandIds)
             ? seedFromProduct.brandIds.filter(Boolean)
             : [];
-          if (seedBrands.length > 0) return [seedBrands[0]];
-          return defaultId ? [defaultId] : [];
+          return seedBrands.length > 0 ? [seedBrands[0]] : [];
         })(),
         newBrandName: '',
         showNewBrand: false,
@@ -608,7 +651,9 @@ function CreateCatalogItemModal({
         halfHalf: false,
         buildYourOwn: false,
         halfHalfAllowedProductIds: [],
+        halfHalfBrandId: '',
         buildYourOwnAllowedIngredientIds: [],
+        serviceRules: { ...DEFAULT_CATALOG_SERVICE_RULES },
       });
       setStep(1);
       return;
@@ -619,25 +664,19 @@ function CreateCatalogItemModal({
     setComboStructureConfirmed(true);
     setForm({
       itemType: 'product', name: '', description: '', category: '', unit: 'ud',
-      selectedBrandIds: defaultId ? [defaultId] : [],
+      selectedBrandIds: [],
       newBrandName: '',
       showNewBrand: false,
       unitPrice: '', taxRate: '', staffPrice: '', costPrice: '', stockQuantity: '', minStock: '',
       image: '', allergens: [], notes: '', webVisible: true, available: true,
       ingredients: '', supplements: [], halfHalf: false, buildYourOwn: false,
       halfHalfAllowedProductIds: [],
+      halfHalfBrandId: '',
       buildYourOwnAllowedIngredientIds: [],
+      serviceRules: { ...DEFAULT_CATALOG_SERVICE_RULES },
     });
     setStep(1);
   }, [editItem, seedFromProduct, isOpen, brands, defaultComboStructure, catalogCategoriesInUse]);
-
-  /** Si las marcas cargan después de abrir el modal, preselecciona la línea comercial por defecto. */
-  useEffect(() => {
-    if (!isOpen || editItem || seedFromProduct) return;
-    const defaultId = defaultBrandIdForCatalog(brands);
-    if (!defaultId) return;
-    setForm((f) => (f.selectedBrandIds.length > 0 ? f : { ...f, selectedBrandIds: [defaultId] }));
-  }, [isOpen, editItem, seedFromProduct, brands]);
 
   const reloadModalTpvIngredients = useCallback(async () => {
     if (!dataUserId) {
@@ -689,6 +728,11 @@ function CreateCatalogItemModal({
     Object.keys(modalBrandIngredientSelection).length > 0
       ? modalBrandIngredientSelection
       : brandIngredientSelection;
+
+  const modalDefaultExtraPrice = useMemo(
+    () => inferTpvDefaultExtraPrice(effectiveStoreIngredients),
+    [effectiveStoreIngredients],
+  );
 
   useEffect(() => {
     if (recipePicks.length === 0) return;
@@ -837,7 +881,6 @@ function CreateCatalogItemModal({
     [form.category],
   );
   const isSharedCatalogCategory = shouldClearBrandForCategory(normalizedCategory);
-  const requiresCommercialBrand = activeBrands.length > 0 && !isSharedCatalogCategory;
 
   useEffect(() => {
     if (!isOpen || editItem || !isSharedCatalogCategory) return;
@@ -845,15 +888,19 @@ function CreateCatalogItemModal({
     setForm((f) => ({ ...f, selectedBrandIds: [] }));
   }, [isOpen, editItem, isSharedCatalogCategory, form.selectedBrandIds.length]);
 
-  const halfHalfPizzaCandidates = useMemo(
+  const halfHalfCommercialBrands = useMemo(
+    () => sortBrandsForDisplay(commercialLineBrands(brands.filter((b) => b.active !== false))),
+    [brands],
+  );
+
+  const halfHalfFlavorCandidates = useMemo(
     () =>
-      catalogPizzaCandidatesForHalfHalf(
+      catalogHalfHalfFlavorCandidates(
         catalogItems,
         editItem?._id,
-        form.selectedBrandIds,
-        brands,
+        form.halfHalfBrandId,
       ),
-    [catalogItems, editItem?._id, form.selectedBrandIds, brands],
+    [catalogItems, editItem?._id, form.halfHalfBrandId],
   );
 
   const formCatalogPreview = useMemo(
@@ -866,6 +913,25 @@ function CreateCatalogItemModal({
     }),
     [form.category, form.name, form.selectedBrandIds, form.itemType, editItem?.customFields],
   );
+
+  const duplicateCatalogItemByName = useMemo(
+    () =>
+      findCatalogDuplicateByName(catalogMenuItemsForDuplicateCheck, form.name.trim(), {
+        excludeId: editItem?._id,
+      }),
+    [catalogMenuItemsForDuplicateCheck, form.name, editItem?._id],
+  );
+
+  const isSalePriceMissing = useMemo(() => {
+    const raw = form.unitPrice.trim();
+    if (!raw) return true;
+    const value = Number(raw);
+    return !Number.isFinite(value) || value <= 0;
+  }, [form.unitPrice]);
+
+  const showNameRequiredError = fieldErrorsShown && !form.name.trim();
+  const showNameDuplicateError = fieldErrorsShown && Boolean(duplicateCatalogItemByName);
+  const showSalePriceError = fieldErrorsShown && isSalePriceMissing;
 
   const buildYourOwnIngredientCandidates = useMemo(
     () =>
@@ -909,7 +975,11 @@ function CreateCatalogItemModal({
     if (!isOpen) return;
     const scrollTop = () => {
       modalOverlayRef.current?.scrollTo({ top: 0, behavior: 'auto' });
-      modalPanelRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+      const panel = modalPanelRef.current;
+      if (!panel) return;
+      panel.scrollTo({ top: 0, behavior: 'auto' });
+      const body = panel.querySelector('[data-create-catalog-body]');
+      if (body instanceof HTMLElement) body.scrollTo({ top: 0, behavior: 'auto' });
     };
     scrollTop();
     const raf = requestAnimationFrame(scrollTop);
@@ -925,12 +995,10 @@ function CreateCatalogItemModal({
     form.itemType === 'combo' || /combo/i.test(form.category.trim());
   const isServiceWizard = form.itemType === 'service' && !showComboBuilder;
   const createStepLabels = isServiceWizard
-    ? ['Producto y precio', 'Foto y publicación']
+    ? ['Servicio', 'Foto y publicación']
     : showComboBuilder
-      ? ['Producto y precio', 'Qué incluye el menú', 'Foto y publicación']
-      : isRestaurantCatalog
-        ? ['Producto y precio', 'Extras (opcional)', 'Foto y publicación']
-        : CREATE_STEP_LABELS;
+      ? ['Producto', 'Qué incluye el menú', 'Foto y publicación']
+      : CREATE_STEP_LABELS;
   const totalSteps = createStepLabels.length;
   const isEditMode = Boolean(editItem);
   const isCompositionStep = !isEditMode && !isServiceWizard && step === 2;
@@ -940,22 +1008,28 @@ function CreateCatalogItemModal({
     if (step > totalSteps) setStep(totalSteps);
   }, [isEditMode, step, totalSteps]);
 
-  const handleCreateBrand = async () => {
-    const name = form.newBrandName.trim();
-    if (!name || !businessId) return;
-    try {
-      const created = await createBrandRequest(businessId, { name, active: true });
-      onBrandsChange([...brands, created]);
-      setForm((f) => ({
-        ...f,
-        selectedBrandIds: [created._id],
-        newBrandName: '',
-        showNewBrand: false,
-      }));
-      toast.success(`Marca "${created.name}" creada`);
-    } catch {
-      toast.error('No se pudo crear la marca');
+  /** Crear marca con el asistente de Ajustes; si el plan no da, CTA a facturación. */
+  const handleNuevaMarcaCta = () => {
+    if (!canAddCommercialBrand) {
+      if (isIosCustomerAccessOnlyApp()) {
+        toast.info(
+          `Tu plan ${brandEntitlements.planLabel} no incluye más líneas comerciales. En iOS no se contratan ampliaciones.`,
+        );
+        return;
+      }
+      if (dataUserId) {
+        writeBillingSelection(dataUserId, {
+          selectedPlanId: 'pro',
+          billingMode: 'monthly',
+          requestedAddon: brandEntitlements.needsCommercialBrandAddon ? 'extra_brand' : null,
+        });
+      }
+      onClose();
+      navigate('/saas/settings/facturacion');
+      return;
     }
+    onClose();
+    navigate('/saas/settings/marca?action=new-brand');
   };
 
   const selectBrand = (brandId: string) => {
@@ -965,7 +1039,70 @@ function CreateCatalogItemModal({
     }));
   };
 
+  const selectItemType = (itemType: CatalogItem['itemType']) => {
+    setForm((f) => ({
+      ...f,
+      itemType,
+      ...(itemType === 'service'
+        ? {
+            category: f.category.trim() || CATALOG_SERVICE_CATEGORY,
+            selectedBrandIds: [],
+            buildYourOwn: false,
+            buildYourOwnAllowedIngredientIds: [],
+          }
+        : {}),
+      ...(itemType !== 'product'
+        ? {
+            buildYourOwn: false,
+            buildYourOwnAllowedIngredientIds: [],
+          }
+        : {}),
+    }));
+  };
+
+  const itemTypeOptions = isRestaurantCatalog
+    ? [
+        { value: 'product' as const, label: 'Producto', desc: 'Plato / bebida' },
+        { value: 'service' as const, label: 'Servicio', desc: 'Cargo o suplemento' },
+        { value: 'combo' as const, label: 'Combo', desc: 'Menú' },
+      ]
+    : [
+        { value: 'product' as const, label: 'Producto', desc: 'Con stock' },
+        { value: 'service' as const, label: 'Servicio', desc: 'Sin stock' },
+        { value: 'combo' as const, label: 'Combo', desc: 'Menú' },
+      ];
+
+  const renderItemTypePicker = () => (
+    <div>
+      <label className={labelClass}>Qué es *</label>
+      <div className="grid grid-cols-3 gap-2">
+        {itemTypeOptions.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => selectItemType(option.value)}
+            className={`rounded-xl border px-2.5 py-2.5 text-left transition-colors ${
+              form.itemType === option.value
+                ? 'border-[var(--v-blue,#2563eb)] bg-[var(--v-blue,#2563eb)] text-white'
+                : 'border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-700 dark:text-stone-300 hover:border-blue-200'
+            }`}
+          >
+            <div className="text-xs font-bold leading-tight">{option.label}</div>
+            <div
+              className={`mt-0.5 text-[10px] leading-tight ${
+                form.itemType === option.value ? 'text-white/80' : 'text-stone-500 dark:text-stone-400'
+              }`}
+            >
+              {option.desc}
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
   const handleFinalSubmit = async (keepOpen = false) => {
+    setFieldErrorsShown(true);
     if (!form.name.trim()) {
       toast.error('El nombre es obligatorio');
       if (!isEditMode) setStep(1);
@@ -976,13 +1113,13 @@ function CreateCatalogItemModal({
       if (!isEditMode) setStep(1);
       return;
     }
-    if (requiresCommercialBrand && form.selectedBrandIds.length === 0) {
-      toast.error('Selecciona la línea comercial (marca) del producto');
+    if (form.halfHalf && !form.halfHalfBrandId.trim()) {
+      toast.error('Elige la marca comercial para mitad y mitad');
       if (!isEditMode) setStep(1);
       return;
     }
     if (form.halfHalf && isHalfHalfFlavorSelectionInvalid(form.halfHalfAllowedProductIds)) {
-      toast.error('Selecciona al menos 2 pizzas como sabores, o pulsa «Todas»');
+      toast.error('Selecciona al menos 2 productos como sabores, o pulsa «Todas»');
       if (!isEditMode) setStep(1);
       return;
     }
@@ -1000,15 +1137,29 @@ function CreateCatalogItemModal({
       if (!isEditMode) setStep(1);
       return;
     }
+    if (isSalePriceMissing) {
+      toast.error('Indica el precio de venta del producto');
+      if (!isEditMode) setStep(1);
+      return;
+    }
+    if (form.itemType === 'service') {
+      const serviceErr = validateCatalogServiceRules(form.serviceRules);
+      if (serviceErr) {
+        toast.error(serviceErr);
+        if (!isEditMode) setStep(1);
+        return;
+      }
+    }
     setSubmitting(true);
     try {
-      const category = normalizedCategory;
-      const brandIds = resolveCatalogImportBrandIds(
-        form.selectedBrandIds,
-        category,
-        brands,
-        form.name.trim(),
-      );
+      const category =
+        form.itemType === 'service'
+          ? normalizeImportCategory(form.category.trim() || CATALOG_SERVICE_CATEGORY)
+          : normalizedCategory;
+      const brandIds =
+        form.itemType === 'service'
+          ? brandIdsForCatalogServiceSave(form.serviceRules)
+          : resolveCatalogImportBrandIds(form.selectedBrandIds, category, brands, form.name.trim());
       const customizable = isCatalogTpvConfigurable(
         {
           category,
@@ -1057,6 +1208,7 @@ function CreateCatalogItemModal({
           ? {
               halfHalf: true,
               buildYourOwn: false,
+              halfHalfBrandId: normalizeHalfHalfBrandId(form.halfHalfBrandId),
               ...(halfHalfAllowedIds.length > 0
                 ? { halfHalfAllowedProductIds: halfHalfAllowedIds }
                 : { halfHalfAllowedProductIds: undefined }),
@@ -1066,6 +1218,7 @@ function CreateCatalogItemModal({
                 buildYourOwn: true,
                 halfHalf: false,
                 halfHalfAllowedProductIds: undefined,
+                halfHalfBrandId: undefined,
                 ...(buildYourOwnAllowedIds.length > 0
                   ? { buildYourOwnAllowedIngredientIds: buildYourOwnAllowedIds }
                   : { buildYourOwnAllowedIngredientIds: undefined }),
@@ -1075,12 +1228,30 @@ function CreateCatalogItemModal({
                   halfHalf: false,
                   buildYourOwn: false,
                   halfHalfAllowedProductIds: undefined,
+                  halfHalfBrandId: undefined,
                   buildYourOwnAllowedIngredientIds: undefined,
                 }
               : {}),
       };
+      if (form.itemType === 'service') {
+        Object.assign(
+          customFields,
+          mergeCatalogServiceRulesIntoCustomFields({}, form.serviceRules),
+        );
+        delete customFields.ingredients;
+        delete customFields.supplements;
+        delete customFields.halfHalf;
+        delete customFields.buildYourOwn;
+        delete customFields.halfHalfAllowedProductIds;
+        delete customFields.buildYourOwnAllowedIngredientIds;
+        delete customFields.comboStructure;
+        delete customFields.comboStructureConfirmed;
+      }
       if (customFields.halfHalfAllowedProductIds === undefined) {
         delete customFields.halfHalfAllowedProductIds;
+      }
+      if (customFields.halfHalfBrandId === undefined) {
+        delete customFields.halfHalfBrandId;
       }
       if (customFields.buildYourOwnAllowedIngredientIds === undefined) {
         delete customFields.buildYourOwnAllowedIngredientIds;
@@ -1130,6 +1301,7 @@ function CreateCatalogItemModal({
         setComboStructure(defaultComboStructure.map((s) => ({ ...s })));
         setComboStructureConfirmed(true);
         setRecipePicks([]);
+        setFieldErrorsShown(false);
         setForm((f) => ({
           ...f,
           name: '',
@@ -1148,7 +1320,9 @@ function CreateCatalogItemModal({
           halfHalf: false,
           buildYourOwn: false,
           halfHalfAllowedProductIds: [],
+          halfHalfBrandId: '',
           buildYourOwnAllowedIngredientIds: [],
+          serviceRules: { ...DEFAULT_CATALOG_SERVICE_RULES },
           webVisible: true,
           available: true,
         }));
@@ -1162,12 +1336,41 @@ function CreateCatalogItemModal({
     }
   };
 
-  const canNext = () => {
+  const handleGoNext = () => {
     if (step === 1) {
-      if (!form.name.trim()) return false;
-      if (!normalizedCategory.trim()) return false;
-      if (requiresCommercialBrand && form.selectedBrandIds.length === 0) return false;
-      if (form.halfHalf && isHalfHalfFlavorSelectionInvalid(form.halfHalfAllowedProductIds)) return false;
+      setFieldErrorsShown(true);
+      if (!form.name.trim()) {
+        toast.error('Indica el nombre del producto para continuar');
+        return;
+      }
+      if (duplicateCatalogItemByName) {
+        toast.error(formatCatalogDuplicateNameError(duplicateCatalogItemByName));
+        return;
+      }
+      if (isSalePriceMissing) {
+        toast.error('Indica el precio de venta para continuar');
+        return;
+      }
+      if (form.itemType === 'service') {
+        const serviceErr = validateCatalogServiceRules(form.serviceRules);
+        if (serviceErr) {
+          toast.error(serviceErr);
+          return;
+        }
+      } else if (!normalizedCategory.trim()) {
+        toast.error('Indica la categoría del producto para continuar');
+        return;
+      }
+      if (form.halfHalf && !form.halfHalfBrandId.trim()) {
+      toast.error('Elige la marca comercial para mitad y mitad');
+      if (!isEditMode) setStep(1);
+      return;
+    }
+    if (form.halfHalf && isHalfHalfFlavorSelectionInvalid(form.halfHalfAllowedProductIds)) {
+        toast.error('Selecciona al menos 2 productos como sabores, o pulsa «Todas»');
+        return;
+      }
+      if (!validateBuildYourOwnSelection()) return;
       if (
         form.buildYourOwn &&
         isBuildYourOwnIngredientSelectionInvalid(
@@ -1175,45 +1378,21 @@ function CreateCatalogItemModal({
           buildYourOwnIngredientCandidates.length,
         )
       ) {
-        return false;
+        return;
       }
-      return true;
     }
-    return true;
-  };
-
-  const handleGoNext = () => {
-    if (step === 1) {
-      if (!form.name.trim()) {
-        toast.error('Indica el nombre del producto para continuar');
-        return;
-      }
-      if (!normalizedCategory.trim()) {
-        toast.error('Indica la categoría del producto para continuar');
-        return;
-      }
-      if (requiresCommercialBrand && form.selectedBrandIds.length === 0) {
-        toast.error('Selecciona la línea comercial (marca) del producto');
-        return;
-      }
-      if (form.halfHalf && isHalfHalfFlavorSelectionInvalid(form.halfHalfAllowedProductIds)) {
-        toast.error('Selecciona al menos 2 pizzas como sabores, o pulsa «Todas»');
-        return;
-      }
-      if (!validateBuildYourOwnSelection()) return;
-    }
-    if (!canNext()) return;
+    setFieldErrorsShown(false);
     setStep((s) => s + 1);
   };
 
   const renderBrandPicker = () => {
     if (isSharedCatalogCategory) {
       return (
-        <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 px-3 py-2.5">
-          <p className="text-sm font-semibold text-blue-900 dark:text-blue-200">
+        <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 px-3 py-2">
+          <p className="text-xs font-semibold text-blue-900 dark:text-blue-200">
             Categoría compartida del TPV
           </p>
-          <p className="text-xs text-blue-800/80 dark:text-blue-300/80 mt-0.5">
+          <p className="text-[11px] text-blue-800/80 dark:text-blue-300/80 mt-0.5">
             «{normalizedCategory}» aparece en la pestaña compartida del TPV (sin línea comercial).
           </p>
         </div>
@@ -1221,100 +1400,76 @@ function CreateCatalogItemModal({
     }
     return (
     <div>
-      <label className={labelClass}>Marca comercial</label>
-      <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-        Elige una sola línea de venta para este producto (categorías y TPV de esa marca).
+      <label className={labelClass}>Marca comercial (opcional)</label>
+      <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-1.5">
+        Para platos de línea (pizza, burger, tacos…). Bebidas, complementos y postres van a su pestaña del TPV sin elegir marca aquí.
       </p>
       {activeBrands.length === 0 ? (
-        <p className="text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl px-3 py-2">
+        <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl px-3 py-2">
           Crea al menos una marca en Ajustes antes de asignar productos.
         </p>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-36 overflow-y-auto pr-1">
           {activeBrands.map((b) => {
             const selected = form.selectedBrandIds.includes(b._id);
             const preset = getDeliveryBrandLinePreset(b.deliveryLineKind);
-            const accent = b.primaryColor || preset?.primaryColor || '#6366F1';
+            const accent = b.primaryColor || preset?.primaryColor || '#2563eb';
             const lineLabel = b.deliveryLineKind ? deliveryBrandLineKindLabel(b.deliveryLineKind) : null;
             return (
               <button
                 key={b._id}
                 type="button"
                 onClick={() => selectBrand(b._id)}
-                className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all ${
+                className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border text-left transition-all ${
                   selected
-                    ? 'border-gray-900 dark:border-gray-100 bg-gray-50 dark:bg-gray-900/50 ring-1 ring-gray-900/10'
-                    : 'border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500'
+                    ? 'border-[var(--v-blue,#2563eb)] bg-blue-50 dark:bg-blue-950/40 ring-1 ring-blue-500/20'
+                    : 'border-stone-200 dark:border-stone-700 hover:border-blue-200 dark:hover:border-blue-700'
                 }`}
               >
                 {b.logo ? (
-                  <img src={b.logo} alt="" className="w-10 h-10 rounded-lg object-contain border border-gray-200 dark:border-gray-700 shrink-0" />
+                  <img src={b.logo} alt="" className="w-7 h-7 rounded-md object-contain border border-stone-200 dark:border-stone-700 shrink-0" />
                 ) : (
                   <div
-                    className="w-10 h-10 rounded-lg flex items-center justify-center text-white text-sm font-bold shrink-0"
+                    className="w-7 h-7 rounded-md flex items-center justify-center text-white text-[11px] font-bold shrink-0"
                     style={{ background: `linear-gradient(145deg, ${accent}, ${accent}cc)` }}
                   >
                     {b.name.trim().charAt(0).toUpperCase() || '?'}
                   </div>
                 )}
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{b.name}</div>
+                  <div className="text-[11px] font-bold text-stone-900 dark:text-stone-100 truncate leading-tight">{b.name}</div>
                   {lineLabel ? (
-                    <span className={`inline-block mt-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded ${preset ? DELIVERY_BRAND_LINE_ICON_BOX[preset.id as keyof typeof DELIVERY_BRAND_LINE_ICON_BOX] : 'bg-gray-100 text-gray-600'}`}>
+                    <span className={`inline-block mt-0.5 text-[9px] font-semibold px-1 py-px rounded ${preset ? DELIVERY_BRAND_LINE_ICON_BOX[preset.id as keyof typeof DELIVERY_BRAND_LINE_ICON_BOX] : 'bg-stone-100 text-stone-600'}`}>
                       {lineLabel}
                     </span>
                   ) : (
-                    <span className="text-[11px] text-gray-500 dark:text-gray-400">Sin tipo de carta</span>
+                    <span className="text-[9px] text-stone-400">Sin tipo</span>
                   )}
                 </div>
                 {selected ? (
-                  <CheckCircle2 className="w-5 h-5 text-gray-900 dark:text-gray-100 shrink-0" />
+                  <CheckCircle2 className="w-3.5 h-3.5 text-[var(--v-blue,#2563eb)] shrink-0" />
                 ) : null}
               </button>
             );
           })}
         </div>
       )}
-      {form.showNewBrand ? (
-        <div className="mt-3 flex gap-2">
-          <input
-            className={inputClass}
-            placeholder="Nombre nueva marca"
-            value={form.newBrandName}
-            onChange={(e) => setForm((f) => ({ ...f, newBrandName: e.target.value }))}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                void handleCreateBrand();
-              }
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => void handleCreateBrand()}
-            disabled={!form.newBrandName.trim()}
-            className="px-4 py-2.5 bg-gray-900 dark:bg-gray-100 dark:text-gray-900 text-white rounded-xl text-sm font-semibold disabled:opacity-50"
-          >
-            Crear
-          </button>
-          <button
-            type="button"
-            onClick={() => setForm((f) => ({ ...f, showNewBrand: false, newBrandName: '' }))}
-            className="px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm"
-          >
-            Cancelar
-          </button>
-        </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setForm((f) => ({ ...f, showNewBrand: true }))}
-          className="mt-2 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:underline inline-flex items-center gap-1"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          Nueva marca
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={handleNuevaMarcaCta}
+        className={`mt-1.5 text-[11px] font-semibold hover:underline inline-flex items-center gap-1 ${
+          canAddCommercialBrand
+            ? 'text-stone-600 dark:text-stone-300'
+            : 'text-violet-700 dark:text-violet-300'
+        }`}
+      >
+        <Plus className="w-3 h-3" />
+        {canAddCommercialBrand
+          ? 'Nueva marca'
+          : brandEntitlements.needsCommercialBrandAddon
+            ? 'Mejorar plan · nueva marca'
+            : 'Pasar a PRO · nueva marca'}
+      </button>
     </div>
     );
   };
@@ -1322,26 +1477,99 @@ function CreateCatalogItemModal({
   const renderCategoryUnit = () => {
     const selectedCategory = normalizeImportCategory(form.category);
     const selectedKey = selectedCategory.toLowerCase();
-    const pickerCategories = categoryChips.filter((c) => c.toLowerCase() !== selectedKey);
     const categoryFieldLabel = isRestaurantCatalog ? 'Organizador en la carta' : 'Categoría';
 
     return (
-      <div
-        className={`rounded-2xl border-2 p-4 space-y-3 ${
-          selectedCategory
-            ? `${VERTIAL_ACCENT_BORDER} ${VERTIAL_ACCENT_BG}`
-            : 'border-stone-200 bg-stone-50/80 dark:border-stone-700 dark:bg-stone-900/40'
-        }`}
-      >
-        <label className="block text-sm font-bold text-stone-900 dark:text-stone-100">
+      <div className="rounded-xl border border-stone-200 bg-stone-50/80 p-3 space-y-2 dark:border-stone-700 dark:bg-stone-900/40">
+        <label className="block text-xs font-bold text-stone-900 dark:text-stone-100">
           {categoryFieldLabel} *
         </label>
 
+        {categoryChips.length > 0 || selectedCategory ? (
+          <div className="flex flex-wrap gap-1.5">
+            {categoryChips.map((cat) => {
+              const key = cat.toLowerCase();
+              const selected = key === selectedKey;
+              const deleting = deletingCategoryKey === key;
+              const canDelete = !categoriesInUseKeys.has(key);
+              return (
+                <span
+                  key={cat}
+                  className={`inline-flex items-center rounded-lg border text-stone-700 transition-colors dark:text-stone-300 ${
+                    selected
+                      ? 'border-[var(--v-blue,#2563eb)] bg-[var(--v-blue,#2563eb)] text-white dark:text-white'
+                      : 'border-stone-200 bg-white hover:border-blue-300 dark:border-stone-600 dark:bg-stone-900 dark:hover:border-blue-700'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => selectCategoryChip(cat)}
+                    className={`py-1.5 pl-2.5 text-[11px] font-semibold leading-none ${
+                      canDelete ? 'pr-1' : 'pr-2.5'
+                    } ${selected ? 'text-white' : ''}`}
+                  >
+                    {cat}
+                  </button>
+                  {canDelete ? (
+                    <button
+                      type="button"
+                      disabled={deleting}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteCategoryChip(cat);
+                      }}
+                      title={`Quitar «${cat}» de la lista`}
+                      aria-label={`Quitar categoría «${cat}»`}
+                      className={`mr-1 flex h-4 w-4 items-center justify-center rounded transition-colors disabled:opacity-50 ${
+                        selected
+                          ? 'text-white/80 hover:bg-white/20 hover:text-white'
+                          : 'text-stone-400 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/40 dark:hover:text-red-400'
+                      }`}
+                    >
+                      {deleting ? (
+                        <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                      ) : (
+                        <X className="h-2.5 w-2.5" />
+                      )}
+                    </button>
+                  ) : null}
+                </span>
+              );
+            })}
+            {!addingCategory ? (
+              <button
+                type="button"
+                onClick={startAddCategory}
+                className="inline-flex items-center gap-1 rounded-lg border border-dashed border-stone-300 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-stone-600 transition-colors hover:border-blue-300 hover:text-[var(--v-blue,#2563eb)] dark:border-stone-600 dark:bg-stone-900 dark:text-stone-300"
+              >
+                <Plus className="w-3 h-3" />
+                Nueva categoría
+              </button>
+            ) : null}
+          </div>
+        ) : !addingCategory ? (
+          <div className="flex flex-wrap gap-1.5">
+            <p className="w-full text-xs text-stone-500 dark:text-stone-400">
+              {isRestaurantCatalog
+                ? 'Crea la primera categoría o impórtala con Excel.'
+                : 'Crea la primera categoría.'}
+            </p>
+            <button
+              type="button"
+              onClick={startAddCategory}
+              className="inline-flex items-center gap-1 rounded-lg border border-dashed border-stone-300 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-stone-600 transition-colors hover:border-blue-300 hover:text-[var(--v-blue,#2563eb)] dark:border-stone-600 dark:bg-stone-900 dark:text-stone-300"
+            >
+              <Plus className="w-3 h-3" />
+              Nueva categoría
+            </button>
+          </div>
+        ) : null}
+
         {addingCategory ? (
-          <div className="rounded-xl border-2 border-dashed border-blue-200 bg-white p-3 space-y-3 dark:border-blue-800 dark:bg-stone-900">
-            <p className="text-sm font-semibold text-stone-900 dark:text-stone-100">Nueva categoría</p>
+          <div className="rounded-lg border border-dashed border-blue-200 bg-white p-2.5 space-y-2 dark:border-blue-800 dark:bg-stone-900">
+            <p className="text-xs font-semibold text-stone-900 dark:text-stone-100">Nueva categoría</p>
             <input
-              className={`${inputClass} ${VERTIAL_FOCUS_RING}`}
+              className={`${inputClass} !py-2 text-sm ${VERTIAL_FOCUS_RING}`}
               placeholder={isRestaurantCatalog ? 'Ej. Tapas, Bebidas, Combos…' : 'Nombre de la categoría…'}
               value={newCategoryDraft}
               autoFocus
@@ -1357,8 +1585,8 @@ function CreateCatalogItemModal({
                 }
               }}
             />
-            <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={commitNewCategoryChip} className={`${VERTIAL_BTN_PRIMARY} !min-h-10`}>
+            <div className="flex flex-wrap gap-1.5">
+              <button type="button" onClick={commitNewCategoryChip} className={`${VERTIAL_BTN_PRIMARY} !min-h-0 px-3 py-1.5 text-xs`}>
                 Crear y usar
               </button>
               <button
@@ -1367,88 +1595,12 @@ function CreateCatalogItemModal({
                   setAddingCategory(false);
                   setNewCategoryDraft('');
                 }}
-                className={`${VERTIAL_BTN_SECONDARY} !min-h-10`}
+                className={`${VERTIAL_BTN_SECONDARY} !min-h-0 px-3 py-1.5 text-xs`}
               >
                 Cancelar
               </button>
             </div>
           </div>
-        ) : (
-          <button
-            type="button"
-            onClick={startAddCategory}
-            className={`${VERTIAL_BTN_SECONDARY} w-full justify-center border-dashed !min-h-11`}
-          >
-            <Plus className="w-4 h-4" />
-            Nueva categoría
-          </button>
-        )}
-
-        {selectedCategory && !addingCategory ? (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-blue-200 bg-white px-3 py-2.5 dark:border-blue-800 dark:bg-stone-900">
-            <span className="text-sm font-bold text-stone-900 dark:text-stone-100">{selectedCategory}</span>
-            <button
-              type="button"
-              onClick={() => setForm((f) => ({ ...f, category: '' }))}
-              className="text-xs font-semibold text-[var(--v-blue,#2563eb)] hover:underline"
-            >
-              Cambiar
-            </button>
-          </div>
-        ) : null}
-
-        {pickerCategories.length > 0 ? (
-          <div>
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-stone-400 dark:text-stone-500">
-              {selectedCategory ? 'O elige otra' : 'Ya en tu carta'}
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {pickerCategories.map((cat) => {
-                const key = cat.toLowerCase();
-                const deleting = deletingCategoryKey === key;
-                const canDelete = !categoriesInUseKeys.has(key);
-                return (
-                  <span
-                    key={cat}
-                    className="inline-flex items-center rounded-full border border-stone-200 bg-white text-stone-700 transition-colors hover:border-blue-300 dark:border-stone-600 dark:bg-stone-900 dark:text-stone-300"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => selectCategoryChip(cat)}
-                      className="py-1.5 pl-3 pr-1 text-xs font-semibold"
-                    >
-                      {cat}
-                    </button>
-                    {canDelete ? (
-                      <button
-                        type="button"
-                        disabled={deleting}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteCategoryChip(cat);
-                        }}
-                        title={`Quitar «${cat}» de la lista`}
-                        aria-label={`Quitar categoría «${cat}»`}
-                        className="mr-1.5 flex h-5 w-5 items-center justify-center rounded-full text-stone-400 transition-colors hover:bg-red-100 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-900/40 dark:hover:text-red-400"
-                      >
-                        {deleting ? (
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                        ) : (
-                          <X className="h-3 w-3" />
-                        )}
-                      </button>
-                    ) : null}
-                  </span>
-                );
-              })}
-            </div>
-          </div>
-        ) : !selectedCategory && !addingCategory ? (
-          <p className="text-sm text-stone-500 dark:text-stone-400">
-            {isRestaurantCatalog
-              ? 'Crea la primera categoría arriba o impórtala con Excel.'
-              : 'Crea la primera categoría arriba.'}
-          </p>
         ) : null}
       </div>
     );
@@ -1460,36 +1612,56 @@ function CreateCatalogItemModal({
       <button
         type="button"
         onClick={() =>
-          setForm((f) => ({
-            ...f,
-            halfHalf: !f.halfHalf,
-            buildYourOwn: false,
-            category: f.category || (/pizza/i.test(f.name) ? 'Pizzas' : f.category),
-            halfHalfAllowedProductIds: !f.halfHalf ? f.halfHalfAllowedProductIds : [],
-          }))
+          setForm((f) => {
+            const enabling = !f.halfHalf;
+            const defaultBrand =
+              normalizeHalfHalfBrandId(f.halfHalfBrandId) ||
+              f.selectedBrandIds[0] ||
+              halfHalfCommercialBrands[0]?._id ||
+              '';
+            return {
+              ...f,
+              halfHalf: enabling,
+              buildYourOwn: false,
+              buildYourOwnAllowedIngredientIds: [],
+              halfHalfBrandId: enabling ? defaultBrand : '',
+              halfHalfAllowedProductIds: enabling ? f.halfHalfAllowedProductIds : [],
+            };
+          })
         }
-        className={`w-full p-4 rounded-2xl border-2 text-left transition-all ${
+        className={`w-full px-3 py-2.5 rounded-xl border-2 text-left transition-all ${
           form.halfHalf
             ? 'border-amber-400 bg-amber-50 dark:bg-amber-950/25'
             : 'border-gray-200 dark:border-gray-700 hover:border-gray-400'
         }`}
       >
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="font-bold text-gray-900 dark:text-gray-100">Mitad y mitad (2 sabores)</p>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-              En TPV se eligen 2 pizzas de la carta · un solo precio · badge ½½
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+              Mitad y mitad
+              <span className="ml-1 text-[10px] font-bold text-amber-700 dark:text-amber-300">½½</span>
+            </p>
+            <p className="text-[11px] leading-snug text-gray-500 dark:text-gray-400 mt-0.5">
+              En TPV se eligen 2 productos de la carta · un solo precio
             </p>
           </div>
-          <div className={`w-11 h-6 rounded-full relative shrink-0 ${form.halfHalf ? 'bg-amber-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
-            <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.halfHalf ? 'translate-x-5' : 'translate-x-0.5'}`} />
+          <div
+            className={`w-9 h-5 rounded-full relative shrink-0 ${
+              form.halfHalf ? 'bg-amber-500' : 'bg-gray-300 dark:bg-gray-600'
+            }`}
+          >
+            <div
+              className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                form.halfHalf ? 'translate-x-4' : 'translate-x-0.5'
+              }`}
+            />
           </div>
         </div>
       </button>
     );
   };
 
-  const toggleHalfHalfPizza = (productId: string) => {
+  const toggleHalfHalfFlavor = (productId: string) => {
     setForm((f) => {
       const selected = f.halfHalfAllowedProductIds.includes(productId);
       const next = selected
@@ -1504,19 +1676,60 @@ function CreateCatalogItemModal({
 
     const selectedCount = form.halfHalfAllowedProductIds.length;
     const usingAll = selectedCount === 0;
+    const scopeBrand = halfHalfCommercialBrands.find((b) => b._id === form.halfHalfBrandId);
 
     return (
       <section className="rounded-2xl border-2 border-amber-300 dark:border-amber-700 bg-amber-50/60 dark:bg-amber-950/20 p-4 space-y-3">
         <div>
-          <p className="font-bold text-gray-900 dark:text-gray-100">Pizzas disponibles como sabores</p>
+          <p className="font-bold text-gray-900 dark:text-gray-100">Mitad y mitad · marca y productos</p>
           <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-            Marca qué pizzas puede elegir el cliente en TPV. Si no marcas ninguna, se usarán todas las pizzas del catálogo.
+            Elige la marca comercial y qué productos de esa línea puede combinar el cliente en TPV. Si no
+            marcas ninguno, se usarán todos los de la marca.
           </p>
         </div>
 
-        {halfHalfPizzaCandidates.length === 0 ? (
+        <div>
+          <label className="text-xs font-semibold text-gray-700 dark:text-gray-300">Marca comercial</label>
+          {halfHalfCommercialBrands.length === 0 ? (
+            <p className="text-sm text-amber-800 dark:text-amber-300 mt-1">
+              Crea al menos una marca comercial en Ajustes antes de configurar mitad y mitad.
+            </p>
+          ) : (
+            <div className="grid grid-cols-2 gap-1.5 mt-1.5 max-h-32 overflow-y-auto">
+              {halfHalfCommercialBrands.map((b) => {
+                const selected = form.halfHalfBrandId === b._id;
+                return (
+                  <button
+                    key={b._id}
+                    type="button"
+                    onClick={() =>
+                      setForm((f) => ({
+                        ...f,
+                        halfHalfBrandId: b._id,
+                        halfHalfAllowedProductIds: [],
+                      }))
+                    }
+                    className={`rounded-lg border-2 px-2.5 py-2 text-left text-xs font-semibold transition-colors ${
+                      selected
+                        ? 'border-amber-600 bg-white dark:bg-gray-900 text-amber-950 dark:text-amber-100'
+                        : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400'
+                    }`}
+                  >
+                    {b.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {!form.halfHalfBrandId.trim() ? (
+          <p className="text-sm text-amber-800 dark:text-amber-300">Selecciona una marca para ver sus productos.</p>
+        ) : halfHalfFlavorCandidates.length === 0 ? (
           <p className="text-sm text-amber-800 dark:text-amber-300">
-            Aún no hay pizzas en el catálogo. Crea o importa pizzas en categoría «Pizzas» primero.
+            {scopeBrand
+              ? `Aún no hay productos de «${scopeBrand.name}» en el catálogo. Créalos o asígnalos a esa marca primero.`
+              : 'No hay productos disponibles para esta marca.'}
           </p>
         ) : (
           <>
@@ -1530,14 +1743,14 @@ function CreateCatalogItemModal({
                     : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400'
                 }`}
               >
-                Todas ({halfHalfPizzaCandidates.length})
+                Todas ({halfHalfFlavorCandidates.length})
               </button>
               <button
                 type="button"
                 onClick={() =>
                   setForm((f) => ({
                     ...f,
-                    halfHalfAllowedProductIds: halfHalfPizzaCandidates.map((p) => p._id),
+                    halfHalfAllowedProductIds: halfHalfFlavorCandidates.map((p) => p._id),
                   }))
                 }
                 className="px-3 py-1.5 rounded-full text-xs font-semibold border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400"
@@ -1553,24 +1766,24 @@ function CreateCatalogItemModal({
               </button>
             </div>
             <div className="max-h-48 overflow-y-auto grid grid-cols-2 gap-2">
-              {halfHalfPizzaCandidates.map((pizza) => {
+              {halfHalfFlavorCandidates.map((product) => {
                 const checked =
-                  usingAll || form.halfHalfAllowedProductIds.includes(pizza._id);
+                  usingAll || form.halfHalfAllowedProductIds.includes(product._id);
                 return (
                   <button
-                    key={pizza._id}
+                    key={product._id}
                     type="button"
                     onClick={() => {
                       if (usingAll) {
                         setForm((f) => ({
                           ...f,
-                          halfHalfAllowedProductIds: halfHalfPizzaCandidates
+                          halfHalfAllowedProductIds: halfHalfFlavorCandidates
                             .map((p) => p._id)
-                            .filter((id) => id !== pizza._id),
+                            .filter((id) => id !== product._id),
                         }));
                         return;
                       }
-                      toggleHalfHalfPizza(pizza._id);
+                      toggleHalfHalfFlavor(product._id);
                     }}
                     className={`rounded-xl border-2 p-2.5 text-left text-sm transition-colors ${
                       checked
@@ -1579,7 +1792,7 @@ function CreateCatalogItemModal({
                     }`}
                   >
                     <span className="font-semibold text-gray-900 dark:text-gray-100 line-clamp-2">
-                      {pizza.name}
+                      {product.name}
                     </span>
                   </button>
                 );
@@ -1587,14 +1800,15 @@ function CreateCatalogItemModal({
             </div>
             {!usingAll && isHalfHalfFlavorSelectionInvalid(form.halfHalfAllowedProductIds) ? (
               <p className="text-xs font-semibold text-red-600 dark:text-red-400">
-                Selecciona al menos 2 pizzas o pulsa «Todas».
+                Selecciona al menos 2 productos o pulsa «Todas».
               </p>
             ) : null}
           </>
         )}
 
         <p className="text-xs text-gray-600 dark:text-gray-400 border-t border-amber-200 dark:border-amber-800 pt-3">
-          Stock: al vender mitad y mitad se descuenta el escandallo de este artículo (p. ej. 1 masa), no el de las dos pizzas elegidas. Configúralo en la pestaña Escandallo.
+          Stock: al vender mitad y mitad se descuenta el escandallo de este artículo, no el de los dos productos
+          elegidos. Configúralo en la pestaña Escandallo.
         </p>
       </section>
     );
@@ -1611,28 +1825,43 @@ function CreateCatalogItemModal({
             buildYourOwn: !f.buildYourOwn,
             halfHalf: false,
             halfHalfAllowedProductIds: [],
-            category: f.category || (/pizza/i.test(f.name) ? 'Pizzas' : f.category),
+            halfHalfBrandId: '',
             buildYourOwnAllowedIngredientIds: [],
           }))
         }
-        className={`w-full p-4 rounded-2xl border-2 text-left transition-all ${
+        className={`w-full px-3 py-2.5 rounded-xl border-2 text-left transition-all ${
           form.buildYourOwn
             ? 'border-orange-400 bg-orange-50 dark:bg-orange-950/25'
             : 'border-gray-200 dark:border-gray-700 hover:border-gray-400'
         }`}
       >
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="font-bold text-gray-900 dark:text-gray-100">Producto al gusto</p>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Producto al gusto</p>
+            <p className="text-[11px] leading-snug text-gray-500 dark:text-gray-400 mt-0.5">
               En TPV se eligen los ingredientes base · precio fijo del producto
             </p>
           </div>
-          <div className={`w-11 h-6 rounded-full relative shrink-0 ${form.buildYourOwn ? 'bg-orange-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
-            <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.buildYourOwn ? 'translate-x-5' : 'translate-x-0.5'}`} />
+          <div className={`w-9 h-5 rounded-full relative shrink-0 ${form.buildYourOwn ? 'bg-orange-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
+            <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${form.buildYourOwn ? 'translate-x-4' : 'translate-x-0.5'}`} />
           </div>
         </div>
       </button>
+    );
+  };
+
+  const renderProductConfiguratorOptions = () => {
+    if (form.itemType !== 'product') return null;
+    return (
+      <div className="space-y-2">
+        <p className="text-[11px] font-semibold text-stone-500 dark:text-stone-400 uppercase tracking-wide">
+          Opciones TPV (opcional)
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {renderBuildYourOwnProductToggle()}
+          {renderHalfHalfProductToggle()}
+        </div>
+      </div>
     );
   };
 
@@ -1646,6 +1875,158 @@ function CreateCatalogItemModal({
     });
   };
 
+  const foldIngredientNameKey = (s: string) =>
+    String(s || '')
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '');
+
+  /** Alta enlazada: config TPV + sync almacén. Devuelve el ingrediente creado. */
+  const persistLinkedStoreIngredient = async (opts: {
+    name: string;
+    baseCost?: number;
+    flags?: { chargeExtra: boolean; allowRemove: boolean };
+    successToast?: string;
+  }): Promise<StoreIngredient | null> => {
+    const name = opts.name.trim().replace(/\s+/g, ' ');
+    if (!name) {
+      toast.error('Escribe el nombre del ingrediente');
+      return null;
+    }
+    if (!dataUserId) {
+      toast.error('No hay cuenta de datos para guardar el ingrediente');
+      return null;
+    }
+
+    const lineBrands = commercialLineBrands(brands);
+    const brandIds =
+      form.selectedBrandIds.length > 0
+        ? form.selectedBrandIds.filter(Boolean)
+        : lineBrands.map((b) => b._id);
+    if (lineBrands.length > 0 && brandIds.length === 0) {
+      toast.error('Selecciona la marca del producto antes de crear el ingrediente');
+      return null;
+    }
+
+    const nameKey = foldIngredientNameKey(name);
+    const duplicate = effectiveStoreIngredients.some((ing) => {
+      if (foldIngredientNameKey(ing.name) !== nameKey) return false;
+      const assigned = Array.isArray(ing.brandIds) ? ing.brandIds.filter(Boolean) : [];
+      if (assigned.length === 0 || brandIds.length === 0) return true;
+      return brandIds.some((id) => assigned.includes(id));
+    });
+    if (duplicate) {
+      toast.error(`Ya existe «${name}» en los ingredientes de esta línea`);
+      return null;
+    }
+
+    const parts = new Set<TpvCategoryTemplateKey>();
+    for (const id of brandIds) {
+      const brand = brands.find((b) => b._id === id);
+      if (!brand) continue;
+      for (const key of resolveBrandTpvCategoryKeys(brand)) {
+        if (key === 'pizzas' || key === 'hamburguesas') parts.add(key);
+      }
+    }
+    const productParts: TpvCategoryTemplateKey[] =
+      parts.size > 0 ? [...parts] : ['pizzas', 'hamburguesas'];
+
+    const flags = opts.flags ?? { chargeExtra: false, allowRemove: true };
+    let created = withStoreIngredientTpvFlags(
+      {
+        id: `ing-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        name,
+        escandalloOnly: !flags.allowRemove && !flags.chargeExtra,
+        ...(brandIds.length > 0 ? { brandIds: [...brandIds] } : {}),
+        productParts,
+        ...(opts.baseCost != null && Number.isFinite(opts.baseCost) && opts.baseCost >= 0
+          ? { baseCost: Math.round(opts.baseCost * 100) / 100 }
+          : {}),
+      },
+      flags,
+    );
+    if (created.baseCost == null) {
+      created = withVertialDefaultBaseCost(created, brands);
+    }
+
+    const cfg = await getDeliveryConfigRequest(dataUserId);
+    const lineBrandIds = lineBrands.map((b) => b._id);
+    const current = unifyStoreIngredientsFromConfig(cfg, lineBrandIds);
+    const nextRows = normalizeStoreIngredients([...current, created]);
+
+    await updateDeliveryConfigRequest(dataUserId, {
+      _id: cfg?._id || `dlvconf-${normalizeTenantUserId(dataUserId)}`,
+      _rev: cfg?._rev,
+      storeIngredients: nextRows,
+    } as Parameters<typeof updateDeliveryConfigRequest>[1]);
+
+    await syncInventoryCatalogFromSources(dataUserId, {
+      businessType: isRestaurantCatalog ? 'restaurant' : 'delivery',
+      businessId: businessId || undefined,
+      storeIngredients: nextRows,
+      brands: lineBrands.map((b) => ({ _id: b._id, deliveryLineKind: b.deliveryLineKind })),
+      inventorySyncExcludedKeys: Array.isArray(cfg?.inventorySyncExcludedKeys)
+        ? cfg.inventorySyncExcludedKeys
+        : undefined,
+    }).catch(() => null);
+
+    notifyDeliveryConfigChanged();
+    notifyDeliveryCatalogChanged(dataUserId, businessId);
+    setModalStoreIngredients(nextRows);
+    void reloadModalTpvIngredients();
+    toast.success(opts.successToast || `«${name}» creado: TPV + almacén`);
+    return created;
+  };
+
+  /** Alta base TPV + sync almacén (mismas conexiones que Catálogo → Ingredientes). */
+  const createByoBaseIngredient = async () => {
+    setCreatingByoIngredient(true);
+    try {
+      const created = await persistLinkedStoreIngredient({
+        name: newByoIngredientName,
+        flags: { chargeExtra: false, allowRemove: true },
+        successToast: `«${newByoIngredientName.trim()}» creado: TPV (base) + almacén`,
+      });
+      if (!created) return;
+      setNewByoIngredientName('');
+      setShowCreateByoIngredient(false);
+      setForm((f) => {
+        if (f.buildYourOwnAllowedIngredientIds.length === 0) return f;
+        if (f.buildYourOwnAllowedIngredientIds.includes(created.id)) return f;
+        return {
+          ...f,
+          buildYourOwnAllowedIngredientIds: [...f.buildYourOwnAllowedIngredientIds, created.id],
+        };
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo crear el ingrediente');
+    } finally {
+      setCreatingByoIngredient(false);
+    }
+  };
+
+  const createRecipeLinkedIngredient = async (input: {
+    name: string;
+    baseCost?: number;
+    unit?: string;
+  }): Promise<StoreIngredient | null> => {
+    setCreatingRecipeIngredient(true);
+    try {
+      return await persistLinkedStoreIngredient({
+        name: input.name,
+        baseCost: input.baseCost,
+        flags: { chargeExtra: false, allowRemove: false },
+        successToast: `«${input.name.trim()}» creado: escandallo + almacén`,
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo crear el ingrediente');
+      return null;
+    } finally {
+      setCreatingRecipeIngredient(false);
+    }
+  };
+
   const renderBuildYourOwnIngredientPicker = () => {
     if (!form.buildYourOwn || form.itemType !== 'product') return null;
 
@@ -1653,13 +2034,75 @@ function CreateCatalogItemModal({
     const usingAll = selectedCount === 0;
 
     return (
-      <section className="rounded-2xl border-2 border-orange-300 dark:border-orange-700 bg-orange-50/60 dark:bg-orange-950/20 p-4 space-y-3">
-        <div>
-          <p className="font-bold text-gray-900 dark:text-gray-100">Ingredientes disponibles en TPV</p>
-          <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-            Marca qué ingredientes base puede elegir el cliente. Si no marcas ninguno, se usarán todos los de la línea.
-          </p>
+      <section className="rounded-2xl border-2 border-orange-300 dark:border-orange-700 bg-orange-50/60 dark:bg-orange-950/20 p-3 space-y-2.5">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="font-bold text-gray-900 dark:text-gray-100">Ingredientes disponibles en TPV</p>
+            <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+              Marca qué ingredientes base puede elegir el cliente. Si no marcas ninguno, se usarán todos los de la línea.
+            </p>
+          </div>
+          {!showCreateByoIngredient ? (
+            <button
+              type="button"
+              onClick={() => setShowCreateByoIngredient(true)}
+              disabled={modalIngredientsLoading || creatingByoIngredient}
+              className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-dashed border-orange-300 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-orange-800 transition-colors hover:border-orange-500 hover:bg-orange-50 disabled:opacity-50 dark:border-orange-800 dark:bg-stone-900 dark:text-orange-200"
+            >
+              <Plus className="w-3 h-3" />
+              Crear ingrediente
+            </button>
+          ) : null}
         </div>
+
+        {showCreateByoIngredient ? (
+          <div className="rounded-xl border border-dashed border-orange-300 bg-white p-3 space-y-2 dark:border-orange-800 dark:bg-stone-900">
+            <p className="text-xs font-semibold text-stone-900 dark:text-stone-100">Nuevo ingrediente base</p>
+            <p className="text-[11px] text-stone-500 dark:text-stone-400">
+              Se guarda en Catálogo → Ingredientes (TPV), se enlaza a la marca del producto y se crea en almacén.
+            </p>
+            <input
+              className={`${inputClass} !py-2 text-sm`}
+              placeholder="Ej. Mozzarella, Bacon…"
+              value={newByoIngredientName}
+              autoFocus
+              disabled={creatingByoIngredient}
+              onChange={(e) => setNewByoIngredientName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  void createByoBaseIngredient();
+                }
+                if (e.key === 'Escape') {
+                  setShowCreateByoIngredient(false);
+                  setNewByoIngredientName('');
+                }
+              }}
+            />
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => void createByoBaseIngredient()}
+                disabled={creatingByoIngredient || !newByoIngredientName.trim()}
+                className={`${VERTIAL_BTN_PRIMARY} !min-h-0 px-3 py-1.5 text-xs disabled:opacity-50 inline-flex items-center gap-1.5`}
+              >
+                {creatingByoIngredient ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                {creatingByoIngredient ? 'Guardando…' : 'Crear y usar'}
+              </button>
+              <button
+                type="button"
+                disabled={creatingByoIngredient}
+                onClick={() => {
+                  setShowCreateByoIngredient(false);
+                  setNewByoIngredientName('');
+                }}
+                className={`${VERTIAL_BTN_SECONDARY} !min-h-0 px-3 py-1.5 text-xs`}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         {buildYourOwnIngredientCandidates.length === 0 ? (
           <p className="text-sm text-orange-800 dark:text-orange-300">
@@ -1667,7 +2110,7 @@ function CreateCatalogItemModal({
               'Cargando ingredientes del TPV…'
             ) : (
               <>
-                Aún no hay ingredientes base. Créalos en Catálogo → <strong>Ingredientes</strong> (sin precio extra).
+                Aún no hay ingredientes base. Crea uno aquí o en Catálogo → <strong>Ingredientes</strong>.
               </>
             )}
           </p>
@@ -1685,27 +2128,8 @@ function CreateCatalogItemModal({
               >
                 Todos ({buildYourOwnIngredientCandidates.length})
               </button>
-              <button
-                type="button"
-                onClick={() =>
-                  setForm((f) => ({
-                    ...f,
-                    buildYourOwnAllowedIngredientIds: buildYourOwnIngredientCandidates.map((ing) => ing.id),
-                  }))
-                }
-                className="px-3 py-1.5 rounded-full text-xs font-semibold border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400"
-              >
-                Seleccionar todos
-              </button>
-              <button
-                type="button"
-                onClick={() => setForm((f) => ({ ...f, buildYourOwnAllowedIngredientIds: [] }))}
-                className="px-3 py-1.5 rounded-full text-xs font-semibold border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400"
-              >
-                Limpiar
-              </button>
             </div>
-            <div className="max-h-48 overflow-y-auto grid grid-cols-2 gap-2">
+            <div className="max-h-36 overflow-y-auto grid grid-cols-2 gap-1.5">
               {buildYourOwnIngredientCandidates.map((ing) => {
                 const checked =
                   usingAll || form.buildYourOwnAllowedIngredientIds.includes(ing.id);
@@ -1725,7 +2149,7 @@ function CreateCatalogItemModal({
                       }
                       toggleBuildYourOwnIngredient(ing.id);
                     }}
-                    className={`rounded-xl border-2 p-2.5 text-left text-sm transition-colors ${
+                    className={`rounded-xl border-2 p-2 text-left text-sm transition-colors ${
                       checked
                         ? 'border-orange-500 bg-white dark:bg-gray-900'
                         : 'border-gray-200 dark:border-gray-700 opacity-70'
@@ -1741,7 +2165,7 @@ function CreateCatalogItemModal({
           </>
         )}
 
-        <p className="text-xs text-gray-600 dark:text-gray-400 border-t border-orange-200 dark:border-orange-800 pt-3">
+        <p className="text-xs text-gray-600 dark:text-gray-400 border-t border-orange-200 dark:border-orange-800 pt-2.5">
           En TPV el cliente toca los ingredientes que quiere añadir. Precio fijo del producto.
         </p>
       </section>
@@ -1755,9 +2179,9 @@ function CreateCatalogItemModal({
     }));
   };
 
-  const inputClass = 'w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100';
-  const inputClassInline = 'px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100';
-  const labelClass = 'block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5';
+  const inputClass = 'w-full px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100';
+  const inputClassInline = 'px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100';
+  const labelClass = 'block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1';
 
   const renderComboBuilderSection = () => {
     if (!showComboBuilder) return null;
@@ -1791,108 +2215,18 @@ function CreateCatalogItemModal({
   const renderSupplementsSection = () => {
     if (form.itemType === 'service') return null;
     return (
-          <div className="space-y-3 pt-2">
-            <div>
-              <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
-                <div className="min-w-0">
-                  <label className={labelClass}>Extras de pago</label>
-                </div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setForm((f) => ({
-                      ...f,
-                      supplements: [
-                        ...f.supplements,
-                        { id: `sup-${Date.now()}`, name: '', price: '' },
-                      ],
-                    }))
-                  }
-                  className="inline-flex shrink-0 items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-900"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  Añadir extra
-                </button>
-              </div>
-              {form.supplements.length === 0 ? (
-                <p className="text-sm text-stone-400 rounded-xl border border-dashed border-gray-200 dark:border-gray-700 px-3 py-3">
-                  Sin extras. Pulsa <span className="font-semibold">Añadir extra</span> para crear uno (ej. «Extra queso» → 1,50 €).
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  <div className="hidden sm:grid sm:grid-cols-[minmax(0,1fr)_7rem_2.5rem] gap-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                    <span>Nombre del extra</span>
-                    <span className="text-right">Precio €</span>
-                    <span className="sr-only">Quitar</span>
-                  </div>
-                  {form.supplements.map((row, idx) => (
-                    <div
-                      key={row.id || idx}
-                      className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_7rem_2.5rem] gap-2 items-center"
-                    >
-                      <div className="min-w-0">
-                        <label className="sm:sr-only text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">
-                          Nombre del extra
-                        </label>
-                        <input
-                          className={`${inputClassInline} w-full min-w-0`}
-                          placeholder="Ej. Extra queso"
-                          value={row.name}
-                          onChange={(e) =>
-                            setForm((f) => ({
-                              ...f,
-                              supplements: f.supplements.map((s, i) =>
-                                i === idx ? { ...s, name: e.target.value } : s,
-                              ),
-                            }))
-                          }
-                        />
-                      </div>
-                      <div className="flex items-center gap-2 sm:block">
-                        <label className="sm:sr-only text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">
-                          Precio €
-                        </label>
-                        <div className="flex items-center gap-1.5 w-full sm:w-auto">
-                          <span className="text-sm text-gray-400 shrink-0 sm:hidden">€</span>
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            inputMode="decimal"
-                            className={`${inputClassInline} w-full sm:w-full tabular-nums text-right`}
-                            placeholder="0,00"
-                            value={row.price}
-                            onChange={(e) =>
-                              setForm((f) => ({
-                                ...f,
-                                supplements: f.supplements.map((s, i) =>
-                                  i === idx ? { ...s, price: e.target.value } : s,
-                                ),
-                              }))
-                            }
-                          />
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setForm((f) => ({
-                            ...f,
-                            supplements: f.supplements.filter((_, i) => i !== idx),
-                          }))
-                        }
-                        className="justify-self-end sm:justify-self-center p-2 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30"
-                        title="Quitar este extra"
-                        aria-label="Quitar este extra"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
+      <div className="space-y-2 pt-2">
+        <label className={labelClass}>Cobrar extra en TPV</label>
+        <CatalogSupplementPicker
+          rows={form.supplements}
+          onChange={(supplements) => setForm((f) => ({ ...f, supplements }))}
+          storeIngredients={effectiveStoreIngredients}
+          brandIds={form.selectedBrandIds}
+          defaultExtraPrice={modalDefaultExtraPrice}
+          loading={modalIngredientsLoading}
+          inputClass={inputClassInline}
+        />
+      </div>
     );
   };
 
@@ -1923,6 +2257,8 @@ function CreateCatalogItemModal({
           brandIds={form.selectedBrandIds}
           salePrice={Number(form.unitPrice) || 0}
           compact
+          onCreateIngredient={createRecipeLinkedIngredient}
+          creatingIngredient={creatingRecipeIngredient}
         />
         {renderSupplementsSection()}
       </section>
@@ -2051,30 +2387,38 @@ function CreateCatalogItemModal({
     <>
     <div
       ref={modalOverlayRef}
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-2 sm:p-4 bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto pt-3 sm:pt-5 px-2 sm:px-4 pb-3 bg-black/40 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
         ref={modalPanelRef}
-        className={`bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-h-[95vh] sm:max-h-[90vh] overflow-y-auto my-2 sm:my-4 ${
-          showComboBuilder ? 'max-w-3xl' : 'max-w-2xl'
+        className={`bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-2.5rem)] flex flex-col overflow-hidden ${
+          showComboBuilder && (isEditMode || isCompositionStep) ? 'max-w-3xl' : 'max-w-2xl'
         }`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="sticky top-0 bg-white dark:bg-gray-800 z-10 p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-                {editItem ? 'Editar producto' : 'Nuevo producto'}
-              </h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+        <div className="shrink-0 bg-white dark:bg-gray-800 z-10 px-4 py-3 sm:px-5 sm:py-3.5 border-b border-gray-200 dark:border-gray-700">
+          <div className="flex items-center justify-between gap-2 mb-2.5">
+            <div className="min-w-0">
+              <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">
                 {editItem
-                  ? 'Marca, categoría y precios vinculados a tus líneas comerciales'
+                  ? form.itemType === 'service'
+                    ? 'Editar servicio'
+                    : 'Editar producto'
+                  : form.itemType === 'service'
+                    ? 'Nuevo servicio'
+                    : 'Nuevo producto'}
+              </h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                {editItem
+                  ? form.itemType === 'service'
+                    ? 'Nombre, precio y reglas de aplicación del servicio'
+                    : 'Marca, categoría y precios vinculados a tus líneas comerciales'
                   : `Paso ${step} de ${totalSteps} — ${createStepLabels[step - 1]}`}
               </p>
             </div>
-            <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors">
+            <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors shrink-0">
               <X className="w-5 h-5 text-gray-500 dark:text-gray-400" />
             </button>
           </div>
@@ -2095,7 +2439,7 @@ function CreateCatalogItemModal({
             </>
           )}
           {editItem && (
-            <div className="mt-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-3">
+            <div className="mt-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-3">
               <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
                 Producto que estas editando
               </p>
@@ -2137,75 +2481,84 @@ function CreateCatalogItemModal({
           )}
         </div>
 
-        {/* Step content */}
-        <div className="p-4 sm:p-6 min-h-[280px]">
+        {/* Step content — solo el cuerpo hace scroll si hace falta */}
+        <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4" data-create-catalog-body>
           {isEditMode ? (
-            <div className="space-y-8">
-              <section className="space-y-5">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Producto</h3>
+            <div className="space-y-6">
+              <section className="space-y-4">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                  {form.itemType === 'service' ? 'Servicio' : 'Producto'}
+                </h3>
+                {renderItemTypePicker()}
                 <div>
-                  <label className={labelClass}>Nombre del producto *</label>
-                  <input className={inputClass} placeholder="Ej: Hamburguesa clásica, Coca-Cola 33cl..." value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+                  <label className={labelClass}>
+                    {form.itemType === 'service' ? 'Nombre del servicio *' : 'Nombre del producto *'}
+                  </label>
+                  <input
+                    className={`${inputClass}${showNameRequiredError || showNameDuplicateError ? ' border-red-400 dark:border-red-500 focus:border-red-500' : ''}`}
+                    placeholder={
+                      form.itemType === 'service'
+                        ? 'Ej: Corte de pizza, Envío a domicilio…'
+                        : 'Ej: Hamburguesa clásica, Coca-Cola 33cl...'
+                    }
+                    value={form.name}
+                    onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                  />
+                  {showNameDuplicateError ? (
+                    <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                      {formatCatalogDuplicateNameError(duplicateCatalogItemByName)}
+                    </p>
+                  ) : showNameRequiredError ? (
+                    <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                      {form.itemType === 'service'
+                        ? 'Indica el nombre del servicio.'
+                        : 'Indica el nombre del producto.'}
+                    </p>
+                  ) : null}
                 </div>
-                {renderCategoryUnit()}
-                <div>
-                  <label className={labelClass}>Tipo de elemento</label>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    {[
-                      { value: 'product', label: 'Producto', desc: 'Se vende y puede tener stock' },
-                      { value: 'service', label: 'Servicio', desc: 'No descuenta inventario' },
-                      { value: 'combo', label: 'Combo', desc: 'Paquete o menú compuesto' },
-                    ].map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        onClick={() => setForm((f) => ({ ...f, itemType: option.value as CatalogItem['itemType'] }))}
-                        className={`rounded-xl border-2 p-3 text-left transition-colors ${
-                          form.itemType === option.value
-                            ? 'border-gray-900 dark:border-gray-100 bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
-                            : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:border-gray-400'
-                        }`}
-                      >
-                        <div className="text-sm font-bold">{option.label}</div>
-                        <div className={`mt-1 text-xs ${form.itemType === option.value ? 'text-white/75 dark:text-gray-600' : 'text-gray-500 dark:text-gray-400'}`}>{option.desc}</div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                {renderBrandPicker()}
-                {renderBuildYourOwnProductToggle()}
-                {renderBuildYourOwnIngredientPicker()}
-                <div>
-                  <label className={labelClass}>Descripción</label>
-                  <textarea rows={3} className={`${inputClass} resize-none`} placeholder="Descripción detallada del producto..." value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
-                </div>
+                {form.itemType === 'service' ? (
+                  <>
+                    <CatalogServiceRulesFields
+                      rules={form.serviceRules}
+                      onChange={(serviceRules) => setForm((f) => ({ ...f, serviceRules }))}
+                      brands={brands}
+                      showValidation={fieldErrorsShown}
+                    />
+                    <p className="text-[10px] text-stone-500 dark:text-stone-400">
+                      Categoría en catálogo: «{form.category.trim() || CATALOG_SERVICE_CATEGORY}»
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    {renderCategoryUnit()}
+                    {renderProductConfiguratorOptions()}
+                    {renderBuildYourOwnIngredientPicker()}
+                    {renderHalfHalfPizzaPicker()}
+                    {renderBrandPicker()}
+                  </>
+                )}
               </section>
-              {renderCustomizationSection()}
-              {renderComboBuilderSection()}
+              {form.itemType !== 'service' ? renderCustomizationSection() : null}
+              {form.itemType !== 'service' ? renderComboBuilderSection() : null}
               <section className="space-y-5 border-t border-gray-200 dark:border-gray-700 pt-6">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Precios e inventario</h3>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className={labelClass}>Precio venta (€)</label>
-                    <input type="number" step="0.01" className={inputClass} placeholder="0.00" value={form.unitPrice} onChange={(e) => setForm((f) => ({ ...f, unitPrice: e.target.value }))} />
-                  </div>
-                  <div>
-                    <label className={labelClass}>IVA venta</label>
-                    <select
-                      className={inputClass}
-                      value={form.taxRate}
-                      onChange={(e) => setForm((f) => ({ ...f, taxRate: e.target.value }))}
-                    >
-                      <option value="">Apagado (como hasta ahora)</option>
-                      <option value="0">0%</option>
-                      <option value="4">4%</option>
-                      <option value="5">5%</option>
-                      <option value="10">10%</option>
-                      <option value="21">21%</option>
-                    </select>
-                    <p className="mt-1 text-[10px] leading-snug text-gray-500 dark:text-gray-400">
-                      Opcional. No cambia finanzas del TPV mientras esté apagado.
-                    </p>
+                    <label className={labelClass}>Precio venta (€) *</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      className={`${inputClass}${showSalePriceError ? ' border-red-400 dark:border-red-500 focus:border-red-500' : ''}`}
+                      placeholder="0.00"
+                      value={form.unitPrice}
+                      onChange={(e) => setForm((f) => ({ ...f, unitPrice: e.target.value }))}
+                    />
+                    {showSalePriceError ? (
+                      <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                        Indica el precio de venta para guardar.
+                      </p>
+                    ) : null}
                   </div>
                   <div>
                     <label className={labelClass}>Precio empleado (€)</label>
@@ -2232,6 +2585,10 @@ function CreateCatalogItemModal({
               <section className="space-y-5 border-t border-gray-200 dark:border-gray-700 pt-6">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Publicación</h3>
                 {renderProductPhotoField()}
+                <div>
+                  <label className={labelClass}>Descripción</label>
+                  <textarea rows={3} className={`${inputClass} resize-none`} placeholder="Descripción detallada del producto..." value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
+                </div>
                 <div>
                   <label className={labelClass}>Alérgenos</label>
                   <div className="flex flex-wrap gap-2">
@@ -2263,11 +2620,16 @@ function CreateCatalogItemModal({
               </section>
             </div>
           ) : step === 1 ? (
-            <div className="space-y-5">
+            <div className="space-y-3">
               {sessionCreated.length > 0 ? (
                 <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-2.5">
                   <p className="text-xs font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
-                    {sessionCreated.length} producto(s) guardado(s) en «{normalizedCategory || form.category || 'esta sección'}»
+                    {sessionCreated.length}{' '}
+                    {form.itemType === 'service' ? 'servicio(s)' : 'producto(s)'} guardado(s) en «
+                    {form.itemType === 'service'
+                      ? CATALOG_SERVICE_CATEGORY
+                      : normalizedCategory || form.category || 'esta sección'}
+                    »
                   </p>
                   <ul className="mt-1.5 space-y-0.5 text-xs text-emerald-900 dark:text-emerald-200">
                     {sessionCreated.slice(-4).map((item) => (
@@ -2281,96 +2643,152 @@ function CreateCatalogItemModal({
                   </ul>
                 </div>
               ) : null}
+
+              {renderItemTypePicker()}
+
               <div>
-                <label className={labelClass}>Nombre del producto *</label>
-                <input className={inputClass} placeholder="Ej: Mitad y mitad, Margarita, Coca-Cola 33cl..." value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} autoFocus />
+                <label className={labelClass}>Nombre *</label>
+                <input
+                  className={`${inputClass}${showNameRequiredError || showNameDuplicateError ? ' border-red-400 dark:border-red-500 focus:border-red-500' : ''}`}
+                  placeholder={
+                    form.itemType === 'service'
+                      ? 'Ej: Corte de pizza, Envío a domicilio, Servicio terraza…'
+                      : 'Ej: Margarita, Coca-Cola 33cl…'
+                  }
+                  value={form.name}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                  autoFocus
+                />
+                {showNameDuplicateError ? (
+                  <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                    {formatCatalogDuplicateNameError(duplicateCatalogItemByName)}
+                  </p>
+                ) : showNameRequiredError ? (
+                  <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                    {form.itemType === 'service'
+                      ? 'Indica el nombre del servicio para continuar.'
+                      : 'Indica el nombre del producto para continuar.'}
+                  </p>
+                ) : null}
               </div>
-              {renderCategoryUnit()}
-              <div>
-                <label className={labelClass}>Tipo de elemento</label>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {(isRestaurantCatalog
-                    ? [
-                        { value: 'product', label: 'Producto', desc: 'Plato, tapa o bebida' },
-                        { value: 'service', label: 'Servicio', desc: 'Cubierto u otro cobro, sin stock' },
-                        { value: 'combo', label: 'Combo', desc: 'Menú con varios productos de la carta' },
-                      ]
-                    : [
-                        { value: 'product', label: 'Producto', desc: 'Se vende y puede tener stock' },
-                        { value: 'service', label: 'Servicio', desc: 'No descuenta inventario' },
-                        { value: 'combo', label: 'Combo', desc: 'Paquete o menú compuesto' },
-                      ]
-                  ).map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => setForm((f) => ({ ...f, itemType: option.value as CatalogItem['itemType'] }))}
-                      className={`rounded-xl border-2 p-3 text-left transition-colors ${
-                        form.itemType === option.value
-                          ? 'border-gray-900 dark:border-gray-100 bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
-                          : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:border-gray-400'
-                      }`}
-                    >
-                      <div className="text-sm font-bold">{option.label}</div>
-                      <div className={`mt-1 text-xs ${form.itemType === option.value ? 'text-white/75 dark:text-gray-600' : 'text-gray-500 dark:text-gray-400'}`}>{option.desc}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {renderBrandPicker()}
-              {renderBuildYourOwnProductToggle()}
-              {renderBuildYourOwnIngredientPicker()}
-              <div>
-                <label className={labelClass}>Descripción</label>
-                <textarea rows={2} className={`${inputClass} resize-none`} placeholder="Opcional: ingredientes, tamaño, etc." value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className={labelClass}>Precio venta (€)</label>
-                  <input type="number" step="0.01" className={inputClass} placeholder="0.00" value={form.unitPrice} onChange={(e) => setForm((f) => ({ ...f, unitPrice: e.target.value }))} />
-                </div>
-                <div>
-                  <label className={labelClass}>IVA venta</label>
-                  <select
-                    className={inputClass}
-                    value={form.taxRate}
-                    onChange={(e) => setForm((f) => ({ ...f, taxRate: e.target.value }))}
-                  >
-                    <option value="">Apagado (como hasta ahora)</option>
-                    <option value="0">0%</option>
-                    <option value="4">4%</option>
-                    <option value="5">5%</option>
-                    <option value="10">10%</option>
-                    <option value="21">21%</option>
-                  </select>
-                </div>
-                <div>
-                  <label className={labelClass}>Precio empleado (€)</label>
-                  <input type="number" step="0.01" className={inputClass} placeholder="Opcional" value={form.staffPrice} onChange={(e) => setForm((f) => ({ ...f, staffPrice: e.target.value }))} />
-                </div>
-              </div>
+
+              {form.itemType === 'service' ? (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className={labelClass}>Precio (€) *</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        className={`${inputClass}${showSalePriceError ? ' border-red-400 dark:border-red-500 focus:border-red-500' : ''}`}
+                        placeholder="0.00"
+                        value={form.unitPrice}
+                        onChange={(e) => setForm((f) => ({ ...f, unitPrice: e.target.value }))}
+                      />
+                      {showSalePriceError ? (
+                        <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                          Indica el precio para continuar.
+                        </p>
+                      ) : null}
+                    </div>
+                    <div>
+                      <label className={labelClass}>Precio empleado (€)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        className={inputClass}
+                        placeholder="Opcional"
+                        value={form.staffPrice}
+                        onChange={(e) => setForm((f) => ({ ...f, staffPrice: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <CatalogServiceRulesFields
+                    rules={form.serviceRules}
+                    onChange={(serviceRules) => setForm((f) => ({ ...f, serviceRules }))}
+                    brands={brands}
+                    showValidation={fieldErrorsShown}
+                  />
+                  <p className="text-[10px] text-stone-500 dark:text-stone-400">
+                    Se listará en catálogo bajo «{CATALOG_SERVICE_CATEGORY}». El motor TPV aplicará las reglas en una
+                    fase posterior.
+                  </p>
+                </>
+              ) : (
+                <>
+                  {renderCategoryUnit()}
+                  {renderProductConfiguratorOptions()}
+                  {renderBuildYourOwnIngredientPicker()}
+                  {renderHalfHalfPizzaPicker()}
+                  {renderBrandPicker()}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className={labelClass}>Precio venta (€) *</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        className={`${inputClass}${showSalePriceError ? ' border-red-400 dark:border-red-500 focus:border-red-500' : ''}`}
+                        placeholder="0.00"
+                        value={form.unitPrice}
+                        onChange={(e) => setForm((f) => ({ ...f, unitPrice: e.target.value }))}
+                      />
+                      {showSalePriceError ? (
+                        <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                          Indica el precio de venta para continuar.
+                        </p>
+                      ) : null}
+                    </div>
+                    <div>
+                      <label className={labelClass}>Precio empleado (€)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        className={inputClass}
+                        placeholder="Opcional"
+                        value={form.staffPrice}
+                        onChange={(e) => setForm((f) => ({ ...f, staffPrice: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-stone-500 dark:text-stone-400 -mt-2">
+                    Precio empleado solo si vendes más barato al personal. IVA como hasta ahora.
+                  </p>
+                </>
+              )}
             </div>
           ) : isCompositionStep ? (
-            <div className="space-y-5">
+            <div className="space-y-4">
               {showComboBuilder ? (
                 <>
                   {renderComboBuilderSection()}
                   {renderSupplementsSection()}
                 </>
-              ) : isRestaurantCatalog || form.buildYourOwn ? (
+              ) : form.buildYourOwn ? (
                 renderSupplementsSection()
               ) : (
                 renderCustomizationSection()
               )}
             </div>
           ) : (
-            <div className="space-y-5">
+            <div className="space-y-4">
               {isServiceWizard ? (
                 <p className="text-sm text-stone-500 dark:text-stone-400">
-                  Un servicio no lleva receta ni stock. Aquí solo foto, alérgenos y si está a la venta.
+                  Foto, descripción y visibilidad. Las reglas ya quedaron en el paso anterior.
                 </p>
               ) : null}
               {renderProductPhotoField({ autoFocus: true })}
+              <div>
+                <label className={labelClass}>Descripción</label>
+                <textarea
+                  rows={3}
+                  className={`${inputClass} resize-none`}
+                  placeholder="Opcional: ingredientes, tamaño, etc."
+                  value={form.description}
+                  onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                />
+              </div>
               <div>
                 <label className={labelClass}>Alérgenos</label>
                 <div className="flex flex-wrap gap-2 max-h-28 overflow-y-auto">
@@ -2411,6 +2829,14 @@ function CreateCatalogItemModal({
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                   {[form.category, activeBrands.filter((b) => form.selectedBrandIds.includes(b._id)).map((b) => b.name).join(', ')].filter(Boolean).join(' · ')}
                 </p>
+                {form.itemType === 'service' ? (
+                  <p className="text-[11px] text-violet-700 dark:text-violet-300 mt-1">
+                    {summarizeCatalogServiceRules(form.serviceRules)}
+                  </p>
+                ) : null}
+                {form.description.trim() ? (
+                  <p className="text-xs text-gray-600 dark:text-gray-300 mt-1 line-clamp-2">{form.description}</p>
+                ) : null}
                 <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mt-1">{Number(form.unitPrice || 0).toFixed(2)}€</p>
               </div>
             </div>
@@ -2418,10 +2844,10 @@ function CreateCatalogItemModal({
         </div>
 
         {/* Footer */}
-        <div className="sticky bottom-0 bg-gray-50 dark:bg-gray-900 p-4 sm:p-6 border-t border-gray-200 dark:border-gray-700 flex flex-wrap gap-2 sm:gap-3">
+        <div className="shrink-0 bg-gray-50 dark:bg-gray-900 px-3 py-3 sm:px-4 sm:py-3.5 border-t border-gray-200 dark:border-gray-700 flex flex-wrap gap-2 sm:gap-3">
           {isEditMode ? (
             <>
-              <button type="button" onClick={onClose} className="px-5 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-white dark:hover:bg-gray-800 transition-colors">
+              <button type="button" onClick={onClose} className="px-4 py-2.5 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-white dark:hover:bg-gray-800 transition-colors">
                 Cancelar
               </button>
               <div className="flex-1" />
@@ -2429,7 +2855,7 @@ function CreateCatalogItemModal({
                 type="button"
                 onClick={() => void handleFinalSubmit(false)}
                 disabled={submitting}
-                className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-semibold transition-colors disabled:opacity-60 disabled:cursor-wait"
+                className="px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-xl font-semibold transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {submitting ? 'Guardando…' : 'Guardar cambios'}
               </button>
@@ -2437,11 +2863,11 @@ function CreateCatalogItemModal({
           ) : (
             <>
               {step > 1 ? (
-                <button type="button" onClick={() => setStep(s => s - 1)} className="px-5 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-white dark:hover:bg-gray-800 transition-colors">
+                <button type="button" onClick={() => setStep(s => s - 1)} className="px-4 py-2.5 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-white dark:hover:bg-gray-800 transition-colors">
                   Atrás
                 </button>
               ) : (
-                <button type="button" onClick={onClose} className="px-5 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-white dark:hover:bg-gray-800 transition-colors">
+                <button type="button" onClick={onClose} className="px-4 py-2.5 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-white dark:hover:bg-gray-800 transition-colors">
                   Cancelar
                 </button>
               )}
@@ -2450,8 +2876,7 @@ function CreateCatalogItemModal({
                 <button
                   type="button"
                   onClick={handleGoNext}
-                  disabled={!canNext()}
-                  className="px-6 py-3 bg-gray-900 hover:bg-black text-white rounded-xl font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-5 py-2.5 bg-gray-900 hover:bg-black text-white rounded-xl font-semibold transition-colors"
                 >
                   Siguiente
                 </button>
@@ -2461,7 +2886,7 @@ function CreateCatalogItemModal({
                     type="button"
                     onClick={() => void handleFinalSubmit(true)}
                     disabled={submitting}
-                    className="px-5 py-3 border-2 border-green-600 text-green-700 dark:text-green-400 rounded-xl font-semibold transition-colors disabled:opacity-60 disabled:cursor-wait hover:bg-green-50 dark:hover:bg-green-950/30"
+                    className="px-4 py-2.5 border-2 border-green-600 text-green-700 dark:text-green-400 rounded-xl font-semibold transition-colors disabled:opacity-60 disabled:cursor-wait hover:bg-green-50 dark:hover:bg-green-950/30"
                   >
                     {submitting ? 'Guardando…' : 'Guardar y añadir otro'}
                   </button>
@@ -2469,7 +2894,7 @@ function CreateCatalogItemModal({
                     type="button"
                     onClick={() => void handleFinalSubmit(false)}
                     disabled={submitting}
-                    className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-semibold transition-colors disabled:opacity-60 disabled:cursor-wait"
+                    className="px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-xl font-semibold transition-colors disabled:opacity-60 disabled:cursor-wait"
                   >
                     {submitting ? 'Guardando…' : sessionCreated.length > 0 ? 'Guardar y cerrar' : 'Crear producto'}
                   </button>
@@ -4116,7 +4541,7 @@ type CatalogNavGroup = { id: string; label: string; tabs: CatalogNavTab[] };
 
 /**
  * Nav agrupada del catálogo TPV: misma mecánica que las tabs planas (?tab=…).
- * Muestra todas las secciones (Carta · Almacén · Compras · Equipo) con separadores.
+ * Cada sección es un botón visible (avance azul / outline secundario).
  */
 function CatalogModuleNav({
   groups,
@@ -4129,14 +4554,20 @@ function CatalogModuleNav({
 }) {
   return (
     <nav
-      className="flex w-full items-center gap-1 overflow-x-auto rounded-2xl border border-gray-200 bg-white p-1.5 shadow-sm dark:border-gray-700 dark:bg-gray-800 [&::-webkit-scrollbar]:hidden"
+      className="flex w-full items-center gap-2 overflow-x-auto rounded-2xl border border-stone-200 bg-stone-100/80 p-2 shadow-sm dark:border-stone-700 dark:bg-stone-900/60 [&::-webkit-scrollbar]:hidden"
       style={{ scrollbarWidth: 'none' }}
+      aria-label="Secciones del catálogo"
     >
       {groups.map((group, gi) => {
         const singleTab = group.tabs.length === 1;
         return (
-          <div key={group.id} className="flex shrink-0 items-center gap-1">
-            {gi !== 0 && <span className="mx-0.5 h-5 w-px shrink-0 bg-gray-200 dark:bg-gray-700" />}
+          <div key={group.id} className="flex shrink-0 items-center gap-1.5">
+            {gi !== 0 ? (
+              <span
+                className="mx-0.5 h-8 w-px shrink-0 bg-stone-300 dark:bg-stone-600"
+                aria-hidden
+              />
+            ) : null}
             {group.tabs.map((tab) => {
               const isActive = activeTab === tab.id;
               return (
@@ -4144,24 +4575,25 @@ function CatalogModuleNav({
                   key={tab.id}
                   type="button"
                   onClick={() => onChange(tab.id)}
-                  className={`flex items-center gap-1.5 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-semibold transition-colors md:px-3.5 md:text-sm ${
+                  aria-current={isActive ? 'page' : undefined}
+                  className={`inline-flex min-h-11 items-center gap-1.5 whitespace-nowrap rounded-xl px-3.5 py-2 text-xs font-semibold transition-colors md:px-4 md:text-sm ${
                     isActive
-                      ? 'bg-[var(--v-blue,#2563eb)] text-white shadow-sm'
-                      : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-700/60 dark:hover:text-gray-200'
+                      ? 'bg-[var(--v-blue,#2563eb)] text-white shadow-sm shadow-blue-600/20'
+                      : 'border border-stone-200 bg-white text-stone-700 hover:border-blue-200 hover:bg-blue-50/60 hover:text-[var(--v-blue,#2563eb)] dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:border-blue-700 dark:hover:bg-blue-950/40 dark:hover:text-blue-300'
                   }`}
                 >
                   {singleTab ? group.label : tab.label}
-                  {tab.count !== undefined && (
+                  {tab.count !== undefined ? (
                     <span
-                      className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${
+                      className={`rounded-lg px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${
                         isActive
                           ? 'bg-white/25 text-white'
-                          : 'bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500'
+                          : 'bg-stone-100 text-stone-500 dark:bg-stone-700 dark:text-stone-300'
                       }`}
                     >
                       {tab.count}
                     </span>
-                  )}
+                  ) : null}
                 </button>
               );
             })}
@@ -4237,8 +4669,9 @@ export function CatalogPage() {
       filterCatalogItemsForBusinessScope(allCatalogItems, businessId, brands, {
         accountBusinessCount,
         activeBusinessType: currentBusiness?.businessType,
+        brandsSettled: !brandsLoading,
       }),
-    [allCatalogItems, businessId, brands, accountBusinessCount, currentBusiness?.businessType],
+    [allCatalogItems, businessId, brands, accountBusinessCount, currentBusiness?.businessType, brandsLoading],
   );
 
   /** Solo productos de carta TPV (excluye ingredientes/almacén module stock). */
@@ -4306,7 +4739,6 @@ export function CatalogPage() {
   const [invoicesHydrating, setInvoicesHydrating] = useState(false);
   const [syncingEmailInvoices, setSyncingEmailInvoices] = useState(false);
   const [invoiceEmailPdvs, setInvoiceEmailPdvs] = useState<SupplierInvoicePdvEmailStatus[]>([]);
-  const [invoiceEmailLegacyConnected, setInvoiceEmailLegacyConnected] = useState(false);
   const [invoiceFinanceLinks, setInvoiceFinanceLinks] = useState<Set<string>>(new Set());
   const suppliersFetchedRef = useRef(false);
   const invoicesFetchedRef = useRef(false);
@@ -4331,11 +4763,10 @@ export function CatalogPage() {
   const reloadInvoiceEmailStatus = useCallback(async () => {
     if (!dataUserId) {
       setInvoiceEmailPdvs([]);
-      setInvoiceEmailLegacyConnected(false);
       return;
     }
     try {
-      const { pdvs, legacyAccount } = await listSupplierInvoicePdvEmailConfigs(dataUserId);
+      const { pdvs } = await listSupplierInvoicePdvEmailConfigs(dataUserId);
       const bid = normalizeBusinessScopeId(businessId);
       const scoped = (Array.isArray(pdvs) ? pdvs : []).filter((p) => {
         if (!bid) return true;
@@ -4343,29 +4774,14 @@ export function CatalogPage() {
         return !pdvBid || pdvBid === bid;
       });
       setInvoiceEmailPdvs(scoped);
-      setInvoiceEmailLegacyConnected(Boolean(legacyAccount?.connected || legacyAccount?.config?.enabled));
     } catch {
       setInvoiceEmailPdvs([]);
-      setInvoiceEmailLegacyConnected(false);
     }
   }, [dataUserId, businessId]);
 
-  const invoiceEmailPdvsForUi = useMemo(() => {
-    const storeById = new Map(activeStore.pointsOfSale.map((p) => [p._id, p]));
-    return invoiceEmailPdvs.map((pdv) => {
-      const store = storeById.get(pdv.pdvId);
-      return {
-        ...pdv,
-        label: store
-          ? pointOfSaleDisplayLabel(store)
-          : pointOfSaleDisplayLabel({ name: pdv.name, code: pdv.code }),
-      };
-    });
-  }, [invoiceEmailPdvs, activeStore.pointsOfSale]);
-
   const invoiceEmailConnectedCount = useMemo(
-    () => invoiceEmailPdvsForUi.filter((p) => p.connected).length,
-    [invoiceEmailPdvsForUi],
+    () => invoiceEmailPdvs.filter((p) => p.connected).length,
+    [invoiceEmailPdvs],
   );
   const storeLabel = activeStore.displayLabelForActive || 'Tienda activa';
   const activeWorkCenterId = useMemo(() => {
@@ -5215,7 +5631,6 @@ export function CatalogPage() {
     setPurchaseOrders([]);
     setInvoicesHydrating(false);
     setInvoiceEmailPdvs([]);
-    setInvoiceEmailLegacyConnected(false);
     setInvoiceFinanceLinks(new Set());
     setWarehouses([]);
     setLoading(false);
@@ -6280,20 +6695,21 @@ export function CatalogPage() {
     !loading && catalogMenuItems.length > 0 && filteredCatalog.length === 0 && Boolean(searchCatalog.trim());
 
   const renderCatalogTab = () => (
-    <SaasTabWorkspace
+    <CatalogTabShell
       stats={catalogTabStats}
-      toolbar={
-        <SaasTabToolbarRow
-          left={
-            <SaasTabSearch
-              value={searchCatalog}
-              onChange={setSearchCatalog}
-              placeholder="Buscar en el menú…"
-              className="relative w-full sm:w-64"
-            />
-          }
-          right={
-            <>
+      storeLabel={storeLabel}
+      dataUserId={dataUserId}
+      storeWarehouseId={storeWarehouseId}
+      toolbarBelow={
+        <SaasTabSearch
+          value={searchCatalog}
+          onChange={setSearchCatalog}
+          placeholder="Buscar en el menú…"
+          className="relative w-full"
+        />
+      }
+      toolbarRight={
+        <>
               {!isCatalogEmpty && !catalogSelectMode ? (
                 <>
                   <SaasTabSecondaryButton
@@ -6382,43 +6798,20 @@ export function CatalogPage() {
                 </ActivationFieldWrap>
               ) : null}
             </>
-          }
-        />
-      }
-      banner={
-        catalogSelectMode && filteredCatalog.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-3 text-gray-800 dark:text-gray-200">
-            <label className="inline-flex items-center gap-2 text-xs font-medium cursor-pointer">
-              <input
-                type="checkbox"
-                checked={allFilteredCatalogSelected}
-                onChange={toggleSelectAllFilteredCatalog}
-                className="w-3.5 h-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-              />
-              {allFilteredCatalogSelected ? 'Deseleccionar todo' : 'Seleccionar todo'}
-            </label>
-            <span className="text-xs text-gray-600 dark:text-gray-400">
-              {selectedCatalogCount === 0
-                ? 'Carta: marca productos de venta para mover o eliminar (no es Almacén)'
-                : `${selectedCatalogCount} de Carta seleccionado${selectedCatalogCount !== 1 ? 's' : ''}`}
-            </span>
-            {bulkDeleteConfirmStep && selectedCatalogCount > 0 ? (
-              <span className="text-xs font-medium text-red-700 dark:text-red-300">
-                Pulsa «Estoy seguro» para confirmar
-              </span>
-            ) : null}
-          </div>
-        ) : undefined
       }
     >
       {/* Secciones por categoría */}
-      {(loading) && (
+      {(loading || catalogBusy) && (
         <div className="flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 px-3 py-2 text-sm text-gray-600 dark:text-gray-400">
           <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-          {catalogItems.length > 0 ? 'Actualizando catálogo…' : 'Cargando productos…'}
+          {brandsLoading && !loading
+            ? 'Cargando marcas comerciales…'
+            : catalogItems.length > 0
+              ? 'Actualizando catálogo…'
+              : 'Cargando productos…'}
         </div>
       )}
-      {!loading && isCatalogEmpty ? (
+      {!loading && !catalogBusy && isCatalogEmpty ? (
         <ActivationFieldWrap
           fieldKey="catalog-import"
           activeKey={
@@ -6946,7 +7339,7 @@ export function CatalogPage() {
           );
         })()
       ) : null}
-    </SaasTabWorkspace>
+    </CatalogTabShell>
   );
 
   // ── Tab: Proveedores ────────────────────────────────────────────────────────
@@ -6969,14 +7362,17 @@ export function CatalogPage() {
     const historyTotal = purchaseHistory.reduce((s, i) => s + Number(i.total || 0), 0);
 
     return (
-    <SaasTabWorkspace
+    <CatalogTabShell
       stats={[
         { label: 'proveedores', value: supplierKpis.total },
         { label: 'activos', value: supplierKpis.active, tone: 'emerald' },
         { label: 'compras', value: purchaseHistory.length },
         { label: 'importe', value: formatMoneyEs(historyTotal) },
       ]}
-      statsTrailing={
+      storeLabel={storeLabel}
+      dataUserId={dataUserId}
+      storeWarehouseId={storeWarehouseId}
+      toolbarRight={
         <SaasTabPrimaryButton onClick={() => { void openSupplierEditor(null); }}>
           <Plus className="w-3.5 h-3.5" />
           Nuevo proveedor
@@ -7276,7 +7672,7 @@ export function CatalogPage() {
           </div>
         )}
       </div>
-    </SaasTabWorkspace>
+    </CatalogTabShell>
     );
   };
 
@@ -7327,7 +7723,7 @@ export function CatalogPage() {
     const empty = waitingOrders.length === 0 && albaranes.length === 0;
 
     return (
-      <SaasTabWorkspace
+      <CatalogTabShell
         stats={[
           { label: 'en espera', value: waitingOrders.length, tone: 'amber' },
           { label: 'albaranes', value: albaranes.length },
@@ -7337,6 +7733,9 @@ export function CatalogPage() {
             tone: 'amber',
           },
         ]}
+        storeLabel={storeLabel}
+        dataUserId={dataUserId}
+        storeWarehouseId={storeWarehouseId}
       >
         {empty ? (
           <SaasTabEmpty
@@ -7517,7 +7916,7 @@ export function CatalogPage() {
             )}
           </div>
         )}
-      </SaasTabWorkspace>
+      </CatalogTabShell>
     );
   };
 
@@ -7800,7 +8199,7 @@ export function CatalogPage() {
     };
 
     return (
-      <SaasTabWorkspace
+      <CatalogTabShell
         stats={[
           { label: 'facturas', value: invoiceKpis.total },
           { label: 'pendientes', value: invoiceKpis.pending, tone: 'amber' },
@@ -7810,91 +8209,51 @@ export function CatalogPage() {
             value: formatMoneyEs(invoiceKpis.totalAmount),
           },
         ]}
-        toolbar={
-          <div className="space-y-2 w-full">
-            {(invoiceEmailPdvsForUi.length > 0 || invoiceEmailLegacyConnected) ? (
-              <div className="rounded-xl border border-stone-200 dark:border-stone-700 bg-white/90 dark:bg-stone-900/60 px-3 py-2.5">
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-                  <span className="text-[10px] font-bold uppercase tracking-wide text-stone-400 shrink-0">
-                    Correo por tienda
-                  </span>
-                  {invoiceEmailPdvsForUi.map((pdv) => (
-                    <button
-                      key={pdv.pdvId}
-                      type="button"
-                      onClick={() => navigate(`/saas/correo-facturas?pdv=${encodeURIComponent(pdv.pdvId)}`)}
-                      title={
-                        pdv.connected
-                          ? `${pdv.label} · ${pdv.imapUser || 'conectado'}`
-                          : `${pdv.label} · sin correo configurado`
-                      }
-                      className={`inline-flex max-w-full items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors ${
-                        pdv.connected
-                          ? 'border-teal-200 bg-teal-50 text-teal-900 hover:border-teal-300 dark:border-teal-800 dark:bg-teal-950/40 dark:text-teal-100'
-                          : 'border-amber-200 bg-amber-50 text-amber-900 hover:border-amber-300 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100'
-                      }`}
-                    >
-                      <Store className="h-3 w-3 shrink-0 opacity-70" />
-                      <span className="truncate">{pdv.label}</span>
-                      <span className="truncate opacity-80">
-                        {pdv.connected ? pdv.imapUser || 'conectado' : 'sin correo'}
-                      </span>
-                    </button>
-                  ))}
-                  {invoiceEmailLegacyConnected ? (
-                    <span className="text-[11px] text-amber-700 dark:text-amber-300">
-                      Cuenta global (legado) — configura cada tienda
-                    </span>
-                  ) : null}
-                  <button
-                    type="button"
-                    onClick={() => navigate('/saas/correo-facturas')}
-                    className="text-[11px] font-semibold text-[var(--v-blue,#2563eb)] hover:underline"
-                  >
-                    Gestionar correos
-                  </button>
-                </div>
-              </div>
+        storeLabel={storeLabel}
+        dataUserId={dataUserId}
+        storeWarehouseId={storeWarehouseId}
+        toolbarRight={
+          <div className="flex flex-wrap items-center gap-2">
+            {invoiceEmailConnectedCount > 0 || syncingEmailInvoices || invoicesHydrating ? (
+              <span className="text-[11px] text-teal-700 dark:text-teal-300 font-medium tabular-nums">
+                {invoiceEmailConnectedCount > 0
+                  ? `${invoiceEmailConnectedCount} tienda(s) con correo`
+                  : ''}
+                {invoiceEmailConnectedCount > 0 && (syncingEmailInvoices || invoicesHydrating) ? ' · ' : ''}
+                {syncingEmailInvoices ? 'sincronizando…' : invoicesHydrating ? 'actualizando…' : ''}
+              </span>
             ) : null}
-            <SaasTabToolbarRow
-            right={
-              <div className="flex flex-wrap items-center gap-2">
-                {invoiceEmailConnectedCount > 0 || syncingEmailInvoices || invoicesHydrating ? (
-                  <span className="text-[11px] text-teal-700 dark:text-teal-300 font-medium tabular-nums">
-                    {invoiceEmailConnectedCount > 0
-                      ? `${invoiceEmailConnectedCount} tienda(s) con correo`
-                      : ''}
-                    {invoiceEmailConnectedCount > 0 && (syncingEmailInvoices || invoicesHydrating) ? ' · ' : ''}
-                    {syncingEmailInvoices ? 'sincronizando…' : invoicesHydrating ? 'actualizando…' : ''}
-                  </span>
-                ) : null}
-                <SaasTabSecondaryButton
-                  onClick={() => void syncInvoicesFromEmail()}
-                  disabled={syncingEmailInvoices || !dataUserId}
-                  title="Leer facturas nuevas del correo conectado"
-                >
-                  {syncingEmailInvoices ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <RefreshCw className="w-3.5 h-3.5" />
-                  )}
-                  Sincronizar
-                </SaasTabSecondaryButton>
-                <SaasTabSecondaryButton
-                  onClick={() => openInvoiceOcrFlow()}
-                  disabled={!dataUserId}
-                  title="Escanear factura con OCR: proveedor, artículos y stock"
-                >
-                  <ScanLine className="w-3.5 h-3.5" />
-                  Escanear factura
-                </SaasTabSecondaryButton>
-                <SaasTabPrimaryButton onClick={() => { setEditingInvoice(null); setShowCreateInvoice(true); }}>
-                  <Plus className="w-3.5 h-3.5" />
-                  Nueva factura
-                </SaasTabPrimaryButton>
-              </div>
-            }
-          />
+            <SaasTabSecondaryButton
+              onClick={() => navigate('/saas/correo-facturas?ajustes=1')}
+              title="Ajustes de correo de facturas"
+            >
+              <Settings2 className="w-3.5 h-3.5" />
+              Ajustes
+            </SaasTabSecondaryButton>
+            <SaasTabSecondaryButton
+              onClick={() => void syncInvoicesFromEmail()}
+              disabled={syncingEmailInvoices || !dataUserId}
+              title="Leer facturas nuevas del correo conectado"
+            >
+              {syncingEmailInvoices ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="w-3.5 h-3.5" />
+              )}
+              Sincronizar
+            </SaasTabSecondaryButton>
+            <SaasTabSecondaryButton
+              onClick={() => openInvoiceOcrFlow()}
+              disabled={!dataUserId}
+              title="Escanear factura con OCR: proveedor, artículos y stock"
+            >
+              <ScanLine className="w-3.5 h-3.5" />
+              Escanear factura
+            </SaasTabSecondaryButton>
+            <SaasTabPrimaryButton onClick={() => { setEditingInvoice(null); setShowCreateInvoice(true); }}>
+              <Plus className="w-3.5 h-3.5" />
+              Nueva factura
+            </SaasTabPrimaryButton>
           </div>
         }
       >
@@ -8012,7 +8371,7 @@ export function CatalogPage() {
           </div>
           </>
         )}
-      </SaasTabWorkspace>
+      </CatalogTabShell>
     );
   };
 
@@ -8166,7 +8525,9 @@ export function CatalogPage() {
     };
   }, [activeTab, isRestaurantCatalog]);
 
-  const catalogBusy = loading && catalogItems.length === 0;
+  const catalogBusy =
+    (loading || (brandsLoading && allCatalogItems.length > 0 && catalogItems.length === 0)) &&
+    catalogItems.length === 0;
 
   return (
     <Layout backTo={catalogBackTo} title={pageTitle} subtitle={pageSubtitle}>

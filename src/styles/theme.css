@@ -243,6 +243,11 @@
   html.native-ios .saas-topbar {
     padding-top: max(2.75rem, env(safe-area-inset-top, 2.75rem));
   }
+
+  /* Android: status bar nativa (Capacitor StatusBar overlay: false) */
+  html.native-android .saas-topbar {
+    padding-top: max(0.625rem, env(safe-area-inset-top, 0px));
+  }
 }
 
 /* ── Mobile touch improvements ────────────────────────────────── */

@@ -19,6 +19,8 @@ export async function configureNativeSafeArea(): Promise<void> {
   document.documentElement.classList.add('native-app');
   if (Capacitor.getPlatform() === 'ios') {
     document.documentElement.classList.add('native-ios');
+  } else if (Capacitor.getPlatform() === 'android') {
+    document.documentElement.classList.add('native-android');
   }
 
   try {

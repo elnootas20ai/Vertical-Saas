@@ -23,6 +23,7 @@ import {
   normalizeTpvDefaultExtraPrice,
   parseIngredientsBulkText,
   readStoreIngredientTpvFlags,
+  resolveIngredientExtraPrice,
   resolveIngredientRole,
   resolveStoreIngredientBrandIds,
   withStoreIngredientTpvFlags,
@@ -36,6 +37,7 @@ import {
   type TpvCategoryTemplateKey,
 } from '../../lib/catalogCustomization';
 import { getDeliveryConfigRequest, listCatalogItemsRequest, updateDeliveryConfigRequest, type CatalogItem } from '../../lib/deliveryApi';
+import { formatMoneyEs } from '../../lib/formatNumberEs';
 import { CatalogCoreLoadingState } from './CatalogCoreLoadingState';
 import { notifyDeliveryConfigChanged } from '../../lib/deliverySetup';
 import { applyVertialDefaultsToStoreIngredients, withVertialDefaultBaseCost } from '../../lib/vertialDefaultCosts';
@@ -48,9 +50,8 @@ import {
   SaasTabSearch,
   SaasTabSecondaryButton,
   SaasTabEmpty,
-  SaasTabToolbarRow,
-  SaasTabWorkspace,
 } from './SaasTabWorkspace';
+import { CatalogTabShell } from './CatalogTabShell';
 
 const PART_OPTIONS: Array<{ value: TpvCategoryTemplateKey; label: string }> = [
   { value: 'pizzas', label: 'Pizzas' },
@@ -80,7 +81,7 @@ function ingredientMatchesInventarioFilter(ing: StoreIngredient, catalogItems: C
   return catalogInventoryItemsForIngredient(catalogItems, ing.name).length > 0;
 }
 
-/** Interruptor en línea para las tablas (mismo look que el toggle Web del catálogo). */
+/** Interruptor en línea para las tablas — look Vertial (azul avance / stone off). */
 function InlineToggle({
   checked,
   onChange,
@@ -97,13 +98,16 @@ function InlineToggle({
       aria-checked={checked}
       title={title}
       onClick={() => onChange(!checked)}
-      className={`w-9 h-5 rounded-full transition-colors relative inline-block align-middle ${
-        checked ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
+      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30 ${
+        checked
+          ? 'border-[var(--v-blue,#2563eb)] bg-[var(--v-blue,#2563eb)]'
+          : 'border-stone-300 bg-stone-200 dark:border-stone-600 dark:bg-stone-700'
       }`}
     >
       <span
-        className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
-          checked ? 'translate-x-4' : 'translate-x-0.5'
+        aria-hidden
+        className={`pointer-events-none block h-3.5 w-3.5 rounded-full bg-white shadow-sm ring-1 ring-black/5 transition-transform ${
+          checked ? 'translate-x-[18px]' : 'translate-x-[3px]'
         }`}
       />
     </button>
@@ -862,8 +866,21 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
   }
 
   const priceOk = !hasExtras || normalizeTpvDefaultExtraPrice(defaultExtraPrice) != null;
+  const defaultExtraPriceNum = normalizeTpvDefaultExtraPrice(defaultExtraPrice);
   const filteredVisible = filterVisibleItems(brandScopedItems, search, listFilter, catalogItems).length;
   const canSave = !saving && priceOk;
+
+  const extraPriceLabelFor = (ing: StoreIngredient) => {
+    const flags = readStoreIngredientTpvFlags(ing);
+    if (!flags.chargeExtra) return null;
+    const price = resolveIngredientExtraPrice(
+      ing,
+      multiBrand && activeBrandId ? [activeBrandId] : [],
+      defaultExtraPriceNum ?? undefined,
+    );
+    if (!(price > 0)) return 'Sin precio';
+    return formatMoneyEs(price);
+  };
 
   const markAllBrandAsExtra = () => {
     toggleManyTpvFlags(
@@ -888,7 +905,7 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
 
   return (
     <div className="pb-20 lg:pb-4">
-      <SaasTabWorkspace
+      <CatalogTabShell
         stats={[
           { label: 'ingredientes', value: brandScopedItems.length },
           { label: 'extras de pago', value: extraItems.length, tone: extraItems.length > 0 ? 'amber' : 'default' },
@@ -945,11 +962,8 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
             </p>
           )
         }
-        toolbar={
+        toolbarLeftExtra={
           <>
-            <SaasTabToolbarRow
-              left={
-                <>
                   <SaasTabSearch
                     value={search}
                     onChange={setSearch}
@@ -992,9 +1006,9 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
                     <option value="extra-first">Extras primero</option>
                   </select>
                 </>
-              }
-              right={
-                <>
+        }
+        toolbarRight={
+          <>
                   <SaasTabSecondaryButton
                     onClick={() => {
                       setShowBatchPanel((v) => !v);
@@ -1023,8 +1037,9 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
                     Nuevo ingrediente
                   </SaasTabPrimaryButton>
                 </>
-              }
-            />
+        }
+        toolbarBelow={
+          <>
             {showBatchPanel ? (
               <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
                 <span className="font-semibold text-gray-500">Aplicar a esta marca:</span>
@@ -1222,6 +1237,17 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
                                   onChange={(checked) => updateIngredientTpvFlags(ing.id, { chargeExtra: checked })}
                                   title="Se cobra como extra al añadirlo en el TPV"
                                 />
+                                {flags.chargeExtra ? (
+                                  <span
+                                    className={`tabular-nums font-semibold ${
+                                      extraPriceLabelFor(ing) === 'Sin precio'
+                                        ? 'text-amber-600 dark:text-amber-400'
+                                        : 'text-amber-800 dark:text-amber-200'
+                                    }`}
+                                  >
+                                    {extraPriceLabelFor(ing)}
+                                  </span>
+                                ) : null}
                               </label>
                               <label className="inline-flex items-center gap-1.5 text-[11px] font-medium text-gray-500 dark:text-gray-400">
                                 Se puede quitar
@@ -1279,11 +1305,27 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
                                   />
                                 </td>
                                 <td className="px-4 py-2 text-center">
-                                  <InlineToggle
-                                    checked={flags.chargeExtra}
-                                    onChange={(checked) => updateIngredientTpvFlags(ing.id, { chargeExtra: checked })}
-                                    title="Se cobra como extra al añadirlo en el TPV"
-                                  />
+                                  <div className="inline-flex flex-col items-center gap-0.5">
+                                    <InlineToggle
+                                      checked={flags.chargeExtra}
+                                      onChange={(checked) => updateIngredientTpvFlags(ing.id, { chargeExtra: checked })}
+                                      title="Se cobra como extra al añadirlo en el TPV"
+                                    />
+                                    {flags.chargeExtra ? (
+                                      <span
+                                        className={`text-[11px] font-semibold tabular-nums leading-tight ${
+                                          extraPriceLabelFor(ing) === 'Sin precio'
+                                            ? 'text-amber-600 dark:text-amber-400'
+                                            : 'text-amber-800 dark:text-amber-200'
+                                        }`}
+                                        title="Precio por extra (el de arriba, rápido para todos)"
+                                      >
+                                        {extraPriceLabelFor(ing)}
+                                      </span>
+                                    ) : (
+                                      <span className="text-[11px] text-gray-400 leading-tight">—</span>
+                                    )}
+                                  </div>
                                 </td>
                                 <td className="px-4 py-2 text-center">
                                   <InlineToggle
@@ -1347,7 +1389,7 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
             })
           )}
         </div>
-      </SaasTabWorkspace>
+      </CatalogTabShell>
 
       {editingIngredient ? (
         <div

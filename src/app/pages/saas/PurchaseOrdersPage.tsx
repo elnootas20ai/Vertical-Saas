@@ -54,9 +54,8 @@ import {
   SaasTabEmpty,
   SaasTabPrimaryButton,
   SaasTabSecondaryButton,
-  SaasTabToolbarRow,
-  SaasTabWorkspace,
 } from '../../components/saas/SaasTabWorkspace';
+import { CatalogTabShell } from '../../components/saas/CatalogTabShell';
 const STATUS_META: Record<PurchaseOrderStatus, { label: string; className: string }> = {
   draft: {
     label: 'Borrador',
@@ -1855,12 +1854,11 @@ export function PurchaseOrdersPage({
   };
 
   return (
-    <SaasTabWorkspace
+    <CatalogTabShell
       stats={stats}
-      toolbar={
-        <SaasTabToolbarRow
-          right={
-            <>
+      dataUserId={userId}
+      toolbarRight={
+        <>
               {draftOrders.length > 0 ? (
                 <SaasTabSecondaryButton
                   onClick={() => void handleCleanDrafts()}
@@ -1876,8 +1874,6 @@ export function PurchaseOrdersPage({
                 Nuevo pedido
               </SaasTabPrimaryButton>
             </>
-          }
-        />
       }
     >
       {userId ? (
@@ -2201,6 +2197,6 @@ export function PurchaseOrdersPage({
           onGoToInvoices={onGoToInvoices}
         />
       ) : null}
-    </SaasTabWorkspace>
+    </CatalogTabShell>
   );
 }

@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { useAuth } from '../../../context/AuthContext';
 import { isWorkerAccount } from '../../../lib/authApi';
 import { isVertialNativeApp } from '../../../lib/vertialPrint/isNativeApp';
+import { canUseNativePushRegistration } from '../../../lib/nativePushRuntime';
 import {
   readPushConsent,
   writePushConsent,
@@ -18,6 +19,7 @@ async function readDeviceStatus(): Promise<DeviceStatus> {
   if (isVertialNativeApp()) {
     const platform = Capacitor.getPlatform();
     if (platform !== 'ios' && platform !== 'android') return 'unsupported';
+    if (platform === 'android' && !canUseNativePushRegistration()) return 'unsupported';
     try {
       const perm = await PushNotifications.checkPermissions();
       if (perm.receive === 'granted') return 'granted';
@@ -70,14 +72,22 @@ export function DevicePushStatusCard() {
       }
 
       if (isVertialNativeApp()) {
-        const req = await PushNotifications.requestPermissions();
-        if (req.receive === 'granted') {
-          writePushConsent(userId, 'accepted');
-          window.dispatchEvent(new CustomEvent('vertial:push-register-now'));
-          toast.success('Avisos activados');
-        } else {
-          writePushConsent(userId, 'declined', { force: true });
-          toast.message('Sin permiso del sistema');
+        if (Capacitor.getPlatform() === 'android' && !canUseNativePushRegistration()) {
+          toast.message('Push en Android requiere configurar Firebase (google-services.json) en el APK.');
+          return;
+        }
+        try {
+          const req = await PushNotifications.requestPermissions();
+          if (req.receive === 'granted') {
+            writePushConsent(userId, 'accepted');
+            window.dispatchEvent(new CustomEvent('vertial:push-register-now'));
+            toast.success('Avisos activados');
+          } else {
+            writePushConsent(userId, 'declined', { force: true });
+            toast.message('Sin permiso del sistema');
+          }
+        } catch {
+          toast.message('No se pudieron activar las notificaciones en este dispositivo');
         }
       } else if ('Notification' in window) {
         const result = await Notification.requestPermission();

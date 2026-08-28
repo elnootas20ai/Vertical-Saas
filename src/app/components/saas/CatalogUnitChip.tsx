@@ -1,3 +1,5 @@
+import { formatQtyEs } from '../../lib/formatNumberEs';
+
 /**
  * Chip de unidad (kg, ud, L…) — más visible que texto suelto al lado del nombre/stock.
  * Uso: listas de almacén, carta y proveedores.
@@ -44,7 +46,7 @@ export function StockQtyWithUnit({
           low ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-gray-100'
         }`}
       >
-        {qty}
+        {formatQtyEs(qty, 3)}
       </span>
       <CatalogUnitChip unit={unit} />
     </span>

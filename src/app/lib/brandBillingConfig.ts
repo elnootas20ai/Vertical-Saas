@@ -299,71 +299,170 @@ function sheetHasUnit(sheet: BrandBillingSheet, key: FoodUnitKey): boolean {
   return (sheet.unitColumns || []).some((c) => c.key === key);
 }
 
-/** Quita hojas vacías (sin marcas) que quedan al mover tacos a Black Burger. */
-export function pruneEmptyBillingSheets(sheets: BrandBillingSheet[]): BrandBillingSheet[] {
-  return sheets.filter((s) => (s.brandIds || []).length > 0);
+const BILLING_UNIT_ORDER: FoodUnitKey[] = ['pizza', 'burger', 'taco'];
+
+function sheetDedicatedToUnit(sheet: BrandBillingSheet, key: FoodUnitKey): boolean {
+  const cols = (sheet.unitColumns || []).map((c) => c.key);
+  return cols.length === 1 && cols[0] === key;
+}
+
+function findDedicatedSheet(
+  sheets: BrandBillingSheet[],
+  key: FoodUnitKey,
+): BrandBillingSheet | undefined {
+  return sheets.find((s) => sheetDedicatedToUnit(s, key));
+}
+
+function unitTypesInBusiness(brands: Brand[]): Set<FoodUnitKey> {
+  const out = new Set<FoodUnitKey>();
+  for (const b of brandsForBilling(brands).filter((x) => !isUnsetDefaultShell(x))) {
+    const u = resolveBrandFoodUnitKey(b);
+    if (u) out.add(u);
+  }
+  return out;
+}
+
+function brandIdsForUnit(brands: Brand[], key: FoodUnitKey): Set<string> {
+  const out = new Set<string>();
+  for (const b of brandsForBilling(brands)) {
+    if (resolveBrandFoodUnitKey(b) !== key) continue;
+    for (const k of brandIdKeys(b)) out.add(k);
+  }
+  return out;
+}
+
+function defaultSheetForUnit(
+  key: FoodUnitKey,
+  brands: Brand[],
+  options?: { assignAnchor?: boolean },
+): BrandBillingSheet {
+  const assignAnchor = options?.assignAnchor !== false;
+  const eligible = brandsForBilling(brands).filter((b) => !isUnsetDefaultShell(b));
+  const anchor = eligible.find((b) => resolveBrandFoodUnitKey(b) === key);
+  const opt = FOOD_UNIT_OPTIONS.find((o) => o.key === key);
+  const anchorId = assignAnchor && anchor ? String(anchor._id || anchor.id || '').trim() : '';
+  return {
+    id: `sheet-${key}`,
+    label: anchor ? sanitizeSheetLabel(anchor.name) : sanitizeSheetLabel(opt?.label || key),
+    brandIds: anchorId ? [anchorId] : [],
+    unitColumns: [{ key, header: opt?.defaultHeader || `TOTAL ${key.toUpperCase()}` }],
+  };
+}
+
+function findSheetHostingUnit(
+  sheets: BrandBillingSheet[],
+  key: FoodUnitKey,
+): BrandBillingSheet | undefined {
+  return (
+    findDedicatedSheet(sheets, key)
+    || sheets.find((s) => sheetHasUnit(s, key) && !BILLING_UNIT_ORDER.some((k) => k !== key && sheetHasUnit(s, k)))
+  );
+}
+
+function billingSheetSortOrder(sheet: BrandBillingSheet): number {
+  if (sheetDedicatedToUnit(sheet, 'pizza')) return 0;
+  if (sheetDedicatedToUnit(sheet, 'burger')) return 1;
+  if (sheetDedicatedToUnit(sheet, 'taco')) return 2;
+  return 3;
 }
 
 /**
- * Plantilla clasica de cierres: burgers + tacos en la misma hoja.
- * - Marcas taco → se mueven a la hoja burger si existe.
- * - Si hay hoja burger sin columna TACOS y no hay hoja taco aparte → se añade TOTAL TACOS.
+ * Una hoja por tipo (pizza / burger / taco). Tacos no se fusionan con burger.
+ * Si hay marca taco en el negocio, siempre existe hoja taco (aunque sin marcas asignadas).
  */
-export function coalesceTacoIntoBurgerSheets(
+export function normalizeBillingSheetsLayout(
   sheets: BrandBillingSheet[],
   brands: Brand[] = [],
 ): BrandBillingSheet[] {
   let next = brands.length > 0
     ? enforceExclusiveBrandAssignment(sheets, brands)
-    : sheets.map((s) => ({ ...s, unitColumns: [...(s.unitColumns || [])] }));
+    : sheets.map((s) => ({
+        ...s,
+        brandIds: [...(s.brandIds || [])],
+        unitColumns: [...(s.unitColumns || [])],
+      }));
 
-  const burgerIdx = next.findIndex((s) => sheetHasUnit(s, 'burger'));
-  if (burgerIdx < 0) return pruneEmptyBillingSheets(next);
+  const unitsPresent = unitTypesInBusiness(brands);
+  const tacoIds = brandIdsForUnit(brands, 'taco');
 
-  const tacoOnlyIdxs = next
-    .map((s, i) => ({ s, i }))
-    .filter(({ s, i }) => (
-      i !== burgerIdx
-      && sheetHasUnit(s, 'taco')
-      && !sheetHasUnit(s, 'burger')
-      && !sheetHasUnit(s, 'pizza')
-    ))
-    .map(({ i }) => i);
-
-  if (tacoOnlyIdxs.length > 0) {
-    const movedIds = [...next[burgerIdx].brandIds];
-    for (const i of tacoOnlyIdxs) {
-      for (const id of next[i].brandIds) {
-        if (!movedIds.includes(id)) movedIds.push(id);
-      }
+  if (tacoIds.size > 0) {
+    let tacoSheet = findDedicatedSheet(next, 'taco');
+    if (!tacoSheet) {
+      next.push(defaultSheetForUnit('taco', brands, { assignAnchor: false }));
+      tacoSheet = next[next.length - 1];
     }
-    next = next.map((s, i) => {
-      if (i === burgerIdx) return { ...s, brandIds: movedIds };
-      if (tacoOnlyIdxs.includes(i)) return { ...s, brandIds: [] };
-      return s;
+    const tacoSheetId = tacoSheet.id;
+    const collected = new Set(tacoSheet.brandIds);
+    next = next.map((s) => {
+      if (s.id === tacoSheetId) return s;
+      const keep = (s.brandIds || []).filter((id) => !tacoIds.has(id));
+      for (const id of s.brandIds || []) {
+        if (tacoIds.has(id)) collected.add(id);
+      }
+      const unitColumns =
+        sheetHasUnit(s, 'burger') || sheetHasUnit(s, 'pizza')
+          ? (s.unitColumns || []).filter((c) => c.key !== 'taco')
+          : [...(s.unitColumns || [])];
+      return { ...s, brandIds: keep, unitColumns };
     });
-    next = brands.length > 0
-      ? enforceExclusiveBrandAssignment(next, brands)
-      : next.map((s, i) => {
-        if (i !== burgerIdx) return s;
-        const cols = [...s.unitColumns];
-        if (!cols.some((c) => c.key === 'taco')) cols.push(tacoUnitColumn());
-        return { ...s, unitColumns: cols };
-      });
+    next = next.map((s) =>
+      s.id === tacoSheetId
+        ? { ...s, brandIds: [...collected], unitColumns: [tacoUnitColumn()] }
+        : s,
+    );
   }
 
-  next = pruneEmptyBillingSheets(next);
+  for (const key of BILLING_UNIT_ORDER) {
+    if (!unitsPresent.has(key)) continue;
+    if (findSheetHostingUnit(next, key)) continue;
+    next.push(defaultSheetForUnit(key, brands, { assignAnchor: false }));
+  }
 
-  // Hoja burger sin marca taco: igual muestra TOTAL TACOS (conteo del cierre).
-  const stillHasTacoSheet = next.some((s) =>
-    sheetHasUnit(s, 'taco') && !sheetHasUnit(s, 'burger'),
-  );
-  if (stillHasTacoSheet) return next;
+  if (brands.length > 0) {
+    next = enforceExclusiveBrandAssignment(next, brands);
+  }
 
-  return next.map((s) => {
-    if (!sheetHasUnit(s, 'burger') || sheetHasUnit(s, 'taco')) return s;
-    return { ...s, unitColumns: [...s.unitColumns, tacoUnitColumn()] };
+  next = next.map((s) => {
+    if ((s.brandIds || []).length === 0) {
+      const dedicated = BILLING_UNIT_ORDER.find((k) => sheetDedicatedToUnit(s, k));
+      if (dedicated) {
+        const opt = FOOD_UNIT_OPTIONS.find((o) => o.key === dedicated);
+        return {
+          ...s,
+          unitColumns: [{ key: dedicated, header: opt?.defaultHeader || `TOTAL ${dedicated.toUpperCase()}` }],
+        };
+      }
+    }
+    return {
+      ...s,
+      unitColumns:
+        brands.length > 0 ? unitColumnsForBrandIds(brands, s.brandIds) : s.unitColumns || [],
+    };
   });
+
+  next.sort(
+    (a, b) =>
+      billingSheetSortOrder(a) - billingSheetSortOrder(b)
+      || String(a.label || '').localeCompare(String(b.label || ''), 'es'),
+  );
+
+  return next;
+}
+
+/** @deprecated Usar normalizeBillingSheetsLayout — ya no fusiona tacos con burger. */
+export function pruneEmptyBillingSheets(sheets: BrandBillingSheet[]): BrandBillingSheet[] {
+  return sheets.filter((s) => {
+    if ((s.brandIds || []).length > 0) return true;
+    return BILLING_UNIT_ORDER.some((key) => sheetDedicatedToUnit(s, key));
+  });
+}
+
+/** @deprecated Usar normalizeBillingSheetsLayout. */
+export function coalesceTacoIntoBurgerSheets(
+  sheets: BrandBillingSheet[],
+  brands: Brand[] = [],
+): BrandBillingSheet[] {
+  return normalizeBillingSheetsLayout(sheets, brands);
 }
 
 /** Columnas Excel = tipos de las marcas asignadas a la hoja. */
@@ -402,37 +501,36 @@ function sheetForBrand(brand: Brand): BrandBillingSheet {
 }
 
 /**
- * Sugiere hojas Excel: 1 por marca, pero tacos van con la hoja burger
- * (plantilla clasica de cierres: BLACK BURGER = TOTAL BURGUER + TOTAL TACOS).
+ * Sugiere hojas Excel: una por tipo (pizza, burger, taco) presente en el negocio.
  */
 export function suggestBillingSheetsFromBrands(brands: Brand[]): BrandBillingSheet[] {
   const eligible = brandsForBilling(brands).filter((b) => !isUnsetDefaultShell(b));
   const sheets: BrandBillingSheet[] = [];
-  let burgerIdx = -1;
 
-  for (const brand of eligible) {
-    const id = String(brand._id || brand.id || '').trim();
-    const unit = resolveBrandFoodUnitKey(brand);
-    if (unit === 'taco' && burgerIdx >= 0) {
-      const host = sheets[burgerIdx];
-      const brandIds = host.brandIds.includes(id) ? host.brandIds : [...host.brandIds, id];
-      sheets[burgerIdx] = {
-        ...host,
-        brandIds,
-        unitColumns: unitColumnsForBrandIds(brands, brandIds),
-      };
-      continue;
-    }
-    sheets.push(sheetForBrand(brand));
-    if (unit === 'burger') burgerIdx = sheets.length - 1;
+  for (const key of BILLING_UNIT_ORDER) {
+    const group = eligible.filter((b) => resolveBrandFoodUnitKey(b) === key);
+    if (group.length === 0) continue;
+    const brandIds = group
+      .map((b) => String(b._id || b.id || '').trim())
+      .filter(Boolean);
+    sheets.push({
+      id: `sheet-${key}`,
+      label: sanitizeSheetLabel(group[0].name),
+      brandIds,
+      unitColumns: unitColumnsForBrandIds(brands, brandIds),
+    });
   }
 
-  return coalesceTacoIntoBurgerSheets(sheets, brands);
+  for (const brand of eligible) {
+    if (resolveBrandFoodUnitKey(brand)) continue;
+    sheets.push(sheetForBrand(brand));
+  }
+
+  return normalizeBillingSheetsLayout(sheets, brands);
 }
 
 /**
- * Sincroniza hojas con marcas nuevas. Tacos nuevos → hoja burger si existe.
- * Recalcula columnas y garantiza: cada marca en como máximo una hoja.
+ * Sincroniza hojas con marcas nuevas. Una hoja por tipo; tacos en hoja propia.
  */
 export function syncBillingSheetsWithBrands(
   sheets: BrandBillingSheet[],
@@ -446,25 +544,27 @@ export function syncBillingSheetsWithBrands(
   }
 
   const next = [...exclusive];
-  let burgerIdx = next.findIndex((s) => sheetHasUnit(s, 'burger'));
 
   for (const b of eligible) {
     const id = String(b._id || b.id || '').trim();
     if (!id || assigned.has(id)) continue;
     const unit = resolveBrandFoodUnitKey(b);
-    if (unit === 'taco' && burgerIdx >= 0) {
-      const host = next[burgerIdx];
-      const brandIds = host.brandIds.includes(id) ? host.brandIds : [...host.brandIds, id];
-      next[burgerIdx] = { ...host, brandIds };
-      assigned.add(id);
-      continue;
+    if (unit) {
+      let host = findDedicatedSheet(next, unit);
+      if (!host) {
+        next.push(defaultSheetForUnit(unit, brands));
+        host = next[next.length - 1];
+      }
+      if (!host.brandIds.includes(id)) {
+        host.brandIds = [...host.brandIds, id];
+      }
+    } else {
+      next.push(sheetForBrand(b));
     }
-    next.push(sheetForBrand(b));
     assigned.add(id);
-    if (unit === 'burger' && burgerIdx < 0) burgerIdx = next.length - 1;
   }
 
-  return coalesceTacoIntoBurgerSheets(next, brands);
+  return normalizeBillingSheetsLayout(next, brands);
 }
 
 /**
@@ -486,9 +586,12 @@ export function enforceExclusiveBrandAssignment(
     return {
       ...s,
       brandIds,
-      unitColumns: brands.length > 0
-        ? unitColumnsForBrandIds(brands, brandIds)
-        : s.unitColumns || [],
+      unitColumns:
+        brands.length > 0
+          ? brandIds.length > 0
+            ? unitColumnsForBrandIds(brands, brandIds)
+            : (s.unitColumns || [])
+          : s.unitColumns || [],
     };
   });
 }
@@ -512,7 +615,7 @@ export function assignBrandToSheetExclusive(
     if (!s.brandIds.includes(bid)) return s;
     return { ...s, brandIds: s.brandIds.filter((id) => id !== bid) };
   });
-  return coalesceTacoIntoBurgerSheets(next, brands);
+  return normalizeBillingSheetsLayout(next, brands);
 }
 
 /** Quita una marca de una hoja (sin moverla a otra). */
@@ -527,7 +630,7 @@ export function removeBrandFromSheet(
     if (s.id !== sheetId) return s;
     return { ...s, brandIds: s.brandIds.filter((id) => id !== bid) };
   });
-  return coalesceTacoIntoBurgerSheets(next, brands);
+  return normalizeBillingSheetsLayout(next, brands);
 }
 
 export function normalizeBrandBillingConfig(

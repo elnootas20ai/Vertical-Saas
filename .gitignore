@@ -55,6 +55,7 @@ android/local.properties
 android/captures/
 android/app/src/main/assets/public/
 android/app/src/main/assets/capacitor.config.json
+dist-android/
 ios/App/Pods/
 ios/App/App/public/
 ios/App/App/capacitor.config.json

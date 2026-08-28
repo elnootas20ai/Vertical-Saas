@@ -34,6 +34,10 @@ android {
         }
     }
     buildTypes {
+        debug {
+            // Sin badge «Debug app» en Android 14+; sigue siendo APK de prueba (firma debug).
+            debuggable false
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'

@@ -115,6 +115,7 @@ import { prefetchTpvCatalog } from '../../../lib/tpvCatalogCache';
 import { resolveRetailOpsWriteBusinessId, resolveTpvRegisterScope } from '../../../lib/tpvRegisterScope';
 import { useTpvIncomingOrderSounds } from '../../../hooks/useTpvIncomingOrderSounds';
 import { useDeliveryOrdersLive } from '../../../hooks/useDeliveryOrdersLive';
+import { useIsMobile } from '../../../components/ui/use-mobile';
 import {
   isTpvBoardSoundEnabled,
   setTpvBoardSoundEnabled,
@@ -163,6 +164,7 @@ function OrderChannelBadge({ channel, compact = false }: { channel?: string | nu
 }
 
 type FulfillmentFilter = 'all' | 'recogida' | 'domicilio';
+type PhoneBoardLane = 'montaje' | 'reparto';
 
 /** Pedido cobrado en TPV (Cobrar y enviar): tiene canal y método de pago. */
 function resolveDeliveryPaymentMethod(raw: string | undefined | null): DeliveryPaymentMethod {
@@ -1347,6 +1349,7 @@ export function WorkerTpvDelivery({
   const [view, setView] = useState<'board' | 'new-order' | 'staff-consumption'>('board');
   const [editingOrder, setEditingOrder] = useState<DeliveryOrder | null>(null);
   const [fulfillmentFilter, setFulfillmentFilter] = useState<FulfillmentFilter>('all');
+  const [phoneBoardLane, setPhoneBoardLane] = useState<PhoneBoardLane>('montaje');
   const [search, setSearch] = useState('');
   const [advancingIds, setAdvancingIds] = useState<ReadonlySet<string>>(() => new Set());
   const advancingIdsRef = useRef<Set<string>>(new Set());
@@ -1414,6 +1417,7 @@ export function WorkerTpvDelivery({
 
   const isTabletSession = registerScope.isTabletSession;
   const tabletVertical = tabletBinding?.tpvVertical ?? null;
+  const isPhone = useIsMobile();
 
   const tpvVerticalPending = useMemo(
     () => isTpvOpsVerticalPending({
@@ -1445,8 +1449,8 @@ export function WorkerTpvDelivery({
     prefetchDeliveryTicketPrint();
   }, []);
 
-  // CEO TPV rápido = misma UI compacta que tablet (antes !ceoMode forzaba el layout grande "antiguo").
-  const isTabletUi = ceoMode || isTabletSession;
+  // CEO TPV rápido = misma UI compacta que tablet; en móvil layout apilado usable.
+  const isTabletUi = (ceoMode || isTabletSession) && !isPhone;
   const workerPdv = useMemo(
     () => resolvePdvIdFromStoreRef(activeStoreScope.pointsOfSale, user?.employment?.salesPointId),
     [activeStoreScope.pointsOfSale, user?.employment?.salesPointId],
@@ -2563,7 +2567,41 @@ export function WorkerTpvDelivery({
             <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
           </div>
         ) : (
-          <div className={`flex h-full min-h-0 ${isTabletUi ? 'flex-row gap-2' : 'flex-col md:flex-row gap-3'}`}>
+          <>
+            {isPhone ? (
+              <div className="shrink-0 flex rounded-xl bg-gray-100 dark:bg-gray-800 p-0.5 gap-0.5 mb-2">
+                <button
+                  type="button"
+                  onClick={() => setPhoneBoardLane('montaje')}
+                  className={`flex-1 min-h-[40px] rounded-lg text-sm font-semibold touch-manipulation inline-flex items-center justify-center gap-1.5 ${
+                    phoneBoardLane === 'montaje'
+                      ? 'bg-white dark:bg-gray-900 text-indigo-700 dark:text-indigo-300 shadow-sm'
+                      : 'text-gray-600 dark:text-gray-400'
+                  }`}
+                >
+                  Montaje
+                  <span className="min-w-[1.1rem] h-5 px-1 rounded-full bg-indigo-600/15 text-indigo-700 dark:text-indigo-300 text-[11px] font-bold tabular-nums">
+                    {assemblyOrders.length}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPhoneBoardLane('reparto')}
+                  className={`flex-1 min-h-[40px] rounded-lg text-sm font-semibold touch-manipulation inline-flex items-center justify-center gap-1.5 ${
+                    phoneBoardLane === 'reparto'
+                      ? 'bg-white dark:bg-gray-900 text-cyan-700 dark:text-cyan-300 shadow-sm'
+                      : 'text-gray-600 dark:text-gray-400'
+                  }`}
+                >
+                  Reparto
+                  <span className="min-w-[1.1rem] h-5 px-1 rounded-full bg-cyan-600/15 text-cyan-700 dark:text-cyan-300 text-[11px] font-bold tabular-nums">
+                    {deliveryOrders.length}
+                  </span>
+                </button>
+              </div>
+            ) : null}
+          <div className={`flex h-full min-h-0 ${isTabletUi ? 'flex-row gap-2' : isPhone ? 'flex-col gap-2' : 'flex-col md:flex-row gap-3'}`}>
+            {(isPhone ? phoneBoardLane === 'montaje' : true) ? (
             <OrderLane
               title="Montaje"
               icon={<Package className={isTabletUi ? 'w-3.5 h-3.5 text-indigo-600' : 'w-4 h-4 text-indigo-600'} />}
@@ -2581,6 +2619,8 @@ export function WorkerTpvDelivery({
               compact={isTabletUi}
               nowMs={nowMs}
             />
+            ) : null}
+            {(isPhone ? phoneBoardLane === 'reparto' : true) ? (
             <OrderLane
               title="Reparto"
               icon={<Truck className={isTabletUi ? 'w-3.5 h-3.5 text-cyan-600' : 'w-4 h-4 text-cyan-600'} />}
@@ -2598,7 +2638,9 @@ export function WorkerTpvDelivery({
               compact={isTabletUi}
               nowMs={nowMs}
             />
+            ) : null}
           </div>
+          </>
         )}
       </div>
 

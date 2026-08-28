@@ -120,15 +120,19 @@ export async function saveSupplierInvoiceEmailConfig(
   userId: string,
   config: Partial<SupplierInvoiceEmailConfig>,
   pdvId?: string,
-): Promise<SupplierInvoiceEmailConfig> {
-  const data = await apiRequest<{ ok: boolean; config: SupplierInvoiceEmailConfig }>(
+): Promise<SupplierInvoiceEmailConfig & { warning?: string }> {
+  const data = await apiRequest<{
+    ok: boolean;
+    config: SupplierInvoiceEmailConfig;
+    warning?: string;
+  }>(
     `/api/supplier-invoices/config/${encodeURIComponent(userId)}`,
     {
       method: 'PUT',
       body: JSON.stringify({ config, ...(pdvId ? { pdvId } : {}) }),
     },
   );
-  return data.config;
+  return { ...data.config, warning: data.warning };
 }
 
 export async function testSupplierInvoiceImap(

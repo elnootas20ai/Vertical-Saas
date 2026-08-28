@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -10,10 +10,10 @@ import {
   RefreshCw,
   Settings2,
   Shield,
-  Store,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
+import { SupplierInvoiceEmailSettingsModal } from '../../components/saas/SupplierInvoiceEmailSettingsModal';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
@@ -128,7 +128,6 @@ async function fetchScopedActivePdvsFallback(
   return scoped;
 }
 
-type PageTab = 'pdvs' | 'config';
 type MailProvider = 'gmail' | 'outlook' | 'other';
 
 const PROVIDER_PRESETS: Record<
@@ -157,12 +156,14 @@ function detectProvider(host: string, user: string): MailProvider {
 }
 
 /**
- * Correo de facturas por empresa: PDVs activos de la empresa actual + Configuración.
+ * Correo de facturas — **CORE SaaS** (no es de un vertical).
+ * Misma pantalla en toda empresa / tienda / vertical: un buzón IMAP por PDV.
  */
 export function SupplierInvoiceEmailPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const pdvFromUrl = searchParams.get('pdv');
+  const openAjustesFromUrl = searchParams.get('ajustes') === '1';
   const { currentBusiness, businesses, businessesFetchSettled } = useBusiness();
   const { user } = useAuth();
   const {
@@ -180,7 +181,6 @@ export function SupplierInvoiceEmailPage() {
   const currentBizId = resolveBusinessScopeId(currentBusiness as Business | null);
   const businessName = String(currentBusiness?.name || '').trim() || 'Empresa';
 
-  const [pageTab, setPageTab] = useState<PageTab>('pdvs');
   const [stores, setStores] = useState<PointOfSale[]>([]);
   /** Revalidación en segundo plano (sin tapar la página si ya hay PDVs). */
   const [refreshingStores, setRefreshingStores] = useState(false);
@@ -190,6 +190,9 @@ export function SupplierInvoiceEmailPage() {
   const [legacyAccountConnected, setLegacyAccountConnected] = useState(false);
   const [legacyAccountEmail, setLegacyAccountEmail] = useState('');
   const [selectedPdvId, setSelectedPdvId] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  /** PDV cuya config está en el draft (evita mezclar al cambiar de tienda). */
+  const [loadedConfigPdvId, setLoadedConfigPdvId] = useState('');
 
   const [imapDraft, setImapDraft] = useState<Partial<SupplierInvoiceEmailConfig>>({});
   const [imapLoading, setImapLoading] = useState(false);
@@ -201,6 +204,8 @@ export function SupplierInvoiceEmailPage() {
   const [provider, setProvider] = useState<MailProvider>('gmail');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  /** Evita que el efecto de presets pise la config recién cargada del PDV. */
+  const skipProviderPresetRef = useRef(false);
 
   const businessList = useMemo(
     () => (Array.isArray(businesses) ? businesses : []).filter((b) => b?.business_id || b?.id),
@@ -388,8 +393,15 @@ export function SupplierInvoiceEmailPage() {
     const id = String(pdvFromUrl || '').trim();
     if (!id || !stores.some((s) => s._id === id)) return;
     setSelectedPdvId(id);
-    setPageTab('pdvs');
   }, [pdvFromUrl, stores]);
+
+  useEffect(() => {
+    if (!openAjustesFromUrl) return;
+    setSettingsOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete('ajustes');
+    setSearchParams(next, { replace: true });
+  }, [openAjustesFromUrl, searchParams, setSearchParams]);
 
   const resolvedPdvId = useMemo(() => {
     if (selectedPdvId && stores.some((s) => s._id === selectedPdvId)) return selectedPdvId;
@@ -436,18 +448,39 @@ export function SupplierInvoiceEmailPage() {
     return map;
   }, [stores, pdvStatuses]);
 
+  const settingsPdvRows = useMemo(
+    () =>
+      stores.map((pdv) => {
+        const st = statusById.get(pdv._id);
+        return {
+          pdvId: pdv._id,
+          label: pointOfSaleDisplayLabel(pdv),
+          connected: Boolean(st?.connected),
+          imapUser: String(st?.imapUser || ''),
+        };
+      }),
+    [stores, statusById],
+  );
+
   useEffect(() => {
-    if (!dataUserId || !resolvedPdvId || pageTab !== 'pdvs') {
+    if (!dataUserId || !resolvedPdvId) {
+      setImapDraft({});
+      setLoadedConfigPdvId('');
+      setImapLoading(false);
       return;
     }
     let cancelled = false;
+    skipProviderPresetRef.current = true;
     setImapLoading(true);
     setLastTestOk(false);
     setPollSummary(null);
+    setImapDraft({});
+    setLoadedConfigPdvId('');
     getSupplierInvoiceEmailConfig(dataUserId, resolvedPdvId)
       .then((cfg) => {
         if (cancelled) return;
         setImapDraft(cfg);
+        setLoadedConfigPdvId(resolvedPdvId);
         const detected = detectProvider(cfg.imapHost || '', cfg.imapUser || '');
         setProvider(detected);
         setShowAdvanced(
@@ -459,18 +492,25 @@ export function SupplierInvoiceEmailPage() {
         );
       })
       .catch(() => {
-        if (!cancelled) setImapDraft({});
+        if (!cancelled) {
+          setImapDraft({});
+          setLoadedConfigPdvId(resolvedPdvId);
+        }
       })
       .finally(() => {
         if (!cancelled) setImapLoading(false);
+        window.setTimeout(() => {
+          if (!cancelled) skipProviderPresetRef.current = false;
+        }, 0);
       });
     return () => {
       cancelled = true;
     };
-  }, [dataUserId, resolvedPdvId, pageTab]);
+  }, [dataUserId, resolvedPdvId]);
 
   useEffect(() => {
     if (provider === 'other') return;
+    if (skipProviderPresetRef.current) return;
     const preset = PROVIDER_PRESETS[provider];
     setImapDraft((p) => {
       if (p.imapHost === preset.host && Number(p.imapPort) === preset.port) return p;
@@ -483,8 +523,12 @@ export function SupplierInvoiceEmailPage() {
     });
   }, [provider]);
 
+  const draftBelongsToSelectedPdv =
+    Boolean(resolvedPdvId) && loadedConfigPdvId === resolvedPdvId;
+
   const isConnected = Boolean(
-    String(imapDraft.imapHost || '').trim()
+    draftBelongsToSelectedPdv
+    && String(imapDraft.imapHost || '').trim()
     && String(imapDraft.imapUser || '').trim()
     && imapDraft.enabled
     && (statusById.get(resolvedPdvId)?.connected || String(imapDraft.imapPassword || '').trim()),
@@ -495,11 +539,17 @@ export function SupplierInvoiceEmailPage() {
     if (!id) return;
     setSelectedPdvId(id);
     setActiveSalesPoint(id);
-    setPageTab('pdvs');
   };
 
   const handleSaveAndEnable = useCallback(async () => {
-    if (!dataUserId || !resolvedPdvId) return;
+    if (!dataUserId || !resolvedPdvId) {
+      toast.error('Elige una tienda antes de guardar');
+      return;
+    }
+    if (!draftBelongsToSelectedPdv) {
+      toast.error('Espera a que cargue la configuración de esta tienda');
+      return;
+    }
     const userMail = String(imapDraft.imapUser || '').trim();
     if (!userMail) {
       toast.error('Pon el correo de este PDV');
@@ -533,16 +583,72 @@ export function SupplierInvoiceEmailPage() {
         ...saved,
         imapPassword: passClean || '••••••••',
       });
+      setLoadedConfigPdvId(resolvedPdvId);
       await reloadPdvStatuses();
-      toast.success('Correo del PDV guardado');
+      if (saved.warning) {
+        toast.warning(saved.warning, { duration: 8000 });
+      } else {
+        toast.success('Correo del PDV guardado');
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar correo');
     } finally {
       setImapSaving(false);
     }
-  }, [dataUserId, imapDraft, resolvedPdvId, reloadPdvStatuses, statusById]);
+  }, [dataUserId, imapDraft, resolvedPdvId, reloadPdvStatuses, statusById, draftBelongsToSelectedPdv]);
+
+  const handleSaveSettingsOnly = useCallback(async () => {
+    if (!dataUserId || !resolvedPdvId) {
+      toast.error('Elige una tienda');
+      return;
+    }
+    if (!draftBelongsToSelectedPdv) {
+      toast.error('Espera a que cargue la configuración de esta tienda');
+      return;
+    }
+    const hasMailbox = Boolean(
+      String(imapDraft.imapHost || '').trim() && String(imapDraft.imapUser || '').trim(),
+    );
+    if (!hasMailbox && !statusById.get(resolvedPdvId)?.connected) {
+      toast.error('Primero configura el correo IMAP de esta tienda');
+      return;
+    }
+    setImapSaving(true);
+    try {
+      const passRaw = String(imapDraft.imapPassword || '');
+      const passClean = passRaw === '••••••••' ? '' : passRaw.replace(/\s+/g, '').trim();
+      const saved = await saveSupplierInvoiceEmailConfig(
+        dataUserId,
+        {
+          ...imapDraft,
+          imapPassword: passClean || '••••••••',
+          enabled:
+            imapDraft.enabled !== undefined
+              ? Boolean(imapDraft.enabled)
+              : Boolean(statusById.get(resolvedPdvId)?.enabled || statusById.get(resolvedPdvId)?.connected),
+        },
+        resolvedPdvId,
+      );
+      setImapDraft({
+        ...saved,
+        imapPassword: passClean || saved.imapPassword || '••••••••',
+      });
+      setLoadedConfigPdvId(resolvedPdvId);
+      await reloadPdvStatuses();
+      toast.success('Ajustes de esta tienda guardados');
+      setSettingsOpen(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al guardar ajustes');
+    } finally {
+      setImapSaving(false);
+    }
+  }, [dataUserId, resolvedPdvId, draftBelongsToSelectedPdv, imapDraft, statusById, reloadPdvStatuses]);
 
   const handleTestImap = useCallback(async () => {
+    if (!resolvedPdvId || !draftBelongsToSelectedPdv) {
+      toast.error('Espera a que cargue la configuración de esta tienda');
+      return;
+    }
     setImapTesting(true);
     setPollSummary(null);
     setLastTestOk(false);
@@ -579,6 +685,7 @@ export function SupplierInvoiceEmailPage() {
               ...saved,
               imapPassword: passClean || '••••••••',
             });
+            setLoadedConfigPdvId(resolvedPdvId);
             await reloadPdvStatuses();
             toast.success(
               n > 0
@@ -620,7 +727,7 @@ export function SupplierInvoiceEmailPage() {
     } finally {
       setImapTesting(false);
     }
-  }, [imapDraft, dataUserId, resolvedPdvId, reloadPdvStatuses]);
+  }, [imapDraft, dataUserId, resolvedPdvId, reloadPdvStatuses, draftBelongsToSelectedPdv]);
 
   const handlePollInvoicesNow = useCallback(async () => {
     if (!dataUserId || !resolvedPdvId) return;
@@ -669,24 +776,34 @@ export function SupplierInvoiceEmailPage() {
   const inputClass =
     'mt-1 w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 outline-none focus:ring-2 focus:ring-blue-500/30 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-100';
 
-  const pageTabs: { id: PageTab; label: string; icon: typeof Store }[] = [
-    { id: 'pdvs', label: 'PDVs', icon: Store },
-    { id: 'config', label: 'Configuración', icon: Settings2 },
-  ];
-
   return (
     <Layout
       title="Correo de facturas"
-      subtitle={`${businessName} · un buzón por PDV activo`}
+      subtitle={`${businessName} · un buzón por tienda`}
     >
       <div className="mx-auto max-w-4xl space-y-4 pb-10">
+        {/* Ajustes arriba a la izquierda */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            className={VERTIAL_BTN_SECONDARY}
+          >
+            <Settings2 className="h-4 w-4" />
+            Ajustes
+          </button>
+          <p className="text-xs text-stone-500 dark:text-stone-400">
+            {connectedCount}/{stores.length || 0} tiendas con correo
+          </p>
+        </div>
+
         {legacyAccountConnected ? (
           <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
             <p>
               Hay un correo guardado a nivel <strong>cuenta global</strong>
               {legacyAccountEmail ? ` (${legacyAccountEmail})` : ''}. Configura un buzón
-              distinto en <strong>cada PDV</strong> para no mezclar facturas entre tiendas.
+              distinto en <strong>cada tienda</strong> para no mezclar facturas.
             </p>
           </div>
         ) : null}
@@ -704,440 +821,340 @@ export function SupplierInvoiceEmailPage() {
             </div>
           </div>
         ) : null}
-        {/* Tabs principales */}
-        <div className="flex gap-1 border-b border-stone-200 dark:border-stone-800">
-          {pageTabs.map((tab) => {
-            const Icon = tab.icon;
-            const active = pageTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setPageTab(tab.id)}
-                className={`inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors ${
-                  active
-                    ? 'border-[var(--v-blue,#2563eb)] text-[var(--v-blue,#2563eb)]'
-                    : 'border-transparent text-stone-500 hover:text-stone-800 dark:hover:text-stone-200'
-                }`}
-              >
-                <Icon className="h-4 w-4" />
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
 
-        {/* ── Tab PDVs ── */}
-        {pageTab === 'pdvs' ? (
-          <div className="space-y-4">
-            {refreshingStores && stores.length > 0 ? (
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-stone-400">
-                Actualizando PDVs…
-              </p>
-            ) : null}
-            {pdvLoadPending ? (
-              <div className="rounded-2xl border border-stone-200 bg-white p-6 dark:border-stone-800 dark:bg-stone-900 space-y-3">
-                <p className="text-sm text-stone-500 dark:text-stone-400">
-                  Preparando la página… los PDVs llegan en segundo plano.
-                </p>
-                <div className="h-2 w-40 animate-pulse rounded-full bg-stone-200 dark:bg-stone-700" />
-              </div>
-            ) : stores.length === 0 ? (
-              <div className="rounded-2xl border border-stone-200 bg-white p-6 dark:border-stone-800 dark:bg-stone-900 space-y-3">
-                <p className="text-sm text-stone-600 dark:text-stone-400">
-                  Esta empresa no tiene PDVs activos. Créalos en Ajustes → Tienda.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => navigate('/saas/settings')}
-                  className={VERTIAL_BTN_SECONDARY}
-                >
-                  Ir a ajustes
-                </button>
-              </div>
-            ) : (
-              <>
-                {/* Títulos PDV arriba */}
-                <div className="flex flex-wrap gap-2">
-                  {stores.map((pdv) => {
-                    const st = statusById.get(pdv._id);
-                    const active = pdv._id === resolvedPdvId;
-                    return (
-                      <button
-                        key={pdv._id}
-                        type="button"
-                        onClick={() => handleSelectPdv(pdv._id)}
-                        className={`inline-flex max-w-full flex-col items-start gap-0.5 rounded-xl border-2 px-3.5 py-2 text-left transition-colors ${
-                          active
-                            ? 'border-gray-900 bg-gray-900 text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900'
-                            : 'border-stone-200 bg-white text-stone-700 hover:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200'
-                        }`}
-                      >
-                        <span className="inline-flex items-center gap-1.5 text-sm font-semibold">
-                          {pointOfSaleDisplayLabel(pdv)}
-                          {st?.connected ? (
-                            <CheckCircle2
-                              className={`h-3.5 w-3.5 shrink-0 ${
-                                active ? 'text-emerald-300 dark:text-emerald-700' : 'text-emerald-600'
-                              }`}
-                            />
-                          ) : null}
-                        </span>
-                        <span
-                          className={`text-[10px] font-medium truncate max-w-[220px] ${
-                            active ? 'text-white/80 dark:text-gray-700' : 'text-stone-500 dark:text-stone-400'
+        {refreshingStores && stores.length > 0 ? (
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-stone-400">
+            Actualizando tiendas…
+          </p>
+        ) : null}
+        {pdvLoadPending ? (
+          <div className="rounded-2xl border border-stone-200 bg-white p-6 dark:border-stone-800 dark:bg-stone-900 space-y-3">
+            <p className="text-sm text-stone-500 dark:text-stone-400">
+              Preparando la página… las tiendas llegan en segundo plano.
+            </p>
+            <div className="h-2 w-40 animate-pulse rounded-full bg-stone-200 dark:bg-stone-700" />
+          </div>
+        ) : stores.length === 0 ? (
+          <div className="rounded-2xl border border-stone-200 bg-white p-6 dark:border-stone-800 dark:bg-stone-900 space-y-3">
+            <p className="text-sm text-stone-600 dark:text-stone-400">
+              Esta empresa no tiene PDVs activos. Créalos en Ajustes → Tienda.
+            </p>
+            <button
+              type="button"
+              onClick={() => navigate('/saas/settings')}
+              className={VERTIAL_BTN_SECONDARY}
+            >
+              Ir a ajustes
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-wrap gap-2">
+              {stores.map((pdv) => {
+                const st = statusById.get(pdv._id);
+                const active = pdv._id === resolvedPdvId;
+                return (
+                  <button
+                    key={pdv._id}
+                    type="button"
+                    onClick={() => handleSelectPdv(pdv._id)}
+                    className={`inline-flex max-w-full flex-col items-start gap-0.5 rounded-xl border-2 px-3.5 py-2 text-left transition-colors ${
+                      active
+                        ? 'border-gray-900 bg-gray-900 text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900'
+                        : 'border-stone-200 bg-white text-stone-700 hover:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200'
+                    }`}
+                  >
+                    <span className="inline-flex items-center gap-1.5 text-sm font-semibold">
+                      {pointOfSaleDisplayLabel(pdv)}
+                      {st?.connected ? (
+                        <CheckCircle2
+                          className={`h-3.5 w-3.5 shrink-0 ${
+                            active ? 'text-emerald-300 dark:text-emerald-700' : 'text-emerald-600'
                           }`}
-                        >
-                          {st?.connected
-                            ? st.imapUser || 'Conectado'
-                            : 'Sin correo — configura este PDV'}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
+                        />
+                      ) : null}
+                    </span>
+                    <span
+                      className={`text-[10px] font-medium truncate max-w-[220px] ${
+                        active ? 'text-white/80 dark:text-gray-700' : 'text-stone-500 dark:text-stone-400'
+                      }`}
+                    >
+                      {st?.connected
+                        ? st.imapUser || 'Conectado'
+                        : 'Sin correo — configura esta tienda'}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
 
-                {/* Contenido del PDV seleccionado */}
-                <section className="rounded-2xl border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900 p-4 sm:p-5 space-y-4">
-                  {!selectedPdv ? (
-                    <p className="text-sm text-stone-400">Elige un PDV arriba.</p>
+            <section className="rounded-2xl border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900 p-4 sm:p-5 space-y-4">
+              {!selectedPdv ? (
+                <p className="text-sm text-stone-400">Elige una tienda arriba.</p>
+              ) : (
+                <>
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <h2 className="text-base font-bold text-stone-900 dark:text-stone-100">
+                        {pointOfSaleDisplayLabel(selectedPdv)}
+                      </h2>
+                      <p className="text-xs text-stone-500 mt-0.5">
+                        Configuración de <strong>esta tienda</strong> — no se comparte con otras
+                      </p>
+                      {selectedPdv.code ? (
+                        <p className="text-[11px] text-stone-400 mt-0.5 font-mono">{selectedPdv.code}</p>
+                      ) : null}
+                    </div>
+                    {isConnected ? (
+                      <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                        <Shield className="h-3.5 w-3.5" />
+                        Configurado
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 rounded-lg bg-stone-100 px-2.5 py-1 text-[11px] font-bold text-stone-500 dark:bg-stone-800 dark:text-stone-400">
+                        Sin correo
+                      </span>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowHelp((v) => !v)}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-stone-500 hover:text-stone-800 dark:hover:text-stone-200"
+                  >
+                    {showHelp ? (
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    ) : (
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    )}
+                    Cómo conectar (Gmail / Outlook)
+                  </button>
+                  {showHelp ? (
+                    <ol className="text-xs text-stone-600 dark:text-stone-400 space-y-1.5 list-decimal pl-4 leading-relaxed">
+                      <li>
+                        Usa el correo donde llegan las facturas de <strong>esta</strong> tienda.
+                      </li>
+                      <li>
+                        Crea una <strong>contraseña de aplicación</strong> (no la normal).
+                      </li>
+                      <li>
+                        Si el correo es de tu dominio (@tuempresa…), abre{' '}
+                        <strong>Ajustes</strong> (arriba) y revisa DNS / MX.
+                      </li>
+                      <li>Guarda, prueba y sincroniza. Revisa en Compras → Facturas.</li>
+                    </ol>
+                  ) : null}
+
+                  {imapLoading || !draftBelongsToSelectedPdv ? (
+                    <p className="text-sm text-stone-400">Cargando configuración de esta tienda…</p>
                   ) : (
-                    <>
-                      <div className="flex flex-wrap items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <h2 className="text-base font-bold text-stone-900 dark:text-stone-100">
-                            {pointOfSaleDisplayLabel(selectedPdv)}
-                          </h2>
-                          <p className="text-xs text-stone-500 mt-0.5">
-                            Configuración de <strong>esta tienda</strong> — no se comparte con otros PDVs
-                          </p>
-                          {selectedPdv.code ? (
-                            <p className="text-[11px] text-stone-400 mt-0.5 font-mono">{selectedPdv.code}</p>
-                          ) : null}
+                    <div className="space-y-4">
+                      <div>
+                        <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-stone-400">
+                          Proveedor
+                        </p>
+                        <div className="grid grid-cols-3 gap-2">
+                          {(
+                            [
+                              { id: 'gmail' as const, label: 'Gmail' },
+                              { id: 'outlook' as const, label: 'Outlook' },
+                              { id: 'other' as const, label: 'Otro' },
+                            ] as const
+                          ).map((opt) => (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              onClick={() => {
+                                skipProviderPresetRef.current = false;
+                                setProvider(opt.id);
+                                setLastTestOk(false);
+                                setShowAdvanced(opt.id === 'other');
+                              }}
+                              className={`rounded-xl border px-2 py-2.5 text-sm font-semibold transition-colors ${
+                                provider === opt.id
+                                  ? 'border-blue-300 bg-blue-50 text-[var(--v-blue,#2563eb)] dark:border-blue-800 dark:bg-blue-950/40'
+                                  : 'border-stone-200 bg-white text-stone-700 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-200'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
                         </div>
-                        {isConnected ? (
-                          <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
-                            <Shield className="h-3.5 w-3.5" />
-                            Configurado
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-3">
+                        <label className="block">
+                          <span className="text-[11px] font-bold uppercase tracking-wide text-stone-400">
+                            Correo de esta tienda
                           </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1.5 rounded-lg bg-stone-100 px-2.5 py-1 text-[11px] font-bold text-stone-500 dark:bg-stone-800 dark:text-stone-400">
-                            Sin correo
+                          <input
+                            type="email"
+                            value={imapDraft.imapUser || ''}
+                            onChange={(e) => {
+                              setImapDraft((p) => ({ ...p, imapUser: e.target.value }));
+                              setLastTestOk(false);
+                            }}
+                            placeholder="facturas@tienda.com"
+                            className={inputClass}
+                            autoComplete="username"
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="text-[11px] font-bold uppercase tracking-wide text-stone-400">
+                            Contraseña de aplicación
                           </span>
-                        )}
+                          <input
+                            type="password"
+                            value={imapDraft.imapPassword || ''}
+                            onChange={(e) => {
+                              setImapDraft((p) => ({ ...p, imapPassword: e.target.value }));
+                              setLastTestOk(false);
+                            }}
+                            placeholder="Contraseña de aplicación"
+                            className={inputClass}
+                            autoComplete="new-password"
+                          />
+                          <p className="mt-1 text-[11px] text-stone-500">
+                            {provider === 'gmail' ? (
+                              <>
+                                Gmail → Seguridad → Contraseñas de aplicaciones.{' '}
+                                <a
+                                  href="https://myaccount.google.com/apppasswords"
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-0.5 font-semibold text-[var(--v-blue,#2563eb)] hover:underline"
+                                >
+                                  Guía <ExternalLink className="h-3 w-3" />
+                                </a>
+                              </>
+                            ) : provider === 'outlook' ? (
+                              <>Outlook: Seguridad → Contraseñas de aplicación (con 2FA).</>
+                            ) : (
+                              <>Si hace falta, abre Avanzado para host/puerto.</>
+                            )}
+                          </p>
+                        </label>
                       </div>
 
                       <button
                         type="button"
-                        onClick={() => setShowHelp((v) => !v)}
+                        onClick={() => setShowAdvanced((v) => !v)}
                         className="inline-flex items-center gap-1 text-xs font-semibold text-stone-500 hover:text-stone-800 dark:hover:text-stone-200"
                       >
-                        {showHelp ? (
+                        {showAdvanced ? (
                           <ChevronDown className="h-3.5 w-3.5" />
                         ) : (
                           <ChevronRight className="h-3.5 w-3.5" />
                         )}
-                        Cómo conectar (Gmail / Outlook)
+                        Avanzado (IMAP)
                       </button>
-                      {showHelp ? (
-                        <ol className="text-xs text-stone-600 dark:text-stone-400 space-y-1.5 list-decimal pl-4 leading-relaxed">
-                          <li>
-                            Usa el correo donde llegan las facturas de <strong>esta</strong> tienda.
-                          </li>
-                          <li>
-                            Crea una <strong>contraseña de aplicación</strong> (no la normal).
-                          </li>
-                          <li>Guarda, prueba y sincroniza. Revisa en Compras → Facturas.</li>
-                        </ol>
+                      {showAdvanced ? (
+                        <div className="grid grid-cols-1 gap-3 rounded-xl border border-stone-200 bg-stone-50/80 p-3 dark:border-stone-700 dark:bg-stone-950/50 sm:grid-cols-2">
+                          <label className="block">
+                            <span className="text-[10px] font-bold uppercase text-stone-400">
+                              Servidor
+                            </span>
+                            <input
+                              type="text"
+                              value={imapDraft.imapHost || ''}
+                              onChange={(e) =>
+                                setImapDraft((p) => ({ ...p, imapHost: e.target.value }))
+                              }
+                              className={inputClass}
+                            />
+                          </label>
+                          <label className="block">
+                            <span className="text-[10px] font-bold uppercase text-stone-400">
+                              Puerto
+                            </span>
+                            <input
+                              type="number"
+                              value={imapDraft.imapPort ?? 993}
+                              onChange={(e) =>
+                                setImapDraft((p) => ({
+                                  ...p,
+                                  imapPort: Number(e.target.value) || 993,
+                                }))
+                              }
+                              className={inputClass}
+                            />
+                          </label>
+                        </div>
+                      ) : provider !== 'other' ? (
+                        <p className="text-xs text-stone-500 font-mono">
+                          {imapDraft.imapHost || '—'} · {imapDraft.imapPort ?? 993}
+                        </p>
                       ) : null}
 
-                      {imapLoading ? (
-                        <p className="text-sm text-stone-400">Cargando…</p>
-                      ) : (
-                        <div className="space-y-4">
-                          <div>
-                            <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-stone-400">
-                              Proveedor
-                            </p>
-                            <div className="grid grid-cols-3 gap-2">
-                              {(
-                                [
-                                  { id: 'gmail' as const, label: 'Gmail' },
-                                  { id: 'outlook' as const, label: 'Outlook' },
-                                  { id: 'other' as const, label: 'Otro' },
-                                ] as const
-                              ).map((opt) => (
-                                <button
-                                  key={opt.id}
-                                  type="button"
-                                  onClick={() => {
-                                    setProvider(opt.id);
-                                    setLastTestOk(false);
-                                    setShowAdvanced(opt.id === 'other');
-                                  }}
-                                  className={`rounded-xl border px-2 py-2.5 text-sm font-semibold transition-colors ${
-                                    provider === opt.id
-                                      ? 'border-blue-300 bg-blue-50 text-[var(--v-blue,#2563eb)] dark:border-blue-800 dark:bg-blue-950/40'
-                                      : 'border-stone-200 bg-white text-stone-700 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-200'
-                                  }`}
-                                >
-                                  {opt.label}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-1 gap-3">
-                            <label className="block">
-                              <span className="text-[11px] font-bold uppercase tracking-wide text-stone-400">
-                                Correo
-                              </span>
-                              <input
-                                type="email"
-                                value={imapDraft.imapUser || ''}
-                                onChange={(e) => {
-                                  setImapDraft((p) => ({ ...p, imapUser: e.target.value }));
-                                  setLastTestOk(false);
-                                }}
-                                placeholder="facturas@tienda.com"
-                                className={inputClass}
-                                autoComplete="username"
-                              />
-                            </label>
-                            <label className="block">
-                              <span className="text-[11px] font-bold uppercase tracking-wide text-stone-400">
-                                Contraseña de aplicación
-                              </span>
-                              <input
-                                type="password"
-                                value={imapDraft.imapPassword || ''}
-                                onChange={(e) => {
-                                  setImapDraft((p) => ({ ...p, imapPassword: e.target.value }));
-                                  setLastTestOk(false);
-                                }}
-                                placeholder="Contraseña de aplicación"
-                                className={inputClass}
-                                autoComplete="new-password"
-                              />
-                              <p className="mt-1 text-[11px] text-stone-500">
-                                {provider === 'gmail' ? (
-                                  <>
-                                    Gmail → Seguridad → Contraseñas de aplicaciones.{' '}
-                                    <a
-                                      href="https://myaccount.google.com/apppasswords"
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="inline-flex items-center gap-0.5 font-semibold text-[var(--v-blue,#2563eb)] hover:underline"
-                                    >
-                                      Guía <ExternalLink className="h-3 w-3" />
-                                    </a>
-                                  </>
-                                ) : provider === 'outlook' ? (
-                                  <>Outlook: Seguridad → Contraseñas de aplicación (con 2FA).</>
-                                ) : (
-                                  <>Si hace falta, abre Avanzado para host/puerto.</>
-                                )}
-                              </p>
-                            </label>
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={() => setShowAdvanced((v) => !v)}
-                            className="inline-flex items-center gap-1 text-xs font-semibold text-stone-500 hover:text-stone-800 dark:hover:text-stone-200"
-                          >
-                            {showAdvanced ? (
-                              <ChevronDown className="h-3.5 w-3.5" />
-                            ) : (
-                              <ChevronRight className="h-3.5 w-3.5" />
-                            )}
-                            Avanzado (IMAP)
-                          </button>
-                          {showAdvanced ? (
-                            <div className="grid grid-cols-1 gap-3 rounded-xl border border-stone-200 bg-stone-50/80 p-3 dark:border-stone-700 dark:bg-stone-950/50 sm:grid-cols-2">
-                              <label className="block">
-                                <span className="text-[10px] font-bold uppercase text-stone-400">
-                                  Servidor
-                                </span>
-                                <input
-                                  type="text"
-                                  value={imapDraft.imapHost || ''}
-                                  onChange={(e) =>
-                                    setImapDraft((p) => ({ ...p, imapHost: e.target.value }))
-                                  }
-                                  className={inputClass}
-                                />
-                              </label>
-                              <label className="block">
-                                <span className="text-[10px] font-bold uppercase text-stone-400">
-                                  Puerto
-                                </span>
-                                <input
-                                  type="number"
-                                  value={imapDraft.imapPort ?? 993}
-                                  onChange={(e) =>
-                                    setImapDraft((p) => ({
-                                      ...p,
-                                      imapPort: Number(e.target.value) || 993,
-                                    }))
-                                  }
-                                  className={inputClass}
-                                />
-                              </label>
-                            </div>
-                          ) : provider !== 'other' ? (
-                            <p className="text-xs text-stone-500 font-mono">
-                              {imapDraft.imapHost || '—'} · {imapDraft.imapPort ?? 993}
-                            </p>
-                          ) : null}
-
-                          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap pt-1">
-                            <button
-                              type="button"
-                              onClick={() => void handleSaveAndEnable()}
-                              disabled={imapSaving || !dataUserId}
-                              className={VERTIAL_BTN_PRIMARY}
-                            >
-                              {imapSaving ? (
-                                <RefreshCw className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Mail className="h-4 w-4" />
-                              )}
-                              Guardar y activar
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void handleTestImap()}
-                              disabled={imapTesting}
-                              className={VERTIAL_BTN_SECONDARY}
-                            >
-                              {imapTesting ? <RefreshCw className="h-4 w-4 animate-spin" /> : null}
-                              Probar conexión
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void handlePollInvoicesNow()}
-                              disabled={imapPolling || !isConnected}
-                              className={VERTIAL_BTN_SECONDARY}
-                            >
-                              {imapPolling ? (
-                                <RefreshCw className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <RefreshCw className="h-4 w-4" />
-                              )}
-                              Sincronizar ahora
-                            </button>
-                          </div>
-                          {pollSummary ? (
-                            <p className="text-xs text-stone-600 dark:text-stone-400 rounded-xl bg-stone-50 dark:bg-stone-950/50 border border-stone-200 dark:border-stone-700 px-3 py-2">
-                              {pollSummary}
-                            </p>
-                          ) : null}
-                        </div>
-                      )}
-                    </>
-                  )}
-                </section>
-              </>
-            )}
-          </div>
-        ) : null}
-
-        {/* ── Tab Configuración ── */}
-        {pageTab === 'config' ? (
-          <div className="space-y-4">
-            <section className="rounded-2xl border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900 p-4 sm:p-5 space-y-3">
-              <h2 className="text-sm font-bold text-stone-900 dark:text-stone-100">
-                Resumen · {businessName}
-              </h2>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                <div className="rounded-xl border border-stone-100 bg-stone-50 px-3 py-3 dark:border-stone-800 dark:bg-stone-950/50">
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-stone-400">
-                    PDVs activos
-                  </p>
-                  <p className="mt-1 text-xl font-bold text-stone-900 dark:text-stone-100 tabular-nums">
-                    {stores.length}
-                  </p>
-                </div>
-                <div className="rounded-xl border border-stone-100 bg-stone-50 px-3 py-3 dark:border-stone-800 dark:bg-stone-950/50">
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-stone-400">
-                    Con correo
-                  </p>
-                  <p className="mt-1 text-xl font-bold text-emerald-700 dark:text-emerald-400 tabular-nums">
-                    {connectedCount}
-                  </p>
-                </div>
-                <div className="rounded-xl border border-stone-100 bg-stone-50 px-3 py-3 dark:border-stone-800 dark:bg-stone-950/50 col-span-2 sm:col-span-1">
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-stone-400">
-                    Pendientes
-                  </p>
-                  <p className="mt-1 text-xl font-bold text-amber-700 dark:text-amber-400 tabular-nums">
-                    {Math.max(0, stores.length - connectedCount)}
-                  </p>
-                </div>
-              </div>
-              <p className="text-sm text-stone-600 dark:text-stone-400 leading-relaxed">
-                Cada PDV activo de esta empresa puede tener su propio buzón. Las facturas que entren
-                por ese correo se asocian a esa tienda.
-              </p>
-            </section>
-
-            <section className="rounded-2xl border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900 overflow-hidden">
-              <div className="px-4 py-3 border-b border-stone-100 dark:border-stone-800">
-                <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100">
-                  Estado por PDV
-                </h3>
-              </div>
-              {pdvLoadPending ? (
-                <p className="p-4 text-sm text-stone-400">Cargando PDVs en segundo plano…</p>
-              ) : stores.length === 0 ? (
-                <p className="p-4 text-sm text-stone-500">Sin PDVs activos en esta empresa.</p>
-              ) : (
-                <ul className="divide-y divide-stone-100 dark:divide-stone-800">
-                  {stores.map((pdv) => {
-                    const st = statusById.get(pdv._id);
-                    return (
-                      <li
-                        key={pdv._id}
-                        className="px-4 py-3 flex items-center justify-between gap-3"
-                      >
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-stone-900 dark:text-stone-100 truncate">
-                            {pointOfSaleDisplayLabel(pdv)}
-                          </p>
-                          <p className="text-xs text-stone-500 truncate mt-0.5">
-                            {st?.connected
-                              ? `${st.imapUser || 'Conectado'}${st.imapHost ? ` · ${st.imapHost}` : ''}`
-                              : 'Sin correo configurado'}
-                          </p>
-                        </div>
+                      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap pt-1">
                         <button
                           type="button"
-                          onClick={() => handleSelectPdv(pdv._id)}
+                          onClick={() => void handleSaveAndEnable()}
+                          disabled={imapSaving || !dataUserId || !draftBelongsToSelectedPdv}
+                          className={VERTIAL_BTN_PRIMARY}
+                        >
+                          {imapSaving ? (
+                            <RefreshCw className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Mail className="h-4 w-4" />
+                          )}
+                          Guardar y activar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleTestImap()}
+                          disabled={imapTesting || !draftBelongsToSelectedPdv}
                           className={VERTIAL_BTN_SECONDARY}
                         >
-                          {st?.connected ? 'Editar' : 'Configurar'}
+                          {imapTesting ? <RefreshCw className="h-4 w-4 animate-spin" /> : null}
+                          Probar conexión
                         </button>
-                      </li>
-                    );
-                  })}
-                </ul>
+                        <button
+                          type="button"
+                          onClick={() => void handlePollInvoicesNow()}
+                          disabled={imapPolling || !isConnected}
+                          className={VERTIAL_BTN_SECONDARY}
+                        >
+                          {imapPolling ? (
+                            <RefreshCw className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-4 w-4" />
+                          )}
+                          Sincronizar ahora
+                        </button>
+                      </div>
+                      {lastTestOk ? (
+                        <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                          Última prueba de conexión: OK
+                        </p>
+                      ) : null}
+                      {pollSummary ? (
+                        <p className="text-xs text-stone-600 dark:text-stone-400 rounded-xl bg-stone-50 dark:bg-stone-950/50 border border-stone-200 dark:border-stone-700 px-3 py-2">
+                          {pollSummary}
+                        </p>
+                      ) : null}
+                    </div>
+                  )}
+                </>
               )}
             </section>
-
-            <section className="rounded-2xl border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900 p-4 sm:p-5 space-y-2">
-              <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100">Notas</h3>
-              <ul className="text-sm text-stone-600 dark:text-stone-400 space-y-1.5 list-disc pl-4 leading-relaxed">
-                <li>Un buzón distinto por PDV evita mezclar facturas entre tiendas.</li>
-                <li>Usa siempre contraseña de aplicación, no la contraseña normal del correo.</li>
-                <li>
-                  Tras conectar, las facturas aparecen en Compras → Facturas para confirmar.
-                </li>
-              </ul>
-            </section>
-          </div>
-        ) : null}
+          </>
+        )}
       </div>
+
+      <SupplierInvoiceEmailSettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        storeLabel={selectedPdv ? pointOfSaleDisplayLabel(selectedPdv) : '—'}
+        provider={provider}
+        draft={imapDraft}
+        onChangeDraft={(patch) => setImapDraft((prev) => ({ ...prev, ...patch }))}
+        onSave={handleSaveSettingsOnly}
+        saving={imapSaving}
+        canSave={Boolean(dataUserId && resolvedPdvId && draftBelongsToSelectedPdv)}
+        pdvRows={settingsPdvRows}
+        onSelectPdv={handleSelectPdv}
+      />
     </Layout>
   );
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
@@ -6,9 +6,8 @@ import {
   SaasTabPrimaryButton,
   SaasTabSearch,
   SaasTabSecondaryButton,
-  SaasTabToolbarRow,
-  SaasTabWorkspace,
 } from './SaasTabWorkspace';
+import { CatalogTabShell } from './CatalogTabShell';
 import { CatalogCoreLoadingState } from './CatalogCoreLoadingState';
 import { useAuth } from '../../context/AuthContext';
 import { useActiveBusinessScope } from '../../hooks/useActiveBusinessScope';
@@ -105,6 +104,110 @@ function statusClass(status: ReturnType<typeof productCostingStatus>): string {
   if (status === 'fixed') return 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300';
   if (status === 'recipe') return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300';
   return 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400';
+}
+
+function EscandalloActionsMenu({
+  canGenerate,
+  generating,
+  canDownload,
+  canCategoryCosts,
+  categoryCostsOpen,
+  onGenerate,
+  onDownload,
+  onToggleCategoryCosts,
+}: {
+  canGenerate: boolean;
+  generating: boolean;
+  canDownload: boolean;
+  canCategoryCosts: boolean;
+  categoryCostsOpen: boolean;
+  onGenerate: () => void;
+  onDownload: () => void;
+  onToggleCategoryCosts: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const run = (fn: () => void) => {
+    setOpen(false);
+    fn();
+  };
+
+  const itemClass =
+    'flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm font-medium text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors';
+
+  const hasAny = canGenerate || canDownload || canCategoryCosts;
+  if (!hasAny) return null;
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <SaasTabSecondaryButton
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        title="Acciones de escandallo"
+      >
+        Acciones
+        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </SaasTabSecondaryButton>
+      {open ? (
+        <>
+          <div className="fixed inset-0 z-[30]" onClick={() => setOpen(false)} aria-hidden />
+          <div
+            role="menu"
+            className="absolute right-0 top-full z-[40] mt-1.5 min-w-[240px] overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+          >
+            {canGenerate ? (
+              <button
+                type="button"
+                role="menuitem"
+                disabled={generating}
+                onClick={() => run(onGenerate)}
+                className={`${itemClass} bg-blue-50/60 dark:bg-blue-950/30`}
+              >
+                {generating ? (
+                  <Loader2 className="w-4 h-4 animate-spin text-[var(--v-blue,#2563eb)]" />
+                ) : (
+                  <Sparkles className="w-4 h-4 text-[var(--v-blue,#2563eb)]" />
+                )}
+                Generar escandallos
+              </button>
+            ) : null}
+            {canDownload ? (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => run(onDownload)}
+                className={itemClass}
+              >
+                <Download className="w-4 h-4 text-gray-500" />
+                Descargar Excel escandallo
+              </button>
+            ) : null}
+            {canCategoryCosts ? (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => run(onToggleCategoryCosts)}
+                className={itemClass}
+              >
+                <Layers className="w-4 h-4 text-gray-500" />
+                {categoryCostsOpen ? 'Ocultar costes por categoría' : 'Costes por categoría'}
+              </button>
+            ) : null}
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
 }
 
 export function ProductCostingModal({
@@ -699,7 +802,7 @@ export function EscandalloPanel({
 
   return (
     <>
-      <SaasTabWorkspace
+      <CatalogTabShell
         stats={[
           { label: 'productos', value: kpis.total },
           { label: 'con escandallo', value: kpis.recipe, tone: 'emerald' },
@@ -711,10 +814,8 @@ export function EscandalloPanel({
           },
           { label: 'FC >35%', value: kpis.highCostCount, tone: kpis.highCostCount > 0 ? 'red' : 'default' },
         ]}
-        toolbar={
-          <SaasTabToolbarRow
-            left={
-              <>
+        toolbarLeftExtra={
+          <>
                 <SaasTabSearch
                   value={search}
                   onChange={setSearch}
@@ -746,37 +847,20 @@ export function EscandalloPanel({
                   <option value="none">Sin configurar</option>
                 </select>
               </>
-            }
-            right={
-              <>
-                {kpis.none > 0 ? (
-                  <SaasTabPrimaryButton onClick={() => void handleGenerateEscandallos()} disabled={generatingCosting}>
-                    {generatingCosting ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Sparkles className="w-3.5 h-3.5" />
-                    )}
-                    Generar escandallos
-                  </SaasTabPrimaryButton>
-                ) : null}
-                {catalogItems.length > 0 ? (
-                  <SaasTabSecondaryButton onClick={handleDownloadEscandalloExcel}>
-                    <Download className="w-3.5 h-3.5" />
-                    Descargar Excel escandallo
-                  </SaasTabSecondaryButton>
-                ) : null}
-                {categories.length > 0 ? (
-                  <SaasTabSecondaryButton
-                    onClick={() => setShowCategoryPanel((open) => !open)}
-                    className={showCategoryPanel ? 'border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-300' : ''}
-                  >
-                    <Layers className="w-3.5 h-3.5" />
-                    Costes por categoría
-                  </SaasTabSecondaryButton>
-                ) : null}
-              </>
-            }
-          />
+        }
+        toolbarRight={
+          <>
+            <EscandalloActionsMenu
+                canGenerate={kpis.none > 0}
+                generating={generatingCosting}
+                canDownload={catalogItems.length > 0}
+                canCategoryCosts={categories.length > 0}
+                categoryCostsOpen={showCategoryPanel}
+                onGenerate={() => void handleGenerateEscandallos()}
+                onDownload={handleDownloadEscandalloExcel}
+                onToggleCategoryCosts={() => setShowCategoryPanel((open) => !open)}
+              />
+          </>
         }
       >
         <div
@@ -1010,7 +1094,7 @@ export function EscandalloPanel({
             </aside>
           ) : null}
         </div>
-      </SaasTabWorkspace>
+      </CatalogTabShell>
 
       {editingProduct ? (
         <ProductCostingModal

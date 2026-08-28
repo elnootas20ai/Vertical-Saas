@@ -8,10 +8,12 @@ import {
   isBrandBillingUnlocked,
   normalizeBrandBillingConfig,
   predominantBrandIdForSheet,
+  removeBrandFromSheet,
   resolveBillingSheetsForClosing,
   resolveBrandFoodUnitKey,
   sheetMoneyShares,
   suggestBillingSheetsFromBrands,
+  syncBillingSheetsWithBrands,
   unitColumnsForBrand,
   unitColumnsForDeliveryLineKind,
 } from '../src/app/lib/brandBillingConfig.ts';
@@ -105,7 +107,7 @@ describe('suggestBillingSheetsFromBrands / unlock', () => {
     expect(sheets[1].unitColumns[0].key).toBe('burger');
   });
 
-  it('la 3ª marca tacos va con la hoja Black Burger (misma pestaña Excel)', () => {
+  it('la 3ª marca tacos tiene hoja propia (no va con Black Burger)', () => {
     const brands = [
       {
         _id: 'm1', id: 'm1', type: 'brand', business_id: 'b', user_id: 'u',
@@ -124,13 +126,15 @@ describe('suggestBillingSheetsFromBrands / unlock', () => {
       },
     ];
     const sheets = suggestBillingSheetsFromBrands(brands);
-    expect(sheets).toHaveLength(2);
+    expect(sheets).toHaveLength(3);
     expect(sheets[0].unitColumns.map((c) => c.key)).toEqual(['pizza']);
-    expect(sheets[1].brandIds).toEqual(['b1', 't1']);
-    expect(sheets[1].unitColumns.map((c) => c.key)).toEqual(['burger', 'taco']);
+    expect(sheets[1].unitColumns.map((c) => c.key)).toEqual(['burger']);
+    expect(sheets[1].brandIds).toEqual(['b1']);
+    expect(sheets[2].unitColumns.map((c) => c.key)).toEqual(['taco']);
+    expect(sheets[2].brandIds).toEqual(['t1']);
   });
 
-  it('coalesce une hoja TACOS suelta en la hoja burger', () => {
+  it('legacy: hoja TACOS suelta se mantiene separada de burger', () => {
     const brands = [
       {
         _id: 'b1', id: 'b1', type: 'brand', business_id: 'b', user_id: 'u',
@@ -154,9 +158,68 @@ describe('suggestBillingSheetsFromBrands / unlock', () => {
       },
     ];
     const merged = coalesceTacoIntoBurgerSheets(sheets, brands);
-    expect(merged).toHaveLength(1);
-    expect(merged[0].brandIds).toEqual(['b1', 't1']);
-    expect(merged[0].unitColumns.map((c) => c.key)).toEqual(['burger', 'taco']);
+    expect(merged).toHaveLength(2);
+    expect(merged[0].brandIds).toEqual(['b1']);
+    expect(merged[0].unitColumns.map((c) => c.key)).toEqual(['burger']);
+    expect(merged[1].brandIds).toEqual(['t1']);
+    expect(merged[1].unitColumns.map((c) => c.key)).toEqual(['taco']);
+  });
+
+  it('legacy burger+taco fusionados se separan al normalizar', () => {
+    const brands = [
+      {
+        _id: 'b1', id: 'b1', type: 'brand', business_id: 'b', user_id: 'u',
+        name: 'Modomio Burger', description: '', logo: '', website: '', deliveryLineKind: 'burger_fastfood',
+        active: true, createdAt: '', updatedAt: '',
+      },
+      {
+        _id: 't1', id: 't1', type: 'brand', business_id: 'b', user_id: 'u',
+        name: 'Tacos Uriel', description: '', logo: '', website: '', deliveryLineKind: 'tacos_mexican',
+        active: true, createdAt: '', updatedAt: '',
+      },
+    ];
+    const legacy = [
+      {
+        id: 'bb', label: 'MODOMIO BURGER', brandIds: ['b1', 't1'],
+        unitColumns: [
+          { key: 'burger', header: 'TOTAL BURGUER' },
+          { key: 'taco', header: 'TOTAL TACOS' },
+        ],
+      },
+    ];
+    const synced = syncBillingSheetsWithBrands(legacy, brands);
+    expect(synced).toHaveLength(2);
+    expect(synced[0].brandIds).toEqual(['b1']);
+    expect(synced[0].unitColumns.map((c) => c.key)).toEqual(['burger']);
+    expect(synced[1].brandIds).toEqual(['t1']);
+    expect(synced[1].unitColumns.map((c) => c.key)).toEqual(['taco']);
+  });
+
+  it('hoja taco vacía se mantiene si hay marca taco en el negocio', () => {
+    const brands = [
+      {
+        _id: 'm1', id: 'm1', type: 'brand', business_id: 'b', user_id: 'u',
+        name: 'Modomio', description: '', logo: '', website: '', deliveryLineKind: 'pizza',
+        active: true, createdAt: '', updatedAt: '',
+      },
+      {
+        _id: 'b1', id: 'b1', type: 'brand', business_id: 'b', user_id: 'u',
+        name: 'Modomio Burger', description: '', logo: '', website: '', deliveryLineKind: 'burger_fastfood',
+        active: true, createdAt: '', updatedAt: '',
+      },
+      {
+        _id: 't1', id: 't1', type: 'brand', business_id: 'b', user_id: 'u',
+        name: 'Tacos Uriel', description: '', logo: '', website: '', deliveryLineKind: 'tacos_mexican',
+        active: true, createdAt: '', updatedAt: '',
+      },
+    ];
+    const sheets = suggestBillingSheetsFromBrands(brands);
+    const tacoSheet = sheets.find((s) => s.unitColumns.some((c) => c.key === 'taco' && !s.unitColumns.some((x) => x.key === 'burger')));
+    expect(tacoSheet).toBeTruthy();
+    const cleared = removeBrandFromSheet(sheets, tacoSheet.id, 't1', brands);
+    const tacoAfter = cleared.find((s) => s.id === tacoSheet.id);
+    expect(tacoAfter?.brandIds).toEqual([]);
+    expect(tacoAfter?.unitColumns.map((c) => c.key)).toEqual(['taco']);
   });
 
   it('no se activa con una sola marca', () => {
@@ -218,14 +281,14 @@ describe('closingSlotsFromBillingSheets / 2ª caja', () => {
     },
   ];
 
-  it('3 marcas con tacos en Black Burger → 2 slots; nombre = marca que manda', () => {
+  it('3 marcas → 3 hojas y 3 slots de cierre', () => {
     const sheets = resolveBillingSheetsForClosing(null, pauBrands);
     const slots = closingSlotsFromBillingSheets(sheets, pauBrands);
-    expect(slots).toHaveLength(2);
-    expect(slots.map((s) => s.name)).toEqual(['Modomio', 'Black Burger']);
-    expect(slots[1].brandId).toBe('b1');
-    expect(slots[1].memberBrandIds).toEqual(['b1', 't1']);
-    expect(predominantBrandIdForSheet(sheets[1], pauBrands)).toBe('b1');
+    expect(sheets).toHaveLength(3);
+    expect(slots).toHaveLength(3);
+    expect(slots.map((s) => s.name)).toEqual(['Modomio', 'Black Burger', 'Tacos Uriel']);
+    expect(slots[2].brandId).toBe('t1');
+    expect(slots[2].memberBrandIds).toEqual(['t1']);
   });
 
   it('1 marca → 1 slot', () => {

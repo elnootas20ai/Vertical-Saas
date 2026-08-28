@@ -72,6 +72,7 @@ export type LandingCopy = {
     monthly: string;
     yearly: string;
     perMonth: string;
+    askPrice: string;
     mostPopular: string;
     licenseNote: string;
     licenseNoteBold: string;
@@ -246,12 +247,13 @@ const es: LandingCopy = {
     ],
   },
   pricing: {
-    eyebrow: 'Precios',
-    title: 'Planes para crecer con Vertial',
-    subtitle: 'Escala cuando lo necesites. Sin permanencia.',
+    eyebrow: 'Planes',
+    title: 'Elige cómo quieres trabajar con Vertial',
+    subtitle: 'Te proponemos el plan según tu operativa. Precio bajo consulta.',
     monthly: 'Mensual',
     yearly: 'Anual',
     perMonth: '/mes',
+    askPrice: 'Consulta con nosotros',
     mostPopular: 'Más popular',
     licenseNote: ' Cada sede adicional se factura por separado.',
     licenseNoteBold: '1 ubicación = 1 licencia.',
@@ -485,12 +487,13 @@ const en: LandingCopy = {
     ],
   },
   pricing: {
-    eyebrow: 'Pricing',
-    title: 'Plans that grow with Vertial',
-    subtitle: 'Scale when you need. No lock-in.',
+    eyebrow: 'Plans',
+    title: 'Choose how you want to work with Vertial',
+    subtitle: 'We propose a plan for your operations. Pricing on request.',
     monthly: 'Monthly',
     yearly: 'Yearly',
     perMonth: '/mo',
+    askPrice: 'Contact us for pricing',
     mostPopular: 'Most popular',
     licenseNote: ' Each extra site is billed separately.',
     licenseNoteBold: '1 location = 1 license.',

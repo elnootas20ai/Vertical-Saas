@@ -169,6 +169,7 @@ import { CeoTpvStorePicker, buildCeoTpvStoreRows } from '../../components/saas/C
 import { WorkerTpvStockReview } from './worker/WorkerTpvStockReview';
 import { WorkerTpvBottomBar } from '../../components/saas/WorkerTpvBottomBar';
 import { TpvChromeScope, useTpvOrderFlowChrome, useTpvOrderFlowActive } from '../../context/TpvChromeContext';
+import { useIsMobile } from '../../components/ui/use-mobile';
 import { consumeTpvStockReviewLaunch, TPV_OPEN_STOCK_REVIEW_EVENT } from '../../lib/tpvStockReview';
 import { TPV_OPEN_STORE_TRANSFERS_EVENT } from '../../lib/tpvStoreTransfers';
 import { WorkerTpvStoreTransfers } from './worker/WorkerTpvStoreTransfers';
@@ -982,6 +983,7 @@ export function TpvRapidoOrderFlow({
 }: TpvRapidoOrderFlowProps = {}) {
   useTpvOrderFlowChrome(true);
   const orderFlowChrome = useTpvOrderFlowActive();
+  const isPhone = useIsMobile();
   const { user } = useAuth();
   const registerFromGate = useTpvRegisterIfOpen();
   const boardReady = useTpvRegisterBoardReady();
@@ -1100,6 +1102,9 @@ export function TpvRapidoOrderFlow({
   const isRestaurantMode = Boolean(
     restaurantModeProp ?? isRestaurantBusinessType(currentBusiness?.businessType),
   );
+  /** Delivery TPV en móvil: pestañas Carta/Pedido en lugar de split tablet. */
+  const phoneLayout = isPhone && !isRestaurantMode;
+  const pickerCompact = tabletMode && !phoneLayout;
 
   const walkInClient = useMemo(
     () => buildRestaurantWalkInClient(userId || 'tpv', writeBusinessId || businessId || 'tpv'),
@@ -4786,8 +4791,8 @@ export function TpvRapidoOrderFlow({
 
   const stickyFooter = (
     <div className="shrink-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 shadow-lg pb-[max(0.25rem,env(safe-area-inset-bottom))]">
-      <div className={`w-full min-w-0 px-2 ${tabletMode ? 'py-1.5' : 'px-3 py-2 max-w-[920px] mx-auto'} ${!tabletMode && isProductsFocus ? 'max-w-[1320px] mx-auto' : ''}`}>
-        <div className={`flex items-center justify-end gap-2 text-xs text-gray-500 dark:text-gray-400 ${tabletMode ? 'mb-0.5' : 'mb-1.5'}`}>
+      <div className={`w-full min-w-0 px-2 ${phoneLayout || tabletMode ? 'py-1.5' : 'px-3 py-2 max-w-[920px] mx-auto'} ${!tabletMode && !phoneLayout && isProductsFocus ? 'max-w-[1320px] mx-auto' : ''}`}>
+        <div className={`flex items-center justify-end gap-2 text-xs text-gray-500 dark:text-gray-400 ${phoneLayout || tabletMode ? 'mb-0.5' : 'mb-1.5'}`}>
           {restaurantAccountMode && accountDue > 0 ? (
             <span className="font-semibold text-violet-600 dark:text-violet-400 tabular-nums">
               Cuenta {formatPrice(accountDue)}
@@ -4810,7 +4815,7 @@ export function TpvRapidoOrderFlow({
             </span>
           )}
         </div>
-        <div className="flex gap-1 flex-wrap">
+        <div className={phoneLayout ? 'flex flex-col gap-2' : 'flex gap-1 flex-wrap'}>
           {isRestaurantMode ? (
             <button
               type="button"
@@ -4959,14 +4964,22 @@ export function TpvRapidoOrderFlow({
     <TpvFullscreenShell
       onBack={() => void handleGoBack()}
       embedded
-      tabletMode={tabletMode}
-      contentFill={tabletMode && isProductsFocus}
+      tabletMode={tabletMode || phoneLayout}
+      contentFill={(tabletMode || phoneLayout) && isProductsFocus}
       topSlot={tpvTopActions}
       footerSlot={stickyFooter}
       hideBack={!embeddedInRestaurantTpv}
-      compactTop={!tabletMode && orderFlowChrome}
+      compactTop={!tabletMode && !phoneLayout && orderFlowChrome}
     >
-      <div className={`w-full min-w-0 ${tabletMode && isProductsFocus ? 'flex-1 min-h-0 flex flex-col pb-0 px-1' : tabletMode ? 'pb-2 px-1' : isProductsFocus ? 'max-w-[1320px] mx-auto pb-4 px-2 md:px-4' : 'max-w-[920px] mx-auto pb-3 px-2 sm:px-3 md:px-4'}`}>
+      <div className={`w-full min-w-0 ${
+        (tabletMode || phoneLayout) && isProductsFocus
+          ? 'flex-1 min-h-0 flex flex-col pb-0 px-1'
+          : tabletMode
+            ? 'pb-2 px-1'
+            : isProductsFocus
+              ? 'max-w-[1320px] mx-auto pb-4 px-2 md:px-4'
+              : 'max-w-[920px] mx-auto pb-3 px-2 sm:px-3 md:px-4'
+      }`}>
         {!tabletMode && !orderFlowChrome && register && register.clockedInWorkers.length > 0 && (
           <div className="sticky top-0 z-20 -mx-2 md:-mx-4 px-2 md:px-4 py-2 mb-3 bg-gray-50/95 dark:bg-gray-950/95 backdrop-blur border-b border-gray-200 dark:border-gray-800">
             <ClockedInWorkerBubbles
@@ -5586,10 +5599,12 @@ export function TpvRapidoOrderFlow({
           </div>
         ) : null}
         {currentStep === 'products' && isStepReachable('products') ? (
-          <StepContainer step={3} title="Productos" visible wide className={tabletMode ? 'flex-1 min-h-0 flex flex-col mb-0' : undefined}>
-            <div className={tabletMode ? 'flex-1 min-h-0 flex flex-col w-full' : undefined}>
+          <StepContainer step={3} title="Productos" visible wide className={(tabletMode || phoneLayout) ? 'flex-1 min-h-0 flex flex-col mb-0' : undefined}>
+            <div className={(tabletMode || phoneLayout) ? 'flex-1 min-h-0 flex flex-col w-full' : undefined}>
             <TpvProductPicker
-              compact={tabletMode}
+              compact={pickerCompact}
+              phoneMode={phoneLayout}
+              cartBadgeCount={orderPanelCount}
               userId={userId}
               businessId={businessId}
               sections={catalogSections}

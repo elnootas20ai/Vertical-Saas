@@ -2533,28 +2533,47 @@ function sleepMs(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function inventorySyncExclusionKeyForCatalogDoc(doc) {
-  if (!doc || doc.type !== 'catalog_item') return '';
+function foldInventoryExclusionName(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/\s+/g, ' ');
+}
+
+/** Todas las claves posibles: si solo guardamos una, el sync recrea el artículo (id vs name). */
+function inventorySyncExclusionKeysForCatalogDoc(doc, storeIngredients = []) {
+  const keys = new Set();
+  if (!doc || doc.type !== 'catalog_item') return [];
   const cf = doc.customFields && typeof doc.customFields === 'object' ? doc.customFields : {};
   const storeIngId = String(cf.storeIngredientId || '').trim();
   const templateId = String(cf.vertialStockTemplateId || '').trim();
   const linkedCat = String(cf.linkedCatalogItemId || '').trim();
-  if (storeIngId) return `id:${storeIngId}`;
-  if (templateId) return `tpl:${templateId}`;
-  if (linkedCat) return `cat:${linkedCat}`;
-  const name = String(doc.name || '')
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{M}/gu, '');
-  return name ? `name:${name}` : '';
+  if (storeIngId) keys.add(`id:${storeIngId}`);
+  if (templateId) keys.add(`tpl:${templateId}`);
+  if (linkedCat) keys.add(`cat:${linkedCat}`);
+  const nameKey = foldInventoryExclusionName(doc.name);
+  if (nameKey) keys.add(`name:${nameKey}`);
+
+  const list = Array.isArray(storeIngredients) ? storeIngredients : [];
+  for (const ing of list) {
+    if (!ing) continue;
+    const ingId = String(ing.id || '').trim();
+    const ingName = foldInventoryExclusionName(ing.name);
+    const linked =
+      (storeIngId && ingId && ingId === storeIngId)
+      || (nameKey && ingName && ingName === nameKey);
+    if (!linked) continue;
+    if (ingId) keys.add(`id:${ingId}`);
+    if (ingName) keys.add(`name:${ingName}`);
+  }
+  return [...keys];
 }
 
 async function appendInventorySyncExclusionForCatalogItem(req, userId, doc) {
   const isStock = doc?.module === 'stock' || doc?.isStockItem === true;
   if (!isStock) return;
-  const key = inventorySyncExclusionKeyForCatalogDoc(doc);
-  if (!key) return;
   const db = getDeliveryDbName();
   await ensureDatabase(req, db);
   const configId = `dlvconf-${userId}`;
@@ -2567,10 +2586,62 @@ async function appendInventorySyncExclusionForCatalogItem(req, userId, doc) {
   if (!existing || existing.type !== 'delivery_config') {
     existing = buildDeliveryConfigDocument(userId, {});
   }
+
+  const storeIngredients = Array.isArray(existing.storeIngredients) ? existing.storeIngredients : [];
+  const keys = inventorySyncExclusionKeysForCatalogDoc(doc, storeIngredients);
+  if (keys.length === 0) return;
+
+  const nameKeys = new Set(
+    keys.filter((k) => k.startsWith('name:')).map((k) => k.slice(5)),
+  );
+  const idKeys = new Set(
+    keys.filter((k) => k.startsWith('id:')).map((k) => k.slice(3)),
+  );
+
+  const nextStoreIngredients = storeIngredients.filter((ing) => {
+    if (!ing) return false;
+    const ingId = String(ing.id || '').trim();
+    const ingName = foldInventoryExclusionName(ing.name);
+    if (ingId && idKeys.has(ingId)) return false;
+    if (ingName && nameKeys.has(ingName)) return false;
+    return true;
+  });
+  const removedIds = new Set(
+    storeIngredients
+      .filter((ing) => ing && !nextStoreIngredients.includes(ing))
+      .map((ing) => String(ing.id || '').trim())
+      .filter(Boolean),
+  );
+
+  let nextBrandIngredients = existing.tpvBrandIngredients;
+  if (removedIds.size > 0 && existing.tpvBrandIngredients && typeof existing.tpvBrandIngredients === 'object') {
+    nextBrandIngredients = {};
+    for (const [brandId, value] of Object.entries(existing.tpvBrandIngredients)) {
+      if (!Array.isArray(value)) continue;
+      const filtered = value
+        .map((x) => String(x || '').trim())
+        .filter((id) => id && !removedIds.has(id));
+      if (filtered.length > 0) nextBrandIngredients[brandId] = filtered;
+    }
+  }
+
   const prev = Array.isArray(existing.inventorySyncExcludedKeys) ? existing.inventorySyncExcludedKeys : [];
-  if (prev.includes(key)) return;
-  const next = [...prev, key].slice(-500);
-  const updated = buildDeliveryConfigDocument(userId, { inventorySyncExcludedKeys: next }, existing);
+  const nextExcluded = [...prev];
+  for (const key of keys) {
+    if (!nextExcluded.includes(key)) nextExcluded.push(key);
+  }
+
+  const updated = buildDeliveryConfigDocument(
+    userId,
+    {
+      inventorySyncExcludedKeys: nextExcluded.slice(-500),
+      storeIngredients: nextStoreIngredients,
+      ...(nextBrandIngredients !== existing.tpvBrandIngredients
+        ? { tpvBrandIngredients: nextBrandIngredients }
+        : {}),
+    },
+    existing,
+  );
   await putDocument(req, db, updated._id, updated);
 }
 
@@ -2584,7 +2655,23 @@ async function removeCatalogItemIdWithRetry(req, userId, itemId, maxAttempts = 4
       if (!existing || existing.deletedAt) {
         return { ok: true, status: 'gone' };
       }
-      await softDeleteDocument(req, getCatalogDbName(), id);
+      const saved = await softDeleteDocument(req, getCatalogDbName(), id);
+      // Que no quede activo=true con deletedAt (fantasma en listados raros).
+      try {
+        const rev = saved?.rev || saved?._rev;
+        if (rev) {
+          await putDocument(req, getCatalogDbName(), id, {
+            ...existing,
+            _rev: rev,
+            deletedAt: new Date().toISOString(),
+            active: false,
+            available: false,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      } catch (activeErr) {
+        logger.warn('[removeCatalogItem] active=false %s: %s', id, activeErr?.message || activeErr);
+      }
       try {
         await appendInventorySyncExclusionForCatalogItem(req, userId, existing);
       } catch (exclErr) {

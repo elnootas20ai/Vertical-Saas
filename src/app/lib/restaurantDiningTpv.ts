@@ -22,6 +22,7 @@ import type { CartLineCustomization } from './catalogCustomization';
 import {
   buildOrderExtras,
   buildOrderIngredients,
+  buildOrderStructuredCustomization,
   cartLineUnitPrice,
   productBrandIdsFromItem,
 } from './catalogCustomization';
@@ -43,6 +44,7 @@ export function cartLinesToDiningItems(lines: RestaurantCartLine[]): DiningOrder
   return lines.map((ci) => {
     const extras = buildOrderExtras(ci.customization);
     const ingredients = buildOrderIngredients(ci.catalogItem, ci.customization);
+    const structured = buildOrderStructuredCustomization(ci.customization);
     return {
       id: ci.lineId || uuidv4(),
       productId: ci.catalogItem._id,
@@ -58,6 +60,7 @@ export function cartLinesToDiningItems(lines: RestaurantCartLine[]): DiningOrder
       cancelledReason: '',
       cancelledBy: '',
       brandIds: productBrandIdsFromItem(ci.catalogItem),
+      ...structured,
     };
   });
 }
@@ -75,6 +78,27 @@ export function deliveryItemsToDiningItems(items: DeliveryOrderItem[]): DiningOr
           }))
           .filter((ing) => ing.name)
       : [];
+    const hh = i.halfHalfPizza;
+    const halfHalfPizza =
+      hh?.firstProductId && hh?.secondProductId
+        ? {
+            firstProductId: String(hh.firstProductId),
+            firstProductName: String(hh.firstProductName || ''),
+            secondProductId: String(hh.secondProductId),
+            secondProductName: String(hh.secondProductName || ''),
+          }
+        : undefined;
+    const comboSelections = Array.isArray(i.comboSelections)
+      ? i.comboSelections
+          .filter((ref) => ref?.productId && Number(ref.quantity || 0) > 0)
+          .map((ref) => ({
+            productId: String(ref.productId),
+            productName: String(ref.productName || ''),
+            quantity: Number(ref.quantity || 1),
+            ...(ref.slotKind ? { slotKind: String(ref.slotKind) } : {}),
+            ...(ref.instanceId ? { instanceId: String(ref.instanceId) } : {}),
+          }))
+      : undefined;
     return {
       id: i.id || uuidv4(),
       productId: String(i.catalogItemId || i.id || ''),
@@ -92,6 +116,8 @@ export function deliveryItemsToDiningItems(items: DeliveryOrderItem[]): DiningOr
       brandIds: Array.isArray(i.brandIds)
         ? i.brandIds.map((b) => String(b || '').trim()).filter(Boolean)
         : [],
+      ...(halfHalfPizza ? { halfHalfPizza } : {}),
+      ...(comboSelections && comboSelections.length > 0 ? { comboSelections } : {}),
     };
   });
 }

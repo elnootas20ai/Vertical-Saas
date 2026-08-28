@@ -24,6 +24,7 @@ import * as XLSX from 'xlsx';
 import type { BrandBillingSheet } from './brandBillingConfig';
 import {
   coalesceTacoIntoBurgerSheets,
+  normalizeBillingSheetsLayout,
   sheetMoneyShares,
   type UnitCounts,
 } from './brandBillingConfig';
@@ -1009,7 +1010,7 @@ function moneyRowCells(row: CajaDayAmounts): unknown[] {
 export function resolveBillingSheetsForExcel(sheets?: BrandBillingSheet[] | null): BrandBillingSheet[] {
   if (Array.isArray(sheets) && sheets.length > 0) {
     // Burgers + tacos en la misma hoja (plantilla clasica de cierres), aunque vengan 3 hojas guardadas.
-    const merged = coalesceTacoIntoBurgerSheets(sheets);
+    const merged = normalizeBillingSheetsLayout(sheets);
     const withUnits = merged.filter((s) => (s.unitColumns || []).length > 0);
     if (withUnits.length > 0) return withUnits;
   }

@@ -15,6 +15,7 @@ import {
   writePushConsent,
 } from '../../lib/pushPermissionConsent';
 import { ensureLocationPermissionPrompt } from '../../hooks/useGeolocation';
+import { canUseNativePushRegistration } from '../../lib/nativePushRuntime';
 
 const ASK_DELAY_MS = 1600;
 const LOCATION_ASK_DELAY_MS = 3200;
@@ -23,6 +24,7 @@ async function systemReceiveStatus(): Promise<'granted' | 'denied' | 'prompt' | 
   if (isVertialNativeApp()) {
     const platform = Capacitor.getPlatform();
     if (platform !== 'ios' && platform !== 'android') return 'unsupported';
+    if (platform === 'android' && !canUseNativePushRegistration()) return 'unsupported';
     try {
       const perm = await PushNotifications.checkPermissions();
       if (perm.receive === 'granted') return 'granted';
@@ -40,8 +42,15 @@ async function systemReceiveStatus(): Promise<'granted' | 'denied' | 'prompt' | 
 
 async function requestSystemPermission(): Promise<'granted' | 'denied'> {
   if (isVertialNativeApp()) {
-    const req = await PushNotifications.requestPermissions();
-    return req.receive === 'granted' ? 'granted' : 'denied';
+    if (Capacitor.getPlatform() === 'android' && !canUseNativePushRegistration()) {
+      return 'denied';
+    }
+    try {
+      const req = await PushNotifications.requestPermissions();
+      return req.receive === 'granted' ? 'granted' : 'denied';
+    } catch {
+      return 'denied';
+    }
   }
   if (!('Notification' in window)) return 'denied';
   const result = await Notification.requestPermission();

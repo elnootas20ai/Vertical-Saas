@@ -89,6 +89,10 @@ type TpvProductPickerProps = {
   hideCatalogAdminLink?: boolean;
   /** TPV tablet: layout denso, catálogo + carrito en fila y más espacio útil. */
   compact?: boolean;
+  /** Móvil: carta y pedido a pantalla completa con pestañas (no split). */
+  phoneMode?: boolean;
+  /** Badge en pestaña Pedido (móvil). */
+  cartBadgeCount?: number;
   /** Layout de pestañas (bar: marca + familias). */
   catalogLayout?: 'default' | 'brand_families';
 };
@@ -281,13 +285,19 @@ export function TpvProductPicker({
   onImportCatalog,
   hideCatalogAdminLink = false,
   compact = false,
+  phoneMode = false,
+  cartBadgeCount = 0,
   userId,
   businessId,
   catalogLayout = 'default',
 }: TpvProductPickerProps) {
   const [productSearch, setProductSearch] = useState('');
+  const [phonePanel, setPhonePanel] = useState<'catalog' | 'cart'>('catalog');
   const [sectionOrder, setSectionOrder] = useState<string[]>([]);
   const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
+  const useSplitRow = compact && !phoneMode;
+  const showCatalog = !phoneMode || phonePanel === 'catalog';
+  const showCart = !phoneMode || phonePanel === 'cart';
 
   const orderStorageKey = useMemo(
     () => (userId && businessId ? tpvPickerOrderStorageKey(userId, businessId) : ''),
@@ -392,15 +402,14 @@ export function TpvProductPicker({
     if (orderStorageKey) writeTpvCategoryOrder(orderStorageKey, selectedSectionId, nextIds);
   };
 
-  return (
-    <div
-      className={
-        compact
-          ? 'flex flex-row gap-2 flex-1 min-h-0 w-full min-w-0'
-          : 'flex flex-col md:flex-row gap-3 min-h-[min(68vh,640px)] md:min-h-0 md:h-full w-full'
-      }
-    >
-      <div className="flex-1 flex flex-col min-h-0 min-w-0 w-full rounded-lg border border-gray-200/80 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden">
+  const catalogGridColumns = phoneMode
+    ? 'repeat(2, minmax(0, 1fr))'
+    : useSplitRow
+      ? 'repeat(auto-fill, minmax(5.75rem, 1fr))'
+      : 'repeat(auto-fill, minmax(5.25rem, 1fr))';
+
+  const catalogColumn = (
+      <div className={`flex-1 flex flex-col min-h-0 min-w-0 w-full rounded-lg border border-gray-200/80 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden ${phoneMode && !showCatalog ? 'hidden' : ''}`}>
         <div className={`shrink-0 border-b border-gray-100 dark:border-gray-800 ${compact ? 'px-2 pt-1.5 pb-1.5' : 'px-2.5 pt-2.5 pb-2'}`}>
           <div className="relative">
             <Search className={`absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none ${compact ? 'w-4 h-4' : 'w-3.5 h-3.5'}`} />
@@ -415,7 +424,7 @@ export function TpvProductPicker({
                 setProductSearch(v);
                 if (v.trim()) onSelectedCategoryChange(null);
               }}
-              placeholder="Producto, categoría, SKU o código…"
+              placeholder={phoneMode ? 'Buscar producto…' : 'Producto, categoría, SKU o código…'}
               autoComplete="off"
               autoCorrect="off"
               spellCheck={false}
@@ -612,12 +621,8 @@ export function TpvProductPicker({
             </div>
           ) : (
             <div
-              className={compact ? 'grid gap-2' : 'grid gap-2'}
-              style={{
-                gridTemplateColumns: compact
-                  ? 'repeat(auto-fill, minmax(5.75rem, 1fr))'
-                  : 'repeat(auto-fill, minmax(5.25rem, 1fr))',
-              }}
+              className="grid gap-2"
+              style={{ gridTemplateColumns: catalogGridColumns }}
             >
               {filteredProducts.map((item) => {
                 const qty = getCartQty(item._id);
@@ -632,7 +637,7 @@ export function TpvProductPicker({
                     formatPrice={formatPrice}
                     onAdd={() => addToCart(item)}
                     onRemove={() => removeFromCart(item._id)}
-                    compact={compact}
+                    compact={compact || phoneMode}
                   />
                 );
               })}
@@ -640,16 +645,65 @@ export function TpvProductPicker({
           )}
         </div>
       </div>
+  );
 
+  const cartColumn = (
       <aside
         className={
-          compact
-            ? 'w-[min(18rem,32%)] min-w-[14rem] shrink-0 rounded-xl border border-gray-200/80 dark:border-gray-800 bg-gray-50/90 dark:bg-gray-950/50 flex flex-col min-h-0 overflow-hidden'
-            : 'md:w-[17rem] xl:w-[18rem] shrink-0 rounded-xl border border-gray-200/80 dark:border-gray-800 bg-gray-50/90 dark:bg-gray-950/50 flex flex-col min-h-[14rem] md:min-h-0 md:sticky md:top-14 md:self-start md:max-h-[calc(100dvh-8rem)]'
+          phoneMode
+            ? `flex-1 flex flex-col min-h-0 w-full rounded-xl border border-gray-200/80 dark:border-gray-800 bg-gray-50/90 dark:bg-gray-950/50 overflow-hidden ${!showCart ? 'hidden' : ''}`
+            : useSplitRow
+              ? 'w-[min(18rem,32%)] min-w-[14rem] shrink-0 rounded-xl border border-gray-200/80 dark:border-gray-800 bg-gray-50/90 dark:bg-gray-950/50 flex flex-col min-h-0 overflow-hidden'
+              : 'md:w-[17rem] xl:w-[18rem] shrink-0 rounded-xl border border-gray-200/80 dark:border-gray-800 bg-gray-50/90 dark:bg-gray-950/50 flex flex-col min-h-[14rem] md:min-h-0 md:sticky md:top-14 md:self-start md:max-h-[calc(100dvh-8rem)]'
         }
       >
         {cartPanel}
       </aside>
+  );
+
+  return (
+    <div
+      className={
+        phoneMode
+          ? 'flex flex-col gap-2 flex-1 min-h-0 w-full min-w-0'
+          : useSplitRow
+            ? 'flex flex-row gap-2 flex-1 min-h-0 w-full min-w-0'
+            : 'flex flex-col md:flex-row gap-3 min-h-[min(68vh,640px)] md:min-h-0 md:h-full w-full'
+      }
+    >
+      {phoneMode ? (
+        <div className="shrink-0 flex rounded-xl bg-gray-100 dark:bg-gray-800 p-0.5 gap-0.5">
+          <button
+            type="button"
+            onClick={() => setPhonePanel('catalog')}
+            className={`flex-1 min-h-[40px] rounded-lg text-sm font-semibold touch-manipulation transition-colors ${
+              phonePanel === 'catalog'
+                ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-sm'
+                : 'text-gray-600 dark:text-gray-400'
+            }`}
+          >
+            Carta
+          </button>
+          <button
+            type="button"
+            onClick={() => setPhonePanel('cart')}
+            className={`flex-1 min-h-[40px] rounded-lg text-sm font-semibold touch-manipulation transition-colors inline-flex items-center justify-center gap-1.5 ${
+              phonePanel === 'cart'
+                ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-sm'
+                : 'text-gray-600 dark:text-gray-400'
+            }`}
+          >
+            Pedido
+            {cartBadgeCount > 0 ? (
+              <span className="min-w-[1.25rem] h-5 px-1 rounded-full bg-emerald-600 text-white text-[11px] font-bold tabular-nums flex items-center justify-center">
+                {cartBadgeCount}
+              </span>
+            ) : null}
+          </button>
+        </div>
+      ) : null}
+      {catalogColumn}
+      {cartColumn}
     </div>
   );
 }

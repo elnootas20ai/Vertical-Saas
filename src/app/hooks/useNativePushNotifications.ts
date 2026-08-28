@@ -4,6 +4,7 @@ import { Capacitor } from '@capacitor/core';
 import { getApiBase } from '../lib/apiBase';
 import { isVertialNativeApp } from '../lib/vertialPrint/isNativeApp';
 import { readPushConsent, writePushConsent } from '../lib/pushPermissionConsent';
+import { canUseNativePushRegistration } from '../lib/nativePushRuntime';
 import { queuePushDeepLink } from '../lib/pushDeepLink';
 
 async function registerNativeToken(
@@ -65,34 +66,37 @@ export function useNativePushNotifications({ userId, token }: UseNativePushNotif
   const register = useCallback(async () => {
     if (!isVertialNativeApp() || !userId || !token) return;
     if (platform !== 'ios' && platform !== 'android') return;
+    if (platform === 'android' && !canUseNativePushRegistration()) return;
 
-    // No pedir permiso aquí: lo hace PushPermissionGate (diálogo del sistema).
-    const perm = await PushNotifications.checkPermissions();
-    if (perm.receive !== 'granted') return;
+    try {
+      const perm = await PushNotifications.checkPermissions();
+      if (perm.receive !== 'granted') return;
 
-    if (readPushConsent(userId).decision !== 'accepted') {
-      writePushConsent(userId, 'accepted');
-    }
-
-    // Android: canal high/public → sale en pantalla de bloqueo
-    if (platform === 'android') {
-      try {
-        await PushNotifications.createChannel({
-          id: 'vertial_alerts',
-          name: 'Alertas Vertial',
-          description: 'Avisos con el móvil bloqueado',
-          importance: 5,
-          visibility: 1,
-          sound: 'default',
-          vibration: true,
-          lights: true,
-        });
-      } catch {
-        /* canal ya existe o API no disponible */
+      if (readPushConsent(userId).decision !== 'accepted') {
+        writePushConsent(userId, 'accepted');
       }
-    }
 
-    await PushNotifications.register();
+      if (platform === 'android') {
+        try {
+          await PushNotifications.createChannel({
+            id: 'vertial_alerts',
+            name: 'Alertas Vertial',
+            description: 'Avisos con el móvil bloqueado',
+            importance: 5,
+            visibility: 1,
+            sound: 'default',
+            vibration: true,
+            lights: true,
+          });
+        } catch {
+          /* canal ya existe o API no disponible */
+        }
+      }
+
+      await PushNotifications.register();
+    } catch (err) {
+      console.warn('[NativePush] Registro omitido:', (err as Error)?.message || err);
+    }
   }, [userId, token, platform]);
 
   useEffect(() => {

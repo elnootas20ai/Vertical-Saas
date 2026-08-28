@@ -87,6 +87,8 @@ export function computeInventoryStats(items: CatalogItem[]) {
 export type InventoryOrganizerGroup = {
   id: string;
   label: string;
+  /** Color de chip (hex). Vacío = look neutro; se configurará luego. */
+  color?: string;
   stockCategory?: StockCategory;
   ok: number;
   low: number;
@@ -99,6 +101,8 @@ export type InventoryCommercialBrand = {
   _id: string;
   name: string;
   deliveryLineKind?: string;
+  /** Color de marca (hex); si existe, el chip del almacén lo usa. */
+  primaryColor?: string;
 };
 
 /** Solo UI de almacén — no afecta TPV ni catálogo vendible. */
@@ -200,6 +204,11 @@ function foodLineLabel(brand: InventoryCommercialBrand, opts?: { omitBrandName?:
   if (opts?.omitBrandName) return 'Ingredientes';
   const name = String(brand.name || '').trim() || 'Línea';
   return `Ingredientes · ${name}`;
+}
+
+/** Etiqueta del chip de filtro almacén (nombre comercial, sin prefijo «Ingredientes ·»). */
+function inventoryBrandChipLabel(brand: InventoryCommercialBrand): string {
+  return String(brand.name || '').trim() || 'Línea';
 }
 
 function labelForOrganizerGroup(id: string, commercialBrands: InventoryCommercialBrand[]): string {
@@ -336,6 +345,10 @@ export function resolveInventoryOrganizerId(
 
   if (isComplementStockItem(item)) return ORGANIZER_COMPLEMENTS;
 
+  // Una sola línea de comida (p. ej. Modomio): sin vínculo TPV → va a esa línea, no a un chip «Ingredientes» fantasma.
+  const foodBrands = commercialBrands.filter((b) => b.deliveryLineKind !== 'drinks_desserts');
+  if (foodBrands.length === 1) return foodBrands[0]._id;
+
   return ORGANIZER_TOTAL;
 }
 
@@ -397,11 +410,11 @@ export function buildInventoryOrganizerGroups(
 
   const brandGroups: InventoryOrganizerGroup[] = [];
   for (const brand of foodBrands) {
-    const subset = buckets.get(brand._id);
-    if (!subset?.length) continue;
+    const subset = buckets.get(brand._id) || [];
     brandGroups.push({
       id: brand._id,
-      label: foodLineLabel(brand),
+      label: inventoryBrandChipLabel(brand),
+      color: String(brand.primaryColor || '').trim() || undefined,
       ...countStatusForItems(subset),
     });
     buckets.delete(brand._id);
@@ -434,7 +447,13 @@ export function buildInventoryOrganizerGroups(
     buckets.delete(ORGANIZER_VARIOS);
   }
 
-  const leftoverGroups = leftoverOrganizerGroups(buckets, commercialBrands);
+  const leftoverGroups = leftoverOrganizerGroups(buckets, commercialBrands).filter((g) => {
+    // Ocultar «Ingredientes» genérico vacío si ya hay chips por marca o tipo.
+    if (g.id === ORGANIZER_TOTAL && g.total === 0 && (brandGroups.length > 0 || extras.length > 0)) {
+      return false;
+    }
+    return true;
+  });
 
   if (brandGroups.length === 0 && extras.length === 0) {
     if (leftoverGroups.length === 1 && leftoverGroups[0].id === ORGANIZER_TOTAL) {

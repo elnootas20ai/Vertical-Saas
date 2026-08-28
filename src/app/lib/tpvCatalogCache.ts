@@ -58,6 +58,10 @@ function liteCatalogItem(item: CatalogItem): CatalogItem {
   if (cf.halfHalf === true) {
     customFields.halfHalf = true;
   }
+  const halfHalfBrandId = String(cf.halfHalfBrandId || '').trim();
+  if (halfHalfBrandId) {
+    customFields.halfHalfBrandId = halfHalfBrandId;
+  }
   const halfHalfAllowed = Array.isArray(cf.halfHalfAllowedProductIds)
     ? cf.halfHalfAllowedProductIds.map((id) => String(id || '').trim()).filter(Boolean)
     : [];

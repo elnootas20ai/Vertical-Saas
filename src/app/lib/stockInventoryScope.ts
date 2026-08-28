@@ -10,16 +10,18 @@ const STOCK_CATEGORIES = new Set([
 
 /**
  * Artículos que van en inventario (almacén): ingredientes, bebidas a granel, envases…
- * No incluye platos de carta (pizzas, hamburguesas) salvo que estén marcados explícitamente como stock.
+ * No incluye platos de carta (pizzas, hamburguesas) — stockCategory finished_product.
+ * Bebidas de carta con isStockItem sí entran (p. ej. Coca-Cola).
  */
 export function isStockInventoryItem(item: CatalogItem | null | undefined): boolean {
   if (!item || item.active === false || item.deletedAt) return false;
   if (item.itemType && item.itemType !== 'product') return false;
 
+  // Producto hecho / plato de carta: fuera del almacén (antes de isStockItem).
+  if (item.stockCategory === 'finished_product') return false;
+
   if (item.isStockItem === true) return true;
   if (item.module === 'stock') return true;
-
-  if (item.stockCategory === 'finished_product') return false;
 
   if (item.stockCategory && STOCK_CATEGORIES.has(item.stockCategory)) return true;
 

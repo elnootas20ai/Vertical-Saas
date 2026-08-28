@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Vertial — Presentación de negocio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --green: #22C55E;
+      --teal: #14B8A6;
+      --blue: #2563EB;
+      --ink: #0B1220;
+      --slate: #334155;
+      --muted: #64748B;
+      --line: #E2E8F0;
+      --soft: #F5F7FB;
+      --white: #FFFFFF;
+      --grad: linear-gradient(135deg, #22C55E 0%, #14B8A6 52%, #2563EB 100%);
+      --grad-soft: linear-gradient(135deg, rgba(34,197,94,.12), rgba(20,184,166,.10), rgba(37,99,235,.12));
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      background: #0B1220;
+      color: var(--ink);
+      font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .deck { display: flex; flex-direction: column; gap: 0; }
+
+    .slide {
+      width: 297mm;
+      height: 210mm;
+      position: relative;
+      overflow: hidden;
+      page-break-after: always;
+      break-after: page;
+      background: #070B14;
+      color: #F8FAFC;
+    }
+    .slide:last-child { page-break-after: auto; break-after: auto; }
+
+    .brand-bar {
+      position: absolute; top: 0; left: 0; right: 0; height: 5px;
+      background: var(--grad);
+    }
+
+    .footer {
+      position: absolute; left: 18mm; right: 18mm; bottom: 8mm;
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 9.5px; font-weight: 600; color: #64748B; letter-spacing: .02em;
+    }
+    .footer .dot {
+      width: 6px; height: 6px; border-radius: 2px; background: var(--grad);
+      display: inline-block; margin-right: 6px; vertical-align: middle;
+    }
+
+    .logo-mark {
+      width: 28px; height: 28px; display: inline-block; vertical-align: middle;
+    }
+    .logo-row {
+      display: inline-flex; align-items: center; gap: 10px;
+      font-weight: 800; font-size: 15px; letter-spacing: -.02em; color: #E2E8F0;
+    }
+
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: 11px; font-weight: 800; letter-spacing: .16em;
+      text-transform: uppercase; color: #7DD3FC; margin-bottom: 14px;
+    }
+    .eyebrow::before {
+      content: ""; width: 10px; height: 10px; border-radius: 3px; background: var(--grad);
+    }
+
+    h1 {
+      font-size: 42px; font-weight: 800; letter-spacing: -.035em; line-height: 1.08;
+      color: #F8FAFC;
+    }
+    h2 {
+      font-size: 34px; font-weight: 800; letter-spacing: -.03em; line-height: 1.12;
+      color: #F8FAFC;
+    }
+    .lead {
+      margin-top: 16px; font-size: 16px; line-height: 1.55; color: #94A3B8; max-width: 620px; font-weight: 500;
+    }
+    .accent { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+    .pad { padding: 22mm 18mm 18mm; height: 100%; position: relative; z-index: 1; }
+
+    .mesh {
+      position: absolute; inset: 0; pointer-events: none;
+      background:
+        radial-gradient(ellipse 80% 60% at 70% 30%, rgba(37,99,235,.35), transparent 55%),
+        radial-gradient(ellipse 60% 50% at 15% 75%, rgba(34,197,94,.22), transparent 50%),
+        radial-gradient(ellipse 50% 40% at 85% 85%, rgba(20,184,166,.18), transparent 50%);
+    }
+    .grid-bg {
+      position: absolute; inset: 0; pointer-events: none; opacity: .28;
+      background-image:
+        linear-gradient(rgba(148,163,184,.22) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(148,163,184,.22) 1px, transparent 1px);
+      background-size: 28px 28px;
+      mask-image: radial-gradient(ellipse 80% 70% at 50% 40%, #000 20%, transparent 75%);
+    }
+
+    /* Cover — mismo fondo; tipografía un poco más grande */
+    .slide-cover h1 { font-size: 52px; max-width: 720px; }
+    .slide-cover .lead { font-size: 18px; max-width: 560px; }
+    .cover-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 8px 14px; border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.05);
+      font-size: 12px; font-weight: 600; color: #CBD5E1; margin-bottom: 22px;
+    }
+    .cover-meta {
+      margin-top: 36px; display: flex; gap: 28px; flex-wrap: wrap;
+    }
+    .cover-meta div {
+      padding-left: 14px; border-left: 2px solid transparent;
+      border-image: var(--grad) 1;
+    }
+    .cover-meta strong { display: block; font-size: 13px; color: #E2E8F0; font-weight: 700; }
+    .cover-meta span { font-size: 12px; color: #64748B; font-weight: 500; }
+
+    /* Cards */
+    .pillars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 28px; }
+    .pillar {
+      background: var(--white);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 18px 18px 20px;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, .04);
+      min-height: 128px;
+    }
+    .pillar .ico {
+      width: 36px; height: 36px; border-radius: 10px; margin-bottom: 12px;
+      display: grid; place-items: center; color: white; font-weight: 800; font-size: 14px;
+    }
+    .pillar h3 { font-size: 15px; font-weight: 800; margin-bottom: 6px; letter-spacing: -.01em; color: var(--ink); }
+    .pillar p { font-size: 12.5px; line-height: 1.45; color: var(--muted); font-weight: 500; }
+    .ico-g { background: var(--green); }
+    .ico-t { background: var(--teal); }
+    .ico-b { background: var(--blue); }
+
+    /* Architecture */
+    .arch { display: grid; grid-template-columns: 0.95fr 1.35fr; gap: 16px; margin-top: 18px; height: 132mm; }
+    .heart, .verts {
+      background: var(--white);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      padding: 18px 18px 16px;
+      box-shadow: 0 12px 36px rgba(15, 23, 42, .05);
+      height: 100%;
+    }
+    .heart {
+      background: linear-gradient(160deg, #EFF6FF 0%, #FFFFFF 55%);
+      border-color: #BFDBFE;
+    }
+    .section-label {
+      font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .heart .section-label { color: var(--blue); }
+    .verts .section-label { color: var(--teal); }
+    .section-sub { font-size: 12px; color: var(--muted); font-weight: 500; margin-bottom: 14px; }
+    .heart-list { list-style: none; display: grid; gap: 7px; }
+    .heart-list li {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 12.5px; font-weight: 600; color: var(--slate);
+    }
+    .heart-list li::before {
+      content: ""; width: 7px; height: 7px; border-radius: 50%;
+      background: var(--blue); flex-shrink: 0;
+    }
+    .chip-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px;
+    }
+    .chip {
+      background: #F0FDFA;
+      border: 1px solid #99F6E4;
+      color: #0F766E;
+      border-radius: 10px;
+      padding: 8px 6px;
+      text-align: center;
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: -.01em;
+    }
+
+    /* Modules */
+    .mods { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; }
+    .mod {
+      border-radius: 16px; padding: 14px 14px 12px; border: 1px solid var(--line);
+      min-height: 118px; background: var(--white);
+    }
+    .mod:nth-child(1), .mod:nth-child(4) { background: linear-gradient(160deg, #F0FDF4, #fff); border-color: #BBF7D0; }
+    .mod:nth-child(2), .mod:nth-child(5) { background: linear-gradient(160deg, #F0FDFA, #fff); border-color: #99F6E4; }
+    .mod:nth-child(3), .mod:nth-child(6) { background: linear-gradient(160deg, #EFF6FF, #fff); border-color: #BFDBFE; }
+    .mod h3 { font-size: 13.5px; font-weight: 800; margin-bottom: 8px; color: var(--ink); }
+    .mod ul { list-style: none; display: grid; gap: 4px; }
+    .mod li { font-size: 11.5px; color: var(--slate); font-weight: 550; padding-left: 12px; position: relative; }
+    .mod li::before { content: "·"; position: absolute; left: 2px; color: var(--blue); font-weight: 800; }
+
+    /* Split live */
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 18px; }
+    .panel {
+      background: var(--white); border: 1px solid var(--line); border-radius: 18px;
+      padding: 20px; min-height: 128mm; box-shadow: 0 10px 28px rgba(15,23,42,.04);
+    }
+    .panel-head { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+    .panel-head .badge {
+      width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center;
+      color: white; font-weight: 800; font-size: 14px;
+    }
+    .panel-head h3 { font-size: 18px; font-weight: 800; letter-spacing: -.02em; color: var(--ink); }
+    .panel-head p { font-size: 12px; color: var(--muted); font-weight: 500; }
+    .bullets { list-style: none; display: grid; gap: 12px; }
+    .bullets li {
+      display: grid; grid-template-columns: 22px 1fr; gap: 10px; align-items: start;
+      font-size: 13px; line-height: 1.4; color: var(--slate); font-weight: 550;
+    }
+    .bullets .n {
+      width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center;
+      font-size: 10px; font-weight: 800; color: white;
+    }
+
+    /* Summary */
+    .summary { margin-top: 20px; display: grid; gap: 10px; }
+    .sum-row {
+      display: grid; grid-template-columns: 52px 1fr; gap: 14px; align-items: center;
+      background: var(--white); border: 1px solid var(--line); border-radius: 14px;
+      padding: 14px 16px;
+    }
+    .sum-row .num {
+      font-size: 20px; font-weight: 800; background: var(--grad);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .sum-row strong { display: block; font-size: 14px; font-weight: 800; margin-bottom: 2px; color: var(--ink); }
+    .sum-row span { font-size: 12.5px; color: var(--muted); font-weight: 500; }
+
+    .cta-bar {
+      margin-top: 18px; border-radius: 16px; padding: 16px 18px;
+      background: var(--grad); color: white;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .cta-bar strong { font-size: 15px; font-weight: 800; }
+    .cta-bar span { font-size: 12.5px; opacity: .92; font-weight: 500; }
+
+    @media print {
+      body { background: white; }
+      .slide { margin: 0; box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="deck">
+
+    <!-- 1 COVER -->
+    <section class="slide slide-cover">
+      <div class="brand-bar"></div>
+      <div class="mesh"></div>
+      <div class="grid-bg"></div>
+      <div class="pad">
+        <div class="cover-badge">
+          <svg class="logo-mark" viewBox="0 0 128 128" aria-hidden="true">
+            <defs>
+              <linearGradient id="vg" x1="12" y1="10" x2="116" y2="118" gradientUnits="userSpaceOnUse">
+                <stop offset="0" stop-color="#22C55E"/>
+                <stop offset="0.55" stop-color="#14B8A6"/>
+                <stop offset="1" stop-color="#2563EB"/>
+              </linearGradient>
+            </defs>
+            <path fill="url(#vg)" d="M16 26c0-5.523 4.477-10 10-10h12c4.12 0 7.84 2.52 9.34 6.35L64 64.2l16.66-41.85C82.16 18.52 85.88 16 90 16h12c5.523 0 10 4.477 10 10 0 1.305-.256 2.598-.755 3.804L76.6 112.4c-1.55 3.72-5.18 6.15-9.1 6.15s-7.55-2.43-9.1-6.15L16.755 29.804A10.01 10.01 0 0 1 16 26z"/>
+          </svg>
+          Presentación de negocio · Vertial
+        </div>
+        <h1>La plataforma de autogestión que lo conecta todo <span class="accent">en tiempo real</span></h1>
+        <p class="lead">Un solo sistema para dirigir el negocio: operativa, equipo, clientes, dinero y documentos — sin Excel suelto ni media docena de apps.</p>
+        <div class="cover-meta">
+          <div><strong>Multi-vertical</strong><span>Un core, muchas operativas</span></div>
+          <div><strong>Tiempo real</strong><span>Datos vivos en el panel</span></div>
+          <div><strong>Hecha en España</strong><span>Datos en Europa · RGPD</span></div>
+        </div>
+      </div>
+      <div class="footer"><span><span class="dot"></span>Vertial</span><span>01 / 06</span></div>
+    </section>
+
+    <!-- 2 QUÉ ES -->
+    <section class="slide">
+      <div class="brand-bar"></div>
+      <div class="mesh"></div>
+      <div class="grid-bg"></div>
+      <div class="pad">
+        <div class="logo-row" style="margin-bottom:18px">
+          <svg class="logo-mark" viewBox="0 0 128 128"><defs><linearGradient id="vg2" x1="12" y1="10" x2="116" y2="118" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#22C55E"/><stop offset="0.55" stop-color="#14B8A6"/><stop offset="1" stop-color="#2563EB"/></linearGradient></defs><path fill="url(#vg2)" d="M16 26c0-5.523 4.477-10 10-10h12c4.12 0 7.84 2.52 9.34 6.35L64 64.2l16.66-41.85C82.16 18.52 85.88 16 90 16h12c5.523 0 10 4.477 10 10 0 1.305-.256 2.598-.755 3.804L76.6 112.4c-1.55 3.72-5.18 6.15-9.1 6.15s-7.55-2.43-9.1-6.15L16.755 29.804A10.01 10.01 0 0 1 16 26z"/></svg>
+          Vertial
+        </div>
+        <div class="eyebrow">Qué es Vertial</div>
+        <h2>El sistema operativo<br>de tu negocio</h2>
+        <p class="lead">No es otro Excel con login. Es el núcleo operativo de la empresa: diseñada para autogestionar el día a día y escalar por vertical sin empezar de cero.</p>
+        <div class="pillars">
+          <article class="pillar">
+            <div class="ico ico-g">01</div>
+            <h3>Autogestión</h3>
+            <p>Roles, permisos y flujos listos. El titular y el equipo trabajan sobre la misma fuente de verdad.</p>
+          </article>
+          <article class="pillar">
+            <div class="ico ico-t">02</div>
+            <h3>Todo conectado</h3>
+            <p>Core compartido + vertical de tu sector. Operativa, RRHH, finanzas y docs en un solo sitio.</p>
+          </article>
+          <article class="pillar">
+            <div class="ico ico-b">03</div>
+            <h3>Tiempo real</h3>
+            <p>Dashboard, alertas y operativa del día con datos vivos — no el cierre de ayer.</p>
+          </article>
+        </div>
+      </div>
+      <div class="footer"><span><span class="dot"></span>Vertial · Qué es</span><span>02 / 06</span></div>
+    </section>
+
+    <!-- 3 COMPOSICIÓN -->
+    <section class="slide">
+      <div class="brand-bar"></div>
+      <div class="mesh"></div>
+      <div class="grid-bg"></div>
+      <div class="pad">
+        <div class="eyebrow">Arquitectura</div>
+        <h2>De qué está compuesto</h2>
+        <p class="lead" style="max-width:780px;margin-bottom:0">Un corazón Vertial para todo tipo de negocios. La plataforma es la misma; cada vertical aporta su operativa.</p>
+        <div class="arch">
+          <div class="heart">
+            <div class="section-label">Corazón Vertial</div>
+            <div class="section-sub">Compartido por todas las verticales</div>
+            <ul class="heart-list">
+              <li>Cuenta, negocio y permisos</li>
+              <li>PDV / centros de trabajo</li>
+              <li>Dashboard y centro de alertas</li>
+              <li>CRM, chat y calendario</li>
+              <li>RRHH y gestoría</li>
+              <li>Finanzas y documentación</li>
+              <li>Catálogo / stock base</li>
+              <li>Informes transversales</li>
+            </ul>
+          </div>
+          <div class="verts">
+            <div class="section-label">Verticales</div>
+            <div class="section-sub">Misma plataforma · distinta operativa por sector</div>
+            <div class="chip-grid">
+              <div class="chip">Compraventa</div>
+              <div class="chip">Delivery</div>
+              <div class="chip">Bar / restaurante</div>
+              <div class="chip">Heladería</div>
+              <div class="chip">Carnicería</div>
+              <div class="chip">Taller</div>
+              <div class="chip">Desguace</div>
+              <div class="chip">Recambios</div>
+              <div class="chip">Taxi</div>
+              <div class="chip">Lavadero</div>
+              <div class="chip">Farmacia</div>
+              <div class="chip">Veterinario</div>
+              <div class="chip">Estanco</div>
+              <div class="chip">Gimnasio</div>
+              <div class="chip">Clínica</div>
+              <div class="chip">Hotel</div>
+              <div class="chip">Peluquería</div>
+              <div class="chip">Discoteca</div>
+              <div class="chip">Eventos</div>
+              <div class="chip">Academia</div>
+              <div class="chip">Inmobiliaria</div>
+              <div class="chip">Abogados</div>
+              <div class="chip">Constructora</div>
+              <div class="chip">Limpieza</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="footer"><span><span class="dot"></span>Vertial · Composición</span><span>03 / 06</span></div>
+    </section>
+
+    <!-- 4 CORE -->
+    <section class="slide">
+      <div class="brand-bar"></div>
+      <div class="mesh"></div>
+      <div class="grid-bg"></div>
+      <div class="pad">
+        <div class="eyebrow">Core compartido</div>
+        <h2>Todo lo que incluye Vertial</h2>
+        <p class="lead" style="margin-bottom:0">Además de la vertical de tu sector, tienes el día a día de empresa: personas, papeles, dinero y comunicación.</p>
+        <div class="mods">
+          <article class="mod">
+            <h3>Home & tiempo real</h3>
+            <ul>
+              <li>Dashboard operativo</li>
+              <li>Centro de alertas</li>
+              <li>Calendario</li>
+              <li>Chat de equipo</li>
+            </ul>
+          </article>
+          <article class="mod">
+            <h3>Clientes / CRM</h3>
+            <ul>
+              <li>Clientes</li>
+              <li>Presupuestos</li>
+              <li>Promociones</li>
+              <li>Historial unificado</li>
+            </ul>
+          </article>
+          <article class="mod">
+            <h3>RRHH</h3>
+            <ul>
+              <li>Equipo y roles</li>
+              <li>Fichajes</li>
+              <li>Horarios y vacaciones</li>
+              <li>Solicitudes · comisiones · nóminas</li>
+            </ul>
+          </article>
+          <article class="mod">
+            <h3>Gestoría & docs</h3>
+            <ul>
+              <li>Gestoría</li>
+              <li>Documentación sociedad</li>
+              <li>Contratos y licencias</li>
+              <li>Archivos financieros</li>
+            </ul>
+          </article>
+          <article class="mod">
+            <h3>Finanzas</h3>
+            <ul>
+              <li>Ingresos y gastos · EBITDA</li>
+              <li>Impuestos · Verifactu</li>
+              <li>Conciliación bancaria</li>
+              <li>Informes y KPIs</li>
+            </ul>
+          </article>
+          <article class="mod">
+            <h3>Catálogo & TPV</h3>
+            <ul>
+              <li>Catálogo e inventario</li>
+              <li>Proveedores</li>
+              <li>Escandallo / costing</li>
+              <li>TPV en tablet</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+      <div class="footer"><span><span class="dot"></span>Vertial · Módulos</span><span>04 / 06</span></div>
+    </section>
+
+    <!-- 5 LIVE + ALERTS -->
+    <section class="slide">
+      <div class="brand-bar"></div>
+      <div class="mesh"></div>
+      <div class="grid-bg"></div>
+      <div class="pad">
+        <div class="eyebrow">Operación del día</div>
+        <h2>Tiempo real y alertas</h2>
+        <p class="lead" style="max-width:760px">El panel no es un archivo estático: se alimenta de lo que ocurre ahora. Las alertas avisan cuando hay que actuar.</p>
+        <div class="split">
+          <div class="panel">
+            <div class="panel-head">
+              <div class="badge" style="background:#22C55E">TR</div>
+              <div>
+                <h3>Tiempo real</h3>
+                <p>La empresa en vivo</p>
+              </div>
+            </div>
+            <ul class="bullets">
+              <li><span class="n" style="background:#22C55E">1</span><span>Dashboard con KPIs del día</span></li>
+              <li><span class="n" style="background:#22C55E">2</span><span>Operativa vertical en vivo (pedidos, caja, plazos…)</span></li>
+              <li><span class="n" style="background:#22C55E">3</span><span>Equipo: fichajes, chat y calendario compartidos</span></li>
+              <li><span class="n" style="background:#22C55E">4</span><span>Stock y márgenes al operar</span></li>
+              <li><span class="n" style="background:#22C55E">5</span><span>Misma fuente de verdad para titular, gestor y equipo</span></li>
+            </ul>
+          </div>
+          <div class="panel">
+            <div class="panel-head">
+              <div class="badge" style="background:#2563EB">AL</div>
+              <div>
+                <h3>Centro de alertas</h3>
+                <p>Cuando importa, te avisa</p>
+              </div>
+            </div>
+            <ul class="bullets">
+              <li><span class="n" style="background:#2563EB">1</span><span>Avisos in-app (y canales según plan)</span></li>
+              <li><span class="n" style="background:#2563EB">2</span><span>Lo positivo: lo que salió bien (plan Básico)</span></li>
+              <li><span class="n" style="background:#2563EB">3</span><span>Lo crítico: caja, dinero, operación (plan Pro)</span></li>
+              <li><span class="n" style="background:#2563EB">4</span><span>Configurables por rol y negocio</span></li>
+              <li><span class="n" style="background:#2563EB">5</span><span>Menos sorpresas: el sistema te llama a tiempo</span></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="footer"><span><span class="dot"></span>Vertial · Tiempo real</span><span>05 / 06</span></div>
+    </section>
+
+    <!-- 6 CIERRE -->
+    <section class="slide">
+      <div class="brand-bar"></div>
+      <div class="mesh"></div>
+      <div class="grid-bg"></div>
+      <div class="pad">
+        <div class="eyebrow">En una frase</div>
+        <h2>Un sistema. Tu vertical.<br><span class="accent">Todo conectado.</span></h2>
+        <div class="summary">
+          <div class="sum-row">
+            <div class="num">01</div>
+            <div><strong>Qué es</strong><span>Plataforma de autogestión multi-vertical en tiempo real.</span></div>
+          </div>
+          <div class="sum-row">
+            <div class="num">02</div>
+            <div><strong>De qué se compone</strong><span>Un corazón común + verticales por sector.</span></div>
+          </div>
+          <div class="sum-row">
+            <div class="num">03</div>
+            <div><strong>Qué incluye</strong><span>RRHH, gestoría, CRM, finanzas, docs, stock, TPV, chat…</span></div>
+          </div>
+          <div class="sum-row">
+            <div class="num">04</div>
+            <div><strong>Cómo se vive</strong><span>Operativa del día + alertas cuando hay que actuar.</span></div>
+          </div>
+        </div>
+        <div class="cta-bar">
+          <div>
+            <strong>Más tiempo, menos tareas, más control.</strong><br />
+            <span>Vertial · Hecha en España · Sin permanencia</span>
+          </div>
+          <div style="font-weight:800;font-size:18px;letter-spacing:-.02em">Vertial</div>
+        </div>
+      </div>
+      <div class="footer"><span><span class="dot"></span>Vertial · Cierre</span><span>06 / 06</span></div>
+    </section>
+
+  </div>
+</body>
+</html>

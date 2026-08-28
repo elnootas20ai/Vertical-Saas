@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   catalogBuildYourOwnIngredientCandidates,
+  catalogHalfHalfFlavorCandidates,
   catalogPizzasForHalfHalf,
   catalogPizzaCandidatesForHalfHalf,
+  catalogProductsForHalfHalf,
   customizationSignature,
   isTpvBuildYourOwnCatalogItem,
   isTpvHalfHalfCatalogItem,
@@ -10,8 +12,12 @@ import {
   mergeHalfHalfProductIngredients,
   normalizeHalfHalfAllowedProductIds,
   resolveBuildYourOwnMaxIngredients,
+  resolveHalfHalfScopeBrandId,
   tpvBuildYourOwnIngredientPool,
 } from '../src/app/lib/catalogCustomization.js';
+
+const BRAND_A = 'b1';
+const BRAND_B = 'b2';
 
 describe('isTpvHalfHalfCatalogItem', () => {
   it('detects flag in customFields', () => {
@@ -102,35 +108,38 @@ describe('isTpvBuildYourOwnCatalogItem', () => {
   });
 });
 
-describe('catalogPizzasForHalfHalf', () => {
+describe('catalogProductsForHalfHalf', () => {
   const catalog = [
-    { _id: 'hh', name: 'Mitad y mitad', category: 'Pizzas', itemType: 'product', active: true, customFields: { halfHalf: true } },
-    { _id: 'p1', name: 'Margarita', category: 'Pizzas', itemType: 'product', active: true, customFields: {} },
-    { _id: 'p2', name: 'Barbacoa', category: 'Pizzas', itemType: 'product', active: true, customFields: {} },
-    { _id: 'c1', name: 'Menú 1', category: 'Combos', itemType: 'combo', active: true, customFields: {} },
-    { _id: 'b1', name: 'Coca-Cola', category: 'Bebidas', itemType: 'product', active: true, customFields: {} },
+    { _id: 'hh', name: 'Mitad y mitad', category: 'Pizzas', itemType: 'product', active: true, brandIds: [BRAND_A], customFields: { halfHalf: true, halfHalfBrandId: BRAND_A } },
+    { _id: 'p1', name: 'Margarita', category: 'Pizzas', itemType: 'product', active: true, brandIds: [BRAND_A], customFields: {} },
+    { _id: 'p2', name: 'Barbacoa', category: 'Pizzas', itemType: 'product', active: true, brandIds: [BRAND_A], customFields: {} },
+    { _id: 'c1', name: 'Menú 1', category: 'Combos', itemType: 'combo', active: true, brandIds: [BRAND_A], customFields: {} },
+    { _id: 'b1', name: 'Coca-Cola', category: 'Bebidas', itemType: 'product', active: true, brandIds: [BRAND_A], customFields: {} },
+    { _id: 'other', name: 'Otra marca', category: 'Pizzas', itemType: 'product', active: true, brandIds: [BRAND_B], customFields: {} },
   ];
 
-  it('lists pizzas excluding half-half product and combos', () => {
-    const list = catalogPizzasForHalfHalf(catalog, 'hh');
-    expect(list.map((p) => p._id)).toEqual(['p2', 'p1']);
+  it('lists products of the scoped brand excluding half-half product and combos', () => {
+    const list = catalogProductsForHalfHalf(catalog, 'hh', { scopeBrandId: BRAND_A });
+    expect(list.map((p) => p._id)).toEqual(['p2', 'b1', 'p1']);
   });
 
   it('filters by allowed product ids when configured', () => {
-    const list = catalogPizzasForHalfHalf(catalog, 'hh', {
+    const list = catalogProductsForHalfHalf(catalog, 'hh', {
+      scopeBrandId: BRAND_A,
       allowedProductIds: ['p1'],
     });
     expect(list.map((p) => p._id)).toEqual(['p1']);
   });
 
-  it('returns empty when allowed ids do not match any pizza', () => {
-    const list = catalogPizzasForHalfHalf(catalog, 'hh', {
+  it('returns empty when allowed ids do not match any product', () => {
+    const list = catalogProductsForHalfHalf(catalog, 'hh', {
+      scopeBrandId: BRAND_A,
       allowedProductIds: ['missing'],
     });
     expect(list).toEqual([]);
   });
 
-  it('excludes pizza al gusto from half-half flavor list', () => {
+  it('excludes build-your-own from half-half flavor list', () => {
     const withByo = [
       ...catalog,
       {
@@ -139,17 +148,72 @@ describe('catalogPizzasForHalfHalf', () => {
         category: 'Pizzas',
         itemType: 'product',
         active: true,
+        brandIds: [BRAND_A],
         customFields: { buildYourOwn: true },
       },
     ];
-    const list = catalogPizzasForHalfHalf(withByo, 'hh');
+    const list = catalogProductsForHalfHalf(withByo, 'hh', { scopeBrandId: BRAND_A });
+    expect(list.map((p) => p._id)).toEqual(['p2', 'b1', 'p1']);
+  });
+
+  it('shows only configured flavors when whitelist has two products', () => {
+    const list = catalogProductsForHalfHalf(catalog, 'hh', {
+      scopeBrandId: BRAND_A,
+      allowedProductIds: ['p1', 'p2'],
+    });
     expect(list.map((p) => p._id)).toEqual(['p2', 'p1']);
   });
 
-  it('shows only configured flavors when half-half whitelist has two pizzas', () => {
-    const list = catalogPizzasForHalfHalf(catalog, 'hh', {
-      allowedProductIds: ['p1', 'p2'],
-    });
+  it('includes burgers and any product type for the brand', () => {
+    const burgerCatalog = [
+      { _id: 'hh', name: 'Mitad y mitad', category: 'Burgers', itemType: 'product', active: true, brandIds: [BRAND_A], customFields: { halfHalf: true, halfHalfBrandId: BRAND_A } },
+      { _id: 'bg1', name: 'Clásica', category: 'Burgers', itemType: 'product', active: true, brandIds: [BRAND_A], customFields: {} },
+      { _id: 'bg2', name: 'BBQ', category: 'Burgers', itemType: 'product', active: true, brandIds: [BRAND_A], customFields: {} },
+    ];
+    const list = catalogProductsForHalfHalf(burgerCatalog, 'hh', { scopeBrandId: BRAND_A });
+    expect(list.map((p) => p._id)).toEqual(['bg2', 'bg1']);
+  });
+
+  it('excludes products without brand assignment when scope is set', () => {
+    const mixed = [
+      { _id: 'hh', name: 'Mitad y mitad', category: 'Pizzas', itemType: 'product', active: true, brandIds: [BRAND_A], customFields: { halfHalf: true, halfHalfBrandId: BRAND_A } },
+      { _id: 'legacy', name: 'Sin marca', category: 'Pizzas', itemType: 'product', active: true, customFields: {} },
+      { _id: 'p1', name: 'Margarita', category: 'Pizzas', itemType: 'product', active: true, brandIds: [BRAND_A], customFields: {} },
+    ];
+    const list = catalogProductsForHalfHalf(mixed, 'hh', { scopeBrandId: BRAND_A });
+    expect(list.map((p) => p._id)).toEqual(['p1']);
+  });
+});
+
+describe('resolveHalfHalfScopeBrandId', () => {
+  it('prefers customFields.halfHalfBrandId over product brandIds', () => {
+    expect(
+      resolveHalfHalfScopeBrandId({
+        brandIds: [BRAND_B],
+        customFields: { halfHalfBrandId: BRAND_A },
+      }),
+    ).toBe(BRAND_A);
+  });
+
+  it('falls back to first product brandId', () => {
+    expect(
+      resolveHalfHalfScopeBrandId({
+        brandIds: [BRAND_A, BRAND_B],
+        customFields: {},
+      }),
+    ).toBe(BRAND_A);
+  });
+});
+
+describe('catalogPizzasForHalfHalf', () => {
+  const catalog = [
+    { _id: 'hh', name: 'Mitad y mitad', category: 'Pizzas', itemType: 'product', active: true, brandIds: [BRAND_A], customFields: { halfHalf: true, halfHalfBrandId: BRAND_A } },
+    { _id: 'p1', name: 'Margarita', category: 'Pizzas', itemType: 'product', active: true, brandIds: [BRAND_A], customFields: {} },
+    { _id: 'p2', name: 'Barbacoa', category: 'Pizzas', itemType: 'product', active: true, brandIds: [BRAND_A], customFields: {} },
+  ];
+
+  it('delegates to catalogProductsForHalfHalf with scopeBrandId', () => {
+    const list = catalogPizzasForHalfHalf(catalog, 'hh', { scopeBrandId: BRAND_A });
     expect(list.map((p) => p._id)).toEqual(['p2', 'p1']);
   });
 });
@@ -167,22 +231,20 @@ describe('normalizeHalfHalfAllowedProductIds', () => {
 describe('catalogPizzaCandidatesForHalfHalf', () => {
   it('filters candidates by brand when brandIds provided', () => {
     const catalog = [
-      { _id: 'hh', name: 'Mitad y mitad', category: 'Pizzas', itemType: 'product', active: true, brandIds: ['b1'], customFields: { halfHalf: true } },
-      { _id: 'p1', name: 'Margarita', category: 'Pizzas', itemType: 'product', active: true, brandIds: ['b1'], customFields: {} },
-      { _id: 'p2', name: 'Barbacoa', category: 'Pizzas', itemType: 'product', active: true, brandIds: ['b2'], customFields: {} },
+      { _id: 'hh', name: 'Mitad y mitad', category: 'Pizzas', itemType: 'product', active: true, brandIds: [BRAND_A], customFields: { halfHalf: true } },
+      { _id: 'p1', name: 'Margarita', category: 'Pizzas', itemType: 'product', active: true, brandIds: [BRAND_A], customFields: {} },
+      { _id: 'p2', name: 'Barbacoa', category: 'Pizzas', itemType: 'product', active: true, brandIds: [BRAND_B], customFields: {} },
     ];
-    const list = catalogPizzaCandidatesForHalfHalf(catalog, 'hh', ['b1']);
+    const list = catalogPizzaCandidatesForHalfHalf(catalog, 'hh', [BRAND_A]);
     expect(list.map((p) => p._id)).toEqual(['p1']);
   });
 
-  it('includes products from pizza line brand even without pizza in category name', () => {
+  it('includes any category when product belongs to scoped brand', () => {
     const catalog = [
-      { _id: 'hh', name: 'Mitad y mitad', category: 'Pizzas', itemType: 'product', active: true, brandIds: ['b1'], customFields: { halfHalf: true } },
-      { _id: 'p1', name: 'Margarita', category: 'Carta', itemType: 'product', active: true, brandIds: ['b1'], customFields: {} },
+      { _id: 'hh', name: 'Mitad y mitad', category: 'Pizzas', itemType: 'product', active: true, brandIds: [BRAND_A], customFields: { halfHalf: true } },
+      { _id: 'p1', name: 'Margarita', category: 'Carta', itemType: 'product', active: true, brandIds: [BRAND_A], customFields: {} },
     ];
-    const list = catalogPizzaCandidatesForHalfHalf(catalog, 'hh', ['b1'], [
-      { _id: 'b1', deliveryLineKind: 'pizza' },
-    ]);
+    const list = catalogHalfHalfFlavorCandidates(catalog, 'hh', BRAND_A);
     expect(list.map((p) => p._id)).toEqual(['p1']);
   });
 });
@@ -193,7 +255,7 @@ describe('isHalfHalfFlavorSelectionInvalid', () => {
     expect(isHalfHalfFlavorSelectionInvalid(['a', 'b'])).toBe(false);
   });
 
-  it('rejects exactly one selected pizza', () => {
+  it('rejects exactly one selected product', () => {
     expect(isHalfHalfFlavorSelectionInvalid(['a'])).toBe(true);
   });
 });
@@ -302,7 +364,7 @@ describe('isTpvBuildYourOwnCatalogItem modommio', () => {
 });
 
 describe('isTpvBuildYourOwnCatalogItem mitad', () => {
-  it('Mitad y mitad es siempre half-half (2 pizzas), nunca BYO', () => {
+  it('Mitad y mitad es siempre half-half (2 productos), nunca BYO', () => {
     expect(
       isTpvBuildYourOwnCatalogItem({
         itemType: 'product',
@@ -339,14 +401,16 @@ describe('isTpvBuildYourOwnCatalogItem mitad', () => {
 });
 
 describe('catalogPizzasForHalfHalf premium', () => {
-  it('incluye Premium / Especialidad como sabores', () => {
+  it('incluye Premium / Especialidad como sabores de la misma marca', () => {
     const catalog = [
-      { _id: 'hh', name: 'Mitad y mitad', category: 'Pizzas', itemType: 'product', active: true, customFields: { halfHalf: true } },
-      { _id: 'p1', name: 'Margarita', category: 'Pizzas', itemType: 'product', active: true, customFields: {} },
-      { _id: 'p2', name: 'Pallesa', category: 'Premium', itemType: 'product', active: true, customFields: {} },
-      { _id: 'p3', name: 'Mortadella', category: 'Especialidad', itemType: 'product', active: true, customFields: {} },
+      { _id: 'hh', name: 'Mitad y mitad', category: 'Pizzas', itemType: 'product', active: true, brandIds: [BRAND_A], customFields: { halfHalf: true, halfHalfBrandId: BRAND_A } },
+      { _id: 'p1', name: 'Margarita', category: 'Pizzas', itemType: 'product', active: true, brandIds: [BRAND_A], customFields: {} },
+      { _id: 'p2', name: 'Pallesa', category: 'Premium', itemType: 'product', active: true, brandIds: [BRAND_A], customFields: {} },
+      { _id: 'p3', name: 'Mortadella', category: 'Especialidad', itemType: 'product', active: true, brandIds: [BRAND_A], customFields: {} },
     ];
-    expect(catalogPizzasForHalfHalf(catalog, 'hh').map((p) => p._id).sort()).toEqual(['p1', 'p2', 'p3']);
+    expect(
+      catalogPizzasForHalfHalf(catalog, 'hh', { scopeBrandId: BRAND_A }).map((p) => p._id).sort(),
+    ).toEqual(['p1', 'p2', 'p3']);
   });
 });
 
@@ -427,7 +491,7 @@ describe('tpvBuildYourOwnIngredientPool', () => {
 });
 
 describe('mergeHalfHalfProductIngredients', () => {
-  it('merges ingredient lists from both pizza fichas', () => {
+  it('merges ingredient lists from both product fichas', () => {
     const catalog = [
       {
         _id: 'p1',
@@ -454,14 +518,14 @@ describe('mergeHalfHalfProductIngredients', () => {
     expect(merged).toEqual(['Tomate', 'Mozzarella', 'Salsa BBQ', 'Bacon']);
   });
 
-  it('falls back to store ingredients when pizza ficha has no ingredientes', () => {
+  it('falls back to store ingredients when product ficha has no ingredientes', () => {
     const catalog = [
-      { _id: 'p1', name: 'Margarita', category: 'Pizzas', brandIds: ['b1'], customFields: {} },
-      { _id: 'p2', name: 'Barbacoa', category: 'Pizzas', brandIds: ['b1'], customFields: {} },
+      { _id: 'p1', name: 'Margarita', category: 'Pizzas', brandIds: [BRAND_A], customFields: {} },
+      { _id: 'p2', name: 'Barbacoa', category: 'Pizzas', brandIds: [BRAND_A], customFields: {} },
     ];
     const storeIngredients = [
-      { id: 'i1', name: 'Tomate', brandIds: ['b1'], role: 'base' },
-      { id: 'i2', name: 'Mozzarella', brandIds: ['b1'], role: 'base' },
+      { id: 'i1', name: 'Tomate', brandIds: [BRAND_A], role: 'base' },
+      { id: 'i2', name: 'Mozzarella', brandIds: [BRAND_A], role: 'base' },
     ];
     const merged = mergeHalfHalfProductIngredients(
       {
@@ -473,7 +537,7 @@ describe('mergeHalfHalfProductIngredients', () => {
       catalog,
       {
         storeIngredients,
-        brands: [{ _id: 'b1', deliveryLineKind: 'pizza', catalogCategories: ['Pizzas'] }],
+        brands: [{ _id: BRAND_A, deliveryLineKind: 'pizza', catalogCategories: ['Pizzas'] }],
       },
     );
     expect(merged).toEqual(['Tomate', 'Mozzarella']);
@@ -481,7 +545,7 @@ describe('mergeHalfHalfProductIngredients', () => {
 });
 
 describe('customizationSignature half-half', () => {
-  it('includes both pizza ids', () => {
+  it('includes both product ids', () => {
     const a = customizationSignature({
       removedIngredients: [],
       addedSupplements: [],

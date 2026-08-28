@@ -19,6 +19,11 @@ export type CatalogBusinessScopeOptions = {
   accountBusinessCount?: number;
   /** Tipo de la empresa activa — desbloquea bebidas/complementos/postres sin línea (delivery + restaurante). */
   activeBusinessType?: string;
+  /**
+   * false mientras listBrands no ha terminado — evita carta/almacén vacíos porque brandIds aún no está poblado.
+   * En multi-cuenta solo se muestran ítems con business_id de la empresa activa.
+   */
+  brandsSettled?: boolean;
 };
 
 export function readCatalogItemBusinessId(
@@ -47,6 +52,7 @@ export function catalogItemBelongsToBusinessScope(
   const itemBusinessId = readCatalogItemBusinessId(item);
   const accountN = options?.accountBusinessCount;
   const multiAccount = accountN !== undefined && accountN >= 2;
+  const brandsSettled = options?.brandsSettled !== false;
 
   if (itemVertical === 'delivery' && !isDeliveryBusinessType(activeType)) {
     return false;
@@ -86,6 +92,11 @@ export function catalogItemBelongsToBusinessScope(
     .map((id) => String(id).trim())
     .filter(Boolean);
   if (itemBrandIds.some((id) => brandIds.has(id))) {
+    return true;
+  }
+
+  if (!brandsSettled) {
+    if (multiAccount) return false;
     return true;
   }
 

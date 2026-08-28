@@ -1,13 +1,16 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 /**
- * App nativa Vertial (iPad tienda / TestFlight).
+ * App nativa Vertial (iPad / Android móvil).
  *
- * Por defecto (dev local): WebView sirve `dist/` embebido.
+ * Por defecto: WebView sirve `dist/` embebido (sin depender de vertialapp.com para la UI).
+ * API: VITE_NATIVE_API_ORIGIN → https://vertialapp.com
  *
- * En CI (Codemagic): CAPACITOR_SERVER_URL=https://vertialapp.com
- * → la app carga la MISMA web que Safari. Un deploy frontend actualiza
- * las tablets sin IPA nuevo. Plugins nativos (impresora, cámara) siguen en el IPA.
+ * Build APK debug:  npm run cap:android:apk:debug
+ * Build APK release (Play): npm run cap:android:apk:release
+ *
+ * En CI (opcional): CAPACITOR_SERVER_URL carga la web remota — no usar en tablets de producción
+ * salvo acuerdo explícito (actualizar UI = nuevo APK).
  */
 const liveServerUrl = String(
   process.env.CAPACITOR_SERVER_URL || process.env.VITE_CAPACITOR_SERVER_URL || '',
@@ -41,9 +44,9 @@ const config: CapacitorConfig = {
     SplashScreen: {
       launchShowDuration: 2000,
       launchAutoHide: true,
-      backgroundColor: '#030213',
+      backgroundColor: '#000000',
       androidSplashResourceName: 'splash',
-      androidScaleType: 'CENTER_CROP',
+      androidScaleType: 'CENTER',
       showSpinner: false,
     },
     StatusBar: {

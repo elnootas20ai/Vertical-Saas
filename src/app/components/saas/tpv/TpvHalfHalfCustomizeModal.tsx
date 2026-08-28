@@ -2,9 +2,9 @@ import { useMemo, useState } from 'react';
 import { Check, X } from 'lucide-react';
 import type { CatalogItem } from '../../../lib/deliveryApi';
 import {
-  catalogPizzasForHalfHalf,
+  catalogProductsForHalfHalf,
   normalizeHalfHalfAllowedProductIds,
-  productBrandIdsFromItem,
+  resolveHalfHalfScopeBrandId,
   type HalfHalfPizzaSelection,
 } from '../../../lib/catalogCustomization';
 import { useModalClose } from '../../../hooks/useModalClose';
@@ -25,7 +25,7 @@ type ActiveHalf = 'first' | 'second';
 export function TpvHalfHalfCustomizeModal({
   item,
   catalogItems,
-  brands,
+  brands: _brands,
   initial,
   formatPrice,
   onClose,
@@ -33,27 +33,28 @@ export function TpvHalfHalfCustomizeModal({
 }: TpvHalfHalfCustomizeModalProps) {
   useModalClose(true, onClose);
 
-  const pizzas = useMemo(
+  const scopeBrandId = useMemo(() => resolveHalfHalfScopeBrandId(item), [item]);
+
+  const flavorProducts = useMemo(
     () =>
-      catalogPizzasForHalfHalf(catalogItems, item._id, {
+      catalogProductsForHalfHalf(catalogItems, item._id, {
         allowedProductIds: normalizeHalfHalfAllowedProductIds(
           item.customFields?.halfHalfAllowedProductIds,
         ),
-        brandIds: productBrandIdsFromItem(item),
-        brands,
+        scopeBrandId,
       }),
-    [catalogItems, item._id, item.customFields?.halfHalfAllowedProductIds, item.brandIds, brands],
+    [catalogItems, item._id, item.customFields?.halfHalfAllowedProductIds, scopeBrandId],
   );
 
   const [activeHalf, setActiveHalf] = useState<ActiveHalf>('first');
   const [firstId, setFirstId] = useState(initial?.firstProductId || '');
   const [secondId, setSecondId] = useState(initial?.secondProductId || '');
 
-  const first = pizzas.find((p) => p._id === firstId);
-  const second = pizzas.find((p) => p._id === secondId);
+  const first = flavorProducts.find((p) => p._id === firstId);
+  const second = flavorProducts.find((p) => p._id === secondId);
   const complete = Boolean(first && second);
 
-  const pickPizza = (product: CatalogItem) => {
+  const pickProduct = (product: CatalogItem) => {
     if (activeHalf === 'first') {
       setFirstId(product._id);
       if (!secondId) setActiveHalf('second');
@@ -86,7 +87,7 @@ export function TpvHalfHalfCustomizeModal({
             </p>
             <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 truncate">{item.name}</h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-              Elige 2 sabores · {formatPrice(Number(item.unitPrice || 0))}
+              Elige 2 productos · {formatPrice(Number(item.unitPrice || 0))}
             </p>
           </div>
           <button
@@ -114,7 +115,7 @@ export function TpvHalfHalfCustomizeModal({
                 Mitad 1
               </span>
               <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mt-1 truncate">
-                {first?.name || 'Toca una pizza abajo'}
+                {first?.name || 'Toca un producto abajo'}
               </p>
             </button>
             <button
@@ -130,28 +131,28 @@ export function TpvHalfHalfCustomizeModal({
                 Mitad 2
               </span>
               <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mt-1 truncate">
-                {second?.name || 'Toca una pizza abajo'}
+                {second?.name || 'Toca un producto abajo'}
               </p>
             </button>
           </div>
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y p-4">
-          {pizzas.length === 0 ? (
+          {flavorProducts.length === 0 ? (
             <p className="text-sm text-center text-gray-500 dark:text-gray-400 py-8">
-              No hay pizzas en el catálogo. Importa o crea pizzas en categoría Pizzas primero.
+              No hay productos de esta marca en el catálogo. Configura mitad y mitad en el catálogo primero.
             </p>
           ) : (
             <div className="grid grid-cols-2 gap-2">
-              {pizzas.map((pizza) => {
-                const isFirst = pizza._id === firstId;
-                const isSecond = pizza._id === secondId;
+              {flavorProducts.map((product) => {
+                const isFirst = product._id === firstId;
+                const isSecond = product._id === secondId;
                 const selected = isFirst || isSecond;
                 return (
                   <button
-                    key={pizza._id}
+                    key={product._id}
                     type="button"
-                    onClick={() => pickPizza(pizza)}
+                    onClick={() => pickProduct(product)}
                     className={`rounded-xl border-2 p-3 text-left transition-all touch-manipulation ${
                       selected
                         ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30 ring-1 ring-emerald-500/30'
@@ -159,10 +160,10 @@ export function TpvHalfHalfCustomizeModal({
                     }`}
                   >
                     <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 line-clamp-2">
-                      {pizza.name}
+                      {product.name}
                     </p>
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 tabular-nums">
-                      {formatPrice(Number(pizza.unitPrice || 0))}
+                      {formatPrice(Number(product.unitPrice || 0))}
                     </p>
                     {selected ? (
                       <span className="inline-flex items-center gap-1 mt-1.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-400">

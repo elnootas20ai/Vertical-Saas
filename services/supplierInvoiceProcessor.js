@@ -1158,7 +1158,7 @@ export async function processIncomingEmails(userId, imapOverrides, options = {})
   if (usable.length === 0) {
     logger.debug({ tag: 'SINV_PROC', userId, pdvId: pdvId || null }, 'IMAP no configurado, saltando');
     summary.message =
-      'No hay correo de facturas guardado y activado. En Ajustes → Facturas por email: Probar conexión (guarda solo) o Guardar y activar.';
+      'No hay correo de facturas guardado y activado para esta tienda. En Correo de facturas: Probar conexión o Guardar y activar.';
     return summary;
   }
 

@@ -80,7 +80,9 @@ export async function syncInventoryCatalogFromSources(
   let skipped = 0;
 
   for (const candidate of candidates) {
-    if (excludedKeys.has(inventoryCandidateExclusionKey(candidate))) {
+    const exclKey = inventoryCandidateExclusionKey(candidate);
+    const nameExcl = `name:${foldIngredientKey(candidate.name)}`;
+    if (excludedKeys.has(exclKey) || excludedKeys.has(nameExcl)) {
       skipped += 1;
       continue;
     }

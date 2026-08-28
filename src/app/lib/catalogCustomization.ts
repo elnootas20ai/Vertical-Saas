@@ -569,13 +569,29 @@ export function isBuildYourOwnIngredientSelectionInvalid(
   return candidateCount === 0;
 }
 
-/** IDs de pizzas permitidas como sabores en mitad y mitad (vacío = todas las pizzas del catálogo). */
+/** IDs de productos permitidos como sabores en mitad y mitad (vacío = todos los de la marca). */
 export function normalizeHalfHalfAllowedProductIds(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return [...new Set(raw.map((id) => String(id || '').trim()).filter(Boolean))];
 }
 
-/** Selección inválida: exactamente 1 pizza marcada (0 = todas, ≥2 = ok). */
+export function normalizeHalfHalfBrandId(raw: unknown): string {
+  return String(raw || '').trim();
+}
+
+/** Marca comercial cuyos productos entran en el selector mitad y mitad. */
+export function resolveHalfHalfScopeBrandId(
+  item: Pick<CatalogItem, 'customFields' | 'brandIds'>,
+  overrideBrandId?: string,
+): string {
+  const override = normalizeHalfHalfBrandId(overrideBrandId);
+  if (override) return override;
+  const fromCf = normalizeHalfHalfBrandId(item.customFields?.halfHalfBrandId);
+  if (fromCf) return fromCf;
+  return productBrandIdsFromItem(item)[0] || '';
+}
+
+/** Selección inválida: exactamente 1 producto marcado (0 = todos, ≥2 = ok). */
 export function isHalfHalfFlavorSelectionInvalid(allowedProductIds: string[]): boolean {
   return allowedProductIds.length === 1;
 }
@@ -592,66 +608,54 @@ function catalogPizzaMatchesBrandFilter(
   return itemBrandIds.some((id) => brandIds.includes(id));
 }
 
-function isPizzaLineBrandId(brandId: string, brands?: TpvBrandHint[]): boolean {
-  if (!brands?.length) return false;
-  const brand = brands.find((b) => b._id === brandId);
-  return brand?.deliveryLineKind === 'pizza';
-}
-
-function isPizzaLikeCatalogProduct(
-  item: Pick<CatalogItem, 'category' | 'name' | 'brandIds'>,
-  scopeBrandIds: string[],
-  brands?: TpvBrandHint[],
+function catalogHalfHalfMatchesBrandFilter(
+  item: Pick<CatalogItem, 'brandIds'>,
+  scopeBrandId: string,
 ): boolean {
-  const cat = foldCatalogCategoryLabel(item.category || '');
-  const name = foldCatalogCategoryLabel(item.name || '');
-  if (/combo|menu|menú/.test(cat)) return false;
-  if (cat.includes('pizza') || name.includes('pizza')) return true;
-  if (/premium|especialidad|calzone/.test(cat)) return true;
-  if (!scopeBrandIds.length || !brands?.length) return false;
+  const scope = normalizeHalfHalfBrandId(scopeBrandId);
+  if (!scope) return false;
   const itemBrandIds = Array.isArray(item.brandIds)
     ? item.brandIds.map((id) => String(id || '').trim()).filter(Boolean)
     : [];
-  return scopeBrandIds.some(
-    (brandId) => itemBrandIds.includes(brandId) && isPizzaLineBrandId(brandId, brands),
-  );
+  if (itemBrandIds.length === 0) return false;
+  return itemBrandIds.includes(scope);
 }
 
-/** Pizzas elegibles como sabores al configurar mitad y mitad (sin filtro de whitelist). */
-export function catalogPizzaCandidatesForHalfHalf(
-  catalog: CatalogItem[],
-  excludeProductId?: string,
-  brandIds?: string[],
-  brands?: TpvBrandHint[],
-): CatalogItem[] {
-  return catalogPizzasForHalfHalf(catalog, excludeProductId, { brandIds, brands });
+function isSellableHalfHalfFlavorProduct(
+  item: CatalogItem,
+  halfHalfProductId?: string,
+): boolean {
+  if (item.active === false) return false;
+  if (halfHalfProductId && item._id === halfHalfProductId) return false;
+  if (item.itemType === 'combo' || item.itemType === 'service') return false;
+  if ((item.module || 'catalog') !== 'catalog') return false;
+  if (isTpvHalfHalfCatalogItem(item)) return false;
+  if (isTpvBuildYourOwnCatalogItem(item)) return false;
+  if (isTpvComboCatalogItem(item)) return false;
+  return item.itemType === 'product' || !item.itemType;
 }
 
-/** Pizzas vendibles como mitad en TPV. */
-export function catalogPizzasForHalfHalf(
+/** Productos vendibles como mitad en TPV (por marca comercial, sin filtrar solo pizzas). */
+export function catalogProductsForHalfHalf(
   catalog: CatalogItem[],
   halfHalfProductId?: string,
   options?: {
     allowedProductIds?: string[];
+    /** Marca comercial: solo productos asignados a esta línea. */
+    scopeBrandId?: string;
+    /** @deprecated usar scopeBrandId */
     brandIds?: string[];
-    brands?: TpvBrandHint[];
   },
 ): CatalogItem[] {
-  const brandIds = Array.isArray(options?.brandIds)
-    ? options.brandIds.map((id) => String(id || '').trim()).filter(Boolean)
-    : [];
+  const scopeBrandId =
+    normalizeHalfHalfBrandId(options?.scopeBrandId) ||
+    normalizeHalfHalfBrandId(options?.brandIds?.[0]);
   const allowed = normalizeHalfHalfAllowedProductIds(options?.allowedProductIds);
-  const brands = options?.brands;
 
   let list = catalog.filter((c) => {
-    if (c.active === false) return false;
-    if (halfHalfProductId && c._id === halfHalfProductId) return false;
-    if (c.itemType === 'combo' || c.itemType === 'service') return false;
-    if (isTpvHalfHalfCatalogItem(c)) return false;
-    if (isTpvBuildYourOwnCatalogItem(c)) return false;
-    if (isTpvComboCatalogItem(c)) return false;
-    if (!catalogPizzaMatchesBrandFilter(c, brandIds)) return false;
-    return isPizzaLikeCatalogProduct(c, brandIds, brands);
+    if (!isSellableHalfHalfFlavorProduct(c, halfHalfProductId)) return false;
+    if (!catalogHalfHalfMatchesBrandFilter(c, scopeBrandId)) return false;
+    return true;
   });
 
   if (allowed.length > 0) {
@@ -660,6 +664,45 @@ export function catalogPizzasForHalfHalf(
   }
 
   return list.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+}
+
+/** Pizzas elegibles como sabores al configurar mitad y mitad (sin filtro de whitelist). */
+export function catalogHalfHalfFlavorCandidates(
+  catalog: CatalogItem[],
+  excludeProductId?: string,
+  scopeBrandId?: string,
+): CatalogItem[] {
+  return catalogProductsForHalfHalf(catalog, excludeProductId, { scopeBrandId });
+}
+
+export function catalogPizzaCandidatesForHalfHalf(
+  catalog: CatalogItem[],
+  excludeProductId?: string,
+  brandIds?: string[],
+  _brands?: TpvBrandHint[],
+): CatalogItem[] {
+  const scopeBrandId = Array.isArray(brandIds)
+    ? normalizeHalfHalfBrandId(brandIds[0])
+    : '';
+  return catalogHalfHalfFlavorCandidates(catalog, excludeProductId, scopeBrandId);
+}
+
+/** @deprecated Alias de catalogProductsForHalfHalf (ya no limita a pizzas). */
+export function catalogPizzasForHalfHalf(
+  catalog: CatalogItem[],
+  halfHalfProductId?: string,
+  options?: {
+    allowedProductIds?: string[];
+    brandIds?: string[];
+    brands?: TpvBrandHint[];
+    scopeBrandId?: string;
+  },
+): CatalogItem[] {
+  void options?.brands;
+  return catalogProductsForHalfHalf(catalog, halfHalfProductId, {
+    allowedProductIds: options?.allowedProductIds,
+    scopeBrandId: options?.scopeBrandId || options?.brandIds?.[0],
+  });
 }
 
 /** Menú Modomio (legacy): mitad y mitad dentro del combo — no confundir con producto suelto. */
@@ -688,6 +731,7 @@ export function isCustomizableCatalogItem(
   item: Pick<CatalogItem, 'category' | 'name' | 'brandIds' | 'customFields'>,
   brands?: TpvBrandHint[],
 ): boolean {
+  if (isTpvHalfHalfCatalogItem(item)) return true;
   if (isTpvBuildYourOwnCatalogItem(item)) return true;
   if (hasProductTpvIngredients(item)) return true;
   return resolveTpvCategoryTemplateKey(item, brands) !== null;

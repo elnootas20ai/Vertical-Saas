@@ -284,10 +284,11 @@ function readOpValue(
 ): string | number {
   if (field.path.startsWith('delayThresholds.')) {
     const key = field.path.split('.')[1] as keyof DeliveryOperationalConfig['delayThresholds'];
-    return delivery.delayThresholds[key];
+    const thresholds = delivery?.delayThresholds;
+    return Number(thresholds?.[key] ?? 0);
   }
   const src = field.source === 'delivery' ? delivery : cash;
-  const v = (src as Record<string, unknown>)[field.path];
+  const v = (src as Record<string, unknown>)?.[field.path];
   if (field.type === 'time') return String(v ?? '23:30');
   return Number(v ?? 0);
 }
@@ -303,7 +304,7 @@ function writeOpValue(
     return {
       delivery: {
         ...delivery,
-        delayThresholds: { ...delivery.delayThresholds, [key]: Number(raw) },
+        delayThresholds: { ...(delivery?.delayThresholds || {}), [key]: Number(raw) },
       },
       cashRegister: cash,
     };

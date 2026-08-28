@@ -339,8 +339,14 @@ function SaasAppShellInner({ children }: { children: ReactNode }) {
           </div>
         )}
         <main className={`overflow-x-auto ${noPadding ? 'pb-16 md:pb-0' : 'py-4 pb-16 md:pb-0 px-3 md:px-4'}`}>
-          {/* key por ruta: un error en una página no debe dejar bloqueada la navegación al resto */}
-          <ErrorBoundary key={location.pathname}>
+          {/* key por ruta (+ tab en alertas): un error en una pestaña no debe bloquear las demás */}
+          <ErrorBoundary
+            key={
+              location.pathname.startsWith('/saas/alerts')
+                ? `${location.pathname}${location.search}`
+                : location.pathname
+            }
+          >
             <DeliveryOpsReturnStrip />
             <WorkerProfileCompletionBanner />
             <ActivationPageCoach />

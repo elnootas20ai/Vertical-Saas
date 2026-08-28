@@ -2,6 +2,8 @@
 
 Documento **para humanos y para el asistente**: resume el “qué es” y el “cómo lo construimos” sin tener que leer todo el repo de golpe. Incluye **restricciones de disco y memoria** y qué acciones pueden saturar el servidor. Las conclusiones de implementación concretas siguen en `shared/AGENT_HANDOFF.md` y en el código.
 
+**Precios detallados, SVAs y packing comercial:** [`docs/VERTIAL-PRECIOS-PACKING.md`](VERTIAL-PRECIOS-PACKING.md) (documento vivo para seguir apuntando).
+
 ---
 
 ## 1. Qué es Vertial
@@ -17,8 +19,8 @@ Documento **para humanos y para el asistente**: resume el “qué es” y el “
 | Precio mensual (referencia) | Rol del plan | PDV incluidos |
 |----------------------------|----------------|----------------|
 | **50 €**                   | Entrada / básico | **1 PDV** |
-| **150 €**                  | Intermedio     | **1 PDV** |
-| **350 €** (Pro)            | Alto / multi-sede base | **1 PDV** · **2 empresas** · **2 marcas** (sin contar «General»); PDV extra de pago |
+| **179 €**                  | Intermedio (packing) | **1 PDV** · objetivo paridad TPV+Yurest en 1 app · código facturación aún **149 €** |
+| **350 €** (Pro)            | Alto / stack completo | **1 PDV** · **2 empresas** · **2 marcas** (sin contar «General»); **2ª tienda+** = PDV extra de pago (ver packing doc) |
 
 | Ampliación (plan Pro) | Precio/mes | Qué suma |
 |----------------------|------------|----------|
@@ -78,6 +80,7 @@ Documento **para humanos y para el asistente**: resume el “qué es” y el “
 | Archivo | Contenido |
 |---------|-----------|
 | `docs/VERTIAL-SAAS-VISION.md` | **Este** — visión producto + arquitectura modular. |
+| `docs/VERTIAL-PRECIOS-PACKING.md` | Precios, SVAs, addons, comparativa mercado, pendientes. |
 | `shared/AGENT_HANDOFF.md` | Detalle técnico y rutas ya implementadas. |
 | `shared/naming/README.md` | Cómo añadir otra regla de códigos compartida Node + Vite. |
 

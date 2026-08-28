@@ -89,8 +89,20 @@ const RULE_TO_CASH_FLAG: Record<string, keyof CashRegisterOperationalConfig> = {
 };
 
 function normalizeAlertsConfig(data: AlertsConfig): AlertsConfig {
+  const deliveryRaw = data.operational?.delivery || {};
   return {
     ...data,
+    global: {
+      muteAll: Boolean(data.global?.muteAll),
+      quietHoursEnabled: Boolean(data.global?.quietHoursEnabled),
+      quietHoursFrom: String(data.global?.quietHoursFrom || '22:00').slice(0, 5),
+      quietHoursTo: String(data.global?.quietHoursTo || '08:00').slice(0, 5),
+      digestTime: String(data.global?.digestTime || '09:00').slice(0, 5),
+      defaultChannels: Array.isArray(data.global?.defaultChannels)
+        ? data.global.defaultChannels
+        : ['push', 'inApp'],
+    },
+    rules: Array.isArray(data.rules) ? data.rules : [],
     deliveryAlertsReview: {
       completedAt: data.deliveryAlertsReview?.completedAt || null,
       notifSentAt: data.deliveryAlertsReview?.notifSentAt || null,
@@ -100,13 +112,16 @@ function normalizeAlertsConfig(data: AlertsConfig): AlertsConfig {
         ...DEFAULT_CASH_REGISTER_OPERATIONAL,
         ...(data.operational?.cashRegister || {}),
       },
+      // delayThresholds al final: si el doc guardado trae null/undefined, no pisa los defaults.
       delivery: {
         ...DEFAULT_DELIVERY_OPERATIONAL,
+        ...deliveryRaw,
         delayThresholds: {
           ...DEFAULT_DELIVERY_OPERATIONAL.delayThresholds,
-          ...(data.operational?.delivery?.delayThresholds || {}),
+          ...(deliveryRaw.delayThresholds && typeof deliveryRaw.delayThresholds === 'object'
+            ? deliveryRaw.delayThresholds
+            : {}),
         },
-        ...(data.operational?.delivery || {}),
       },
     },
   };
@@ -144,13 +159,19 @@ export function AlertCenterSettingsPanel({
   };
 
   const load = useCallback(async () => {
-    if (!businessId) return;
+    if (!businessId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const data = await getAlertsConfig(businessId);
+      if (!data) {
+        throw new Error('Respuesta de alertas vacía');
+      }
       setConfig(normalizeAlertsConfig({
         ...data,
-        rules: syncRulesPlanTier(data.rules),
+        rules: syncRulesPlanTier(Array.isArray(data.rules) ? data.rules : []),
       }));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error cargando preferencias');
@@ -262,9 +283,9 @@ export function AlertCenterSettingsPanel({
     if (search.trim()) {
       const q = search.toLowerCase();
       return (
-        r.label.toLowerCase().includes(q)
-        || r.description.toLowerCase().includes(q)
-        || r.category.toLowerCase().includes(q)
+        String(r.label || '').toLowerCase().includes(q)
+        || String(r.description || '').toLowerCase().includes(q)
+        || String(r.category || '').toLowerCase().includes(q)
       );
     }
     return true;
@@ -590,6 +611,7 @@ export function AlertCenterSettingsPanel({
             featured={featured}
             planTier={inferRulePlanTier(rule)}
             locked={!isRuleEditable(rule)}
+            vertical={vertical}
             delivery={config.operational!.delivery}
             cashRegister={config.operational!.cashRegister}
             onOperationalChange={updateOperational}
@@ -709,6 +731,7 @@ export function AlertCenterSettingsPanel({
                   featured={featured}
                   planTier={tier}
                   locked={!tierAccessible}
+                  vertical={vertical}
                   delivery={config.operational!.delivery}
                   cashRegister={config.operational!.cashRegister}
                   onOperationalChange={updateOperational}
@@ -893,6 +916,7 @@ function RuleToggleRow({
   disabled,
   locked,
   planTier,
+  vertical,
   delivery,
   cashRegister,
   onOperationalChange,
@@ -903,6 +927,7 @@ function RuleToggleRow({
   locked?: boolean;
   planTier?: AlertPlanTier;
   featured?: boolean;
+  vertical?: string;
   delivery: DeliveryOperationalConfig;
   cashRegister: CashRegisterOperationalConfig;
   onOperationalChange: (next: {

@@ -1,7 +1,3 @@
-ext {
-    cordovaPluginsGradlePath = new File("node_modules/@capacitor/android/capacitor/cordova.variables.gradle")
-}
-apply from: cordovaPluginsGradlePath
 apply plugin: 'com.android.library'
 
 android {

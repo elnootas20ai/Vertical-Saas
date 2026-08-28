@@ -526,14 +526,15 @@ export function AlertHistoryTimeline({
   entries: AlertHistoryEntry[];
   compact?: boolean;
 }) {
-  if (!entries.length) {
+  const list = Array.isArray(entries) ? entries : [];
+  if (!list.length) {
     return <p className="text-xs text-zinc-500">Sin eventos registrados</p>;
   }
 
   return (
     <ol className={`relative ${compact ? 'space-y-2' : 'space-y-3'}`}>
-      {entries.map((entry, idx) => {
-        const isLast = idx === entries.length - 1;
+      {list.map((entry, idx) => {
+        const isLast = idx === list.length - 1;
         let when = entry.at;
         try {
           when = format(new Date(entry.at), compact ? 'dd MMM · HH:mm' : 'dd MMM yyyy · HH:mm', { locale: es });

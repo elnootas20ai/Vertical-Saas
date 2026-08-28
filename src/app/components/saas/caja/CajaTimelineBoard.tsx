@@ -293,9 +293,9 @@ export function CajaTimelineBoard({
   return (
     <div className="text-stone-900 dark:text-stone-100">
       <div className="mx-auto w-full max-w-[1100px] pb-12">
-        {/* Head — Volver a la izquierda (mismo patrón que TPV / resto de Vertial) */}
-        <div className="flex items-center justify-between flex-wrap gap-3.5 mb-1.5">
-          <div className="flex items-center gap-3 flex-wrap min-w-0">
+        {/* Head — Volver izq · fecha centro · acciones dcha */}
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-x-2 gap-y-2 mb-1.5">
+          <div className="justify-self-start">
             <button
               type="button"
               onClick={() => onBack?.()}
@@ -304,7 +304,8 @@ export function CajaTimelineBoard({
             >
               <ArrowLeft className="w-4 h-4" />
             </button>
-            <div className="flex items-center gap-2 flex-wrap min-w-0">
+          </div>
+          <div className="justify-self-center flex items-center gap-2 flex-wrap min-w-0">
               <div className="flex items-center gap-1 rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-1.5 py-1">
                 <button
                   type="button"
@@ -348,9 +349,8 @@ export function CajaTimelineBoard({
                 </button>
               ) : null}
               {refreshing && <span className="text-[11px] text-stone-400">Actualizando…</span>}
-            </div>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="justify-self-end flex items-center gap-2 flex-wrap">
             {headerExtra}
             {onDownloadFormat ? (
               <div ref={downloadRef} className="relative">

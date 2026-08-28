@@ -38,6 +38,38 @@ describe('comandas cocina: extras / SIN', () => {
     expect(items[0].notes).toBe('Poco hecha');
   });
 
+  it('guarda mitad y mitad estructurado y en modifiers para cocina', () => {
+    const items = cartLinesToDiningItems([
+      {
+        lineId: 'l-hh',
+        catalogItem: catalogItem({
+          _id: 'hh1',
+          name: 'Mitad y mitad',
+          customFields: { halfHalf: true, halfHalfBrandId: 'b1' },
+        }),
+        quantity: 1,
+        customization: {
+          ...EMPTY_CART_CUSTOMIZATION,
+          halfHalfPizza: {
+            firstProductId: 'p-a',
+            firstProductName: 'Clásica',
+            secondProductId: 'p-b',
+            secondProductName: 'BBQ',
+          },
+        },
+      },
+    ]);
+
+    expect(items[0].modifiers).toEqual(['½ Clásica', '½ BBQ']);
+    expect(items[0].extras).toEqual(['½ Clásica', '½ BBQ']);
+    expect(items[0].halfHalfPizza).toEqual({
+      firstProductId: 'p-a',
+      firstProductName: 'Clásica',
+      secondProductId: 'p-b',
+      secondProductName: 'BBQ',
+    });
+  });
+
   it('el ticket de cocina arrastra extras e ingredientes', () => {
     const order = {
       _id: 'o1',

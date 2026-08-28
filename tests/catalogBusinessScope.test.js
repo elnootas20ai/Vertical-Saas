@@ -227,6 +227,36 @@ describe('catalogBusinessScope', () => {
     ).toBe(true);
   });
 
+  it('mientras marcas cargan, no oculta productos de la empresa (single account)', () => {
+    const items = [
+      { _id: '1', name: 'Margarita', category: 'Pizzas', brandIds: ['brand-a'] },
+      { _id: '2', name: 'Burger', category: 'Burgers', brandIds: ['brand-b'] },
+    ];
+    const pending = filterCatalogItemsForBusinessScope(items, 'biz-a', [], {
+      accountBusinessCount: 1,
+      activeBusinessType: 'delivery',
+      brandsSettled: false,
+    });
+    expect(pending.map((i) => i._id).sort()).toEqual(['1', '2']);
+
+    const settled = filterCatalogItemsForBusinessScope(items, 'biz-a', [brandA], {
+      accountBusinessCount: 2,
+      activeBusinessType: 'delivery',
+      brandsSettled: true,
+    });
+    expect(settled.map((i) => i._id)).toEqual(['1']);
+  });
+
+  it('mientras marcas cargan en multi-cuenta no mezcla legacy sin business_id', () => {
+    const items = [{ _id: '1', name: 'Margarita', category: 'Pizzas', brandIds: ['brand-a'] }];
+    const pending = filterCatalogItemsForBusinessScope(items, 'biz-a', [], {
+      accountBusinessCount: 2,
+      activeBusinessType: 'delivery',
+      brandsSettled: false,
+    });
+    expect(pending).toHaveLength(0);
+  });
+
   it('expandCatalogItemsForDeletion incluye duplicados legacy con la misma identidad', () => {
     const raw = [
       { _id: '1', module: 'catalog', name: 'Burger', category: 'Burgers', sku: 'B1' },

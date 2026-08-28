@@ -5,7 +5,7 @@ import {
   Package, Shield, ShoppingCart, Sparkles, Star, Target, TrendingUp,
   Truck, Users, Webhook, Wrench, Zap, UtensilsCrossed,
 } from 'lucide-react';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Header } from '../components/Header';
 import { Footer } from '../components/Footer';
@@ -63,7 +63,6 @@ export function LandingNew() {
   const [openFaq, setOpenFaq] = useState<number | null>(null);
   const [showComingSoonModal, setShowComingSoonModal] = useState(false);
   const [comingSoonVertical, setComingSoonVertical] = useState('');
-  const [pricingPeriod, setPricingPeriod] = useState<'monthly' | 'yearly'>('monthly');
   const [heroMetric, setHeroMetric] = useState(0);
 
   useEffect(() => {
@@ -112,15 +111,6 @@ export function LandingNew() {
   const affiliatePerks = t('landing.contact.affiliatesPerks', { returnObjects: true }) as string[];
 
   const verticalLive = [true, true, true, true, false];
-
-  const planPrices = useMemo(
-    () => [
-      { monthly: '50€', yearly: '40€', yearlyTotal: '480€' },
-      { monthly: '150€', yearly: '120€', yearlyTotal: '1.440€' },
-      { monthly: '350€', yearly: '280€', yearlyTotal: '3.360€' },
-    ],
-    [],
-  );
 
   // Re-render arrays when language changes
   void i18n.language;
@@ -457,32 +447,8 @@ export function LandingNew() {
             subtitle={t('landing.pricing.subtitle')}
           />
 
-          <div className="flex justify-center mb-12">
-            <div className="inline-flex p-1 rounded-xl bg-zinc-900 border border-zinc-800">
-              {(['monthly', 'yearly'] as const).map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setPricingPeriod(p)}
-                  className={`px-6 py-2.5 rounded-lg text-sm font-semibold transition-all ${
-                    pricingPeriod === p ? 'vertial-glow-btn text-white shadow-lg' : 'text-zinc-400 hover:text-white'
-                  }`}
-                >
-                  {p === 'monthly' ? t('landing.pricing.monthly') : t('landing.pricing.yearly')}
-                  {p === 'yearly' && (
-                    <span className={`ml-1.5 text-xs font-bold ${pricingPeriod === 'yearly' ? 'text-white/90' : 'text-teal-400'}`}>
-                      -20%
-                    </span>
-                  )}
-                </button>
-              ))}
-            </div>
-          </div>
-
           <div className="grid lg:grid-cols-3 gap-6 items-stretch mb-8">
             {(Array.isArray(pricingPlans) ? pricingPlans : []).map((plan, idx) => {
-              const prices = planPrices[idx] || planPrices[0];
-              const price = pricingPeriod === 'monthly' ? prices.monthly : prices.yearly;
               const primary = idx === 1;
               const sales = idx === 2;
               return (
@@ -500,15 +466,7 @@ export function LandingNew() {
                     </span>
                   )}
                   <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-500">{plan.name}</h3>
-                  <div className="mt-2 mb-1">
-                    <span className="text-4xl lg:text-5xl font-extrabold text-white">{price}</span>
-                    <span className="text-zinc-500 text-sm ml-1">{t('landing.pricing.perMonth')}</span>
-                  </div>
-                  {pricingPeriod === 'yearly' && (
-                    <p className="text-xs text-blue-300/80 font-medium mb-1">
-                      {t('landing.pricing.yearlyBilled', { amount: prices.yearlyTotal })}
-                    </p>
-                  )}
+                  <p className="mt-2 mb-1 text-lg font-semibold text-white">{t('landing.pricing.askPrice')}</p>
                   <p className="text-sm text-zinc-400 mb-6">{plan.desc}</p>
                   <ul className="space-y-3 mb-8 flex-1">
                     {(plan.features || []).map((f) => (

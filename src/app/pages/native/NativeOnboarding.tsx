@@ -99,6 +99,9 @@ const SLIDES: Slide[] = [
 
 const SWIPE_THRESHOLD_PX = 48;
 const DRAG_LOCK_PX = 10;
+const SLIDE_COUNT = SLIDES.length;
+/** % del ancho total del carril (n slides) = un viewport. */
+const SLIDE_SHIFT_PCT = 100 / SLIDE_COUNT;
 
 export function NativeOnboarding() {
   const navigate = useNavigate();
@@ -193,14 +196,14 @@ export function NativeOnboarding() {
     };
   }, [applyEdgeResistance, goTo]);
 
-  const trackTransform = `translate3d(calc(-${index * 100}% + ${dragX}px), 0, 0)`;
+  const trackTransform = `translate3d(calc(-${index * SLIDE_SHIFT_PCT}% + ${dragX}px), 0, 0)`;
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-zinc-950 text-white"
+      className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-zinc-950 text-white native-onboarding"
       style={{
-        paddingTop: 'env(safe-area-inset-top)',
-        paddingBottom: 'env(safe-area-inset-bottom)',
+        paddingTop: 'max(0.75rem, env(safe-area-inset-top))',
+        paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))',
       }}
     >
       <div
@@ -212,8 +215,8 @@ export function NativeOnboarding() {
         }}
       />
 
-      <div className="relative flex items-center justify-between px-6 pt-4">
-        <VertialLogo size="md" className="brightness-0 invert" />
+      <div className="relative flex shrink-0 items-center justify-between px-5 pt-2 pb-1">
+        <VertialLogo size="sm" className="brightness-0 invert" />
         {!isLast && (
           <button
             type="button"
@@ -227,12 +230,13 @@ export function NativeOnboarding() {
 
       <div
         ref={trackRef}
-        className="relative min-h-0 flex-1 touch-pan-y overflow-hidden"
+        className="relative min-h-0 flex-1 touch-pan-y overflow-hidden w-full"
         style={{ touchAction: 'pan-y' }}
       >
         <div
           className="flex h-full will-change-transform"
           style={{
+            width: `${SLIDE_COUNT * 100}%`,
             transform: trackTransform,
             transition: dragX !== 0 || !isSnapping ? 'none' : 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1)',
           }}
@@ -242,20 +246,21 @@ export function NativeOnboarding() {
             return (
               <div
                 key={slide.eyebrow}
-                className="flex h-full w-full shrink-0 flex-col justify-center overflow-y-auto overscroll-contain px-6 py-3"
+                className="flex h-full shrink-0 flex-col overflow-y-auto overscroll-contain px-5 py-2"
+                style={{ width: `${SLIDE_SHIFT_PCT}%` }}
               >
-                <div className="mx-auto w-full max-w-md">
-                  <div className="mb-5 inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 ring-1 ring-emerald-400/25">
-                    <SlideIcon className="h-7 w-7 text-emerald-400" />
+                <div className="mx-auto flex w-full max-w-md min-h-0 flex-1 flex-col justify-start">
+                  <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 ring-1 ring-emerald-400/25">
+                    <SlideIcon className="h-6 w-6 text-emerald-400" />
                   </div>
 
-                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-400/90">
+                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-400/90">
                     {slide.eyebrow}
                   </p>
-                  <h1 className="mb-3 text-[1.65rem] font-bold leading-[1.15] tracking-tight text-white sm:text-3xl">
+                  <h1 className="mb-2 text-[1.35rem] font-bold leading-tight tracking-tight text-white sm:text-[1.65rem]">
                     {slide.title}
                   </h1>
-                  <p className="mb-6 text-[15px] leading-relaxed text-zinc-400">{slide.subtitle}</p>
+                  <p className="mb-4 text-sm leading-relaxed text-zinc-400">{slide.subtitle}</p>
 
                   <div className="overflow-hidden rounded-2xl bg-white/[0.04] ring-1 ring-white/10 backdrop-blur-sm">
                     {slide.features.map((feature, featureIndex) => {
@@ -264,14 +269,14 @@ export function NativeOnboarding() {
                       return (
                         <div
                           key={feature.title}
-                          className={`flex items-start gap-3.5 px-4 py-3.5 ${isLastFeature ? '' : 'border-b border-white/[0.06]'}`}
+                          className={`flex items-start gap-3 px-3.5 py-3 ${isLastFeature ? '' : 'border-b border-white/[0.06]'}`}
                         >
-                          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10">
-                            <FeatureIcon className="h-4 w-4 text-emerald-400" />
+                          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10">
+                            <FeatureIcon className="h-3.5 w-3.5 text-emerald-400" />
                           </div>
                           <div className="min-w-0 pt-0.5">
-                            <p className="text-sm font-semibold text-zinc-100">{feature.title}</p>
-                            <p className="mt-0.5 text-sm leading-snug text-zinc-400">{feature.desc}</p>
+                            <p className="text-[13px] font-semibold text-zinc-100">{feature.title}</p>
+                            <p className="mt-0.5 text-xs leading-snug text-zinc-400">{feature.desc}</p>
                           </div>
                         </div>
                       );
@@ -284,8 +289,8 @@ export function NativeOnboarding() {
         </div>
       </div>
 
-      <div className="relative px-6 pb-6 pt-2">
-        <div className="mb-5 flex items-center justify-center gap-2">
+      <div className="relative shrink-0 px-5 pb-2 pt-1">
+        <div className="mb-4 flex items-center justify-center gap-2">
           {SLIDES.map((slide, i) => (
             <button
               key={slide.eyebrow}
@@ -309,7 +314,7 @@ export function NativeOnboarding() {
             <button
               type="button"
               onClick={() => finish(AUTH_PATHS.register)}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-6 py-3.5 text-base font-semibold text-zinc-950 shadow-lg shadow-emerald-500/20 transition-colors active:bg-emerald-400"
+              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-6 py-3 text-[15px] font-semibold text-zinc-950 shadow-lg shadow-emerald-500/20 transition-colors active:bg-emerald-400"
             >
               Registrarse
               <ArrowRight className="h-5 w-5" />
@@ -317,7 +322,7 @@ export function NativeOnboarding() {
             <button
               type="button"
               onClick={() => finish(AUTH_PATHS.entry)}
-              className="w-full rounded-2xl border border-zinc-700/80 bg-zinc-900/40 px-6 py-3.5 text-base font-medium text-zinc-200 transition-colors active:bg-zinc-800/80"
+              className="w-full rounded-2xl border border-zinc-700/80 bg-zinc-900/40 px-6 py-3 text-[15px] font-medium text-zinc-200 transition-colors active:bg-zinc-800/80"
             >
               Ya tengo cuenta
             </button>
@@ -330,7 +335,7 @@ export function NativeOnboarding() {
                 setIsSnapping(true);
                 goTo(index + 1);
               }}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-6 py-3.5 text-base font-semibold text-zinc-950 shadow-lg shadow-emerald-500/20 transition-colors active:bg-emerald-400"
+              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-6 py-3 text-[15px] font-semibold text-zinc-950 shadow-lg shadow-emerald-500/20 transition-colors active:bg-emerald-400"
             >
               Siguiente
               <ArrowRight className="h-5 w-5" />

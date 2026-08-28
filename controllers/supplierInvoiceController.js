@@ -685,6 +685,28 @@ export async function updateConfig(req, res) {
       if (!pdv) return res.status(404).json({ ok: false, error: 'PDV no encontrado' });
       const existing = pdv.supplierInvoiceConfig || {};
       const updated = mergeInvoiceEmailConfig(existing, config);
+
+      // Aviso suave: mismo buzón en otro PDV del mismo usuario (no bloquea).
+      let duplicatePdvNames = [];
+      try {
+        const allPdvs = await listPointsOfSaleByUser(req, userId);
+        const emailNorm = String(updated.imapUser || '').trim().toLowerCase();
+        if (emailNorm && updated.enabled) {
+          duplicatePdvNames = (allPdvs || [])
+            .filter((p) => p && !p.deletedAt && p._id !== pdvId)
+            .filter((p) => {
+              const other = p.supplierInvoiceConfig || {};
+              return (
+                other.enabled
+                && String(other.imapUser || '').trim().toLowerCase() === emailNorm
+              );
+            })
+            .map((p) => p.name || p.code || p._id);
+        }
+      } catch {
+        duplicatePdvNames = [];
+      }
+
       const db = getDeliveryDbName();
       pdv.supplierInvoiceConfig = updated;
       pdv.updatedAt = new Date().toISOString();
@@ -709,6 +731,12 @@ export async function updateConfig(req, res) {
         ok: true,
         pdvId,
         config: publicInvoiceEmailConfig(updated),
+        ...(duplicatePdvNames.length
+          ? {
+              warning: `El mismo correo también está en: ${duplicatePdvNames.join(', ')}`,
+              duplicatePdvNames,
+            }
+          : {}),
       });
     }
 

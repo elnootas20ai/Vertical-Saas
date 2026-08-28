@@ -919,11 +919,14 @@ async function publicAuthRequest<T>(path: string, init?: RequestInit): Promise<A
 
   if (!response.ok || payload.ok === false) {
     const fromPayload = extractApiErrorMessage(payload as Record<string, unknown>);
-    throw new AuthRequestError(fromPayload || `Error ${response.status}`, {
-      status: response.status,
-      code: typeof payload.code === 'string' ? payload.code : undefined,
-      lockUntil: typeof payload.lockUntil === 'string' ? payload.lockUntil : undefined,
-    });
+    throw new AuthRequestError(
+      fromPayload || 'Ahora mismo no podemos conectar. Inténtalo de nuevo en unos minutos.',
+      {
+        status: response.status,
+        code: typeof payload.code === 'string' ? payload.code : undefined,
+        lockUntil: typeof payload.lockUntil === 'string' ? payload.lockUntil : undefined,
+      },
+    );
   }
 
   return payload as ApiEnvelope<T>;

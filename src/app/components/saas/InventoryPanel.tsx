@@ -35,6 +35,8 @@ import {
   stockMovementSaveMessage,
   type StockMovement,
 } from '../../lib/stockMovementApi';
+import { InventoryStoreHistoryButton } from './InventoryStoreHistoryStrip';
+import { CatalogTabShell } from './CatalogTabShell';
 import { useStockWorkspace } from '../../hooks/useStockWorkspace';
 import { useVerticalCatalog } from '../../hooks/useVerticalCatalog';
 import { useBusiness } from '../../context/BusinessContext';
@@ -66,8 +68,6 @@ import {
   SaasTabPrimaryButton,
   SaasTabSearch,
   SaasTabSecondaryButton,
-  SaasTabToolbarRow,
-  SaasTabWorkspace,
 } from './SaasTabWorkspace';
 import { Tabs } from './Tabs';
 import { VERTIAL_BTN_DANGER, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
@@ -924,6 +924,7 @@ function InventoryItemDetailModal({
   const category = readInventoryCategoryLabel(item);
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [loadingMovements, setLoadingMovements] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const [movementMode, setMovementMode] = useState<MovementMode | null>(null);
   const [savingMeta, setSavingMeta] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -935,6 +936,8 @@ function InventoryItemDetailModal({
     setMinStock(String(item.minStock ?? 0));
     setCostPrice(String(item.costPrice ?? 0));
     setTrackStock(item.isStockItem !== false);
+    setMovements([]);
+    setHistoryLoaded(false);
   }, [item._id, item.minStock, item.costPrice, item.isStockItem]);
 
   const loadMovements = useCallback(async () => {
@@ -943,16 +946,14 @@ function InventoryItemDetailModal({
     try {
       const rows = await getMovementsByItemRequest(userId, item._id);
       setMovements([...rows].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))));
+      setHistoryLoaded(true);
     } catch {
       setMovements([]);
+      setHistoryLoaded(true);
     } finally {
       setLoadingMovements(false);
     }
   }, [userId, item._id]);
-
-  useEffect(() => {
-    void loadMovements();
-  }, [loadMovements]);
 
   const saveMeta = async () => {
     setSavingMeta(true);
@@ -1045,32 +1046,12 @@ function InventoryItemDetailModal({
           </label>
         </section>
 
-        <section>
-          <div className="flex flex-wrap gap-1.5">
-            <button type="button" onClick={() => setMovementMode('in')} className={opBtnClass}>
-              <ArrowDownCircle className="w-3.5 h-3.5" /> Entrada
-            </button>
-            <button type="button" onClick={() => setMovementMode('out')} className={opBtnClass}>
-              <ArrowUpCircle className="w-3.5 h-3.5" /> Salida
-            </button>
-            <button type="button" onClick={() => setMovementMode('adjust')} className={opBtnClass}>
-              <SlidersHorizontal className="w-3.5 h-3.5" /> Ajuste
-            </button>
+        {loadingMovements ? (
+          <div className="flex justify-center py-4">
+            <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
           </div>
-        </section>
-
-        <section>
-          <div className="flex items-center justify-between mb-1.5">
-            <h3 className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Historial</h3>
-            <button type="button" onClick={() => void loadMovements()} className="p-1 text-gray-400 hover:text-gray-700" aria-label="Actualizar">
-              <RefreshCw className="w-3.5 h-3.5" />
-            </button>
-          </div>
-          {loadingMovements ? (
-            <div className="flex justify-center py-4">
-              <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
-            </div>
-          ) : movements.length === 0 ? (
+        ) : historyLoaded ? (
+          movements.length === 0 ? (
             <p className="text-xs text-gray-500 py-1">Sin movimientos.</p>
           ) : (
             <div className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
@@ -1100,28 +1081,52 @@ function InventoryItemDetailModal({
                 </tbody>
               </table>
             </div>
-          )}
-        </section>
+          )
+        ) : null}
       </div>
 
-      <div className="shrink-0 px-4 py-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-end gap-2">
+      <div className="shrink-0 px-4 py-3 border-t border-gray-100 dark:border-gray-800 space-y-2.5">
         <button
           type="button"
-          onClick={() => void deleteItem()}
-          disabled={deleting || savingMeta}
-          className={`${VERTIAL_BTN_DANGER} !min-h-0 px-3 py-2 text-xs`}
+          onClick={() => void loadMovements()}
+          disabled={loadingMovements}
+          className={`${opBtnClass} w-full justify-center`}
         >
-          {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-          Eliminar
+          {loadingMovements ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+          {historyLoaded ? 'Actualizar historial' : 'Historial'}
         </button>
-        <button
-          type="button"
-          onClick={() => void saveMeta()}
-          disabled={savingMeta || deleting}
-          className={`${VERTIAL_BTN_SECONDARY} !min-h-0 px-3 py-2 text-xs`}
-        >
-          {savingMeta ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Guardar'}
-        </button>
+
+        <div className="flex flex-wrap gap-1.5">
+          <button type="button" onClick={() => setMovementMode('in')} className={opBtnClass}>
+            <ArrowDownCircle className="w-3.5 h-3.5" /> Entrada
+          </button>
+          <button type="button" onClick={() => setMovementMode('out')} className={opBtnClass}>
+            <ArrowUpCircle className="w-3.5 h-3.5" /> Salida
+          </button>
+          <button type="button" onClick={() => setMovementMode('adjust')} className={opBtnClass}>
+            <SlidersHorizontal className="w-3.5 h-3.5" /> Ajuste
+          </button>
+        </div>
+
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => void deleteItem()}
+            disabled={deleting || savingMeta}
+            className={`${VERTIAL_BTN_DANGER} !min-h-0 px-3 py-2 text-xs`}
+          >
+            {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+            Eliminar
+          </button>
+          <button
+            type="button"
+            onClick={() => void saveMeta()}
+            disabled={savingMeta || deleting}
+            className={`${VERTIAL_BTN_SECONDARY} !min-h-0 px-3 py-2 text-xs`}
+          >
+            {savingMeta ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Guardar'}
+          </button>
+        </div>
       </div>
 
       {movementMode ? (
@@ -1133,7 +1138,7 @@ function InventoryItemDetailModal({
           onClose={() => setMovementMode(null)}
           onDone={(result) => {
             onUpdated(result);
-            void loadMovements();
+            if (historyLoaded) void loadMovements();
           }}
         />
       ) : null}
@@ -1175,8 +1180,12 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
   const [storeIngredients, setStoreIngredients] = useState<StoreIngredient[]>([]);
   const [commercialBrands, setCommercialBrands] = useState<InventoryCommercialBrand[]>([]);
   const [productBrands, setProductBrands] = useState<{ id: string; name: string }[]>([]);
+  const [organizerMetaReady, setOrganizerMetaReady] = useState(() => !businessId);
   const [syncing, setSyncing] = useState(false);
   const [syncDetail, setSyncDetail] = useState('');
+  const [historyRefreshToken, setHistoryRefreshToken] = useState(0);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyStale, setHistoryStale] = useState(false);
   const autoSyncStartedRef = useRef(false);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
@@ -1228,8 +1237,10 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
         setCommercialBrands([]);
         setProductBrands([]);
         setStoreIngredients([]);
+        setOrganizerMetaReady(true);
         return;
       }
+      setOrganizerMetaReady(false);
       try {
         const [brandList, cfg] = await Promise.all([
           listBrandsRequest(businessId).catch(() => []),
@@ -1238,10 +1249,11 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
         if (cancelled) return;
         const commercial = commercialLineBrands(brandList);
         setCommercialBrands(
-          brandList.map((b) => ({
+          commercial.map((b) => ({
             _id: b._id,
             name: b.name,
             deliveryLineKind: b.deliveryLineKind,
+            primaryColor: String(b.primaryColor || '').trim() || undefined,
           })),
         );
         setProductBrands(
@@ -1255,6 +1267,8 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
           setStoreIngredients(
             normalizeStoreIngredients(unifyStoreIngredientsFromConfig(cfg, brandIds)),
           );
+        } else {
+          setStoreIngredients([]);
         }
       } catch {
         if (!cancelled) {
@@ -1262,6 +1276,8 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
           setProductBrands([]);
           setStoreIngredients([]);
         }
+      } finally {
+        if (!cancelled) setOrganizerMetaReady(true);
       }
     })();
     return () => {
@@ -1285,10 +1301,19 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
 
   const stats = useMemo(() => computeInventoryStats(scopedItems), [scopedItems]);
 
-  const typeGroups = useMemo(
-    () => buildInventoryOrganizerGroups(scopedItems, storeIngredients, commercialBrands).filter((g) => g.id !== ORGANIZER_TOTAL || g.total > 0),
-    [scopedItems, storeIngredients, commercialBrands],
-  );
+  const typeGroups = useMemo(() => {
+    // No pintar chips hasta tener marcas/config: si no, salen «Ingredientes» genéricos y luego saltan.
+    if (!organizerMetaReady) return [];
+    return buildInventoryOrganizerGroups(scopedItems, storeIngredients, commercialBrands).filter(
+      (g) => g.id !== ORGANIZER_TOTAL || g.total > 0,
+    );
+  }, [organizerMetaReady, scopedItems, storeIngredients, commercialBrands]);
+
+  useEffect(() => {
+    if (!typeFilter) return;
+    if (typeGroups.some((g) => g.id === typeFilter)) return;
+    setTypeFilter('');
+  }, [typeFilter, typeGroups]);
 
   const statusTabs = useMemo(
     () => [
@@ -1402,6 +1427,7 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
     (result?: StockMovementDone) => {
       if (result) applyLocalStockFromMovement(result);
       scheduleStockReload();
+      setHistoryRefreshToken((n) => n + 1);
     },
     [applyLocalStockFromMovement, scheduleStockReload],
   );
@@ -1600,75 +1626,71 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
 
   return (
     <>
-      <SaasTabWorkspace
-        stats={[
-          { label: 'artículos', value: stats.total },
-          { label: 'correcto', value: stats.ok, tone: 'emerald' },
-          { label: 'bajo', value: stats.low, tone: stats.low > 0 ? 'amber' : 'default' },
-          { label: 'sin stock', value: stats.out, tone: stats.out > 0 ? 'red' : 'default' },
-          { label: 'valor €', value: stats.estimatedValue.toFixed(0), tone: 'indigo' },
-        ]}
-        banner={
-          <div className="space-y-1">
-            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
-              <p className="text-stone-600 dark:text-stone-300 min-w-0">
-                Stock de <strong className="text-stone-900 dark:text-white">{storeLabel || 'Almacén'}</strong>
-                {' · '}mismo catálogo; cantidades por tienda.
-              </p>
-              <SaasTabSecondaryButton
-                onClick={() => void runInventorySync(false, true)}
-                disabled={syncing || !dataUserId || bulkDeleting}
-                title="Inventario + escandallo + recetas (puede tardar un minuto)"
-                className="shrink-0"
-              >
-                {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                Sincronizar
-              </SaasTabSecondaryButton>
-            </div>
-            {syncing ? (
-              <p className="text-xs font-medium text-amber-800 dark:text-amber-300 flex items-center gap-2">
-                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
-                {syncDetail || 'Sincronizando inventario…'}
-              </p>
-            ) : refreshing && scopedItems.length === 0 ? (
-              <p className="text-xs text-stone-500 dark:text-stone-400 flex items-center gap-2">
-                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
-                {loadDetail || 'Actualizando almacén…'}
-              </p>
+      <CatalogTabShell
+        storeLabel={storeLabel || 'Almacén'}
+        dataUserId={dataUserId}
+        storeWarehouseId={storeWarehouseId}
+        historyOpen={historyOpen}
+        onHistoryOpenChange={setHistoryOpen}
+        historyRefreshToken={historyRefreshToken}
+        onHistoryStaleChange={setHistoryStale}
+        hideChromeWhenHistoryOpen
+        toolbarLeftExtra={
+          <>
+            <SaasTabSearch
+              value={search}
+              onChange={setSearch}
+              placeholder="Buscar artículo…"
+              className="relative w-full min-w-[10rem] sm:w-52"
+            />
+            {brands.length > 0 ? (
+              <select className={selectClass} value={brandFilter} onChange={(e) => setBrandFilter(e.target.value)}>
+                <option value="">Todas las marcas</option>
+                {brands.map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </select>
             ) : null}
-          </div>
+          </>
         }
-        toolbar={
-          <SaasTabToolbarRow
-            left={
-              <>
-                <SaasTabSearch value={search} onChange={setSearch} placeholder="Buscar artículo…" className="relative w-full sm:w-52" />
-                {brands.length > 0 ? (
-                  <select className={selectClass} value={brandFilter} onChange={(e) => setBrandFilter(e.target.value)}>
-                    <option value="">Todas las marcas</option>
-                    {brands.map((b) => (
-                      <option key={b} value={b}>
-                        {b}
-                      </option>
-                    ))}
-                  </select>
-                ) : null}
-              </>
-            }
-            right={
-              <InventoryWarehouseActionsMenu
-                disabled={bulkDeleting || selectMode}
-                scanDisabled={!dataUserId || bulkDeleting || selectMode}
-                entryDisabled={!dataUserId || bulkDeleting || selectMode}
-                onScanInvoice={() => setShowInvoiceOcr(true)}
-                onAddArticle={() => setShowAdd(true)}
-                onAddEntry={() => setShowEntryPicker(true)}
-              />
-            }
-          />
+        toolbarRight={
+          <>
+            <SaasTabSecondaryButton
+              onClick={() => void runInventorySync(false, true)}
+              disabled={syncing || !dataUserId || bulkDeleting}
+              title="Inventario + escandallo + recetas (puede tardar un minuto)"
+            >
+              {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+              Sincronizar
+            </SaasTabSecondaryButton>
+            <InventoryWarehouseActionsMenu
+              disabled={bulkDeleting || selectMode}
+              scanDisabled={!dataUserId || bulkDeleting || selectMode}
+              entryDisabled={!dataUserId || bulkDeleting || selectMode}
+              onScanInvoice={() => setShowInvoiceOcr(true)}
+              onAddArticle={() => setShowAdd(true)}
+              onAddEntry={() => setShowEntryPicker(true)}
+            />
+          </>
+        }
+        toolbarBelow={
+          syncing ? (
+            <p className="text-xs font-medium text-amber-800 dark:text-amber-300 flex items-center gap-2">
+              <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+              {syncDetail || 'Sincronizando inventario…'}
+            </p>
+          ) : refreshing && scopedItems.length === 0 ? (
+            <p className="text-xs text-stone-500 dark:text-stone-400 flex items-center gap-2">
+              <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+              {loadDetail || 'Actualizando almacén…'}
+            </p>
+          ) : null
         }
       >
         {refreshing && scopedItems.length === 0 ? (
+
           <div className="px-3 py-6 space-y-3" aria-busy="true" aria-live="polite">
             <div className="flex items-center gap-2 text-sm text-stone-500 dark:text-stone-400">
               <Loader2 className="w-4 h-4 animate-spin shrink-0" />
@@ -1703,6 +1725,11 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
                   {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                   Sincronizar ingredientes
                 </SaasTabSecondaryButton>
+                <InventoryStoreHistoryButton
+                  open={historyOpen}
+                  onOpenChange={setHistoryOpen}
+                  stale={historyStale}
+                />
               </div>
             }
           />
@@ -1717,7 +1744,7 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
                     setStatusFilter((prev) => (prev === id ? 'all' : (id as StatusFilter)));
                   }}
                 />
-                <div className="flex items-center gap-1.5 shrink-0">
+                <div className="flex items-center gap-1.5 shrink-0 ml-auto">
                   {selectMode ? (
                     <>
                       <button
@@ -1776,6 +1803,11 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
                       <Trash2 className="w-4 h-4" />
                     </button>
                   )}
+                  <InventoryStoreHistoryButton
+                    open={historyOpen}
+                    onOpenChange={setHistoryOpen}
+                    stale={historyStale}
+                  />
                 </div>
               </div>
               {typeGroups.length > 0 ? (
@@ -1872,7 +1904,53 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
           </div>
           </>
         )}
-      </SaasTabWorkspace>
+        {!historyOpen ? (
+          <div className="flex flex-wrap items-center gap-y-1.5 px-3 py-2 border-t border-gray-100 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/40 rounded-b-xl">
+            <div className="flex flex-wrap items-center gap-y-1.5 divide-x divide-gray-200/80 dark:divide-gray-700">
+              {(
+                [
+                  { label: 'artículos', value: stats.total, tone: 'default' as const },
+                  { label: 'correcto', value: stats.ok, tone: 'emerald' as const },
+                  {
+                    label: 'bajo',
+                    value: stats.low,
+                    tone: (stats.low > 0 ? 'amber' : 'default') as 'amber' | 'default',
+                  },
+                  {
+                    label: 'sin stock',
+                    value: stats.out,
+                    tone: (stats.out > 0 ? 'red' : 'default') as 'red' | 'default',
+                  },
+                  {
+                    label: 'valor €',
+                    value: stats.estimatedValue.toFixed(0),
+                    tone: 'indigo' as const,
+                  },
+                ] as const
+              ).map((s) => {
+                const toneClass =
+                  s.tone === 'amber'
+                    ? 'text-amber-700 dark:text-amber-400'
+                    : s.tone === 'emerald'
+                      ? 'text-emerald-700 dark:text-emerald-400'
+                      : s.tone === 'red'
+                        ? 'text-red-700 dark:text-red-400'
+                        : s.tone === 'indigo'
+                          ? 'text-indigo-700 dark:text-indigo-400'
+                          : 'text-gray-900 dark:text-gray-100';
+                return (
+                  <div key={s.label} className="flex items-baseline gap-1.5 px-3 first:pl-0">
+                    <span className={`text-sm font-bold tabular-nums ${toneClass}`}>{s.value}</span>
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                      {s.label}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+      </CatalogTabShell>
 
       {selectedItem ? (
         <InventoryItemDetailModal
