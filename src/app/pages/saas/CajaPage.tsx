@@ -10,6 +10,7 @@ import { resolveBusinessScopeId } from '../../lib/businessStoreScope';
 import {
   listCajaBootstrapRequest,
   updateTpvRegisterSessionRequest,
+  reopenTpvRegisterSessionRequest,
   filterDeliveryOrdersRequest,
   pointOfSaleDisplayLabel,
   type TpvRegisterSession,
@@ -25,7 +26,7 @@ import {
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Filter, Calendar, Eye,
   MessageSquare, TrendingUp, TrendingDown, Hash,
   Truck, MapPin,
-  ArrowLeft, Plug, History, ShoppingBag, Radio, Lock,
+  ArrowLeft, Plug, History, ShoppingBag, Radio, Lock, RotateCcw,
 } from 'lucide-react';
 import {
   buildDailyAggregatorRows,
@@ -63,6 +64,7 @@ import {
   tpvSessionBelongsToBusiness,
 } from '../../lib/tpvCajaScope';
 import { resolveCajaPageExitPath } from '../../lib/retailOpsPaths';
+import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -665,9 +667,32 @@ function RegisterCard({
   );
 }
 
-// ─── Cierre completo (solo lectura) ─────────────────────────────────────────
+// ─── Cierre completo (solo lectura + reajuste CEO) ───────────────────────────
 
-function ClosingViewModal({ session, onClose }: { session: TpvRegisterSession; onClose: () => void }) {
+function ClosingViewModal({
+  session,
+  onClose,
+  onReadjust,
+  readjustBusy,
+}: {
+  session: TpvRegisterSession;
+  onClose: () => void;
+  onReadjust?: (reason: string) => Promise<void>;
+  readjustBusy?: boolean;
+}) {
+  const canReadjust = Boolean(onReadjust) && session.status === 'closed';
+  const [showReason, setShowReason] = useState(false);
+  const [reason, setReason] = useState('');
+
+  const submitReadjust = async () => {
+    const note = reason.trim();
+    if (!note) {
+      toast.error('Indica por qué se reajusta la caja');
+      return;
+    }
+    await onReadjust?.(note);
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6">
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col min-h-0" style={{ maxHeight: '96vh' }}>
@@ -681,10 +706,65 @@ function ClosingViewModal({ session, onClose }: { session: TpvRegisterSession; o
         <div className="flex-1 min-h-0 overflow-y-auto p-6">
           <RegisterClosingDetailPanel session={session} />
         </div>
-        <div className="flex-shrink-0 p-6 border-t border-gray-200 dark:border-gray-700">
-          <button type="button" onClick={onClose} className="w-full py-3 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-semibold">
-            Cerrar
-          </button>
+        <div className="flex-shrink-0 p-4 sm:p-6 border-t border-gray-200 dark:border-gray-700 space-y-3">
+          {showReason && canReadjust ? (
+            <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30 p-3 space-y-2">
+              <p className="text-xs font-semibold text-amber-900 dark:text-amber-100">
+                Motivo del reajuste *
+              </p>
+              <textarea
+                rows={3}
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                disabled={readjustBusy}
+                className="w-full px-3 py-2.5 rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-sm text-stone-900 dark:text-stone-100 resize-none outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                placeholder="Ej: Error en el conteo de efectivo, apps mal declaradas…"
+                autoFocus
+              />
+              <p className="text-[11px] text-amber-800/80 dark:text-amber-200/80">
+                Obligatorio. Se guarda en el historial y la caja vuelve a abrirse (hoy o ayer).
+              </p>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <button
+                  type="button"
+                  disabled={readjustBusy}
+                  onClick={() => { setShowReason(false); setReason(''); }}
+                  className={`${VERTIAL_BTN_SECONDARY} flex-1`}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={readjustBusy || !reason.trim()}
+                  onClick={() => void submitReadjust()}
+                  className={`${VERTIAL_BTN_PRIMARY} flex-1`}
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  {readjustBusy ? 'Reajustando…' : 'Confirmar reajuste'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col sm:flex-row gap-2">
+              {canReadjust ? (
+                <button
+                  type="button"
+                  onClick={() => setShowReason(true)}
+                  className={`${VERTIAL_BTN_PRIMARY} flex-1`}
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  Reajustar caja
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={onClose}
+                className={`${canReadjust ? VERTIAL_BTN_SECONDARY : VERTIAL_BTN_PRIMARY} flex-1`}
+              >
+                Cerrar
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -720,6 +800,7 @@ export function CajaPage() {
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [forcingSessionId, setForcingSessionId] = useState<string | null>(null);
+  const [readjustBusy, setReadjustBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const hasLoadedOnceRef = useRef(false);
 
@@ -727,6 +808,27 @@ export function CajaPage() {
   const handleViewClosing = useCallback((session: TpvRegisterSession) => {
     setViewingClosingSession(session);
   }, []);
+
+  const handleReadjustClosing = useCallback(async (reason: string) => {
+    if (!dataUserId || !viewingClosingSession?._id) return;
+    setReadjustBusy(true);
+    try {
+      const reopened = await reopenTpvRegisterSessionRequest(
+        dataUserId,
+        viewingClosingSession._id,
+        reason,
+      );
+      setSessions((prev) => prev.map((s) => (s._id === reopened._id ? reopened : s)));
+      setViewingClosingSession(null);
+      toast.success(
+        `Caja reajustada: ${reopened.pointOfSaleName || 'tienda'}. Continúa el turno en el TPV.`,
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo reajustar la caja');
+    } finally {
+      setReadjustBusy(false);
+    }
+  }, [dataUserId, viewingClosingSession]);
 
   const pointsOfSale = activeStoreScope.allPointsOfSale.length > 0
     ? activeStoreScope.allPointsOfSale
@@ -1201,6 +1303,8 @@ export function CajaPage() {
         <ClosingViewModal
           session={viewingClosingSession}
           onClose={() => setViewingClosingSession(null)}
+          onReadjust={handleReadjustClosing}
+          readjustBusy={readjustBusy}
         />
       )}
     </Layout>
