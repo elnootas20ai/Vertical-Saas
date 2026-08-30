@@ -54,6 +54,14 @@ describe('activeStoreSidebarSelection', () => {
     expect(resolveActiveOpsStoreRowId(rows, null, null)).toBe('pdv-a');
   });
 
+  it('keeps preference highlight when activeSalesPointId is still null', () => {
+    expect(resolveActiveOpsStoreRowId(rows, null, 'pdv-b')).toBe('pdv-b');
+  });
+
+  it('does not fall back to first store when preference is unknown', () => {
+    expect(resolveActiveOpsStoreRowId(rows, null, 'pdv-missing')).toBe(null);
+  });
+
   it('compraventa allows only one work center', () => {
     const ids = ['wc-1', 'wc-2'];
     expect(resolveActiveWorkCenterRowId(ids, 'wc-1')).toBe('wc-1');

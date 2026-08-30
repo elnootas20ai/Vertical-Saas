@@ -1,5 +1,9 @@
 import type { Business } from './businessApi';
-import { isDeliveryOpsBusinessType, isRestaurantBusinessType } from './deliveryOpsTypes';
+import {
+  isDeliveryOpsBusinessType,
+  isEventsBusinessType,
+  isRestaurantBusinessType,
+} from './deliveryOpsTypes';
 import {
   isTpvTabletBindingAllowedForAuth,
   isTpvTabletWorkerPath,
@@ -38,7 +42,7 @@ function isDeliveryBusinessType(businessType?: string | null): boolean {
 }
 
 /**
- * Catálogo TPV: delivery y restaurante usan el catálogo de su propia empresa.
+ * Catálogo TPV: delivery, restaurante y eventos usan el catálogo de su propia empresa.
  * Solo redirige al negocio delivery si el selector apunta a otra vertical (p. ej. limpieza).
  */
 export function resolveTpvCatalogBusinessId(
@@ -52,7 +56,8 @@ export function resolveTpvCatalogBusinessId(
   if (
     match &&
     (isDeliveryOpsBusinessType(match.businessType) ||
-      isRestaurantBusinessType(match.businessType))
+      isRestaurantBusinessType(match.businessType) ||
+      isEventsBusinessType(match.businessType))
   ) {
     return bid;
   }
@@ -88,6 +93,8 @@ export function shouldAutoSwitchToDeliveryBusiness(
   if (!currentId || currentId === deliveryId) return null;
   if (isDeliveryOpsBusinessType(currentBusiness?.businessType)) return null;
   if (isRestaurantBusinessType(currentBusiness?.businessType)) return null;
+  // Eventos: Ir a TPV debe abrir FOMO/PDV del evento, no saltar al delivery de la cuenta.
+  if (isEventsBusinessType(currentBusiness?.businessType)) return null;
   if (isDeliveryBusinessType(currentBusiness?.businessType)) return null;
   return deliveryId;
 }

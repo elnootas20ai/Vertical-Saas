@@ -468,8 +468,9 @@ export function SuppliersPage() {
 
     void (async () => {
       try {
-        const [items, invs, ords] = await Promise.all([
-          listCatalogItemsRequest(dataUserId, 'stock'),
+        const [stockItems, cartaItems, invs, ords] = await Promise.all([
+          listCatalogItemsRequest(dataUserId, 'stock').catch(() => [] as CatalogItem[]),
+          listCatalogItemsRequest(dataUserId, 'catalog').catch(() => [] as CatalogItem[]),
           listPurchaseInvoicesRequest(dataUserId, {
             businessId: businessId || undefined,
             accountBusinessCount,
@@ -479,7 +480,11 @@ export function SuppliersPage() {
             accountBusinessCount,
           }),
         ]);
-        setCatalogItems(items);
+        const byId = new Map<string, CatalogItem>();
+        for (const item of [...cartaItems, ...stockItems]) {
+          if (item?._id) byId.set(item._id, item);
+        }
+        setCatalogItems([...byId.values()]);
         setInvoices(filterPurchaseDocsByBusinessScope(invs, businessId, accountBusinessCount));
         setOrders(filterPurchaseDocsByBusinessScope(ords, businessId, accountBusinessCount));
         let loadedBrands: Brand[] = [];
@@ -666,7 +671,7 @@ export function SuppliersPage() {
         s.name.toLowerCase().includes(q) || s.cif?.toLowerCase().includes(q) || s.category?.toLowerCase().includes(q) || s.contactPerson?.toLowerCase().includes(q)
       );
     }
-    return list;
+    return [...list].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
   }, [suppliers, searchSupplier, quickFilter, suppliersWithOverdue, orders, invoices]);
 
   return (

@@ -17,6 +17,7 @@ import {
   sanitizeFinance,
   listPointsOfSaleByUser,
   getDeliveryDbName,
+  resolveDataOwnerUserId,
 } from '../services/couchdb.js';
 import { applyQueryOptions } from '../middleware/queryOptions.js';
 import { testImapConnection } from '../services/imapService.js';
@@ -24,6 +25,42 @@ import { processIncomingEmails, runOcrOnBuffer } from '../services/supplierInvoi
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
+}
+
+function normalizeScopeUserId(userId) {
+  const value = String(userId || '').trim();
+  return value.startsWith('account:') ? value.slice('account:'.length) : value;
+}
+
+function normalizeBusinessScopeId(value) {
+  return String(value || '').replace(/^business:/, '').trim();
+}
+
+function pdvBusinessId(pdv = {}) {
+  return normalizeBusinessScopeId(pdv.businessId || pdv.business_id || '');
+}
+
+/** Solo el titular o un miembro de su equipo puede tocar datos de ese userId. */
+async function assertSupplierInvoiceAccess(req, dataUserId) {
+  const authUserId = normalizeScopeUserId(req.authUser?.userId || req.authUser?.user_id);
+  if (!authUserId || !dataUserId) return false;
+  if (authUserId === dataUserId) return true;
+
+  const authRes = await resolveDataOwnerUserId(req, authUserId);
+  const authOwner = normalizeScopeUserId(authRes.ownerUserId || authUserId);
+  if (authOwner === dataUserId) return true;
+
+  const authAccount = authRes.account || (await findAccountByUserId(req, authUserId));
+  if (authAccount && normalizeScopeUserId(authAccount.invitedBy) === dataUserId) return true;
+
+  return false;
+}
+
+async function resolveSupplierDataUserId(req, rawUserId) {
+  const normalized = normalizeScopeUserId(rawUserId);
+  if (!normalized) return '';
+  const { ownerUserId } = await resolveDataOwnerUserId(req, normalized);
+  return normalizeScopeUserId(ownerUserId || normalized);
 }
 
 function publicInvoiceEmailConfig(config = {}) {
@@ -84,7 +121,7 @@ function mergeInvoiceEmailConfig(existing = {}, config = {}) {
   };
 }
 
-async function loadOwnedPdv(req, userId, pdvId) {
+async function loadOwnedPdv(req, userId, pdvId, businessId) {
   const id = String(pdvId || '').trim();
   if (!id) return null;
   const db = getDeliveryDbName();
@@ -94,6 +131,12 @@ async function loadOwnedPdv(req, userId, pdvId) {
   // Misma regla que el resto del TPV (no solo user_id exacto).
   const { pdvDocMatchesUser } = await import('../services/couchdb.js');
   if (!pdvDocMatchesUser(doc, userId)) return null;
+  const wantBiz = normalizeBusinessScopeId(businessId);
+  if (wantBiz) {
+    const docBiz = pdvBusinessId(doc);
+    // PDV con empresa distinta → no pertenece a este scope.
+    if (docBiz && docBiz !== wantBiz) return null;
+  }
   return doc;
 }
 
@@ -479,14 +522,26 @@ export async function supplierInvoiceStats(req, res) {
 
 export async function pollNow(req, res) {
   try {
-    const { userId } = req.params;
-    if (!userId) return badRequest(res, 'Falta userId');
+    const dataUserId = await resolveSupplierDataUserId(req, req.params.userId);
+    if (!dataUserId) return badRequest(res, 'Falta userId');
+    if (!(await assertSupplierInvoiceAccess(req, dataUserId))) {
+      return res.status(403).json({ ok: false, error: 'No autorizado' });
+    }
 
-    const account = await findAccountByUserId(req, userId);
+    const account = await findAccountByUserId(req, dataUserId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
     const pdvId = String(req.body?.pdvId || req.query?.pdvId || '').trim();
-    const summary = await processIncomingEmails(userId, undefined, pdvId ? { pdvId } : {});
+    const businessId = normalizeBusinessScopeId(req.body?.businessId || req.query?.businessId);
+    if (pdvId) {
+      const pdv = await loadOwnedPdv(req, dataUserId, pdvId, businessId);
+      if (!pdv) return res.status(404).json({ ok: false, error: 'PDV no encontrado' });
+    }
+    const summary = await processIncomingEmails(
+      dataUserId,
+      undefined,
+      pdvId ? { pdvId, businessId: businessId || undefined } : {},
+    );
     return res.json({ ok: true, summary });
   } catch (error) {
     const raw = String(error?.message || error || 'Error al ejecutar polling');
@@ -565,18 +620,30 @@ export async function rescanInvoice(req, res) {
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 
-/** Resumen por PDV: conectado / no, sin contraseña. */
+/** Resumen por PDV: conectado / no, sin contraseña. Aislado por cuenta (+ empresa si se pide). */
 export async function listPdvEmailConfigs(req, res) {
   try {
-    const { userId } = req.params;
-    if (!userId) return badRequest(res, 'Falta userId');
+    const dataUserId = await resolveSupplierDataUserId(req, req.params.userId);
+    if (!dataUserId) return badRequest(res, 'Falta userId');
+    if (!(await assertSupplierInvoiceAccess(req, dataUserId))) {
+      return res.status(403).json({ ok: false, error: 'No autorizado' });
+    }
 
-    const account = await findAccountByUserId(req, userId);
+    const account = await findAccountByUserId(req, dataUserId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
-    const pdvs = await listPointsOfSaleByUser(req, userId);
+    const scopeBusinessId = normalizeBusinessScopeId(req.query?.businessId);
+    const accountBusinessCount = Number(req.query?.accountBusinessCount || 0);
+    const pdvs = await listPointsOfSaleByUser(req, dataUserId);
     const items = (pdvs || [])
       .filter((p) => p && !p.deletedAt && p.active !== false)
+      .filter((p) => {
+        if (!scopeBusinessId) return true;
+        const bid = pdvBusinessId(p);
+        if (bid) return bid === scopeBusinessId;
+        // Legacy sin businessId: solo con 1 empresa en la cuenta (no mezclar multi-empresa).
+        return accountBusinessCount === 1;
+      })
       .map((p) => {
         const cfg = p.supplierInvoiceConfig || {};
         const host = String(cfg.imapHost || '').trim();
@@ -587,7 +654,7 @@ export async function listPdvEmailConfigs(req, res) {
           name: p.name || '',
           code: p.code || '',
           workCenterId: p.workCenterId || '',
-          businessId: p.businessId || p.business_id || '',
+          businessId: pdvBusinessId(p),
           connected,
           enabled: Boolean(cfg.enabled),
           imapUser: user,
@@ -602,8 +669,12 @@ export async function listPdvEmailConfigs(req, res) {
 
     return res.json({
       ok: true,
+      businessId: scopeBusinessId || undefined,
       pdvs: items,
-      legacyAccount: { connected: legacyConnected, config: legacy },
+      // Legado cuenta: solo si no hay filtro de empresa (evita filtrar correo ajeno a la tienda).
+      legacyAccount: scopeBusinessId
+        ? { connected: false, config: publicInvoiceEmailConfig({}) }
+        : { connected: legacyConnected, config: legacy },
     });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al listar configs PDV' });
@@ -612,19 +683,24 @@ export async function listPdvEmailConfigs(req, res) {
 
 export async function getConfig(req, res) {
   try {
-    const { userId } = req.params;
-    if (!userId) return badRequest(res, 'Falta userId');
+    const dataUserId = await resolveSupplierDataUserId(req, req.params.userId);
+    if (!dataUserId) return badRequest(res, 'Falta userId');
+    if (!(await assertSupplierInvoiceAccess(req, dataUserId))) {
+      return res.status(403).json({ ok: false, error: 'No autorizado' });
+    }
 
-    const account = await findAccountByUserId(req, userId);
+    const account = await findAccountByUserId(req, dataUserId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
     const pdvId = String(req.query?.pdvId || '').trim();
+    const businessId = normalizeBusinessScopeId(req.query?.businessId);
     if (pdvId) {
-      const pdv = await loadOwnedPdv(req, userId, pdvId);
+      const pdv = await loadOwnedPdv(req, dataUserId, pdvId, businessId);
       if (!pdv) return res.status(404).json({ ok: false, error: 'PDV no encontrado' });
       return res.json({
         ok: true,
         pdvId,
+        businessId: pdvBusinessId(pdv) || businessId || undefined,
         config: publicInvoiceEmailConfig(pdv.supplierInvoiceConfig || {}),
       });
     }
@@ -641,15 +717,19 @@ export async function getConfig(req, res) {
 
 export async function updateConfig(req, res) {
   try {
-    const { userId } = req.params;
-    const { config, pdvId: bodyPdvId } = req.body || {};
-    if (!userId) return badRequest(res, 'Falta userId');
+    const dataUserId = await resolveSupplierDataUserId(req, req.params.userId);
+    const { config, pdvId: bodyPdvId, businessId: bodyBusinessId } = req.body || {};
+    if (!dataUserId) return badRequest(res, 'Falta userId');
+    if (!(await assertSupplierInvoiceAccess(req, dataUserId))) {
+      return res.status(403).json({ ok: false, error: 'No autorizado' });
+    }
     if (!config || typeof config !== 'object') return badRequest(res, 'Falta el objeto config');
 
-    const account = await findAccountByUserId(req, userId);
+    const account = await findAccountByUserId(req, dataUserId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
     const pdvId = String(bodyPdvId || req.query?.pdvId || '').trim();
+    const businessId = normalizeBusinessScopeId(bodyBusinessId || req.query?.businessId);
 
     if (config.enabled) {
       const { isImapConfigured } = await import('../services/imapService.js');
@@ -661,7 +741,7 @@ export async function updateConfig(req, res) {
         : '';
 
       if (pdvId) {
-        const pdv = await loadOwnedPdv(req, userId, pdvId);
+        const pdv = await loadOwnedPdv(req, dataUserId, pdvId, businessId);
         if (!pdv) return res.status(404).json({ ok: false, error: 'PDV no encontrado' });
         existingPass = String(pdv.supplierInvoiceConfig?.imapPassword || '');
         if (!draftHost) draftHost = String(pdv.supplierInvoiceConfig?.imapHost || '').trim();
@@ -681,20 +761,25 @@ export async function updateConfig(req, res) {
     }
 
     if (pdvId) {
-      const pdv = await loadOwnedPdv(req, userId, pdvId);
+      const pdv = await loadOwnedPdv(req, dataUserId, pdvId, businessId);
       if (!pdv) return res.status(404).json({ ok: false, error: 'PDV no encontrado' });
       const existing = pdv.supplierInvoiceConfig || {};
       const updated = mergeInvoiceEmailConfig(existing, config);
+      const pdvBiz = pdvBusinessId(pdv);
 
-      // Aviso suave: mismo buzón en otro PDV del mismo usuario (no bloquea).
+      // Aviso suave: mismo buzón en otro PDV del mismo usuario/empresa (no bloquea).
       let duplicatePdvNames = [];
       try {
-        const allPdvs = await listPointsOfSaleByUser(req, userId);
+        const allPdvs = await listPointsOfSaleByUser(req, dataUserId);
         const emailNorm = String(updated.imapUser || '').trim().toLowerCase();
         if (emailNorm && updated.enabled) {
           duplicatePdvNames = (allPdvs || [])
             .filter((p) => p && !p.deletedAt && p._id !== pdvId)
             .filter((p) => {
+              if (pdvBiz) {
+                const otherBiz = pdvBusinessId(p);
+                if (otherBiz && otherBiz !== pdvBiz) return false;
+              }
               const other = p.supplierInvoiceConfig || {};
               return (
                 other.enabled
@@ -709,19 +794,22 @@ export async function updateConfig(req, res) {
 
       const db = getDeliveryDbName();
       pdv.supplierInvoiceConfig = updated;
+      if (businessId && !pdvBusinessId(pdv)) {
+        pdv.businessId = businessId;
+      }
       pdv.updatedAt = new Date().toISOString();
       await putDocument(req, db, pdv._id, pdv);
 
       try {
         await logAccountActivity(req, {
-          actorUserId: userId,
+          actorUserId: dataUserId,
           actorName: account.fullName,
-          targetUserId: userId,
+          targetUserId: dataUserId,
           type: 'supplier_invoice_config',
           action: `Actualizó correo de facturas del PDV ${pdv.name || pdvId}`,
           entityId: pdv._id,
           entityLabel: 'Configuración IMAP PDV',
-          metadata: { enabled: updated.enabled, pdvId },
+          metadata: { enabled: updated.enabled, pdvId, businessId: pdvBusinessId(pdv) || businessId || '' },
         });
       } catch (logErr) {
         console.warn('[supplierInvoice] logAccountActivity PDV:', logErr?.message || logErr);
@@ -730,6 +818,7 @@ export async function updateConfig(req, res) {
       return res.json({
         ok: true,
         pdvId,
+        businessId: pdvBusinessId(pdv) || businessId || undefined,
         config: publicInvoiceEmailConfig(updated),
         ...(duplicatePdvNames.length
           ? {
@@ -751,9 +840,9 @@ export async function updateConfig(req, res) {
 
     try {
       await logAccountActivity(req, {
-        actorUserId: userId,
+        actorUserId: dataUserId,
         actorName: account.fullName,
-        targetUserId: userId,
+        targetUserId: dataUserId,
         type: 'supplier_invoice_config',
         action: `Actualizó configuración de facturas proveedor por email`,
         entityId: account._id,
@@ -789,11 +878,17 @@ export async function testImap(req, res) {
     const passBlank =
       !String(overrides.pass || '').trim()
       || String(overrides.pass) === '••••••••';
-    const userId = String(body.userId || req.params?.userId || '').trim();
+    const rawUserId = String(body.userId || req.params?.userId || '').trim();
     const pdvId = String(body.pdvId || '').trim();
-    if (passBlank && userId) {
+    const businessId = normalizeBusinessScopeId(body.businessId);
+    if (passBlank && rawUserId) {
+      const dataUserId = await resolveSupplierDataUserId(req, rawUserId);
+      if (!(await assertSupplierInvoiceAccess(req, dataUserId))) {
+        return res.status(403).json({ ok: false, error: 'No autorizado' });
+      }
       if (pdvId) {
-        const pdv = await loadOwnedPdv(req, userId, pdvId);
+        const pdv = await loadOwnedPdv(req, dataUserId, pdvId, businessId);
+        if (!pdv) return res.status(404).json({ ok: false, error: 'PDV no encontrado' });
         const saved = pdv?.supplierInvoiceConfig || {};
         overrides = {
           host: overrides.host || saved.imapHost,
@@ -803,7 +898,7 @@ export async function testImap(req, res) {
           tls: overrides.tls !== undefined ? overrides.tls : saved.imapTls !== false,
         };
       } else {
-        const account = await findAccountByUserId(req, userId);
+        const account = await findAccountByUserId(req, dataUserId);
         const saved = account?.supplierInvoiceConfig || {};
         overrides = {
           host: overrides.host || saved.imapHost,
@@ -812,6 +907,15 @@ export async function testImap(req, res) {
           pass: saved.imapPassword || '',
           tls: overrides.tls !== undefined ? overrides.tls : saved.imapTls !== false,
         };
+      }
+    } else if (rawUserId) {
+      const dataUserId = await resolveSupplierDataUserId(req, rawUserId);
+      if (!(await assertSupplierInvoiceAccess(req, dataUserId))) {
+        return res.status(403).json({ ok: false, error: 'No autorizado' });
+      }
+      if (pdvId) {
+        const pdv = await loadOwnedPdv(req, dataUserId, pdvId, businessId);
+        if (!pdv) return res.status(404).json({ ok: false, error: 'PDV no encontrado' });
       }
     }
 

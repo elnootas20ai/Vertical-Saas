@@ -44,6 +44,11 @@ vi.mock('../services/couchdb.js', () => ({
   })),
   listPointsOfSaleByUser: vi.fn(async () => [fakePdv]),
   pdvDocMatchesUser: () => true,
+  resolveDataOwnerUserId: vi.fn(async (_req, userId) => ({
+    ownerUserId: userId,
+    account: null,
+    isInvited: false,
+  })),
   getDeliveryDbName: () => 'delivery',
   getCatalogDbName: () => 'catalog',
   buildPurchaseInvoiceDocument: vi.fn((userId, data) => ({

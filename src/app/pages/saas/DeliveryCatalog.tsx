@@ -6,7 +6,6 @@ import { DELIVERY_MARCA_SETTINGS_PATH } from '../../lib/deliveryActivationGates'
 import {
   DELIVERY_OPS_HOME_PATH,
   HELADERIA_OPS_HOME_PATH,
-  RESTAURANT_OPS_HOME_PATH,
 } from '../../lib/retailOpsPaths';
 import { notifyDeliveryBrandsChanged, notifyDeliveryCatalogChanged, notifyDeliveryConfigChanged, resolveBusinessScopeId, normalizeBusinessScopeId, DELIVERY_CONFIG_CHANGED, DELIVERY_CATALOG_CHANGED } from '../../lib/deliverySetup';
 import { invalidateCatalogListCache } from '../../lib/catalogListCache';
@@ -220,6 +219,7 @@ import { MISSING_BRAND_IMPORT_CODE } from '../../lib/deliveryCatalogImportLogic'
 import { throwIfAborted, yieldToUi, isImportAbortError } from '../../lib/importAbort';
 import { CatalogDeleteGuardModal } from '../../components/saas/CatalogDeleteGuardModal';
 import { CatalogMoveModal } from '../../components/saas/CatalogMoveModal';
+import { CatalogSectionsModal } from '../../components/saas/CatalogSectionsModal';
 import { VehicleConfirmDialog } from '../../components/saas/vehicles/VehicleConfirmDialog';
 import { useActivationFocus } from '../../hooks/useActivationFocus';
 import { ActivationFieldWrap } from '../../components/saas/ActivationGuideUi';
@@ -257,14 +257,18 @@ import {
   type TpvCategoryTemplateKey,
 } from '../../lib/catalogCustomization';
 import { withVertialDefaultBaseCost } from '../../lib/vertialDefaultCosts';
+import { ORGANIZER_PACKAGING } from '../../lib/inventoryUtils';
 import { StoreIngredientsPanel } from '../../components/saas/StoreIngredientsPanel';
 import { CatalogItemDetailModal } from '../../components/saas/CatalogItemDetailModal';
 import { CatalogComboCompositionEditor } from '../../components/saas/CatalogComboCompositionEditor';
 import {
   CatalogProductRecipePicker,
+  CatalogProductPackagingPicker,
   recipePicksToLines,
   recipePicksToTpvIngredientsText,
+  packagingPicksToLines,
   type CatalogRecipePick,
+  type CatalogPackagingPick,
 } from '../../components/saas/CatalogProductRecipePicker';
 import { CatalogSupplementPicker } from '../../components/saas/CatalogSupplementPicker';
 import {
@@ -409,6 +413,8 @@ interface CreateCatalogItemModalProps {
   catalogMenuItemsForDuplicateCheck?: CatalogItem[];
   storeIngredients?: StoreIngredient[];
   brandIngredientSelection?: TpvBrandIngredientSelection;
+  /** Envases de almacén (stockCategory packaging) para descontar al vender. */
+  packagingStockItems?: CatalogItem[];
   /** Bar/restaurante: el paso 2 no es escandallo (eso va en Escandallo). */
   isRestaurantCatalog?: boolean;
 }
@@ -428,6 +434,7 @@ function CreateCatalogItemModal({
   catalogMenuItemsForDuplicateCheck = [],
   storeIngredients = [],
   brandIngredientSelection = {},
+  packagingStockItems = [],
   isRestaurantCatalog = false,
 }: CreateCatalogItemModalProps) {
   const navigate = useNavigate();
@@ -439,6 +446,8 @@ function CreateCatalogItemModal({
   const [submitting, setSubmitting] = useState(false);
   const [sessionCreated, setSessionCreated] = useState<Array<{ name: string; price: number }>>([]);
   const createModalWasOpenRef = useRef(false);
+  /** Evita rehidratar (y pisar precios) cuando solo refrescan marcas/categorías. */
+  const formHydrateKeyRef = useRef('');
   const modalOverlayRef = useRef<HTMLDivElement>(null);
   const modalPanelRef = useRef<HTMLDivElement>(null);
   const [modalStoreIngredients, setModalStoreIngredients] = useState<StoreIngredient[]>([]);
@@ -455,6 +464,9 @@ function CreateCatalogItemModal({
   );
   const [comboStructureConfirmed, setComboStructureConfirmed] = useState(false);
   const [recipePicks, setRecipePicks] = useState<CatalogRecipePick[]>([]);
+  const [packagingPicks, setPackagingPicks] = useState<CatalogPackagingPick[]>([]);
+  const [modalPackagingItems, setModalPackagingItems] = useState<CatalogItem[]>([]);
+  const [creatingPackaging, setCreatingPackaging] = useState(false);
   const [extraCategories, setExtraCategories] = useState<string[]>([]);
   const [addingCategory, setAddingCategory] = useState(false);
   const [newCategoryDraft, setNewCategoryDraft] = useState('');
@@ -464,39 +476,45 @@ function CreateCatalogItemModal({
   const [creatingByoIngredient, setCreatingByoIngredient] = useState(false);
   const [creatingRecipeIngredient, setCreatingRecipeIngredient] = useState(false);
   const [fieldErrorsShown, setFieldErrorsShown] = useState(false);
-  const [form, setForm] = useState({
-    itemType: 'product' as CatalogItem['itemType'],
-    name: '',
-    description: '',
-    category: '',
-    selectedBrandIds: [] as string[],
-    newBrandName: '',
-    showNewBrand: false,
-    unit: 'ud',
-    unitPrice: '',
-    taxRate: '',
-    staffPrice: '',
-    costPrice: '',
-    stockQuantity: '',
-    minStock: '',
-    image: '',
-    allergens: [] as string[],
-    notes: '',
-    webVisible: true,
-    available: true,
-    ingredients: '',
-    supplements: [] as Array<{ id: string; name: string; price: string }>,
-    halfHalf: false,
-    buildYourOwn: false,
-    halfHalfAllowedProductIds: [] as string[],
-    halfHalfBrandId: '',
-    buildYourOwnAllowedIngredientIds: [] as string[],
-    serviceRules: { ...DEFAULT_CATALOG_SERVICE_RULES } as CatalogServiceRules,
-  });
+  const emptyCreateForm = useCallback(
+    () => ({
+      itemType: 'product' as CatalogItem['itemType'],
+      name: '',
+      description: '',
+      category: '',
+      selectedBrandIds: [] as string[],
+      newBrandName: '',
+      showNewBrand: false,
+      unit: 'ud',
+      unitPrice: '',
+      taxRate: '',
+      staffPrice: '',
+      costPrice: '',
+      stockQuantity: '',
+      minStock: '',
+      image: '',
+      allergens: [] as string[],
+      notes: '',
+      webVisible: true,
+      available: true,
+      ingredients: '',
+      supplements: [] as Array<{ id: string; name: string; price: string }>,
+      halfHalf: false,
+      buildYourOwn: false,
+      halfHalfAllowedProductIds: [] as string[],
+      halfHalfBrandId: '',
+      buildYourOwnAllowedIngredientIds: [] as string[],
+      serviceRules: { ...DEFAULT_CATALOG_SERVICE_RULES } as CatalogServiceRules,
+    }),
+    [],
+  );
+
+  const [form, setForm] = useState(emptyCreateForm);
 
   useEffect(() => {
     if (!isOpen) {
       createModalWasOpenRef.current = false;
+      formHydrateKeyRef.current = '';
       setSessionCreated([]);
       setExtraCategories([]);
       setAddingCategory(false);
@@ -506,11 +524,29 @@ function CreateCatalogItemModal({
       setNewByoIngredientName('');
       setCreatingByoIngredient(false);
       setFieldErrorsShown(false);
+      setRecipePicks([]);
+      setPackagingPicks([]);
+      setModalPackagingItems([]);
+      setCreatingPackaging(false);
+      // Limpiar precios al cerrar: evita flash del producto anterior al reabrir.
+      setForm(emptyCreateForm());
       return;
     }
 
     const justOpened = !createModalWasOpenRef.current;
     createModalWasOpenRef.current = true;
+
+    const hydrateKey = editItem
+      ? `edit:${editItem._id}`
+      : seedFromProduct
+        ? `seed:${seedFromProduct._id}`
+        : 'create';
+
+    // Marcas/categorías refrescan en vivo: no volver a setForm (pisaba precio/paso).
+    if (!justOpened && formHydrateKeyRef.current === hydrateKey) {
+      return;
+    }
+    formHydrateKeyRef.current = hydrateKey;
 
     if (justOpened) {
       setShowCreateByoIngredient(false);
@@ -550,6 +586,18 @@ function CreateCatalogItemModal({
                 : removableNames.has(line.name.toLowerCase()),
           })),
       );
+      setPackagingPicks(
+        existingRecipe
+          .filter((line) => line.catalogItemId && line.stockCategory === 'packaging')
+          .map((line) => ({
+            catalogItemId: String(line.catalogItemId),
+            name: line.name,
+            quantity: line.quantity,
+            unit: line.unit || 'ud',
+          })),
+      );
+      const sale = Number(editItem.unitPrice);
+      const cost = Number(editItem.costPrice);
       setForm({
         itemType: editItem.itemType || 'product',
         name: editItem.name,
@@ -562,7 +610,7 @@ function CreateCatalogItemModal({
         newBrandName: '',
         showNewBrand: false,
         unit: editItem.unit || 'ud',
-        unitPrice: String(editItem.unitPrice || ''),
+        unitPrice: Number.isFinite(sale) && sale > 0 ? String(sale) : '',
         taxRate: (() => {
           const n = Number(editItem.taxRate);
           // 21% es el default histórico de BD: en UI = Apagado (no parece forzado).
@@ -570,7 +618,7 @@ function CreateCatalogItemModal({
           return '';
         })(),
         staffPrice: editItem.staffPrice != null && editItem.staffPrice > 0 ? String(editItem.staffPrice) : '',
-        costPrice: String(editItem.costPrice || ''),
+        costPrice: Number.isFinite(cost) && cost > 0 ? String(cost) : '',
         stockQuantity: String(editItem.stockQuantity || ''),
         minStock: String(editItem.minStock || ''),
         image: editItem.image || '',
@@ -606,6 +654,7 @@ function CreateCatalogItemModal({
 
     setSessionCreated([]);
     setRecipePicks([]);
+    setPackagingPicks([]);
     setExtraCategories([]);
     setDismissedCategoryKeys(new Set());
     setAddingCategory(catalogCategoriesInUse.length === 0);
@@ -622,38 +671,16 @@ function CreateCatalogItemModal({
       setComboStructure(defaultComboStructure.map((s) => ({ ...s })));
       setComboStructureConfirmed(true);
       setForm({
+        ...emptyCreateForm(),
         itemType: 'combo',
         name: `Menú con ${seedFromProduct.name}`,
-        description: '',
         category: 'Combos',
-        unit: 'ud',
         selectedBrandIds: (() => {
           const seedBrands = Array.isArray(seedFromProduct.brandIds)
             ? seedFromProduct.brandIds.filter(Boolean)
             : [];
           return seedBrands.length > 0 ? [seedBrands[0]] : [];
         })(),
-        newBrandName: '',
-        showNewBrand: false,
-        unitPrice: '',
-        taxRate: '',
-        staffPrice: '',
-        costPrice: '',
-        stockQuantity: '',
-        minStock: '',
-        image: '',
-        allergens: [],
-        notes: '',
-        webVisible: true,
-        available: true,
-        ingredients: '',
-        supplements: [],
-        halfHalf: false,
-        buildYourOwn: false,
-        halfHalfAllowedProductIds: [],
-        halfHalfBrandId: '',
-        buildYourOwnAllowedIngredientIds: [],
-        serviceRules: { ...DEFAULT_CATALOG_SERVICE_RULES },
       });
       setStep(1);
       return;
@@ -662,21 +689,9 @@ function CreateCatalogItemModal({
     setComboItems([]);
     setComboStructure(defaultComboStructure.map((s) => ({ ...s })));
     setComboStructureConfirmed(true);
-    setForm({
-      itemType: 'product', name: '', description: '', category: '', unit: 'ud',
-      selectedBrandIds: [],
-      newBrandName: '',
-      showNewBrand: false,
-      unitPrice: '', taxRate: '', staffPrice: '', costPrice: '', stockQuantity: '', minStock: '',
-      image: '', allergens: [], notes: '', webVisible: true, available: true,
-      ingredients: '', supplements: [], halfHalf: false, buildYourOwn: false,
-      halfHalfAllowedProductIds: [],
-      halfHalfBrandId: '',
-      buildYourOwnAllowedIngredientIds: [],
-      serviceRules: { ...DEFAULT_CATALOG_SERVICE_RULES },
-    });
+    setForm(emptyCreateForm());
     setStep(1);
-  }, [editItem, seedFromProduct, isOpen, brands, defaultComboStructure, catalogCategoriesInUse]);
+  }, [editItem, seedFromProduct, isOpen, defaultComboStructure, catalogCategoriesInUse.length, emptyCreateForm]);
 
   const reloadModalTpvIngredients = useCallback(async () => {
     if (!dataUserId) {
@@ -735,14 +750,22 @@ function CreateCatalogItemModal({
   );
 
   useEffect(() => {
+    if (!isOpen) return;
+    setModalPackagingItems(packagingStockItems);
+  }, [isOpen, packagingStockItems]);
+
+  useEffect(() => {
     if (recipePicks.length === 0) return;
     const byId = storeIngredientsById(effectiveStoreIngredients);
     const cost = calculateRecipeTotalCost(recipePicksToLines(recipePicks), byId, brands);
     const tpvText = recipePicksToTpvIngredientsText(recipePicks);
     setForm((f) => {
       const prev = Number(f.costPrice) || 0;
+      const hasStoredCost = String(f.costPrice || '').trim() !== '' && prev > 0;
       const nextCost = cost > 0 ? cost.toFixed(2) : f.costPrice;
-      const costChanged = Math.abs(prev - cost) >= 0.005 && cost > 0;
+      // No pisar coste de venta/guardado al cargar ingredientes en edición.
+      const costChanged =
+        cost > 0 && Math.abs(prev - cost) >= 0.005 && (!editItem || !hasStoredCost);
       const ingredientsChanged = f.ingredients !== tpvText;
       if (!costChanged && !ingredientsChanged) return f;
       return {
@@ -751,7 +774,7 @@ function CreateCatalogItemModal({
         ...(ingredientsChanged ? { ingredients: tpvText } : {}),
       };
     });
-  }, [recipePicks, effectiveStoreIngredients, brands]);
+  }, [recipePicks, effectiveStoreIngredients, brands, editItem]);
 
   const pinCategoryChip = useCallback((raw: string) => {
     const cat = normalizeImportCategory(String(raw || '').trim());
@@ -1281,14 +1304,25 @@ function CreateCatalogItemModal({
         available: form.available,
       };
 
-      if (recipePicks.length > 0 && form.itemType !== 'service') {
-        const byId = storeIngredientsById(effectiveStoreIngredients);
-        payload = withProductCosting(
-          payload as CatalogItem,
-          { costingType: 'recipe', recipeLines: recipePicksToLines(recipePicks) },
-          byId,
-          brands,
-        );
+      if (form.itemType !== 'service') {
+        const recipeLines = [
+          ...recipePicksToLines(recipePicks),
+          ...packagingPicksToLines(packagingPicks),
+        ];
+        if (recipeLines.length > 0) {
+          const byId = storeIngredientsById(effectiveStoreIngredients);
+          const inventoryCostByCatalogId = new Map<string, number>();
+          for (const stock of modalPackagingItems) {
+            inventoryCostByCatalogId.set(stock._id, Number(stock.costPrice) || 0);
+          }
+          payload = withProductCosting(
+            payload as CatalogItem,
+            { costingType: 'recipe', recipeLines },
+            byId,
+            brands,
+            inventoryCostByCatalogId,
+          );
+        }
       }
 
       await onCreate(payload, keepOpen ? { keepOpen: true } : undefined);
@@ -1301,6 +1335,7 @@ function CreateCatalogItemModal({
         setComboStructure(defaultComboStructure.map((s) => ({ ...s })));
         setComboStructureConfirmed(true);
         setRecipePicks([]);
+        setPackagingPicks([]);
         setFieldErrorsShown(false);
         setForm((f) => ({
           ...f,
@@ -1886,6 +1921,7 @@ function CreateCatalogItemModal({
   const persistLinkedStoreIngredient = async (opts: {
     name: string;
     baseCost?: number;
+    unit?: string;
     flags?: { chargeExtra: boolean; allowRemove: boolean };
     successToast?: string;
   }): Promise<StoreIngredient | null> => {
@@ -1933,11 +1969,13 @@ function CreateCatalogItemModal({
       parts.size > 0 ? [...parts] : ['pizzas', 'hamburguesas'];
 
     const flags = opts.flags ?? { chargeExtra: false, allowRemove: true };
+    const unit = String(opts.unit || 'kg').trim().toLowerCase() || 'kg';
     let created = withStoreIngredientTpvFlags(
       {
         id: `ing-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         name,
         escandalloOnly: !flags.allowRemove && !flags.chargeExtra,
+        unit,
         ...(brandIds.length > 0 ? { brandIds: [...brandIds] } : {}),
         productParts,
         ...(opts.baseCost != null && Number.isFinite(opts.baseCost) && opts.baseCost >= 0
@@ -1950,32 +1988,53 @@ function CreateCatalogItemModal({
       created = withVertialDefaultBaseCost(created, brands);
     }
 
-    const cfg = await getDeliveryConfigRequest(dataUserId);
+    // UI al instante; CouchDB + almacén en segundo plano.
+    setModalStoreIngredients((prev) => {
+      const base = prev.length > 0 ? prev : storeIngredients;
+      if (base.some((ing) => ing.id === created.id)) {
+        return prev.length > 0 ? prev : normalizeStoreIngredients(base);
+      }
+      return normalizeStoreIngredients([...base, created]);
+    });
+
+    const createdId = created.id;
     const lineBrandIds = lineBrands.map((b) => b._id);
-    const current = unifyStoreIngredientsFromConfig(cfg, lineBrandIds);
-    const nextRows = normalizeStoreIngredients([...current, created]);
+    void (async () => {
+      try {
+        const cfg = await getDeliveryConfigRequest(dataUserId);
+        const current = unifyStoreIngredientsFromConfig(cfg, lineBrandIds);
+        const nextRows = current.some((ing) => ing.id === createdId)
+          ? normalizeStoreIngredients(current)
+          : normalizeStoreIngredients([...current, created]);
 
-    await updateDeliveryConfigRequest(dataUserId, {
-      _id: cfg?._id || `dlvconf-${normalizeTenantUserId(dataUserId)}`,
-      _rev: cfg?._rev,
-      storeIngredients: nextRows,
-    } as Parameters<typeof updateDeliveryConfigRequest>[1]);
+        await updateDeliveryConfigRequest(dataUserId, {
+          _id: cfg?._id || `dlvconf-${normalizeTenantUserId(dataUserId)}`,
+          _rev: cfg?._rev,
+          storeIngredients: nextRows,
+        } as Parameters<typeof updateDeliveryConfigRequest>[1]);
 
-    await syncInventoryCatalogFromSources(dataUserId, {
-      businessType: isRestaurantCatalog ? 'restaurant' : 'delivery',
-      businessId: businessId || undefined,
-      storeIngredients: nextRows,
-      brands: lineBrands.map((b) => ({ _id: b._id, deliveryLineKind: b.deliveryLineKind })),
-      inventorySyncExcludedKeys: Array.isArray(cfg?.inventorySyncExcludedKeys)
-        ? cfg.inventorySyncExcludedKeys
-        : undefined,
-    }).catch(() => null);
+        await syncInventoryCatalogFromSources(dataUserId, {
+          businessType: isRestaurantCatalog ? 'restaurant' : 'delivery',
+          businessId: businessId || undefined,
+          storeIngredients: nextRows,
+          brands: lineBrands.map((b) => ({ _id: b._id, deliveryLineKind: b.deliveryLineKind })),
+          inventorySyncExcludedKeys: Array.isArray(cfg?.inventorySyncExcludedKeys)
+            ? cfg.inventorySyncExcludedKeys
+            : undefined,
+        }).catch(() => null);
 
-    notifyDeliveryConfigChanged();
-    notifyDeliveryCatalogChanged(dataUserId, businessId);
-    setModalStoreIngredients(nextRows);
-    void reloadModalTpvIngredients();
-    toast.success(opts.successToast || `«${name}» creado: TPV + almacén`);
+        notifyDeliveryConfigChanged();
+        notifyDeliveryCatalogChanged(dataUserId, businessId);
+        setModalStoreIngredients(nextRows);
+        void reloadModalTpvIngredients();
+        toast.success(opts.successToast || `«${name}» creado: TPV + almacén`);
+      } catch (err) {
+        setModalStoreIngredients((prev) => prev.filter((ing) => ing.id !== createdId));
+        setRecipePicks((prev) => prev.filter((p) => p.storeIngredientId !== createdId));
+        toast.error(err instanceof Error ? err.message : 'No se pudo guardar el ingrediente');
+      }
+    })();
+
     return created;
   };
 
@@ -2016,6 +2075,7 @@ function CreateCatalogItemModal({
       return await persistLinkedStoreIngredient({
         name: input.name,
         baseCost: input.baseCost,
+        unit: input.unit || 'kg',
         flags: { chargeExtra: false, allowRemove: false },
         successToast: `«${input.name.trim()}» creado: escandallo + almacén`,
       });
@@ -2024,6 +2084,64 @@ function CreateCatalogItemModal({
       return null;
     } finally {
       setCreatingRecipeIngredient(false);
+    }
+  };
+
+  const createLinkedPackaging = async (input: {
+    name: string;
+  }): Promise<{ _id: string; name: string; unit?: string } | null> => {
+    const name = input.name.trim().replace(/\s+/g, ' ');
+    if (!name) {
+      toast.error('Escribe el nombre del envase');
+      return null;
+    }
+    if (!dataUserId) {
+      toast.error('No hay cuenta de datos para guardar el envase');
+      return null;
+    }
+    const nameKey = foldIngredientNameKey(name);
+    const duplicate = modalPackagingItems.find(
+      (item) => foldIngredientNameKey(item.name) === nameKey,
+    );
+    if (duplicate) {
+      toast.message(`«${duplicate.name}» ya estaba en envases`);
+      return { _id: duplicate._id, name: duplicate.name, unit: duplicate.unit || 'ud' };
+    }
+
+    setCreatingPackaging(true);
+    try {
+      const created = await createCatalogItemRequest(dataUserId, {
+        name,
+        category: 'Envases',
+        module: 'stock',
+        itemType: 'product',
+        vertical: 'delivery',
+        business_id: businessId || undefined,
+        stockCategory: 'packaging',
+        isStockItem: true,
+        unit: 'ud',
+        minStock: 0,
+        costPrice: 0,
+        stockQuantity: 0,
+        active: true,
+        available: true,
+        webVisible: false,
+        customFields: {
+          inventoryOrganizerId: ORGANIZER_PACKAGING,
+        },
+      } as Partial<CatalogItem>);
+      setModalPackagingItems((prev) => {
+        if (prev.some((p) => p._id === created._id)) return prev;
+        return [...prev, created];
+      });
+      notifyDeliveryCatalogChanged(dataUserId, businessId);
+      toast.success(`Envase «${name}» creado en almacén`);
+      return { _id: created._id, name: created.name, unit: created.unit || 'ud' };
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo crear el envase');
+      return null;
+    } finally {
+      setCreatingPackaging(false);
     }
   };
 
@@ -2244,6 +2362,16 @@ function CreateCatalogItemModal({
             </p>
           </div>
           {renderSupplementsSection()}
+          {!isRestaurantCatalog ? (
+            <CatalogProductPackagingPicker
+              picks={packagingPicks}
+              onChange={setPackagingPicks}
+              packagingItems={modalPackagingItems}
+              compact
+              onCreatePackaging={createLinkedPackaging}
+              creatingPackaging={creatingPackaging}
+            />
+          ) : null}
         </section>
       );
     }
@@ -2260,6 +2388,16 @@ function CreateCatalogItemModal({
           onCreateIngredient={createRecipeLinkedIngredient}
           creatingIngredient={creatingRecipeIngredient}
         />
+        {!isRestaurantCatalog ? (
+          <CatalogProductPackagingPicker
+            picks={packagingPicks}
+            onChange={setPackagingPicks}
+            packagingItems={modalPackagingItems}
+            compact
+            onCreatePackaging={createLinkedPackaging}
+            creatingPackaging={creatingPackaging}
+          />
+        ) : null}
         {renderSupplementsSection()}
       </section>
     );
@@ -2388,7 +2526,6 @@ function CreateCatalogItemModal({
     <div
       ref={modalOverlayRef}
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto pt-3 sm:pt-5 px-2 sm:px-4 pb-3 bg-black/40 backdrop-blur-sm"
-      onClick={onClose}
     >
       <div
         ref={modalPanelRef}
@@ -2466,7 +2603,11 @@ function CreateCatalogItemModal({
               <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
                 <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-2 py-1.5">
                   <span className="text-gray-500 dark:text-gray-400">Precio</span>
-                  <p className="font-semibold text-gray-900 dark:text-gray-100">{Number(form.unitPrice || 0).toFixed(2)}€</p>
+                  <p className="font-semibold text-gray-900 dark:text-gray-100">
+                    {String(form.unitPrice || '').trim()
+                      ? `${Number(form.unitPrice).toFixed(2)}€`
+                      : '—'}
+                  </p>
                 </div>
                 <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-2 py-1.5">
                   <span className="text-gray-500 dark:text-gray-400">Stock</span>
@@ -2837,7 +2978,11 @@ function CreateCatalogItemModal({
                 {form.description.trim() ? (
                   <p className="text-xs text-gray-600 dark:text-gray-300 mt-1 line-clamp-2">{form.description}</p>
                 ) : null}
-                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mt-1">{Number(form.unitPrice || 0).toFixed(2)}€</p>
+                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mt-1">
+                  {String(form.unitPrice || '').trim()
+                    ? `${Number(form.unitPrice).toFixed(2)}€`
+                    : 'Sin precio'}
+                </p>
               </div>
             </div>
           )}
@@ -4552,52 +4697,48 @@ function CatalogModuleNav({
   activeTab: string;
   onChange: (tab: string) => void;
 }) {
+  const items = groups.flatMap((group) => {
+    const singleTab = group.tabs.length === 1;
+    return group.tabs.map((tab) => ({
+      id: tab.id,
+      label: singleTab ? group.label : tab.label,
+      count: tab.count,
+    }));
+  });
+
   return (
     <nav
-      className="flex w-full items-center gap-2 overflow-x-auto rounded-2xl border border-stone-200 bg-stone-100/80 p-2 shadow-sm dark:border-stone-700 dark:bg-stone-900/60 [&::-webkit-scrollbar]:hidden"
-      style={{ scrollbarWidth: 'none' }}
+      className="flex w-full items-center gap-1 rounded-xl border border-stone-200 bg-stone-100/80 p-1 dark:border-stone-700 dark:bg-stone-900/60"
       aria-label="Secciones del catálogo"
     >
-      {groups.map((group, gi) => {
-        const singleTab = group.tabs.length === 1;
+      {items.map((tab) => {
+        const isActive = activeTab === tab.id;
         return (
-          <div key={group.id} className="flex shrink-0 items-center gap-1.5">
-            {gi !== 0 ? (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => onChange(tab.id)}
+            aria-current={isActive ? 'page' : undefined}
+            title={tab.label}
+            className={`inline-flex min-h-8 min-w-0 flex-1 items-center justify-center gap-0.5 rounded-lg px-1 py-1 text-[11px] font-semibold leading-tight transition-colors sm:text-xs ${
+              isActive
+                ? 'bg-[var(--v-blue,#2563eb)] text-white'
+                : 'bg-white text-stone-700 hover:bg-blue-50/60 hover:text-[var(--v-blue,#2563eb)] dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-blue-950/40 dark:hover:text-blue-300'
+            }`}
+          >
+            <span className="truncate">{tab.label}</span>
+            {tab.count !== undefined ? (
               <span
-                className="mx-0.5 h-8 w-px shrink-0 bg-stone-300 dark:bg-stone-600"
-                aria-hidden
-              />
+                className={`shrink-0 rounded px-1 py-px text-[9px] font-bold tabular-nums ${
+                  isActive
+                    ? 'bg-white/25 text-white'
+                    : 'bg-stone-100 text-stone-500 dark:bg-stone-700 dark:text-stone-300'
+                }`}
+              >
+                {tab.count}
+              </span>
             ) : null}
-            {group.tabs.map((tab) => {
-              const isActive = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => onChange(tab.id)}
-                  aria-current={isActive ? 'page' : undefined}
-                  className={`inline-flex min-h-11 items-center gap-1.5 whitespace-nowrap rounded-xl px-3.5 py-2 text-xs font-semibold transition-colors md:px-4 md:text-sm ${
-                    isActive
-                      ? 'bg-[var(--v-blue,#2563eb)] text-white shadow-sm shadow-blue-600/20'
-                      : 'border border-stone-200 bg-white text-stone-700 hover:border-blue-200 hover:bg-blue-50/60 hover:text-[var(--v-blue,#2563eb)] dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:border-blue-700 dark:hover:bg-blue-950/40 dark:hover:text-blue-300'
-                  }`}
-                >
-                  {singleTab ? group.label : tab.label}
-                  {tab.count !== undefined ? (
-                    <span
-                      className={`rounded-lg px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${
-                        isActive
-                          ? 'bg-white/25 text-white'
-                          : 'bg-stone-100 text-stone-500 dark:bg-stone-700 dark:text-stone-300'
-                      }`}
-                    >
-                      {tab.count}
-                    </span>
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
+          </button>
         );
       })}
     </nav>
@@ -4616,11 +4757,12 @@ export function CatalogPage() {
 
   const catalogModulesForTab = useCallback(
     (tab: string, createSupplierOpen: boolean): CatalogLoadModules => {
-      if (tab === 'stock') return { carta: false, stock: true };
+      // Proveedor: carta (secciones → ingredientes) + almacén (envases…).
+      if (createSupplierOpen) return { carta: true, stock: true };
+      if (tab === 'stock' || tab === 'ingredientes') return { carta: false, stock: true };
       if (tab === 'catalog' || tab === 'escandallo' || tab === 'staff-consumption') {
         return { carta: true, stock: false };
       }
-      if (tab === 'suppliers' && createSupplierOpen) return { carta: false, stock: true };
       return { carta: false, stock: false };
     },
     [],
@@ -4714,6 +4856,7 @@ export function CatalogPage() {
     [catalogItems],
   );
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [suppliersSearch, setSuppliersSearch] = useState('');
   const [invoices, setInvoices] = useState<PurchaseInvoice[]>([]);
   /** Solo facturas/albaranes de la empresa activa (no mezclar otras verticales/empresas). */
   const scopedInvoices = useMemo(
@@ -4753,8 +4896,7 @@ export function CatalogPage() {
   const activeTab = useMemo(() => {
     const raw = searchParams.get('tab') || 'catalog';
     const tab = raw === 'tpv-templates' ? 'ingredientes' : raw;
-    // Bar/restaurante: sin pestaña Almacén (stock vía Excel en Carta).
-    if (isRestaurantCatalog && tab === 'stock') return 'catalog';
+    // Bar/restaurante: sin pestaña Ingredientes (stock vía Almacén + escandallo en Carta).
     if (isRestaurantCatalog && tab === 'ingredientes') return 'catalog';
     return (CATALOG_TABS as readonly string[]).includes(tab) ? tab : 'catalog';
   }, [searchParams, isRestaurantCatalog]);
@@ -4766,12 +4908,14 @@ export function CatalogPage() {
       return;
     }
     try {
-      const { pdvs } = await listSupplierInvoicePdvEmailConfigs(dataUserId);
       const bid = normalizeBusinessScopeId(businessId);
+      const { pdvs } = await listSupplierInvoicePdvEmailConfigs(dataUserId, bid || undefined, {
+        accountBusinessCount: 1,
+      });
       const scoped = (Array.isArray(pdvs) ? pdvs : []).filter((p) => {
         if (!bid) return true;
         const pdvBid = normalizeBusinessScopeId(String(p.businessId || ''));
-        return !pdvBid || pdvBid === bid;
+        return pdvBid === bid;
       });
       setInvoiceEmailPdvs(scoped);
     } catch {
@@ -4826,6 +4970,9 @@ export function CatalogPage() {
   const [bulkDeletingCatalog, setBulkDeletingCatalog] = useState(false);
   const [bulkMovingCatalog, setBulkMovingCatalog] = useState(false);
   const [catalogMoveItems, setCatalogMoveItems] = useState<CatalogItem[] | null>(null);
+  const [catalogSectionsOpen, setCatalogSectionsOpen] = useState(false);
+  /** Secciones creadas en esta sesión (aún sin productos) para «Editar secciones». */
+  const [sessionCatalogSections, setSessionCatalogSections] = useState<string[]>([]);
   const [deletingOrganizerId, setDeletingOrganizerId] = useState<string | null>(null);
   type CatalogDeleteOp =
     | null
@@ -5901,9 +6048,6 @@ export function CatalogPage() {
       const uid = dataUserId;
       const bid = businessId;
       const createdOrUpdated = savedItem;
-      const ingredientsText = createdOrUpdated
-        ? normalizeCatalogIngredientsForSave(createdOrUpdated.customFields?.ingredients)
-        : '';
       const recipeLines = Array.isArray(createdOrUpdated?.customFields?.costingRecipe)
         ? (createdOrUpdated.customFields.costingRecipe as unknown[])
         : [];
@@ -5915,9 +6059,6 @@ export function CatalogPage() {
             const sync = await syncTpvOrganizersAfterCatalogImport(bid, [createdOrUpdated]);
             const activation = await activateCommercialLinesAfterCatalogImport(bid, [createdOrUpdated]);
             if (sync.updatedBrands > 0 || activation.activated > 0) await loadBrands();
-          }
-          if (bid && createdOrUpdated && ingredientsText) {
-            await syncStoreIngredientsFromCatalogImport(uid, bid, [createdOrUpdated]).catch(() => null);
           }
           if (createdOrUpdated && needsRecipeStock && !isRestaurantCatalog) {
             const bizType = currentBusiness?.businessType || 'delivery';
@@ -5985,20 +6126,145 @@ export function CatalogPage() {
     setBulkDeleteConfirmStep(false);
   };
 
-  const handleDeleteAllFilteredCatalog = () => {
-    if (!dataUserId || bulkDeletingCatalog || bulkMovingCatalog || catalogMenuItems.length === 0) return;
-    const visible = searchCatalog.trim() ? filteredCatalog : catalogMenuItems;
-    const deleteCount = expandCatalogItemsForDeletion(visible, catalogMenuItemsRaw).length;
-    setCatalogSelectMode(true);
-    setSelectedCatalogIds(new Set(visible.map((item) => item._id)));
-    setBulkDeleteConfirmStep(true);
-    toast.warning(
-      searchCatalog.trim()
-        ? `Carta: ${deleteCount} producto(s) visibles. Pulsa «Estoy seguro» y confirma.`
-        : `Eliminar TODO: ${deleteCount} de Carta + almacén sync, ingredientes TPV y recetas. Queda vacío (la plantilla Excel sigue). Pulsa «Estoy seguro» y confirma.`,
-      { duration: 9000 },
-    );
-  };
+  const catalogSectionRows = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const item of catalogMenuItems) {
+      const cat = String(item.category || '').trim() || 'Sin categoría';
+      map.set(cat, (map.get(cat) || 0) + 1);
+    }
+    for (const raw of sessionCatalogSections) {
+      const cat = String(raw || '').trim();
+      if (!cat) continue;
+      const hit = [...map.keys()].find((k) => k.toLowerCase() === cat.toLowerCase());
+      if (hit) continue;
+      map.set(cat, 0);
+    }
+    return [...map.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  }, [catalogMenuItems, sessionCatalogSections]);
+
+  const handleAddCatalogSection = useCallback(
+    async (rawName: string) => {
+      const cat = normalizeImportCategory(rawName.replace(/^\w/u, (c) => c.toUpperCase()));
+      if (!cat) {
+        toast.error('Escribe un nombre válido');
+        return;
+      }
+      if (isWarehouseImportCategory(cat)) {
+        toast.error('Esa categoría es de almacén, no de carta');
+        return;
+      }
+      const exists = catalogSectionRows.some((s) => s.name.toLowerCase() === cat.toLowerCase());
+      if (exists) {
+        toast.message(`«${cat}» ya existe`);
+        return;
+      }
+      setSessionCatalogSections((prev) =>
+        prev.some((c) => c.toLowerCase() === cat.toLowerCase()) ? prev : [...prev, cat],
+      );
+      toast.success(`Sección «${cat}» lista · añade un producto para verla en la carta`);
+    },
+    [catalogSectionRows],
+  );
+
+  const handleRenameCatalogSection = useCallback(
+    async (from: string, toRaw: string) => {
+      if (!dataUserId) return;
+      const to = normalizeImportCategory(toRaw.replace(/^\w/u, (c) => c.toUpperCase()));
+      if (!to) {
+        toast.error('Nombre no válido');
+        return;
+      }
+      if (isWarehouseImportCategory(to)) {
+        toast.error('Esa categoría es de almacén, no de carta');
+        return;
+      }
+      if (to.toLowerCase() === from.toLowerCase()) return;
+      const clash = catalogSectionRows.some(
+        (s) => s.name.toLowerCase() === to.toLowerCase() && s.name.toLowerCase() !== from.toLowerCase(),
+      );
+      if (clash) {
+        toast.error(`Ya existe «${to}»`);
+        return;
+      }
+
+      const items = catalogMenuItemsRaw.filter(
+        (i) => String(i.category || '').trim().toLowerCase() === from.toLowerCase(),
+      );
+      let ok = 0;
+      let fail = 0;
+      for (const item of items) {
+        try {
+          const updated = await updateCatalogItemRequest(dataUserId, { ...item, category: to });
+          setAllCatalogItems((prev) => prev.map((row) => (row._id === updated._id ? updated : row)));
+          ok += 1;
+        } catch {
+          fail += 1;
+        }
+      }
+
+      setSessionCatalogSections((prev) => {
+        const without = prev.filter((c) => c.toLowerCase() !== from.toLowerCase());
+        if (items.length === 0) {
+          return without.some((c) => c.toLowerCase() === to.toLowerCase())
+            ? without
+            : [...without, to];
+        }
+        return without;
+      });
+
+      if (activeCatalogCategory?.toLowerCase() === from.toLowerCase()) {
+        setActiveCatalogCategory(to);
+      }
+
+      if (businessId && ok > 0) {
+        try {
+          if (fail === 0) {
+            await removeCatalogCategoryFromBrands(businessId, from);
+          }
+          await syncTpvOrganizersAfterCatalogImport(
+            businessId,
+            items.map((i) => ({ brandIds: i.brandIds, category: to })),
+          );
+          setBrands(await listBrandsRequest(businessId));
+          notifyDeliveryBrandsChanged();
+        } catch {
+          /* productos renombrados; TPV se puede sincronizar al recargar */
+        }
+      }
+
+      notifyDeliveryCatalogChanged(dataUserId, businessId);
+      if (fail > 0) toast.error(`Renombrados ${ok}, fallaron ${fail}`);
+      else if (ok > 0) toast.success(`«${from}» → «${to}» (${ok} producto${ok !== 1 ? 's' : ''})`);
+      else toast.success(`Sección renombrada a «${to}»`);
+    },
+    [dataUserId, catalogSectionRows, catalogMenuItemsRaw, businessId, activeCatalogCategory],
+  );
+
+  const handleDeleteCatalogSectionFromModal = useCallback(
+    async (name: string, count: number) => {
+      if (count > 0) {
+        const visible = catalogMenuItems.filter(
+          (i) => String(i.category || '').trim().toLowerCase() === name.toLowerCase(),
+        );
+        const items = expandCatalogItemsForDeletion(visible, catalogMenuItemsRaw);
+        if (items.length === 0) {
+          toast.error('No se encontraron productos de esa sección');
+          return;
+        }
+        setCatalogSectionsOpen(false);
+        setCatalogDeleteGuard({ mode: 'bulk', items, categoryLabel: name });
+        return;
+      }
+      setSessionCatalogSections((prev) => prev.filter((c) => c.toLowerCase() !== name.toLowerCase()));
+      if (activeCatalogCategory?.toLowerCase() === name.toLowerCase()) {
+        setActiveCatalogCategory(null);
+      }
+      toast.success(`Sección «${name}» quitada`);
+    },
+    [catalogMenuItems, catalogMenuItemsRaw, activeCatalogCategory],
+  );
 
   const executeCatalogDeleteAfterGuard = useCallback(async () => {
     const op = catalogDeleteOpRef.current;
@@ -6012,6 +6278,25 @@ export function CatalogPage() {
         await deleteCatalogItemRequest(dataUserId, item._id);
         setAllCatalogItems((prev) => prev.filter((i) => i._id !== item._id));
         notifyDeliveryCatalogChanged(dataUserId, businessId);
+
+        // Último de carta → misma limpieza que el borrado masivo (recetas, almacén sync, ingredientes).
+        const stillMenu = (await listCatalogItemsRequest(dataUserId, 'catalog').catch(() => []))
+          .filter((row) => (row.module || 'catalog') === 'catalog' && !row.deletedAt && row._id !== item._id);
+        const stillScoped = businessId
+          ? filterCatalogItemsForBusinessScope(stillMenu, businessId, brands, {
+              accountBusinessCount,
+              activeBusinessType: businessType,
+            })
+          : stillMenu;
+        if (stillScoped.length === 0) {
+          await wipeCatalogLeftoversAfterEmptyCarta(dataUserId, businessId, {
+            brands,
+            accountBusinessCount,
+            businessType,
+          });
+          setStoreIngredients([]);
+        }
+
         toast.success('Artículo eliminado');
       } catch {
         toast.error('Error al eliminar el artículo');
@@ -6041,7 +6326,7 @@ export function CatalogPage() {
         },
       );
 
-      if (categoryLabel && businessId && result.deleted > 0) {
+      if (categoryLabel && businessId && result.deleted > 0 && result.failed === 0) {
         try {
           const updatedBrands = await removeCatalogCategoryFromBrands(businessId, categoryLabel);
           if (updatedBrands > 0) {
@@ -6052,6 +6337,22 @@ export function CatalogPage() {
           /* productos ya borrados; fallo al limpiar pestaña TPV no bloquea */
         }
       }
+
+      setSessionCatalogSections((prev) =>
+        categoryLabel
+          ? prev.filter((c) => c.toLowerCase() !== categoryLabel.toLowerCase())
+          : prev,
+      );
+      if (
+        categoryLabel
+        && activeCatalogCategory
+        && activeCatalogCategory.toLowerCase() === categoryLabel.toLowerCase()
+      ) {
+        setActiveCatalogCategory(null);
+      }
+      const deletedIds = new Set(list.map((i) => i._id));
+      setDetailItem((prev) => (prev && deletedIds.has(prev._id) ? null : prev));
+      setEditingItem((prev) => (prev && deletedIds.has(prev._id) ? null : prev));
 
       await loadCatalog();
       notifyDeliveryCatalogChanged(dataUserId, businessId);
@@ -6101,7 +6402,7 @@ export function CatalogPage() {
         );
       } else {
         toast.error(
-          `Quedan ${result.failed} artículo(s) sin eliminar. Vuelve a pulsar «Eliminar todo» o recarga la página.`,
+          `Quedan ${result.failed} artículo(s) sin eliminar. Reintenta desde Editar o recarga la página.`,
           { duration: 12000 },
         );
       }
@@ -6120,6 +6421,7 @@ export function CatalogPage() {
     brands,
     accountBusinessCount,
     businessType,
+    activeCatalogCategory,
   ]);
 
   const handleToggleField = async (item: CatalogItem, field: 'webVisible' | 'available' | 'active') => {
@@ -6181,9 +6483,6 @@ export function CatalogPage() {
     });
     setAllCatalogItems((prev) => prev.map((i) => (i._id === updated._id ? updated : i)));
     setDetailItem(updated);
-    if (businessId && normalizedIngredients) {
-      await syncStoreIngredientsFromCatalogImport(dataUserId, businessId, [updated]).catch(() => null);
-    }
     notifyDeliveryCatalogChanged(dataUserId, businessId);
   };
 
@@ -6434,7 +6733,14 @@ export function CatalogPage() {
   // ── Derived data ────────────────────────────────────────────────────────────
 
   const categories = useMemo(() => {
-    return [...new Set(catalogItems.map(i => i.category).filter(Boolean))].sort();
+    return [
+      ...new Set(
+        catalogItems
+          .filter((i) => String(i.module || 'catalog') !== 'stock')
+          .map((i) => i.category)
+          .filter((c): c is string => Boolean(c) && !isWarehouseImportCategory(c)),
+      ),
+    ].sort();
   }, [catalogItems]);
 
   const openNewCatalogItemManual = useCallback(() => {
@@ -6555,9 +6861,14 @@ export function CatalogPage() {
   const handleDeleteCategorySection = useCallback(
     (category: string, items: CatalogItem[]) => {
       if (!dataUserId || bulkDeletingCatalog || bulkMovingCatalog || items.length === 0) return;
-      setCatalogDeleteGuard({ mode: 'bulk', items, categoryLabel: category });
+      const expanded = expandCatalogItemsForDeletion(items, catalogMenuItemsRaw);
+      setCatalogDeleteGuard({
+        mode: 'bulk',
+        items: expanded.length > 0 ? expanded : items,
+        categoryLabel: category,
+      });
     },
-    [dataUserId, bulkDeletingCatalog, bulkMovingCatalog],
+    [dataUserId, bulkDeletingCatalog, bulkMovingCatalog, catalogMenuItemsRaw],
   );
 
   const handleDeleteEmptyOrganizer = useCallback(
@@ -6731,16 +7042,22 @@ export function CatalogPage() {
                     </SaasTabSecondaryButton>
                   ) : null}
                   <SaasTabSecondaryButton
-                    onClick={handleDeleteAllFilteredCatalog}
-                    disabled={bulkDeletingCatalog || bulkMovingCatalog || filteredCatalog.length === 0}
-                    className="!border-red-300 !text-red-700"
+                    onClick={() => setCatalogSectionsOpen(true)}
+                    disabled={bulkDeletingCatalog || bulkMovingCatalog}
+                    title="Añadir, renombrar o quitar secciones de la carta"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    {searchCatalog.trim()
-                      ? `Eliminar (${filteredCatalog.length})`
-                      : `Eliminar todo (${filteredCatalog.length})`}
+                    <Edit3 className="w-3.5 h-3.5" />
+                    Editar
                   </SaasTabSecondaryButton>
                 </>
+              ) : isCatalogEmpty && !catalogSelectMode ? (
+                <SaasTabSecondaryButton
+                  onClick={() => setCatalogSectionsOpen(true)}
+                  title="Añadir secciones de la carta"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  Editar
+                </SaasTabSecondaryButton>
               ) : !isCatalogEmpty && catalogSelectMode ? (
                 <>
                   <SaasTabSecondaryButton
@@ -6839,7 +7156,21 @@ export function CatalogPage() {
       ) : catalogMenuItems.length > 0 || filteredCatalog.length > 0 ? (
         (() => {
           const searchActive = Boolean(searchCatalog.trim());
-          const groups = catalogGroupedByCategory;
+          const groups = (() => {
+            const base = catalogGroupedByCategory;
+            if (searchActive || sessionCatalogSections.length === 0) return base;
+            const known = new Set(base.map((g) => g.category.toLowerCase()));
+            const extras = sessionCatalogSections
+              .filter((name) => name && !known.has(name.toLowerCase()))
+              .map((category) => ({ category, items: [] as CatalogItem[] }));
+            if (extras.length === 0) return base;
+            return sortCatalogSectionKeys([...base.map((g) => g.category), ...extras.map((g) => g.category)]).map(
+              (category) =>
+                base.find((g) => g.category === category)
+                || extras.find((g) => g.category === category)
+                || { category, items: [] as CatalogItem[] },
+            );
+          })();
           const singleCategory = groups.length === 1 ? groups[0].category : null;
           const selectedCategory = searchActive
             ? null
@@ -7360,6 +7691,20 @@ export function CatalogPage() {
       })
       .slice(0, 30);
     const historyTotal = purchaseHistory.reduce((s, i) => s + Number(i.total || 0), 0);
+    const q = suppliersSearch.trim().toLowerCase();
+    const suppliersSorted = [...suppliers]
+      .filter((s) => {
+        if (!q) return true;
+        return (
+          String(s.name || '').toLowerCase().includes(q)
+          || String(s.code || '').toLowerCase().includes(q)
+          || String(s.cif || '').toLowerCase().includes(q)
+          || String(s.category || '').toLowerCase().includes(q)
+          || String(s.contactPerson || '').toLowerCase().includes(q)
+          || String(s.email || '').toLowerCase().includes(q)
+        );
+      })
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
 
     return (
     <CatalogTabShell
@@ -7372,6 +7717,16 @@ export function CatalogPage() {
       storeLabel={storeLabel}
       dataUserId={dataUserId}
       storeWarehouseId={storeWarehouseId}
+      toolbarLeftExtra={
+        suppliers.length > 0 ? (
+          <SaasTabSearch
+            value={suppliersSearch}
+            onChange={setSuppliersSearch}
+            placeholder="Buscar proveedor…"
+            className="relative w-full sm:w-64"
+          />
+        ) : null
+      }
       toolbarRight={
         <SaasTabPrimaryButton onClick={() => { void openSupplierEditor(null); }}>
           <Plus className="w-3.5 h-3.5" />
@@ -7396,11 +7751,17 @@ export function CatalogPage() {
             </SaasTabPrimaryButton>
           }
         />
+      ) : suppliersSorted.length === 0 ? (
+        <SaasTabEmpty
+          icon={<Search className="w-10 h-10" />}
+          title="Sin coincidencias"
+          description={`Ningún proveedor coincide con «${suppliersSearch.trim()}»`}
+        />
       ) : (
         <>
         {/* Móvil: tarjetas de proveedor */}
         <ul className="md:hidden divide-y divide-gray-100 dark:divide-gray-800">
-          {suppliers.map(supplier => (
+          {suppliersSorted.map(supplier => (
             <li key={supplier._id} className="px-3 py-2.5">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
@@ -7460,7 +7821,7 @@ export function CatalogPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-              {suppliers.map(supplier => (
+              {suppliersSorted.map(supplier => (
                 <tr key={supplier._id} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                   <td className="px-3 py-2.5 align-middle">
                     <div className="font-semibold text-gray-900 dark:text-gray-100 text-sm truncate" title={supplier.name}>
@@ -8378,7 +8739,9 @@ export function CatalogPage() {
   // ── Tab: Ingredientes ─────────────────────────────────────────────────────────
 
   const renderIngredientesTab = () => (
-    dataUserId && businessId ? <StoreIngredientsPanel userId={dataUserId} businessId={businessId} /> : null
+    dataUserId && businessId ? (
+      <StoreIngredientsPanel userId={dataUserId} businessId={businessId} />
+    ) : null
   );
 
   // ── Tabs config ─────────────────────────────────────────────────────────────
@@ -8387,14 +8750,16 @@ export function CatalogPage() {
     const cartaTabs: CatalogNavGroup['tabs'] = [
       { id: 'catalog', label: 'Carta', count: catalogMenuItems.filter((i) => i.active).length || undefined },
     ];
+    const almacenTabs: CatalogNavGroup['tabs'] = [
+      { id: 'stock', label: 'Almacén', count: stockTabCount || undefined },
+    ];
     if (!isRestaurantCatalog) {
-      cartaTabs.push({
+      almacenTabs.push({
         id: 'ingredientes',
         label: 'Ingredientes',
         count: storeIngredients.length || undefined,
       });
     }
-    cartaTabs.push({ id: 'escandallo', label: 'Escandallo' });
 
     return [
       {
@@ -8402,17 +8767,11 @@ export function CatalogPage() {
         label: 'Carta',
         tabs: cartaTabs,
       },
-      ...(isRestaurantCatalog
-        ? []
-        : [
-            {
-              id: 'almacen',
-              label: 'Almacén',
-              tabs: [
-                { id: 'stock', label: 'Inventario', count: stockTabCount || undefined },
-              ],
-            },
-          ]),
+      {
+        id: 'almacen',
+        label: 'Almacén',
+        tabs: almacenTabs,
+      },
       {
         id: 'compras',
         label: 'Compras',
@@ -8422,6 +8781,11 @@ export function CatalogPage() {
           { id: 'albaranes', label: 'Albarán' },
           { id: 'invoices', label: 'Facturas', count: invoiceKpis.pending || undefined },
         ],
+      },
+      {
+        id: 'escandallo',
+        label: 'Escandallo',
+        tabs: [{ id: 'escandallo', label: 'Escandallo' }],
       },
       {
         id: 'equipo',
@@ -8478,8 +8842,10 @@ export function CatalogPage() {
     pageReady && Boolean(businessId) && !brandsLoading && !activeStore.loading;
   const showBrandIncompleteBanner = usesTpvCatalogUi && brandCheckReady && !brandReady;
 
+  // Bar/restaurante: Carta · Almacén · Compras son raíces del sidebar → sin flecha Atrás.
+  // Delivery: sigue volviendo al Centro Operativo.
   const catalogBackTo = isRestaurantCatalog
-    ? RESTAURANT_OPS_HOME_PATH
+    ? false
     : isHeladeriaCatalog
       ? HELADERIA_OPS_HOME_PATH
       : DELIVERY_OPS_HOME_PATH;
@@ -8487,8 +8853,14 @@ export function CatalogPage() {
   const { pageTitle, pageSubtitle } = useMemo(() => {
     if (activeTab === 'stock') {
       return {
-        pageTitle: 'Almacén',
-        pageSubtitle: 'Inventario · stock por tienda',
+        pageTitle: 'Almacén / Inventario',
+        pageSubtitle: 'Stock por tienda · envases · ingredientes de cocina',
+      };
+    }
+    if (activeTab === 'ingredientes') {
+      return {
+        pageTitle: 'Almacén / Inventario',
+        pageSubtitle: 'Ingredientes · lista maestra y stock',
       };
     }
     if (activeTab === 'suppliers' || activeTab === 'purchase-orders' || activeTab === 'albaranes' || activeTab === 'invoices') {
@@ -8509,10 +8881,9 @@ export function CatalogPage() {
         pageSubtitle: 'Consumos de personal',
       };
     }
-    // Carta: catalog | ingredientes | escandallo
+    // Carta: catalog | escandallo
     const cartaSub: Record<string, string> = {
       catalog: isRestaurantCatalog ? 'Carta de sala y barra' : 'Menú y productos TPV',
-      ingredientes: 'Ingredientes del TPV',
       escandallo: 'Costes y recetas',
     };
     return {
@@ -8521,7 +8892,7 @@ export function CatalogPage() {
         cartaSub[activeTab] ||
         (isRestaurantCatalog
           ? 'Carta · Escandallo · Inventario · Compras · Consumos'
-          : 'Menú · Ingredientes · Inventario · Compras · Consumos'),
+          : 'Menú · Escandallo · Inventario · Compras · Consumos'),
     };
   }, [activeTab, isRestaurantCatalog]);
 
@@ -8577,7 +8948,7 @@ export function CatalogPage() {
 
         {activeTab === 'ingredientes' && !isRestaurantCatalog && renderIngredientesTab()}
 
-        {activeTab === 'stock' && !isRestaurantCatalog && (
+        {activeTab === 'stock' && (
           <InventoryPanel seedStockItems={filterStockInventoryItems(catalogItems)} />
         )}
 
@@ -8647,6 +9018,9 @@ export function CatalogPage() {
         catalogMenuItemsForDuplicateCheck={catalogMenuItemsRaw}
         storeIngredients={storeIngredients}
         brandIngredientSelection={brandIngredientSelection}
+        packagingStockItems={filterStockInventoryItems(catalogItems).filter(
+          (item) => item.stockCategory === 'packaging',
+        )}
         isRestaurantCatalog={isRestaurantCatalog}
       />
 
@@ -8658,6 +9032,7 @@ export function CatalogPage() {
           stats={catalogSalesIndex.get(detailItem._id) || computeCatalogItemSalesStats(detailItem, deliveryOrders)}
           statsLoading={ordersLoading}
           storeIngredients={storeIngredients}
+          stockItems={filterStockInventoryItems(catalogItems)}
           dataUserId={dataUserId}
           businessId={businessId}
           onArmCombo={() => {
@@ -8891,6 +9266,16 @@ export function CatalogPage() {
         }}
         onConfirm={handleConfirmCatalogMove}
         onDeleteEmptyOrganizer={handleDeleteEmptyOrganizer}
+      />
+      <CatalogSectionsModal
+        open={catalogSectionsOpen}
+        sections={catalogSectionRows}
+        busy={bulkDeletingCatalog || bulkMovingCatalog}
+        entityLabel={isRestaurantCatalog ? 'sección' : 'categoría'}
+        onClose={() => setCatalogSectionsOpen(false)}
+        onAdd={handleAddCatalogSection}
+        onRename={handleRenameCatalogSection}
+        onDelete={handleDeleteCatalogSectionFromModal}
       />
       <CatalogDeleteGuardModal
         open={catalogDeleteGuard !== null}

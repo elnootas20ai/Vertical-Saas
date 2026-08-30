@@ -165,25 +165,26 @@ export function pickStoreOpeningHours(
 }
 
 /**
- * Horario inicial al crear un PDV: obliga a rellenar apertura/cierre de cada día abierto.
- * Los cerrados cuentan como definidos; los abiertos empiezan sin hora.
+ * Horario inicial al crear un PDV: plantilla usable de inmediato (L–V 9–19, sáb 10–14).
+ * El usuario puede cambiar cualquier día; no se bloquea por horas vacías “fantasma”.
  */
 export function createBlankBusinessHoursConfig(): BusinessHoursConfig {
-  return {
-    timezone: 'Europe/Madrid',
-    schedule: {
-      monday: { open: true, from: '', to: '' },
-      tuesday: { open: true, from: '', to: '' },
-      wednesday: { open: true, from: '', to: '' },
-      thursday: { open: true, from: '', to: '' },
-      friday: { open: true, from: '', to: '' },
-      // Finde cerrado por defecto: basta configurar L–V; si abre, se rellena al activarlo.
-      saturday: { open: false, from: '', to: '' },
-      sunday: { open: false, from: '', to: '' },
-    },
-    holidays: [],
-    lunchBreak: { enabled: false, from: '14:00', to: '16:00' },
-  };
+  return normalizeBusinessHoursConfig(DEFAULT_BUSINESS_HOURS_CONFIG);
+}
+
+/**
+ * Antes de validar/guardar: días abiertos sin HH:mm completos reciben defaults.
+ * Así no bloqueamos el alta por un día que en pantalla “parece” relleno pero el estado estaba vacío.
+ */
+export function prepareBusinessHoursForSave(
+  hours: BusinessHoursConfig | null | undefined,
+): BusinessHoursConfig {
+  const next = normalizeBusinessHoursConfig(hours);
+  for (const day of ALL_SCHEDULE_DAY_KEYS) {
+    if (!next.schedule[day].open) continue;
+    next.schedule[day] = ensureOpenDayTimes(next.schedule[day]);
+  }
+  return next;
 }
 
 /** Mensaje para UI si el horario no se puede guardar; `null` si es válido. */
@@ -191,17 +192,15 @@ export function getBusinessHoursIssue(hours: BusinessHoursConfig | null | undefi
   if (!hours?.schedule) {
     return 'Configura el horario de cada día (L–D): abierto con horas o cerrado.';
   }
+  const prepared = prepareBusinessHoursForSave(hours);
   for (const day of ALL_SCHEDULE_DAY_KEYS) {
-    const d = hours.schedule[day];
+    const d = prepared.schedule[day];
     if (!d || typeof d !== 'object') {
       return `${SCHEDULE_DAY_LABELS_ES[day]}: indica si abre y su horario.`;
     }
     if (!d.open) continue;
     const from = String(d.from ?? '').trim();
     const to = String(d.to ?? '').trim();
-    if (!from || !to) {
-      return `${SCHEDULE_DAY_LABELS_ES[day]}: indica hora de apertura y de cierre.`;
-    }
     const fromMin = scheduleTimeToMinutes(from);
     const toMin = scheduleTimeToMinutes(to);
     if (fromMin < 0 || toMin < 0) {
@@ -212,13 +211,13 @@ export function getBusinessHoursIssue(hours: BusinessHoursConfig | null | undefi
     }
     // from > to = turno nocturno (p. ej. 20:00 → 06:00 del día siguiente). Válido.
   }
-  if (countOpenScheduleDays(hours.schedule) === 0) {
+  if (countOpenScheduleDays(prepared.schedule) === 0) {
     return 'Activa al menos un día abierto con su horario (L–D).';
   }
   // Horario partido (pausa mediodía): válido junto a horarios distintos por día.
-  if (hours.lunchBreak?.enabled) {
-    const breakFrom = scheduleTimeToMinutes(hours.lunchBreak.from);
-    const breakTo = scheduleTimeToMinutes(hours.lunchBreak.to);
+  if (prepared.lunchBreak?.enabled) {
+    const breakFrom = scheduleTimeToMinutes(prepared.lunchBreak.from);
+    const breakTo = scheduleTimeToMinutes(prepared.lunchBreak.to);
     if (breakFrom < 0 || breakTo < 0) {
       return 'Horario partido: usa horas válidas en la pausa (HH:mm).';
     }

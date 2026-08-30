@@ -112,7 +112,7 @@ export function SaasTabToolbarRow({ left, right }: { left?: ReactNode; right?: R
         hasLeft && hasRight ? 'justify-between' : ''
       }`}
     >
-      {hasLeft ? <div className="flex min-w-0 flex-wrap items-center gap-1.5">{left}</div> : null}
+      {hasLeft ? <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">{left}</div> : null}
       {hasRight ? (
         <div className={`flex flex-wrap items-center gap-1.5 shrink-0 ${hasLeft ? 'ml-auto' : ''}`}>
           {right}

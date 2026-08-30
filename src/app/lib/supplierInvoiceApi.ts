@@ -87,15 +87,25 @@ export interface EmailPollSummary {
   message?: string;
 }
 
-export async function listSupplierInvoicePdvEmailConfigs(userId: string): Promise<{
+export async function listSupplierInvoicePdvEmailConfigs(
+  userId: string,
+  businessId?: string,
+  options?: { accountBusinessCount?: number },
+): Promise<{
   pdvs: SupplierInvoicePdvEmailStatus[];
   legacyAccount: { connected: boolean; config: SupplierInvoiceEmailConfig };
 }> {
+  const params = new URLSearchParams();
+  if (businessId) params.set('businessId', businessId);
+  if (options?.accountBusinessCount != null) {
+    params.set('accountBusinessCount', String(options.accountBusinessCount));
+  }
+  const qs = params.toString() ? `?${params.toString()}` : '';
   const data = await apiRequest<{
     ok: boolean;
     pdvs: SupplierInvoicePdvEmailStatus[];
     legacyAccount: { connected: boolean; config: SupplierInvoiceEmailConfig };
-  }>(`/api/supplier-invoices/config/${encodeURIComponent(userId)}/pdvs`);
+  }>(`/api/supplier-invoices/config/${encodeURIComponent(userId)}/pdvs${qs}`);
   return {
     pdvs: Array.isArray(data.pdvs) ? data.pdvs : [],
     legacyAccount: data.legacyAccount || {
@@ -108,8 +118,12 @@ export async function listSupplierInvoicePdvEmailConfigs(userId: string): Promis
 export async function getSupplierInvoiceEmailConfig(
   userId: string,
   pdvId?: string,
+  businessId?: string,
 ): Promise<SupplierInvoiceEmailConfig> {
-  const qs = pdvId ? `?pdvId=${encodeURIComponent(pdvId)}` : '';
+  const params = new URLSearchParams();
+  if (pdvId) params.set('pdvId', pdvId);
+  if (businessId) params.set('businessId', businessId);
+  const qs = params.toString() ? `?${params.toString()}` : '';
   const data = await apiRequest<{ ok: boolean; config: SupplierInvoiceEmailConfig }>(
     `/api/supplier-invoices/config/${encodeURIComponent(userId)}${qs}`,
   );
@@ -120,6 +134,7 @@ export async function saveSupplierInvoiceEmailConfig(
   userId: string,
   config: Partial<SupplierInvoiceEmailConfig>,
   pdvId?: string,
+  businessId?: string,
 ): Promise<SupplierInvoiceEmailConfig & { warning?: string }> {
   const data = await apiRequest<{
     ok: boolean;
@@ -129,7 +144,11 @@ export async function saveSupplierInvoiceEmailConfig(
     `/api/supplier-invoices/config/${encodeURIComponent(userId)}`,
     {
       method: 'PUT',
-      body: JSON.stringify({ config, ...(pdvId ? { pdvId } : {}) }),
+      body: JSON.stringify({
+        config,
+        ...(pdvId ? { pdvId } : {}),
+        ...(businessId ? { businessId } : {}),
+      }),
     },
   );
   return { ...data.config, warning: data.warning };
@@ -141,6 +160,7 @@ export async function testSupplierInvoiceImap(
   > & {
     userId?: string;
     pdvId?: string;
+    businessId?: string;
   },
 ): Promise<{ ok: boolean; error?: string; folders?: string[]; totalMessages?: number }> {
   const passRaw = String(overrides.imapPassword || '');
@@ -156,6 +176,7 @@ export async function testSupplierInvoiceImap(
       tls: overrides.imapTls,
       userId: overrides.userId || undefined,
       pdvId: overrides.pdvId || undefined,
+      businessId: overrides.businessId || undefined,
     }),
   });
 }
@@ -163,12 +184,16 @@ export async function testSupplierInvoiceImap(
 export async function pollSupplierInvoicesNow(
   userId: string,
   pdvId?: string,
+  businessId?: string,
 ): Promise<EmailPollSummary> {
   const data = await apiRequest<{ ok: boolean; summary: EmailPollSummary }>(
     `/api/supplier-invoices/poll/${encodeURIComponent(userId)}`,
     {
       method: 'POST',
-      body: JSON.stringify(pdvId ? { pdvId } : {}),
+      body: JSON.stringify({
+        ...(pdvId ? { pdvId } : {}),
+        ...(businessId ? { businessId } : {}),
+      }),
     },
   );
   return data.summary;

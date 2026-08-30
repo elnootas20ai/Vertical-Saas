@@ -147,56 +147,19 @@ export const VERTIAL_ORDER_CHANNEL_STOCK_RULES: OrderChannelStockRule[] = [
   { deliveryType: 'domicilio', templateId: 'bag-delivery', quantity: 1 },
 ];
 
+/** @deprecated Envases se eligen a mano en el alta del producto; no hay reglas auto. */
 export type ProductPackagingRule = {
   match: (foldedName: string, foldedCategory: string, lineKind: string) => boolean;
   templateId: string;
   quantity: number;
 };
 
-const PRODUCT_PACKAGING_RULES: ProductPackagingRule[] = [
-  {
-    match: (name, _cat, kind) =>
-      kind === 'pizza' && /xl|familiar|xxl|extra\s*large|32|33\s*cm|35\s*cm/.test(name),
-    templateId: 'box-pizza-xl',
-    quantity: 1,
-  },
-  {
-    match: (name, _cat, kind) =>
-      kind === 'pizza' && / grande|\bl\b|30\s*cm|28\s*cm/.test(name),
-    templateId: 'box-pizza-l',
-    quantity: 1,
-  },
-  {
-    match: (_name, cat, kind) =>
-      kind === 'pizza' || /pizza|calzone/.test(cat) || /pizza|calzone/.test(_name),
-    templateId: 'box-pizza-m',
-    quantity: 1,
-  },
-  {
-    match: (name, cat, kind) =>
-      kind === 'burger_fastfood' ||
-      /burger|hamburguesa/.test(cat) ||
-      /burger|hamburguesa/.test(name),
-    templateId: 'box-burger',
-    quantity: 1,
-  },
-];
-
+/** Siempre vacío: el packaging va en la composición del producto (Carta). */
 export function resolveProductPackagingLines(
-  item: { name?: string; category?: string },
-  lineKind: string,
+  _item: { name?: string; category?: string },
+  _lineKind: string,
 ): Array<{ templateId: string; quantity: number }> {
-  const name = fold(item.name || '');
-  const cat = fold(item.category || '');
-  const out: Array<{ templateId: string; quantity: number }> = [];
-  const seen = new Set<string>();
-  for (const rule of PRODUCT_PACKAGING_RULES) {
-    if (!rule.match(name, cat, lineKind)) continue;
-    if (seen.has(rule.templateId)) continue;
-    seen.add(rule.templateId);
-    out.push({ templateId: rule.templateId, quantity: rule.quantity });
-  }
-  return out;
+  return [];
 }
 
 export function resolveOrderChannelStockRules(

@@ -74,7 +74,7 @@ test('resolveInventoryOrganizerId respeta inventoryOrganizerId', () => {
   assert.ok(choices.some((c) => c.label === 'Bebidas'));
 });
 
-test('buildInventoryOrganizerGroups no mete el resto en un Total que no filtra', () => {
+test('buildInventoryOrganizerGroups no usa marcas como chips (van a Ingredientes)', () => {
   const pizza = { _id: 'brand-pizza-1', name: 'pizzeria', deliveryLineKind: 'pizza' };
   const drinks = { _id: 'brand-drinks-1', name: 'bebidas marca', deliveryLineKind: 'drinks_desserts' };
   const items = [
@@ -99,16 +99,18 @@ test('buildInventoryOrganizerGroups no mete el resto en un Total que no filtra',
     },
   ];
   const groups = buildInventoryOrganizerGroups(items, [], [pizza, drinks]);
-  const leftover = groups.find((g) => g.id === drinks._id);
-  assert.ok(leftover, 'la línea de bebidas debe ser un chip con su id, no Total');
-  assert.equal(leftover.total, 1);
-  assert.equal(groups.some((g) => g.id === 'total'), false);
-  const filtered = filterItemsByOrganizer(items, drinks._id, [], [pizza, drinks]);
-  assert.equal(filtered.length, 1);
-  assert.equal(filtered[0].name, 'Cola');
+  assert.equal(groups.some((g) => g.id === pizza._id), false);
+  assert.equal(groups.some((g) => g.id === drinks._id), false);
+  assert.ok(groups.some((g) => g.id === ORGANIZER_PACKAGING));
+  const ingredientes = groups.find((g) => g.id === 'total');
+  assert.ok(ingredientes);
+  assert.equal(ingredientes.total, 2);
+  const filtered = filterItemsByOrganizer(items, 'total', [], [pizza, drinks]);
+  assert.equal(filtered.length, 2);
+  assert.deepEqual(filtered.map((i) => i.name).sort(), ['Cola', 'Masa']);
 });
 
-test('buildInventoryOrganizerGroups lista todas las marcas comerciales aunque estén vacías', () => {
+test('buildInventoryOrganizerGroups no lista marcas vacías Burger/Tacos', () => {
   const pizza = { _id: 'brand-pizza-1', name: 'Modomio', deliveryLineKind: 'pizza', primaryColor: '#dc2626' };
   const burger = { _id: 'brand-burger-1', name: 'Black Burger', deliveryLineKind: 'burger_fastfood' };
   const items = [
@@ -120,12 +122,8 @@ test('buildInventoryOrganizerGroups lista todas las marcas comerciales aunque es
     },
   ];
   const groups = buildInventoryOrganizerGroups(items, [], [pizza, burger]);
-  const modomio = groups.find((g) => g.id === pizza._id);
-  const black = groups.find((g) => g.id === burger._id);
-  assert.ok(modomio);
-  assert.equal(modomio.label, 'Modomio');
-  assert.equal(modomio.total, 1);
-  assert.ok(black);
-  assert.equal(black.label, 'Black Burger');
-  assert.equal(black.total, 0);
+  assert.equal(groups.some((g) => g.id === pizza._id), false);
+  assert.equal(groups.some((g) => g.id === burger._id), false);
+  // Solo ingredientes bajo marca → sin chip (Total único se omite; se ven en lista completa).
+  assert.equal(groups.length, 0);
 });

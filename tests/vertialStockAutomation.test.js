@@ -8,7 +8,7 @@ import {
 import { buildRecipeIngredientsFromCostingItem } from '../src/app/lib/recipeSyncLogic.ts';
 
 describe('collectInventoryCandidates extended', () => {
-  it('includes vertial packaging templates and catalog resale', () => {
+  it('no inyecta plantillas Vertial de envases; sí reventa e ingredientes de carta', () => {
     const candidates = collectInventoryCandidates([], [
       {
         _id: 'cat-coca',
@@ -27,10 +27,17 @@ describe('collectInventoryCandidates extended', () => {
     ]);
 
     const names = candidates.map((c) => c.name);
-    expect(names).toContain('Caja pizza M');
-    expect(names).toContain('Bolsa delivery');
+    expect(names).not.toContain('Caja pizza M');
+    expect(names).not.toContain('Bolsa para llevar');
     expect(names).toContain('Coca-Cola 33cl');
     expect(names).toContain('Mozzarella');
+  });
+
+  it('puede incluir plantillas Vertial solo si se pide explícito', () => {
+    const candidates = collectInventoryCandidates([], [], { includeVertialTemplates: true });
+    const names = candidates.map((c) => c.name);
+    expect(names).toContain('Caja pizza M');
+    expect(names).toContain('Bolsa para llevar');
   });
 });
 
@@ -40,20 +47,13 @@ describe('vertialStockDefaults', () => {
     expect(resolveVertialMinStock('beverage')).toBe(24);
   });
 
-  it('maps pizza to box template', () => {
-    const lines = resolveProductPackagingLines(
-      { name: 'Margarita', category: 'Pizzas' },
-      'pizza',
-    );
-    expect(lines[0]?.templateId).toBe('box-pizza-m');
-  });
-
-  it('maps burger to burger box', () => {
-    const lines = resolveProductPackagingLines(
-      { name: 'Cheese Burger', category: 'Burgers' },
-      'burger_fastfood',
-    );
-    expect(lines[0]?.templateId).toBe('box-burger');
+  it('ya no asigna packaging automático por tipo de producto', () => {
+    expect(
+      resolveProductPackagingLines({ name: 'Margarita', category: 'Pizzas' }, 'pizza'),
+    ).toEqual([]);
+    expect(
+      resolveProductPackagingLines({ name: 'Cheese Burger', category: 'Burgers' }, 'burger_fastfood'),
+    ).toEqual([]);
   });
 });
 
@@ -100,6 +100,35 @@ describe('buildRecipeIngredientsFromCostingItem', () => {
     expect(ingredients).toHaveLength(2);
     expect(ingredients[1]?.catalogItemId).toBe('stock-box');
     expect(ingredients[1]?.optional).toBe(true);
+    expect(ingredients[0]?.wastePercent).toBe(0);
+  });
+
+  it('maps mermaPct to wastePercent on every line', () => {
+    const inventory = [
+      {
+        _id: 'stock-moz',
+        name: 'Mozzarella',
+        module: 'stock',
+        costPrice: 5.5,
+        stockCategory: 'ingredient',
+        customFields: { storeIngredientId: 'ing-moz' },
+      },
+    ];
+    const catalogItem = {
+      _id: 'prod-marg',
+      name: 'Margarita',
+      module: 'catalog',
+      customFields: {
+        costingType: 'recipe',
+        mermaPct: 12,
+        costingRecipe: [
+          { storeIngredientId: 'ing-moz', name: 'Mozzarella', quantity: 0.15, unit: 'kg' },
+        ],
+      },
+    };
+    const ingredients = buildRecipeIngredientsFromCostingItem(catalogItem, inventory);
+    expect(ingredients).toHaveLength(1);
+    expect(ingredients[0]?.wastePercent).toBe(12);
   });
 });
 

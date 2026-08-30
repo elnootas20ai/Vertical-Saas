@@ -118,12 +118,18 @@ Código producto: `basic` · `normal` · `pro`. UI: **Básico** · **Mediano (No
 | Capacidad | Básico | Mediano | Pro |
 |-----------|:------:|:-------:|:---:|
 | TPV + Verifactu | ✓ | ✓ | ✓ |
-| Inventario · Escandallo · Compras OCR | ✗ | ✓ | ✓ |
+| **Carta** / catálogo | ✓ mín. | ✓ | ✓ |
+| Inventario / stock | ✗ | ✓ | ✓ |
+| **Escandallo** (recetas, food cost) | ✗ | ✓ | ✓ |
+| Compras OCR (albarán · factura) | ✗ | ✓ | ✓ |
+| Dashboard 1 (ventas día · marca) | ✓ | ✓ | ✓ |
 | Correo IMAP facturas | ✗ | ✗ | ✓ |
 | OPS tiempo real | ✗ | ✗ | ✓ |
 | Dashboard completo · Alertas | ✗ | ✗ | ✓ |
 | SVAs (RRHH, web, QR, chat…) | ✗ | à la carte | ✓ incluidos |
 | Multi-tienda (función) | ✗ | ✗ | ✓ |
+
+> **Carta** en Básico = catálogo mínimo para cobrar. **Escandallo + Inventario + Compras OCR** arrancan en **Mediano** (§1e). Pro añade IMAP, OPS y dirección.
 
 ---
 
@@ -502,3 +508,4 @@ Mediano+SVAs clásicos (**366 €**) o +todos (**523 €**) → **Pro 350 €** 
 | 2026-08-26 | **§1f** Ficha cerrada **Básico · Mediano (Normal) · Pro** — referencia única tres planes |
 | 2026-08-26 | **Chat SVA 50 €** · **Calendario SVA 19 €** — precios cerrados |
 | 2026-08-26 | **Hoja cliente Mediano** en `docs/VERTIAL-HOJAS-CLIENTE-CONTRATO.md` (anexo contrato) |
+| 2026-08-28 | **Comparativa rápida:** separa **Carta** · Inventario · Escandallo · Compras OCR · Dashboard 1 (antes iba todo mezclado) |

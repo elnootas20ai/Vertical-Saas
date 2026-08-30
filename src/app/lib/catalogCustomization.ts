@@ -61,6 +61,14 @@ export type TpvBrandCategoryIngredients = Record<
 
 export type StoreIngredientRole = 'escandallo' | 'base' | 'extra';
 
+/** Componentes de un ingrediente elaborado (ej. masa = harina + agua). */
+export type StoreIngredientRecipeLine = {
+  storeIngredientId: string;
+  name: string;
+  quantity: number;
+  unit: string;
+};
+
 export interface StoreIngredient {
   id: string;
   name: string;
@@ -82,6 +90,43 @@ export interface StoreIngredient {
   tpvAllowRemove?: boolean;
   /** Coste base por unidad para escandallos (€). */
   baseCost?: number;
+  /** Unidad de compra del coste (kg, g, ud, l, ml…). */
+  unit?: string;
+  /** Receta de elaboración (componentes → este ingrediente). No es TPV. */
+  recipeLines?: StoreIngredientRecipeLine[];
+  /** Cantidad de este elaborado que se descuenta por unidad vendida del producto. */
+  usageQtyPerUnit?: number;
+  usageUnit?: string;
+}
+
+export function normalizeStoreIngredientUnit(raw: unknown, fallback = 'ud'): string {
+  const u = String(raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^lt$/, 'l');
+  if (!u) return fallback;
+  if (u === 'ud' || u === 'g' || u === 'kg' || u === 'ml' || u === 'l') return u;
+  return fallback;
+}
+
+export function normalizeStoreIngredientRecipeLines(raw: unknown): StoreIngredientRecipeLine[] {
+  if (!Array.isArray(raw)) return [];
+  const out: StoreIngredientRecipeLine[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const rec = entry as Record<string, unknown>;
+    const storeIngredientId = String(rec.storeIngredientId || '').trim();
+    const name = String(rec.name || '').trim();
+    const quantity = Number(rec.quantity);
+    if (!storeIngredientId || !name || !Number.isFinite(quantity) || quantity <= 0) continue;
+    out.push({
+      storeIngredientId,
+      name,
+      quantity: Math.round(quantity * 1000) / 1000,
+      unit: normalizeStoreIngredientUnit(rec.unit, 'ud'),
+    });
+  }
+  return out;
 }
 
 const CUSTOMIZABLE_KEYS = ['pizza', 'pizzas', 'hamburguesa', 'hamburguesas', 'burger', 'burgers'];
@@ -1040,7 +1085,12 @@ export function filterStoreIngredientsByBrand(
   allBrandIds: string[],
 ): StoreIngredient[] {
   if (!brandId || allBrandIds.length <= 1) return items;
-  return items.filter((ing) => normalizeBrandIds(ing.brandIds).includes(brandId));
+  return items.filter((ing) => {
+    const assigned = normalizeBrandIds(ing.brandIds);
+    // Sin marcas = compartido entre todas (mismo producto en 2+ líneas).
+    if (assigned.length === 0) return true;
+    return assigned.includes(brandId);
+  });
 }
 
 export function countStoreIngredientsByBrand(
@@ -1180,6 +1230,12 @@ export function normalizeStoreIngredients(raw: unknown): StoreIngredient[] {
     const baseCostRaw = Number(rec.baseCost);
     const baseCost =
       Number.isFinite(baseCostRaw) && baseCostRaw >= 0 ? Math.round(baseCostRaw * 100) / 100 : undefined;
+    const unit = normalizeStoreIngredientUnit(rec.unit, 'ud');
+    const recipeLines = normalizeStoreIngredientRecipeLines(rec.recipeLines);
+    const usageQtyRaw = Number(rec.usageQtyPerUnit);
+    const usageQtyPerUnit =
+      Number.isFinite(usageQtyRaw) && usageQtyRaw > 0 ? Math.round(usageQtyRaw * 1000) / 1000 : undefined;
+    const usageUnit = normalizeStoreIngredientUnit(rec.usageUnit, unit);
     out.push({
       id: String(rec.id || `ing-${idx}-${ingredientNameKey(name).replace(/\s+/g, '-')}`),
       name,
@@ -1187,10 +1243,13 @@ export function normalizeStoreIngredients(raw: unknown): StoreIngredient[] {
       escandalloOnly: syncedRole === 'escandallo',
       tpvChargeExtra,
       tpvAllowRemove,
+      unit,
       ...(brandIds.length > 0 ? { brandIds } : {}),
       ...(productParts.length > 0 ? { productParts } : {}),
       ...(syncedRole === 'extra' && Object.keys(extraPrices).length > 0 ? { extraPrices } : {}),
       ...(baseCost !== undefined ? { baseCost } : {}),
+      ...(recipeLines.length > 0 ? { recipeLines } : {}),
+      ...(usageQtyPerUnit != null ? { usageQtyPerUnit, usageUnit } : {}),
     });
   });
   return out;
@@ -1244,23 +1303,38 @@ function mergeStoreIngredientRows(a: StoreIngredient, b: StoreIngredient): Store
   const pickBaseCost = () => {
     const ca = Number(a.baseCost);
     const cb = Number(b.baseCost);
-    if (Number.isFinite(ca) && ca >= 0 && Number.isFinite(cb) && cb >= 0) {
-      return Math.round(Math.max(ca, cb) * 100) / 100;
-    }
+    // Preferir el de `a` (ya guardado). Nunca Math.max: inflaba costes al fusionar.
     if (Number.isFinite(ca) && ca >= 0) return Math.round(ca * 100) / 100;
     if (Number.isFinite(cb) && cb >= 0) return Math.round(cb * 100) / 100;
     return undefined;
   };
   const mergedBaseCost = pickBaseCost();
+  const unitA = normalizeStoreIngredientUnit(a.unit, '');
+  const unitB = normalizeStoreIngredientUnit(b.unit, '');
+  const mergedUnit = unitA || unitB || 'ud';
+  const recipeLines =
+    (Array.isArray(a.recipeLines) && a.recipeLines.length > 0 ? a.recipeLines : null) ||
+    (Array.isArray(b.recipeLines) && b.recipeLines.length > 0 ? b.recipeLines : null) ||
+    [];
+  const usageQty =
+    a.usageQtyPerUnit && a.usageQtyPerUnit > 0
+      ? a.usageQtyPerUnit
+      : b.usageQtyPerUnit && b.usageQtyPerUnit > 0
+        ? b.usageQtyPerUnit
+        : undefined;
+  const usageUnit = normalizeStoreIngredientUnit(a.usageUnit || b.usageUnit, mergedUnit);
   return withStoreIngredientTpvFlags(
     {
       id: String(a.id || b.id || '').trim() || `ing-${Date.now()}`,
       name: pickName(a.name, b.name),
       role: 'base',
       escandalloOnly: false,
+      unit: mergedUnit,
       ...(mergedBrands.length > 0 ? { brandIds: mergedBrands } : {}),
       ...(parts.size > 0 ? { productParts: [...parts] } : {}),
       ...(mergedBaseCost !== undefined ? { baseCost: mergedBaseCost } : {}),
+      ...(recipeLines.length > 0 ? { recipeLines } : {}),
+      ...(usageQty != null ? { usageQtyPerUnit: usageQty, usageUnit } : {}),
     },
     { chargeExtra, allowRemove },
   );
@@ -1396,8 +1470,10 @@ export function resolveStoreIngredientsFromDeliveryConfig(config: {
   storeIngredients?: unknown;
   tpvCategoryTemplates?: TpvCategoryTemplates;
 }): StoreIngredient[] {
-  const fromStore = normalizeStoreIngredients(config.storeIngredients);
-  if (fromStore.length > 0) return fromStore;
+  // Lista maestra explícita (Excel / alta manual). Vacía = borrado intencional.
+  if (Array.isArray(config.storeIngredients)) {
+    return normalizeStoreIngredients(config.storeIngredients);
+  }
   const templates = normalizeTpvCategoryTemplates(config.tpvCategoryTemplates);
   return normalizeStoreIngredients(
     legacyTemplateIngredientNames(templates).map((name, idx) => ({
@@ -1431,6 +1507,8 @@ function mergeLegacyExtrasIntoStoreIngredients(
   },
   brandIds: string[] = [],
 ): StoreIngredient[] {
+  /** Con lista maestra guardada, no reinyectar nombres borrados desde extras legacy. */
+  const explicitMaster = Array.isArray(config.storeIngredients);
   const list = resolveStoreIngredientsFromDeliveryConfig(config);
   const byKey = new Map(list.map((ing) => [ingredientRowKey(ing.name, normalizeBrandIds(ing.brandIds)), { ...ing }]));
   const { brandSupplements } = resolveTpvBrandConfigFromDeliveryConfig(config, brandIds);
@@ -1447,6 +1525,7 @@ function mergeLegacyExtrasIntoStoreIngredients(
         byKey.set(ingredientRowKey(existing.name, normalizeBrandIds(existing.brandIds)), existing);
         continue;
       }
+      if (explicitMaster) continue;
       const row: StoreIngredient = {
         id: sup.id || `extra-${ingredientNameKey(sup.name).replace(/\s+/g, '-')}`,
         name: sup.name,
@@ -1474,6 +1553,7 @@ function mergeLegacyExtrasIntoStoreIngredients(
         }
         continue;
       }
+      if (explicitMaster) continue;
       byKey.set(key, {
         id: sup.id || `extra-${ingredientNameKey(sup.name).replace(/\s+/g, '-')}`,
         name: sup.name,
@@ -1525,9 +1605,7 @@ export function resolveIngredientExtraPrice(
   brandIds: string[] = [],
   defaultExtraPrice?: number,
 ): number {
-  const global = normalizeTpvDefaultExtraPrice(defaultExtraPrice);
-  if (global != null) return global;
-
+  // Precio propio del ingrediente gana; el de la barra es solo fallback.
   const direct = normalizeTpvDefaultExtraPrice(ing.extraPrice);
   if (direct != null) return direct;
   const searchBrands = brandIds.length > 0 ? brandIds : [''];
@@ -1539,6 +1617,8 @@ export function resolveIngredientExtraPrice(
     const first = Object.values(ing.extraPrices).find((p) => Number.isFinite(p));
     if (first != null) return Math.round(first * 100) / 100;
   }
+  const global = normalizeTpvDefaultExtraPrice(defaultExtraPrice);
+  if (global != null) return global;
   return 0;
 }
 
@@ -1980,6 +2060,9 @@ export function parseCatalogSupplements(
     options,
   );
   if (fromStore.length > 0) return fromStore;
+
+  // Lista maestra vacía = borrado intencional: no rellenar con extras legacy.
+  if (Array.isArray(storeIngredients) && storeIngredients.length === 0) return [];
 
   const key = resolveTpvCategoryTemplateKey(item, brands, options);
   if (!key) return [];

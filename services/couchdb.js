@@ -6578,11 +6578,20 @@ export function sanitizeStoreIngredients(raw) {
     const baseCostRaw = Number(entry.baseCost);
     const baseCost =
       Number.isFinite(baseCostRaw) && baseCostRaw >= 0 ? Math.round(baseCostRaw * 100) / 100 : undefined;
+    const unitRaw = String(entry.unit || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^lt$/, 'l');
+    const unit =
+      unitRaw === 'ud' || unitRaw === 'g' || unitRaw === 'kg' || unitRaw === 'ml' || unitRaw === 'l'
+        ? unitRaw
+        : 'ud';
     out.push({
       id: String(entry.id || `ing-${idx}-${key.replace(/\s+/g, '-')}`),
       name,
       role,
       escandalloOnly: role === 'escandallo',
+      unit,
       ...(brandIds.length > 0 ? { brandIds } : {}),
       ...(productParts.length > 0 ? { productParts } : {}),
       ...(role === 'extra' && Object.keys(extraPrices).length > 0 ? { extraPrices } : {}),

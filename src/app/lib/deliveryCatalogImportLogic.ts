@@ -203,14 +203,20 @@ const IMPORT_CATEGORY_ALIASES: Record<string, string> = {
   consumables: 'Varios',
 };
 
-/** Categorías de Excel → solo almacén (no aparecen en TPV). */
-export const WAREHOUSE_IMPORT_CATEGORIES = ['Envases', 'Limpieza', 'Varios'] as const;
+/** Categorías de Excel / sync almacén → solo almacén (no aparecen en TPV ni chips de carta). */
+export const WAREHOUSE_IMPORT_CATEGORIES = ['Envases', 'Limpieza', 'Varios', 'Ingredientes'] as const;
 
-export type WarehouseImportStockCategory = 'packaging' | 'cleaning' | 'consumable';
+export type WarehouseImportStockCategory = 'packaging' | 'cleaning' | 'consumable' | 'ingredient';
 
 export function isWarehouseImportCategory(category: string): boolean {
   const key = foldKey(normalizeImportCategory(category));
-  return key === 'envases' || key === 'limpieza' || key === 'varios';
+  if (!key) return false;
+  if (key === 'envases' || key === 'limpieza' || key === 'varios') return true;
+  // Sync escandallo → almacén crea «Ingredientes» / «Ingredientes · Marca». Nunca carta/TPV.
+  if (key === 'ingredientes' || key.startsWith('ingredientes ') || key.startsWith('ingredientes·')) {
+    return true;
+  }
+  return false;
 }
 
 /** Prefijo de organizador = categoría de catálogo (chips del producto → proveedor). */
@@ -238,7 +244,12 @@ export function catalogCategoryKeyFromOrganizerId(organizerId: string): string {
  */
 export function listCatalogCategoryOrganizerChoices(
   brands: Array<{ catalogCategories?: string[]; deliveryLineKind?: string } | null | undefined> = [],
-  catalogItems: Array<{ category?: string; active?: boolean; deletedAt?: string | null } | null | undefined> = [],
+  catalogItems: Array<{
+    category?: string;
+    active?: boolean;
+    deletedAt?: string | null;
+    module?: string;
+  } | null | undefined> = [],
   options?: { businessType?: string | null },
 ): Array<{ id: string; label: string }> {
   const skipLineKindPresets = restaurantBrandCategoriesFromCatalogOnly(options?.businessType);
@@ -260,6 +271,8 @@ export function listCatalogCategoryOrganizerChoices(
   }
   for (const item of catalogItems || []) {
     if (!item || item.deletedAt || item.active === false) continue;
+    // Solo carta: categorías de almacén (invcat / module stock) no entran al TPV ni a «Qué te vende» como carta.
+    if (String(item.module || 'catalog') === 'stock') continue;
     add(String(item.category || ''));
   }
   return [...labelByKey.entries()]
@@ -689,6 +702,7 @@ export function mergeBrandCatalogCategories(existing: string[] | undefined, impo
   const add = (value: string) => {
     const trimmed = String(value || '').trim();
     if (!trimmed) return;
+    if (isWarehouseImportCategory(trimmed)) return;
     const key = foldKey(trimmed);
     if (seen.has(key)) return;
     seen.add(key);

@@ -4,7 +4,7 @@ import { isDefaultBrandNamePlaceholder, sortBrandsForDisplay } from './brandUtil
 import { resolveBrandLogo } from './brandPlaceholders';
 import { brandIdAliases } from './brandLabels';
 import { UNIVERSAL_CATALOG_CATEGORIES } from './deliveryBrandLineKinds';
-import { shouldClearBrandForCategory, allCommercialLineBrands } from './deliveryCatalogImportLogic';
+import { shouldClearBrandForCategory, allCommercialLineBrands, isWarehouseImportCategory } from './deliveryCatalogImportLogic';
 import { isTpvWarehouseOnlyCatalogItem } from './tpvCatalogScope';
 import {
   isBrandFoodCategory,
@@ -82,6 +82,8 @@ export function isTpvSellableCatalogItem(item: CatalogItem | null | undefined): 
   if (item.available === false) return false;
   if (item.itemType !== 'product' && item.itemType !== 'combo') return false;
   if (isTpvWarehouseOnlyCatalogItem(item)) return false;
+  // Categoría de almacén (p. ej. «Ingredientes» al crear escandallo): nunca en TPV.
+  if (isWarehouseImportCategory(String(item.category || ''))) return false;
   return true;
 }
 
@@ -399,12 +401,13 @@ export function categoriesForTpvScope(
     const fromItems = new Set<string>();
     items.forEach((item) => {
       const cat = item.category?.trim();
-      if (!cat) return;
+      if (!cat || isWarehouseImportCategory(cat)) return;
       if (layout !== 'brand_families' && isCrossBrandOrganizerCategory(cat, brands, catalog)) return;
       fromItems.add(cat);
     });
     if (brand?.catalogCategories?.length) {
       const ordered = brand.catalogCategories.filter((cat) => {
+        if (isWarehouseImportCategory(cat)) return false;
         if (!fromItems.has(cat)) return false;
         if (layout === 'brand_families') return isBrandFoodCategory(cat);
         return !isCrossBrandOrganizerCategory(cat, brands, catalog);
@@ -420,7 +423,9 @@ export function categoriesForTpvScope(
 
   const cats = new Set<string>();
   items.forEach((item) => {
-    if (item.category?.trim()) cats.add(item.category.trim());
+    const cat = item.category?.trim();
+    if (!cat || isWarehouseImportCategory(cat)) return;
+    cats.add(cat);
   });
   return [...cats].sort((a, b) => a.localeCompare(b, 'es'));
 }

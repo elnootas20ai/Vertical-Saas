@@ -1,6 +1,12 @@
 import type { CatalogItem, StockCategory } from './deliveryApi';
 import type { ProductRecipeLine } from './catalogCosting';
-import { readProductCostingType, readProductRecipeLines } from './catalogCosting';
+import {
+  readProductCostingType,
+  readProductMermaPct,
+  readProductRecipeLines,
+  resolveIngredientUnitCost,
+} from './catalogCosting';
+import type { StoreIngredient } from './catalogCustomization';
 import { buildInventoryLookupMaps } from './inventorySyncLogic';
 
 export type RecipeIngredientDraft = {
@@ -21,24 +27,25 @@ function lineToRecipeIngredient(
   line: ProductRecipeLine,
   inventoryById: Map<string, CatalogItem>,
   storeIngToStock: Map<string, CatalogItem>,
+  ingredientsById: Map<string, StoreIngredient> | undefined,
+  wastePercent: number,
 ): RecipeIngredientDraft | null {
   let catalogItemId = String(line.catalogItemId || '').trim();
   let catalogItemName = line.name;
   let costPerUnit = 0;
   let stockCategory: StockCategory = line.stockCategory || 'ingredient';
+  let stock: (CatalogItem & { lastPurchasePrice?: number }) | undefined;
 
   if (!catalogItemId && line.storeIngredientId) {
-    const stock = storeIngToStock.get(line.storeIngredientId);
+    stock = storeIngToStock.get(line.storeIngredientId) as CatalogItem & { lastPurchasePrice?: number };
     if (!stock) return null;
     catalogItemId = stock._id;
     catalogItemName = stock.name;
-    costPerUnit = Number(stock.costPrice) || 0;
     stockCategory = stock.stockCategory || stockCategory;
   } else if (catalogItemId) {
-    const stock = inventoryById.get(catalogItemId);
+    stock = inventoryById.get(catalogItemId) as CatalogItem & { lastPurchasePrice?: number };
     if (stock) {
       catalogItemName = stock.name;
-      costPerUnit = Number(stock.costPrice) || 0;
       stockCategory = stock.stockCategory || stockCategory;
     }
   }
@@ -48,18 +55,31 @@ function lineToRecipeIngredient(
   const quantity = Number(line.quantity) || 0;
   if (quantity <= 0) return null;
 
+  if (line.storeIngredientId && ingredientsById) {
+    const ing = ingredientsById.get(line.storeIngredientId);
+    if (ing) {
+      costPerUnit = resolveIngredientUnitCost(ing, stock, undefined).effective;
+    }
+  }
+  if (!(costPerUnit > 0)) {
+    costPerUnit = Number(stock?.lastPurchasePrice) || Number(stock?.costPrice) || 0;
+  }
+
   const totalCost = Math.round(quantity * costPerUnit * 100) / 100;
+  const isPackaging = stockCategory === 'packaging';
+  const waste = isPackaging ? 0 : Math.min(100, Math.max(0, Number(wastePercent) || 0));
+  const netQuantity = Math.round(quantity * (1 - waste / 100) * 10000) / 10000;
   return {
     catalogItemId,
     catalogItemName,
     quantity,
     unit: line.unit || 'ud',
-    wastePercent: 0,
-    netQuantity: quantity,
+    wastePercent: waste,
+    netQuantity,
     costPerUnit,
     totalCost,
     stockCategory,
-    optional: stockCategory === 'packaging',
+    optional: isPackaging,
     substitutes: [],
   };
 }
@@ -67,6 +87,7 @@ function lineToRecipeIngredient(
 export function buildRecipeIngredientsFromCostingItem(
   item: CatalogItem,
   inventoryItems: CatalogItem[],
+  ingredientsById?: Map<string, StoreIngredient>,
 ): RecipeIngredientDraft[] {
   if (readProductCostingType(item) !== 'recipe') return [];
   const lines = readProductRecipeLines(item);
@@ -74,17 +95,24 @@ export function buildRecipeIngredientsFromCostingItem(
 
   const maps = buildInventoryLookupMaps(inventoryItems);
   const inventoryById = new Map(inventoryItems.map((row) => [row._id, row]));
+  const wastePercent = readProductMermaPct(item);
   const out: RecipeIngredientDraft[] = [];
 
   for (const line of lines) {
-    const ing = lineToRecipeIngredient(line, inventoryById, maps.byStoreIngredientId);
+    const ing = lineToRecipeIngredient(
+      line,
+      inventoryById,
+      maps.byStoreIngredientId,
+      ingredientsById,
+      wastePercent,
+    );
     if (ing) out.push(ing);
   }
   return out;
 }
 
 export function recipeIngredientsNeedUpdate(
-  existing: Array<{ catalogItemId: string; quantity: number; unit: string }>,
+  existing: Array<{ catalogItemId: string; quantity: number; unit: string; wastePercent?: number }>,
   next: RecipeIngredientDraft[],
 ): boolean {
   if (existing.length !== next.length) return true;
@@ -94,6 +122,7 @@ export function recipeIngredientsNeedUpdate(
     if (a.catalogItemId !== b.catalogItemId) return true;
     if (Math.abs(a.quantity - b.quantity) > 1e-6) return true;
     if (a.unit !== b.unit) return true;
+    if (Math.abs(Number(a.wastePercent || 0) - Number(b.wastePercent || 0)) > 1e-6) return true;
   }
   return false;
 }

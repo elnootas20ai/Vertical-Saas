@@ -21,11 +21,14 @@ import {
 import {
   catalogCategoryKeyFromOrganizerId,
   isCatalogCategoryOrganizerId,
+  isImportComboCategory,
   normalizeImportCategory,
 } from './deliveryCatalogImportLogic';
+import { readProductRecipeLines } from './catalogCosting';
 import { defaultUnitForIngredient } from './inventorySyncLogic';
 import { effectiveStoreIngredientBaseCost } from './vertialDefaultCosts';
 import { resolveSupplierSelectedStockIds } from './supplierCatalogLinks';
+import { parseIngredientsBulkText } from './catalogCustomization';
 
 export const SUGGESTION_NO_SUPPLIER_ID = '__no_supplier__';
 
@@ -119,6 +122,8 @@ export function catalogItemBelongsToSupplier(
   supplier: Supplier,
   storeIngredients: StoreIngredient[] = [],
   commercialBrands: InventoryCommercialBrand[] = [],
+  /** Catálogo completo (carta + almacén) para enlazar `cat:Bocatas` → ingredientes de receta. */
+  allCatalogItems: CatalogItem[] = [],
 ): boolean {
   if (!isStockInventoryItem(item)) return false;
   const marked = supplierCatalogItemIdSet(supplier);
@@ -128,8 +133,12 @@ export function catalogItemBelongsToSupplier(
   if (orgs.size === 0) return false;
   const organizerId = resolveStockOrganizerId(item, storeIngredients, commercialBrands);
   if (organizerId && orgs.has(organizerId)) return true;
+  const scope = allCatalogItems.length > 0 ? allCatalogItems : [item];
   for (const org of orgs) {
-    if (isCatalogCategoryOrganizerId(org) && itemMatchesCategoryOrganizer(item, org)) return true;
+    if (!isCatalogCategoryOrganizerId(org)) continue;
+    if (itemMatchesCategoryOrganizer(item, org)) return true;
+    const linked = stockItemsForOrganizer(scope, org, storeIngredients, commercialBrands);
+    if (linked.some((x) => x._id === item._id)) return true;
   }
   return false;
 }
@@ -195,7 +204,99 @@ function mergePendingStoreIngredients(
   );
 }
 
-/** Artículos de un organizador (almacén clásico o categoría de catálogo). */
+/**
+ * Categoría de Carta en proveedor (Bocatas, Cafés…): lo que se compra son
+ * los ingredientes de las recetas, chips TPV de la ficha y artículos de stock
+ * de esa categoría. No incluye el plato de venta ni Combos.
+ */
+function stockItemsForCartaCategoryOrganizer(
+  catalogItems: CatalogItem[],
+  organizerId: string,
+  storeIngredients: StoreIngredient[],
+  commercialBrands: InventoryCommercialBrand[],
+): CatalogItem[] {
+  const catKey = catalogCategoryKeyFromOrganizerId(organizerId);
+  if (!catKey || catKey === 'combos' || isImportComboCategory(catKey)) return [];
+
+  const productsInCat = catalogItems.filter(
+    (item) =>
+      !item.deletedAt
+      && item.active !== false
+      && itemMatchesCategoryOrganizer(item, organizerId),
+  );
+
+  const stockItems = catalogItems.filter(isStockInventoryItem);
+  const stockById = new Map(stockItems.map((i) => [i._id, i]));
+  const stockByIngId = new Map<string, CatalogItem>();
+  const stockByName = new Map<string, CatalogItem>();
+  for (const s of stockItems) {
+    const ingId = String(s.customFields?.storeIngredientId || '').trim();
+    if (ingId) stockByIngId.set(ingId, s);
+    stockByName.set(foldName(s.name), s);
+  }
+
+  const out = new Map<string, CatalogItem>();
+  const pendingIngIds = new Set<string>();
+  const pendingNames = new Set<string>();
+
+  const absorbName = (rawName: string) => {
+    const name = String(rawName || '').trim();
+    if (!name) return;
+    const stock = stockByName.get(foldName(name));
+    if (stock) {
+      out.set(stock._id, stock);
+      return;
+    }
+    pendingNames.add(foldName(name));
+  };
+
+  for (const product of productsInCat) {
+    // Bebida/envase con stock en esa sección de carta → se compra tal cual.
+    if (isStockInventoryItem(product)) {
+      out.set(product._id, product);
+    }
+    for (const line of readProductRecipeLines(product)) {
+      // Envases van en organizador Envases del almacén, no bajo Bocatas/Cafés.
+      if (line.stockCategory === 'packaging') continue;
+      let stock: CatalogItem | undefined;
+      if (line.catalogItemId) stock = stockById.get(line.catalogItemId);
+      if (!stock && line.storeIngredientId) stock = stockByIngId.get(line.storeIngredientId);
+      if (!stock && line.name) stock = stockByName.get(foldName(line.name));
+      if (stock) {
+        out.set(stock._id, stock);
+        continue;
+      }
+      if (line.storeIngredientId) pendingIngIds.add(line.storeIngredientId);
+      else if (line.name) pendingNames.add(foldName(line.name));
+    }
+    // Chips «Ingredientes TPV» de la ficha: también son candidatos de compra
+    // (cuentas legacy con ficha rellena pero sin escandallo).
+    const tpvRaw =
+      typeof product.customFields?.ingredients === 'string'
+        ? product.customFields.ingredients
+        : '';
+    for (const name of parseIngredientsBulkText(tpvRaw)) {
+      absorbName(name);
+    }
+  }
+
+  const seenNames = new Set([...out.values()].map((i) => foldName(i.name)));
+  for (const ing of storeIngredients) {
+    if (!ing?.id || !String(ing.name || '').trim()) continue;
+    const nameKey = foldName(ing.name);
+    if (!pendingIngIds.has(ing.id) && !pendingNames.has(nameKey)) continue;
+    if (out.has(ing.id) || seenNames.has(nameKey)) continue;
+    const virtual = buildVirtualStockItemFromIngredient(ing, commercialBrands);
+    out.set(virtual._id, virtual);
+    seenNames.add(nameKey);
+  }
+
+  return [...out.values()].sort((a, b) =>
+    String(a.name || '').localeCompare(String(b.name || ''), 'es'),
+  );
+}
+
+/** Artículos de un organizador (almacén clásico o categoría de carta → ingredientes). */
 export function stockItemsForOrganizer(
   catalogItems: CatalogItem[],
   organizerId: string,
@@ -205,11 +306,22 @@ export function stockItemsForOrganizer(
   const want = String(organizerId || '').trim();
   if (!want) return [];
   if (isCatalogCategoryOrganizerId(want)) {
-    const fromCatalog = catalogItems
-      .filter((item) => !item.deletedAt && item.active !== false)
-      .filter((item) => itemMatchesCategoryOrganizer(item, want))
-      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
-    return mergePendingStoreIngredients(fromCatalog, want, storeIngredients, commercialBrands);
+    const catKey = catalogCategoryKeyFromOrganizerId(want);
+    if (catKey === 'combos' || isImportComboCategory(catKey)) return [];
+    // Cubo de almacén «Ingredientes» (no sección de carta).
+    if (catKey === 'ingredientes') {
+      const fromCatalog = catalogItems
+        .filter(isStockInventoryItem)
+        .filter((item) => itemMatchesCategoryOrganizer(item, want))
+        .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+      return mergePendingStoreIngredients(fromCatalog, want, storeIngredients, commercialBrands);
+    }
+    return stockItemsForCartaCategoryOrganizer(
+      catalogItems,
+      want,
+      storeIngredients,
+      commercialBrands,
+    );
   }
   const fromStock = catalogItems
     .filter(isStockInventoryItem)
@@ -316,7 +428,7 @@ export function stockItemsForSupplierOrder(
     );
   }
   const matched = stock.filter((item) =>
-    catalogItemBelongsToSupplier(item, supplier, storeIngredients, commercialBrands),
+    catalogItemBelongsToSupplier(item, supplier, storeIngredients, commercialBrands, catalogItems),
   );
   return matched.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
 }
@@ -376,6 +488,7 @@ function resolveSuggestionSupplier(
   activeSuppliers: Supplier[],
   storeIngredients: StoreIngredient[],
   commercialBrands: InventoryCommercialBrand[],
+  allCatalogItems: CatalogItem[] = [],
 ): { supplier: Supplier | null; matchedBy: VertialSuggestionGroup['matchedBy'] } {
   const fromSuggestion = suggestion.supplierId
     ? supplierById.get(String(suggestion.supplierId).trim())
@@ -395,7 +508,13 @@ function resolveSuggestionSupplier(
     }
 
     const belongs = activeSuppliers.filter((sup) =>
-      catalogItemBelongsToSupplier(catalogItem, sup, storeIngredients, commercialBrands),
+      catalogItemBelongsToSupplier(
+        catalogItem,
+        sup,
+        storeIngredients,
+        commercialBrands,
+        allCatalogItems,
+      ),
     );
     if (belongs.length === 1) {
       return { supplier: belongs[0], matchedBy: 'organizer' };
@@ -467,6 +586,7 @@ export function groupSuggestionsForVertial(
       activeSuppliers,
       storeIngredients,
       commercialBrands,
+      catalogItems,
     );
     if (resolved.supplier) {
       pushTo(resolved.supplier._id, resolved.supplier.name, resolved.matchedBy, suggestion);

@@ -16,6 +16,10 @@ export const CATALOG_TAB_STORE_SUBTITLE = 'Mismo catálogo · stock por tienda';
 type CatalogTabShellProps = {
   /** Nombre de la tienda activa; si no se pasa, sale del scope. */
   storeLabel?: string;
+  /** Oculta el título de tienda (toolbar más compacta). */
+  hideStoreLabel?: boolean;
+  /** Oculta la franja de chips Tiendas + historial (si la pestaña trae su propio selector). */
+  hideStoreStrip?: boolean;
   dataUserId?: string;
   /** Almacén de la tienda (historial); vacío = solo chips de tienda. */
   storeWarehouseId?: string;
@@ -42,6 +46,8 @@ type CatalogTabShellProps = {
  */
 export function CatalogTabShell({
   storeLabel: storeLabelProp,
+  hideStoreLabel = false,
+  hideStoreStrip = false,
   dataUserId: dataUserIdProp,
   storeWarehouseId = '',
   toolbarLeftExtra,
@@ -82,14 +88,16 @@ export function CatalogTabShell({
             <SaasTabToolbarRow
               left={
                 <>
-                  <div className="min-w-0 max-w-[12rem] sm:max-w-[16rem]">
-                    <p
-                      className="truncate text-sm font-semibold text-stone-900 dark:text-white"
-                      title={storeLabel}
-                    >
-                      {storeLabel}
-                    </p>
-                  </div>
+                  {!hideStoreLabel ? (
+                    <div className="min-w-0 max-w-[12rem] sm:max-w-[16rem]">
+                      <p
+                        className="truncate text-sm font-semibold text-stone-900 dark:text-white"
+                        title={storeLabel}
+                      >
+                        {storeLabel}
+                      </p>
+                    </div>
+                  ) : null}
                   {toolbarLeftExtra}
                 </>
               }
@@ -100,14 +108,16 @@ export function CatalogTabShell({
         )
       }
       belowToolbar={
-        <InventoryStoreHistoryStrip
-          dataUserId={dataUserId}
-          storeWarehouseId={storeWarehouseId}
-          refreshToken={historyRefreshToken}
-          open={historyOpen}
-          onOpenChange={setHistoryOpen}
-          onStaleChange={onHistoryStaleChange}
-        />
+        hideStoreStrip || hideChrome ? undefined : (
+          <InventoryStoreHistoryStrip
+            dataUserId={dataUserId}
+            storeWarehouseId={storeWarehouseId}
+            refreshToken={historyRefreshToken}
+            open={historyOpen}
+            onOpenChange={setHistoryOpen}
+            onStaleChange={onHistoryStaleChange}
+          />
+        )
       }
     >
       {hideChrome ? null : children}

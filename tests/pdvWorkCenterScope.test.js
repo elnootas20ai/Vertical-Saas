@@ -46,4 +46,25 @@ describe('filterPointsOfSaleForWorkCenters — no perder PDV de la empresa', () 
     const out = filterPointsOfSaleForWorkCenters(pdvs, [], { businessId: 'biz-modo' });
     expect(out.map((p) => p._id)).toEqual(['pdv-legacy']);
   });
+
+  it('multi-empresa: no cuela PDV huérfanos ni de otra empresa (bodegeta)', async () => {
+    const { filterPointsOfSaleForWorkCenters } = await import('../src/app/lib/deliverySetup.ts');
+    const retail = [{ _id: 'wc-badalona', name: 'badalona', centerType: 'punto_de_venta' }];
+    const pdvs = [
+      { _id: 'pdv-badalona', name: 'badalona', workCenterId: 'wc-badalona', businessId: 'biz-delivery' },
+      { _id: 'pdv-bodegeta', name: 'bodegeta', workCenterId: '', businessId: 'biz-bodegeta' },
+      { _id: 'pdv-huerfano', name: 'fantasma', workCenterId: '', businessId: '' },
+      {
+        _id: 'pdv-bode-wc',
+        name: 'bodegeta local',
+        workCenterId: 'wc-badalona',
+        businessId: 'biz-bodegeta',
+      },
+    ];
+    const out = filterPointsOfSaleForWorkCenters(pdvs, retail, {
+      businessId: 'biz-delivery',
+      accountBusinessCount: 2,
+    });
+    expect(out.map((p) => p._id)).toEqual(['pdv-badalona']);
+  });
 });

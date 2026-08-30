@@ -186,7 +186,7 @@ export async function createReservation(
   tables: DiningTable[],
   existing: RestaurantReservation[],
   clientScope: ReservationClientScope = {},
-): Promise<{ item: RestaurantReservation; tableAssigned: boolean; clientLinked: boolean }> {
+): Promise<{ item: RestaurantReservation; tableAssigned: boolean; clientLinked: boolean; clientCrmError?: string }> {
   let selection = resolveTablesSelection(tables, reservationTableIds(form));
   let tableAssigned = false;
 
@@ -219,16 +219,22 @@ export async function createReservation(
     },
   ]);
 
-  const clientId = await ensureReservationCrmClient({
-    userId,
-    businessId: clientScope.businessId,
-    searchBusinessId: clientScope.searchBusinessId,
-    guestName: form.guestName,
-    phone: form.phone,
-    email: form.email,
-    clientId: form.clientId,
-    actorName: actor.userName,
-  }).catch(() => '');
+  let clientId = '';
+  let clientCrmError = '';
+  try {
+    clientId = await ensureReservationCrmClient({
+      userId,
+      businessId: clientScope.businessId,
+      searchBusinessId: clientScope.searchBusinessId,
+      guestName: form.guestName,
+      phone: form.phone,
+      email: form.email,
+      clientId: form.clientId,
+      actorName: actor.userName,
+    });
+  } catch (err) {
+    clientCrmError = err instanceof Error ? err.message : 'No se pudo guardar el cliente en el CRM';
+  }
 
   const item = await api.create(userId, {
     ...form,
@@ -245,7 +251,12 @@ export async function createReservation(
     await syncTablesReserved(userId, selection.tableIds, form.guestName, true);
   }
 
-  return { item, tableAssigned, clientLinked: Boolean(clientId) };
+  return {
+    item,
+    tableAssigned,
+    clientLinked: Boolean(clientId),
+    clientCrmError,
+  };
 }
 
 export async function updateReservation(
@@ -290,16 +301,21 @@ export async function updateReservation(
   });
 
   const mergedForm = { ...reservation, ...form };
-  const clientId = await ensureReservationCrmClient({
-    userId,
-    businessId: clientScope.businessId,
-    searchBusinessId: clientScope.searchBusinessId,
-    guestName: mergedForm.guestName,
-    phone: mergedForm.phone,
-    email: mergedForm.email,
-    clientId: mergedForm.clientId || reservation.clientId,
-    actorName: actor.userName,
-  }).catch(() => reservation.clientId || '');
+  let clientId = String(mergedForm.clientId || reservation.clientId || '').trim();
+  try {
+    clientId = await ensureReservationCrmClient({
+      userId,
+      businessId: clientScope.businessId,
+      searchBusinessId: clientScope.searchBusinessId,
+      guestName: mergedForm.guestName,
+      phone: mergedForm.phone,
+      email: mergedForm.email,
+      clientId,
+      actorName: actor.userName,
+    });
+  } catch {
+    if (!clientId) clientId = reservation.clientId || '';
+  }
 
   const item = await api.update(
     userId,

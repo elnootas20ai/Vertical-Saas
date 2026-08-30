@@ -9,10 +9,13 @@ import {
   calculateRecipeTotalCost,
   foodRecipeLines,
   productCostingStatus,
+  readProductMermaPct,
   readProductRecipeLines,
+  resolveIngredientUnitCost,
   resolveProductUnitCost,
-  resolveStoreIngredientBaseCost,
+  stockItemsByStoreIngredientId,
   storeIngredientsById,
+  type RecipeCostOptions,
 } from './catalogCosting';
 
 export const ESCANDALLO_EXPORT_SHEET_NAME = 'escandallo';
@@ -28,7 +31,8 @@ export const ESCANDALLO_EXPORT_HEADERS = [
   'Unidad',
   'Coste ud. ingrediente €',
   'Coste línea €',
-  'Coste total producto €',
+  'Merma %',
+  'Coste por venta €',
 ] as const;
 
 export type EscandalloExportRow = {
@@ -41,7 +45,8 @@ export type EscandalloExportRow = {
   unidad: string;
   costeUdIngrediente: number | '';
   costeLinea: number | '';
-  costeTotalProducto: number;
+  mermaPct: number;
+  costePorVenta: number;
 };
 
 function tipoLabel(status: ReturnType<typeof productCostingStatus>): string {
@@ -54,13 +59,28 @@ function round2(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
+function costOptionsFor(
+  stockItems?: CatalogItem[],
+  mermaPct?: number,
+): RecipeCostOptions | undefined {
+  if (!stockItems?.length && !(mermaPct && mermaPct > 0)) return mermaPct != null ? { mermaPct } : undefined;
+  return {
+    mermaPct,
+    stockByStoreIngredientId: stockItems?.length
+      ? stockItemsByStoreIngredientId(stockItems)
+      : undefined,
+  };
+}
+
 /** Filas planas: un producto con escandallo → una fila por ingrediente. */
 export function buildEscandalloExportRows(
   products: CatalogItem[],
   storeIngredients: StoreIngredient[],
   brands?: Array<{ _id: string; deliveryLineKind?: string }>,
+  stockItems?: CatalogItem[],
 ): EscandalloExportRow[] {
   const ingredientsById = storeIngredientsById(storeIngredients);
+  const stockById = stockItemsByStoreIngredientId(stockItems || []);
   const sorted = [...products].sort((a, b) => {
     const byCat = String(a.category || '').localeCompare(String(b.category || ''), 'es');
     if (byCat !== 0) return byCat;
@@ -72,13 +92,18 @@ export function buildEscandalloExportRows(
   for (const product of sorted) {
     const status = productCostingStatus(product);
     const salePrice = round2(Number(product.unitPrice) || 0);
-    const totalCost = round2(resolveProductUnitCost(product, ingredientsById, brands));
+    const mermaPct = status === 'recipe' ? readProductMermaPct(product) : 0;
+    const opts = costOptionsFor(stockItems, mermaPct);
+    const costePorVenta = round2(
+      resolveProductUnitCost(product, ingredientsById, brands, undefined, opts),
+    );
     const base = {
       producto: String(product.name || '').trim() || 'Sin nombre',
       categoria: String(product.category || '').trim() || 'Sin categoría',
       tipo: tipoLabel(status),
       precioVenta: salePrice,
-      costeTotalProducto: totalCost,
+      mermaPct,
+      costePorVenta,
     };
 
     if (status === 'recipe') {
@@ -99,7 +124,8 @@ export function buildEscandalloExportRows(
         let unitCost = 0;
         if (line.storeIngredientId) {
           const ing = ingredientsById.get(line.storeIngredientId);
-          unitCost = ing ? resolveStoreIngredientBaseCost(ing, brands) : 0;
+          const stock = stockById.get(line.storeIngredientId);
+          unitCost = ing ? resolveIngredientUnitCost(ing, stock, brands).effective : 0;
         }
         const qty = Number(line.quantity) || 0;
         rows.push({
@@ -139,7 +165,8 @@ function rowsToSheetMatrix(rows: EscandalloExportRow[]): (string | number)[][] {
     r.unidad,
     r.costeUdIngrediente,
     r.costeLinea,
-    r.costeTotalProducto,
+    r.mermaPct,
+    r.costePorVenta,
   ]);
   return [header, ...body];
 }
@@ -148,8 +175,9 @@ export function downloadEscandalloProductsExcel(
   products: CatalogItem[],
   storeIngredients: StoreIngredient[],
   brands?: Array<{ _id: string; deliveryLineKind?: string }>,
+  stockItems?: CatalogItem[],
 ): { rows: number; filename: string } {
-  const dataRows = buildEscandalloExportRows(products, storeIngredients, brands);
+  const dataRows = buildEscandalloExportRows(products, storeIngredients, brands, stockItems);
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet(rowsToSheetMatrix(dataRows));
   ws['!cols'] = [
@@ -162,7 +190,8 @@ export function downloadEscandalloProductsExcel(
     { wch: 8 },
     { wch: 18 },
     { wch: 14 },
-    { wch: 18 },
+    { wch: 10 },
+    { wch: 16 },
   ];
   XLSX.utils.book_append_sheet(wb, ws, ESCANDALLO_EXPORT_SHEET_NAME);
 
@@ -177,6 +206,7 @@ export function sumRecipeCostForProduct(
   product: CatalogItem,
   storeIngredients: StoreIngredient[],
   brands?: Array<{ _id: string; deliveryLineKind?: string }>,
+  stockItems?: CatalogItem[],
 ): number {
   const ingredientsById = storeIngredientsById(storeIngredients);
   const lines = foodRecipeLines(readProductRecipeLines(product));
@@ -184,5 +214,7 @@ export function sumRecipeCostForProduct(
     lines.length > 0 ? lines : readProductRecipeLines(product),
     ingredientsById,
     brands,
+    undefined,
+    costOptionsFor(stockItems, readProductMermaPct(product)),
   );
 }

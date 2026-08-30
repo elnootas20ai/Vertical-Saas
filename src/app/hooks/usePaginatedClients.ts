@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Client } from '../context/AppContext';
-import { listClientsPageRequest, type ClientsListMeta } from '../lib/crmApi';
+import { listClientsPageRequest, CRM_CLIENTS_SYNC_EVENT, type ClientsListMeta } from '../lib/crmApi';
 import type { PaginationState } from './usePagination';
 
 export interface UsePaginatedClientsOptions {
@@ -113,6 +113,14 @@ export function usePaginatedClients(options: UsePaginatedClientsOptions) {
   useEffect(() => {
     void fetchPage(page);
     return () => abortRef.current?.abort();
+  }, [fetchPage, page]);
+
+  useEffect(() => {
+    const onSync = () => {
+      void fetchPage(page);
+    };
+    window.addEventListener(CRM_CLIENTS_SYNC_EVENT, onSync);
+    return () => window.removeEventListener(CRM_CLIENTS_SYNC_EVENT, onSync);
   }, [fetchPage, page]);
 
   const totalPages = Math.max(1, Math.ceil(meta.total / pageSize));

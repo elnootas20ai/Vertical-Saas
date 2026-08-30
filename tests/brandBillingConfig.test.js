@@ -165,7 +165,7 @@ describe('suggestBillingSheetsFromBrands / unlock', () => {
     expect(merged[1].unitColumns.map((c) => c.key)).toEqual(['taco']);
   });
 
-  it('legacy burger+taco fusionados se separan al normalizar', () => {
+  it('legacy burger+taco en la misma hoja: el clic/usuario puede agruparlos (columnas pizza/burger/taco)', () => {
     const brands = [
       {
         _id: 'b1', id: 'b1', type: 'brand', business_id: 'b', user_id: 'u',
@@ -188,11 +188,74 @@ describe('suggestBillingSheetsFromBrands / unlock', () => {
       },
     ];
     const synced = syncBillingSheetsWithBrands(legacy, brands);
-    expect(synced).toHaveLength(2);
-    expect(synced[0].brandIds).toEqual(['b1']);
-    expect(synced[0].unitColumns.map((c) => c.key)).toEqual(['burger']);
-    expect(synced[1].brandIds).toEqual(['t1']);
-    expect(synced[1].unitColumns.map((c) => c.key)).toEqual(['taco']);
+    const host = synced.find((s) => s.brandIds.includes('b1') && s.brandIds.includes('t1'));
+    expect(host).toBeTruthy();
+    expect(host?.unitColumns.map((c) => c.key).sort()).toEqual(['burger', 'taco']);
+  });
+
+  it('clic mover taco a hoja burger: la marca se queda (no la devuelve a TACOS)', () => {
+    const brands = [
+      {
+        _id: 'b1', id: 'b1', type: 'brand', business_id: 'b', user_id: 'u',
+        name: 'Burgergood', description: '', logo: '', website: '', deliveryLineKind: 'burger_fastfood',
+        active: true, createdAt: '', updatedAt: '',
+      },
+      {
+        _id: 't1', id: 't1', type: 'brand', business_id: 'b', user_id: 'u',
+        name: 'taquitosgood', description: '', logo: '', website: '', deliveryLineKind: 'tacos_mexican',
+        active: true, createdAt: '', updatedAt: '',
+      },
+    ];
+    const sheets = suggestBillingSheetsFromBrands(brands);
+    const burgerSheet = sheets.find((s) => s.brandIds.includes('b1'));
+    expect(burgerSheet).toBeTruthy();
+    const moved = assignBrandToSheetExclusive(sheets, burgerSheet.id, 't1', brands);
+    const host = moved.find((s) => s.id === burgerSheet.id);
+    expect(host?.brandIds.sort()).toEqual(['b1', 't1']);
+    expect(host?.unitColumns.map((c) => c.key).sort()).toEqual(['burger', 'taco']);
+  });
+
+  it('no deja dos hojas BURGERGOOD (vacía + con marcas)', () => {
+    const brands = [
+      {
+        _id: 'b1', id: 'b1', type: 'brand', business_id: 'b', user_id: 'u',
+        name: 'Burgergood', description: '', logo: '', website: '', deliveryLineKind: 'burger_fastfood',
+        active: true, createdAt: '', updatedAt: '',
+      },
+      {
+        _id: 't1', id: 't1', type: 'brand', business_id: 'b', user_id: 'u',
+        name: 'taquitosgood', description: '', logo: '', website: '', deliveryLineKind: 'tacos_mexican',
+        active: true, createdAt: '', updatedAt: '',
+      },
+    ];
+    const dirty = [
+      {
+        id: 'sheet-burger',
+        label: 'BURGERGOOD',
+        brandIds: ['b1', 't1'],
+        unitColumns: [
+          { key: 'burger', header: 'TOTAL BURGUER' },
+          { key: 'taco', header: 'TOTAL TACOS' },
+        ],
+      },
+      {
+        id: 'sheet-burger',
+        label: 'BURGERGOOD',
+        brandIds: [],
+        unitColumns: [{ key: 'burger', header: 'TOTAL BURGUER' }],
+      },
+      {
+        id: 'sheet-burger-empty',
+        label: 'BURGERGOOD',
+        brandIds: [],
+        unitColumns: [{ key: 'burger', header: 'TOTAL BURGUER' }],
+      },
+    ];
+    const cleaned = syncBillingSheetsWithBrands(dirty, brands);
+    const burgerLabels = cleaned.filter((s) => /burgergood/i.test(s.label));
+    expect(burgerLabels).toHaveLength(1);
+    expect(burgerLabels[0].brandIds.sort()).toEqual(['b1', 't1']);
+    expect(cleaned.filter((s) => s.id === 'sheet-burger')).toHaveLength(1);
   });
 
   it('hoja taco vacía se mantiene si hay marca taco en el negocio', () => {

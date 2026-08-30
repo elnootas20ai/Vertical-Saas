@@ -146,6 +146,8 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
     if (!Array.isArray(seedStockItems)) return [];
     return filterStockInventoryItems(seedStockItems);
   });
+  /** Carta + almacén (scoped) — para chips de categoría de carta en Inventario. */
+  const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [loading, setLoading] = useState(() => {
     if (!Array.isArray(seedStockItems)) return true;
@@ -227,6 +229,7 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
   const reload = useCallback(async () => {
     if (!dataUserId) {
       setItems([]);
+      setCatalogItems([]);
       setWarehouses([]);
       setLoading(false);
       setLoadDetail('');
@@ -254,13 +257,14 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
       ]);
       // Ignorar respuestas viejas si hubo otro reload/entrada después.
       if (gen !== reloadGenRef.current) return;
-      const inventory = filterStockInventoryItems(allCatalog);
-      const scoped = businessId
-        ? filterCatalogItemsForBusinessScope(inventory, businessId, brands, {
+      const scopedAll = businessId
+        ? filterCatalogItemsForBusinessScope(allCatalog, businessId, brands, {
             accountBusinessCount: businesses.length,
             activeBusinessType: currentBusiness?.businessType,
           })
-        : inventory;
+        : allCatalog;
+      const scoped = filterStockInventoryItems(scopedAll);
+      setCatalogItems(scopedAll);
       setItems(scoped);
       setWarehouses(wh);
       hasPaintedRef.current = true;
@@ -280,6 +284,7 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
       if (gen !== reloadGenRef.current) return;
       if (!hasPaintedRef.current) {
         setItems([]);
+        setCatalogItems([]);
         setWarehouses([]);
       }
       hasPaintedRef.current = true;
@@ -324,6 +329,8 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
     warehouses,
     stockItems,
     stockedCount,
+    /** Catálogo completo scoped (carta + almacén) para chips de categoría. */
+    catalogItems,
     /** Solo true mientras aún no hay user/scope; nunca bloquea con pantalla llena. */
     loading: !ready,
     /** true mientras llega el listado (UI ya visible). */

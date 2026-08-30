@@ -64,8 +64,11 @@ export function CatalogDeleteGuardModal({
 
   const pinConfigured = PIN_FROM_ENV.length > 0;
   const canSubmit = pinConfigured ? pin.length > 0 : phrase.trim().length > 0;
+  /** Borrado de una sección/categoría concreta ≠ selección múltiple de productos. */
+  const isSectionDelete = payload.mode === 'bulk' && Boolean(payload.organizerLabel?.trim());
+  const sectionName = isSectionDelete ? String(payload.organizerLabel).trim() : '';
   const bulkPhrase =
-    payload.mode === 'bulk' && payload.confirmPhrase?.trim()
+    payload.mode === 'bulk' && !isSectionDelete && payload.confirmPhrase?.trim()
       ? payload.confirmPhrase.trim().toUpperCase()
       : BULK_PHRASE_NO_PIN;
 
@@ -81,6 +84,11 @@ export function CatalogDeleteGuardModal({
     } else if (payload.mode === 'single') {
       if (normalizePhrase(phrase) !== normalizePhrase(payload.itemName)) {
         setError('El texto no coincide con el nombre del producto');
+        return;
+      }
+    } else if (isSectionDelete) {
+      if (normalizePhrase(phrase).toLowerCase() !== normalizePhrase(sectionName).toLowerCase()) {
+        setError('El texto no coincide con el nombre de la sección');
         return;
       }
     } else if (normalizePhrase(phrase).toUpperCase() !== bulkPhrase) {
@@ -232,7 +240,9 @@ export function CatalogDeleteGuardModal({
               <label htmlFor="catalog-delete-phrase" className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1.5">
                 {payload.mode === 'single'
                   ? 'Escribe el nombre exacto del producto'
-                  : `Escribe la frase: ${bulkPhrase}`}
+                  : isSectionDelete
+                    ? 'Escribe el nombre exacto de la sección'
+                    : `Escribe la frase: ${bulkPhrase}`}
               </label>
               <input
                 id="catalog-delete-phrase"
@@ -241,7 +251,13 @@ export function CatalogDeleteGuardModal({
                 value={phrase}
                 onChange={(e) => setPhrase(e.target.value)}
                 className={inp}
-                placeholder={payload.mode === 'single' ? payload.itemName : bulkPhrase}
+                placeholder={
+                  payload.mode === 'single'
+                    ? payload.itemName
+                    : isSectionDelete
+                      ? sectionName
+                      : bulkPhrase
+                }
               />
             </div>
           )}

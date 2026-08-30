@@ -53,14 +53,16 @@ export function workCentersStrictlyForBusiness(
   return workCenters.filter((wc) => readWorkCenterBusinessId(wc) === bid);
 }
 
-/** PDV enlazados a centros del scope (misma lógica que usaba deliverySetup). */
+/** PDV enlazados a centros del scope (misma lógica que deliverySetup). */
 export function filterPointsOfSaleForWorkCenters<T extends PointOfSaleLike>(
   pointsOfSale: T[],
   workCenters: WorkCenter[],
-  options?: { businessId?: string | null },
+  options?: { businessId?: string | null; accountBusinessCount?: number },
 ): T[] {
   const wcIds = new Set(workCenters.map((wc) => String(wc._id || '').trim()).filter(Boolean));
   const businessId = normalizeBusinessScopeId(options?.businessId);
+  const multiBiz =
+    typeof options?.accountBusinessCount === 'number' && options.accountBusinessCount > 1;
   const pdvBusinessId = (p: T) =>
     normalizeBusinessScopeId(String(p.business_id || p.businessId || ''));
 
@@ -68,16 +70,69 @@ export function filterPointsOfSaleForWorkCenters<T extends PointOfSaleLike>(
     if (!businessId) return [];
     const tagged = pointsOfSale.filter((p) => pdvBusinessId(p) === businessId);
     if (tagged.length > 0) return tagged;
+    if (multiBiz) return [];
     return pointsOfSale.filter((p) => !pdvBusinessId(p));
   }
 
   return pointsOfSale.filter((p) => {
     const wcId = String(p.workCenterId || '').trim();
-    if (wcId && wcIds.has(wcId)) return true;
     const pBid = pdvBusinessId(p);
+    if (businessId && pBid && pBid !== businessId) return false;
     if (businessId && pBid === businessId) return true;
-    if (businessId && !pBid && !wcId) return true;
+    if (wcId && wcIds.has(wcId)) return true;
+    if (businessId && !pBid && !wcId) return !multiBiz;
     return false;
+  });
+}
+
+function foldPdvLabel(value: string): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+}
+
+/**
+ * Selector UI: solo PDV de la empresa activa.
+ * Nunca incluye otra empresa del portfolio ni PDV huérfanos sin WC del scope.
+ */
+export function filterPointsOfSaleStrictlyForBusiness<T extends PointOfSaleLike>(
+  pointsOfSale: T[],
+  options: {
+    businessId: string;
+    workCenters?: Array<{ _id?: string; deletedAt?: string | null; active?: boolean }>;
+    foreignBusinessNames?: string[];
+  },
+): T[] {
+  const bid = normalizeBusinessScopeId(options.businessId);
+  if (!bid) return [];
+
+  const wcIds = new Set(
+    (options.workCenters || [])
+      .filter((wc) => wc && !wc.deletedAt && wc.active !== false)
+      .map((wc) => String(wc._id || '').trim())
+      .filter(Boolean),
+  );
+
+  const foreignNames = (options.foreignBusinessNames || [])
+    .map((n) => foldPdvLabel(n))
+    .filter(Boolean);
+
+  return pointsOfSale.filter((p) => {
+    if (!p || (p as { deletedAt?: string }).deletedAt || p.active === false) return false;
+    const pBid = normalizeBusinessScopeId(String(p.business_id || p.businessId || ''));
+    if (pBid && pBid !== bid) return false;
+
+    const name = foldPdvLabel(String(p.name || ''));
+    // Solo nombre exacto: «delivery» no debe excluir «delivery bufala».
+    if (name && foreignNames.some((fn) => name === fn)) {
+      return false;
+    }
+
+    if (pBid === bid) return true;
+    const wcId = String(p.workCenterId || '').trim();
+    return Boolean(wcId && wcIds.has(wcId));
   });
 }
 

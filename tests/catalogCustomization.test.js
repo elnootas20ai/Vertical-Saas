@@ -311,6 +311,14 @@ describe('catalogCustomization TPV', () => {
     ]);
   });
 
+  it('lista maestra vacía no reinyecta extras legacy en TPV', () => {
+    const pizza = { category: 'Pizzas', brandIds: ['mod'], customFields: {} };
+    const brandSupplements = {
+      mod: [{ id: 's1', name: 'Extra aceitunas', price: 1.2 }],
+    };
+    expect(parseCatalogSupplements(pizza, undefined, brandSupplements, undefined, [])).toEqual([]);
+  });
+
   it('no mezcla extras de pizza y burger entre marcas', () => {
     const master = [
       { id: 'p1', name: 'Extra mozzarella', role: 'extra', brandIds: ['mod'], productParts: ['pizzas'] },

@@ -119,7 +119,7 @@ export function collectInventoryCandidates(
   >,
   options?: { includeVertialTemplates?: boolean; includeCatalogResale?: boolean },
 ): InventoryCandidate[] {
-  const includeVertialTemplates = options?.includeVertialTemplates !== false;
+  const includeVertialTemplates = options?.includeVertialTemplates === true;
   const includeCatalogResale = options?.includeCatalogResale !== false;
   const byKey = new Map<string, InventoryCandidate>();
 
@@ -157,6 +157,7 @@ export function collectInventoryCandidates(
       storeIngredientId: ing.id,
       baseCost: baseCost > 0 ? baseCost : undefined,
       stockCategory: inferInventoryStockCategory(name),
+      unit: String((ing as { unit?: string }).unit || '').trim() || defaultUnitForIngredient(name),
       source: 'store_ingredient',
     });
   }

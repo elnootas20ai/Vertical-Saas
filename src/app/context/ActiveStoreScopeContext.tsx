@@ -113,11 +113,15 @@ function scopeFromLoadState(
   pointsOfSale: PointOfSale[],
   authUser: AuthUser | null | undefined,
   businessId: string,
+  accountBusinessCount?: number,
 ): { retail: WorkCenter[]; allPdvs: PointOfSale[] } {
   // loadTpvPointsOfSaleForBusiness ya filtra por empresa (incl. legacy sin businessId).
   let retail = pickRetailWorkCenters(workCenters);
   let allPdvs = dedupePointsOfSale(
-    filterPointsOfSaleForWorkCenters(pointsOfSale, retail, { businessId }),
+    filterPointsOfSaleForWorkCenters(pointsOfSale, retail, {
+      businessId,
+      accountBusinessCount,
+    }),
   );
 
   if (authUser && isInvitedWorkerUser(authUser)) {
@@ -285,7 +289,10 @@ function ActiveStoreScopeProviderImpl({
         )
       : pickRetailWorkCenters(retail);
     const scopedPdvs = dedupePointsOfSale(
-      filterPointsOfSaleForWorkCenters(allPdvs, scopedRetail, { businessId: bid }),
+      filterPointsOfSaleForWorkCenters(allPdvs, scopedRetail, {
+        businessId: bid,
+        accountBusinessCount: accountN,
+      }),
     );
     const activePdvs = scopedPdvs.filter((p) => p.active !== false);
     setRetailWorkCenters(scopedRetail);
@@ -321,6 +328,7 @@ function ActiveStoreScopeProviderImpl({
         );
         const scopedPdvs = filterPointsOfSaleForWorkCenters(allPdvs, scopedRetail, {
           businessId: bid,
+          accountBusinessCount: accountN,
         });
         writeRetailScopeCacheForBusiness(
           bid,
@@ -513,6 +521,7 @@ function ActiveStoreScopeProviderImpl({
           state.pointsOfSale,
           authUser,
           bidAtStart,
+          accountBusinessCountRef.current ?? businessesRef.current.length,
         );
         commitStores(retail, allPdvs, bidAtStart, force);
       } catch {
@@ -699,8 +708,15 @@ function ActiveStoreScopeProviderImpl({
     const pool = allPointsOfSale.length > 0 ? allPointsOfSale : pointsOfSale;
     if (pool.length === 0) return null;
     // Preferencia guardada primero; solo fallback al default si no hay preferencia.
-    const resolved = resolvePreferenceToPdvId(pool.filter((p) => p.active !== false), activePreferenceRaw);
+    const activePool = pool.filter((p) => p.active !== false);
+    const resolved = resolvePreferenceToPdvId(activePool, activePreferenceRaw);
     if (resolved) return resolved;
+    // Preferencia a un PDV concreto (aunque inactive o aún no filtrado): respetar clic sidebar.
+    const raw = String(activePreferenceRaw || '').trim();
+    if (raw && !raw.startsWith('wc:')) {
+      const hit = pool.find((p) => p._id === raw);
+      if (hit) return hit._id;
+    }
     // Si la preferencia apunta a un PDV que aún no está en la lista (refresh a medias),
     // no caer al primero (bodegeta): devolver null hasta que la lista se complete.
     if (activePreferenceRaw) return null;
@@ -716,6 +732,7 @@ function ActiveStoreScopeProviderImpl({
     const pool = (allPointsOfSale.length > 0 ? allPointsOfSale : pointsOfSale).filter(
       (p) => p.active !== false,
     );
+    const poolAll = allPointsOfSale.length > 0 ? allPointsOfSale : pointsOfSale;
     const retail = retailWorkCenters.filter((wc) => !wc.deletedAt && wc.active !== false);
 
     const writeIfChanged = (next: string | null, notify = false) => {
@@ -734,12 +751,12 @@ function ActiveStoreScopeProviderImpl({
         return;
       }
 
-      if (pool.some((p) => p._id === raw)) return;
+      // Preferencia PDV: si está en el pool (activo o no), no tocar.
+      if (poolAll.some((p) => p._id === raw)) return;
 
-      // Preferencia huérfana de verdad (lista cargada y el PDV ya no existe).
-      // Si la lista está vacía, es un refresh a medias: no tocar storage.
-      if (pool.length === 0) return;
-      writeIfChanged(pickDefaultActiveStorePreference(pool, retail), true);
+      // Preferencia no está en la lista: NO resetear a la 1ª tienda.
+      // Lista incompleta tras refresh / 2ª tienda recién creada — pisar aquí
+      // hacía que el clic en «test1» volviera siempre a la primera.
       return;
     }
 

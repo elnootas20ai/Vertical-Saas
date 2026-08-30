@@ -46,7 +46,33 @@ describe('buildEscandalloExportRows', () => {
     expect(rows[0].cantidad).toBe(0.2);
     expect(rows[0].costeUdIngrediente).toBe(8);
     expect(rows[0].costeLinea).toBe(1.6);
-    expect(rows[0].costeTotalProducto).toBe(1.6);
+    expect(rows[0].mermaPct).toBe(0);
+    expect(rows[0].costePorVenta).toBe(1.6);
+  });
+
+  it('incluye merma en coste por venta', () => {
+    const rows = buildEscandalloExportRows(
+      [
+        product({
+          customFields: {
+            costingType: 'recipe',
+            mermaPct: 10,
+            costingRecipe: [
+              {
+                storeIngredientId: 'ing-1',
+                name: 'Mozzarella',
+                quantity: 0.2,
+                unit: 'kg',
+              },
+            ],
+          },
+        }),
+      ],
+      [ingredient()],
+    );
+    expect(rows[0].mermaPct).toBe(10);
+    expect(rows[0].costeLinea).toBe(1.6);
+    expect(rows[0].costePorVenta).toBe(1.76);
   });
 
   it('incluye coste fijo sin desglose de ingredientes', () => {
@@ -63,7 +89,7 @@ describe('buildEscandalloExportRows', () => {
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].tipo).toBe('Coste fijo');
-    expect(rows[0].costeTotalProducto).toBe(0.45);
+    expect(rows[0].costePorVenta).toBe(0.45);
     expect(rows[0].ingrediente).toBe('—');
   });
 });

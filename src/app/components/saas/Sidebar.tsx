@@ -1121,12 +1121,11 @@ function SidebarInner({
       const pdvId = row?.pdvId || pdvPool.find((p) => p._id === id)?._id;
       if (pdvId) {
         activeStore.setActiveSalesPoint(pdvId);
-        void activeStore.refresh();
+        // No refresh inmediato: un reload a medias reseteaba la 2ª tienda a la 1ª.
         return;
       }
       if (row?.workCenterId) {
         activeStore.setActiveWorkCenterPreference(row.workCenterId);
-        void activeStore.refresh();
       }
       return;
     }
@@ -1295,15 +1294,7 @@ function SidebarInner({
       if (usesDeliverySidebarCore || isRestaurantVertical || isEventsVertical) {
         // TPV: Carta · Almacén · Compras · Facturas · Consumo equipo · Correo facturas (abajo).
         // Eventos: misma carta TPV, sin consumos de staff.
-        itemIds = isRestaurantVertical
-          ? [
-              'catalog-carta',
-              'catalog-purchases',
-              'catalog-invoices',
-              'catalog-consumos',
-              'catalog-invoice-email',
-            ]
-          : isEventsVertical
+        itemIds = isEventsVertical
           ? [
               'catalog-carta',
               'catalog-stock-tpv',
@@ -1504,30 +1495,9 @@ function SidebarInner({
           onMobileClose();
           return;
         }
-        if (usesOpsStoreSidebar) {
-          // En TPV: solo cambiar tienda (no echar a Ops). El gate escucha el evento.
-          const onDeliveryTpv =
-            location.pathname.startsWith('/saas/vertical/delivery/tpv')
-            || location.pathname.startsWith('/saas/caja/tpv');
-          const onRestaurantTpv =
-            location.pathname.startsWith('/saas/vertical/restaurant/tpv')
-            || location.pathname.startsWith('/saas/restaurant-tpv');
-          if (!(onDeliveryTpv || onRestaurantTpv)) {
-            handleNavigate(isRestaurantVertical ? '/saas/restaurant-ops' : '/saas/delivery-ops');
-          }
-          onMobileClose();
-          return;
-        }
-        if (isCompraventa) {
-          handleNavigate('/saas/vehicles');
-          onMobileClose();
-          return;
-        }
-        if (isLawyerVertical) {
-          handleNavigate('/saas/lawyer-ops');
-          onMobileClose();
-          return;
-        }
+        // Solo cambia la tienda activa; no navegar al centro operativo.
+        onMobileClose();
+        return;
       }
       onMobileClose();
       return;
@@ -1726,9 +1696,9 @@ function SidebarInner({
     (item.id === 'cleaning-reports' && (location.pathname.startsWith('/saas/cleaning-reports') || location.pathname.startsWith('/saas/vertical/limpieza/informes'))) ||
     (item.id === 'cleaning-execution' && location.pathname.startsWith('/saas/cleaning-execution')) ||
     (item.id === 'catalog' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'catalog') ||
-    (item.id === 'catalog-carta' && location.pathname.startsWith('/saas/catalog') && ['catalog', 'escandallo', 'ingredientes', 'tpv-templates'].includes(catalogTab)) ||
+    (item.id === 'catalog-carta' && location.pathname.startsWith('/saas/catalog') && ['catalog', 'escandallo', 'tpv-templates'].includes(catalogTab)) ||
     (item.id === 'catalog-stock' && location.pathname.startsWith('/saas/inventory')) ||
-    (item.id === 'catalog-stock-tpv' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'stock') ||
+    (item.id === 'catalog-stock-tpv' && location.pathname.startsWith('/saas/catalog') && ['stock', 'ingredientes'].includes(catalogTab)) ||
     (item.id === 'catalog-purchases' && location.pathname.startsWith('/saas/catalog') && ['suppliers', 'purchase-orders', 'albaranes'].includes(catalogTab)) ||
     (item.id === 'catalog-invoices' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'invoices') ||
     (item.id === 'catalog-consumos' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'staff-consumption') ||

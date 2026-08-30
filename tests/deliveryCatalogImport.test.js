@@ -592,6 +592,9 @@ describe('deliveryCatalogExcelTemplate', () => {
     expect(normalizeImportCategory('packaging')).toBe('Envases');
     expect(normalizeImportCategory('papel')).toBe('Envases');
     expect(isWarehouseImportCategory('Limpieza')).toBe(true);
+    expect(isWarehouseImportCategory('Ingredientes')).toBe(true);
+    expect(isWarehouseImportCategory('Ingredientes · Modomio')).toBe(true);
+    expect(isWarehouseImportCategory('Tapas')).toBe(false);
     expect(resolveWarehouseImportMeta('Varios')?.stockCategory).toBe('consumable');
 
     const brands = [

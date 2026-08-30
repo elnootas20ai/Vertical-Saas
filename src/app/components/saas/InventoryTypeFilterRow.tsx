@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react';
+import { ChevronRight } from 'lucide-react';
 import type { InventoryOrganizerGroup } from '../../lib/inventoryUtils';
 
 function normalizeChipColor(raw: string | undefined): string | undefined {
@@ -8,67 +8,53 @@ function normalizeChipColor(raw: string | undefined): string | undefined {
   return undefined;
 }
 
-/** Estilo solo si hay color configurado; sin color = clases neutras (sin defaults inventados). */
-function optionalChipStyle(color: string | undefined, active: boolean): CSSProperties | undefined {
-  const c = normalizeChipColor(color);
-  if (!c) return undefined;
-  if (active) {
-    return { backgroundColor: c, color: '#fff', borderColor: c };
-  }
-  return {
-    backgroundColor: `${c}1a`,
-    color: c,
-    borderColor: `${c}66`,
-  };
-}
-
+/**
+ * Misma piel que Carta: grid de organizadores (Bebidas, Envases…).
+ * Un toque abre el listado de esa categoría.
+ */
 export function InventoryTypeFilterRow({
   groups,
-  activeId,
+  activeId: _activeId,
   onSelect,
 }: {
   groups: InventoryOrganizerGroup[];
-  activeId: string;
+  activeId?: string;
   onSelect: (id: string) => void;
 }) {
   if (groups.length === 0) return null;
 
   return (
-    <div
-      className="flex gap-1.5 overflow-x-auto pb-0.5 [&::-webkit-scrollbar]:hidden"
-      style={{ scrollbarWidth: 'none' }}
-    >
+    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
       {groups.map((group) => {
-        const active = activeId === group.id;
-        const colored = optionalChipStyle(group.color, active);
+        const color = normalizeChipColor(group.color);
         return (
           <button
             key={group.id}
             type="button"
             onClick={() => onSelect(group.id)}
-            style={colored}
-            className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap border ${
-              colored
-                ? 'border-solid'
-                : active
-                  ? 'border-transparent bg-gray-900 text-white dark:bg-white dark:text-gray-900'
-                  : 'border-transparent bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
-            }`}
+            className="group flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-4 text-left shadow-sm transition-all hover:border-blue-300 hover:shadow-md dark:border-gray-700 dark:bg-gray-800 dark:hover:border-blue-700"
           >
-            {group.label}
-            <span
-              className={`tabular-nums text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                colored
-                  ? active
-                    ? 'bg-white/20 text-inherit'
-                    : 'bg-white/70 dark:bg-black/20 text-inherit'
-                  : active
-                    ? 'bg-white/20 text-inherit dark:bg-gray-900/15'
-                    : 'bg-white dark:bg-gray-900 text-gray-400 dark:text-gray-500'
-              }`}
-            >
-              {group.total.toLocaleString('es-ES')}
-            </span>
+            <div className="flex items-center justify-between w-full">
+              <span
+                className={
+                  color
+                    ? 'flex h-10 w-10 items-center justify-center rounded-full text-xs font-bold'
+                    : 'flex h-10 w-10 items-center justify-center rounded-full bg-stone-100 text-xs font-bold text-stone-500 dark:bg-stone-700 dark:text-stone-200'
+                }
+                style={color ? { backgroundColor: `${color}22`, color } : undefined}
+              >
+                {group.label.slice(0, 2).toUpperCase()}
+              </span>
+              <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-[var(--v-blue,#2563eb)] group-hover:translate-x-0.5 transition-all shrink-0" />
+            </div>
+            <div className="min-w-0 w-full">
+              <p className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate group-hover:text-[var(--v-blue,#2563eb)]">
+                {group.label}
+              </p>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 tabular-nums">
+                {group.total.toLocaleString('es-ES')} artículo{group.total !== 1 ? 's' : ''}
+              </p>
+            </div>
           </button>
         );
       })}

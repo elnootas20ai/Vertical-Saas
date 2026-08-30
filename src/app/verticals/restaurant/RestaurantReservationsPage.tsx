@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
@@ -7,7 +7,7 @@ import { useModalClose } from '../../hooks/useModalClose';
 import { useClientPhoneSearch } from '../../hooks/useClientPhoneSearch';
 import { resolveClientSearchBusinessId } from '../../lib/clientSearchScope';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
-import { formatDateEs, formatDateEsAsTyping, parseDateEsToIso } from '../../lib/formatDateEs';
+import { formatDateEs } from '../../lib/formatDateEs';
 import type { Client } from '../../context/AppContext';
 import {
   listDiningTablesRequest,
@@ -111,19 +111,29 @@ function toLocalIsoDate(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+/** Clave estable yyyy-mm-dd (API a veces trae ISO largo). */
+function reservationDateKey(value: string | null | undefined): string {
+  const raw = String(value || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+  return '';
+}
+
 function addDays(dateStr: string, days: number): string {
-  const d = new Date(`${dateStr}T12:00:00`);
+  const key = reservationDateKey(dateStr) || todayLocalIso();
+  const d = new Date(`${key}T12:00:00`);
   d.setDate(d.getDate() + days);
   return toLocalIsoDate(d);
 }
 
 function formatDisplayDate(dateStr: string): string {
-  const d = new Date(`${dateStr}T12:00:00`);
+  const key = reservationDateKey(dateStr) || todayLocalIso();
+  const d = new Date(`${key}T12:00:00`);
   return d.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
 }
 
 function weekDays(dateStr: string): string[] {
-  const d = new Date(`${dateStr}T12:00:00`);
+  const key = reservationDateKey(dateStr) || todayLocalIso();
+  const d = new Date(`${key}T12:00:00`);
   const day = d.getDay();
   const mondayOffset = day === 0 ? -6 : 1 - day;
   const monday = new Date(d);
@@ -135,10 +145,17 @@ function weekDays(dateStr: string): string[] {
   });
 }
 
+function monthFromIso(dateStr: string): { year: number; month: number } {
+  const key = reservationDateKey(dateStr) || todayLocalIso();
+  const [y, m] = key.split('-').map(Number);
+  return { year: y, month: m - 1 };
+}
+
 export function RestaurantReservationsPage() {
   const { user } = useAuth();
   const { currentBusiness, businesses } = useBusiness();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const userId = user?.user_id || user?.id || '';
   const userName = user?.fullName || user?.email || 'Usuario';
   const businessId = currentBusiness?.business_id || '';
@@ -170,18 +187,20 @@ export function RestaurantReservationsPage() {
   const [selected, setSelected] = useState<RestaurantReservation | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<RestaurantReservation | null>(null);
-  const [form, setForm] = useState<ReservationFormData>(EMPTY_FORM);
-  const [formDateDisplay, setFormDateDisplay] = useState('');
+  const [form, setForm] = useState<ReservationFormData>({ ...EMPTY_FORM, date: todayLocalIso() });
   const [saving, setSaving] = useState(false);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [showAutomation, setShowAutomation] = useState(false);
   const [automation, setAutomation] = useState<ReservationAutomationSettings>(loadAutomationSettings);
-  const [calendarMonth, setCalendarMonth] = useState(() => {
-    const now = new Date();
-    return { year: now.getFullYear(), month: now.getMonth() };
-  });
+  const [calendarMonth, setCalendarMonth] = useState(() => monthFromIso(todayLocalIso()));
   const [clientLookup, setClientLookup] = useState('');
   const [clientEditing, setClientEditing] = useState(true);
+  const [crmClientHints, setCrmClientHints] = useState<{
+    referralCode: string;
+    loyaltyEnrolled: boolean;
+    loyaltyPoints: number;
+    loyaltyLevel: string;
+  } | null>(null);
 
   const {
     results: clientResults,
@@ -204,9 +223,9 @@ export function RestaurantReservationsPage() {
     setShowModal(false);
     setEditing(null);
     setForm({ ...EMPTY_FORM, date: selectedDate });
-    setFormDateDisplay(formatDateEs(selectedDate));
     setClientLookup('');
     setClientEditing(true);
+    setCrmClientHints(null);
     clearSelection();
     clearResults();
   });
@@ -296,8 +315,9 @@ export function RestaurantReservationsPage() {
 
   const dayReservations = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const day = reservationDateKey(selectedDate);
     return displayReservations
-      .filter((r) => r.date === selectedDate)
+      .filter((r) => reservationDateKey(r.date) === day)
       .filter((r) => matchesFilterStatus(r.status, filterStatus))
       .filter((r) => {
         if (!q) return true;
@@ -305,7 +325,7 @@ export function RestaurantReservationsPage() {
           r.guestName.toLowerCase().includes(q)
           || r.phone.toLowerCase().includes(q)
           || r.tableNumber.includes(q)
-          || r.date.includes(q)
+          || reservationDateKey(r.date).includes(q)
         );
       })
       .sort((a, b) => a.time.localeCompare(b.time));
@@ -314,8 +334,10 @@ export function RestaurantReservationsPage() {
   const countsByDate = useMemo(() => {
     const map: Record<string, number> = {};
     for (const r of displayReservations) {
+      const key = reservationDateKey(r.date);
+      if (!key) continue;
       if (ACTIVE_STATUSES.includes(r.status as ReservationStatus) || r.status === 'confirmed') {
-        map[r.date] = (map[r.date] || 0) + 1;
+        map[key] = (map[key] || 0) + 1;
       }
     }
     return map;
@@ -323,18 +345,31 @@ export function RestaurantReservationsPage() {
 
   const week = useMemo(() => weekDays(selectedDate), [selectedDate]);
 
+  /** Un solo gesto: elige día y alinea el mes del calendario lateral. */
+  const selectReservationDay = useCallback((iso: string) => {
+    const key = reservationDateKey(iso);
+    if (!key) return;
+    setSelectedDate(key);
+    setCalendarMonth(monthFromIso(key));
+  }, []);
+
   const openCreate = () => {
     setEditing(null);
-    setForm({ ...EMPTY_FORM, date: selectedDate });
-    setFormDateDisplay(formatDateEs(selectedDate));
+    setForm({ ...EMPTY_FORM, date: selectedDate || todayLocalIso() });
     setClientLookup('');
     setClientEditing(true);
+    setCrmClientHints(null);
     clearSelection();
     clearResults();
     setShowModal(true);
   };
 
-  const applyClient = (client: Client) => {
+  const applyClient = (client: Client, hints?: {
+    referralCode?: string;
+    loyaltyEnrolled?: boolean;
+    loyaltyPoints?: number;
+    loyaltyLevel?: string;
+  }) => {
     selectClient(client);
     setForm((prev) => ({
       ...prev,
@@ -345,6 +380,16 @@ export function RestaurantReservationsPage() {
     }));
     setClientLookup('');
     setClientEditing(false);
+    const referral = String(hints?.referralCode ?? client.referralCode ?? '').trim();
+    const loyaltyEnrolled = hints?.loyaltyEnrolled ?? Boolean(client.loyalty?.enrolled);
+    const loyaltyPoints = hints?.loyaltyPoints ?? Number(client.loyalty?.points || 0);
+    const loyaltyLevel = String(hints?.loyaltyLevel ?? client.loyalty?.level ?? '');
+    setCrmClientHints({
+      referralCode: referral,
+      loyaltyEnrolled,
+      loyaltyPoints,
+      loyaltyLevel,
+    });
   };
 
   const clearLinkedClient = () => {
@@ -352,16 +397,86 @@ export function RestaurantReservationsPage() {
     setForm((prev) => ({ ...prev, clientId: '' }));
     setClientLookup('');
     setClientEditing(true);
+    setCrmClientHints(null);
   };
 
+  /** Desde CRM: /saas/reservations?nuevo=1&clientId=…&name=… */
+  useEffect(() => {
+    if (searchParams.get('nuevo') !== '1') return;
+    const clientId = String(searchParams.get('clientId') || '').trim();
+    const name = String(searchParams.get('name') || '').trim();
+    const phone = String(searchParams.get('phone') || '').trim();
+    const email = String(searchParams.get('email') || '').trim();
+    const referralCode = String(searchParams.get('referralCode') || '').trim();
+    const loyaltyEnrolled = searchParams.get('loyalty') === '1';
+    const loyaltyPoints = Number(searchParams.get('loyaltyPoints') || 0);
+    const loyaltyLevel = String(searchParams.get('loyaltyLevel') || '').trim();
+
+    setEditing(null);
+    setForm({
+      ...EMPTY_FORM,
+      date: selectedDate || todayLocalIso(),
+      clientId,
+      guestName: name,
+      phone,
+      email,
+      time: '20:00',
+      partySize: '2',
+    });
+    setClientLookup('');
+    clearResults();
+
+    if (clientId) {
+      const stub = {
+        id: clientId,
+        name: name || 'Cliente',
+        phone: phone.replace(/^\+\d+\s*/, '') || phone,
+        phonePrefix: phone.startsWith('+') ? phone.split(/\s/)[0] : '+34',
+        email,
+        dni: '',
+        status: 'active' as const,
+        responsible: '',
+        createdAt: new Date(),
+        referralCode: referralCode || undefined,
+        loyalty: loyaltyEnrolled
+          ? {
+              enrolled: true,
+              enrolledAt: null,
+              points: loyaltyPoints,
+              level: (loyaltyLevel || 'bronze') as NonNullable<Client['loyalty']>['level'],
+              totalVisits: 0,
+            }
+          : undefined,
+      } as Client;
+      selectClient(stub);
+      setClientEditing(false);
+      setCrmClientHints({
+        referralCode,
+        loyaltyEnrolled,
+        loyaltyPoints,
+        loyaltyLevel,
+      });
+    } else {
+      clearSelection();
+      setClientEditing(true);
+      setCrmClientHints(null);
+    }
+
+    setShowModal(true);
+    setSearchParams({}, { replace: true });
+  // Solo al montar / al llegar con query CRM
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   const openEdit = (item: RestaurantReservation) => {
+    const day = reservationDateKey(item.date) || selectedDate || todayLocalIso();
     setEditing(item);
     setForm({
       guestName: item.guestName,
       phone: item.phone,
       email: item.email,
       clientId: item.clientId || '',
-      date: item.date,
+      date: day,
       time: item.time,
       partySize: item.partySize,
       preferredZone: item.preferredZone,
@@ -371,7 +486,6 @@ export function RestaurantReservationsPage() {
       notes: item.notes,
       status: item.status,
     });
-    setFormDateDisplay(formatDateEs(item.date));
     setClientLookup('');
     setClientEditing(!item.clientId);
     clearSelection();
@@ -380,7 +494,7 @@ export function RestaurantReservationsPage() {
   };
 
   const handleSave = async () => {
-    const dateIso = parseDateEsToIso(formDateDisplay) || form.date;
+    const dateIso = reservationDateKey(form.date);
     if (!userId || !form.guestName.trim() || !dateIso || !form.time) {
       toast.error('Completa nombre, fecha y hora');
       return;
@@ -393,7 +507,7 @@ export function RestaurantReservationsPage() {
         toast.success(item.clientId ? 'Reserva actualizada · Cliente en CRM' : 'Reserva actualizada');
         setSelected(item);
       } else {
-        const { item, tableAssigned, clientLinked } = await createReservation(
+        const { item, tableAssigned, clientLinked, clientCrmError } = await createReservation(
           userId,
           payload,
           actor,
@@ -402,16 +516,18 @@ export function RestaurantReservationsPage() {
           clientScope,
         );
         const phoneDigits = form.phone.replace(/\D/g, '');
-        if (tableAssigned && clientLinked) {
-          toast.success('Reserva creada · Mesa asignada · Cliente guardado en CRM');
+        if (clientCrmError) {
+          toast.warning(`Reserva creada, pero el CRM falló: ${clientCrmError}`);
+        } else if (tableAssigned && clientLinked) {
+          toast.success('Reserva creada · Mesa asignada · Cliente en CRM');
         } else if (tableAssigned) {
           toast.success('Reserva creada · Mesa asignada automáticamente');
         } else if (clientLinked) {
-          toast.success('Reserva creada · Cliente guardado en CRM');
+          toast.success('Reserva creada · Cliente nuevo en CRM');
         } else if (phoneDigits.length > 0 && phoneDigits.length < 9) {
           toast.success('Reserva creada · Teléfono incompleto para CRM (mín. 9 dígitos)');
         } else if (!phoneDigits.length) {
-          toast.success('Reserva creada · Añade teléfono para guardar en CRM');
+          toast.success('Reserva creada · Añade teléfono para crear cliente en CRM');
         } else {
           toast.success('Reserva creada correctamente');
         }
@@ -419,6 +535,7 @@ export function RestaurantReservationsPage() {
       }
       setShowModal(false);
       setEditing(null);
+      selectReservationDay(dateIso);
       await loadData();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'No se pudo guardar');
@@ -507,7 +624,7 @@ export function RestaurantReservationsPage() {
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={() => setSelectedDate(todayLocalIso())}
+                onClick={() => selectReservationDay(todayLocalIso())}
                 className="rounded-xl border border-gray-200 px-3 py-2 text-sm font-medium hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800"
               >
                 Hoy
@@ -535,8 +652,9 @@ export function RestaurantReservationsPage() {
           <div className="flex items-center gap-1 overflow-x-auto pb-1">
             <button
               type="button"
-              onClick={() => setSelectedDate(addDays(selectedDate, -7))}
-              className="shrink-0 rounded-lg p-2 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+              onClick={() => selectReservationDay(addDays(selectedDate, -7))}
+              className="shrink-0 rounded-lg p-2.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+              aria-label="Semana anterior"
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
@@ -549,8 +667,8 @@ export function RestaurantReservationsPage() {
                 <button
                   key={d}
                   type="button"
-                  onClick={() => setSelectedDate(d)}
-                  className={`relative shrink-0 rounded-xl px-3 py-2 text-center text-sm transition-all ${
+                  onClick={() => selectReservationDay(d)}
+                  className={`relative min-h-[3.25rem] min-w-[3.5rem] shrink-0 touch-manipulation rounded-xl px-3 py-2.5 text-center text-sm transition-all ${
                     isSelected
                       ? 'bg-violet-600 font-semibold text-white shadow-md'
                       : 'border border-gray-200 bg-white text-gray-700 hover:border-violet-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300'
@@ -570,8 +688,9 @@ export function RestaurantReservationsPage() {
             })}
             <button
               type="button"
-              onClick={() => setSelectedDate(addDays(selectedDate, 7))}
-              className="shrink-0 rounded-lg p-2 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+              onClick={() => selectReservationDay(addDays(selectedDate, 7))}
+              className="shrink-0 rounded-lg p-2.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+              aria-label="Semana siguiente"
             >
               <ChevronRight className="h-4 w-4" />
             </button>
@@ -638,9 +757,9 @@ export function RestaurantReservationsPage() {
                   <span key={d}>{d}</span>
                 ))}
               </div>
-              <div className="grid grid-cols-7 gap-0.5">
+              <div className="grid grid-cols-7 gap-1">
                 {calendarCells.map((dateStr, i) => {
-                  if (!dateStr) return <span key={`empty-${i}`} />;
+                  if (!dateStr) return <span key={`empty-${i}`} className="min-h-11" />;
                   const isSelected = dateStr === selectedDate;
                   const isToday = dateStr === todayLocalIso();
                   const count = countsByDate[dateStr] || 0;
@@ -648,8 +767,8 @@ export function RestaurantReservationsPage() {
                     <button
                       key={dateStr}
                       type="button"
-                      onClick={() => setSelectedDate(dateStr)}
-                      className={`relative flex h-8 items-center justify-center rounded-lg text-xs font-medium transition-colors ${
+                      onClick={() => selectReservationDay(dateStr)}
+                      className={`relative flex min-h-11 min-w-0 touch-manipulation items-center justify-center rounded-xl text-sm font-medium transition-colors ${
                         isSelected
                           ? 'bg-violet-600 text-white'
                           : isToday
@@ -659,7 +778,7 @@ export function RestaurantReservationsPage() {
                     >
                       {parseInt(dateStr.slice(8), 10)}
                       {count > 0 && !isSelected && (
-                        <span className="absolute bottom-0.5 h-1 w-1 rounded-full bg-violet-500" />
+                        <span className="absolute bottom-1 h-1.5 w-1.5 rounded-full bg-violet-500" />
                       )}
                     </button>
                   );
@@ -950,22 +1069,47 @@ export function RestaurantReservationsPage() {
                   Cliente CRM (teléfono o nombre)
                 </label>
                 {selectedClient || form.clientId ? (
-                  <div className="flex items-center justify-between gap-3 rounded-xl border-2 border-violet-200 bg-violet-50 p-3 dark:border-violet-800 dark:bg-violet-950/30">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
-                        {selectedClient?.name || form.guestName}
-                      </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        Se vinculará al CRM de clientes
-                      </p>
+                  <div className="rounded-xl border-2 border-violet-200 bg-violet-50 p-3 dark:border-violet-800 dark:bg-violet-950/30">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
+                          {selectedClient?.name || form.guestName}
+                        </p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          Se vinculará al CRM de clientes
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={clearLinkedClient}
+                        className="shrink-0 rounded-lg p-1.5 text-violet-700 hover:bg-violet-100 dark:text-violet-300 dark:hover:bg-violet-900/40"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={clearLinkedClient}
-                      className="shrink-0 rounded-lg p-1.5 text-violet-700 hover:bg-violet-100 dark:text-violet-300 dark:hover:bg-violet-900/40"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                          crmClientHints?.referralCode
+                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-200'
+                            : 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300'
+                        }`}
+                      >
+                        {crmClientHints?.referralCode
+                          ? `Afiliado · ${crmClientHints.referralCode}`
+                          : 'Sin código afiliado'}
+                      </span>
+                      {crmClientHints?.loyaltyEnrolled ? (
+                        <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200">
+                          Fidelización · {crmClientHints.loyaltyPoints || 0} pts
+                          {crmClientHints.loyaltyLevel ? ` · ${crmClientHints.loyaltyLevel}` : ''}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center rounded-full bg-stone-100 px-2 py-0.5 text-[11px] font-semibold text-stone-600 dark:bg-stone-800 dark:text-stone-300">
+                          Sin fidelización
+                        </span>
+                      )}
+                    </div>
                   </div>
                 ) : (
                   <>
@@ -1046,34 +1190,51 @@ export function RestaurantReservationsPage() {
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  placeholder="DD/MM/AAAA"
-                  value={formDateDisplay}
-                  onChange={(e) => {
-                    const next = formatDateEsAsTyping(e.target.value);
-                    setFormDateDisplay(next);
-                    const iso = parseDateEsToIso(next);
-                    if (iso) setForm((p) => ({ ...p, date: iso }));
-                  }}
-                  onBlur={() => {
-                    const iso = parseDateEsToIso(formDateDisplay);
-                    if (iso) {
-                      setForm((p) => ({ ...p, date: iso }));
-                      setFormDateDisplay(formatDateEs(iso));
-                    } else if (form.date) {
-                      setFormDateDisplay(formatDateEs(form.date));
-                    }
-                  }}
-                  className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm dark:border-gray-700 dark:bg-gray-800"
-                />
-                <input
-                  type="time"
-                  value={form.time}
-                  onChange={(e) => setForm((p) => ({ ...p, time: e.target.value }))}
-                  className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm dark:border-gray-700 dark:bg-gray-800"
-                />
+                <div>
+                  <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                    Día · {form.date ? formatDateEs(form.date) : '—'}
+                  </label>
+                  <div className="mb-1.5 flex flex-wrap gap-1.5">
+                    {[
+                      { label: 'Hoy', value: todayLocalIso() },
+                      { label: 'Mañana', value: addDays(todayLocalIso(), 1) },
+                      { label: '+2', value: addDays(todayLocalIso(), 2) },
+                    ].map((chip) => (
+                      <button
+                        key={chip.value}
+                        type="button"
+                        onClick={() => setForm((p) => ({ ...p, date: chip.value }))}
+                        className={`min-h-9 touch-manipulation rounded-lg px-2.5 text-xs font-semibold ${
+                          form.date === chip.value
+                            ? 'bg-violet-600 text-white'
+                            : 'border border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300'
+                        }`}
+                      >
+                        {chip.label}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="date"
+                    value={form.date || ''}
+                    onChange={(e) => {
+                      const next = reservationDateKey(e.target.value);
+                      if (next) setForm((p) => ({ ...p, date: next }));
+                    }}
+                    className="min-h-11 w-full touch-manipulation rounded-xl border border-gray-200 px-3 py-2.5 text-sm dark:border-gray-700 dark:bg-gray-800"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                    Hora
+                  </label>
+                  <input
+                    type="time"
+                    value={form.time}
+                    onChange={(e) => setForm((p) => ({ ...p, time: e.target.value }))}
+                    className="min-h-11 w-full touch-manipulation rounded-xl border border-gray-200 px-3 py-2.5 text-sm dark:border-gray-700 dark:bg-gray-800"
+                  />
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <input

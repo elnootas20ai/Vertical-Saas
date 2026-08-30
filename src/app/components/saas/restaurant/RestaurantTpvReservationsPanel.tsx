@@ -108,6 +108,11 @@ export function RestaurantTpvReservationsPanel({
 }: Props) {
   const { currentBusiness, businesses } = useBusiness();
   const today = localCalendarDayKey();
+  const tomorrow = useMemo(() => {
+    const d = new Date(`${today}T12:00:00`);
+    d.setDate(d.getDate() + 1);
+    return localCalendarDayKey(d);
+  }, [today]);
   const businessScopeId = resolveBusinessScopeId(currentBusiness) || normalizeBusinessScopeId(businessId);
   const clientSearchBusinessId = resolveClientSearchBusinessId(currentBusiness, businessScopeId);
   const reservationScope = useMemo(
@@ -276,7 +281,7 @@ export function RestaurantTpvReservationsPanel({
         const item = await updateReservation(userId, editing, form, actor, tables, items, clientScope);
         toast.success(item.clientId ? 'Reserva actualizada · Cliente en CRM' : 'Reserva actualizada');
       } else {
-        const { tableAssigned, clientLinked } = await createReservation(
+        const { tableAssigned, clientLinked, clientCrmError } = await createReservation(
           userId,
           { ...form, date: form.date || today },
           actor,
@@ -285,16 +290,18 @@ export function RestaurantTpvReservationsPanel({
           clientScope,
         );
         const phoneDigits = form.phone.replace(/\D/g, '');
-        if (tableAssigned && clientLinked) {
+        if (clientCrmError) {
+          toast.warning(`Reserva creada, pero el CRM falló: ${clientCrmError}`);
+        } else if (tableAssigned && clientLinked) {
           toast.success('Reserva creada · Mesa asignada · Cliente en CRM');
         } else if (tableAssigned) {
           toast.success('Reserva creada · Mesa asignada');
         } else if (clientLinked) {
-          toast.success('Reserva creada · Cliente guardado en CRM');
+          toast.success('Reserva creada · Cliente nuevo en CRM');
         } else if (phoneDigits.length > 0 && phoneDigits.length < 9) {
           toast.success('Reserva creada · Teléfono incompleto para CRM (mín. 9 dígitos)');
         } else if (!phoneDigits.length) {
-          toast.success('Reserva creada · Añade teléfono para guardar en CRM');
+          toast.success('Reserva creada · Añade teléfono para crear cliente en CRM');
         } else {
           toast.success('Reserva creada');
         }
@@ -653,17 +660,38 @@ export function RestaurantTpvReservationsPanel({
                     />
                   </div>
                   <div className="grid grid-cols-2 gap-2">
-                    <input
-                      type="date"
-                      value={form.date}
-                      onChange={(e) => setForm((p) => ({ ...p, date: e.target.value }))}
-                      className="w-full rounded-xl border border-stone-200 px-3 py-2.5 text-sm dark:border-stone-700 dark:bg-stone-950"
-                    />
+                    <div>
+                      <div className="mb-1 flex flex-wrap gap-1">
+                        {[
+                          { label: 'Hoy', value: today },
+                          { label: 'Mañana', value: tomorrow },
+                        ].map((chip) => (
+                          <button
+                            key={chip.value}
+                            type="button"
+                            onClick={() => setForm((p) => ({ ...p, date: chip.value }))}
+                            className={`min-h-9 touch-manipulation rounded-lg px-2 text-xs font-semibold ${
+                              form.date === chip.value
+                                ? 'bg-violet-600 text-white'
+                                : 'border border-stone-200 text-stone-700 dark:border-stone-700 dark:text-stone-300'
+                            }`}
+                          >
+                            {chip.label}
+                          </button>
+                        ))}
+                      </div>
+                      <input
+                        type="date"
+                        value={form.date}
+                        onChange={(e) => setForm((p) => ({ ...p, date: e.target.value.slice(0, 10) }))}
+                        className="min-h-11 w-full touch-manipulation rounded-xl border border-stone-200 px-3 py-2.5 text-sm dark:border-stone-700 dark:bg-stone-950"
+                      />
+                    </div>
                     <input
                       type="time"
                       value={form.time}
                       onChange={(e) => setForm((p) => ({ ...p, time: e.target.value }))}
-                      className="w-full rounded-xl border border-stone-200 px-3 py-2.5 text-sm dark:border-stone-700 dark:bg-stone-950"
+                      className="min-h-11 w-full touch-manipulation self-end rounded-xl border border-stone-200 px-3 py-2.5 text-sm dark:border-stone-700 dark:bg-stone-950"
                     />
                   </div>
                   <div>

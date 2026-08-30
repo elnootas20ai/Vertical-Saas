@@ -1,27 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, ChevronDown, Plus, Trash2 } from 'lucide-react';
+import { Check, ChevronDown, Plus, Search, Trash2 } from 'lucide-react';
 import {
   listInventoryOrganizerChoices,
-  ORGANIZER_BEVERAGES,
-  ORGANIZER_COMPLEMENTS,
-  ORGANIZER_CLEANING,
-  ORGANIZER_PACKAGING,
-  ORGANIZER_VARIOS,
+  buildInventoryOrganizerGroups,
+  ORGANIZER_TOTAL,
   type InventoryCommercialBrand,
 } from '../../lib/inventoryUtils';
 import {
   commercialLineBrands,
+  isImportComboCategory,
   listCatalogCategoryOrganizerChoices,
 } from '../../lib/deliveryCatalogImportLogic';
 import { stockItemsForOrganizer } from '../../lib/purchaseSuggestions';
 import type { CatalogItem } from '../../lib/deliveryApi';
 import type { StoreIngredient } from '../../lib/catalogCustomization';
+import { isStockInventoryItem } from '../../lib/stockInventoryScope';
 import {
   VERTIAL_ACCENT_BG,
   VERTIAL_ACCENT_BORDER,
   VERTIAL_BTN_SECONDARY,
 } from '../../lib/vertialUiTokens';
 import { CatalogUnitChip } from './CatalogUnitChip';
+/** Etiquetas legacy `cat:…` + categorías de carta (sin Combos) en «Qué te vende». */
 
 type BrandLike = {
   _id: string;
@@ -82,39 +82,98 @@ export function supplierFormInitFingerprint(
   return `${id}|${catalogItemsLength}|${String(supplier?.updatedAt || '')}|${orgs}|${items}`;
 }
 
-function organizerLabelKey(label: string): string {
-  return String(label || '')
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{M}/gu, '');
-}
-
-/** Todas las categorías del catálogo + almacén (sin filtrar por selección). */
+/**
+ * Categorías de Carta (sin Combos) + organizadores de Almacén.
+ * Carta siempre visible (aunque aún no haya escandallo/almacén) — cuentas legacy/admin.
+ * Almacén: presets siempre + grupos con artículos.
+ */
 export function buildSupplierOrganizerChoices(
   brands: BrandLike[] = [],
   catalogItems: CatalogItem[] = [],
-  options?: { businessType?: string | null },
+  options?: {
+    businessType?: string | null;
+    storeIngredients?: StoreIngredient[];
+    selectedOrganizerIds?: string[];
+  },
 ): Array<{ id: string; label: string }> {
   const commercialBrands = commercialLineBrands(brands) as InventoryCommercialBrand[];
-  const categories = listCatalogCategoryOrganizerChoices(brands, catalogItems, options);
-  const catalogLabelKeys = new Set(categories.map((c) => organizerLabelKey(c.label)));
-  const warehouse = listInventoryOrganizerChoices(commercialBrands, {
-    omitBrandInFoodLabels: true,
-  }).filter((c) => {
-    if (c.id === ORGANIZER_BEVERAGES || c.id === ORGANIZER_COMPLEMENTS) {
-      return !catalogLabelKeys.has(organizerLabelKey(c.label));
-    }
-    return true;
-  });
-  const seen = new Set(warehouse.map((c) => c.id));
-  const merged = [...warehouse];
-  for (const c of categories) {
-    if (seen.has(c.id)) continue;
-    seen.add(c.id);
-    merged.push(c);
+  const storeIngredients = options?.storeIngredients || [];
+  const selected = new Set(
+    (options?.selectedOrganizerIds || []).map((id) => String(id || '').trim()).filter(Boolean),
+  );
+  const seen = new Set<string>();
+  const seenLabelKeys = new Set<string>();
+  const out: Array<{ id: string; label: string }> = [];
+
+  const push = (id: string, label: string) => {
+    const cleanId = String(id || '').trim();
+    const cleanLabel = String(label || '').trim() || cleanId;
+    if (!cleanId || seen.has(cleanId)) return;
+    seen.add(cleanId);
+    seenLabelKeys.add(
+      cleanLabel
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/\p{M}/gu, ''),
+    );
+    out.push({ id: cleanId, label: cleanLabel });
+  };
+
+  // 1) Secciones de Carta — siempre (sin Combos). Sin exigir escandallo/almacén.
+  for (const c of listCatalogCategoryOrganizerChoices(brands, catalogItems, {
+    businessType: options?.businessType,
+  })) {
+    if (isImportComboCategory(c.label)) continue;
+    push(c.id, c.label);
   }
-  return merged;
+
+  // 2) Almacén con artículos (envases, invcat, líneas…).
+  const stock = catalogItems.filter(isStockInventoryItem);
+  const groups = buildInventoryOrganizerGroups(stock, storeIngredients, commercialBrands).filter(
+    (g) => g.id !== ORGANIZER_TOTAL && (g.total > 0 || selected.has(g.id)),
+  );
+  for (const g of groups) {
+    if (seen.has(g.id)) continue;
+    const labelKey = String(g.label || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '');
+    if (seenLabelKeys.has(labelKey) && !selected.has(g.id)) continue;
+    push(g.id, g.label);
+  }
+
+  // 3) Presets de almacén siempre (Envases, Limpieza…). Líneas de marca solo si hay stock o ya seleccionadas.
+  const WAREHOUSE_PRESET_IDS = new Set([
+    'packaging',
+    'cleaning',
+    'varios',
+    'beverages',
+    'complements',
+  ]);
+  for (const c of listInventoryOrganizerChoices(commercialBrands)) {
+    if (seen.has(c.id)) continue;
+    const labelKey = String(c.label || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '');
+    if (seenLabelKeys.has(labelKey) && !selected.has(c.id)) continue;
+    const isPreset = WAREHOUSE_PRESET_IDS.has(c.id);
+    if (
+      !isPreset
+      && !selected.has(c.id)
+      && stockItemsForOrganizer(stock, c.id, storeIngredients, commercialBrands).length === 0
+    ) {
+      continue;
+    }
+    push(c.id, c.label);
+  }
+
+  for (const id of selected) {
+    if (seen.has(id)) continue;
+    push(id, id);
+  }
+
+  return out.sort((a, b) => a.label.localeCompare(b.label, 'es'));
 }
 
 function organizerIdsForMarkedItems(
@@ -148,7 +207,9 @@ export function initialSupplierOrganizerIds(
   );
   const catalogItemIds = initialSupplierCatalogItemIds(supplier, catalogItems);
   const commercialBrands = commercialLineBrands(brands) as InventoryCommercialBrand[];
-  const choiceIds = buildSupplierOrganizerChoices(brands, catalogItems).map((c) => c.id);
+  const choiceIds = buildSupplierOrganizerChoices(brands, catalogItems, {
+    storeIngredients,
+  }).map((c) => c.id);
   for (const orgId of organizerIdsForMarkedItems(
     catalogItemIds,
     catalogItems,
@@ -173,7 +234,10 @@ export function resolveSupplierOrganizerIdsForSave(
     (organizerIds || []).map((id) => String(id || '').trim()).filter(Boolean),
   );
   const commercialBrands = commercialLineBrands(brands) as InventoryCommercialBrand[];
-  const choiceIds = buildSupplierOrganizerChoices(brands, catalogItems).map((c) => c.id);
+  const choiceIds = buildSupplierOrganizerChoices(brands, catalogItems, {
+    storeIngredients,
+    selectedOrganizerIds: organizerIds,
+  }).map((c) => c.id);
   for (const orgId of organizerIdsForMarkedItems(
     catalogItemIds,
     catalogItems,
@@ -186,19 +250,9 @@ export function resolveSupplierOrganizerIdsForSave(
   return [...ids];
 }
 
-/** Organizadores de almacén que un proveedor puede tener sin artículos todavía. */
-const SUPPLIER_ORGANIZER_ALWAYS = new Set([
-  ORGANIZER_BEVERAGES,
-  ORGANIZER_COMPLEMENTS,
-  ORGANIZER_PACKAGING,
-  ORGANIZER_CLEANING,
-  ORGANIZER_VARIOS,
-]);
 /**
- * Alta de proveedor: eliges un organizador del Excel/almacén
- * y marcas los productos que ese proveedor te vende.
- * Seleccionar en el desplegable ya añade el organizador y enseña sus productos.
- * El + es para añadir otro organizador a la lista.
+ * Alta de proveedor: categorías de Carta (ingredientes por sección) + Almacén
+ * (envases, limpieza…). Los ingredientes no salen en el TPV.
  */
 export function SupplierOrganizersField({
   organizerIds,
@@ -213,6 +267,7 @@ export function SupplierOrganizersField({
 }: Props) {
   const [pickId, setPickId] = useState('');
   const [openOrganizerId, setOpenOrganizerId] = useState('');
+  const [query, setQuery] = useState('');
   const pickRef = useRef<HTMLSelectElement>(null);
   const prevSelectedOrgCountRef = useRef(0);
 
@@ -220,43 +275,68 @@ export function SupplierOrganizersField({
     () => commercialLineBrands(brands) as InventoryCommercialBrand[],
     [brands],
   );
-  const allChoices = useMemo(
-    () => buildSupplierOrganizerChoices(brands, catalogItems, { businessType }),
-    [brands, catalogItems, businessType],
-  );
-  const selectedOrgSet = useMemo(
-    () => new Set((organizerIds || []).map((id) => String(id || '').trim()).filter(Boolean)),
-    [organizerIds],
-  );
-  const choices = useMemo(
-    () =>
-      allChoices.filter((c) => {
-        if (selectedOrgSet.has(c.id)) return true;
-        if (String(c.id).startsWith('cat:')) return true;
-        if (SUPPLIER_ORGANIZER_ALWAYS.has(c.id)) return true;
-        return stockItemsForOrganizer(catalogItems, c.id, storeIngredients, commercialBrands).length > 0;
-      }),
-    [allChoices, catalogItems, storeIngredients, commercialBrands, selectedOrgSet],
-  );
+  const allChoices = useMemo(() => {
+    const list = buildSupplierOrganizerChoices(brands, catalogItems, {
+      businessType,
+      storeIngredients,
+      selectedOrganizerIds: organizerIds,
+    });
+    return [...list].sort((a, b) => a.label.localeCompare(b.label, 'es'));
+  }, [brands, catalogItems, businessType, storeIngredients, organizerIds]);
+  const choices = allChoices;
   const labelById = useMemo(
     () => new Map(choices.map((c) => [c.id, c.label])),
     [choices],
   );
-  const selectedOrgs = useMemo(
-    () => [...new Set((organizerIds || []).map((id) => String(id || '').trim()).filter(Boolean))],
-    [organizerIds],
-  );
+  const selectedOrgs = useMemo(() => {
+    const ids = [...new Set((organizerIds || []).map((id) => String(id || '').trim()).filter(Boolean))];
+    return ids.sort((a, b) =>
+      String(labelById.get(a) || a).localeCompare(String(labelById.get(b) || b), 'es'),
+    );
+  }, [organizerIds, labelById]);
   const selectedItems = useMemo(
     () => new Set((catalogItemIds || []).map((id) => String(id || '').trim()).filter(Boolean)),
     [catalogItemIds],
   );
+  const queryNorm = useMemo(
+    () =>
+      query
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/\p{M}/gu, ''),
+    [query],
+  );
+  const matchesQuery = (text: string) => {
+    if (!queryNorm) return true;
+    return String(text || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '')
+      .includes(queryNorm);
+  };
   const remaining = useMemo(
     () =>
       choices
         .filter((c) => !selectedOrgs.includes(c.id))
+        .filter((c) => matchesQuery(c.label))
         .sort((a, b) => a.label.localeCompare(b.label, 'es')),
-    [choices, selectedOrgs],
+    // matchesQuery closes over queryNorm
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- queryNorm drives filter
+    [choices, selectedOrgs, queryNorm],
   );
+
+  const visibleSelectedOrgs = useMemo(() => {
+    if (!queryNorm) return selectedOrgs;
+    return selectedOrgs.filter((orgId) => {
+      const label = labelById.get(orgId) || orgId;
+      if (matchesQuery(label)) return true;
+      return stockItemsForOrganizer(catalogItems, orgId, storeIngredients, commercialBrands).some((item) =>
+        matchesQuery(item.name),
+      );
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- queryNorm drives filter
+  }, [selectedOrgs, labelById, catalogItems, storeIngredients, commercialBrands, queryNorm]);
 
   // Al editar o al añadir el primer organizador: abrir uno para ver productos.
   // No reabrir si el usuario cerró manualmente (antes reabría al poner openOrganizerId '').
@@ -372,7 +452,9 @@ export function SupplierOrganizersField({
             }}
             className="flex-1 min-h-11 px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 outline-none focus:border-blue-500"
           >
-            <option value="">Elegir categoría…</option>
+            <option value="">
+              {queryNorm && remaining.length === 0 ? 'Sin coincidencias…' : 'Elegir categoría…'}
+            </option>
             {remaining.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.label}
@@ -386,7 +468,9 @@ export function SupplierOrganizersField({
             className={VERTIAL_BTN_SECONDARY}
             title={
               remaining.length === 0
-                ? 'Ya tienes todas las categorías'
+                ? queryNorm
+                  ? 'Ninguna categoría coincide con la búsqueda'
+                  : 'Ya tienes todas las categorías'
                 : pickId
                   ? 'Añadir la categoría elegida'
                   : 'Elegir otra categoría'
@@ -396,22 +480,40 @@ export function SupplierOrganizersField({
             Añadir otro
           </button>
         </div>
+        <div className="relative mt-2">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Buscar categoría o producto…"
+            className="w-full min-h-11 pl-9 pr-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 outline-none focus:border-blue-500"
+          />
+        </div>
         {choices.length === 0 ? (
           <p className="text-sm text-gray-400 mt-2">
             No hay categorías todavía. Crea una al dar de alta un producto (Nueva categoría) y vuelve aquí.
           </p>
-        ) : remaining.length === 0 && selectedOrgs.length > 0 ? (
+        ) : remaining.length === 0 && selectedOrgs.length > 0 && !queryNorm ? (
           <p className="text-xs text-gray-400 mt-2">Ya tienes todas las categorías añadidas.</p>
         ) : null}
       </div>
 
-      {selectedOrgs.length > 0 ? (
+      {visibleSelectedOrgs.length > 0 ? (
         <div className="space-y-2">
-          {selectedOrgs.map((orgId) => {
-            const items = stockItemsForOrganizer(catalogItems, orgId, storeIngredients, commercialBrands);
-            const checkedCount = items.filter((i) => selectedItems.has(i._id)).length;
-            const open = openOrganizerId === orgId;
-            const allOn = items.length > 0 && checkedCount === items.length;
+          {visibleSelectedOrgs.map((orgId) => {
+            const itemsAll = stockItemsForOrganizer(
+              catalogItems,
+              orgId,
+              storeIngredients,
+              commercialBrands,
+            );
+            const items = queryNorm
+              ? itemsAll.filter((item) => matchesQuery(item.name) || matchesQuery(labelById.get(orgId) || ''))
+              : itemsAll;
+            const checkedCount = itemsAll.filter((i) => selectedItems.has(i._id)).length;
+            const open = openOrganizerId === orgId || Boolean(queryNorm && items.length > 0);
+            const allOn = items.length > 0 && items.every((i) => selectedItems.has(i._id));
             return (
               <div
                 key={orgId}
@@ -422,7 +524,7 @@ export function SupplierOrganizersField({
                 <div className="flex items-center gap-1 px-2 py-1.5">
                   <button
                     type="button"
-                    onClick={() => setOpenOrganizerId(open ? '' : orgId)}
+                    onClick={() => setOpenOrganizerId(open && !queryNorm ? '' : orgId)}
                     aria-expanded={open}
                     className="flex-1 min-w-0 flex items-center gap-2 px-2 py-2 rounded-lg text-left hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
                   >
@@ -437,9 +539,11 @@ export function SupplierOrganizersField({
                         {labelById.get(orgId) || orgId}
                       </p>
                       <p className="text-xs text-gray-500 dark:text-gray-400">
-                        {items.length === 0
+                        {itemsAll.length === 0
                           ? 'Sin productos en esta categoría'
-                          : `${checkedCount} de ${items.length} producto${items.length !== 1 ? 's' : ''} marcado${checkedCount !== 1 ? 's' : ''}`}
+                          : queryNorm
+                            ? `${items.length} coincidencia${items.length !== 1 ? 's' : ''} · ${checkedCount} marcado${checkedCount !== 1 ? 's' : ''}`
+                            : `${checkedCount} de ${itemsAll.length} producto${itemsAll.length !== 1 ? 's' : ''} marcado${checkedCount !== 1 ? 's' : ''}`}
                       </p>
                     </span>
                     <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 shrink-0 hidden sm:inline">
@@ -459,7 +563,9 @@ export function SupplierOrganizersField({
                   <div className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2">
                     {items.length === 0 ? (
                       <p className="text-xs text-gray-400 py-2">
-                        Esta categoría no tiene productos. Cuando crees productos con esa categoría, saldrán aquí para marcarlos.
+                        {queryNorm
+                          ? 'Ningún producto coincide con la búsqueda en esta categoría.'
+                          : 'Esta categoría no tiene productos. Cuando crees productos con esa categoría, saldrán aquí para marcarlos.'}
                       </p>
                     ) : (
                       <>
@@ -524,6 +630,8 @@ export function SupplierOrganizersField({
             );
           })}
         </div>
+      ) : selectedOrgs.length > 0 && queryNorm ? (
+        <p className="text-sm text-gray-400">Ninguna categoría o producto coincide con «{query.trim()}».</p>
       ) : null}
     </div>
   );
@@ -541,12 +649,13 @@ export function labelsForSupplierOrganizerIds(
   if (ids.length === 0) return [];
   const lines = commercialLineBrands(brands) as InventoryCommercialBrand[];
   const byId = new Map([
-    ...listInventoryOrganizerChoices(lines, { omitBrandInFoodLabels: true }).map(
-      (c) => [c.id, c.label] as const,
-    ),
+    ...listInventoryOrganizerChoices(lines).map((c) => [c.id, c.label] as const),
+    // Legacy: proveedores guardados con `cat:…` de carta.
     ...listCatalogCategoryOrganizerChoices(brands, catalogItems).map((c) => [c.id, c.label] as const),
   ]);
-  return ids.map((id) => byId.get(id) || id);
+  return ids
+    .map((id) => byId.get(id) || id)
+    .sort((a, b) => a.localeCompare(b, 'es'));
 }
 
 export function initialSupplierCatalogItemIds(

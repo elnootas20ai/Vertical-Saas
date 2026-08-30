@@ -46,7 +46,20 @@ function buildInventoryLookupMaps(items) {
   return { byStoreIngredientId };
 }
 
-function lineToRecipeIngredient(line, inventoryById, storeIngToStock) {
+function readProductMermaPct(item) {
+  const n = Number(item?.customFields?.mermaPct);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(100, Math.max(0, n));
+}
+
+function stockUnitCost(stock) {
+  if (!stock) return 0;
+  const purchase = Number(stock.lastPurchasePrice) || 0;
+  if (purchase > 0) return purchase;
+  return Number(stock.costPrice) || 0;
+}
+
+function lineToRecipeIngredient(line, inventoryById, storeIngToStock, wastePercent) {
   let catalogItemId = String(line.catalogItemId || '').trim();
   let catalogItemName = line.name;
   let costPerUnit = 0;
@@ -57,13 +70,13 @@ function lineToRecipeIngredient(line, inventoryById, storeIngToStock) {
     if (!stock) return null;
     catalogItemId = stock._id;
     catalogItemName = stock.name;
-    costPerUnit = Number(stock.costPrice) || 0;
+    costPerUnit = stockUnitCost(stock);
     stockCategory = stock.stockCategory || stockCategory;
   } else if (catalogItemId) {
     const stock = inventoryById.get(catalogItemId);
     if (stock) {
       catalogItemName = stock.name;
-      costPerUnit = Number(stock.costPrice) || 0;
+      costPerUnit = stockUnitCost(stock);
       stockCategory = stock.stockCategory || stockCategory;
     }
   }
@@ -73,17 +86,19 @@ function lineToRecipeIngredient(line, inventoryById, storeIngToStock) {
   if (quantity <= 0) return null;
 
   const totalCost = Math.round(quantity * costPerUnit * 100) / 100;
+  const isPackaging = stockCategory === 'packaging';
+  const waste = isPackaging ? 0 : Math.min(100, Math.max(0, Number(wastePercent) || 0));
   return {
     catalogItemId,
     catalogItemName,
     quantity,
     unit: line.unit || 'ud',
-    wastePercent: 0,
-    netQuantity: quantity,
+    wastePercent: waste,
+    netQuantity: Math.round(quantity * (1 - waste / 100) * 10000) / 10000,
     costPerUnit,
     totalCost,
     stockCategory,
-    optional: stockCategory === 'packaging',
+    optional: isPackaging,
     substitutes: [],
   };
 }
@@ -95,10 +110,11 @@ export function buildRecipeIngredientsFromCostingItem(item, inventoryItems) {
 
   const { byStoreIngredientId } = buildInventoryLookupMaps(inventoryItems);
   const inventoryById = new Map(inventoryItems.map((row) => [row._id, row]));
+  const wastePercent = readProductMermaPct(item);
   const out = [];
 
   for (const line of lines) {
-    const ing = lineToRecipeIngredient(line, inventoryById, byStoreIngredientId);
+    const ing = lineToRecipeIngredient(line, inventoryById, byStoreIngredientId, wastePercent);
     if (ing) out.push(ing);
   }
   return out;

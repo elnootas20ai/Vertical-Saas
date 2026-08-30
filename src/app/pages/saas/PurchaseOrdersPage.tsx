@@ -1485,6 +1485,7 @@ function PurchaseSuggestionsPanel({
     () => groups.filter((group) => group.matchedBy !== 'none' && group.items.length > 0),
     [groups],
   );
+  const hasSuggestions = suggestions.length > 0;
 
   const handleGenerate = async () => {
     if (!userId || loading) return;
@@ -1584,14 +1585,20 @@ function PurchaseSuggestionsPanel({
           ) : null}
           <SaasTabSecondaryButton onClick={() => void handleGenerate()} disabled={loading || creating}>
           {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-          {loaded ? 'Actualizar sugerencia' : 'Generar sugerencia'}
+          {hasSuggestions ? 'Actualizar sugerencia' : loaded ? 'Volver a comprobar' : 'Generar sugerencia'}
         </SaasTabSecondaryButton>
         </div>
       </div>
 
-      {loaded && groups.length === 0 ? (
+      {loaded && !hasSuggestions ? (
         <p className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
-          Nada que reponer ahora mismo. Revisa que los artículos tengan stock mínimo configurado.
+          Nada que reponer ahora. Si esperabas líneas, revisa stock mínimo en Inventario y «Qué suministra» en proveedores.
+        </p>
+      ) : null}
+
+      {!loaded ? (
+        <p className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
+          Pulsa «Generar sugerencia» para ver qué conviene pedir según stock y mínimos.
         </p>
       ) : null}
 

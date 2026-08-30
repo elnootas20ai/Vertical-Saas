@@ -40,6 +40,7 @@ import {
 import {
   calculateRecipeTotalCost,
   foodCostPercent,
+  foodRecipeLines,
   formatEscandalloFoodCost,
   formatEscandalloMargin,
   escandalloMarginTone,
@@ -47,16 +48,28 @@ import {
   marginPercent,
   productCostingStatus,
   readProductCostingType,
+  readProductMermaPct,
   readProductRecipeLines,
+  resolveIngredientUnitCost,
   resolveProductUnitCost,
-  resolveStoreIngredientBaseCost,
+  stockItemsByStoreIngredientId,
   storeIngredientsById,
   withProductCosting,
   type ProductCostingType,
   type ProductRecipeLine,
 } from '../../lib/catalogCosting';
 import { downloadEscandalloProductsExcel } from '../../lib/escandalloExcelExport';
+import { buildEscandalloIngredientCostRows } from '../../lib/escandalloIngredientCosts';
+import { formatDateTimeEs } from '../../lib/formatDateEs';
+import { formatMoneyEs } from '../../lib/formatNumberEs';
 import { syncFullStockAutomationAfterCatalogImport } from '../../lib/deliveryCatalogImport';
+import { syncRecipeForCostingProduct } from '../../lib/recipeSyncFromCosting';
+import { filterStockInventoryItems } from '../../lib/stockInventoryScope';
+import {
+  listStockMovementsRequest,
+  stockMovementUserMessage,
+  type StockMovement,
+} from '../../lib/stockMovementApi';
 import {
   Calculator,
   ChevronDown,
@@ -64,9 +77,11 @@ import {
   ChevronUp,
   Download,
   Edit3,
+  History,
   Layers,
   Loader2,
   Minus,
+  Package,
   Plus,
   Sparkles,
   Trash2,
@@ -75,6 +90,7 @@ import {
 import { CategoryBulkCostingPanel } from './CategoryBulkCostingPanel';
 
 type StatusFilter = 'all' | 'fixed' | 'recipe' | 'none';
+type EscandalloViewTab = 'products' | 'ingredients' | 'history';
 
 type RecipeLineDraft = {
   storeIngredientId: string;
@@ -214,6 +230,7 @@ export function ProductCostingModal({
   product,
   storeIngredients,
   brands,
+  stockItems = [],
   onClose,
   onSaved,
   embedded = false,
@@ -221,6 +238,8 @@ export function ProductCostingModal({
   product: CatalogItem;
   storeIngredients: StoreIngredient[];
   brands: Array<{ _id: string; deliveryLineKind?: string }>;
+  /** Artículos de almacén (última compra) para coste efectivo. */
+  stockItems?: CatalogItem[];
   onClose: () => void;
   onSaved: (item: CatalogItem) => void;
   /** Dentro de otra ficha: sin overlay ni segundo modal. */
@@ -228,6 +247,14 @@ export function ProductCostingModal({
 }) {
   useModalClose(!embedded, onClose);
   const ingredientsById = useMemo(() => storeIngredientsById(storeIngredients), [storeIngredients]);
+  const stockByStoreIngredientId = useMemo(
+    () => stockItemsByStoreIngredientId(stockItems),
+    [stockItems],
+  );
+  const costOptsBase = useMemo(
+    () => ({ stockByStoreIngredientId }),
+    [stockByStoreIngredientId],
+  );
   const initialType = readProductCostingType(product);
   const retailDefault = isDrinkCatalogProduct(product) || isDessertCatalogProduct(product);
   const [costingType, setCostingType] = useState<ProductCostingType>(
@@ -238,9 +265,14 @@ export function ProductCostingModal({
     if (retailDefault) return String(resolveVertialDefaultRetailCost(product));
     return String(product.costPrice || 0);
   });
+  const [mermaPct, setMermaPct] = useState(() => {
+    const m = readProductMermaPct(product);
+    return m > 0 ? String(m) : '';
+  });
   const [lines, setLines] = useState<RecipeLineDraft[]>(() =>
-    readProductRecipeLines(product).map((line) => ({
-      storeIngredientId: line.storeIngredientId,
+    // Solo comida: los envases se editan al crear/editar producto y se conservan al guardar.
+    foodRecipeLines(readProductRecipeLines(product)).map((line) => ({
+      storeIngredientId: line.storeIngredientId || '',
       quantity: String(line.quantity),
       unit: line.unit,
     })),
@@ -275,10 +307,14 @@ export function ProductCostingModal({
     return out;
   }, [lines, ingredientsById]);
 
+  const mermaValue = parseDecimalInput(mermaPct) ?? 0;
   const previewCost =
     costingType === 'fixed'
       ? parseDecimalInput(fixedCost) ?? 0
-      : calculateRecipeTotalCost(recipeLines, ingredientsById, brands);
+      : calculateRecipeTotalCost(recipeLines, ingredientsById, brands, undefined, {
+          ...costOptsBase,
+          mermaPct: mermaValue,
+        });
 
   const salePrice = Number(product.unitPrice) || 0;
   const fc = foodCostPercent(previewCost, salePrice);
@@ -313,12 +349,30 @@ export function ProductCostingModal({
       const next = withProductCosting(
         product,
         costingType === 'fixed'
-          ? { costingType: 'fixed', fixedCost: parseDecimalInput(fixedCost) ?? 0 }
-          : { costingType: 'recipe', recipeLines },
+          ? { costingType: 'fixed', fixedCost: parseDecimalInput(fixedCost) ?? 0, mermaPct: null }
+          : {
+              costingType: 'recipe',
+              recipeLines,
+              mermaPct: mermaValue > 0 ? mermaValue : null,
+            },
         ingredientsById,
         brands,
+        undefined,
+        costOptsBase,
       );
       const saved = await updateCatalogItemRequest(product.user_id, next);
+      if (costingType === 'recipe') {
+        try {
+          await syncRecipeForCostingProduct(
+            product.user_id,
+            saved,
+            stockItems,
+            ingredientsById,
+          );
+        } catch {
+          /* escandallo ya guardado; sync recipe best-effort */
+        }
+      }
       onSaved(saved);
       toast.success('Escandallo guardado');
       if (!embedded) onClose();
@@ -430,7 +484,13 @@ export function ProductCostingModal({
                 {lines.map((line, index) => {
                   const ing = ingredientsById.get(line.storeIngredientId);
                   const qty = parseDecimalInput(line.quantity) ?? 0;
-                  const lineCost = (ing ? resolveStoreIngredientBaseCost(ing, brands) : 0) * qty;
+                  const stock = line.storeIngredientId
+                    ? stockByStoreIngredientId.get(line.storeIngredientId)
+                    : undefined;
+                  const unitRes = ing
+                    ? resolveIngredientUnitCost(ing, stock, brands)
+                    : { effective: 0, fromFicha: 0, fromPurchase: 0, source: 'zero' as const };
+                  const lineCost = unitRes.effective * qty;
                   return (
                     <div
                       key={`${line.storeIngredientId}-${index}`}
@@ -455,6 +515,17 @@ export function ProductCostingModal({
                             </option>
                           ))}
                         </select>
+                        {unitRes.source === 'purchase' && unitRes.fromFicha > 0 && unitRes.fromPurchase !== unitRes.fromFicha ? (
+                          <span className="mt-1 inline-flex text-[10px] font-semibold text-teal-700 dark:text-teal-300">
+                            Última compra {formatMoney(unitRes.fromPurchase)} · ficha {formatMoney(unitRes.fromFicha)}
+                          </span>
+                        ) : unitRes.source === 'ficha' ? (
+                          <span className="mt-1 inline-flex text-[10px] font-semibold text-gray-500">Coste ficha</span>
+                        ) : unitRes.source === 'zero' && line.storeIngredientId ? (
+                          <span className="mt-1 inline-flex text-[10px] font-semibold text-amber-700 dark:text-amber-300">
+                            Sin coste
+                          </span>
+                        ) : null}
                       </label>
                       <label className="block text-xs text-gray-500">
                         Cantidad
@@ -499,13 +570,35 @@ export function ProductCostingModal({
                   );
                 })}
               </div>
+              <label className="block text-sm">
+                <span className="font-semibold text-gray-700 dark:text-gray-300">Merma %</span>
+                <div className="mt-1 flex items-center gap-2">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={mermaPct}
+                    onChange={(e) => setMermaPct(e.target.value)}
+                    className="w-24 px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-sm bg-white dark:bg-gray-900"
+                    placeholder="0"
+                  />
+                  <span className="text-sm text-gray-500">% sobre el coste del plato</span>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  Afecta al coste por venta y al descuento de stock (waste) al guardar.
+                </p>
+              </label>
             </div>
           )}
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2">
-              <p className="text-[10px] uppercase font-bold text-gray-500">Coste</p>
+              <p className="text-[10px] uppercase font-bold text-gray-500">
+                {costingType === 'recipe' ? 'Coste por venta' : 'Coste'}
+              </p>
               <p className="text-lg font-bold tabular-nums">{formatMoney(previewCost)}</p>
+              {costingType === 'recipe' && mermaValue > 0 ? (
+                <p className="text-[10px] text-gray-500 mt-0.5">con merma {mermaValue}%</p>
+              ) : null}
             </div>
             <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2">
               <p className="text-[10px] uppercase font-bold text-gray-500">PVP</p>
@@ -596,6 +689,7 @@ export function EscandalloPanel({
   const { businessId, dataUserId, accountBusinessCount, businessType } = useActiveBusinessScope();
   const hasCatalogSeed = (seedCatalogItems?.length ?? 0) > 0;
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>(() => seedCatalogItems ?? []);
+  const [stockItems, setStockItems] = useState<CatalogItem[]>([]);
   const [storeIngredients, setStoreIngredients] = useState<StoreIngredient[]>(
     () => seedStoreIngredients ?? [],
   );
@@ -612,8 +706,81 @@ export function EscandalloPanel({
   const [editingProduct, setEditingProduct] = useState<CatalogItem | null>(null);
   const [showCategoryPanel, setShowCategoryPanel] = useState(false);
   const [generatingCosting, setGeneratingCosting] = useState(false);
+  const [viewTab, setViewTab] = useState<EscandalloViewTab>('products');
+  const [ingredientSearch, setIngredientSearch] = useState('');
+  const [historyMovements, setHistoryMovements] = useState<StockMovement[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
 
   const ingredientsById = useMemo(() => storeIngredientsById(storeIngredients), [storeIngredients]);
+  const stockByStoreIngredientId = useMemo(
+    () => stockItemsByStoreIngredientId(stockItems),
+    [stockItems],
+  );
+  const recipeCostOpts = useMemo(
+    () => ({ stockByStoreIngredientId }),
+    [stockByStoreIngredientId],
+  );
+
+  const ingredientCostRows = useMemo(
+    () =>
+      buildEscandalloIngredientCostRows(
+        storeIngredients,
+        stockItems as Array<CatalogItem & { lastPurchasePrice?: number }>,
+        brands,
+      ),
+    [storeIngredients, stockItems, brands],
+  );
+
+  const filteredIngredientRows = useMemo(() => {
+    const q = ingredientSearch.trim().toLowerCase();
+    if (!q) return ingredientCostRows;
+    return ingredientCostRows.filter(
+      (row) =>
+        row.name.toLowerCase().includes(q)
+        || row.supplierName.toLowerCase().includes(q),
+    );
+  }, [ingredientCostRows, ingredientSearch]);
+
+  const ingredientKpis = useMemo(() => {
+    const linked = ingredientCostRows.filter((r) => r.linkedStock).length;
+    const purchase = ingredientCostRows.filter((r) => r.source === 'purchase').length;
+    const zero = ingredientCostRows.filter((r) => r.effectiveCost <= 0).length;
+    const withSupplier = ingredientCostRows.filter((r) => r.supplierName).length;
+    return {
+      total: ingredientCostRows.length,
+      linked,
+      purchase,
+      zero,
+      withSupplier,
+    };
+  }, [ingredientCostRows]);
+
+  const loadHistory = useCallback(async () => {
+    const uid = dataUserId || user?.id;
+    if (!uid) return;
+    setHistoryLoading(true);
+    try {
+      const movements = await listStockMovementsRequest(uid, {
+        movementType: 'purchase_reception',
+        limit: 80,
+      });
+      const sorted = [...movements].sort((a, b) =>
+        String(b.createdAt || '').localeCompare(String(a.createdAt || '')),
+      );
+      setHistoryMovements(sorted);
+      setHistoryLoaded(true);
+    } catch (err) {
+      toast.error(stockMovementUserMessage(err, 'No se pudo cargar el histórico de compras'));
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [dataUserId, user?.id]);
+
+  useEffect(() => {
+    if (viewTab !== 'history' || historyLoaded || historyLoading) return;
+    void loadHistory();
+  }, [viewTab, historyLoaded, historyLoading, loadHistory]);
 
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     const uid = dataUserId || user?.id;
@@ -627,8 +794,9 @@ export function EscandalloPanel({
       const brandsPromise = businessId
         ? listBrandsRequest(businessId).catch(() => [])
         : Promise.resolve([]);
-      const [items, config, rawBrands] = await Promise.all([
+      const [items, stockRaw, config, rawBrands] = await Promise.all([
         listCatalogItemsRequest(uid, 'catalog'),
+        listCatalogItemsRequest(uid, 'stock').catch(() => [] as CatalogItem[]),
         getDeliveryConfigRequest(uid),
         brandsPromise,
       ]);
@@ -647,6 +815,7 @@ export function EscandalloPanel({
       setCatalogItems(
         dedupeCatalogItemsForDisplay(visibleItems.filter(isCatalogCostingProduct), businessId),
       );
+      setStockItems(filterStockInventoryItems(stockRaw));
       const brandIds = lineBrands.map((b) => b._id);
       const normalized = normalizeStoreIngredients(unifyStoreIngredientsFromConfig(config, brandIds));
       const { items: withDefaults } = applyVertialDefaultsToStoreIngredients(normalized, lineBrands);
@@ -725,17 +894,42 @@ export function EscandalloPanel({
     const fixed = catalogItems.filter((item) => productCostingStatus(item) === 'fixed').length;
     const recipe = catalogItems.filter((item) => productCostingStatus(item) === 'recipe').length;
     const none = catalogItems.length - fixed - recipe;
+    const withMerma = catalogItems.filter((item) => readProductMermaPct(item) > 0).length;
     const withPrice = catalogItems.filter((item) => item.unitPrice > 0);
     const foodCosts = withPrice
       .map((item) => {
-        const cost = resolveProductUnitCost(item, ingredientsById, brands);
+        const cost = resolveProductUnitCost(item, ingredientsById, brands, undefined, {
+          ...recipeCostOpts,
+          mermaPct: readProductMermaPct(item),
+        });
         return foodCostPercent(cost, item.unitPrice);
       })
-      .filter((fc): fc is number => fc != null && Number.isFinite(fc) && fc >= 0 && fc <= 120);
+      .filter((fc): fc is number => fc != null && Number.isFinite(fc) && fc >= 0 && fc <= 500);
     const avgFc = foodCosts.length > 0 ? foodCosts.reduce((s, v) => s + v, 0) / foodCosts.length : 0;
     const highCostCount = foodCosts.filter((fc) => fc > 35).length;
-    return { total: catalogItems.length, fixed, recipe, none, avgFc, highCostCount };
-  }, [catalogItems, ingredientsById, brands]);
+    let zeroCostLines = 0;
+    for (const item of catalogItems) {
+      if (productCostingStatus(item) !== 'recipe') continue;
+      for (const line of readProductRecipeLines(item)) {
+        if (line.stockCategory === 'packaging') continue;
+        if (!line.storeIngredientId) continue;
+        const ing = ingredientsById.get(line.storeIngredientId);
+        if (!ing) continue;
+        const stock = stockByStoreIngredientId.get(line.storeIngredientId);
+        if (resolveIngredientUnitCost(ing, stock, brands).effective <= 0) zeroCostLines += 1;
+      }
+    }
+    return {
+      total: catalogItems.length,
+      fixed,
+      recipe,
+      none,
+      withMerma,
+      avgFc,
+      highCostCount,
+      zeroCostLines,
+    };
+  }, [catalogItems, ingredientsById, brands, recipeCostOpts, stockByStoreIngredientId]);
 
   const handleSaved = (saved: CatalogItem) => {
     setCatalogItems((prev) => prev.map((item) => (item._id === saved._id ? saved : item)));
@@ -758,12 +952,13 @@ export function EscandalloPanel({
         catalogItems,
         storeIngredients,
         brands,
+        stockItems,
       );
       toast.success(`Excel descargado: ${rows} fila(s) · ${filename}`);
     } catch {
       toast.error('No se pudo generar el Excel de escandallo');
     }
-  }, [brands, catalogItems, storeIngredients]);
+  }, [brands, catalogItems, storeIngredients, stockItems]);
 
   const handleGenerateEscandallos = useCallback(async () => {
     const uid = dataUserId || user?.id;
@@ -803,18 +998,38 @@ export function EscandalloPanel({
   return (
     <>
       <CatalogTabShell
-        stats={[
-          { label: 'productos', value: kpis.total },
-          { label: 'con escandallo', value: kpis.recipe, tone: 'emerald' },
-          { label: 'coste fijo', value: kpis.fixed },
-          { label: 'sin configurar', value: kpis.none, tone: kpis.none > 0 ? 'amber' : 'default' },
-          {
-            label: 'food cost medio',
-            value: kpis.avgFc > 0 ? `${kpis.avgFc.toFixed(1)}%` : '—',
-          },
-          { label: 'FC >35%', value: kpis.highCostCount, tone: kpis.highCostCount > 0 ? 'red' : 'default' },
-        ]}
+        stats={
+          viewTab === 'ingredients'
+            ? [
+                { label: 'ingredientes', value: ingredientKpis.total },
+                { label: 'con almacén', value: ingredientKpis.linked, tone: 'emerald' },
+                { label: 'última compra', value: ingredientKpis.purchase, tone: 'emerald' },
+                { label: 'con proveedor', value: ingredientKpis.withSupplier },
+                {
+                  label: 'sin coste',
+                  value: ingredientKpis.zero,
+                  tone: ingredientKpis.zero > 0 ? 'amber' : 'default',
+                },
+              ]
+            : viewTab === 'history'
+              ? [
+                  { label: 'entradas compra', value: historyMovements.length },
+                ]
+            : [
+                { label: 'productos', value: kpis.total },
+                { label: 'con escandallo', value: kpis.recipe, tone: 'emerald' },
+                { label: 'coste fijo', value: kpis.fixed },
+                { label: 'sin configurar', value: kpis.none, tone: kpis.none > 0 ? 'amber' : 'default' },
+                { label: 'con merma', value: kpis.withMerma },
+                {
+                  label: 'food cost medio',
+                  value: kpis.avgFc > 0 ? `${kpis.avgFc.toFixed(1)}%` : '—',
+                },
+                { label: 'FC >35%', value: kpis.highCostCount, tone: kpis.highCostCount > 0 ? 'red' : 'default' },
+              ]
+        }
         toolbarLeftExtra={
+          viewTab === 'products' ? (
           <>
                 <SaasTabSearch
                   value={search}
@@ -847,8 +1062,28 @@ export function EscandalloPanel({
                   <option value="none">Sin configurar</option>
                 </select>
               </>
+          ) : viewTab === 'ingredients' ? (
+            <SaasTabSearch
+              value={ingredientSearch}
+              onChange={setIngredientSearch}
+              placeholder="Buscar ingrediente o proveedor…"
+              className="relative w-full sm:w-64"
+            />
+          ) : (
+            <SaasTabSecondaryButton
+              disabled={historyLoading}
+              onClick={() => {
+                setHistoryLoaded(false);
+                void loadHistory();
+              }}
+            >
+              {historyLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+              Actualizar
+            </SaasTabSecondaryButton>
+          )
         }
         toolbarRight={
+          viewTab === 'products' ? (
           <>
             <EscandalloActionsMenu
                 canGenerate={kpis.none > 0}
@@ -861,11 +1096,56 @@ export function EscandalloPanel({
                 onToggleCategoryCosts={() => setShowCategoryPanel((open) => !open)}
               />
           </>
+          ) : null
+        }
+        toolbarBelow={
+          <div
+            className="grid grid-cols-3 gap-1 rounded-xl border border-stone-200 bg-stone-100/80 p-1 dark:border-stone-700 dark:bg-stone-900/60"
+            role="tablist"
+            aria-label="Vistas de escandallo"
+          >
+            {(
+              [
+                { id: 'products' as const, label: 'Productos', count: kpis.total },
+                { id: 'ingredients' as const, label: 'Ingredientes', count: ingredientKpis.total },
+                { id: 'history' as const, label: 'Histórico', count: historyLoaded ? historyMovements.length : null },
+              ] as const
+            ).map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={viewTab === tab.id}
+                onClick={() => {
+                  setViewTab(tab.id);
+                  if (tab.id !== 'products') setShowCategoryPanel(false);
+                }}
+                className={`inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg px-2 text-sm font-semibold transition-colors ${
+                  viewTab === tab.id
+                    ? 'bg-[var(--v-blue,#2563eb)] text-white shadow-sm'
+                    : 'bg-white text-stone-700 hover:bg-blue-50/60 dark:bg-stone-800 dark:text-stone-200'
+                }`}
+              >
+                {tab.label}
+                {tab.count != null ? (
+                  <span
+                    className={`rounded px-1.5 py-px text-[10px] font-bold tabular-nums ${
+                      viewTab === tab.id
+                        ? 'bg-white/25 text-white'
+                        : 'bg-stone-100 text-stone-500 dark:bg-stone-700 dark:text-stone-300'
+                    }`}
+                  >
+                    {tab.count}
+                  </span>
+                ) : null}
+              </button>
+            ))}
+          </div>
         }
       >
         <div
           className={
-            showCategoryPanel && user?.id
+            viewTab === 'products' && showCategoryPanel && user?.id
               ? 'grid grid-cols-1 lg:grid-cols-[1fr_minmax(260px,30%)] lg:min-h-[min(72vh,680px)] divide-y lg:divide-y-0 lg:divide-x divide-gray-100 dark:divide-gray-700'
               : undefined
           }
@@ -873,6 +1153,113 @@ export function EscandalloPanel({
           <div className="min-w-0">
         {loading ? (
           <CatalogCoreLoadingState kind="escandallo" compact />
+        ) : viewTab === 'ingredients' ? (
+          filteredIngredientRows.length === 0 ? (
+            <SaasTabEmpty
+              icon={<Package className="w-10 h-10" />}
+              title={ingredientCostRows.length === 0 ? 'Sin ingredientes' : 'Sin resultados'}
+              description={
+                ingredientCostRows.length === 0
+                  ? 'Crea ingredientes en Catálogo → Ingredientes (o importa Excel). Aquí verás coste de ficha, última compra y proveedor.'
+                  : 'Prueba con otra búsqueda.'
+              }
+            />
+          ) : (
+            <div className="p-3 space-y-3">
+              <p className="text-xs text-gray-600 dark:text-gray-400">
+                Coste que usa el escandallo de productos. Si hay última compra en almacén, manda esa.
+              </p>
+              <div className="hidden md:grid grid-cols-[1fr_90px_100px_100px_1fr_70px] gap-2 px-3 py-2 rounded-xl bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                <span>Ingrediente</span>
+                <span className="text-right">Ficha</span>
+                <span className="text-right">Últ. compra</span>
+                <span className="text-right">Efectivo</span>
+                <span>Proveedor</span>
+                <span className="text-right">Stock</span>
+              </div>
+              <div className="divide-y divide-gray-100 dark:divide-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden bg-white dark:bg-gray-800">
+                {filteredIngredientRows.map((row) => (
+                  <div
+                    key={row.ingredientId}
+                    className="grid grid-cols-1 md:grid-cols-[1fr_90px_100px_100px_1fr_70px] gap-1 md:gap-2 px-3 py-2.5 text-sm"
+                  >
+                    <div className="min-w-0">
+                      <div className="font-medium text-gray-900 dark:text-gray-100 truncate">{row.name}</div>
+                      <div className="text-[11px] text-gray-400">
+                        {row.unit}
+                        {!row.linkedStock ? ' · sin enlace a almacén' : ''}
+                      </div>
+                    </div>
+                    <div className="text-right tabular-nums text-gray-600 dark:text-gray-300">
+                      {row.fichaCost > 0 ? formatMoneyEs(row.fichaCost) : '—'}
+                    </div>
+                    <div className="text-right tabular-nums text-gray-600 dark:text-gray-300">
+                      {row.purchaseCost > 0 ? formatMoneyEs(row.purchaseCost) : '—'}
+                    </div>
+                    <div className="text-right tabular-nums font-semibold text-gray-900 dark:text-gray-100">
+                      {row.effectiveCost > 0 ? formatMoneyEs(row.effectiveCost) : '—'}
+                      {row.source === 'purchase' ? (
+                        <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">Últ. compra</div>
+                      ) : null}
+                    </div>
+                    <div className="text-gray-700 dark:text-gray-300 truncate">
+                      {row.supplierName || '—'}
+                    </div>
+                    <div className="text-right tabular-nums text-gray-600 dark:text-gray-300">
+                      {row.stockQty != null ? row.stockQty : '—'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        ) : viewTab === 'history' ? (
+          historyLoading && !historyLoaded ? (
+            <CatalogCoreLoadingState kind="escandallo" compact />
+          ) : historyMovements.length === 0 ? (
+            <SaasTabEmpty
+              icon={<History className="w-10 h-10" />}
+              title="Sin histórico de compras"
+              description="Cuando recibas un albarán o cargues factura al almacén, aquí verás entradas con precio (histórico de costes)."
+            />
+          ) : (
+            <div className="p-3 space-y-3">
+              <p className="text-xs text-gray-600 dark:text-gray-400">
+                Entradas de compra al almacén (precio unitario). Es el rastro de cambios de coste.
+              </p>
+              <div className="hidden md:grid grid-cols-[130px_1fr_80px_100px_1fr] gap-2 px-3 py-2 rounded-xl bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                <span>Fecha</span>
+                <span>Artículo</span>
+                <span className="text-right">Cant.</span>
+                <span className="text-right">€ / ud</span>
+                <span>Nota</span>
+              </div>
+              <div className="divide-y divide-gray-100 dark:divide-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden bg-white dark:bg-gray-800">
+                {historyMovements.map((m) => (
+                  <div
+                    key={m._id}
+                    className="grid grid-cols-1 md:grid-cols-[130px_1fr_80px_100px_1fr] gap-1 md:gap-2 px-3 py-2.5 text-sm"
+                  >
+                    <div className="text-gray-600 dark:text-gray-300 tabular-nums text-xs md:text-sm">
+                      {formatDateTimeEs(m.createdAt)}
+                    </div>
+                    <div className="font-medium text-gray-900 dark:text-gray-100 truncate">
+                      {m.catalogItemName || 'Artículo'}
+                    </div>
+                    <div className="text-right tabular-nums text-gray-700 dark:text-gray-300">
+                      {m.quantity}
+                    </div>
+                    <div className="text-right tabular-nums font-semibold text-gray-900 dark:text-gray-100">
+                      {Number(m.unitCost) > 0 ? formatMoneyEs(m.unitCost) : '—'}
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                      {m.notes || m.referenceType || '—'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
         ) : filteredProducts.length === 0 ? (
           <SaasTabEmpty
             icon={<Calculator className="w-10 h-10" />}
@@ -890,6 +1277,12 @@ export function EscandalloPanel({
                 <strong>{kpis.none} producto{kpis.none === 1 ? '' : 's'} sin coste.</strong> El escandallo no se crea solo al
                 añadir productos al catálogo: hay que generarlo (botón «Generar escandallos»), usar ingredientes en la ficha del
                 producto o configurarlo producto a producto. Abre cada categoría para ver el detalle.
+              </p>
+            ) : null}
+            {kpis.zeroCostLines > 0 ? (
+              <p className="text-xs text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-900/50 rounded-xl px-3 py-2.5">
+                <strong>{kpis.zeroCostLines} línea{kpis.zeroCostLines === 1 ? '' : 's'} a coste 0.</strong> Revisa
+                el coste de ficha o la última compra en Almacén → Ingredientes / Inventario.
               </p>
             ) : null}
             {groupedProducts.map(([category, products]) => {
@@ -926,10 +1319,11 @@ export function EscandalloPanel({
 
               {!isCollapsed && (
             <>
-            <div className="hidden md:grid grid-cols-[1fr_110px_90px_90px_80px_90px_36px] gap-2 px-4 py-2.5 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+            <div className="hidden md:grid grid-cols-[1fr_100px_64px_90px_90px_80px_90px_36px] gap-2 px-4 py-2.5 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
               <span>Producto</span>
               <span>Tipo</span>
-              <span className="text-right">Coste</span>
+              <span className="text-right">Merma</span>
+              <span className="text-right">Coste/venta</span>
               <span className="text-right">PVP</span>
               <span className="text-right">Margen %</span>
               <span className="text-right">Food cost</span>
@@ -939,7 +1333,11 @@ export function EscandalloPanel({
             <div className="divide-y divide-gray-100 dark:divide-gray-800">
               {products.map((product) => {
                 const status = productCostingStatus(product);
-                const unitCost = resolveProductUnitCost(product, ingredientsById, brands);
+                const mermaPct = readProductMermaPct(product);
+                const unitCost = resolveProductUnitCost(product, ingredientsById, brands, undefined, {
+                  ...recipeCostOpts,
+                  mermaPct,
+                });
                 const salePrice = Number(product.unitPrice) || 0;
                 const fc = foodCostPercent(unitCost, salePrice);
                 const margin = marginPercent(unitCost, salePrice);
@@ -952,16 +1350,22 @@ export function EscandalloPanel({
                     <button
                       type="button"
                       onClick={() => setExpandedId(isExpanded ? null : product._id)}
-                      className="w-full px-4 py-3 flex items-center md:grid md:grid-cols-[1fr_110px_90px_90px_80px_90px_36px] gap-2 text-left hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+                      className="w-full px-4 py-3 flex items-center md:grid md:grid-cols-[1fr_100px_64px_90px_90px_80px_90px_36px] gap-2 text-left hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
                     >
                       <div className="flex-1 min-w-0 md:flex-none">
                         <h3 className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate">{product.name}</h3>
-                        <p className="text-[10px] text-gray-400 dark:text-gray-500 truncate">{product.category || '—'}</p>
+                        <p className="text-[10px] text-gray-400 dark:text-gray-500 truncate">
+                          {product.category || '—'}
+                          {mermaPct > 0 ? ` · Merma ${mermaPct}%` : ''}
+                        </p>
                       </div>
                       <div className="hidden md:block">
                         <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${statusClass(status)}`}>
                           {statusLabel(status)}
                         </span>
+                      </div>
+                      <div className="hidden md:block text-right text-sm tabular-nums text-gray-700 dark:text-gray-300">
+                        {mermaPct > 0 ? `${mermaPct}%` : '—'}
                       </div>
                       <div className="hidden md:block text-right text-sm font-semibold tabular-nums">
                         {status === 'none' ? '—' : formatMoney(unitCost)}
@@ -1012,13 +1416,25 @@ export function EscandalloPanel({
                               {statusLabel(status)}
                             </span>
                             <span className="text-xs text-gray-500">
-                              Coste {status === 'none' ? '—' : formatMoney(unitCost)} · PVP{' '}
+                              Coste por venta {status === 'none' ? '—' : formatMoney(unitCost)} · PVP{' '}
                               {salePrice > 0 ? formatMoney(salePrice) : '—'}
+                              {mermaPct > 0 ? ` · Merma ${mermaPct}%` : ''}
                             </span>
                           </div>
 
                           {status === 'recipe' && recipeLines.length > 0 ? (
-                            <div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                            <>
+                              <div className="flex flex-wrap gap-2 text-xs text-gray-600 dark:text-gray-400">
+                                <span>
+                                  Coste por venta: <strong className="tabular-nums">{formatMoney(unitCost)}</strong>
+                                </span>
+                                {mermaPct > 0 ? (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 font-semibold">
+                                    Merma {mermaPct}%
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
                               <table className="w-full text-xs">
                                 <thead className="bg-white dark:bg-gray-900 text-gray-500">
                                   <tr>
@@ -1033,14 +1449,29 @@ export function EscandalloPanel({
                                     const ing = line.storeIngredientId
                                       ? ingredientsById.get(line.storeIngredientId)
                                       : undefined;
-                                    const unit = ing ? resolveStoreIngredientBaseCost(ing, brands) : 0;
+                                    const stock = line.storeIngredientId
+                                      ? stockByStoreIngredientId.get(line.storeIngredientId)
+                                      : undefined;
+                                    const unitRes = ing
+                                      ? resolveIngredientUnitCost(ing, stock, brands)
+                                      : { effective: 0, source: 'zero' as const };
+                                    const unit = unitRes.effective;
                                     const total = unit * line.quantity;
                                     return (
                                       <tr
                                         key={`${line.storeIngredientId || line.name}-${lineIdx}`}
                                         className="border-t border-gray-100 dark:border-gray-800"
                                       >
-                                        <td className="px-3 py-2">{line.name}</td>
+                                        <td className="px-3 py-2">
+                                          {line.name}
+                                          {unitRes.source === 'purchase' ? (
+                                            <span className="ml-1.5 text-[10px] font-semibold text-teal-700 dark:text-teal-300">
+                                              Última compra
+                                            </span>
+                                          ) : unitRes.source === 'ficha' ? (
+                                            <span className="ml-1.5 text-[10px] font-semibold text-gray-400">Ficha</span>
+                                          ) : null}
+                                        </td>
                                         <td className="px-3 py-2 text-right tabular-nums">
                                           {line.quantity} {line.unit}
                                         </td>
@@ -1052,6 +1483,7 @@ export function EscandalloPanel({
                                 </tbody>
                               </table>
                             </div>
+                            </>
                           ) : status === 'fixed' ? (
                             <p className="text-sm text-gray-600 dark:text-gray-400">
                               Coste fijo: <strong>{formatMoney(unitCost)}</strong>
@@ -1083,7 +1515,7 @@ export function EscandalloPanel({
         )}
           </div>
 
-          {showCategoryPanel && user?.id ? (
+          {viewTab === 'products' && showCategoryPanel && user?.id ? (
             <aside className="lg:max-h-[min(72vh,680px)] lg:overflow-hidden flex flex-col min-h-[280px] lg:min-h-0">
               <CategoryBulkCostingPanel
                 catalogItems={catalogItems}
@@ -1101,6 +1533,7 @@ export function EscandalloPanel({
           product={editingProduct}
           storeIngredients={storeIngredients}
           brands={brands}
+          stockItems={stockItems}
           onClose={() => setEditingProduct(null)}
           onSaved={handleSaved}
         />

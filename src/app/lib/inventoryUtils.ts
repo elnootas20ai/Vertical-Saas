@@ -2,6 +2,12 @@ import type { CatalogItem, StockCategory } from './deliveryApi';
 import type { MovementType } from './stockMovementApi';
 import type { StoreIngredient } from './catalogCustomization';
 import { resolveTpvFamilyKey } from './tpvCatalogFamilies';
+import {
+  catalogCategoryOrganizerId,
+  isCatalogCategoryOrganizerId,
+  isWarehouseImportCategory,
+  normalizeImportCategory,
+} from './deliveryCatalogImportLogic';
 
 function foldIngredientKey(value: string): string {
   return String(value || '')
@@ -113,6 +119,119 @@ export const ORGANIZER_BEVERAGES = 'beverages';
 export const ORGANIZER_COMPLEMENTS = 'complements';
 export const ORGANIZER_TOTAL = 'total';
 
+/** Prefijo de categorías creadas en Inventario (nunca van al TPV). */
+export const INVENTORY_CUSTOM_CATEGORY_PREFIX = 'invcat:';
+
+export function inventoryCustomCategoryId(label: string): string {
+  const key = String(label || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/\s+/g, ' ');
+  return `${INVENTORY_CUSTOM_CATEGORY_PREFIX}${key}`;
+}
+
+export function isInventoryCustomCategoryId(id: string): boolean {
+  return String(id || '').startsWith(INVENTORY_CUSTOM_CATEGORY_PREFIX);
+}
+
+/** Etiquetas de categoría solo-almacén ya usadas (para el selector «Añadir categoría»). */
+export const INVENTORY_WAREHOUSE_CATEGORY_PRESETS = [
+  'Envases',
+  'Limpieza',
+  'Varios',
+  'Bebidas',
+  'Complementos',
+] as const;
+
+/** Categorías de la carta (module catalog) → deben salir en Inventario. */
+export function listCartaCategoriesForInventory(allCatalogItems: CatalogItem[]): string[] {
+  const byKey = new Map<string, string>();
+  for (const item of allCatalogItems) {
+    if (String(item.module || 'catalog') === 'stock') continue;
+    if (item.active === false || item.deletedAt) continue;
+    const cat = normalizeImportCategory(String(item.category || '').trim());
+    if (!cat || isWarehouseImportCategory(cat)) continue;
+    const key = cat.toLowerCase();
+    if (!byKey.has(key)) byKey.set(key, cat);
+  }
+  return [...byKey.values()].sort((a, b) => a.localeCompare(b, 'es'));
+}
+
+/** Solo almacén: presets + categorías creadas aquí (invcat). Nunca las de carta. */
+export function listInventoryWarehouseCategoryLabels(stockItems: CatalogItem[]): string[] {
+  const byKey = new Map<string, string>();
+  for (const label of INVENTORY_WAREHOUSE_CATEGORY_PRESETS) {
+    byKey.set(label.toLowerCase(), label);
+  }
+  for (const item of stockItems) {
+    const id = String(item.customFields?.inventoryOrganizerId || '').trim();
+    const cat = String(item.category || '').trim();
+    if (isInventoryCustomCategoryId(id) && cat) {
+      byKey.set(cat.toLowerCase(), cat);
+      continue;
+    }
+    if (id === ORGANIZER_PACKAGING) byKey.set('envases', cat || 'Envases');
+    else if (id === ORGANIZER_CLEANING) byKey.set('limpieza', cat || 'Limpieza');
+    else if (id === ORGANIZER_VARIOS) byKey.set('varios', cat || 'Varios');
+    else if (id === ORGANIZER_BEVERAGES) byKey.set('bebidas', cat || 'Bebidas');
+    else if (id === ORGANIZER_COMPLEMENTS) byKey.set('complementos', cat || 'Complementos');
+  }
+  return [...byKey.values()].sort((a, b) => a.localeCompare(b, 'es'));
+}
+
+/**
+ * Resuelve categoría al guardar artículo de inventario.
+ * - Preset almacén (Envases…) → organizer fijo
+ * - Categoría de carta → `cat:` (agrupa ingredientes; no crea nada en TPV)
+ * - Nueva solo almacén → `invcat:` (nunca sale en TPV/carta)
+ */
+export function stockFieldsForWarehouseCategory(
+  label: string,
+  opts?: { cartaCategoryKeys?: Set<string> },
+): {
+  stockCategory: StockCategory;
+  category: string;
+  organizerId: string;
+} {
+  const category = normalizeImportCategory(String(label || '').trim().replace(/\s+/g, ' '));
+  const folded = category
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+  if (folded === 'envases' || folded === 'envase') {
+    return { stockCategory: 'packaging', category: category || 'Envases', organizerId: ORGANIZER_PACKAGING };
+  }
+  if (folded === 'limpieza') {
+    return { stockCategory: 'cleaning', category: category || 'Limpieza', organizerId: ORGANIZER_CLEANING };
+  }
+  if (folded === 'varios' || folded === 'consumibles' || folded === 'consumible') {
+    return { stockCategory: 'consumable', category: category || 'Varios', organizerId: ORGANIZER_VARIOS };
+  }
+  if (folded === 'bebidas' || folded === 'bebida') {
+    return { stockCategory: 'beverage', category: category || 'Bebidas', organizerId: ORGANIZER_BEVERAGES };
+  }
+  if (folded === 'complementos' || folded === 'complemento') {
+    return { stockCategory: 'ingredient', category: category || 'Complementos', organizerId: ORGANIZER_COMPLEMENTS };
+  }
+
+  const cartaKeys = opts?.cartaCategoryKeys;
+  if (cartaKeys && category && cartaKeys.has(category.toLowerCase())) {
+    return {
+      stockCategory: 'ingredient',
+      category,
+      organizerId: catalogCategoryOrganizerId(category),
+    };
+  }
+
+  return {
+    stockCategory: 'other',
+    category,
+    organizerId: inventoryCustomCategoryId(category),
+  };
+}
+
 const FOOD_LINE_KIND_ORDER = [
   'pizza',
   'burger_fastfood',
@@ -206,12 +325,17 @@ function foodLineLabel(brand: InventoryCommercialBrand, opts?: { omitBrandName?:
   return `Ingredientes · ${name}`;
 }
 
-/** Etiqueta del chip de filtro almacén (nombre comercial, sin prefijo «Ingredientes ·»). */
-function inventoryBrandChipLabel(brand: InventoryCommercialBrand): string {
-  return String(brand.name || '').trim() || 'Línea';
-}
-
 function labelForOrganizerGroup(id: string, commercialBrands: InventoryCommercialBrand[]): string {
+  if (isInventoryCustomCategoryId(id)) {
+    const raw = id.slice(INVENTORY_CUSTOM_CATEGORY_PREFIX.length).trim();
+    if (!raw) return 'Otros';
+    return raw.replace(/^\w/u, (c) => c.toUpperCase());
+  }
+  if (isCatalogCategoryOrganizerId(id)) {
+    const raw = id.slice('cat:'.length).trim();
+    if (!raw) return 'Otros';
+    return raw.replace(/^\w/u, (c) => c.toUpperCase());
+  }
   if (id === ORGANIZER_BEVERAGES) return 'Bebidas';
   if (id === ORGANIZER_COMPLEMENTS) return 'Complementos';
   if (id === ORGANIZER_PACKAGING) return 'Envases';
@@ -291,7 +415,8 @@ export function listInventoryOrganizerChoices(
     ...foodBrands.map((b) => ({
       id: b._id,
       label: foodLineLabel(b, { omitBrandName: opts?.omitBrandInFoodLabels }),
-      inUse: true,
+      // Con lista de uso: solo marcas que ya tienen artículos (como genéricos).
+      inUse: inUseIds ? inUseIds.has(b._id) : true,
     })),
     { id: ORGANIZER_BEVERAGES, label: 'Bebidas', inUse: genericInUse(ORGANIZER_BEVERAGES) },
     { id: ORGANIZER_COMPLEMENTS, label: 'Complementos', inUse: genericInUse(ORGANIZER_COMPLEMENTS) },
@@ -359,9 +484,13 @@ function leftoverOrganizerGroups(
   const groups: InventoryOrganizerGroup[] = [];
   for (const [id, subset] of buckets) {
     if (!subset.length) continue;
+    const customLabel =
+      isInventoryCustomCategoryId(id) || isCatalogCategoryOrganizerId(id)
+        ? String(subset[0]?.category || '').trim()
+        : '';
     groups.push({
       id,
-      label: labelForOrganizerGroup(id, commercialBrands),
+      label: customLabel || labelForOrganizerGroup(id, commercialBrands),
       ...countStatusForItems(subset),
     });
   }
@@ -369,8 +498,8 @@ function leftoverOrganizerGroups(
 }
 
 /**
- * Orden almacén: ingredientes por línea → Bebidas → Complementos → Envases → resto.
- * El resto conserva su id real (si no, el chip no filtra).
+ * Orden almacén: Bebidas → Complementos → Envases → Limpieza → Varios → resto.
+ * Las marcas comerciales (Burger, Tacos…) son de facturación/TPV: no salen como chips.
  */
 export function buildInventoryOrganizerGroups(
   items: CatalogItem[],
@@ -392,32 +521,18 @@ export function buildInventoryOrganizerGroups(
     buckets.set(id, arr);
   }
 
-  const foodBrands = commercialBrands
-    .filter((b) => b.deliveryLineKind !== 'drinks_desserts')
-    .slice()
-    .sort((a, b) => {
-      const ia = FOOD_LINE_KIND_ORDER.indexOf(
-        (a.deliveryLineKind || 'other') as (typeof FOOD_LINE_KIND_ORDER)[number],
-      );
-      const ib = FOOD_LINE_KIND_ORDER.indexOf(
-        (b.deliveryLineKind || 'other') as (typeof FOOD_LINE_KIND_ORDER)[number],
-      );
-      const ra = ia < 0 ? 99 : ia;
-      const rb = ib < 0 ? 99 : ib;
-      if (ra !== rb) return ra - rb;
-      return String(a.name || '').localeCompare(String(b.name || ''), 'es');
-    });
-
-  const brandGroups: InventoryOrganizerGroup[] = [];
-  for (const brand of foodBrands) {
-    const subset = buckets.get(brand._id) || [];
-    brandGroups.push({
-      id: brand._id,
-      label: inventoryBrandChipLabel(brand),
-      color: String(brand.primaryColor || '').trim() || undefined,
-      ...countStatusForItems(subset),
-    });
-    buckets.delete(brand._id);
+  // Marcas → «Ingredientes» (no chips Burger/Tacos/…).
+  const brandIds = new Set(
+    commercialBrands.map((b) => String(b._id || '').trim()).filter(Boolean),
+  );
+  for (const brandId of brandIds) {
+    const subset = buckets.get(brandId);
+    if (subset?.length) {
+      const merged = buckets.get(ORGANIZER_TOTAL) || [];
+      merged.push(...subset);
+      buckets.set(ORGANIZER_TOTAL, merged);
+    }
+    buckets.delete(brandId);
   }
 
   const extras: InventoryOrganizerGroup[] = [];
@@ -448,21 +563,21 @@ export function buildInventoryOrganizerGroups(
   }
 
   const leftoverGroups = leftoverOrganizerGroups(buckets, commercialBrands).filter((g) => {
-    // Ocultar «Ingredientes» genérico vacío si ya hay chips por marca o tipo.
-    if (g.id === ORGANIZER_TOTAL && g.total === 0 && (brandGroups.length > 0 || extras.length > 0)) {
+    // Ocultar «Ingredientes» genérico vacío si ya hay chips de tipo.
+    if (g.id === ORGANIZER_TOTAL && g.total === 0 && extras.length > 0) {
       return false;
     }
     return true;
   });
 
-  if (brandGroups.length === 0 && extras.length === 0) {
+  if (extras.length === 0) {
     if (leftoverGroups.length === 1 && leftoverGroups[0].id === ORGANIZER_TOTAL) {
       return [];
     }
     return leftoverGroups;
   }
 
-  return [...brandGroups, ...extras, ...leftoverGroups];
+  return [...extras, ...leftoverGroups];
 }
 
 export function filterItemsByOrganizer(
@@ -478,9 +593,16 @@ export function filterItemsByOrganizer(
     if (ing.id) byId.set(ing.id, ing);
     byName.set(foldIngredientKey(ing.name), ing);
   }
-  return items.filter(
-    (item) => resolveInventoryOrganizerId(item, byId, byName, commercialBrands) === organizerId,
+  const brandIds = new Set(
+    commercialBrands.map((b) => String(b._id || '').trim()).filter(Boolean),
   );
+  return items.filter((item) => {
+    const id = resolveInventoryOrganizerId(item, byId, byName, commercialBrands);
+    if (id === organizerId) return true;
+    // Chip «Ingredientes»: incluye lo que antes iba a marca.
+    if (organizerId === ORGANIZER_TOTAL && brandIds.has(id)) return true;
+    return false;
+  });
 }
 
 export function movementTypeLabel(type: MovementType | string): string {

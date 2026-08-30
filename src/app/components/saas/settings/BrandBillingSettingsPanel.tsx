@@ -10,6 +10,7 @@ import {
   ORPHAN_MODE_OPTIONS,
   SHARED_SPLIT_MODE_OPTIONS,
   assignBrandToSheetExclusive,
+  billingSheetHasBrand,
   brandsForBilling,
   emptyBrandBillingConfig,
   isBrandBillingUnlocked,
@@ -143,26 +144,28 @@ export function BrandBillingSettingsPanel({
     }));
   };
 
+  const sheetOwningBrand = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of config.sheets) {
+      for (const brand of selectableBrands) {
+        const id = String(brand._id || brand.id || '').trim();
+        if (!id || !billingSheetHasBrand(s, id, brands)) continue;
+        if (!map.has(id)) map.set(id, s.label || s.id);
+      }
+    }
+    return map;
+  }, [config.sheets, selectableBrands, brands]);
+
   const toggleBrand = (sheetId: string, brandId: string) => {
     setConfig((prev) => {
       const sheet = prev.sheets.find((s) => s.id === sheetId);
-      const has = sheet?.brandIds.includes(brandId);
+      const has = sheet ? billingSheetHasBrand(sheet, brandId, brands) : false;
       const sheets = has
         ? removeBrandFromSheet(prev.sheets, sheetId, brandId, brands)
         : assignBrandToSheetExclusive(prev.sheets, sheetId, brandId, brands);
       return { ...prev, sheets };
     });
   };
-
-  const sheetOwningBrand = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const s of config.sheets) {
-      for (const id of s.brandIds) {
-        if (!map.has(id)) map.set(id, s.label || s.id);
-      }
-    }
-    return map;
-  }, [config.sheets]);
 
   const removeSheet = (sheetId: string) => {
     setConfig((prev) => ({
@@ -284,7 +287,7 @@ export function BrandBillingSettingsPanel({
                   <div className="mt-1 flex flex-wrap gap-1">
                     {selectableBrands.map((b) => {
                       const id = b._id || b.id;
-                      const on = sheet.brandIds.includes(id);
+                      const on = billingSheetHasBrand(sheet, id, brands);
                       const ownedElsewhere = !on ? sheetOwningBrand.get(id) : undefined;
                       const unitKey = resolveBrandFoodUnitKey(b);
                       const typeHint = b.deliveryLineKind

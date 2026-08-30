@@ -440,8 +440,9 @@ function WizardDayRow({
   onFrom: (v: string) => void;
   onTo: (v: string) => void;
 }) {
-  const fromLabel = normalizeScheduleTimeValue(from, '09:00') || '09:00';
-  const toLabel = normalizeScheduleTimeValue(to, '21:00') || '21:00';
+  // Misma lógica que al guardar: si el día está abierto y falta hora, usar defaults reales
+  // (antes se mostraba 09:00–21:00 “de mentira” y el estado vacío bloqueaba el avance).
+  const ensured = open ? ensureOpenDayTimes({ open, from, to }) : { open, from, to };
   return (
     <div
       className={`flex min-h-10 items-center gap-2 border-b border-stone-100 px-2.5 py-1.5 last:border-b-0 dark:border-stone-800 ${
@@ -462,7 +463,7 @@ function WizardDayRow({
       </span>
       <div className="min-w-0 flex-1">
         {open ? (
-          <TimeRangeRow dense from={fromLabel} to={toLabel} onFrom={onFrom} onTo={onTo} />
+          <TimeRangeRow dense from={ensured.from} to={ensured.to} onFrom={onFrom} onTo={onTo} />
         ) : (
           <span className="text-xs text-stone-400">Cerrado</span>
         )}

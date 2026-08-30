@@ -359,19 +359,29 @@ export function SupplierInvoiceEmailPage() {
   ]);
 
   const reloadPdvStatuses = useCallback(async () => {
-    if (!dataUserId) {
+    if (!dataUserId || !currentBizId) {
       setPdvStatuses([]);
       setLegacyAccountConnected(false);
       setLegacyAccountEmail('');
       return;
     }
     try {
-      const { pdvs, legacyAccount } = await listSupplierInvoicePdvEmailConfigs(dataUserId);
-      setPdvStatuses(
-        currentBizId
-          ? pdvs.filter((p) => !p.businessId || p.businessId === currentBizId)
-          : pdvs,
+      const { pdvs, legacyAccount } = await listSupplierInvoicePdvEmailConfigs(
+        dataUserId,
+        currentBizId,
+        { accountBusinessCount: businessList.length || 1 },
       );
+      const storeIds = new Set(stores.map((s) => s._id));
+      // Solo correos de tiendas de ESTA empresa (intersección con listado scoped).
+      setPdvStatuses(
+        (pdvs || []).filter((p) => {
+          const bid = String(p.businessId || '').replace(/^business:/, '').trim();
+          if (bid && bid !== currentBizId) return false;
+          if (storeIds.size > 0 && !storeIds.has(p.pdvId)) return false;
+          return true;
+        }),
+      );
+      // Con filtro de empresa el API ya oculta legado de cuenta.
       setLegacyAccountConnected(Boolean(legacyAccount?.connected || legacyAccount?.config?.enabled));
       setLegacyAccountEmail(String(legacyAccount?.config?.imapUser || '').trim());
     } catch {
@@ -379,11 +389,23 @@ export function SupplierInvoiceEmailPage() {
       setLegacyAccountConnected(false);
       setLegacyAccountEmail('');
     }
-  }, [dataUserId, currentBizId]);
+  }, [dataUserId, currentBizId, stores, businessList.length]);
 
   useEffect(() => {
     void loadStores();
   }, [currentBizId, user?.user_id]);
+
+  /** Al cambiar de empresa/cuenta: no arrastrar correo ni PDV de la anterior. */
+  useEffect(() => {
+    setSelectedPdvId('');
+    setImapDraft({});
+    setLoadedConfigPdvId('');
+    setPdvStatuses([]);
+    setLegacyAccountConnected(false);
+    setLegacyAccountEmail('');
+    setLastTestOk(false);
+    setPollSummary(null);
+  }, [currentBizId, dataUserId]);
 
   useEffect(() => {
     void reloadPdvStatuses();
@@ -414,10 +436,14 @@ export function SupplierInvoiceEmailPage() {
   );
 
   const statusById = useMemo(() => {
+    const storeIds = new Set(stores.map((s) => s._id));
     const m = new Map<string, SupplierInvoicePdvEmailStatus>();
-    for (const s of pdvStatuses) m.set(s.pdvId, s);
+    for (const s of pdvStatuses) {
+      if (storeIds.size > 0 && !storeIds.has(s.pdvId)) continue;
+      m.set(s.pdvId, s);
+    }
     return m;
-  }, [pdvStatuses]);
+  }, [pdvStatuses, stores]);
 
   const connectedCount = useMemo(
     () => stores.filter((s) => statusById.get(s._id)?.connected).length,
@@ -426,8 +452,9 @@ export function SupplierInvoiceEmailPage() {
 
   const duplicateEmailWarnings = useMemo(() => {
     const byEmail = new Map<string, { email: string; pdvIds: string[] }>();
-    for (const status of pdvStatuses) {
-      if (!status.connected) continue;
+    for (const store of stores) {
+      const status = statusById.get(store._id);
+      if (!status?.connected) continue;
       const email = String(status.imapUser || '').trim().toLowerCase();
       if (!email) continue;
       const row = byEmail.get(email) || { email: status.imapUser, pdvIds: [] };
@@ -435,18 +462,13 @@ export function SupplierInvoiceEmailPage() {
       byEmail.set(email, row);
     }
     return [...byEmail.values()].filter((row) => row.pdvIds.length > 1);
-  }, [pdvStatuses]);
+  }, [stores, statusById]);
 
   const pdvLabelById = useMemo(() => {
     const map = new Map<string, string>();
     for (const store of stores) map.set(store._id, pointOfSaleDisplayLabel(store));
-    for (const status of pdvStatuses) {
-      if (!map.has(status.pdvId)) {
-        map.set(status.pdvId, pointOfSaleDisplayLabel({ name: status.name, code: status.code }));
-      }
-    }
     return map;
-  }, [stores, pdvStatuses]);
+  }, [stores]);
 
   const settingsPdvRows = useMemo(
     () =>
@@ -476,7 +498,7 @@ export function SupplierInvoiceEmailPage() {
     setPollSummary(null);
     setImapDraft({});
     setLoadedConfigPdvId('');
-    getSupplierInvoiceEmailConfig(dataUserId, resolvedPdvId)
+    getSupplierInvoiceEmailConfig(dataUserId, resolvedPdvId, currentBizId || undefined)
       .then((cfg) => {
         if (cancelled) return;
         setImapDraft(cfg);
@@ -506,7 +528,7 @@ export function SupplierInvoiceEmailPage() {
     return () => {
       cancelled = true;
     };
-  }, [dataUserId, resolvedPdvId]);
+  }, [dataUserId, resolvedPdvId, currentBizId]);
 
   useEffect(() => {
     if (provider === 'other') return;
@@ -536,7 +558,7 @@ export function SupplierInvoiceEmailPage() {
 
   const handleSelectPdv = (pdvId: string) => {
     const id = String(pdvId || '').trim();
-    if (!id) return;
+    if (!id || !stores.some((s) => s._id === id)) return;
     setSelectedPdvId(id);
     setActiveSalesPoint(id);
   };
@@ -578,6 +600,7 @@ export function SupplierInvoiceEmailPage() {
           enabled: true,
         },
         resolvedPdvId,
+        currentBizId || undefined,
       );
       setImapDraft({
         ...saved,
@@ -595,7 +618,7 @@ export function SupplierInvoiceEmailPage() {
     } finally {
       setImapSaving(false);
     }
-  }, [dataUserId, imapDraft, resolvedPdvId, reloadPdvStatuses, statusById, draftBelongsToSelectedPdv]);
+  }, [dataUserId, imapDraft, resolvedPdvId, reloadPdvStatuses, statusById, draftBelongsToSelectedPdv, currentBizId]);
 
   const handleSaveSettingsOnly = useCallback(async () => {
     if (!dataUserId || !resolvedPdvId) {
@@ -628,6 +651,7 @@ export function SupplierInvoiceEmailPage() {
               : Boolean(statusById.get(resolvedPdvId)?.enabled || statusById.get(resolvedPdvId)?.connected),
         },
         resolvedPdvId,
+        currentBizId || undefined,
       );
       setImapDraft({
         ...saved,
@@ -642,7 +666,7 @@ export function SupplierInvoiceEmailPage() {
     } finally {
       setImapSaving(false);
     }
-  }, [dataUserId, resolvedPdvId, draftBelongsToSelectedPdv, imapDraft, statusById, reloadPdvStatuses]);
+  }, [dataUserId, resolvedPdvId, draftBelongsToSelectedPdv, imapDraft, statusById, reloadPdvStatuses, currentBizId]);
 
   const handleTestImap = useCallback(async () => {
     if (!resolvedPdvId || !draftBelongsToSelectedPdv) {
@@ -664,6 +688,7 @@ export function SupplierInvoiceEmailPage() {
         imapTls: imapDraft.imapTls,
         userId: dataUserId || undefined,
         pdvId: resolvedPdvId || undefined,
+        businessId: currentBizId || undefined,
       });
       if (result.ok) {
         setLastTestOk(true);
@@ -680,6 +705,7 @@ export function SupplierInvoiceEmailPage() {
                 enabled: true,
               },
               resolvedPdvId,
+              currentBizId || undefined,
             );
             setImapDraft({
               ...saved,
@@ -727,14 +753,18 @@ export function SupplierInvoiceEmailPage() {
     } finally {
       setImapTesting(false);
     }
-  }, [imapDraft, dataUserId, resolvedPdvId, reloadPdvStatuses, draftBelongsToSelectedPdv]);
+  }, [imapDraft, dataUserId, resolvedPdvId, reloadPdvStatuses, draftBelongsToSelectedPdv, currentBizId]);
 
   const handlePollInvoicesNow = useCallback(async () => {
     if (!dataUserId || !resolvedPdvId) return;
     setImapPolling(true);
     setPollSummary(null);
     try {
-      const summary = await pollSupplierInvoicesNow(dataUserId, resolvedPdvId);
+      const summary = await pollSupplierInvoicesNow(
+        dataUserId,
+        resolvedPdvId,
+        currentBizId || undefined,
+      );
       const processed = Number(summary.processed) || 0;
       const created = Number(summary.created) || 0;
       if (summary.baselined || summary.message) {
@@ -771,7 +801,7 @@ export function SupplierInvoiceEmailPage() {
     } finally {
       setImapPolling(false);
     }
-  }, [dataUserId, resolvedPdvId]);
+  }, [dataUserId, resolvedPdvId, currentBizId]);
 
   const inputClass =
     'mt-1 w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 outline-none focus:ring-2 focus:ring-blue-500/30 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-100';

@@ -47,6 +47,32 @@ describe('recipeCostingFallback', () => {
     expect(ingredients[0]?.catalogItemId).toBe('stock-moz');
     expect(ingredients[1]?.catalogItemId).toBe('stock-box');
     expect(ingredients[1]?.optional).toBe(true);
+    expect(ingredients[0]?.wastePercent).toBe(0);
+  });
+
+  it('usa mermaPct del producto como wastePercent', () => {
+    const ingredients = buildRecipeIngredientsFromCostingItem(
+      {
+        _id: 'prod',
+        customFields: {
+          costingType: 'recipe',
+          mermaPct: 8,
+          costingRecipe: [
+            { storeIngredientId: 'ing-moz', name: 'Mozzarella', quantity: 0.1, unit: 'kg' },
+          ],
+        },
+      },
+      [
+        {
+          _id: 'stock-moz',
+          name: 'Mozzarella',
+          module: 'stock',
+          costPrice: 5,
+          customFields: { storeIngredientId: 'ing-moz' },
+        },
+      ],
+    );
+    expect(ingredients[0]?.wastePercent).toBe(8);
   });
 
   it('devuelve vacío si no hay escandallo recipe', () => {

@@ -63,11 +63,13 @@ import {
   getBusinessHoursIssue,
   hasValidBusinessHoursConfig,
   normalizeBusinessHoursConfig,
+  prepareBusinessHoursForSave,
 } from '../../../lib/businessHoursUtils';
 import { getBusinessHours, type BusinessHoursConfig } from '../../../lib/settingsApi';
 import {
   applyOpeningHoursToShiftTemplates,
 } from '../../../lib/schedulesApi';
+import { writeSalaSetupPending } from '../../../lib/salaQuickSetup';
 import { BusinessHoursEditor } from './BusinessHoursEditor';
 import {
   buildPdvCodeFromParts,
@@ -750,7 +752,7 @@ function WorkCenterModal({
 
     const validateHorarios = () => {
       if (!includeOpeningHours) return;
-      const issue = getBusinessHoursIssue(openingHours);
+      const issue = getBusinessHoursIssue(prepareBusinessHoursForSave(openingHours));
       if (issue) {
         nextErr.horarios = issue;
       }
@@ -860,11 +862,11 @@ function WorkCenterModal({
         active: editItem ? editItem.active !== false : defaultActiveOnCreate,
         openingHours: includeOpeningHours
           ? (() => {
-              const normalized = normalizeBusinessHoursConfig(openingHours);
-              // Defensa: nunca guardar días abiertos sin HH:mm (evita «sin definir» después).
-              const issue = getBusinessHoursIssue(normalized);
+              // Completa horas vacías en días abiertos; no bloquea por “Viernes sin hora” fantasma.
+              const prepared = prepareBusinessHoursForSave(openingHours);
+              const issue = getBusinessHoursIssue(prepared);
               if (issue) throw new Error(issue);
-              return normalized;
+              return prepared;
             })()
           : editItem?.openingHours,
       });
@@ -1890,23 +1892,46 @@ export function SalesPointsTab() {
 
   const defaultActiveOnCreate = true;
 
+  /** PDVs retail (sin salas legacy): los que cuentan para operar TPV. */
+  const retailPdvs = useMemo(
+    () =>
+      workCenters.filter(
+        (wc) => wc.centerType === 'punto_de_venta' && !isSalaManagedWorkCenter(wc),
+      ),
+    [workCenters],
+  );
+
+  /** Más antiguo: etiqueta «Principal» (informativa). No bloquea borrado. */
   const primaryPdvId = useMemo(() => {
-    const pdvs = workCenters.filter(
-      (wc) => wc.centerType === 'punto_de_venta' && !isSalaManagedWorkCenter(wc),
-    );
-    if (pdvs.length === 0) return null;
-    const sorted = [...pdvs].sort((a, b) => {
+    if (retailPdvs.length === 0) return null;
+    const sorted = [...retailPdvs].sort((a, b) => {
       const ta = new Date(a.createdAt || 0).getTime();
       const tb = new Date(b.createdAt || 0).getTime();
       if (ta !== tb) return ta - tb;
       return a._id.localeCompare(b._id);
     });
     return sorted[0]._id;
-  }, [workCenters]);
+  }, [retailPdvs]);
 
   const isPrimaryPdv = useCallback(
     (wc: WorkCenter) => wc._id === primaryPdvId,
     [primaryPdvId],
+  );
+
+  /** Solo el último PDV retail no se puede eliminar (hace falta al menos uno). */
+  const isLastRetailPdv = useCallback(
+    (wc: WorkCenter) =>
+      retailPdvs.length <= 1 && retailPdvs.some((p) => p._id === wc._id),
+    [retailPdvs],
+  );
+
+  /** Solo el último PDV activo no se puede desactivar. */
+  const isLastActiveRetailPdv = useCallback(
+    (wc: WorkCenter) => {
+      const active = retailPdvs.filter((p) => p.active !== false);
+      return active.length <= 1 && active.some((p) => p._id === wc._id);
+    },
+    [retailPdvs],
   );
 
   const existingPdvNamesForModal = useMemo(() => {
@@ -2351,8 +2376,8 @@ export function SalesPointsTab() {
     e?.stopPropagation();
     e?.preventDefault();
     if (!dataUserId) return;
-    if (wc.active !== false && isPrimaryPdv(wc)) {
-      toast.error('No se puede desactivar el PDV principal. Necesitas al menos un PDV activo para operar.');
+    if (wc.active !== false && isLastActiveRetailPdv(wc)) {
+      toast.error('No se puede desactivar el único PDV activo. Necesitas al menos uno para operar.');
       return;
     }
     try {
@@ -2388,8 +2413,8 @@ export function SalesPointsTab() {
 
   const openDeleteDialog = (wc: WorkCenter) => {
     const legacySala = isSalaManagedWorkCenter(wc);
-    if (isPrimaryPdv(wc) && !legacySala) {
-      toast.error('El PDV principal de tu cuenta no se puede eliminar.');
+    if (isLastRetailPdv(wc) && !legacySala) {
+      toast.error('No se puede eliminar el único PDV. Crea otro antes o deja al menos uno.');
       return;
     }
     setDeleteTarget(wc);
@@ -2400,8 +2425,8 @@ export function SalesPointsTab() {
   const handleDelete = async () => {
     if (!deleteTarget || !dataUserId) return;
     const legacySala = isSalaManagedWorkCenter(deleteTarget);
-    if (isPrimaryPdv(deleteTarget) && !legacySala) {
-      toast.error('El PDV principal de tu cuenta no se puede eliminar.');
+    if (isLastRetailPdv(deleteTarget) && !legacySala) {
+      toast.error('No se puede eliminar el único PDV. Crea otro antes o deja al menos uno.');
       setDeleteTarget(null);
       return;
     }
@@ -2631,6 +2656,8 @@ export function SalesPointsTab() {
         >
           {filtered.map(wc => {
             const primary = isPrimaryPdv(wc);
+            const lastRetail = isLastRetailPdv(wc);
+            const lastActive = isLastActiveRetailPdv(wc);
             const openEdit = () => openEditWorkCenter(wc);
 
             return (
@@ -2665,8 +2692,7 @@ export function SalesPointsTab() {
                         {getTypeLabel(wc)}
                       </span>
                       {primary && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300" title="PDV principal de la cuenta, no se puede eliminar">
-                          <Lock className="w-2.5 h-2.5" />
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300" title="PDV más antiguo de la cuenta (referencia)">
                           Principal
                         </span>
                       )}
@@ -2681,17 +2707,17 @@ export function SalesPointsTab() {
                 <button
                   type="button"
                   onClick={(e) => void handleToggleActive(wc, e)}
-                  disabled={primary && wc.active !== false}
+                  disabled={lastActive && wc.active !== false}
                   className={`flex-shrink-0 ml-2 inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors ${
-                    primary && wc.active !== false
+                    lastActive && wc.active !== false
                       ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 opacity-70 cursor-not-allowed'
                       : wc.active !== false
                         ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 hover:bg-green-200 cursor-pointer'
                         : 'bg-gray-200 text-gray-700 dark:bg-gray-600 dark:text-gray-200 hover:bg-gray-300 cursor-pointer'
                   }`}
                   title={
-                    primary && wc.active !== false
-                      ? 'El PDV principal debe permanecer activo'
+                    lastActive && wc.active !== false
+                      ? 'El único PDV activo debe permanecer activo'
                       : wc.active !== false
                         ? 'Clic para desactivar'
                         : 'Clic para activar'
@@ -2806,10 +2832,10 @@ export function SalesPointsTab() {
                   <Edit3 className="w-3.5 h-3.5" />
                   Editar
                 </button>
-                {primary ? (
+                {lastRetail ? (
                   <span
                     className="p-1.5 rounded-lg text-gray-300 dark:text-gray-600 cursor-not-allowed"
-                    title="El PDV principal de la cuenta no se puede eliminar"
+                    title="No se puede eliminar el único PDV"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <Lock className="w-4 h-4" />

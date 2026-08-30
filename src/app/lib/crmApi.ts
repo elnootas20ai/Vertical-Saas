@@ -22,6 +22,8 @@ function notifyCrmClientsSync() {
   window.dispatchEvent(new CustomEvent(CRM_CLIENTS_SYNC_EVENT));
 }
 
+export { notifyCrmClientsSync };
+
 function getCouchHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
   return headers;

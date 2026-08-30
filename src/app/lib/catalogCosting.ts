@@ -22,6 +22,24 @@ export type ProductRecipeLine = {
   stockCategory?: StockCategory;
 };
 
+export type IngredientUnitCostSource = 'purchase' | 'ficha' | 'zero';
+
+export type IngredientUnitCostResolution = {
+  effective: number;
+  fromFicha: number;
+  fromPurchase: number;
+  source: IngredientUnitCostSource;
+};
+
+export type RecipeCostOptions = {
+  mermaPct?: number;
+  /** Artículos de almacén indexados por customFields.storeIngredientId */
+  stockByStoreIngredientId?: Map<
+    string,
+    Pick<CatalogItem, 'costPrice' | 'customFields'> & { lastPurchasePrice?: number }
+  >;
+};
+
 export function normalizeProductRecipeLines(raw: unknown): ProductRecipeLine[] {
   if (!Array.isArray(raw)) return [];
   const out: ProductRecipeLine[] = [];
@@ -60,9 +78,50 @@ export function readProductRecipeLines(item: Pick<CatalogItem, 'customFields'>):
   return normalizeProductRecipeLines(item.customFields?.costingRecipe);
 }
 
+/** Merma % del plato (0–100). Viene del Excel o del editor de Escandallo. */
+export function normalizeMermaPct(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(100, Math.max(0, n));
+}
+
+export function readProductMermaPct(item: Pick<CatalogItem, 'customFields'>): number {
+  return normalizeMermaPct(item.customFields?.mermaPct);
+}
+
+export function applyMermaToCost(baseCost: number, mermaPct: number): number {
+  const base = Number(baseCost) || 0;
+  const m = normalizeMermaPct(mermaPct);
+  if (!(base > 0) || m <= 0) return Math.round(base * 100) / 100;
+  return Math.round(base * (1 + m / 100) * 100) / 100;
+}
+
 /** Líneas de comida (excluye envases para food cost / margen). */
 export function foodRecipeLines(lines: ProductRecipeLine[]): ProductRecipeLine[] {
   return lines.filter((line) => line.stockCategory !== 'packaging');
+}
+
+/** Envases vinculados al producto (descuenta stock; no entran en food cost). */
+export function packagingRecipeLines(lines: ProductRecipeLine[]): ProductRecipeLine[] {
+  return lines.filter((line) => line.stockCategory === 'packaging');
+}
+
+/**
+ * Sustituye solo comida; conserva envases previos si el patch no trae packaging.
+ * (Escandallo edita ingredientes y no debe borrar cajas/bolsas del producto.)
+ */
+export function replaceFoodRecipeLinesKeepingPackaging(
+  previous: ProductRecipeLine[],
+  nextFood: ProductRecipeLine[],
+): ProductRecipeLine[] {
+  const incoming = Array.isArray(nextFood) ? nextFood : [];
+  if (incoming.some((line) => line.stockCategory === 'packaging')) {
+    return normalizeProductRecipeLines(incoming);
+  }
+  return normalizeProductRecipeLines([
+    ...foodRecipeLines(incoming),
+    ...packagingRecipeLines(previous),
+  ]);
 }
 
 export function resolveStoreIngredientBaseCost(
@@ -79,8 +138,43 @@ export function resolveStoreIngredientBaseCost(
   return effectiveStoreIngredientBaseCost(ing, brands);
 }
 
+/** Coste unitario efectivo: última compra proveedor si existe; si no, ficha. */
+export function resolveIngredientUnitCost(
+  ing: Pick<StoreIngredient, 'baseCost' | 'name' | 'brandIds'> & { role?: string },
+  stockItem?: (Pick<CatalogItem, 'costPrice'> & { lastPurchasePrice?: number }) | null,
+  brands?: Array<{ _id: string; deliveryLineKind?: string }>,
+): IngredientUnitCostResolution {
+  const fromFicha = resolveStoreIngredientBaseCost(ing, brands);
+  const fromPurchase = Number(stockItem?.lastPurchasePrice) || 0;
+  if (fromPurchase > 0) {
+    return {
+      effective: Math.round(fromPurchase * 100) / 100,
+      fromFicha,
+      fromPurchase: Math.round(fromPurchase * 100) / 100,
+      source: 'purchase',
+    };
+  }
+  if (fromFicha > 0) {
+    return { effective: fromFicha, fromFicha, fromPurchase: 0, source: 'ficha' };
+  }
+  return { effective: 0, fromFicha: 0, fromPurchase: 0, source: 'zero' };
+}
+
 export function storeIngredientsById(list: StoreIngredient[]): Map<string, StoreIngredient> {
   return new Map(list.map((ing) => [ing.id, ing]));
+}
+
+export function stockItemsByStoreIngredientId(
+  stockItems: Array<CatalogItem | (CatalogItem & { lastPurchasePrice?: number })>,
+): Map<string, CatalogItem & { lastPurchasePrice?: number }> {
+  const map = new Map<string, CatalogItem & { lastPurchasePrice?: number }>();
+  for (const item of stockItems) {
+    if (!item || item.deletedAt || item.active === false) continue;
+    const sid = String(item.customFields?.storeIngredientId || '').trim();
+    if (!sid || map.has(sid)) continue;
+    map.set(sid, item as CatalogItem & { lastPurchasePrice?: number });
+  }
+  return map;
 }
 
 export function calculateRecipeTotalCost(
@@ -88,22 +182,29 @@ export function calculateRecipeTotalCost(
   ingredientsById: Map<string, StoreIngredient>,
   brands?: Array<{ _id: string; deliveryLineKind?: string }>,
   inventoryCostByCatalogId?: Map<string, number>,
+  options?: RecipeCostOptions,
 ): number {
   let total = 0;
   for (const line of lines) {
     let unitCost = 0;
     if (line.storeIngredientId) {
       const ing = ingredientsById.get(line.storeIngredientId);
-      unitCost = ing ? resolveStoreIngredientBaseCost(ing, brands) : 0;
+      if (ing) {
+        const stock = options?.stockByStoreIngredientId?.get(line.storeIngredientId);
+        unitCost = resolveIngredientUnitCost(ing, stock, brands).effective;
+      }
     } else if (line.catalogItemId && inventoryCostByCatalogId) {
       unitCost = inventoryCostByCatalogId.get(line.catalogItemId) ?? 0;
     }
     total += (Number(line.quantity) || 0) * unitCost;
   }
-  return Math.round(total * 100) / 100;
+  const rounded = Math.round(total * 100) / 100;
+  return applyMermaToCost(rounded, options?.mermaPct ?? 0);
 }
 
-export function productCostingStatus(item: Pick<CatalogItem, 'customFields' | 'name' | 'category' | 'stockCategory'>): ProductCostingStatus {
+export function productCostingStatus(
+  item: Pick<CatalogItem, 'customFields' | 'name' | 'category' | 'stockCategory'>,
+): ProductCostingStatus {
   const type = readProductCostingType(item);
   if (type === 'fixed') return 'fixed';
   if (type === 'recipe') {
@@ -118,27 +219,26 @@ export function resolveProductUnitCost(
   ingredientsById: Map<string, StoreIngredient>,
   brands?: Array<{ _id: string; deliveryLineKind?: string }>,
   inventoryCostByCatalogId?: Map<string, number>,
+  options?: RecipeCostOptions,
 ): number {
   const type = readProductCostingType(item);
-  const salePrice = Number(item.unitPrice) || 0;
   const storedCost = Number(item.costPrice) || 0;
+  const mermaPct = options?.mermaPct ?? readProductMermaPct(item);
+  const costOpts: RecipeCostOptions = {
+    ...options,
+    mermaPct,
+  };
 
   if (type === 'fixed') return storedCost;
   if (type === 'recipe') {
     const lines = foodRecipeLines(readProductRecipeLines(item));
-    const computed = calculateRecipeTotalCost(
+    return calculateRecipeTotalCost(
       lines.length > 0 ? lines : readProductRecipeLines(item),
       ingredientsById,
       brands,
       inventoryCostByCatalogId,
+      costOpts,
     );
-    if (storedCost > 0 && salePrice > 0 && computed > salePrice * 1.05 && storedCost <= salePrice) {
-      return storedCost;
-    }
-    if (salePrice > 0 && computed > salePrice * 0.95) {
-      return Math.round(Math.min(computed, salePrice * 0.42) * 100) / 100;
-    }
-    return computed;
   }
   if (isDrinkCatalogProduct(item) || isDessertCatalogProduct(item)) {
     return resolveVertialDefaultRetailCost(item);
@@ -186,10 +286,13 @@ export function withProductCosting(
     costingType: ProductCostingType | null;
     recipeLines?: ProductRecipeLine[];
     fixedCost?: number;
+    /** Merma % del plato. `null` borra; `undefined` deja la actual. */
+    mermaPct?: number | null;
   },
   ingredientsById: Map<string, StoreIngredient>,
   brands?: Array<{ _id: string; deliveryLineKind?: string }>,
   inventoryCostByCatalogId?: Map<string, number>,
+  options?: RecipeCostOptions,
 ): CatalogItem {
   const customFields = { ...(item.customFields || {}) };
 
@@ -198,21 +301,50 @@ export function withProductCosting(
     delete customFields.costingRecipe;
   } else if (patch.costingType === 'fixed') {
     customFields.costingType = 'fixed';
-    delete customFields.costingRecipe;
+    // Coste fijo no usa ingredientes, pero los envases del producto deben seguir descontando.
+    const packOnly = packagingRecipeLines(readProductRecipeLines(item));
+    if (packOnly.length > 0) customFields.costingRecipe = packOnly;
+    else delete customFields.costingRecipe;
   } else {
     customFields.costingType = 'recipe';
-    customFields.costingRecipe = patch.recipeLines ?? [];
+    customFields.costingRecipe = replaceFoodRecipeLinesKeepingPackaging(
+      readProductRecipeLines(item),
+      patch.recipeLines ?? [],
+    );
   }
+
+  if (patch.mermaPct === null) {
+    delete customFields.mermaPct;
+  } else if (patch.mermaPct !== undefined) {
+    const m = normalizeMermaPct(patch.mermaPct);
+    if (m > 0) customFields.mermaPct = m;
+    else delete customFields.mermaPct;
+  }
+
+  const mermaPct =
+    patch.mermaPct === null
+      ? 0
+      : patch.mermaPct !== undefined
+        ? normalizeMermaPct(patch.mermaPct)
+        : readProductMermaPct({ customFields });
+
+  const costOpts: RecipeCostOptions = {
+    ...options,
+    mermaPct: patch.costingType === 'recipe' ? mermaPct : 0,
+  };
 
   let costPrice = Number(item.costPrice) || 0;
   if (patch.costingType === 'fixed') {
     costPrice = Math.max(0, Number(patch.fixedCost) || 0);
   } else if (patch.costingType === 'recipe') {
+    const lines = patch.recipeLines ?? [];
+    const food = foodRecipeLines(lines);
     costPrice = calculateRecipeTotalCost(
-      patch.recipeLines ?? [],
+      food.length > 0 ? food : lines,
       ingredientsById,
       brands,
       inventoryCostByCatalogId,
+      costOpts,
     );
   }
 

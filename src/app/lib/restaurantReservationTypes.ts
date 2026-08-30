@@ -137,7 +137,8 @@ export const EMPTY_FORM: ReservationFormData = {
   phone: '',
   email: '',
   clientId: '',
-  date: new Date().toISOString().slice(0, 10),
+  // Siempre rellenar en openCreate/openEdit con día local (nunca UTC de módulo).
+  date: '',
   time: '20:00',
   partySize: '2',
   preferredZone: '',

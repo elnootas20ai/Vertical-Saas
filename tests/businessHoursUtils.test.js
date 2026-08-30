@@ -74,17 +74,18 @@ describe('businessHoursUtils', () => {
     expect(getBusinessHoursIssue(cfg)).toMatch(/partido/i);
   });
 
-  it('createBlankBusinessHoursConfig obliga a rellenar horas de días abiertos', () => {
+  it('createBlankBusinessHoursConfig ya es válido (no bloquea el alta PDV)', () => {
     const blank = createBlankBusinessHoursConfig();
-    expect(getBusinessHoursIssue(blank)).toMatch(/Lunes/i);
-    blank.schedule.monday = { open: true, from: '09:00', to: '14:00' };
-    blank.schedule.tuesday = { open: true, from: '09:00', to: '14:00' };
-    blank.schedule.wednesday = { open: true, from: '09:00', to: '14:00' };
-    blank.schedule.thursday = { open: true, from: '09:00', to: '14:00' };
-    blank.schedule.friday = { open: true, from: '09:00', to: '22:00' };
-    // Finde cerrado por defecto: L–V distintos ya es válido (sin “aplicar a todos”).
-    expect(blank.schedule.saturday.open).toBe(false);
     expect(getBusinessHoursIssue(blank)).toBeNull();
+    expect(blank.schedule.monday.from).toBe('09:00');
+    expect(blank.schedule.friday.to).toBe('19:00');
+    expect(blank.schedule.sunday.open).toBe(false);
+  });
+
+  it('getBusinessHoursIssue no bloquea días abiertos con horas vacías (las completa)', () => {
+    const cfg = createBlankBusinessHoursConfig();
+    cfg.schedule.friday = { open: true, from: '', to: '' };
+    expect(getBusinessHoursIssue(cfg)).toBeNull();
   });
 
   it('applyHoursToOpenDays solo toca días abiertos', () => {

@@ -36,6 +36,7 @@ export async function syncRecipesFromCostingCatalog(
   userId: string,
   catalogItems: CatalogItem[],
   inventoryItems?: CatalogItem[],
+  ingredientsById?: Map<string, import('./catalogCustomization').StoreIngredient>,
 ): Promise<RecipeSyncResult> {
   const uid = String(userId || '').trim();
   if (!uid) return { created: 0, updated: 0, skipped: 0 };
@@ -56,7 +57,7 @@ export async function syncRecipesFromCostingCatalog(
     if (item.module === 'stock') continue;
     if (item.active === false || item.deletedAt) continue;
 
-    const ingredients = buildRecipeIngredientsFromCostingItem(item, inventory);
+    const ingredients = buildRecipeIngredientsFromCostingItem(item, inventory, ingredientsById);
     if (ingredients.length === 0) {
       skipped += 1;
       continue;
@@ -99,6 +100,16 @@ export async function syncRecipesFromCostingCatalog(
   }
 
   return { created, updated, skipped };
+}
+
+/** Sync de un solo producto tras guardar escandallo en UI. */
+export async function syncRecipeForCostingProduct(
+  userId: string,
+  product: CatalogItem,
+  inventoryItems: CatalogItem[] = [],
+  ingredientsById?: Map<string, import('./catalogCustomization').StoreIngredient>,
+): Promise<RecipeSyncResult> {
+  return syncRecipesFromCostingCatalog(userId, [product], inventoryItems, ingredientsById);
 }
 
 export function filterCostingCatalogItems(catalog: CatalogItem[]): CatalogItem[] {

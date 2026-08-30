@@ -15,9 +15,7 @@ import {
   resolveVertialDefaultRetailCost,
 } from './vertialDefaultCosts.ts';
 import {
-  findVertialStockTemplate,
   isCatalogResaleStockProduct,
-  resolveProductPackagingLines,
 } from './vertialStockDefaults.ts';
 import { buildInventoryLookupMaps } from './inventorySyncLogic.ts';
 import {
@@ -643,27 +641,6 @@ function buildCostingInventoryContext(inventoryItems: CatalogItem[]): CostingInv
   };
 }
 
-function buildPackagingRecipeLines(
-  item: Pick<CatalogItem, 'name' | 'category'>,
-  lineKind: DeliveryBrandLineKindId | 'generic',
-  byTemplateId: Map<string, CatalogItem>,
-): ProductRecipeLine[] {
-  const lines: ProductRecipeLine[] = [];
-  for (const rule of resolveProductPackagingLines(item, lineKind)) {
-    const stock = byTemplateId.get(rule.templateId);
-    if (!stock) continue;
-    const tpl = findVertialStockTemplate(rule.templateId);
-    lines.push({
-      catalogItemId: stock._id,
-      name: stock.name,
-      quantity: rule.quantity,
-      unit: tpl?.unit || 'ud',
-      stockCategory: 'packaging',
-    });
-  }
-  return lines;
-}
-
 function buildResaleConsumptionRecipe(
   catalogItem: CatalogItem,
   byLinkedCatalogId: Map<string, CatalogItem>,
@@ -686,12 +663,11 @@ function buildFullRecipeLines(
   storeIngredients: CostingStoreIngredient[],
   brands: Array<{ _id: string; deliveryLineKind?: string }>,
   lineKind: DeliveryBrandLineKindId | 'generic',
-  inventoryContext?: CostingInventoryContext,
+  _inventoryContext?: CostingInventoryContext,
 ): ProductRecipeLine[] {
-  const base = buildRecipeLinesFromIngredients(item, storeIngredients, brands, lineKind);
-  if (!inventoryContext) return base;
-  const packaging = buildPackagingRecipeLines(item, lineKind, inventoryContext.byTemplateId);
-  return [...base, ...packaging];
+  // Envases: solo los que el usuario elige al crear/editar el producto (no reglas automáticas).
+  void _inventoryContext;
+  return buildRecipeLinesFromIngredients(item, storeIngredients, brands, lineKind);
 }
 
 function isBaseRecipeIngredientName(name: string, lineKind: DeliveryBrandLineKindId | 'generic'): boolean {

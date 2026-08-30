@@ -5,6 +5,7 @@ import { Layout } from '../../components/saas/Layout';
 import { useApp } from '../../context/AppContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { salesListPathForBusiness } from '../../lib/compraventaPaths';
+import { isCompraventaBusinessType } from '../../lib/compraventaSetup';
 import { usePagination } from '../../hooks/usePagination';
 import { usePaginatedClients } from '../../hooks/usePaginatedClients';
 import { useWorkCenters } from '../../hooks/useWorkCenters';
@@ -1592,6 +1593,8 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   const isHeladeriaBusiness = currentBusiness?.businessType === 'iceCreamShop';
   const isRealEstateBusiness = currentBusiness?.businessType === 'realEstate';
   const isLawyerBusiness = currentBusiness?.businessType === 'lawyer';
+  const isCompraventaBusiness = isCompraventaBusinessType(currentBusiness?.businessType);
+  const isCleaningBusiness = currentBusiness?.businessType === 'cleaning';
   const reManagerRoles = useMemo(
     () => new Set([
       'Admin', 'Gerente', 'GerenteGrupo', 'Administrador', 'Gestor', 'Encargado', 'Superadmin', 'Administración',
@@ -3578,7 +3581,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                     showTier={listPlan.canViewSpent}
                   />
                 ) : null}
-                {!isOpsCrmBusiness && (client.vehiclesPurchased?.length ?? 0) > 0 && (
+                {!isOpsCrmBusiness && isCompraventaBusiness && (client.vehiclesPurchased?.length ?? 0) > 0 && (
                   <div className="flex items-center gap-1.5 p-2 bg-gray-50 dark:bg-gray-800 rounded-xl mb-2">
                     <Car className="w-3 h-3 text-gray-400 dark:text-gray-500" />
                     <p className="text-xs text-gray-600 dark:text-gray-400 truncate">{client.vehiclesPurchased!.join(' · ')}</p>
@@ -3625,10 +3628,47 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                         </button>
                         <button onClick={() => viewClientDetail(client.id)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Ver ficha"><Eye className="w-4 h-4 text-gray-500 dark:text-gray-400" /></button>
                       </>
+                    ) : isRestaurantBusiness ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const params = new URLSearchParams({ nuevo: '1', clientId: client.id });
+                            if (client.name) params.set('name', client.name);
+                            if (client.phone) params.set('phone', client.phone);
+                            if (client.email) params.set('email', client.email);
+                            const referral = String(client.referralCode || '').trim();
+                            if (referral) params.set('referralCode', referral);
+                            if (client.loyalty?.enrolled) {
+                              params.set('loyalty', '1');
+                              params.set('loyaltyPoints', String(client.loyalty.points || 0));
+                              if (client.loyalty.level) params.set('loyaltyLevel', String(client.loyalty.level));
+                            }
+                            navigate(`/saas/reservations?${params.toString()}`);
+                          }}
+                          className="p-1.5 hover:bg-violet-50 dark:hover:bg-violet-950/40 rounded-lg"
+                          title="Hacer reserva"
+                        >
+                          <Calendar className="w-4 h-4 text-violet-600" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/saas/caja/tpv?clientId=${encodeURIComponent(client.id)}`)}
+                          className="p-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-lg"
+                          title="Abrir TPV sala"
+                        >
+                          <ShoppingBag className="w-4 h-4 text-emerald-600" />
+                        </button>
+                        <button onClick={() => viewClientDetail(client.id)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Ver ficha"><Eye className="w-4 h-4 text-gray-500 dark:text-gray-400" /></button>
+                      </>
                     ) : !isOpsCrmBusiness ? (
                       <>
-                        <button onClick={() => handleCreateContract(client)} className="p-1.5 hover:bg-blue-50 rounded-lg" title="Contrato"><FileText className="w-4 h-4 text-blue-500" /></button>
-                        <button onClick={() => navigate(`/saas/vertical/limpieza/clientes?search=${encodeURIComponent(client.name)}`)} className="p-1.5 hover:bg-cyan-50 dark:hover:bg-cyan-900/20 rounded-lg" title="Ver en limpieza"><Droplets className="w-4 h-4 text-cyan-500" /></button>
+                        {isCompraventaBusiness ? (
+                          <button onClick={() => handleCreateContract(client)} className="p-1.5 hover:bg-blue-50 rounded-lg" title="Contrato"><FileText className="w-4 h-4 text-blue-500" /></button>
+                        ) : null}
+                        {isCleaningBusiness ? (
+                          <button onClick={() => navigate(`/saas/vertical/limpieza/clientes?search=${encodeURIComponent(client.name)}`)} className="p-1.5 hover:bg-cyan-50 dark:hover:bg-cyan-900/20 rounded-lg" title="Ver en limpieza"><Droplets className="w-4 h-4 text-cyan-500" /></button>
+                        ) : null}
                         <button onClick={() => viewClientDetail(client.id)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Ver ficha"><Eye className="w-4 h-4 text-gray-500 dark:text-gray-400" /></button>
                       </>
                     ) : null}
@@ -3921,10 +3961,47 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                             </button>
                             <button onClick={() => viewClientDetail(client.id)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Ver ficha"><Eye className="w-4 h-4 text-gray-500 dark:text-gray-400" /></button>
                           </div>
+                        ) : isRestaurantBusiness ? (
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const params = new URLSearchParams({ nuevo: '1', clientId: client.id });
+                                if (client.name) params.set('name', client.name);
+                                if (client.phone) params.set('phone', client.phone);
+                                if (client.email) params.set('email', client.email);
+                                const referral = String(client.referralCode || '').trim();
+                                if (referral) params.set('referralCode', referral);
+                                if (client.loyalty?.enrolled) {
+                                  params.set('loyalty', '1');
+                                  params.set('loyaltyPoints', String(client.loyalty.points || 0));
+                                  if (client.loyalty.level) params.set('loyaltyLevel', String(client.loyalty.level));
+                                }
+                                navigate(`/saas/reservations?${params.toString()}`);
+                              }}
+                              className="p-1.5 hover:bg-violet-50 dark:hover:bg-violet-950/40 rounded-lg"
+                              title="Hacer reserva"
+                            >
+                              <Calendar className="w-4 h-4 text-violet-600" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => navigate(`/saas/caja/tpv?clientId=${encodeURIComponent(client.id)}`)}
+                              className="p-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-lg"
+                              title="Abrir TPV sala"
+                            >
+                              <ShoppingBag className="w-4 h-4 text-emerald-600" />
+                            </button>
+                            <button onClick={() => viewClientDetail(client.id)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Ver ficha"><Eye className="w-4 h-4 text-gray-500 dark:text-gray-400" /></button>
+                          </div>
                         ) : !isOpsCrmBusiness ? (
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onClick={() => handleCreateContract(client)} className="p-1.5 hover:bg-blue-50 rounded-lg" title="Contrato"><FileText className="w-4 h-4 text-blue-500" /></button>
-                            <button onClick={() => navigate(`/saas/vertical/limpieza/clientes?search=${encodeURIComponent(client.name)}`)} className="p-1.5 hover:bg-cyan-50 dark:hover:bg-cyan-900/20 rounded-lg" title="Ver en limpieza"><Droplets className="w-4 h-4 text-cyan-500" /></button>
+                            {isCompraventaBusiness ? (
+                              <button onClick={() => handleCreateContract(client)} className="p-1.5 hover:bg-blue-50 rounded-lg" title="Contrato"><FileText className="w-4 h-4 text-blue-500" /></button>
+                            ) : null}
+                            {isCleaningBusiness ? (
+                              <button onClick={() => navigate(`/saas/vertical/limpieza/clientes?search=${encodeURIComponent(client.name)}`)} className="p-1.5 hover:bg-cyan-50 dark:hover:bg-cyan-900/20 rounded-lg" title="Ver en limpieza"><Droplets className="w-4 h-4 text-cyan-500" /></button>
+                            ) : null}
                             <button onClick={() => viewClientDetail(client.id)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Ver ficha"><Eye className="w-4 h-4 text-gray-500 dark:text-gray-400" /></button>
                           </div>
                         ) : null}
@@ -4778,7 +4855,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
         <SAAS__ConvertToClientModal isOpen={showConvertModal} onClose={() => { setShowConvertModal(false); setLeadToConvert(null); }}
           lead={leadToConvert} onConvert={(data: any) => { void handleConvertLeadToClient(data); }} />
       )}
-      {selectedClient && (
+      {isCompraventaBusiness && selectedClient && (
         <SAAS__CreateContractModal isOpen={showCreateContractModal} onClose={() => { setShowCreateContractModal(false); setSelectedClient(null); }}
           client={selectedClient} vehicles={vehicles || []}
           userId={authUser?.user_id || ''}

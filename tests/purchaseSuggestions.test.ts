@@ -231,8 +231,9 @@ describe('stockItemsForSupplierOrder', () => {
       name: 'Nuggets',
       module: 'stock',
       isStockItem: true,
-      stockCategory: 'finished_product',
+      stockCategory: 'consumable',
       category: 'Complementos',
+      customFields: { inventoryOrganizerId: 'complements' },
     });
     const items = explicitMarkedStockItemsForSupplier(
       [cola, fanta, nuggets],
@@ -359,5 +360,60 @@ describe('stockItemsForOrganizer', () => {
       brands,
     );
     expect(byCategory.map((i) => i.name).sort()).toEqual(['Mozzarella', 'Tomate']);
+  });
+
+  it('categoría de carta lista ingredientes de receta, no el plato; Combos vacío', () => {
+    const pan = catalogItem({
+      _id: 'stock-pan',
+      name: 'pan',
+      module: 'stock',
+      category: 'Ingredientes',
+      isStockItem: true,
+      stockCategory: 'ingredient',
+      customFields: { storeIngredientId: 'ing-pan' },
+    });
+    const jamon = catalogItem({
+      _id: 'stock-jamon',
+      name: 'jamón',
+      module: 'stock',
+      category: 'Ingredientes',
+      isStockItem: true,
+      stockCategory: 'ingredient',
+      customFields: { storeIngredientId: 'ing-jamon' },
+    });
+    const bocata = catalogItem({
+      _id: 'carta-bocata',
+      name: 'Bocadillo queso',
+      module: 'catalog',
+      category: 'Bocatas',
+      isStockItem: false,
+      stockCategory: 'finished_product',
+      customFields: {
+        costingType: 'recipe',
+        costingRecipe: [
+          { storeIngredientId: 'ing-pan', name: 'pan', quantity: 1, unit: 'ud' },
+          { storeIngredientId: 'ing-jamon', name: 'jamón', quantity: 1, unit: 'ud' },
+        ],
+      },
+    });
+    const combo = catalogItem({
+      _id: 'carta-combo',
+      name: 'Combo 1',
+      module: 'catalog',
+      category: 'Combos',
+      isStockItem: false,
+      stockCategory: 'finished_product',
+      customFields: {
+        costingType: 'recipe',
+        costingRecipe: [
+          { storeIngredientId: 'ing-pan', name: 'pan', quantity: 1, unit: 'ud' },
+        ],
+      },
+    });
+    const catalog = [pan, jamon, bocata, combo];
+    const bocatas = stockItemsForOrganizer(catalog, 'cat:bocatas');
+    expect(bocatas.map((i) => i.name).sort()).toEqual(['jamón', 'pan']);
+    expect(bocatas.every((i) => i._id !== 'carta-bocata')).toBe(true);
+    expect(stockItemsForOrganizer(catalog, 'cat:combos')).toEqual([]);
   });
 });

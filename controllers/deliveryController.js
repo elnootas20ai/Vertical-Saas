@@ -119,6 +119,7 @@ import { broadcastToBusiness, broadcastToUser } from '../services/sseService.js'
 import { assertCanCreatePointOfSale } from '../services/entitlementEnforcement.js';
 import { recordMovement } from '../services/stockMovementService.js';
 import { deductOrderByRecipe, restoreDeliveryOrderStockFromMovements, deductStaffConsumptionStock } from '../services/recipeStockService.js';
+import { findRecipeByCatalogItem } from '../services/recipeModel.js';
 import { deductOrderChannelPackaging } from '../services/orderChannelStockService.js';
 import {
   ensureDeliveryOrderIncomeServer,
@@ -2645,6 +2646,31 @@ async function appendInventorySyncExclusionForCatalogItem(req, userId, doc) {
   await putDocument(req, db, updated._id, updated);
 }
 
+/** Al borrar un producto de carta, su receta vinculada no puede quedar huérfana. */
+async function softDeleteRecipesLinkedToCatalogItem(req, userId, catalogItemId) {
+  const cid = String(catalogItemId || '').trim();
+  const uid = String(userId || '').trim();
+  if (!cid || !uid) return;
+  try {
+    const recipes = await findRecipeByCatalogItem(req, uid, cid);
+    for (const recipe of recipes) {
+      if (!recipe?._id || recipe.deletedAt) continue;
+      try {
+        await softDeleteDocument(req, getCatalogDbName(), recipe._id);
+      } catch (err) {
+        logger.warn(
+          '[removeCatalogItem] recipe cascade %s → %s: %s',
+          cid,
+          recipe._id,
+          err?.message || err,
+        );
+      }
+    }
+  } catch (err) {
+    logger.warn('[removeCatalogItem] recipe cascade lookup %s: %s', cid, err?.message || err);
+  }
+}
+
 async function removeCatalogItemIdWithRetry(req, userId, itemId, maxAttempts = 4) {
   const id = String(itemId || '').trim();
   if (!id) return { ok: false, error: 'Id vacío', status: 'error' };
@@ -2653,6 +2679,8 @@ async function removeCatalogItemIdWithRetry(req, userId, itemId, maxAttempts = 4
     try {
       const existing = await ensureCatalogItemOwner(req, userId, id);
       if (!existing || existing.deletedAt) {
+        // Producto ya borrado: aún así limpiar recetas huérfanas vinculadas.
+        await softDeleteRecipesLinkedToCatalogItem(req, userId, id);
         return { ok: true, status: 'gone' };
       }
       const saved = await softDeleteDocument(req, getCatalogDbName(), id);
@@ -2677,10 +2705,12 @@ async function removeCatalogItemIdWithRetry(req, userId, itemId, maxAttempts = 4
       } catch (exclErr) {
         logger.warn('[removeCatalogItem] exclusion %s: %s', id, exclErr?.message || exclErr);
       }
+      await softDeleteRecipesLinkedToCatalogItem(req, userId, id);
       return { ok: true, status: 'deleted' };
     } catch (error) {
       const message = String(error?.message || error || '').toLowerCase();
       if (message.includes('no encontrado') || message.includes('not found')) {
+        await softDeleteRecipesLinkedToCatalogItem(req, userId, id);
         return { ok: true, status: 'gone' };
       }
       if (attempt >= maxAttempts - 1) {

@@ -261,6 +261,14 @@ describe('tpvRegisterScope — regresión caja tablet', () => {
     expect(resolveTpvCatalogBusinessId('rest-1', businesses)).toBe('rest-1');
   });
 
+  it('resolveTpvCatalogBusinessId mantiene eventos activo (no redirige a delivery)', () => {
+    const businesses = [
+      { business_id: 'evt-1', businessType: 'events' },
+      { business_id: 'del-1', businessType: 'delivery' },
+    ];
+    expect(resolveTpvCatalogBusinessId('evt-1', businesses)).toBe('evt-1');
+  });
+
   it('shouldAutoSwitchToDeliveryBusiness no cambia si el selector es restaurante', () => {
     const businesses = [
       { business_id: 'rest-1', businessType: 'restaurant' },
@@ -268,6 +276,16 @@ describe('tpvRegisterScope — regresión caja tablet', () => {
     ];
     expect(
       shouldAutoSwitchToDeliveryBusiness({ business_id: 'rest-1', businessType: 'restaurant' }, businesses),
+    ).toBe(null);
+  });
+
+  it('shouldAutoSwitchToDeliveryBusiness no cambia si el selector es eventos', () => {
+    const businesses = [
+      { business_id: 'evt-1', businessType: 'events' },
+      { business_id: 'del-1', businessType: 'delivery' },
+    ];
+    expect(
+      shouldAutoSwitchToDeliveryBusiness({ business_id: 'evt-1', businessType: 'events' }, businesses),
     ).toBe(null);
   });
 

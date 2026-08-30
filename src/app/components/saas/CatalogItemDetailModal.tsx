@@ -42,8 +42,10 @@ import {
   isCatalogCostingProduct,
   marginPercent,
   productCostingStatus,
+  readProductMermaPct,
   readProductRecipeLines,
   resolveProductUnitCost,
+  stockItemsByStoreIngredientId,
   storeIngredientsById,
   withProductCosting,
   type ProductRecipeLine,
@@ -105,6 +107,8 @@ type CatalogItemDetailModalProps = {
   statsLoading?: boolean;
   /** Ingredientes de tienda: habilita la sección de escandallo dentro de la ficha. */
   storeIngredients?: StoreIngredient[];
+  /** Artículos de almacén para coste efectiva (última compra). */
+  stockItems?: CatalogItem[];
   /** Para abrir el gestor de ingredientes de la tienda desde la ficha. */
   dataUserId?: string;
   businessId?: string;
@@ -240,6 +244,7 @@ export function CatalogItemDetailModal({
   stats,
   statsLoading,
   storeIngredients,
+  stockItems,
   dataUserId,
   businessId,
   onArmCombo,
@@ -255,8 +260,17 @@ export function CatalogItemDetailModal({
     () => storeIngredientsById(storeIngredients || []),
     [storeIngredients],
   );
+  const stockByStoreIngredientId = useMemo(
+    () => stockItemsByStoreIngredientId(stockItems || []),
+    [stockItems],
+  );
   const costingStatus = productCostingStatus(item);
-  const costingUnitCost = costingEnabled ? resolveProductUnitCost(item, ingredientsById, brands) : 0;
+  const costingUnitCost = costingEnabled
+    ? resolveProductUnitCost(item, ingredientsById, brands, undefined, {
+        stockByStoreIngredientId,
+        mermaPct: readProductMermaPct(item),
+      })
+    : 0;
   const costingRecipeLines = useMemo(() => readProductRecipeLines(item), [item]);
 
   const tpvConfigurable = isCatalogTpvConfigurable(item, brands);
@@ -920,6 +934,7 @@ export function CatalogItemDetailModal({
                 product={item}
                 storeIngredients={storeIngredients || []}
                 brands={brands}
+                stockItems={stockItems || []}
                 embedded
                 onClose={() => undefined}
                 onSaved={(saved) => onCostingSaved?.(saved)}

@@ -268,6 +268,10 @@ export function filterWorkCentersForBusinessScope(
 
   // Clave: mirar tiendas retail, no «cualquier centro». Una oficina etiquetada no debe ocultar «pizzerias».
   if (mineRetail.length === 0) {
+    // Multi-empresa: no absorber tiendas huérfanas (bodegeta u otra vertical) en el scope activo.
+    if (typeof accountN === 'number' && accountN > 1) {
+      return mine.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+    }
     const legacyRetail = active.filter((wc) => !readWorkCenterBusinessId(wc) && isRetail(wc));
     const merged = new Map<string, WorkCenter>();
     for (const wc of mine) merged.set(wc._id, wc);
@@ -369,30 +373,35 @@ export async function tagOrphanRetailWorkCentersForBusiness(
 export function filterPointsOfSaleForWorkCenters(
   pointsOfSale: PointOfSale[],
   workCenters: WorkCenter[],
-  options?: { businessId?: string | null },
+  options?: { businessId?: string | null; accountBusinessCount?: number },
 ): PointOfSale[] {
   const wcIds = new Set(workCenters.map((wc) => String(wc._id || '').trim()).filter(Boolean));
   const businessId = normalizeBusinessScopeId(options?.businessId);
+  const multiBiz =
+    typeof options?.accountBusinessCount === 'number' && options.accountBusinessCount > 1;
   const pdvBusinessId = (p: PointOfSale) =>
     normalizeBusinessScopeId(
       String((p as PointOfSale & { business_id?: string }).business_id || p.businessId || ''),
     );
 
   if (wcIds.size === 0) {
-    // Sin tiendas en scope: PDV de la empresa; si aún no tienen businessId (legacy), no dejar el TPV vacío.
+    // Sin tiendas en scope: PDV de la empresa; legacy sin etiqueta solo en mono-empresa.
     if (!businessId) return [];
     const tagged = pointsOfSale.filter((p) => pdvBusinessId(p) === businessId);
     if (tagged.length > 0) return tagged;
+    if (multiBiz) return [];
     return pointsOfSale.filter((p) => !pdvBusinessId(p));
   }
 
   return pointsOfSale.filter((p) => {
     const wcId = String(p.workCenterId || '').trim();
-    if (wcId && wcIds.has(wcId)) return true;
     const pBid = pdvBusinessId(p);
+    // Otra empresa: nunca (aunque el WC esté en el scope por error).
+    if (businessId && pBid && pBid !== businessId) return false;
     if (businessId && pBid === businessId) return true;
-    // Legacy: PDV sin empresa y sin WC (o WC roto) — solo si no hay duda de otra empresa.
-    if (businessId && !pBid && !wcId) return true;
+    if (wcId && wcIds.has(wcId)) return true;
+    // Legacy sin empresa ni WC: solo mono-empresa (evita bodegeta en delivery).
+    if (businessId && !pBid && !wcId) return !multiBiz;
     return false;
   });
 }
@@ -554,7 +563,10 @@ export async function loadDeliveryStores(
         includeInactive: includeInactivePdvs,
       });
   const filteredByWc = dedupePointsOfSale(
-    filterPointsOfSaleForWorkCenters(pointsOfSale, workCenters, { businessId }),
+    filterPointsOfSaleForWorkCenters(pointsOfSale, workCenters, {
+      businessId,
+      accountBusinessCount: options?.accountBusinessCount,
+    }),
     dedupeOpts,
   );
   pointsOfSale = filteredByWc;

@@ -7,6 +7,7 @@ import { Layout } from '../../components/saas/Layout';
 import { Tabs } from '../../components/saas/Tabs';
 import { useApp } from '../../context/AppContext';
 import { useBusiness } from '../../context/BusinessContext';
+import { isCompraventaBusinessType } from '../../lib/compraventaSetup';
 import type { ConsentHistoryEntry, GdprRecord, LeadInteraction, Client as AppContextClient } from '../../context/AppContext';
 import { computeLeadScore, getScoreColor, getScoreLabel } from '../../lib/leadScoring';
 import { InteractionTimeline, type TimelineEvent } from '../../components/saas/InteractionTimeline';
@@ -321,6 +322,7 @@ export function ClientDetail() {
   const isRestaurantBusiness = currentBusiness?.businessType === 'restaurant';
   const isHeladeriaBusiness = currentBusiness?.businessType === 'iceCreamShop';
   const isRealEstateBusiness = currentBusiness?.businessType === 'realEstate';
+  const isCompraventaBusiness = isCompraventaBusinessType(currentBusiness?.businessType);
   /** Solo delivery mantiene CRM ops (pedidos/stats). Resto → ficha core sin enlace delivery. */
   const isOpsCrmBusiness = isDeliveryBusiness;
   const clientPlan = useClientDetailPlanAccess();
@@ -1087,6 +1089,28 @@ export function ClientDetail() {
     navigate(`/saas/caja/tpv?clientId=${encodeURIComponent(client.id)}`);
   };
 
+  const goToRestaurantReservation = () => {
+    if (!client) return;
+    const params = new URLSearchParams({ nuevo: '1', clientId: client.id });
+    if (client.name) params.set('name', client.name);
+    if (client.phone) params.set('phone', client.phone);
+    if (client.email) params.set('email', client.email);
+    const referral = String(
+      (fetchedClientRecord as { referralCode?: string } | null)?.referralCode
+        || (client as { referralCode?: string }).referralCode
+        || ctxClient?.referralCode
+        || '',
+    ).trim();
+    if (referral) params.set('referralCode', referral);
+    const loyalty = fetchedClientRecord?.loyalty || ctxClient?.loyalty;
+    if (loyalty?.enrolled) {
+      params.set('loyalty', '1');
+      if (loyalty.points != null) params.set('loyaltyPoints', String(loyalty.points));
+      if (loyalty.level) params.set('loyaltyLevel', String(loyalty.level));
+    }
+    navigate(`/saas/reservations?${params.toString()}`);
+  };
+
   const goToOpsTpv = () => {
     if (isRestaurantBusiness) {
       goToRestaurantTpv();
@@ -1811,6 +1835,30 @@ export function ClientDetail() {
             >
               <ShoppingBag className="w-4 h-4" />
               Nuevo pedido delivery
+            </button>
+          </div>
+        )}
+        {isRestaurantBusiness && (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl border-2 border-violet-200 dark:border-violet-800 bg-violet-50/90 dark:bg-violet-950/35">
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-violet-900 dark:text-violet-100">Reserva desde esta ficha</p>
+              <p className="text-xs text-violet-800/90 dark:text-violet-300 mt-0.5">
+                Crea una reserva con {client.name} ya vinculado
+                {String((client as { referralCode?: string }).referralCode || ctxClient?.referralCode || '').trim()
+                  ? ' · cliente con código afiliado'
+                  : ' · sin código afiliado'}
+                {(fetchedClientRecord?.loyalty || ctxClient?.loyalty)?.enrolled
+                  ? ' · fidelización activa'
+                  : ''}.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={goToRestaurantReservation}
+              className="shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold transition-colors shadow-sm"
+            >
+              <Calendar className="w-4 h-4" />
+              Hacer reserva
             </button>
           </div>
         )}
@@ -3058,6 +3106,42 @@ export function ClientDetail() {
                   </div>
                 )}
               </div>
+              {isRestaurantBusiness ? (
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {(() => {
+                    const referral = String(
+                      (fetchedClientRecord as { referralCode?: string } | null)?.referralCode
+                        || (client as { referralCode?: string }).referralCode
+                        || ctxClient?.referralCode
+                        || '',
+                    ).trim();
+                    const loyalty = fetchedClientRecord?.loyalty || ctxClient?.loyalty;
+                    return (
+                      <>
+                        <span
+                          className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold border ${
+                            referral
+                              ? 'bg-amber-400/25 border-amber-200/50 text-amber-50'
+                              : 'bg-white/10 border-white/25 text-white/90'
+                          }`}
+                        >
+                          {referral ? `Afiliado · ${referral}` : 'Sin código afiliado'}
+                        </span>
+                        {loyalty?.enrolled ? (
+                          <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold border bg-emerald-400/20 border-emerald-200/40 text-emerald-50">
+                            Fidelización · {loyalty.points || 0} pts
+                            {loyalty.level ? ` · ${loyalty.level}` : ''}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold border bg-white/10 border-white/25 text-white/90">
+                            Sin fidelización
+                          </span>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
+              ) : null}
               {/* Tags */}
               <div className="flex flex-wrap items-center gap-1.5 mt-3 relative">
                 {(ctxClient?.tags || []).map((tag) => (
@@ -3141,15 +3225,44 @@ export function ClientDetail() {
                     Editar datos
                   </button>
                 </>
-              ) : (
+              ) : isRestaurantBusiness ? (
                 <>
                   <button
-                    onClick={handleCreateContract}
-                    className="px-4 py-2.5 bg-white dark:bg-gray-800 hover:bg-blue-50 text-blue-600 rounded-xl font-semibold transition-colors flex items-center gap-2 text-sm"
+                    type="button"
+                    onClick={goToRestaurantReservation}
+                    className="px-4 py-2.5 bg-white dark:bg-gray-800 hover:bg-violet-50 text-violet-700 rounded-xl font-semibold transition-colors flex items-center gap-2 text-sm"
                   >
-                    <FileText className="w-4 h-4" />
-                    Crear contrato
+                    <Calendar className="w-4 h-4" />
+                    Hacer reserva
                   </button>
+                  <button
+                    type="button"
+                    onClick={goToRestaurantTpv}
+                    className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-semibold transition-colors flex items-center gap-2 text-sm shadow-md shadow-emerald-900/15"
+                  >
+                    <ShoppingBag className="w-4 h-4" />
+                    Abrir TPV sala
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('datos')}
+                    className="px-4 py-2.5 bg-white/20 hover:bg-white/30 text-white rounded-xl font-semibold transition-colors flex items-center gap-2 text-sm"
+                  >
+                    <Edit2 className="w-4 h-4" />
+                    Editar datos
+                  </button>
+                </>
+              ) : (
+                <>
+                  {isCompraventaBusiness ? (
+                    <button
+                      onClick={handleCreateContract}
+                      className="px-4 py-2.5 bg-white dark:bg-gray-800 hover:bg-blue-50 text-blue-600 rounded-xl font-semibold transition-colors flex items-center gap-2 text-sm"
+                    >
+                      <FileText className="w-4 h-4" />
+                      Crear contrato
+                    </button>
+                  ) : null}
                   {dataUserId && (
                     <button
                       onClick={async () => {
@@ -3352,17 +3465,19 @@ export function ClientDetail() {
         {activeTab === 'gdpr' && renderGdprTab()}
       </div>
 
-      {/* Create Contract Modal */}
-      <SAAS__CreateContractModal
-        isOpen={showCreateContractModal}
-        onClose={() => setShowCreateContractModal(false)}
-        client={client}
-        vehicles={vehicles || []}
-        userId={dataUserId || authUser?.id || ''}
-        responsibleName={authUser?.fullName || ''}
-        companyName={authUser?.companyName || 'Vertial'}
-        onSubmit={() => setShowCreateContractModal(false)}
-      />
+      {/* Create Contract Modal — solo compraventa (vehículos) */}
+      {isCompraventaBusiness ? (
+        <SAAS__CreateContractModal
+          isOpen={showCreateContractModal}
+          onClose={() => setShowCreateContractModal(false)}
+          client={client}
+          vehicles={vehicles || []}
+          userId={dataUserId || authUser?.id || ''}
+          responsibleName={authUser?.fullName || ''}
+          companyName={authUser?.companyName || 'Vertial'}
+          onSubmit={() => setShowCreateContractModal(false)}
+        />
+      ) : null}
 
       {/* U-04: Confirm client deletion */}
       <ConfirmDestroyModal
