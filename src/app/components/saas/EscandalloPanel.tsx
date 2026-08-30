@@ -60,7 +60,7 @@ import {
 } from '../../lib/catalogCosting';
 import { downloadEscandalloProductsExcel } from '../../lib/escandalloExcelExport';
 import { buildEscandalloIngredientCostRows } from '../../lib/escandalloIngredientCosts';
-import { formatDateTimeEs } from '../../lib/formatDateEs';
+import { formatDateEs, formatDateTimeEs } from '../../lib/formatDateEs';
 import { formatMoneyEs } from '../../lib/formatNumberEs';
 import { syncFullStockAutomationAfterCatalogImport } from '../../lib/deliveryCatalogImport';
 import { syncRecipeForCostingProduct } from '../../lib/recipeSyncFromCosting';
@@ -91,12 +91,80 @@ import { CategoryBulkCostingPanel } from './CategoryBulkCostingPanel';
 
 type StatusFilter = 'all' | 'fixed' | 'recipe' | 'none';
 type EscandalloViewTab = 'products' | 'ingredients' | 'history';
+type HistoryDatePreset = '7d' | '30d' | 'month' | 'all' | 'custom';
 
 type RecipeLineDraft = {
   storeIngredientId: string;
   quantity: string;
   unit: string;
 };
+
+function toYmdLocal(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** Rango ISO para filtrar movimientos (inclusive en el día). */
+function resolveHistoryDateRange(
+  preset: HistoryDatePreset,
+  customFrom: string,
+  customTo: string,
+): { dateFrom?: string; dateTo?: string; label: string } {
+  const now = new Date();
+  const today = toYmdLocal(now);
+  if (preset === 'all') {
+    return { label: 'Todo' };
+  }
+  if (preset === '7d') {
+    const from = new Date(now);
+    from.setDate(from.getDate() - 7);
+    const ymd = toYmdLocal(from);
+    return {
+      dateFrom: `${ymd}T00:00:00.000`,
+      dateTo: `${today}T23:59:59.999`,
+      label: 'Últimos 7 días',
+    };
+  }
+  if (preset === '30d') {
+    const from = new Date(now);
+    from.setDate(from.getDate() - 30);
+    const ymd = toYmdLocal(from);
+    return {
+      dateFrom: `${ymd}T00:00:00.000`,
+      dateTo: `${today}T23:59:59.999`,
+      label: 'Últimos 30 días',
+    };
+  }
+  if (preset === 'month') {
+    const from = new Date(now.getFullYear(), now.getMonth(), 1);
+    const ymd = toYmdLocal(from);
+    return {
+      dateFrom: `${ymd}T00:00:00.000`,
+      dateTo: `${today}T23:59:59.999`,
+      label: 'Este mes',
+    };
+  }
+  const from = String(customFrom || '').trim();
+  const to = String(customTo || '').trim() || today;
+  return {
+    dateFrom: from ? `${from}T00:00:00.000` : undefined,
+    dateTo: to ? `${to}T23:59:59.999` : undefined,
+    label: from || to ? `${formatDateEs(from || to)} → ${formatDateEs(to || from)}` : 'Personalizado',
+  };
+}
+
+function groupMovementsByDay(movements: StockMovement[]): Array<{ day: string; items: StockMovement[] }> {
+  const map = new Map<string, StockMovement[]>();
+  for (const m of movements) {
+    const day = formatDateEs(m.createdAt) || 'Sin fecha';
+    const arr = map.get(day) || [];
+    arr.push(m);
+    map.set(day, arr);
+  }
+  return [...map.entries()].map(([day, items]) => ({ day, items }));
+}
 
 function formatMoney(value: number): string {
   return `${value.toFixed(2)}€`;
@@ -711,6 +779,16 @@ export function EscandalloPanel({
   const [historyMovements, setHistoryMovements] = useState<StockMovement[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [historyPreset, setHistoryPreset] = useState<HistoryDatePreset>('30d');
+  const [historyFrom, setHistoryFrom] = useState('');
+  const [historyTo, setHistoryTo] = useState('');
+
+  const historyRange = useMemo(
+    () => resolveHistoryDateRange(historyPreset, historyFrom, historyTo),
+    [historyPreset, historyFrom, historyTo],
+  );
+
+  const historyByDay = useMemo(() => groupMovementsByDay(historyMovements), [historyMovements]);
 
   const ingredientsById = useMemo(() => storeIngredientsById(storeIngredients), [storeIngredients]);
   const stockByStoreIngredientId = useMemo(
@@ -761,9 +839,12 @@ export function EscandalloPanel({
     if (!uid) return;
     setHistoryLoading(true);
     try {
+      const range = resolveHistoryDateRange(historyPreset, historyFrom, historyTo);
       const movements = await listStockMovementsRequest(uid, {
         movementType: 'purchase_reception',
-        limit: 80,
+        dateFrom: range.dateFrom,
+        dateTo: range.dateTo,
+        limit: historyPreset === 'all' ? 120 : 300,
       });
       const sorted = [...movements].sort((a, b) =>
         String(b.createdAt || '').localeCompare(String(a.createdAt || '')),
@@ -775,12 +856,12 @@ export function EscandalloPanel({
     } finally {
       setHistoryLoading(false);
     }
-  }, [dataUserId, user?.id]);
+  }, [dataUserId, user?.id, historyPreset, historyFrom, historyTo]);
 
   useEffect(() => {
-    if (viewTab !== 'history' || historyLoaded || historyLoading) return;
+    if (viewTab !== 'history') return;
     void loadHistory();
-  }, [viewTab, historyLoaded, historyLoading, loadHistory]);
+  }, [viewTab, loadHistory]);
 
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     const uid = dataUserId || user?.id;
@@ -1013,7 +1094,8 @@ export function EscandalloPanel({
               ]
             : viewTab === 'history'
               ? [
-                  { label: 'entradas compra', value: historyMovements.length },
+                  { label: 'entradas', value: historyMovements.length },
+                  { label: 'periodo', value: historyRange.label },
                 ]
             : [
                 { label: 'productos', value: kpis.total },
@@ -1070,16 +1152,43 @@ export function EscandalloPanel({
               className="relative w-full sm:w-64"
             />
           ) : (
-            <SaasTabSecondaryButton
-              disabled={historyLoading}
-              onClick={() => {
-                setHistoryLoaded(false);
-                void loadHistory();
-              }}
-            >
-              {historyLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-              Actualizar
-            </SaasTabSecondaryButton>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                className="px-2 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg text-xs bg-white dark:bg-gray-900 outline-none"
+                value={historyPreset}
+                onChange={(e) => setHistoryPreset(e.target.value as HistoryDatePreset)}
+                aria-label="Periodo del histórico"
+              >
+                <option value="7d">Últimos 7 días</option>
+                <option value="30d">Últimos 30 días</option>
+                <option value="month">Este mes</option>
+                <option value="all">Todo</option>
+                <option value="custom">Fechas…</option>
+              </select>
+              {historyPreset === 'custom' ? (
+                <>
+                  <input
+                    type="date"
+                    value={historyFrom}
+                    onChange={(e) => setHistoryFrom(e.target.value)}
+                    className="px-2 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg text-xs bg-white dark:bg-gray-900"
+                    aria-label="Desde"
+                  />
+                  <span className="text-xs text-gray-400">→</span>
+                  <input
+                    type="date"
+                    value={historyTo}
+                    onChange={(e) => setHistoryTo(e.target.value)}
+                    className="px-2 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg text-xs bg-white dark:bg-gray-900"
+                    aria-label="Hasta"
+                  />
+                </>
+              ) : null}
+              <SaasTabSecondaryButton disabled={historyLoading} onClick={() => void loadHistory()}>
+                {historyLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                Actualizar
+              </SaasTabSecondaryButton>
+            </div>
           )
         }
         toolbarRight={
@@ -1214,50 +1323,66 @@ export function EscandalloPanel({
             </div>
           )
         ) : viewTab === 'history' ? (
-          historyLoading && !historyLoaded ? (
+          historyLoading && historyMovements.length === 0 ? (
             <CatalogCoreLoadingState kind="escandallo" compact />
           ) : historyMovements.length === 0 ? (
             <SaasTabEmpty
               icon={<History className="w-10 h-10" />}
-              title="Sin histórico de compras"
-              description="Cuando recibas un albarán o cargues factura al almacén, aquí verás entradas con precio (histórico de costes)."
+              title="Sin compras en este periodo"
+              description={`No hay entradas de compra (${historyRange.label}). Prueba otro rango o recibe un albarán: ahí queda el precio.`}
             />
           ) : (
             <div className="p-3 space-y-3">
               <p className="text-xs text-gray-600 dark:text-gray-400">
-                Entradas de compra al almacén (precio unitario). Es el rastro de cambios de coste.
+                Compras al almacén por fecha ({historyRange.label}). Así ves si el proveedor subió el precio.
               </p>
-              <div className="hidden md:grid grid-cols-[130px_1fr_80px_100px_1fr] gap-2 px-3 py-2 rounded-xl bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
-                <span>Fecha</span>
-                <span>Artículo</span>
-                <span className="text-right">Cant.</span>
-                <span className="text-right">€ / ud</span>
-                <span>Nota</span>
-              </div>
-              <div className="divide-y divide-gray-100 dark:divide-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden bg-white dark:bg-gray-800">
-                {historyMovements.map((m) => (
-                  <div
-                    key={m._id}
-                    className="grid grid-cols-1 md:grid-cols-[130px_1fr_80px_100px_1fr] gap-1 md:gap-2 px-3 py-2.5 text-sm"
-                  >
-                    <div className="text-gray-600 dark:text-gray-300 tabular-nums text-xs md:text-sm">
-                      {formatDateTimeEs(m.createdAt)}
-                    </div>
-                    <div className="font-medium text-gray-900 dark:text-gray-100 truncate">
-                      {m.catalogItemName || 'Artículo'}
-                    </div>
-                    <div className="text-right tabular-nums text-gray-700 dark:text-gray-300">
-                      {m.quantity}
-                    </div>
-                    <div className="text-right tabular-nums font-semibold text-gray-900 dark:text-gray-100">
-                      {Number(m.unitCost) > 0 ? formatMoneyEs(m.unitCost) : '—'}
-                    </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                      {m.notes || m.referenceType || '—'}
-                    </div>
+              {historyByDay.map(({ day, items }) => (
+                <section
+                  key={day}
+                  className="rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden bg-white dark:bg-gray-800"
+                >
+                  <div className="flex items-center justify-between gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+                    <span className="text-xs font-bold text-gray-800 dark:text-gray-100 tabular-nums">{day}</span>
+                    <span className="text-[10px] font-semibold uppercase text-gray-400 tabular-nums">
+                      {items.length} entrada{items.length === 1 ? '' : 's'}
+                    </span>
                   </div>
-                ))}
-              </div>
+                  <div className="hidden md:grid grid-cols-[90px_1fr_80px_100px_1fr] gap-2 px-3 py-1.5 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100 dark:border-gray-800">
+                    <span>Hora</span>
+                    <span>Artículo</span>
+                    <span className="text-right">Cant.</span>
+                    <span className="text-right">€ / ud</span>
+                    <span>Nota</span>
+                  </div>
+                  <div className="divide-y divide-gray-100 dark:divide-gray-800">
+                    {items.map((m) => {
+                      const time = formatDateTimeEs(m.createdAt).split(', ')[1] || '';
+                      return (
+                        <div
+                          key={m._id}
+                          className="grid grid-cols-1 md:grid-cols-[90px_1fr_80px_100px_1fr] gap-1 md:gap-2 px-3 py-2.5 text-sm"
+                        >
+                          <div className="text-gray-500 dark:text-gray-400 tabular-nums text-xs md:text-sm">
+                            {time || '—'}
+                          </div>
+                          <div className="font-medium text-gray-900 dark:text-gray-100 truncate">
+                            {m.catalogItemName || 'Artículo'}
+                          </div>
+                          <div className="text-right tabular-nums text-gray-700 dark:text-gray-300">
+                            {m.quantity}
+                          </div>
+                          <div className="text-right tabular-nums font-semibold text-gray-900 dark:text-gray-100">
+                            {Number(m.unitCost) > 0 ? formatMoneyEs(m.unitCost) : '—'}
+                          </div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                            {m.notes || m.referenceType || '—'}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
             </div>
           )
         ) : filteredProducts.length === 0 ? (
