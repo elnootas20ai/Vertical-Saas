@@ -6763,7 +6763,37 @@ export function buildDeliveryConfigDocument(userId, data = {}, existing = null) 
     inventorySyncExcludedKeys: sanitizeInventorySyncExcludedKeys(
       base.inventorySyncExcludedKeys ?? existing?.inventorySyncExcludedKeys,
     ),
+    escandalloInfrastructure: sanitizeEscandalloInfrastructure(
+      base.escandalloInfrastructure ?? existing?.escandalloInfrastructure,
+    ),
     createdAt: existing?.createdAt || now, updatedAt: now,
+  };
+}
+
+function sanitizeEscandalloInfrastructure(raw) {
+  const empty = { applyToFoodCost: false, estimatedMonthlySales: 0, lines: [] };
+  if (!raw || typeof raw !== 'object') return empty;
+  const linesRaw = Array.isArray(raw.lines) ? raw.lines : [];
+  const lines = [];
+  for (const entry of linesRaw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const name = String(entry.name || '').trim();
+    const amountMonthly = Number(entry.amountMonthly);
+    if (!name || !Number.isFinite(amountMonthly) || amountMonthly < 0) continue;
+    const id = String(entry.id || '').trim() || `infra-${lines.length + 1}`;
+    lines.push({
+      id,
+      name,
+      amountMonthly: Math.round(amountMonthly * 100) / 100,
+    });
+    if (lines.length >= 40) break;
+  }
+  const sales = Number(raw.estimatedMonthlySales);
+  return {
+    applyToFoodCost: Boolean(raw.applyToFoodCost),
+    estimatedMonthlySales:
+      Number.isFinite(sales) && sales > 0 ? Math.round(sales * 100) / 100 : 0,
+    lines,
   };
 }
 
@@ -6852,6 +6882,7 @@ export function sanitizeDeliveryConfig(doc) {
     tpvBrandSupplements: sanitizeTpvBrandSupplementsFlat(doc.tpvBrandSupplements),
     tpvCategoryTemplates: sanitizeTpvCategoryTemplates(doc.tpvCategoryTemplates),
     inventorySyncExcludedKeys: sanitizeInventorySyncExcludedKeys(doc.inventorySyncExcludedKeys),
+    escandalloInfrastructure: sanitizeEscandalloInfrastructure(doc.escandalloInfrastructure),
     createdAt: doc.createdAt || new Date().toISOString(),
     updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
   };

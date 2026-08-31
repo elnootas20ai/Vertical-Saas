@@ -3,10 +3,10 @@ import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import {
   ArrowDownCircle,
+  ArrowLeft,
   ArrowUpCircle,
   Boxes,
   ChevronDown,
-  ChevronLeft,
   Loader2,
   PackagePlus,
   Plus,
@@ -907,15 +907,18 @@ function StockEntryPickerModal({
           <SaasTabSearch value={query} onChange={setQuery} placeholder="Buscar artículo…" className="relative w-full" />
           {!searchActive && organizerId ? (
             <div className="flex items-center gap-2 min-w-0">
-              <button
+              <SaasTabSecondaryButton
                 type="button"
                 onClick={() => setOrganizerId('')}
-                className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
+                title="Retroceder a organizadores"
+                className="shrink-0 !border-[var(--v-blue,#2563eb)] !text-[var(--v-blue,#2563eb)] hover:!bg-blue-50 dark:hover:!bg-blue-950/40"
               >
-                <ChevronLeft className="h-3.5 w-3.5" />
-                Organizadores
-              </button>
-              <span className="text-stone-300 dark:text-stone-600">/</span>
+                <ArrowLeft className="w-4 h-4" />
+                Retroceder
+              </SaasTabSecondaryButton>
+              <span className="text-stone-300 dark:text-stone-600" aria-hidden>
+                /
+              </span>
               <p className="truncate text-sm font-semibold text-stone-900 dark:text-stone-100">
                 {activeOrganizerLabel || 'Almacén'}
               </p>
@@ -1978,19 +1981,22 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
             <div className="px-3 pt-3 pb-2 space-y-2.5 border-b border-gray-100 dark:border-gray-700">
               {!search.trim() && typeFilter ? (
                 <div className="flex items-center gap-2 min-w-0">
-                  <button
+                  <SaasTabSecondaryButton
                     type="button"
                     onClick={() => {
                       setTypeFilter('');
                       setStatusFilter('all');
                       exitSelectMode();
                     }}
-                    className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
+                    title="Retroceder a organizadores"
+                    className="shrink-0 !border-[var(--v-blue,#2563eb)] !text-[var(--v-blue,#2563eb)] hover:!bg-blue-50 dark:hover:!bg-blue-950/40"
                   >
-                    <ChevronLeft className="h-3.5 w-3.5" />
-                    Organizadores
-                  </button>
-                  <span className="text-stone-300 dark:text-stone-600">/</span>
+                    <ArrowLeft className="w-4 h-4" />
+                    Retroceder
+                  </SaasTabSecondaryButton>
+                  <span className="text-stone-300 dark:text-stone-600" aria-hidden>
+                    /
+                  </span>
                   <p className="truncate text-sm font-semibold text-stone-900 dark:text-stone-100">
                     {typeGroups.find((g) => g.id === typeFilter)?.label || 'Almacén'}
                   </p>

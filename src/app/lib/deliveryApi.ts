@@ -2759,6 +2759,15 @@ export interface DeliveryConfig {
   storeIngredients?: StoreIngredient[];
   /** Precio único para todos los extras de pago en el TPV. */
   tpvDefaultExtraPrice?: number;
+  /**
+   * Escandallo: costes de infraestructura opcionales (alquiler, luz…).
+   * Si applyToFoodCost es false, no afectan food cost.
+   */
+  escandalloInfrastructure?: {
+    applyToFoodCost?: boolean;
+    estimatedMonthlySales?: number;
+    lines?: Array<{ id?: string; name?: string; amountMonthly?: number }>;
+  };
   /** Menú TPV: por cada ingrediente quitado, 1 extra añadido va sin coste. */
   tpvFreeSwapOnRemove?: boolean;
   /** Coste de envío automático en TPV (solo pedidos a domicilio). */

@@ -4,8 +4,8 @@
  * Salida en resources/:
  *   icon.png              — icono iOS / fallback (fondo + V)
  *   icon-foreground.png   — solo la V (transparente) para adaptive icon Android
- *   icon-background.png   — fondo sólido #030213
- *   splash.png            — pantalla de arranque
+ *   icon-background.png   — fondo sólido #000000
+ *   splash.png            — pantalla de arranque (negro + V)
  */
 import sharp from 'sharp';
 import { mkdir, readFile } from 'fs/promises';

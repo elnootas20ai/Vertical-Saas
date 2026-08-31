@@ -1,6 +1,7 @@
 import type { CatalogItem, StockCategory } from './deliveryApi';
 import type { ProductRecipeLine } from './catalogCosting';
 import {
+  calculateRecipeLineCost,
   readProductCostingType,
   readProductMermaPct,
   readProductRecipeLines,
@@ -55,17 +56,20 @@ function lineToRecipeIngredient(
   const quantity = Number(line.quantity) || 0;
   if (quantity <= 0) return null;
 
+  let ingredientUnit: string | undefined;
   if (line.storeIngredientId && ingredientsById) {
     const ing = ingredientsById.get(line.storeIngredientId);
     if (ing) {
       costPerUnit = resolveIngredientUnitCost(ing, stock, undefined).effective;
+      ingredientUnit = ing.unit;
     }
   }
   if (!(costPerUnit > 0)) {
     costPerUnit = Number(stock?.lastPurchasePrice) || Number(stock?.costPrice) || 0;
   }
 
-  const totalCost = Math.round(quantity * costPerUnit * 100) / 100;
+  const lineUnit = line.unit || 'ud';
+  const totalCost = calculateRecipeLineCost(quantity, lineUnit, costPerUnit, ingredientUnit);
   const isPackaging = stockCategory === 'packaging';
   const waste = isPackaging ? 0 : Math.min(100, Math.max(0, Number(wastePercent) || 0));
   const netQuantity = Math.round(quantity * (1 - waste / 100) * 10000) / 10000;

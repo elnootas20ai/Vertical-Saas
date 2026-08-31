@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Loader2, Minus, Plus, Search, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Loader2, Plus, Search, Trash2 } from 'lucide-react';
 import type { Brand } from '../../lib/brandsApi';
 import { type ProductRecipeLine } from '../../lib/catalogCosting';
 import {
@@ -8,6 +8,81 @@ import {
   type StoreIngredient,
 } from '../../lib/catalogCustomization';
 import { VERTIAL_BTN_PRIMARY } from '../../lib/vertialUiTokens';
+
+/** Borrador de cantidad: coma y punto valen igual como decimal. */
+function parseRecipeQtyDraft(raw: string, opts?: { commitIncomplete?: boolean }): number | null {
+  let trimmed = String(raw || '')
+    .trim()
+    .replace(/\s/g, '')
+    .replace(',', '.');
+  if (trimmed === '' || trimmed === '.') return null;
+  if (trimmed.endsWith('.')) {
+    if (!opts?.commitIncomplete) return null;
+    trimmed = trimmed.slice(0, -1);
+    if (trimmed === '') return null;
+  }
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(n * 1000) / 1000;
+}
+
+function isRecipeQtyDraftAllowed(raw: string): boolean {
+  return raw === '' || /^\d*[.,]?\d*$/.test(raw);
+}
+
+function RecipeQtyInput({
+  value,
+  onCommit,
+  ariaLabel,
+}: {
+  value: number;
+  onCommit: (n: number) => void;
+  ariaLabel: string;
+}) {
+  const [draft, setDraft] = useState(() => String(value).replace('.', ','));
+  const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    if (!focused) setDraft(String(value).replace('.', ','));
+  }, [value, focused]);
+
+  const commit = () => {
+    const parsed = parseRecipeQtyDraft(draft, { commitIncomplete: true });
+    if (parsed == null) {
+      setDraft(String(value).replace('.', ','));
+      return;
+    }
+    setDraft(String(parsed).replace('.', ','));
+    if (parsed !== value) onCommit(parsed);
+  };
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={draft}
+      onChange={(e) => {
+        const next = e.target.value;
+        if (!isRecipeQtyDraftAllowed(next)) return;
+        setDraft(next);
+      }}
+      onFocus={(e) => {
+        setFocused(true);
+        e.target.select();
+      }}
+      onBlur={() => {
+        setFocused(false);
+        commit();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+      }}
+      aria-label={ariaLabel}
+      placeholder="0"
+      className="w-24 px-2.5 py-2 rounded-xl border-2 border-stone-200 bg-white text-sm font-semibold tabular-nums text-center outline-none focus:border-[var(--v-blue,#2563eb)] dark:border-stone-700 dark:bg-stone-900"
+    />
+  );
+}
 
 export type CatalogRecipePick = {
   storeIngredientId: string;
@@ -137,19 +212,7 @@ export function CatalogProductRecipePicker({
     ]);
   };
 
-  const updateQty = (id: string, delta: number) => {
-    onChange(
-      picks.map((p) => {
-        if (p.storeIngredientId !== id) return p;
-        const step = p.unit === 'kg' || p.unit === 'l' || p.unit === 'lt' ? 0.01 : 1;
-        const next = Math.round((p.quantity + delta * step) * 1000) / 1000;
-        return { ...p, quantity: Math.max(step, next) };
-      }),
-    );
-  };
-
-  const setQty = (id: string, raw: string) => {
-    const n = Number(String(raw).replace(',', '.'));
+  const setQty = (id: string, n: number) => {
     if (!Number.isFinite(n) || n < 0) return;
     onChange(
       picks.map((p) =>
@@ -170,9 +233,11 @@ export function CatalogProductRecipePicker({
     onChange(picks.filter((p) => p.storeIngredientId !== id));
   };
 
-  const submitCreate = async () => {
+  const submitCreate = async (nameOverride?: string) => {
     if (!onCreateIngredient || creatingIngredient) return;
-    const name = newName.trim().replace(/\s+/g, ' ');
+    const name = String(nameOverride ?? newName)
+      .trim()
+      .replace(/\s+/g, ' ');
     if (!name) return;
     const nameDraft = name;
 
@@ -219,52 +284,30 @@ export function CatalogProductRecipePicker({
                   <span className="text-[10px] font-semibold uppercase tracking-wide text-stone-400 shrink-0">
                     Cuánto usas
                   </span>
-                  <div className="flex items-center gap-1 rounded-xl border border-stone-200 bg-stone-50 p-0.5 dark:border-stone-700 dark:bg-stone-950">
-                    <button
-                      type="button"
-                      onClick={() => updateQty(pick.storeIngredientId, -1)}
-                      className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center rounded-lg hover:bg-white dark:hover:bg-stone-800"
-                      aria-label="Menos"
-                    >
-                      <Minus className="w-4 h-4" />
-                    </button>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={String(pick.quantity)}
-                      onChange={(e) => setQty(pick.storeIngredientId, e.target.value)}
-                      aria-label={`Cantidad de ${pick.name}`}
-                      placeholder="0"
-                      className="w-20 text-center px-1 py-1.5 rounded-lg border-0 bg-transparent text-sm font-bold tabular-nums outline-none focus:bg-white dark:focus:bg-stone-900"
-                    />
-                    <select
-                      value={pick.unit || 'ud'}
-                      onChange={(e) => {
-                        const unit = e.target.value;
-                        onChange(
-                          picks.map((p) =>
-                            p.storeIngredientId === pick.storeIngredientId ? { ...p, unit } : p,
-                          ),
-                        );
-                      }}
-                      aria-label={`Unidad de ${pick.name}`}
-                      className="h-9 rounded-lg border-0 bg-transparent pl-1 pr-1 text-xs font-semibold text-stone-600 outline-none dark:text-stone-300"
-                    >
-                      <option value="g">g</option>
-                      <option value="kg">kg</option>
-                      <option value="ml">ml</option>
-                      <option value="l">l</option>
-                      <option value="ud">ud</option>
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => updateQty(pick.storeIngredientId, 1)}
-                      className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center rounded-lg hover:bg-white dark:hover:bg-stone-800"
-                      aria-label="Más"
-                    >
-                      <Plus className="w-4 h-4" />
-                    </button>
-                  </div>
+                  <RecipeQtyInput
+                    value={pick.quantity}
+                    onCommit={(n) => setQty(pick.storeIngredientId, n)}
+                    ariaLabel={`Cantidad de ${pick.name}`}
+                  />
+                  <select
+                    value={pick.unit || 'ud'}
+                    onChange={(e) => {
+                      const unit = e.target.value;
+                      onChange(
+                        picks.map((p) =>
+                          p.storeIngredientId === pick.storeIngredientId ? { ...p, unit } : p,
+                        ),
+                      );
+                    }}
+                    aria-label={`Unidad de ${pick.name}`}
+                    className="h-10 rounded-xl border-2 border-stone-200 bg-white pl-2 pr-1 text-xs font-semibold text-stone-700 outline-none focus:border-[var(--v-blue,#2563eb)] dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200"
+                  >
+                    <option value="g">g</option>
+                    <option value="kg">kg</option>
+                    <option value="ml">ml</option>
+                    <option value="l">l</option>
+                    <option value="ud">ud</option>
+                  </select>
                   <span className="text-[10px] text-stone-400 hidden sm:inline">aprox.</span>
                 </div>
                 {hideTpvOptions ? null : (
@@ -364,6 +407,12 @@ export function CatalogProductRecipePicker({
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter') return;
+            if (!onCreateIngredient || available.length > 0 || !search.trim()) return;
+            e.preventDefault();
+            void submitCreate(search);
+          }}
           placeholder="Buscar ingrediente…"
           className="w-full pl-9 pr-3 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm"
         />
@@ -374,13 +423,37 @@ export function CatalogProductRecipePicker({
           No hay ingredientes. Créalos en <strong>Catálogo → Ingredientes</strong> y vuelve.
         </p>
       ) : available.length === 0 ? (
-        <p className="text-xs text-gray-500 text-center py-1">
-          {search.trim()
-            ? 'Sin resultados'
-            : scoped.length === 0
-              ? 'No hay ingredientes para esta marca. Créalos en Catálogo → Ingredientes.'
-              : 'Todos ya están en este plato'}
-        </p>
+        search.trim() && onCreateIngredient ? (
+          <div className="flex items-center justify-between gap-2 rounded-xl border border-dashed border-stone-300 bg-stone-50/80 px-2.5 py-2 dark:border-stone-600 dark:bg-stone-900/40">
+            <p className="min-w-0 text-xs text-stone-500 dark:text-stone-400 truncate">
+              Sin resultados
+            </p>
+            <button
+              type="button"
+              disabled={creatingIngredient}
+              onClick={() => void submitCreate(search)}
+              className={`${VERTIAL_BTN_PRIMARY} !min-h-0 shrink-0 px-3 py-1.5 text-xs disabled:opacity-50 inline-flex items-center gap-1.5 max-w-[65%]`}
+              title={`Añadir «${search.trim()}»`}
+            >
+              {creatingIngredient ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+              ) : (
+                <Plus className="w-3.5 h-3.5 shrink-0" />
+              )}
+              <span className="truncate">
+                {creatingIngredient ? 'Creando…' : `Añadir «${search.trim()}»`}
+              </span>
+            </button>
+          </div>
+        ) : (
+          <p className="text-xs text-gray-500 text-center py-1">
+            {search.trim()
+              ? 'Sin resultados'
+              : scoped.length === 0
+                ? 'No hay ingredientes para esta marca. Créalos en Catálogo → Ingredientes.'
+                : 'Todos ya están en este plato'}
+          </p>
+        )
       ) : (
         <div
           className={`grid gap-1.5 max-h-40 overflow-y-auto pr-0.5 ${
@@ -469,17 +542,7 @@ export function CatalogProductPackagingPicker({
     ]);
   };
 
-  const updateQty = (id: string, delta: number) => {
-    onChange(
-      picks.map((p) => {
-        if (p.catalogItemId !== id) return p;
-        return { ...p, quantity: Math.max(1, p.quantity + delta) };
-      }),
-    );
-  };
-
-  const setQty = (id: string, raw: string) => {
-    const n = Number(String(raw).replace(',', '.'));
+  const setQty = (id: string, n: number) => {
     if (!Number.isFinite(n) || n < 0) return;
     onChange(
       picks.map((p) =>
@@ -534,32 +597,11 @@ export function CatalogProductPackagingPicker({
                 <span className="text-[10px] font-semibold uppercase tracking-wide text-stone-400 shrink-0">
                   Ud. por venta
                 </span>
-                <div className="flex items-center gap-1 rounded-xl border border-stone-200 bg-stone-50 p-0.5 dark:border-stone-700 dark:bg-stone-950">
-                  <button
-                    type="button"
-                    onClick={() => updateQty(pick.catalogItemId, -1)}
-                    className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center rounded-lg hover:bg-white dark:hover:bg-stone-800"
-                    aria-label="Menos"
-                  >
-                    <Minus className="w-4 h-4" />
-                  </button>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={String(pick.quantity)}
-                    onChange={(e) => setQty(pick.catalogItemId, e.target.value)}
-                    aria-label={`Cantidad de ${pick.name}`}
-                    className="w-16 text-center px-1 py-1.5 rounded-lg border-0 bg-transparent text-sm font-bold tabular-nums outline-none focus:bg-white dark:focus:bg-stone-900"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => updateQty(pick.catalogItemId, 1)}
-                    className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center rounded-lg hover:bg-white dark:hover:bg-stone-800"
-                    aria-label="Más"
-                  >
-                    <Plus className="w-4 h-4" />
-                  </button>
-                </div>
+                <RecipeQtyInput
+                  value={pick.quantity}
+                  onCommit={(n) => setQty(pick.catalogItemId, n)}
+                  ariaLabel={`Cantidad de ${pick.name}`}
+                />
                 <button
                   type="button"
                   onClick={() => removePick(pick.catalogItemId)}

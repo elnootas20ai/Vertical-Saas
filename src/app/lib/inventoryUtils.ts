@@ -494,11 +494,11 @@ function leftoverOrganizerGroups(
       ...countStatusForItems(subset),
     });
   }
-  return groups;
+  return groups.sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' }));
 }
 
 /**
- * Orden almacén: Bebidas → Complementos → Envases → Limpieza → Varios → resto.
+ * Organizadores del almacén ordenados A→Z por etiqueta.
  * Las marcas comerciales (Burger, Tacos…) son de facturación/TPV: no salen como chips.
  */
 export function buildInventoryOrganizerGroups(
@@ -570,14 +570,17 @@ export function buildInventoryOrganizerGroups(
     return true;
   });
 
+  const byLabel = (a: InventoryOrganizerGroup, b: InventoryOrganizerGroup) =>
+    a.label.localeCompare(b.label, 'es', { sensitivity: 'base' });
+
   if (extras.length === 0) {
     if (leftoverGroups.length === 1 && leftoverGroups[0].id === ORGANIZER_TOTAL) {
       return [];
     }
-    return leftoverGroups;
+    return leftoverGroups.sort(byLabel);
   }
 
-  return [...extras, ...leftoverGroups];
+  return [...extras, ...leftoverGroups].sort(byLabel);
 }
 
 export function filterItemsByOrganizer(

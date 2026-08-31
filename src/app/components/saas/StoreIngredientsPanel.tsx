@@ -4,7 +4,6 @@ import {
   Loader2,
   Plus,
   Trash2,
-  Euro,
   AlertCircle,
   Package,
   Pencil,
@@ -21,6 +20,7 @@ import {
   ingredientChargesExtra,
   mergeDuplicateStoreIngredients,
   normalizeStoreIngredientRecipeLines,
+  normalizeStoreIngredientUnit,
   normalizeStoreIngredients,
   normalizeTpvDefaultExtraPrice,
   readStoreIngredientTpvFlags,
@@ -29,10 +29,13 @@ import {
   type StoreIngredient,
 } from '../../lib/catalogCustomization';
 import { getDeliveryConfigRequest, listCatalogItemsRequest, updateDeliveryConfigRequest, pointOfSaleDisplayLabel, type CatalogItem } from '../../lib/deliveryApi';
-import { readProductRecipeLines } from '../../lib/catalogCosting';
+import {
+  calculateRecipeLineCost,
+  readProductRecipeLines,
+  resolveIngredientUnitCost,
+} from '../../lib/catalogCosting';
 import { formatMoneyEs } from '../../lib/formatNumberEs';
 import { CatalogCoreLoadingState } from './CatalogCoreLoadingState';
-import { withVertialDefaultBaseCost } from '../../lib/vertialDefaultCosts';
 import { normalizeTenantUserId } from '../../lib/tenantUserId';
 import { listBrandsRequest, type Brand } from '../../lib/brandsApi';
 import {
@@ -227,7 +230,7 @@ function IngredientCostCell({
   );
 }
 
-/** Precio que se cobra en TPV al añadir este ingrediente como extra. */
+/** Precio que se cobra en TPV al añadir este ingrediente como extra. Vacío = hereda el predeterminado de la barra. */
 function IngredientExtraPriceCell({
   ingredient,
   fallbackPrice,
@@ -235,37 +238,47 @@ function IngredientExtraPriceCell({
 }: {
   ingredient: StoreIngredient;
   fallbackPrice?: number | null;
-  onCommit: (value: number) => void;
+  onCommit: (value: number | null) => void;
 }) {
-  const resolved =
-    normalizeTpvDefaultExtraPrice(ingredient.extraPrice) ??
-    (fallbackPrice != null && Number.isFinite(fallbackPrice) ? fallbackPrice : null);
-  const [draft, setDraft] = useState(resolved != null ? String(resolved) : '');
+  const own = normalizeTpvDefaultExtraPrice(ingredient.extraPrice);
+  const [draft, setDraft] = useState(own != null ? String(own) : '');
 
   useEffect(() => {
-    const next =
-      normalizeTpvDefaultExtraPrice(ingredient.extraPrice) ??
-      (fallbackPrice != null && Number.isFinite(fallbackPrice) ? fallbackPrice : null);
+    const next = normalizeTpvDefaultExtraPrice(ingredient.extraPrice);
     setDraft(next != null ? String(next) : '');
-  }, [ingredient.id, ingredient.extraPrice, fallbackPrice]);
+  }, [ingredient.id, ingredient.extraPrice]);
 
   const commit = () => {
     const raw = draft.trim().replace(',', '.');
-    const n = raw === '' ? NaN : Number(raw);
+    if (raw === '') {
+      setDraft('');
+      if (own != null) onCommit(null);
+      return;
+    }
+    const n = Number(raw);
     if (!Number.isFinite(n) || n < 0) {
-      const next =
-        normalizeTpvDefaultExtraPrice(ingredient.extraPrice) ??
-        (fallbackPrice != null && Number.isFinite(fallbackPrice) ? fallbackPrice : null);
-      setDraft(next != null ? String(next) : '');
+      setDraft(own != null ? String(own) : '');
       return;
     }
     const rounded = Math.round(n * 100) / 100;
     setDraft(String(rounded));
-    if (rounded !== (normalizeTpvDefaultExtraPrice(ingredient.extraPrice) ?? -1)) onCommit(rounded);
+    if (rounded !== own) onCommit(rounded);
   };
 
+  const placeholder =
+    fallbackPrice != null && Number.isFinite(fallbackPrice)
+      ? String(fallbackPrice)
+      : '0,00';
+
   return (
-    <span className="inline-flex items-center gap-1" title="Cuánto se cobra en el TPV al añadirlo">
+    <span
+      className="inline-flex items-center gap-1"
+      title={
+        own != null
+          ? 'Precio propio de este extra (gana sobre el predeterminado)'
+          : 'Vacío: usa el precio predeterminado de la barra'
+      }
+    >
       <input
         type="text"
         inputMode="decimal"
@@ -275,7 +288,7 @@ function IngredientExtraPriceCell({
         onKeyDown={(e) => {
           if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
         }}
-        placeholder="0,00"
+        placeholder={placeholder}
         aria-label={`Precio extra de ${ingredient.name}`}
         className="w-16 px-1.5 py-1 text-right text-xs font-semibold tabular-nums border border-amber-200 dark:border-amber-800 rounded-lg bg-amber-50/80 dark:bg-amber-950/30 outline-none focus:border-amber-500"
       />
@@ -330,7 +343,7 @@ type IngredientDraft = {
   extraPrice: string;
 };
 
-function emptyDraft(chargeExtra: boolean): IngredientDraft {
+function emptyDraft(chargeExtra = true): IngredientDraft {
   return {
     name: '',
     chargeExtra,
@@ -361,6 +374,7 @@ function draftToItem(draft: IngredientDraft, existingId?: string): StoreIngredie
     {
       id: existingId || `ing-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       name,
+      unit: 'kg',
       escandalloOnly: false,
       ...(extraPrice != null ? { extraPrice } : {}),
     },
@@ -499,32 +513,79 @@ const EDIT_INGREDIENT_TABS: Array<{
   hint: string;
   Icon: typeof Package;
 }> = [
-  { id: 'datos', label: 'Datos', hint: 'Nombre y coste', Icon: Package },
+  { id: 'datos', label: 'Datos', hint: 'Nombre, coste y unidad', Icon: Package },
   { id: 'tpv', label: 'TPV', hint: 'Extra y quitar', Icon: SlidersHorizontal },
-  { id: 'productos', label: 'Productos', hint: 'Dónde se usa', Icon: ShoppingBag },
+  { id: 'productos', label: 'Productos', hint: 'Consumo por plato', Icon: ShoppingBag },
 ];
+
+type LinkedProductRow = {
+  _id: string;
+  name: string;
+  via: 'carta' | 'receta' | 'ambos';
+  quantity: number | null;
+  unit: string | null;
+  lineCost: number | null;
+};
 
 function listProductsLinkedToIngredient(
   catalogItems: CatalogItem[],
   ing: StoreIngredient,
-): Array<{ _id: string; name: string; via: 'carta' | 'receta' | 'ambos' }> {
-  const byId = new Map<string, { name: string; carta: boolean; receta: boolean }>();
+): LinkedProductRow[] {
+  const byId = new Map<
+    string,
+    {
+      name: string;
+      carta: boolean;
+      receta: boolean;
+      quantity: number | null;
+      unit: string | null;
+      lineCost: number | null;
+    }
+  >();
   for (const p of catalogItemsUsingIngredient(catalogItems, ing.name)) {
-    byId.set(p._id, { name: p.name, carta: true, receta: false });
+    byId.set(p._id, {
+      name: p.name,
+      carta: true,
+      receta: false,
+      quantity: null,
+      unit: null,
+      lineCost: null,
+    });
   }
   const needle = ingredientNameFold(ing.name);
+  const unitRes = resolveIngredientUnitCost(ing, null);
   for (const item of catalogItems) {
     if (item.active === false) continue;
     if (item.module && item.module !== 'catalog') continue;
-    const hit = readProductRecipeLines(item).some(
+    const recipeLines = readProductRecipeLines(item);
+    const match = recipeLines.find(
       (line) =>
         String(line.storeIngredientId || '').trim() === ing.id ||
         ingredientNameFold(line.name) === needle,
     );
-    if (!hit) continue;
+    if (!match) continue;
+    const qty = Number(match.quantity);
+    const unit = String(match.unit || '').trim() || null;
+    const lineCost =
+      Number.isFinite(qty) && qty > 0
+        ? calculateRecipeLineCost(qty, unit || 'ud', unitRes.effective, ing.unit)
+        : null;
     const prev = byId.get(item._id);
-    if (prev) prev.receta = true;
-    else byId.set(item._id, { name: item.name, carta: false, receta: true });
+    if (prev) {
+      prev.receta = true;
+      prev.quantity = Number.isFinite(qty) && qty > 0 ? qty : prev.quantity;
+      prev.unit = unit || prev.unit;
+      prev.lineCost = lineCost ?? prev.lineCost;
+    } else {
+      byId.set(item._id, {
+        name: item.name,
+        carta: false,
+        receta: true,
+        quantity: Number.isFinite(qty) && qty > 0 ? qty : null,
+        unit,
+        lineCost,
+      });
+    }
   }
   return [...byId.entries()]
     .map(([_id, v]) => ({
@@ -534,6 +595,9 @@ function listProductsLinkedToIngredient(
         | 'carta'
         | 'receta'
         | 'ambos',
+      quantity: v.quantity,
+      unit: v.unit,
+      lineCost: v.lineCost,
     }))
     .sort((a, b) => a.name.localeCompare(b.name, 'es'));
 }
@@ -546,6 +610,7 @@ function EditIngredientDetailModal({
   onUpdate,
   onFlags,
   onCost,
+  onUnit,
   onExtraPrice,
   onRemove,
   onClose,
@@ -556,7 +621,8 @@ function EditIngredientDetailModal({
   onUpdate: (draft: IngredientDraft) => boolean | Promise<boolean>;
   onFlags: (patch: Partial<{ chargeExtra: boolean; allowRemove: boolean }>) => void;
   onCost: (value: number) => void;
-  onExtraPrice: (value: number) => void;
+  onUnit: (unit: string) => void;
+  onExtraPrice: (value: number | null) => void;
   onRemove: () => void;
   onClose: () => void;
 }) {
@@ -727,18 +793,26 @@ function EditIngredientDetailModal({
               </label>
               <div className="space-y-1.5">
                 <span className="text-[11px] font-semibold uppercase tracking-wide text-stone-400">
-                  Coste base (compra)
+                  Coste de compra
                 </span>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <IngredientCostCell ingredient={ingredient} onCommit={onCost} />
-                  {ingredient.baseCost != null && ingredient.baseCost > 0 ? (
-                    <span className="text-xs text-stone-400">
-                      {formatMoneyEs(ingredient.baseCost)}
-                    </span>
-                  ) : null}
+                  <select
+                    value={normalizeStoreIngredientUnit(ingredient.unit, 'kg')}
+                    onChange={(e) => onUnit(e.target.value)}
+                    className="rounded-xl border border-stone-200 bg-white px-2.5 py-2 text-sm font-semibold outline-none focus:border-[var(--v-blue,#2563eb)] dark:border-stone-700 dark:bg-stone-900"
+                    aria-label="Unidad del coste"
+                  >
+                    <option value="kg">€ / kg</option>
+                    <option value="g">€ / g</option>
+                    <option value="l">€ / l</option>
+                    <option value="ml">€ / ml</option>
+                    <option value="ud">€ / ud</option>
+                  </select>
                 </div>
                 <p className="text-[11px] text-stone-500">
-                  Coste interno del ingrediente. No es el precio del extra en TPV.
+                  Precio que pagas al proveedor por esa unidad. El escandallo convierte g↔kg y ml↔l
+                  solo. Si lo dejas a 0, el coste del plato no se inventa.
                 </p>
               </div>
             </section>
@@ -771,7 +845,7 @@ function EditIngredientDetailModal({
                     onCommit={onExtraPrice}
                   />
                   <p className="mt-2 text-[11px] text-amber-800/80 dark:text-amber-200/80">
-                    Si lo dejas vacío, se usa el precio por defecto de extras de la barra.
+                    Vacío = precio predeterminado de la barra. Si pones un importe aquí, ese gana.
                   </p>
                 </div>
               ) : null}
@@ -794,10 +868,15 @@ function EditIngredientDetailModal({
 
           {tab === 'productos' ? (
             <section className="space-y-3">
-              <p className="text-sm text-stone-600 dark:text-stone-300">
-                Productos de carta o receta que usan este ingrediente. La conexión se hace desde el
-                producto (ficha / receta), no aquí.
-              </p>
+              <div className="rounded-xl border border-stone-200 bg-stone-50/80 px-3 py-2.5 dark:border-stone-700 dark:bg-stone-950/40">
+                <p className="text-sm font-semibold text-stone-800 dark:text-stone-100">
+                  Dónde se usa este ingrediente
+                </p>
+                <p className="mt-0.5 text-[11px] text-stone-500">
+                  Consumo por venta según el escandallo de cada producto. La receta se edita en el
+                  producto, no aquí.
+                </p>
+              </div>
               {linked.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-stone-200 bg-stone-50/80 px-4 py-8 text-center dark:border-stone-700 dark:bg-stone-950/40">
                   <ShoppingBag className="mx-auto h-8 w-8 text-stone-300" />
@@ -805,25 +884,54 @@ function EditIngredientDetailModal({
                     Aún no está en ningún producto
                   </p>
                   <p className="mt-1 text-xs text-stone-500">
-                    Añádelo en la ficha del producto o en una receta.
+                    Añádelo en la ficha del producto o en Escandallo.
                   </p>
                 </div>
               ) : (
-                <ul className="divide-y divide-stone-100 overflow-hidden rounded-2xl border border-stone-200 dark:divide-stone-800 dark:border-stone-700">
-                  {linked.map((p) => (
-                    <li
-                      key={p._id}
-                      className="flex items-center justify-between gap-3 bg-white px-3 py-2.5 dark:bg-stone-900"
-                    >
-                      <span className="min-w-0 truncate text-sm font-medium text-stone-900 dark:text-stone-100">
-                        {p.name}
-                      </span>
-                      <span className="shrink-0 rounded-md bg-stone-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-stone-500 dark:bg-stone-800 dark:text-stone-300">
-                        {p.via === 'ambos' ? 'Carta · Receta' : p.via === 'carta' ? 'Carta' : 'Receta'}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+                <div className="overflow-hidden rounded-2xl border border-stone-200 dark:border-stone-700">
+                  <table className="w-full text-sm">
+                    <thead className="bg-stone-50 text-[10px] font-bold uppercase tracking-wide text-stone-400 dark:bg-stone-950/60">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Producto</th>
+                        <th className="px-3 py-2 text-right">Consume</th>
+                        <th className="px-3 py-2 text-right">Coste</th>
+                        <th className="px-3 py-2 text-right">Vía</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100 dark:divide-stone-800">
+                      {linked.map((p) => (
+                        <tr key={p._id} className="bg-white dark:bg-stone-900">
+                          <td className="px-3 py-2.5 font-medium text-stone-900 dark:text-stone-100">
+                            {p.name}
+                          </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums text-stone-700 dark:text-stone-200">
+                            {p.quantity != null && p.unit
+                              ? `${p.quantity} ${p.unit}`
+                              : p.via === 'carta'
+                                ? 'En carta'
+                                : '—'}
+                          </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-stone-900 dark:text-stone-100">
+                            {p.lineCost != null && p.lineCost > 0
+                              ? formatMoneyEs(p.lineCost)
+                              : p.quantity != null
+                                ? 'Sin coste'
+                                : '—'}
+                          </td>
+                          <td className="px-3 py-2.5 text-right">
+                            <span className="rounded-md bg-stone-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-stone-500 dark:bg-stone-800 dark:text-stone-300">
+                              {p.via === 'ambos'
+                                ? 'Carta · Receta'
+                                : p.via === 'carta'
+                                  ? 'Carta'
+                                  : 'Receta'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </section>
           ) : null}
@@ -922,7 +1030,7 @@ export function StoreIngredientsPanel({
   const [items, setItems] = useState<StoreIngredient[]>([]);
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
-  const [newDraft, setNewDraft] = useState<IngredientDraft>(() => emptyDraft(false));
+  const [newDraft, setNewDraft] = useState<IngredientDraft>(() => emptyDraft());
   const [defaultExtraPrice, setDefaultExtraPrice] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expandedPreview, setExpandedPreview] = useState(false);
@@ -973,7 +1081,7 @@ export function StoreIngredientsPanel({
 
   const startCreateIngredient = () => {
     setEditingId(null);
-    setNewDraft(emptyDraft(false));
+    setNewDraft(emptyDraft());
     setCreating(true);
   };
 
@@ -1011,7 +1119,7 @@ export function StoreIngredientsPanel({
         toast.message(`Fusionamos ${mergedCount} duplicado(s) al cargar`, { duration: 5000 });
       }
       setDefaultExtraPrice(String(inferTpvDefaultExtraPrice(deduped, cfg.tpvDefaultExtraPrice) || ''));
-      setNewDraft(emptyDraft(false));
+      setNewDraft(emptyDraft());
     } catch {
       setLoadError('Error al cargar');
       toast.error('No se pudieron cargar los ingredientes');
@@ -1134,9 +1242,8 @@ export function StoreIngredientsPanel({
     }
     const created = draftToItem(draft);
     if (!created) return false;
-    const row = withVertialDefaultBaseCost(created, brands);
-    const ok = await applyAndPersist((prev) => [...prev, row], `«${row.name}» guardado`);
-    if (ok) setNewDraft(emptyDraft(false));
+    const ok = await applyAndPersist((prev) => [...prev, created], `«${created.name}» guardado`);
+    if (ok) setNewDraft(emptyDraft());
     return ok;
   };
 
@@ -1184,15 +1291,7 @@ export function StoreIngredientsPanel({
     patch: Partial<{ chargeExtra: boolean; allowRemove: boolean }>,
   ) => {
     void applyAndPersist((prev) =>
-      prev.map((i) => {
-        if (i.id !== id) return i;
-        const next = withStoreIngredientTpvFlags(i, patch);
-        if (patch.chargeExtra === true && normalizeTpvDefaultExtraPrice(next.extraPrice) == null) {
-          const fallback = normalizeTpvDefaultExtraPrice(defaultExtraPrice);
-          if (fallback != null) return { ...next, extraPrice: fallback };
-        }
-        return next;
-      }),
+      prev.map((i) => (i.id !== id ? i : withStoreIngredientTpvFlags(i, patch))),
     );
   };
 
@@ -1200,8 +1299,22 @@ export function StoreIngredientsPanel({
     void applyAndPersist((prev) => prev.map((i) => (i.id === id ? { ...i, baseCost } : i)));
   };
 
-  const updateIngredientExtraPrice = (id: string, extraPrice: number) => {
-    void applyAndPersist((prev) => prev.map((i) => (i.id === id ? { ...i, extraPrice } : i)));
+  const updateIngredientUnit = (id: string, unit: string) => {
+    const nextUnit = normalizeStoreIngredientUnit(unit, 'kg');
+    void applyAndPersist((prev) => prev.map((i) => (i.id === id ? { ...i, unit: nextUnit } : i)));
+  };
+
+  const updateIngredientExtraPrice = (id: string, extraPrice: number | null) => {
+    void applyAndPersist((prev) =>
+      prev.map((i) => {
+        if (i.id !== id) return i;
+        if (extraPrice == null) {
+          const { extraPrice: _removed, ...rest } = i;
+          return rest;
+        }
+        return { ...i, extraPrice };
+      }),
+    );
   };
 
   const persistDefaultExtraPrice = async (raw: string) => {
@@ -1307,26 +1420,23 @@ export function StoreIngredientsPanel({
         }
         toolbarRight={
           <>
-            {hasExtras ? (
-              <label
-                className="inline-flex h-8 items-center gap-1 text-xs text-stone-500"
-                title="Precio por defecto en el TPV si el extra no tiene precio propio"
-              >
-                <span className="hidden lg:inline font-medium text-stone-500">Defecto extras</span>
-                <Euro className="h-3.5 w-3.5 text-stone-400" />
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="0,00"
-                  value={defaultExtraPrice}
-                  onChange={(e) => setDefaultExtraPrice(e.target.value)}
-                  onBlur={(e) => void persistDefaultExtraPrice(e.target.value)}
-                  aria-label="Precio por defecto de extras en TPV"
-                  className="w-14 rounded-lg border border-stone-200 bg-white px-1.5 py-1 text-xs font-semibold tabular-nums outline-none focus:border-[var(--v-blue,#2563eb)] dark:border-stone-700 dark:bg-stone-900"
-                />
-                <span>€</span>
-              </label>
-            ) : null}
+            <label
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-2 text-xs text-stone-600 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300"
+              title="Precio predeterminado para todos los extras. Si un ingrediente tiene precio propio abajo, ese gana."
+            >
+              <span className="font-medium whitespace-nowrap">Precio extras</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="0,00"
+                value={defaultExtraPrice}
+                onChange={(e) => setDefaultExtraPrice(e.target.value)}
+                onBlur={(e) => void persistDefaultExtraPrice(e.target.value)}
+                aria-label="Precio predeterminado de extras en TPV"
+                className="w-14 rounded-md border-0 bg-transparent px-1 py-0.5 text-xs font-semibold tabular-nums outline-none focus:ring-1 focus:ring-[var(--v-blue,#2563eb)]"
+              />
+              <span className="font-semibold text-stone-400">€</span>
+            </label>
             <IngredientsNewMenu
               onAddIngredient={() => {
                 setListSection('ingredients');
@@ -1559,7 +1669,7 @@ export function StoreIngredientsPanel({
                               ) : (
                                 <>
                               <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">
-                                Coste base
+                                Coste / ud
                               </th>
                               <th className="px-4 py-2.5 text-center text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">
                                 Extra
@@ -1618,10 +1728,15 @@ export function StoreIngredientsPanel({
                                   ) : (
                                     <>
                                   <td className="px-4 py-2 text-right">
-                                    <IngredientCostCell
-                                      ingredient={ing}
-                                      onCommit={(value) => updateIngredientBaseCost(ing.id, value)}
-                                    />
+                                    <div className="inline-flex items-center justify-end gap-1.5">
+                                      <IngredientCostCell
+                                        ingredient={ing}
+                                        onCommit={(value) => updateIngredientBaseCost(ing.id, value)}
+                                      />
+                                      <span className="text-[10px] font-semibold text-stone-400 tabular-nums">
+                                        /{normalizeStoreIngredientUnit(ing.unit, 'kg')}
+                                      </span>
+                                    </div>
                                   </td>
                                   <td className="px-4 py-2 text-center">
                                     <InlineToggle
@@ -1758,6 +1873,7 @@ export function StoreIngredientsPanel({
           onUpdate={(draft) => updateItem(editingIngredient.id, draft)}
           onFlags={(patch) => updateIngredientTpvFlags(editingIngredient.id, patch)}
           onCost={(value) => updateIngredientBaseCost(editingIngredient.id, value)}
+          onUnit={(unit) => updateIngredientUnit(editingIngredient.id, unit)}
           onExtraPrice={(value) => updateIngredientExtraPrice(editingIngredient.id, value)}
           onRemove={() => {
             setEditingId(null);
@@ -1776,12 +1892,14 @@ export function StoreIngredientsPanel({
         userId={userId}
         initialBrandId={allBrandIds[0] || ''}
         onSaved={async ({ ingredient, createdComponents }) => {
-          const toAdd = [
-            ...createdComponents.map((row) => withVertialDefaultBaseCost(row, brands)),
-            withVertialDefaultBaseCost(ingredient, brands),
-          ];
+          const toAdd = [...createdComponents, ingredient];
           const map = new Map(items.map((i) => [i.id, i]));
-          for (const row of toAdd) map.set(row.id, row);
+          for (const row of toAdd) {
+            map.set(row.id, {
+              ...row,
+              unit: normalizeStoreIngredientUnit(row.unit, 'kg'),
+            });
+          }
           const nextItems = [...map.values()];
           commitItems(nextItems);
           try {

@@ -1,13 +1,79 @@
 import type { CatalogItem, StockCategory } from './deliveryApi';
-import type { StoreIngredient } from './catalogCustomization';
 import {
-  effectiveStoreIngredientBaseCost,
+  normalizeStoreIngredientUnit,
+  type StoreIngredient,
+} from './catalogCustomization';
+import {
   isDrinkCatalogProduct,
   isDessertCatalogProduct,
-  resolveLineKindForIngredient,
-  resolveVertialDefaultBaseCost,
   resolveVertialDefaultRetailCost,
 } from './vertialDefaultCosts.ts';
+
+/** Factores a unidad base (g / ml) para convertir coste de receta. */
+const UNIT_BASE: Record<string, { family: 'mass' | 'vol'; toBase: number }> = {
+  g: { family: 'mass', toBase: 1 },
+  kg: { family: 'mass', toBase: 1000 },
+  ml: { family: 'vol', toBase: 1 },
+  l: { family: 'vol', toBase: 1000 },
+};
+
+/**
+ * Convierte cantidad entre g↔kg o ml↔l. Misma unidad → qty.
+ * Familias incompatibles (p. ej. ud vs g) → null.
+ */
+export function convertQuantityBetweenUnits(
+  quantity: number,
+  fromUnit: string,
+  toUnit: string,
+): number | null {
+  const qty = Number(quantity);
+  if (!Number.isFinite(qty) || qty < 0) return null;
+  const from = normalizeStoreIngredientUnit(fromUnit, 'ud');
+  const to = normalizeStoreIngredientUnit(toUnit, 'ud');
+  if (from === to) return qty;
+  const a = UNIT_BASE[from];
+  const b = UNIT_BASE[to];
+  if (!a || !b || a.family !== b.family) return null;
+  return (qty * a.toBase) / b.toBase;
+}
+
+/**
+ * Unidad del coste en ficha. Si no hay unidad (o es ud) y la línea va en g/kg o ml/l,
+ * se asume €/kg o €/l — convención Vertial de costes a granel.
+ */
+export function resolveIngredientCostUnit(
+  ingredientUnit: string | undefined,
+  recipeLineUnit?: string,
+): string {
+  const stored = normalizeStoreIngredientUnit(ingredientUnit, '');
+  if (stored === 'g' || stored === 'kg' || stored === 'ml' || stored === 'l') return stored;
+  const line = normalizeStoreIngredientUnit(recipeLineUnit, 'ud');
+  if (line === 'g' || line === 'kg') return 'kg';
+  if (line === 'ml' || line === 'l') return 'l';
+  return stored || 'ud';
+}
+
+/** Cantidad de la línea de receta expresada en la unidad del coste del ingrediente. */
+export function quantityInIngredientCostUnit(
+  quantity: number,
+  lineUnit: string,
+  ingredientUnit?: string,
+): number {
+  const costUnit = resolveIngredientCostUnit(ingredientUnit, lineUnit);
+  const converted = convertQuantityBetweenUnits(quantity, lineUnit, costUnit);
+  return converted != null ? converted : Number(quantity) || 0;
+}
+
+/** Coste de una línea: (cantidad convertida a unidad de ficha) × coste unitario. */
+export function calculateRecipeLineCost(
+  quantity: number,
+  lineUnit: string,
+  unitCost: number,
+  ingredientUnit?: string,
+): number {
+  const qty = quantityInIngredientCostUnit(quantity, lineUnit, ingredientUnit);
+  return Math.round(qty * (Number(unitCost) || 0) * 100) / 100;
+}
 
 export type ProductCostingType = 'fixed' | 'recipe';
 
@@ -124,18 +190,17 @@ export function replaceFoodRecipeLinesKeepingPackaging(
   ]);
 }
 
+/**
+ * Coste de ficha para escandallo: solo el `baseCost` guardado.
+ * No inventa precios Vertial: si no hay coste en ficha → 0 (el usuario lo define en Ingredientes).
+ */
 export function resolveStoreIngredientBaseCost(
   ing: Pick<StoreIngredient, 'baseCost' | 'name' | 'brandIds'> & { role?: string },
-  brands?: Array<{ _id: string; deliveryLineKind?: string }>,
+  _brands?: Array<{ _id: string; deliveryLineKind?: string }>,
 ): number {
   const stored = Number(ing.baseCost);
-  const role = String(ing.role || '').trim();
-  if (role === 'extra' && Number.isFinite(stored) && stored > 0) {
-    const lineKind = brands ? resolveLineKindForIngredient(ing, brands) : undefined;
-    const wholesale = resolveVertialDefaultBaseCost(ing.name, lineKind);
-    if (wholesale != null) return Math.round(wholesale * 100) / 100;
-  }
-  return effectiveStoreIngredientBaseCost(ing, brands);
+  if (Number.isFinite(stored) && stored >= 0) return Math.round(stored * 100) / 100;
+  return 0;
 }
 
 /** Coste unitario efectivo: última compra proveedor si existe; si no, ficha. */
@@ -187,16 +252,23 @@ export function calculateRecipeTotalCost(
   let total = 0;
   for (const line of lines) {
     let unitCost = 0;
+    let ingredientUnit: string | undefined;
     if (line.storeIngredientId) {
       const ing = ingredientsById.get(line.storeIngredientId);
       if (ing) {
         const stock = options?.stockByStoreIngredientId?.get(line.storeIngredientId);
         unitCost = resolveIngredientUnitCost(ing, stock, brands).effective;
+        ingredientUnit = ing.unit;
       }
     } else if (line.catalogItemId && inventoryCostByCatalogId) {
       unitCost = inventoryCostByCatalogId.get(line.catalogItemId) ?? 0;
     }
-    total += (Number(line.quantity) || 0) * unitCost;
+    total += calculateRecipeLineCost(
+      Number(line.quantity) || 0,
+      line.unit || 'ud',
+      unitCost,
+      ingredientUnit,
+    );
   }
   const rounded = Math.round(total * 100) / 100;
   return applyMermaToCost(rounded, options?.mermaPct ?? 0);

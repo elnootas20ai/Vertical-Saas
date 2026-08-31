@@ -51,10 +51,10 @@ Los PNG fuente están en `resources/` (generados desde `src/assets/logo.svg`, la
 
 | Archivo | Uso |
 |---------|-----|
-| `icon.png` | Icono completo iOS / fallback (fondo `#030213` + V) |
+| `icon.png` | Icono completo iOS / fallback (fondo `#000000` + V) |
 | `icon-foreground.png` | Solo la V (transparente) — adaptive icon Android |
-| `icon-background.png` | Fondo sólido `#030213` — adaptive icon Android |
-| `splash.png` | Pantalla de arranque (V centrada) |
+| `icon-background.png` | Fondo sólido `#000000` — adaptive icon Android |
+| `splash.png` | Pantalla de arranque (negro + V centrada) |
 
 Para regenerar todos los tamaños nativos:
 

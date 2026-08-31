@@ -236,11 +236,9 @@ import {
   isHalfHalfFlavorSelectionInvalid,
   mergeComboProductIngredients,
   normalizeBuildYourOwnAllowedIngredientIds,
-  normalizeCatalogSupplementsForSave,
   normalizeHalfHalfAllowedProductIds,
   normalizeHalfHalfBrandId,
   productBrandIdsFromItem,
-  parseCatalogSupplements,
   parseIngredientsBulkText,
   normalizeCatalogFichaIngredientsForSave,
   normalizeCatalogIngredientsForSave,
@@ -270,7 +268,6 @@ import {
   type CatalogRecipePick,
   type CatalogPackagingPick,
 } from '../../components/saas/CatalogProductRecipePicker';
-import { CatalogSupplementPicker } from '../../components/saas/CatalogSupplementPicker';
 import {
   calculateRecipeTotalCost,
   isCatalogCostingProduct,
@@ -498,7 +495,6 @@ function CreateCatalogItemModal({
       webVisible: true,
       available: true,
       ingredients: '',
-      supplements: [] as Array<{ id: string; name: string; price: string }>,
       halfHalf: false,
       buildYourOwn: false,
       halfHalfAllowedProductIds: [] as string[],
@@ -627,11 +623,6 @@ function CreateCatalogItemModal({
         webVisible: editItem.webVisible ?? true,
         available: editItem.available ?? true,
         ingredients: typeof editItem.customFields?.ingredients === 'string' ? editItem.customFields.ingredients : '',
-        supplements: parseCatalogSupplements(editItem).map((s) => ({
-          id: s.id,
-          name: s.name,
-          price: String(s.price),
-        })),
         halfHalf: editItem.customFields?.halfHalf === true,
         buildYourOwn: editItem.customFields?.buildYourOwn === true,
         halfHalfAllowedProductIds: normalizeHalfHalfAllowedProductIds(
@@ -743,11 +734,6 @@ function CreateCatalogItemModal({
     Object.keys(modalBrandIngredientSelection).length > 0
       ? modalBrandIngredientSelection
       : brandIngredientSelection;
-
-  const modalDefaultExtraPrice = useMemo(
-    () => inferTpvDefaultExtraPrice(effectiveStoreIngredients),
-    [effectiveStoreIngredients],
-  );
 
   useEffect(() => {
     if (!isOpen) return;
@@ -1216,7 +1202,6 @@ function CreateCatalogItemModal({
                 recipePicks.length > 0
                   ? recipePicksToTpvIngredientsText(recipePicks)
                   : normalizedIngredients,
-              supplements: normalizeCatalogSupplementsForSave(form.supplements),
             }
           : {}),
         ...(form.itemType === 'combo' || /combo/i.test(category)
@@ -1256,6 +1241,8 @@ function CreateCatalogItemModal({
                 }
               : {}),
       };
+      // Extras de pago: solo Catálogo → Ingredientes (ya no por producto).
+      delete customFields.supplements;
       if (form.itemType === 'service') {
         Object.assign(
           customFields,
@@ -1351,7 +1338,6 @@ function CreateCatalogItemModal({
           allergens: [],
           notes: '',
           ingredients: '',
-          supplements: [],
           halfHalf: false,
           buildYourOwn: false,
           halfHalfAllowedProductIds: [],
@@ -2298,7 +2284,6 @@ function CreateCatalogItemModal({
   };
 
   const inputClass = 'w-full px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100';
-  const inputClassInline = 'px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100';
   const labelClass = 'block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1';
 
   const renderComboBuilderSection = () => {
@@ -2330,24 +2315,6 @@ function CreateCatalogItemModal({
     );
   };
 
-  const renderSupplementsSection = () => {
-    if (form.itemType === 'service') return null;
-    return (
-      <div className="space-y-2 pt-2">
-        <label className={labelClass}>Cobrar extra en TPV</label>
-        <CatalogSupplementPicker
-          rows={form.supplements}
-          onChange={(supplements) => setForm((f) => ({ ...f, supplements }))}
-          storeIngredients={effectiveStoreIngredients}
-          brandIds={form.selectedBrandIds}
-          defaultExtraPrice={modalDefaultExtraPrice}
-          loading={modalIngredientsLoading}
-          inputClass={inputClassInline}
-        />
-      </div>
-    );
-  };
-
   const renderCustomizationSection = () => {
     if (form.itemType === 'service') return null;
     if (form.buildYourOwn) {
@@ -2358,10 +2325,10 @@ function CreateCatalogItemModal({
               Producto al gusto
             </p>
             <p className="text-xs text-orange-800/90 dark:text-orange-300/90 mt-0.5">
-              Los ingredientes base se eligen en el paso 1. Aquí puedes añadir extras de pago.
+              Los ingredientes base se eligen en el paso 1. Los extras de pago se configuran en{' '}
+              <strong className="font-semibold">Catálogo → Ingredientes</strong>.
             </p>
           </div>
-          {renderSupplementsSection()}
           {!isRestaurantCatalog ? (
             <CatalogProductPackagingPicker
               picks={packagingPicks}
@@ -2398,7 +2365,6 @@ function CreateCatalogItemModal({
             creatingPackaging={creatingPackaging}
           />
         ) : null}
-        {renderSupplementsSection()}
       </section>
     );
   };
@@ -2902,12 +2868,7 @@ function CreateCatalogItemModal({
           ) : isCompositionStep ? (
             <div className="space-y-4">
               {showComboBuilder ? (
-                <>
-                  {renderComboBuilderSection()}
-                  {renderSupplementsSection()}
-                </>
-              ) : form.buildYourOwn ? (
-                renderSupplementsSection()
+                renderComboBuilderSection()
               ) : (
                 renderCustomizationSection()
               )}
@@ -6836,14 +6797,6 @@ export function CatalogPage() {
     toast.info('Marca los productos y pulsa «Mover»', { duration: 6000 });
   }, [filteredCatalog.length]);
 
-  const openEmptyOrganizersModal = useCallback(() => {
-    if (emptyCommercialLines.length === 0) {
-      toast.message('No hay organizadores vacíos');
-      return;
-    }
-    setCatalogMoveItems([]);
-  }, [emptyCommercialLines.length]);
-
   const openCatalogMoveModal = useCallback(
     (items?: CatalogItem[]) => {
       const list =
@@ -7030,17 +6983,6 @@ export function CatalogPage() {
                     <ArrowRightLeft className="w-3.5 h-3.5" />
                     Mover
                   </SaasTabSecondaryButton>
-                  {emptyCommercialLines.length > 0 ? (
-                    <SaasTabSecondaryButton
-                      onClick={openEmptyOrganizersModal}
-                      disabled={bulkDeletingCatalog || bulkMovingCatalog}
-                      className="!border-amber-300 !text-amber-800 dark:!text-amber-200"
-                      title="Eliminar líneas TPV sin productos"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      Vacíos ({emptyCommercialLines.length})
-                    </SaasTabSecondaryButton>
-                  ) : null}
                   <SaasTabSecondaryButton
                     onClick={() => setCatalogSectionsOpen(true)}
                     disabled={bulkDeletingCatalog || bulkMovingCatalog}
@@ -7349,11 +7291,11 @@ export function CatalogPage() {
                     <SaasTabSecondaryButton
                       type="button"
                       onClick={() => setActiveCatalogCategory(null)}
-                      title="Volver a las categorías"
-                      className="shrink-0"
+                      title="Retroceder a categorías"
+                      className="shrink-0 !border-[var(--v-blue,#2563eb)] !text-[var(--v-blue,#2563eb)] hover:!bg-blue-50 dark:hover:!bg-blue-950/40"
                     >
                       <ArrowLeft className="w-4 h-4" />
-                      Categorías
+                      Retroceder
                     </SaasTabSecondaryButton>
                   ) : null}
                   <span className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate">{shownTitle}</span>

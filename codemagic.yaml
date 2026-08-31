@@ -23,11 +23,9 @@ workflows:
         distribution_type: app_store
         bundle_identifier: com.vertial.app
       vars:
-        # El WebView nativo no comparte origen con el backend: URL absoluta del API
+        # WebView embebido (dist/): API absoluta; NO usar CAPACITOR_SERVER_URL
+        # (la tablet no es un navegador de vertialapp.com — actualizar UI = nuevo IPA).
         VITE_NATIVE_API_ORIGIN: "https://vertialapp.com"
-        # Tablet iOS: misma UI que Safari (no dist embebido que queda viejo).
-        # Deploy frontend = tablets actualizadas. Codemagic solo para shell nativo.
-        CAPACITOR_SERVER_URL: "https://vertialapp.com"
     scripts:
       - name: Verificar commit de build
         script: |
@@ -59,10 +57,14 @@ workflows:
           export VITE_BUILD_STAMP="$(git rev-parse --short HEAD)"
           echo "VITE_BUILD_STAMP=$VITE_BUILD_STAMP"
           npm run build
-      - name: Sincronizar Capacitor iOS (UI live vertialapp.com)
+      - name: Sincronizar Capacitor iOS (UI embebida en dist/)
         script: |
           set -e
-          echo "CAPACITOR_SERVER_URL=$CAPACITOR_SERVER_URL"
+          if [ -n "${CAPACITOR_SERVER_URL:-}" ]; then
+            echo "ERROR: CAPACITOR_SERVER_URL no debe estar seteada en builds de producción"
+            echo "La app usa dist/ embebido. Valor bloqueado: $CAPACITOR_SERVER_URL"
+            exit 1
+          fi
           # capacitor.config.ts necesita typescript en node_modules (devDependency).
           if ! node -e "require('typescript')"; then
             echo "ERROR: falta el paquete typescript. Añádelo con: npm i -D typescript"
@@ -105,14 +107,9 @@ workflows:
             ls -la ios/App/App/ || true
             exit 1
           fi
-          # Tablet TPV: UI en vivo desde vertialapp.com (igual que Safari).
-          if ! grep -q '"url"' ios/App/App/capacitor.config.json; then
-            echo "ERROR: capacitor.config.json debe tener server.url (front en vivo)"
-            cat ios/App/App/capacitor.config.json
-            exit 1
-          fi
-          if ! grep -q 'vertialapp.com' ios/App/App/capacitor.config.json; then
-            echo "ERROR: server.url debe apuntar a vertialapp.com"
+          # Producción: UI embebida — prohibido server.url (no convertir la app en navegador).
+          if grep -q '"url"' ios/App/App/capacitor.config.json; then
+            echo "ERROR: capacitor.config.json NO debe tener server.url en producción"
             cat ios/App/App/capacitor.config.json
             exit 1
           fi
@@ -135,7 +132,7 @@ workflows:
         script: |
           set -e
           cd ios/App
-          # Marketing: shell nativo + WebView live (UI = deploy web).
+          # Marketing: shell nativo + UI embebida (dist/). Actualizar UI = nuevo IPA.
           agvtool new-marketing-version 1.18
           # Build: mayor que el último en TestFlight (si no, Apple rechaza el upload).
           LATEST_TF=""

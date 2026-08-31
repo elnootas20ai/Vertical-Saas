@@ -105,6 +105,11 @@ test('buildInventoryOrganizerGroups no usa marcas como chips (van a Ingredientes
   const ingredientes = groups.find((g) => g.id === 'total');
   assert.ok(ingredientes);
   assert.equal(ingredientes.total, 2);
+  // Tarjetas A→Z: Envases antes que Ingredientes
+  assert.deepEqual(
+    groups.map((g) => g.label),
+    [...groups].sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' })).map((g) => g.label),
+  );
   const filtered = filterItemsByOrganizer(items, 'total', [], [pizza, drinks]);
   assert.equal(filtered.length, 2);
   assert.deepEqual(filtered.map((i) => i.name).sort(), ['Cola', 'Masa']);

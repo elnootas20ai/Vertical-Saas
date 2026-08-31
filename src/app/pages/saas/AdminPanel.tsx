@@ -65,7 +65,6 @@ import {
   Timer,
   Hourglass,
   IdCard,
-  Printer,
 } from 'lucide-react';
 import { TpvIncidentsPanel } from '../../components/saas/restaurant/TpvIncidentsPanel';
 import { Layout } from '../../components/saas/Layout';
@@ -94,7 +93,6 @@ import {
 import { AdminCompanyVerificationPanel } from '../../components/saas/admin/AdminCompanyVerificationPanel';
 import { AdminClientUsagePanel } from '../../components/saas/admin/AdminClientUsagePanel';
 import { AdminWebAnalyticsTab } from '../../components/saas/admin/AdminWebAnalyticsTab';
-import { StorePrintersManager } from '../../components/saas/settings/StorePrintersManager';
 import {
   computeClientHealthFromLogin,
   healthBadgeClasses,
@@ -154,11 +152,10 @@ async function apiFetch(path: string, init?: RequestInit) {
 
 const TABS = [
   { id: 'clients', label: 'Clientes SaaS', icon: Users },
-  { id: 'printers', label: 'Impresoras', icon: Printer },
+  { id: 'affiliate_requests', label: 'Solicitudes afiliados', icon: HandshakeIcon },
   { id: 'web', label: 'Web / Landing', icon: MousePointerClick },
   { id: 'payments', label: 'Pagos MONEI', icon: CreditCard },
   { id: 'plans', label: 'Planes y precios', icon: DollarSign },
-  { id: 'affiliate_requests', label: 'Solicitudes afiliados', icon: HandshakeIcon },
   { id: 'backup', label: 'Backup CouchDB', icon: Database },
   { id: 'audit', label: 'Auditoría', icon: Activity },
   { id: 'incidents', label: 'Incidencias TPV', icon: AlertTriangle },
@@ -1324,17 +1321,17 @@ function SortableHeader({
 }) {
   const isActive = currentField === field;
   return (
-    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+    <th className="px-2.5 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 whitespace-nowrap">
       <button
         type="button"
         onClick={() => onSort(field)}
-        className={`inline-flex items-center gap-1 hover:text-gray-700 dark:hover:text-gray-200 transition-colors ${isActive ? 'text-gray-900 dark:text-gray-100' : ''}`}
+        className={`inline-flex items-center gap-0.5 hover:text-gray-700 dark:hover:text-gray-200 transition-colors ${isActive ? 'text-gray-900 dark:text-gray-100' : ''}`}
       >
         {label}
         {isActive ? (
-          currentDir === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+          currentDir === 'asc' ? <ArrowUp className="w-2.5 h-2.5" /> : <ArrowDown className="w-2.5 h-2.5" />
         ) : (
-          <ArrowUpDown className="w-3 h-3 opacity-40" />
+          <ArrowUpDown className="w-2.5 h-2.5 opacity-40" />
         )}
       </button>
     </th>
@@ -1613,25 +1610,25 @@ function ClientsTab({
         )}
 
         {/* KPIs */}
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-5">
-            <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">Clientes propietarios</p>
-            <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">{ownerAccountsBase.length}</p>
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
+          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-2.5 py-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 leading-tight">Clientes propietarios</p>
+            <p className="text-lg font-bold text-gray-900 dark:text-gray-100 leading-tight mt-0.5">{ownerAccountsBase.length}</p>
           </div>
           <button
             type="button"
             onClick={showPaymentSentQueue}
-            className={`text-left rounded-2xl border p-5 transition-colors ${
+            className={`text-left rounded-xl border px-2.5 py-2 transition-colors ${
               paymentSentCount > 0
                 ? 'border-violet-300 bg-violet-50 hover:bg-violet-100/80 dark:border-violet-700 dark:bg-violet-950/30'
                 : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800'
             }`}
           >
-            <p className="text-xs font-semibold uppercase tracking-wider text-violet-700 dark:text-violet-400 mb-2 flex items-center gap-1">
-              <CreditCard className="w-3.5 h-3.5" />
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-400 leading-tight flex items-center gap-1">
+              <CreditCard className="w-3 h-3 shrink-0" />
               Pago avisado
             </p>
-            <p className={`text-3xl font-bold ${paymentSentCount > 0 ? 'text-violet-700 dark:text-violet-300' : 'text-gray-400'}`}>
+            <p className={`text-lg font-bold leading-tight mt-0.5 ${paymentSentCount > 0 ? 'text-violet-700 dark:text-violet-300' : 'text-gray-400'}`}>
               {paymentSentCount}
             </p>
           </button>
@@ -1641,41 +1638,41 @@ function ClientsTab({
               setFilterVerification('pending');
               setShowFilters(true);
             }}
-            className={`text-left rounded-2xl border p-5 transition-colors ${
+            className={`text-left rounded-xl border px-2.5 py-2 transition-colors ${
               pendingVerificationCount > 0
                 ? 'border-amber-200 bg-amber-50 hover:bg-amber-100/80 dark:border-amber-800 dark:bg-amber-950/30'
                 : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800'
             }`}
           >
-            <p className="text-xs font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400 mb-2 flex items-center gap-1">
-              <ShieldCheck className="w-3.5 h-3.5" />
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400 leading-tight flex items-center gap-1">
+              <ShieldCheck className="w-3 h-3 shrink-0" />
               Verificación pendiente
             </p>
-            <p className={`text-3xl font-bold ${pendingVerificationCount > 0 ? 'text-amber-700 dark:text-amber-300' : 'text-gray-400'}`}>
+            <p className={`text-lg font-bold leading-tight mt-0.5 ${pendingVerificationCount > 0 ? 'text-amber-700 dark:text-amber-300' : 'text-gray-400'}`}>
               {pendingVerificationCount}
             </p>
           </button>
-          <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-5">
-            <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">Invitados excluidos</p>
-            <p className="text-3xl font-bold text-amber-600">{invitedAccounts.length}</p>
+          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-2.5 py-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 leading-tight">Invitados excluidos</p>
+            <p className="text-lg font-bold text-amber-600 leading-tight mt-0.5">{invitedAccounts.length}</p>
           </div>
-          <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-5">
-            <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">Admins detectados</p>
-            <p className="text-3xl font-bold text-blue-600">{ownerAccountsBase.filter((a) => a.role === 'Admin').length}</p>
+          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-2.5 py-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 leading-tight">Admins detectados</p>
+            <p className="text-lg font-bold text-blue-600 leading-tight mt-0.5">{ownerAccountsBase.filter((a) => a.role === 'Admin').length}</p>
           </div>
-          <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-5">
-            <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">Con tarjeta</p>
-            <p className="text-3xl font-bold text-green-600">{ownerAccountsBase.filter((a) => getCardStatus(a)).length}</p>
+          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-2.5 py-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 leading-tight">Con tarjeta</p>
+            <p className="text-lg font-bold text-green-600 leading-tight mt-0.5">{ownerAccountsBase.filter((a) => getCardStatus(a)).length}</p>
           </div>
         </div>
 
-        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-3 md:p-4">
           {/* Header + Search + Filters */}
-          <div className="space-y-4 mb-6">
-            <div className="flex items-center justify-between gap-4">
+          <div className="space-y-3 mb-3">
+            <div className="flex items-center justify-between gap-3">
               <div>
-                <h3 className="font-bold text-gray-900 dark:text-gray-100">Clientes SaaS</h3>
-                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Clientes SaaS</h3>
+                <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
                   {filteredAndSorted.length === ownerAccountsBase.length
                     ? `${ownerAccountsBase.length} cuentas propietarias`
                     : `${filteredAndSorted.length} de ${ownerAccountsBase.length} cuentas`
@@ -1683,71 +1680,71 @@ function ClientsTab({
                 </p>
               </div>
               <button onClick={() => void loadAccounts()}
-                className="inline-flex items-center gap-2 px-4 py-2.5 border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 rounded-xl text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors">
-                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 rounded-xl text-xs font-medium text-gray-700 dark:text-gray-300 transition-colors">
+                <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
                 {loading ? 'Actualizando...' : 'Actualizar'}
               </button>
             </div>
 
             {/* Search bar */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               <div className="relative flex-1">
-                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 dark:text-gray-500" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Buscar por nombre, email, empresa o ID..."
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900 outline-none text-sm text-gray-900 dark:text-gray-100 dark:bg-gray-900 transition-all placeholder:text-gray-400"
+                  className="w-full pl-9 pr-8 py-1.5 rounded-xl border border-gray-200 dark:border-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900 outline-none text-xs text-gray-900 dark:text-gray-100 dark:bg-gray-900 transition-all placeholder:text-gray-400"
                 />
                 {searchQuery && (
                   <button
                     type="button"
                     onClick={() => setSearchQuery('')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded-lg text-gray-400 hover:text-gray-600 transition-colors"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-lg text-gray-400 hover:text-gray-600 transition-colors"
                   >
-                    <X className="w-4 h-4" />
+                    <X className="w-3.5 h-3.5" />
                   </button>
                 )}
               </div>
               <button
                 type="button"
                 onClick={() => setShowFilters((v) => !v)}
-                className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm font-medium transition-colors ${
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-medium transition-colors ${
                   activeFilterCount > 0
                     ? 'border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100'
                     : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-300'
                 }`}
               >
-                <Filter className="w-4 h-4" />
+                <Filter className="w-3.5 h-3.5" />
                 Filtros
                 {activeFilterCount > 0 && (
-                  <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center">{activeFilterCount}</span>
+                  <span className="w-4 h-4 rounded-full bg-blue-600 text-white text-[9px] font-bold flex items-center justify-center">{activeFilterCount}</span>
                 )}
-                {showFilters ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                {showFilters ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
               </button>
             </div>
 
             {/* Filter row */}
             {showFilters && (
-              <div className="flex flex-wrap items-center gap-3 p-4 rounded-xl bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
+              <div className="flex flex-wrap items-center gap-2 p-2.5 rounded-xl bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
                 <div className="relative">
                   <select
                     value={filterPlan}
                     onChange={(e) => setFilterPlan(e.target.value)}
-                    className="appearance-none pl-3 pr-8 py-2 rounded-xl border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 focus:border-blue-500 outline-none cursor-pointer"
+                    className="appearance-none pl-2.5 pr-7 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-xs text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 focus:border-blue-500 outline-none cursor-pointer"
                   >
                     <option value="">Todos los planes</option>
                     {planOptions.map((p) => <option key={p} value={p}>{p}</option>)}
                   </select>
-                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                  <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
                 </div>
 
                 <div className="relative">
                   <select
                     value={filterStatus}
                     onChange={(e) => setFilterStatus(e.target.value)}
-                    className="appearance-none pl-3 pr-8 py-2 rounded-xl border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 focus:border-blue-500 outline-none cursor-pointer"
+                    className="appearance-none pl-2.5 pr-7 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-xs text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 focus:border-blue-500 outline-none cursor-pointer"
                   >
                     <option value="">Todos los estados</option>
                     {statusOptions.map((s) => {
@@ -1755,54 +1752,54 @@ function ClientsTab({
                       return <option key={s} value={s}>{badge.label}</option>;
                     })}
                   </select>
-                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                  <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
                 </div>
 
                 <div className="relative">
                   <select
                     value={filterBlocked}
                     onChange={(e) => setFilterBlocked(e.target.value as '' | 'active' | 'blocked')}
-                    className="appearance-none pl-3 pr-8 py-2 rounded-xl border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 focus:border-blue-500 outline-none cursor-pointer"
+                    className="appearance-none pl-2.5 pr-7 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-xs text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 focus:border-blue-500 outline-none cursor-pointer"
                   >
                     <option value="">Activos y bloqueados</option>
                     <option value="active">Solo activos</option>
                     <option value="blocked">Solo bloqueados</option>
                   </select>
-                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                  <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
                 </div>
 
                 <div className="relative">
                   <select
                     value={filterCard}
                     onChange={(e) => setFilterCard(e.target.value as '' | 'yes' | 'no')}
-                    className="appearance-none pl-3 pr-8 py-2 rounded-xl border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 focus:border-blue-500 outline-none cursor-pointer"
+                    className="appearance-none pl-2.5 pr-7 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-xs text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 focus:border-blue-500 outline-none cursor-pointer"
                   >
                     <option value="">Tarjeta: todos</option>
                     <option value="yes">Con tarjeta</option>
                     <option value="no">Sin tarjeta</option>
                   </select>
-                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                  <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
                 </div>
 
                 <div className="relative">
                   <select
                     value={filterVerification}
                     onChange={(e) => setFilterVerification(e.target.value as '' | 'pending')}
-                    className="appearance-none pl-3 pr-8 py-2 rounded-xl border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 focus:border-blue-500 outline-none cursor-pointer"
+                    className="appearance-none pl-2.5 pr-7 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-xs text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 focus:border-blue-500 outline-none cursor-pointer"
                   >
                     <option value="">Verificación: todas</option>
                     <option value="pending">Pendiente de revisión</option>
                   </select>
-                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                  <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
                 </div>
 
                 {activeFilterCount > 0 && (
                   <button
                     type="button"
                     onClick={clearFilters}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-50 rounded-xl transition-colors"
+                    className="inline-flex items-center gap-1 px-2 py-1.5 text-[11px] font-semibold text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
                   >
-                    <X className="w-3.5 h-3.5" />
+                    <X className="w-3 h-3" />
                     Limpiar filtros
                   </button>
                 )}
@@ -1810,18 +1807,18 @@ function ClientsTab({
             )}
           </div>
 
-          {error && <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+          {error && <div className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>}
 
-          <div className="overflow-x-auto rounded-2xl border border-gray-200 dark:border-gray-700">
-            <table className="w-full min-w-[1600px]">
-              <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+          <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700">
+            <table className="w-full min-w-[1280px] text-xs">
+              <thead className="bg-gray-50 dark:bg-gray-800/80 border-b border-gray-200 dark:border-gray-700">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Avatar</th>
+                  <th className="px-2.5 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Avatar</th>
                   <SortableHeader label="Cliente" field="fullName" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                   <SortableHeader label="Salud" field="health" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                   <SortableHeader label="Empresa" field="companyName" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                   <SortableHeader label="Email" field="email" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Contraseña</th>
+                  <th className="px-2.5 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Contraseña</th>
                   <SortableHeader label="Plan" field="plan" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                   <SortableHeader label="PDV máx." field="pdvMax" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                   <SortableHeader label="Marcas máx." field="brandMax" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
@@ -1835,13 +1832,13 @@ function ClientsTab({
                   <SortableHeader label="Verificación" field="verification" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                 {filteredAndSorted.length === 0 && !loading && (
                   <tr>
-                    <td colSpan={17} className="px-4 py-12 text-center">
-                      <Search className="w-10 h-10 text-gray-200 mx-auto mb-3" />
-                      <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">No se encontraron clientes</p>
-                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                    <td colSpan={17} className="px-3 py-8 text-center">
+                      <Search className="w-7 h-7 text-gray-200 mx-auto mb-2" />
+                      <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">No se encontraron clientes</p>
+                      <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
                         {searchQuery || activeFilterCount > 0
                           ? 'Prueba a cambiar los criterios de búsqueda o filtros'
                           : 'No hay cuentas propietarias registradas'}
@@ -1854,85 +1851,85 @@ function ClientsTab({
                   const isInactive = account.status === 'inactive';
                   return (
                     <tr key={account.user_id} onClick={() => onSelectAccount(account)}
-                      className="hover:bg-blue-50 dark:hover:bg-blue-950/20 cursor-pointer transition-colors">
-                      <td className="px-4 py-3">
-                        <div className="relative w-11 h-11 rounded-full bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-700 overflow-hidden flex items-center justify-center">
-                          {account.avatar ? <img src={account.avatar} alt={account.fullName} className="w-full h-full object-cover" /> : <span className="font-semibold text-gray-600 dark:text-gray-400">{initials(account)}</span>}
-                          {isInactive && <div className="absolute inset-0 bg-red-500/20 flex items-center justify-center"><Lock className="w-4 h-4 text-red-600" /></div>}
+                      className="hover:bg-stone-50 dark:hover:bg-stone-900/40 cursor-pointer transition-colors">
+                      <td className="px-2.5 py-1.5">
+                        <div className="relative w-7 h-7 rounded-full bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-700 overflow-hidden flex items-center justify-center">
+                          {account.avatar ? <img src={account.avatar} alt={account.fullName} className="w-full h-full object-cover" /> : <span className="text-[10px] font-semibold text-gray-600 dark:text-gray-400">{initials(account)}</span>}
+                          {isInactive && <div className="absolute inset-0 bg-red-500/20 flex items-center justify-center"><Lock className="w-3 h-3 text-red-600" /></div>}
                         </div>
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{account.fullName}</p>
-                          <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700"><Shield className="w-3 h-3" />{account.role}</span>
-                          {isInactive && <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-700"><Lock className="w-3 h-3" />Bloqueado</span>}
+                      <td className="px-2.5 py-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="text-xs font-semibold text-gray-900 dark:text-gray-100 leading-tight">{account.fullName}</p>
+                          <span className="inline-flex items-center gap-0.5 rounded-md bg-blue-50 dark:bg-blue-950/40 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:text-blue-300"><Shield className="w-2.5 h-2.5" />{account.role}</span>
+                          {isInactive && <span className="inline-flex items-center gap-0.5 rounded-md bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700"><Lock className="w-2.5 h-2.5" />Bloqueado</span>}
                         </div>
-                        <p className="text-xs text-gray-400 dark:text-gray-500 font-mono mt-1">{account.user_id}</p>
+                        <p className="text-[10px] text-gray-400 dark:text-gray-500 font-mono mt-0.5 truncate max-w-[10rem]">{account.user_id}</p>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-2.5 py-1.5">
                         {(() => {
                           const health = getClientHealthBadge(account);
                           return (
                             <span
-                              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${healthBadgeClasses(health.status)}`}
+                              className={`inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold ${healthBadgeClasses(health.status)}`}
                             >
-                              <Activity className="w-3 h-3" />
+                              <Activity className="w-2.5 h-2.5" />
                               {health.label}
                             </span>
                           );
                         })()}
                       </td>
-                      <td className="px-4 py-3"><div className="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><Building2 className="w-4 h-4 text-gray-400 dark:text-gray-500" />{account.companyName || 'Sin empresa'}</div></td>
-                      <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{account.email}</td>
-                      <td className="px-4 py-3"><code className="inline-flex rounded-lg bg-gray-100 dark:bg-gray-700 px-2.5 py-1 text-xs text-gray-700 dark:text-gray-300">{account.password ? '••••••••' : 'No visible'}</code></td>
-                      <td className="px-4 py-3"><div className="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><Users className="w-4 h-4 text-gray-400 dark:text-gray-500" />{formatAccountPlanLabel(account)}</div></td>
-                      <td className="px-4 py-3">
+                      <td className="px-2.5 py-1.5"><div className="inline-flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 max-w-[9rem] truncate"><Building2 className="w-3 h-3 text-gray-400 dark:text-gray-500 shrink-0" />{account.companyName || 'Sin empresa'}</div></td>
+                      <td className="px-2.5 py-1.5 text-xs text-gray-700 dark:text-gray-300 max-w-[12rem] truncate" title={account.email}>{account.email}</td>
+                      <td className="px-2.5 py-1.5"><code className="inline-flex rounded-md bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 text-[10px] text-gray-600 dark:text-gray-300">{account.password ? '••••••••' : '—'}</code></td>
+                      <td className="px-2.5 py-1.5"><div className="inline-flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap"><Users className="w-3 h-3 text-gray-400 dark:text-gray-500 shrink-0" />{formatAccountPlanLabel(account)}</div></td>
+                      <td className="px-2.5 py-1.5">
                         {(() => {
                           const pdv = getAccountPdvMaxInfo(account);
                           return (
-                            <div className="flex flex-col gap-1 min-w-[4.5rem]">
-                              <span className="inline-flex items-center gap-1.5 text-sm font-bold text-gray-900 dark:text-gray-100">
-                                <Store className="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" />
+                            <div className="flex flex-col gap-0 min-w-[3.25rem]">
+                              <span className="inline-flex items-center gap-1 text-xs font-bold text-gray-900 dark:text-gray-100">
+                                <Store className="w-3 h-3 text-gray-400 dark:text-gray-500 shrink-0" />
                                 {pdv.total}
                               </span>
                               {pdv.extra > 0 ? (
-                                <span className="text-[10px] font-semibold text-violet-700 dark:text-violet-300">
-                                  {pdv.base}+{pdv.extra} extra
+                                <span className="text-[9px] font-semibold text-violet-700 dark:text-violet-300">
+                                  {pdv.base}+{pdv.extra}
                                 </span>
                               ) : (
-                                <span className="text-[10px] text-gray-400 dark:text-gray-500">plan</span>
+                                <span className="text-[9px] text-gray-400 dark:text-gray-500">plan</span>
                               )}
                               {pdv.adminPro && (
-                                <span className="inline-flex w-fit rounded-full bg-violet-100 dark:bg-violet-900/40 px-1.5 py-0.5 text-[9px] font-bold text-violet-800 dark:text-violet-200">
-                                  PRO admin
+                                <span className="inline-flex w-fit rounded bg-violet-100 dark:bg-violet-900/40 px-1 py-px text-[8px] font-bold text-violet-800 dark:text-violet-200">
+                                  PRO
                                 </span>
                               )}
                             </div>
                           );
                         })()}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-2.5 py-1.5">
                         {(() => {
                           const brands = getAccountBrandMaxInfo(account);
                           return (
-                            <div className="flex flex-col gap-1 min-w-[4.5rem]">
-                              <span className="inline-flex items-center gap-1.5 text-sm font-bold text-gray-900 dark:text-gray-100">
-                                <Tag className="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" />
+                            <div className="flex flex-col gap-0 min-w-[3.25rem]">
+                              <span className="inline-flex items-center gap-1 text-xs font-bold text-gray-900 dark:text-gray-100">
+                                <Tag className="w-3 h-3 text-gray-400 dark:text-gray-500 shrink-0" />
                                 {brands.total}
                               </span>
                               {brands.extra > 0 ? (
-                                <span className="text-[10px] font-semibold text-violet-700 dark:text-violet-300">
-                                  {brands.base}+{brands.extra} extra
+                                <span className="text-[9px] font-semibold text-violet-700 dark:text-violet-300">
+                                  {brands.base}+{brands.extra}
                                 </span>
                               ) : (
-                                <span className="text-[10px] text-gray-400 dark:text-gray-500">plan</span>
+                                <span className="text-[9px] text-gray-400 dark:text-gray-500">plan</span>
                               )}
                             </div>
                           );
                         })()}
                       </td>
-                      <td className="px-4 py-3"><span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${statusBadge.color}`}>{statusBadge.label}</span></td>
-                      <td className="px-4 py-3">
+                      <td className="px-2.5 py-1.5"><span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-semibold whitespace-nowrap ${statusBadge.color}`}>{statusBadge.label}</span></td>
+                      <td className="px-2.5 py-1.5">
                         {(() => {
                           const trial = getTrialInfo(account);
                           const TrialIcon = trial.icon === 'active' ? Timer
@@ -1941,15 +1938,15 @@ function ClientsTab({
                             : trial.icon === 'expired' ? XCircle
                             : Clock;
                           return (
-                            <div className="flex flex-col gap-1">
-                              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold ${trial.color}`}>
-                                <TrialIcon className="w-3.5 h-3.5" />
+                            <div className="flex flex-col gap-0.5 min-w-[4.5rem]">
+                              <span className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold whitespace-nowrap ${trial.color}`}>
+                                <TrialIcon className="w-3 h-3" />
                                 {trial.label}
                               </span>
                               {trial.daysLeft >= 0 && trial.daysLeft <= 14 && trial.icon !== 'paid' && (
-                                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
+                                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1">
                                   <div
-                                    className={`h-1.5 rounded-full transition-all ${trial.daysLeft <= 3 ? 'bg-red-500' : trial.daysLeft <= 7 ? 'bg-amber-500' : 'bg-blue-500'}`}
+                                    className={`h-1 rounded-full transition-all ${trial.daysLeft <= 3 ? 'bg-red-500' : trial.daysLeft <= 7 ? 'bg-amber-500' : 'bg-blue-500'}`}
                                     style={{ width: `${Math.max(4, (trial.daysLeft / 14) * 100)}%` }}
                                   />
                                 </div>
@@ -1958,48 +1955,48 @@ function ClientsTab({
                           );
                         })()}
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{account.createdAt ? new Date(account.createdAt).toLocaleDateString('es-ES') : '—'}</td>
-                      <td className="px-4 py-3">
+                      <td className="px-2.5 py-1.5 text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">{account.createdAt ? new Date(account.createdAt).toLocaleDateString('es-ES') : '—'}</td>
+                      <td className="px-2.5 py-1.5">
                         {(() => {
                           const pixel = getPixelStatus(account);
                           return (
-                            <div className="flex flex-col gap-1">
-                              <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${pixel.opened ? 'bg-green-50 text-green-700' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500'}`}>
-                                <Mail className="w-3 h-3" />
+                            <div className="flex flex-col gap-0.5">
+                              <span className={`inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[9px] font-bold ${pixel.opened ? 'bg-green-50 text-green-700' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500'}`}>
+                                <Mail className="w-2.5 h-2.5" />
                                 Abierto
                               </span>
-                              <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${pixel.clicked ? 'bg-green-50 text-green-700' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500'}`}>
-                                <MousePointerClick className="w-3 h-3" />
+                              <span className={`inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[9px] font-bold ${pixel.clicked ? 'bg-green-50 text-green-700' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500'}`}>
+                                <MousePointerClick className="w-2.5 h-2.5" />
                                 Click
                               </span>
                             </div>
                           );
                         })()}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-2.5 py-1.5">
                         {(() => {
                           const hasCard = getCardStatus(account);
                           return (
-                            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold ${hasCard ? 'bg-green-50 text-green-700' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500'}`}>
-                              <CreditCard className="w-3.5 h-3.5" />
-                              {hasCard ? 'Añadida' : 'Pendiente'}
+                            <span className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold whitespace-nowrap ${hasCard ? 'bg-green-50 text-green-700' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500'}`}>
+                              <CreditCard className="w-3 h-3" />
+                              {hasCard ? 'Sí' : 'No'}
                             </span>
                           );
                         })()}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-2.5 py-1.5">
                         {(() => {
                           const imp = getImportProgress(account);
                           const allDone = imp.done === imp.total;
                           return (
-                            <div className="flex flex-col gap-1">
-                              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold ${allDone ? 'bg-green-50 text-green-700' : imp.done > 0 ? 'bg-amber-50 text-amber-700' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500'}`}>
-                                <Upload className="w-3.5 h-3.5" />
+                            <div className="flex flex-col gap-0.5">
+                              <span className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold ${allDone ? 'bg-green-50 text-green-700' : imp.done > 0 ? 'bg-amber-50 text-amber-700' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500'}`}>
+                                <Upload className="w-3 h-3" />
                                 {imp.done}/{imp.total}
                               </span>
-                              <div className="flex flex-wrap gap-0.5">
+                              <div className="flex flex-wrap gap-0.5 max-w-[7rem]">
                                 {IMPORT_SECTIONS.map((s) => (
-                                  <span key={s} className={`text-[9px] font-semibold px-1.5 py-0.5 rounded ${imp.sections[s] ? 'bg-green-50 text-green-600' : 'bg-gray-50 dark:bg-gray-800 text-gray-300 dark:text-gray-600'}`}>
+                                  <span key={s} className={`text-[8px] font-semibold px-1 py-px rounded ${imp.sections[s] ? 'bg-green-50 text-green-600' : 'bg-gray-50 dark:bg-gray-800 text-gray-300 dark:text-gray-600'}`}>
                                     {IMPORT_LABELS[s]}
                                   </span>
                                 ))}
@@ -2008,18 +2005,18 @@ function ClientsTab({
                           );
                         })()}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-2.5 py-1.5">
                         {(() => {
                           const hasAncover = getAncoverAccess(account);
                           return (
-                            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold ${hasAncover ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
-                              {hasAncover ? <ShieldCheck className="w-3.5 h-3.5" /> : <ShieldX className="w-3.5 h-3.5" />}
-                              {hasAncover ? 'Permitido' : 'Denegado'}
+                            <span className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold whitespace-nowrap ${hasAncover ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
+                              {hasAncover ? <ShieldCheck className="w-3 h-3" /> : <ShieldX className="w-3 h-3" />}
+                              {hasAncover ? 'OK' : 'No'}
                             </span>
                           );
                         })()}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-2.5 py-1.5">
                         {(() => {
                           const ver = getAccountVerification(account);
                           const label = getVerificationBadgeLabel(ver);
@@ -2033,8 +2030,8 @@ function ClientsTab({
                                   ? 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
                                   : 'bg-gray-50 text-gray-400 dark:bg-gray-800 dark:text-gray-500';
                           return (
-                            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold ${tone}`}>
-                              <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                            <span className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold whitespace-nowrap ${tone}`}>
+                              <ShieldCheck className="w-3 h-3 shrink-0" />
                               {label}
                             </span>
                           );
@@ -3640,8 +3637,8 @@ function AffiliateRequestsTab({ userId }: { userId: string }) {
         </div>
         <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-700 rounded-xl">
           {([
-            { id: 'pending' as const, label: 'Pendientes' },
             { id: 'all' as const, label: 'Todas' },
+            { id: 'pending' as const, label: 'Pendientes' },
             { id: 'accepted' as const, label: 'Aceptadas' },
             { id: 'rejected' as const, label: 'Rechazadas' },
           ]).map((f) => (
@@ -4000,13 +3997,12 @@ export function AdminPanel() {
         {activeTab === 'clients' && (
           <ClientsTab onSelectAccount={openClientDetail} />
         )}
-        {activeTab === 'printers' && <StorePrintersManager variant="admin" />}
-        {activeTab === 'web' && <AdminWebAnalyticsTab />}
-        {activeTab === 'payments' && <MoneiPaymentsTab />}
-        {activeTab === 'plans' && <PlansTab userId={user?.id || user?.user_id || ''} />}
         {activeTab === 'affiliate_requests' && (
           <AffiliateRequestsTab userId={adminUserId} />
         )}
+        {activeTab === 'web' && <AdminWebAnalyticsTab />}
+        {activeTab === 'payments' && <MoneiPaymentsTab />}
+        {activeTab === 'plans' && <PlansTab userId={user?.id || user?.user_id || ''} />}
         {activeTab === 'backup' && <BackupTab />}
         {activeTab === 'audit' && (
           <AuditTab

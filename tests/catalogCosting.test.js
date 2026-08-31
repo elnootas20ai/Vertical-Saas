@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   applyMermaToCost,
+  calculateRecipeLineCost,
   calculateRecipeTotalCost,
   foodRecipeLines,
   normalizeProductRecipeLines,
@@ -18,10 +19,11 @@ import {
   withProductCosting,
 } from '../src/app/lib/catalogCosting.ts';
 
-test('resolveStoreIngredientBaseCost uses stored or Vertial fallback', () => {
-  assert.equal(resolveStoreIngredientBaseCost({ name: 'desconocido xyz' }), 5);
+test('resolveStoreIngredientBaseCost uses only stored ficha (no Vertial invent)', () => {
+  assert.equal(resolveStoreIngredientBaseCost({ name: 'desconocido xyz' }), 0);
   assert.equal(resolveStoreIngredientBaseCost({ name: 'Mozzarella', baseCost: 2 }), 2);
-  assert.equal(resolveStoreIngredientBaseCost({ name: 'Mozzarella', baseCost: -1 }), 5.5);
+  assert.equal(resolveStoreIngredientBaseCost({ name: 'Mozzarella', baseCost: -1 }), 0);
+  assert.equal(resolveStoreIngredientBaseCost({ name: 'Mozzarella' }), 0);
 });
 
 test('calculateRecipeTotalCost sums quantity × base cost', () => {
@@ -200,11 +202,34 @@ test('resolveProductUnitCost applies merma and does not cap at 42% of PVP', () =
   assert.equal(resolveProductUnitCost(item, byId), 8.8);
 });
 
-test('resolveStoreIngredientBaseCost ignores TPV extra price for escandallo', () => {
+test('resolveStoreIngredientBaseCost uses stored baseCost even for TPV extras', () => {
   assert.equal(
     resolveStoreIngredientBaseCost({ name: 'Mozzarella', baseCost: 2.5, role: 'extra' }),
-    5.5,
+    2.5,
   );
+});
+
+test('calculateRecipeTotalCost converts g to kg when ficha is €/kg', () => {
+  const ingredients = storeIngredientsById([
+    { id: 'bacon', name: 'bacon', baseCost: 12, unit: 'kg' },
+    { id: 'ternera', name: 'Ternera', baseCost: 8.5, unit: 'kg' },
+    { id: 'bbq', name: 'Salsa BBQ', baseCost: 3, unit: 'kg' },
+  ]);
+  const total = calculateRecipeTotalCost(
+    [
+      { storeIngredientId: 'bacon', name: 'bacon', quantity: 100, unit: 'g' },
+      { storeIngredientId: 'ternera', name: 'Ternera', quantity: 100, unit: 'g' },
+      { storeIngredientId: 'bbq', name: 'Salsa BBQ', quantity: 0.05, unit: 'kg' },
+    ],
+    ingredients,
+  );
+  // 0.1×12 + 0.1×8.5 + 0.05×3 = 1.2 + 0.85 + 0.15 = 2.2
+  assert.equal(total, 2.2);
+});
+
+test('calculateRecipeLineCost without ficha unit still assumes €/kg for mass lines', () => {
+  assert.equal(calculateRecipeLineCost(100, 'g', 12, undefined), 1.2);
+  assert.equal(calculateRecipeLineCost(100, 'g', 12, 'ud'), 1.2);
 });
 
 test('formatEscandalloMargin and food cost helpers', () => {
