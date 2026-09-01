@@ -14,6 +14,7 @@ import { notifyDeliveryWorkCentersChanged, resolveBusinessScopeId } from './deli
 import {
   createWorkCenter,
   getWorkCenterById,
+  listSalesPoints,
   updateWorkCenter,
   type WorkCenter,
 } from './workCentersApi';
@@ -203,6 +204,25 @@ export async function ensureEventPortableTpv(
 
   let wc: WorkCenter | null = workCenterId ? await getWorkCenterById(workCenterId) : null;
   if (wc && wc.deletedAt) wc = null;
+
+  // Reutilizar PDV ya ligado a este evento (evita duplicados por carrera / reintentos).
+  if (!wc) {
+    try {
+      const all = await listSalesPoints(uid);
+      const hit = all.find(
+        (row) =>
+          !row.deletedAt
+          && String(row.linkedEventId || '').trim() === event._id
+          && row.eventsPdvKind === 'temporary',
+      );
+      if (hit) {
+        wc = hit;
+        workCenterId = hit._id;
+      }
+    } catch {
+      /* crear abajo */
+    }
+  }
 
   if (!wc) {
     const address = String(event.lugar || '').trim();

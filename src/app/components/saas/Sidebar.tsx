@@ -1737,7 +1737,7 @@ function SidebarInner({
       }
       if (item.id === 'events-pipeline') {
         return location.pathname.startsWith('/saas/vertical/eventos/contrataciones')
-          || /^\/saas\/vertical\/eventos\/(?!nueva-contratacion|contrataciones|presupuestos|ruta)[^/]+$/.test(location.pathname);
+          || /^\/saas\/vertical\/eventos\/(?!nueva-contratacion|contrataciones|presupuestos|ruta|tpv|operar)[^/]+$/.test(location.pathname);
       }
       return location.pathname.startsWith(item.path);
     })()) ||

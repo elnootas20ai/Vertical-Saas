@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, Navigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Layout } from '../../../../components/saas/Layout';
 import { useAuth } from '../../../../context/AuthContext';
@@ -21,8 +21,14 @@ import {
   notifyDeliveryActiveStoreChanged,
   writeDeliveryOpsSelectedPdvId,
 } from '../../../../lib/deliveryOpsPdvSelection';
+import { clearAllRetailScopeCaches } from '../../../../verticals/retailScopeRegistry';
 import { EVENTS_CEO_TPV_PATH } from '../../../../lib/retailOpsPaths';
 import { saasPathWithBusinessScope } from '../../../../lib/businessScopeUrl';
+import {
+  eventsSaasStaticPath,
+  isEventsSaasStaticSegment,
+  type EventsSaasStaticSegment,
+} from '../../../../lib/eventsSaasPaths';
 import { downloadEventQuotePdf, sendEventQuoteByEmailRequest, sendEventReviewInviteRequest, summarizeEventFinancials } from '../../../../lib/eventsFinance';
 import { resolveBusinessScopeId } from '../../../../lib/deliverySetup';
 import {
@@ -99,10 +105,17 @@ export function EventsProjectPage() {
     phone: currentBusiness?.phone,
     email: currentBusiness?.email,
     logo: currentBusiness?.logo,
+    business_id: currentBusiness?.business_id || currentBusiness?.id,
+    businessId: currentBusiness?.business_id || currentBusiness?.id,
+    id: currentBusiness?.id || currentBusiness?.business_id,
   }), [currentBusiness]);
 
   const refresh = useCallback(async (opts?: { silent?: boolean }) => {
     if (!dataUserId || !eventId) return;
+    if (isEventsSaasStaticSegment(eventId)) {
+      if (!opts?.silent) setLoading(false);
+      return;
+    }
     if (!opts?.silent) setLoading(true);
     try {
       const loaded = await loadEventById(dataUserId, eventId);
@@ -141,9 +154,10 @@ export function EventsProjectPage() {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  // Eventos sin código TPV (creados antes): generar PDV temporal en silencio.
+  // PDV temporal: solo cuando el evento ya está contratado / en operación (no en presupuesto).
   useEffect(() => {
     if (!dataUserId || !event || event.estado === 'cancelado') return;
+    if (!['contratado', 'planificacion', 'en_curso', 'finalizado'].includes(event.estado)) return;
     if (String(event.portableTerminalCode || '').trim()) return;
     let cancelled = false;
     void ensureEventPortableTpv(dataUserId, event, currentBusiness)
@@ -349,6 +363,21 @@ export function EventsProjectPage() {
     await handleAdvance('cancelado');
   };
 
+  // Si `:eventId` captura un segmento fijo (ruta/tpv/…), redirigir a la ruta canónica.
+  if (isEventsSaasStaticSegment(eventId)) {
+    const seg = eventId as EventsSaasStaticSegment;
+    const target =
+      seg === 'operar'
+        ? EVENTS_CEO_TPV_PATH
+        : eventsSaasStaticPath(seg);
+    return (
+      <Navigate
+        to={saasPathWithBusinessScope(target, businessId)}
+        replace
+      />
+    );
+  }
+
   if (loading) {
     return (
       <Layout>
@@ -439,6 +468,7 @@ export function EventsProjectPage() {
               userId={dataUserId}
               business={businessIssuer}
               onEventUpdated={setEvent}
+              onOpenFinanzas={() => setTab('finanzas')}
             />
             <button
               type="button"
@@ -585,6 +615,7 @@ export function EventsProjectPage() {
                         toast.error('Este evento aún no tiene PDV listo. Genera el TPV portátil otra vez.');
                         return;
                       }
+                      if (businessId) clearAllRetailScopeCaches(businessId);
                       if (businessId && dataUserId) {
                         writeDeliveryOpsSelectedPdvId(businessId, dataUserId, pdvId);
                         notifyDeliveryActiveStoreChanged();
@@ -744,6 +775,7 @@ export function EventsProjectPage() {
                       userId={dataUserId}
                       business={businessIssuer}
                       onEventUpdated={setEvent}
+                      onOpenFinanzas={() => setTab('finanzas')}
                       onDepositDoneAdvance={async (updated) => {
                         if (updated.estado !== 'aceptado') return;
                         setActing(true);
@@ -790,13 +822,19 @@ export function EventsProjectPage() {
                   userId={dataUserId}
                   business={businessIssuer}
                   onEventUpdated={setEvent}
+                  onOpenFinanzas={() => setTab('finanzas')}
                 />
               ) : null}
 
-              {['contratado', 'planificacion'].includes(event.estado) && event.depositPaidAt ? (
-                <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">
-                  {formatEventPaymentBreakdown(event)}
-                </p>
+              {['contratado', 'planificacion'].includes(event.estado) && dataUserId && event.depositPaidAt ? (
+                <EventsStagePaymentCard
+                  mode="deposit"
+                  event={event}
+                  userId={dataUserId}
+                  business={businessIssuer}
+                  onEventUpdated={setEvent}
+                  onOpenFinanzas={() => setTab('finanzas')}
+                />
               ) : null}
 
               {event.estado === 'finalizado' && dataUserId ? (
@@ -807,6 +845,7 @@ export function EventsProjectPage() {
                     userId={dataUserId}
                     business={businessIssuer}
                     onEventUpdated={setEvent}
+                    onOpenFinanzas={() => setTab('finanzas')}
                   />
                   {event.reviewInviteSentAt ? (
                     <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">

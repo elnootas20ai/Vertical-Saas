@@ -111,7 +111,7 @@ import {
   resolveTpvCatalogBusinessId,
   resolveRetailOpsWriteBusinessId,
 } from '../../lib/tpvRegisterScope';
-import { isRestaurantBusinessType, isDeliveryOpsBusinessType } from '../../lib/deliveryOpsTypes';
+import { isRestaurantBusinessType, isDeliveryOpsBusinessType, isEventsBusinessType } from '../../lib/deliveryOpsTypes';
 import { resolveTpvCeoExitPath } from '../../lib/retailOpsPaths';
 import {
   cancelDiningOrderRequest,
@@ -471,6 +471,8 @@ function TpvRapidoCeoBoard() {
     setBootstrapPdvs([]);
   }, [businessId]);
 
+  const isEventsBiz = isEventsBusinessType(currentBusiness?.businessType);
+
   const storeRows = useMemo(
     () =>
       buildCeoTpvStoreRows(
@@ -479,9 +481,10 @@ function TpvRapidoCeoBoard() {
         businessId,
         {
           accountBusinessCount: businesses.length,
+          includeTemporaryEventPdvs: isEventsBiz,
         },
       ),
-    [retailWorkCenters, pointsOfSale, bootstrapPdvs, businessId, businesses.length],
+    [retailWorkCenters, pointsOfSale, bootstrapPdvs, businessId, businesses.length, isEventsBiz],
   );
 
   const shouldBootstrapCeoStores = useMemo(() => {
@@ -573,20 +576,67 @@ function TpvRapidoCeoBoard() {
 
   // CEO + varias tiendas: primero elegir cuál abrir; luego OpeningScreen de ESA tienda.
   // Solo CEO web — trabajador/tablet entran directo a su tienda (código / asignación).
+  // Eventos: «Ir a TPV» ya fijó el PDV (fijo o temporal) → Abrir caja de ese PDV, sin picker delivery.
   useEffect(() => {
     if (!isCeoStorePickerUser) return;
     if (ceoEntryPickerDoneRef.current) return;
+    if (isEventsBiz) {
+      if (!businessId || !dataUserId) return;
+      const saved = String(readDeliveryOpsSelectedPdvId(businessId, dataUserId) || '').trim();
+      if (saved) {
+        // No coerce: el temporal puede no estar aún en activePdvs (scope/caché).
+        ceoEntryPickerDoneRef.current = true;
+        setSelectedPdvId(saved);
+        setForceStorePicker(false);
+        return;
+      }
+      // Sin PDV elegido desde /eventos/tpv: esperar carga; no «crear tienda» delivery.
+      if (storesLoading || !ceoBootstrapSettled || !businessesFetchSettled) return;
+      if (activePdvs.length <= 1) {
+        ceoEntryPickerDoneRef.current = true;
+        return;
+      }
+      ceoEntryPickerDoneRef.current = true;
+      setSelectedPdvId(null);
+      setForceStorePicker(true);
+      return;
+    }
     if (activePdvs.length <= 1) return;
     ceoEntryPickerDoneRef.current = true;
     setSelectedPdvId(null);
     setForceStorePicker(true);
-  }, [isCeoStorePickerUser, activePdvs.length]);
+  }, [
+    isCeoStorePickerUser,
+    isEventsBiz,
+    activePdvs,
+    activePdvs.length,
+    businessId,
+    dataUserId,
+    storesLoading,
+    ceoBootstrapSettled,
+    businessesFetchSettled,
+  ]);
 
   const resolvedInitialPdvId = useMemo(() => {
-    if (forceStorePicker || !businessId || !dataUserId || activePdvs.length === 0) return null;
+    if (forceStorePicker || !businessId || !dataUserId) return null;
     const saved = readDeliveryOpsSelectedPdvId(businessId, dataUserId);
+    // Eventos: PDV elegido en hub (puede ser temporal aún no listado).
+    if (isEventsBiz) {
+      const forced = String(saved || '').trim();
+      if (forced) return forced;
+      if (activePdvs.length === 0) return null;
+      return coerceSelectedPdvId(activePdvs, activeSalesPointId);
+    }
+    if (activePdvs.length === 0) return null;
     return coerceSelectedPdvId(activePdvs, saved || activeSalesPointId);
-  }, [forceStorePicker, businessId, dataUserId, activePdvs, activeSalesPointId]);
+  }, [
+    forceStorePicker,
+    businessId,
+    dataUserId,
+    activePdvs,
+    activeSalesPointId,
+    isEventsBiz,
+  ]);
 
   const effectivePdvId = forceStorePicker ? null : (selectedPdvId || resolvedInitialPdvId);
 
@@ -607,7 +657,8 @@ function TpvRapidoCeoBoard() {
     );
 
   const noStoresConfigured =
-    !forceStorePicker
+    !isEventsBiz
+    && !forceStorePicker
     && !effectivePdvId
     && !effectiveStoresLoading
     && !ceoBootstrapLoading
@@ -629,13 +680,23 @@ function TpvRapidoCeoBoard() {
   }, [awaitingPdvResolution]);
 
   // Tras timeout: entrar con la tienda guardada (coercida al listado) o abrir el selector.
+  // Eventos: el PDV del hub (puede ser temporal fuera del listado delivery) → Abrir caja, sin crear tienda.
   useEffect(() => {
     if (!pdvWaitTimedOut || forceStorePicker || effectivePdvId) return;
     if (!businessId || !dataUserId) {
-      setForceStorePicker(true);
+      if (!isEventsBiz) setForceStorePicker(true);
       return;
     }
-    const saved = readDeliveryOpsSelectedPdvId(businessId, dataUserId);
+    const saved = String(readDeliveryOpsSelectedPdvId(businessId, dataUserId) || '').trim();
+    if (isEventsBiz) {
+      if (saved) {
+        setSelectedPdvId(saved);
+        setForceStorePicker(false);
+        return;
+      }
+      navigate(tpvExitPath, { replace: true });
+      return;
+    }
     const coerced = coerceSelectedPdvId(activePdvs, saved || activeSalesPointId);
     if (coerced) {
       setSelectedPdvId(coerced);
@@ -650,6 +711,9 @@ function TpvRapidoCeoBoard() {
     dataUserId,
     activePdvs,
     activeSalesPointId,
+    isEventsBiz,
+    navigate,
+    tpvExitPath,
   ]);
 
   useEffect(() => {
@@ -689,10 +753,14 @@ function TpvRapidoCeoBoard() {
     try {
       if (sessionStorage.getItem('vertial.tpv.orderFlowLock') === '1') return;
     } catch { /* ignore */ }
-    const pdvId = coerceSelectedPdvId(
-      activePdvs,
-      activeSalesPointId || readDeliveryOpsSelectedPdvId(businessId, dataUserId),
-    );
+    const saved = String(readDeliveryOpsSelectedPdvId(businessId, dataUserId) || '').trim();
+    // Eventos: no sustituir el PDV del hub por otro del listado delivery (temporales fuera de scope).
+    const pdvId = isEventsBiz && saved
+      ? saved
+      : coerceSelectedPdvId(
+        activePdvs,
+        activeSalesPointId || saved,
+      );
     if (!pdvId) return;
     // Solo rellenar si aún no hay tienda en el TPV (no pisar una elección hecha aquí).
     setSelectedPdvId((prev) => (prev === pdvId ? prev : (prev || pdvId)));
@@ -712,6 +780,7 @@ function TpvRapidoCeoBoard() {
     activeSalesPointId,
     setActiveSalesPoint,
     selectedPdvId,
+    isEventsBiz,
   ]);
 
   useEffect(() => {
@@ -721,8 +790,10 @@ function TpvRapidoCeoBoard() {
       try {
         if (sessionStorage.getItem('vertial.tpv.orderFlowLock') === '1') return;
       } catch { /* ignore */ }
-      const saved = readDeliveryOpsSelectedPdvId(businessId, dataUserId);
-      const pdvId = coerceSelectedPdvId(activePdvs, saved || activeSalesPointId);
+      const saved = String(readDeliveryOpsSelectedPdvId(businessId, dataUserId) || '').trim();
+      const pdvId = isEventsBiz && saved
+        ? saved
+        : coerceSelectedPdvId(activePdvs, saved || activeSalesPointId);
       // No borrar la tienda si el listado PDV aún no cargó (evita desmontar el gate a mitad de pedido).
       if (!pdvId) return;
       // Clic sidebar (también con el picker abierto): esa tienda y entrar.
@@ -732,7 +803,7 @@ function TpvRapidoCeoBoard() {
     };
     window.addEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStore);
     return () => window.removeEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStore);
-  }, [businessId, dataUserId, activePdvs, activeSalesPointId]);
+  }, [businessId, dataUserId, activePdvs, activeSalesPointId, isEventsBiz]);
 
   useEffect(() => {
     if (!effectivePdvId || !dataUserId || !tpvCatalogBusinessId || businesses.length === 0) return;
@@ -777,15 +848,24 @@ function TpvRapidoCeoBoard() {
       writeDeliveryOpsSelectedPdvId(businessId, dataUserId, null);
       notifyDeliveryActiveStoreChanged();
     }
+    // Eventos: volver al hub de PDV (no picker / crear tienda delivery).
+    if (isEventsBiz) {
+      navigate(tpvExitPath, { replace: true });
+      return;
+    }
     setForceStorePicker(true);
     setSelectedPdvId(null);
-  }, [isCeoStorePickerUser, businessId, dataUserId]);
+  }, [isCeoStorePickerUser, businessId, dataUserId, isEventsBiz, navigate, tpvExitPath]);
 
   // Con PDVs listos y sin picker: fijar tienda en el mismo ciclo (no spinner eterno).
   useEffect(() => {
     if (forceStorePicker || effectivePdvId || activePdvs.length === 0) return;
     if (!businessId || !dataUserId) return;
-    const saved = readDeliveryOpsSelectedPdvId(businessId, dataUserId);
+    const saved = String(readDeliveryOpsSelectedPdvId(businessId, dataUserId) || '').trim();
+    if (isEventsBiz && saved) {
+      setSelectedPdvId(saved);
+      return;
+    }
     const pdvId = coerceSelectedPdvId(activePdvs, selectedPdvId || saved || activeSalesPointId);
     if (!pdvId) return;
     setSelectedPdvId(pdvId);
@@ -797,7 +877,37 @@ function TpvRapidoCeoBoard() {
     dataUserId,
     selectedPdvId,
     activeSalesPointId,
+    isEventsBiz,
   ]);
+
+  // Eventos sin PDV elegido: no montar picker delivery — volver al hub.
+  if (isEventsBiz && isCeoStorePickerUser && (!effectivePdvId || forceStorePicker)) {
+    if (!businessId || !dataUserId || !businessesFetchSettled || storesLoading) {
+      return (
+        <div className="flex h-[100svh] min-h-[100svh] items-center justify-center bg-gray-50 dark:bg-gray-950">
+          <div className="text-center px-6">
+            <Loader2 className="mx-auto mb-3 h-8 w-8 animate-spin text-gray-400" />
+            <p className="text-sm text-gray-500 dark:text-gray-400">Abriendo TPV evento…</p>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="flex h-[100svh] min-h-[100svh] flex-col items-center justify-center gap-4 bg-gray-50 p-6 text-center dark:bg-gray-950">
+        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Elige un PDV de evento</p>
+        <p className="max-w-sm text-sm text-gray-500 dark:text-gray-400">
+          Selecciona un punto de venta en TPV evento y pulsa Ir a TPV para abrir caja.
+        </p>
+        <button
+          type="button"
+          onClick={() => navigate(tpvExitPath, { replace: true })}
+          className="rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white dark:bg-gray-100 dark:text-gray-900"
+        >
+          Ir a TPV evento
+        </button>
+      </div>
+    );
+  }
 
   if (noStoresConfigured) {
     return (

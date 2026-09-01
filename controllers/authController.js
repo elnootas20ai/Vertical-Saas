@@ -2219,9 +2219,10 @@ export async function inviteUser(req, res) {
     }
 
     const rawInviteToken = crypto.randomBytes(32).toString('hex');
-    const accountWithToken = await saveInviteToken(req, savedAccount, rawInviteToken);
+    let accountWithToken = await saveInviteToken(req, savedAccount, rawInviteToken);
 
     let emailSent = false;
+    let verificationEmailSent = false;
     try {
       const { subject, html } = buildInvitationEmail({
         name: accountWithToken.fullName || name,
@@ -2246,6 +2247,12 @@ export async function inviteUser(req, res) {
       });
     }
 
+    {
+      const verified = await sendWorkerInviteEmailVerificationIfNeeded(req, accountWithToken);
+      accountWithToken = verified.account;
+      verificationEmailSent = verified.verificationEmailSent;
+    }
+
     await logAccountActivity(req, {
       actorUserId: actorUserId || String(invitedBy || '').trim(),
       actorName: invitedByDisplay,
@@ -2261,6 +2268,7 @@ export async function inviteUser(req, res) {
         companyName: resolvedCompanyName,
         existingUser: isExistingUser,
         emailSent,
+        verificationEmailSent,
       },
     });
 
@@ -2270,6 +2278,7 @@ export async function inviteUser(req, res) {
       user: sanitizeAccount(accountWithToken),
       isExistingUser,
       emailSent,
+      verificationEmailSent,
       companyCode: business?.companyCode || '',
       inviteExpiresAt: accountWithToken.inviteExpiresAt || savedInvitation.expiresAt,
     });
@@ -2375,7 +2384,7 @@ export async function resendInvite(req, res) {
     const companyName = account.pendingTeamInvite?.businessName || business?.name || account.companyName || '';
 
     const rawInviteToken = crypto.randomBytes(32).toString('hex');
-    const refreshedAccount = await saveInviteToken(req, account, rawInviteToken);
+    let refreshedAccount = await saveInviteToken(req, account, rawInviteToken);
 
     let resendInvitedByDisplay = String(companyName || '').trim();
     const resendActorId = String(req.authUser?.userId || '').trim();
@@ -2389,6 +2398,7 @@ export async function resendInvite(req, res) {
     }
 
     let emailSent = false;
+    let verificationEmailSent = false;
     try {
       const { subject, html } = buildInvitationEmail({
         name: refreshedAccount.fullName,
@@ -2412,6 +2422,12 @@ export async function resendInvite(req, res) {
       });
     }
 
+    {
+      const verified = await sendWorkerInviteEmailVerificationIfNeeded(req, refreshedAccount);
+      refreshedAccount = verified.account;
+      verificationEmailSent = verified.verificationEmailSent;
+    }
+
     await logAccountActivity(req, {
       actorUserId: req.authUser?.userId || account.user_id,
       actorName: resendInvitedByDisplay,
@@ -2420,13 +2436,14 @@ export async function resendInvite(req, res) {
       action: 'Invitación reenviada',
       entityId: account.user_id,
       entityLabel: account.fullName,
-      metadata: { email: account.email, businessId, isExistingUser },
+      metadata: { email: account.email, businessId, isExistingUser, emailSent, verificationEmailSent },
     });
 
     return res.json({
       ok: true,
       user: sanitizeAccount(refreshedAccount),
       emailSent,
+      verificationEmailSent,
       isExistingUser,
       inviteExpiresAt: refreshedAccount.inviteExpiresAt,
     });
@@ -3586,6 +3603,23 @@ async function resolveFreshAccount(req, account) {
     if (byId) return byId;
   }
   return account;
+}
+
+/**
+ * Todas las invitaciones a trabajadores: si el email aún no está verificado,
+ * envía también el correo de verificación (además del de invitación).
+ */
+async function sendWorkerInviteEmailVerificationIfNeeded(req, account) {
+  if (!account?.email || account.emailVerified) {
+    return { account, verificationEmailSent: false };
+  }
+  try {
+    const saved = await sendAccountVerificationEmail(req, account);
+    return { account: saved, verificationEmailSent: true };
+  } catch (err) {
+    console.error('[AUTH] Verificación tras invitación trabajador:', err?.message || err);
+    return { account, verificationEmailSent: false };
+  }
 }
 
 async function sendAccountVerificationEmail(req, account) {

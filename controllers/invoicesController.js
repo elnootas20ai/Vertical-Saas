@@ -64,8 +64,8 @@ export async function createInvoice(req, res) {
 
     if (!userId) return badRequest(res, 'Falta userId');
     if (!invoice || typeof invoice !== 'object') return badRequest(res, 'Falta el objeto invoice en el body');
-    if (!invoice.clientId) return badRequest(res, 'Falta clientId');
-    if (!invoice.clientName?.trim()) return badRequest(res, 'Falta clientName');
+    if (!invoice.clientId) return badRequest(res, 'Falta vincular el cliente');
+    if (!invoice.clientName?.trim()) return badRequest(res, 'Falta el nombre del cliente');
     if (!invoice.number?.trim()) return badRequest(res, 'Falta el número de factura');
 
     const account = await findAccountByUserId(req, userId);

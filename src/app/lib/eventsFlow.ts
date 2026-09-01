@@ -51,6 +51,20 @@ export function computeQuoteTotal(lines: QuoteLine[]): number {
   return lines.reduce((sum, line) => sum + (Number(line.total) || 0), 0);
 }
 
+/** IVA al final del presupuesto (líneas = base imponible). */
+export const EVENTS_QUOTE_IVA_RATE = 0.21;
+
+export function computeQuoteMoney(lines: QuoteLine[]): {
+  subtotal: number;
+  iva: number;
+  total: number;
+} {
+  const subtotal = Math.round(computeQuoteTotal(lines) * 100) / 100;
+  const iva = Math.round(subtotal * EVENTS_QUOTE_IVA_RATE * 100) / 100;
+  const total = Math.round((subtotal + iva) * 100) / 100;
+  return { subtotal, iva, total };
+}
+
 export function emptyQuoteLine(): QuoteLine {
   return {
     id: `line-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -207,7 +221,7 @@ export async function createEventDraft(
   input: CreateEventDraftInput,
 ): Promise<EventRecord> {
   const lineas = await ensureCatalogServicesFromQuoteLines(userId, input.lineas);
-  const total = computeQuoteTotal(lineas);
+  const { subtotal, iva, total } = computeQuoteMoney(lineas);
   const workers = (input.workers || [])
     .map((w) => ({
       id: String(w.id || '').trim(),
@@ -242,8 +256,8 @@ export async function createEventDraft(
     eventNombre: item.nombre,
     cliente: item.cliente,
     lineas: serializeQuoteLines(lineas),
-    subtotal: total,
-    iva: Math.round(total * 0.21 * 100) / 100,
+    subtotal,
+    iva,
     total,
     estado: 'borrador',
     notas: input.notas || '',
@@ -258,13 +272,9 @@ export async function createEventDraft(
     lineasPresupuesto: serializeQuoteLines(lineas),
   };
 
-  try {
-    const { ensureEventPortableTpv } = await import('./eventsPortableTpv');
-    return await ensureEventPortableTpv(userId, draft, input.business || null);
-  } catch {
-    /* el evento ya está creado; el código TPV se puede regenerar en la ficha */
-    return draft;
-  }
+  // El PDV temporal se crea al contratar / abrir operación — no al alta ni en borradores
+  // (evita llenar el listado de tiendas con 4–5 «Evento · …»).
+  return draft;
 }
 
 export async function updateEventRecord(
@@ -304,7 +314,7 @@ export async function saveEventQuoteLines(
   if (cleaned.length === 0) {
     throw new Error('Deja al menos una línea con concepto en el presupuesto');
   }
-  const total = computeQuoteTotal(cleaned);
+  const { subtotal, iva, total } = computeQuoteMoney(cleaned);
   const updated = await updateEventRecord(userId, event, {
     lineasPresupuesto: serializeQuoteLines(cleaned),
     presupuesto: total,
@@ -318,8 +328,8 @@ export async function saveEventQuoteLines(
       eventNombre: updated.nombre || event.nombre,
       cliente: updated.cliente || event.cliente,
       lineas: serializeQuoteLines(cleaned),
-      subtotal: total,
-      iva: Math.round(total * 0.21 * 100) / 100,
+      subtotal,
+      iva,
       total,
       estado: 'borrador' as const,
       notas: updated.notas || event.notas || '',

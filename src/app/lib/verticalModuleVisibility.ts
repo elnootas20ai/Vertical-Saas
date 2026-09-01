@@ -90,7 +90,7 @@ export function isVerticalModuleEnabled(
   return isMenuItemVisibleForVertical(moduleId, businessType);
 }
 
-const EVENTS_HIDDEN_SETTINGS_TABS = new Set(['brands', 'salesPoints', 'tpvPrinter']);
+const EVENTS_HIDDEN_SETTINGS_TABS = new Set(['salesPoints', 'tpvPrinter']);
 /** Despacho: sin marcas delivery ni impresora TPV (sí despachos / sedes). */
 const LAWYER_HIDDEN_SETTINGS_TABS = new Set(['brands', 'tpvPrinter']);
 

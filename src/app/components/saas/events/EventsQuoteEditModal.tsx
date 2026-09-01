@@ -11,7 +11,7 @@ import { resolveBusinessDataUserId } from '../../../lib/tenantUserId';
 import { formatMoneyEs, formatQtyEs } from '../../../lib/formatNumberEs';
 import { createVerticalApi, type VerticalEntity } from '../../../lib/verticalApiFactory';
 import {
-  computeQuoteTotal,
+  computeQuoteMoney,
   emptyQuoteLine,
   parseQuoteAmount,
   parseQuoteLines,
@@ -227,7 +227,7 @@ export function EventsEditModal({
     void venuesApi.list(userId).then(setVenues).catch(() => setVenues([]));
   }, [open, userId, venuesApi]);
 
-  const total = useMemo(() => computeQuoteTotal(lines), [lines]);
+  const quoteMoney = useMemo(() => computeQuoteMoney(lines), [lines]);
   const dirtyMeta = !formsEqual(form, savedForm);
   const dirtyLines = !quoteLinesAreEqual(
     lines.filter((line) => String(line.concepto || '').trim()),
@@ -550,7 +550,13 @@ export function EventsEditModal({
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 px-5 py-4 dark:border-gray-800">
-            <p className="text-lg font-bold tabular-nums text-gray-900 dark:text-gray-100">{formatMoneyEs(total)}</p>
+            <div className="space-y-0.5 text-sm">
+              <div className="flex gap-4 text-gray-500">
+                <span>Base {formatMoneyEs(quoteMoney.subtotal)}</span>
+                <span>IVA 21% {formatMoneyEs(quoteMoney.iva)}</span>
+              </div>
+              <p className="text-lg font-bold tabular-nums text-gray-900 dark:text-gray-100">{formatMoneyEs(quoteMoney.total)}</p>
+            </div>
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={onClose} className={VERTIAL_BTN_SECONDARY}>
                 Cancelar

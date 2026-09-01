@@ -1,5 +1,6 @@
 import type { PointOfSale } from './deliveryApi';
 import type { WorkCenter } from './workCentersApi';
+import { isTemporaryEventWorkCenter } from './workCentersApi';
 
 export function normalizeBusinessScopeId(value: string | null | undefined): string {
   return String(value || '').replace(/^business:/, '').trim();
@@ -13,7 +14,7 @@ function readWorkCenterBusinessId(wc: WorkCenter | Record<string, unknown>): str
 function filterWorkCentersForBusinessScope(
   workCenters: WorkCenter[],
   businessId: string,
-  options?: { accountBusinessCount?: number },
+  options?: { accountBusinessCount?: number; includeTemporaryEventPdvs?: boolean },
 ): WorkCenter[] {
   const bid = normalizeBusinessScopeId(businessId);
   if (!bid) return [];
@@ -26,25 +27,31 @@ function filterWorkCentersForBusinessScope(
   const mineRetail = mine.filter(isRetail);
   const accountN = options?.accountBusinessCount;
 
+  let result: WorkCenter[];
   if (accountN === undefined) {
-    return mine.sort((a, b) => a.name.localeCompare(b.name, 'es'));
-  }
-
-  if (mineRetail.length === 0) {
+    result = mine.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  } else if (mineRetail.length === 0) {
     const legacyRetail = active.filter((wc) => !readWorkCenterBusinessId(wc) && isRetail(wc));
     const merged = new Map<string, WorkCenter>();
     for (const wc of mine) merged.set(wc._id, wc);
     for (const wc of legacyRetail) merged.set(wc._id, wc);
-    return [...merged.values()].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+    result = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  } else {
+    result = mine.sort((a, b) => a.name.localeCompare(b.name, 'es'));
   }
 
-  return mine.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  if (!options?.includeTemporaryEventPdvs) {
+    result = result.filter((wc) => !isTemporaryEventWorkCenter(wc));
+  }
+  return result;
 }
 
 function workCentersStrictlyForBusiness(workCenters: WorkCenter[], businessId: string): WorkCenter[] {
   const bid = normalizeBusinessScopeId(businessId);
   if (!bid) return [];
-  return workCenters.filter((wc) => readWorkCenterBusinessId(wc) === bid);
+  return workCenters
+    .filter((wc) => readWorkCenterBusinessId(wc) === bid)
+    .filter((wc) => !isTemporaryEventWorkCenter(wc));
 }
 
 function dedupeRetailWorkCentersForBusiness(workCenters: WorkCenter[]): WorkCenter[] {
@@ -142,14 +149,14 @@ export function isRetailWorkCenter(wc: WorkCenter): boolean {
 export function sanitizeRetailScopeSnapshot(
   businessId: string,
   snapshot: { retailWorkCenters: WorkCenter[]; allPointsOfSale: PointOfSale[] },
-  options?: { accountBusinessCount?: number },
+  options?: { accountBusinessCount?: number; includeTemporaryEventPdvs?: boolean },
 ): { retailWorkCenters: WorkCenter[]; allPointsOfSale: PointOfSale[] } {
   const bid = normalizeBusinessScopeId(businessId);
   if (!bid) return { retailWorkCenters: [], allPointsOfSale: [] };
 
   const input = snapshot.retailWorkCenters.filter((wc) => !wc.deletedAt);
   let retail: WorkCenter[];
-  if (options?.accountBusinessCount !== undefined) {
+  if (options?.accountBusinessCount !== undefined || options?.includeTemporaryEventPdvs) {
     retail = dedupeRetailWorkCentersForBusiness(
       filterWorkCentersForBusinessScope(input, bid, options),
     ).filter(isRetailWorkCenter);

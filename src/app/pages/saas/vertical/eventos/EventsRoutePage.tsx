@@ -34,11 +34,11 @@ import {
 } from 'lucide-react';
 
 const ROUTE_STAGES = new Set<EventContractStage>([
-  'aceptado', 'contratado', 'planificacion', 'en_curso', 'finalizado',
+  'presupuesto', 'enviado', 'aceptado', 'contratado', 'planificacion', 'en_curso', 'finalizado',
 ]);
 
 const ACTIVE_ROUTE_STAGES = new Set<EventContractStage>([
-  'aceptado', 'contratado', 'planificacion', 'en_curso',
+  'presupuesto', 'enviado', 'aceptado', 'contratado', 'planificacion', 'en_curso',
 ]);
 
 type RouteFilter = 'activos' | 'en_curso' | 'todos';
@@ -64,7 +64,7 @@ function sortByFecha(a: EventRecord, b: EventRecord): number {
 export function EventsRoutePage() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, businessesFetchSettled } = useBusiness();
   const businessId = resolveBusinessScopeId(currentBusiness);
   const scoped = (path: string) => saasPathWithBusinessScope(path, businessId);
   const dataUserId = useMemo(
@@ -80,7 +80,7 @@ export function EventsRoutePage() {
 
   const refresh = useCallback(async () => {
     if (!dataUserId) {
-      setLoading(false);
+      if (businessesFetchSettled) setLoading(false);
       return;
     }
     setLoading(true);
@@ -108,9 +108,12 @@ export function EventsRoutePage() {
     } finally {
       setLoading(false);
     }
-  }, [dataUserId, businessId]);
+  }, [dataUserId, businessId, businessesFetchSettled]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    if (!businessesFetchSettled && !dataUserId) return;
+    void refresh();
+  }, [refresh, businessesFetchSettled, dataUserId]);
 
   const routeEvents = useMemo(() => {
     return events
@@ -171,7 +174,7 @@ export function EventsRoutePage() {
               Día D · Ruta
             </h1>
             <p className="text-sm text-stone-500 dark:text-stone-400 mt-0.5">
-              Mando del día: timeline, mercancía, equipo, quién lleva y TPV
+              Todas las contrataciones en curso: de presupuesto al día D
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

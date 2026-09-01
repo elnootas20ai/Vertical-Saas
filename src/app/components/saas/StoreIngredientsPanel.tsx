@@ -343,11 +343,11 @@ type IngredientDraft = {
   extraPrice: string;
 };
 
-function emptyDraft(chargeExtra = true): IngredientDraft {
+function emptyDraft(chargeExtra = false): IngredientDraft {
   return {
     name: '',
     chargeExtra,
-    allowRemove: true,
+    allowRemove: false,
     extraPrice: '',
   };
 }
@@ -1165,18 +1165,26 @@ export function StoreIngredientsPanel({
   const persistList = useCallback(
     async (
       nextItems: StoreIngredient[],
-      opts?: { successToast?: string; warnNoExtras?: boolean },
+      opts?: {
+        successToast?: string;
+        warnNoExtras?: boolean;
+        defaultExtraPriceOverride?: string;
+      },
     ): Promise<boolean> => {
       const rows = nextItems.filter((i) => String(i.name || '').trim());
+      const priceRaw =
+        opts?.defaultExtraPriceOverride !== undefined
+          ? opts.defaultExtraPriceOverride
+          : defaultExtraPrice;
       const extrasNow = rows.some((i) => readStoreIngredientTpvFlags(i).chargeExtra);
-      if (extrasNow && normalizeTpvDefaultExtraPrice(defaultExtraPrice) == null) {
+      if (extrasNow && normalizeTpvDefaultExtraPrice(priceRaw) == null) {
         toast.error('Indica el precio de los extras (Defecto extras)');
         setDirty(true);
         return false;
       }
       setSaving(true);
       try {
-        const tpvDefaultExtraPrice = normalizeTpvDefaultExtraPrice(defaultExtraPrice);
+        const tpvDefaultExtraPrice = normalizeTpvDefaultExtraPrice(priceRaw);
         const saved = await updateDeliveryConfigRequest(userId, {
           _id: configDocId || `dlvconf-${normalizeTenantUserId(userId)}`,
           _rev: configRev,
@@ -1294,6 +1302,53 @@ export function StoreIngredientsPanel({
       prev.map((i) => (i.id !== id ? i : withStoreIngredientTpvFlags(i, patch))),
     );
   };
+
+  /** Aplica flags TPV a todos los ingredientes (no subrecetas) de la lista visible/filtrada. */
+  const bulkSetTpvFlag = (flag: 'chargeExtra' | 'allowRemove', value: boolean) => {
+    const ids = new Set(
+      visibleIngredients
+        .filter((ing) => normalizeStoreIngredientRecipeLines(ing.recipeLines).length === 0)
+        .map((ing) => ing.id),
+    );
+    if (ids.size === 0) return;
+    const needDefaultExtra =
+      flag === 'chargeExtra' && value && normalizeTpvDefaultExtraPrice(defaultExtraPrice) == null;
+    if (needDefaultExtra) setDefaultExtraPrice('0.5');
+    const { items: deduped, mergedCount } = mergeDuplicateStoreIngredients(
+      items.map((i) => {
+        if (!ids.has(i.id)) return i;
+        if (normalizeStoreIngredientRecipeLines(i.recipeLines).length > 0) return i;
+        return withStoreIngredientTpvFlags(i, { [flag]: value });
+      }),
+    );
+    if (mergedCount > 0) {
+      toast.message(`Fusionamos ${mergedCount} duplicado(s) automáticamente`, { duration: 4500 });
+    }
+    setItems(deduped);
+    void persistList(deduped, {
+      successToast: value
+        ? flag === 'chargeExtra'
+          ? 'Extras activados en todos'
+          : 'Quitar en TPV activado en todos'
+        : flag === 'chargeExtra'
+          ? 'Extras desactivados en todos'
+          : 'Quitar en TPV desactivado en todos',
+      ...(needDefaultExtra ? { defaultExtraPriceOverride: '0.5' } : {}),
+    });
+  };
+
+  const bulkTpvTargets = useMemo(() => {
+    return visibleIngredients.filter(
+      (ing) => normalizeStoreIngredientRecipeLines(ing.recipeLines).length === 0,
+    );
+  }, [visibleIngredients]);
+
+  const allExtrasOn =
+    bulkTpvTargets.length > 0 &&
+    bulkTpvTargets.every((ing) => readStoreIngredientTpvFlags(ing).chargeExtra);
+  const allRemoveOn =
+    bulkTpvTargets.length > 0 &&
+    bulkTpvTargets.every((ing) => readStoreIngredientTpvFlags(ing).allowRemove);
 
   const updateIngredientBaseCost = (id: string, baseCost: number) => {
     void applyAndPersist((prev) => prev.map((i) => (i.id === id ? { ...i, baseCost } : i)));
@@ -1515,17 +1570,49 @@ export function StoreIngredientsPanel({
       >
         <div className="p-3 space-y-3">
           {(listSection === 'ingredients' ? ingredientItems : subrecipeItems).length > 0 ? (
-            <SaasTabSearch
-              value={listSearch}
-              onChange={(v) => {
-                setListSearch(v);
-                setExpandedPreview(false);
-              }}
-              placeholder={
-                listSection === 'subrecipes' ? 'Buscar subreceta…' : 'Buscar ingrediente…'
-              }
-              className="relative w-full"
-            />
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+              <SaasTabSearch
+                value={listSearch}
+                onChange={(v) => {
+                  setListSearch(v);
+                  setExpandedPreview(false);
+                }}
+                placeholder={
+                  listSection === 'subrecipes' ? 'Buscar subreceta…' : 'Buscar ingrediente…'
+                }
+                className="relative w-full sm:flex-1"
+              />
+              {listSection === 'ingredients' && bulkTpvTargets.length > 0 ? (
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => bulkSetTpvFlag('chargeExtra', !allExtrasOn)}
+                    className={`${allExtrasOn ? VERTIAL_BTN_SECONDARY : VERTIAL_BTN_PRIMARY} !min-h-10 px-3 py-2 text-xs`}
+                    title={
+                      allExtrasOn
+                        ? 'Desactivar extra de pago en todos los ingredientes'
+                        : 'Activar extra de pago en todos los ingredientes'
+                    }
+                  >
+                    {allExtrasOn ? 'Quitar extras' : 'Activar extras'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => bulkSetTpvFlag('allowRemove', !allRemoveOn)}
+                    className={`${allRemoveOn ? VERTIAL_BTN_SECONDARY : VERTIAL_BTN_PRIMARY} !min-h-10 px-3 py-2 text-xs`}
+                    title={
+                      allRemoveOn
+                        ? 'Desactivar «se puede quitar» en todos'
+                        : 'Activar «se puede quitar» en todos'
+                    }
+                  >
+                    {allRemoveOn ? 'Quitar «se puede quitar»' : 'Activar quitar'}
+                  </button>
+                </div>
+              ) : null}
+            </div>
           ) : null}
           {(listSection === 'ingredients' ? ingredientItems : subrecipeItems).length === 0 ? (
             <SaasTabEmpty

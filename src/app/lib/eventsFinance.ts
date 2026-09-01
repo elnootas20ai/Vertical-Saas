@@ -11,7 +11,22 @@ import {
 import { generateInvoicePdf, type InvoiceData } from './invoicePdfGenerator';
 import { createVerticalApi } from './verticalApiFactory';
 import { updateEventRecord, parseQuoteLines, loadEventQuotes } from './eventsFlow';
+import { EVENTS_QUOTE_IVA_RATE } from './eventsFlow';
 import type { EventRecord, QuoteLine } from './eventsTypes';
+import type { Client } from '../context/AppContext';
+
+/** La señal acordada es importe cobrado (con IVA). Desglosa base + cuota. */
+export function splitGrossWithEventsIva(gross: number, rate = EVENTS_QUOTE_IVA_RATE): {
+  base: number;
+  iva: number;
+  total: number;
+} {
+  const total = Math.round((Number(gross) || 0) * 100) / 100;
+  if (total <= 0) return { base: 0, iva: 0, total: 0 };
+  const base = Math.round((total / (1 + rate)) * 100) / 100;
+  const iva = Math.round((total - base) * 100) / 100;
+  return { base, iva, total };
+}
 
 export type EventFinancialSummary = {
   presupuesto: number;
@@ -25,6 +40,149 @@ export type EventFinancialSummary = {
   facturaFinalCreada: boolean;
   cierreEconomicoOk: boolean;
 };
+
+/**
+ * Busca o crea ficha CRM para un cliente de evento (nombre + teléfono/email opcionales).
+ */
+export async function ensureEventCrmClient(
+  userId: string,
+  input: {
+    clientId?: string;
+    name: string;
+    phone?: string;
+    email?: string;
+  },
+  business?: {
+    business_id?: string;
+    businessId?: string;
+    id?: string;
+  } | null,
+): Promise<{ clientId: string; clientName: string; client: Client | null; created: boolean }> {
+  const clientName = String(input.name || '').trim();
+  let clientId = String(input.clientId || '').trim();
+  if (!clientName) {
+    throw new Error('Indica el nombre del cliente');
+  }
+  if (clientId) {
+    return { clientId, clientName, client: null, created: false };
+  }
+
+  const { createClientRequest, notifyCrmClientsSync, searchClientsByPhoneRequest } = await import('./crmApi');
+  const { normalizeBusinessScopeId } = await import('./deliverySetup');
+  const phone = String(input.phone || '').trim();
+  const email = String(input.email || '').trim();
+  const businessId = normalizeBusinessScopeId(
+    business?.business_id || business?.businessId || business?.id || '',
+  );
+
+  const searchQ = phone.replace(/\D/g, '').length >= 7 ? phone : clientName;
+  if (searchQ) {
+    try {
+      const found = await searchClientsByPhoneRequest(
+        userId,
+        searchQ,
+        8,
+        undefined,
+        businessId || undefined,
+        { includeLegacy: true, fallbackAll: true },
+      );
+      const phoneDigits = phone.replace(/\D/g, '');
+      const hit = (found.clients || []).find((c) => {
+        const id = String(c.id || '').trim();
+        if (!id) return false;
+        const n = String(c.name || (c as { fullName?: string }).fullName || '').trim().toLowerCase();
+        if (n && n === clientName.toLowerCase()) return true;
+        if (phoneDigits.length >= 7) {
+          const cp = String(c.phone || '').replace(/\D/g, '');
+          if (cp && (cp === phoneDigits || cp.endsWith(phoneDigits.slice(-9)) || phoneDigits.endsWith(cp.slice(-9)))) {
+            return true;
+          }
+        }
+        return false;
+      }) || (found.clients.length === 1 ? found.clients[0] : undefined);
+      if (hit?.id) {
+        return {
+          clientId: String(hit.id).trim(),
+          clientName: String(hit.name || hit.fullName || clientName).trim(),
+          client: hit,
+          created: false,
+        };
+      }
+    } catch {
+      /* crear abajo */
+    }
+  }
+
+  const phoneDigits = phone.replace(/\D/g, '');
+  const hasPhone = phoneDigits.length >= 7;
+  const payload = {
+    type: 'client' as const,
+    user_id: userId,
+    ...(businessId ? { businessId, business_id: businessId } : {}),
+    clientType: 'particular' as const,
+    name: clientName,
+    phone: hasPhone ? phoneDigits : '',
+    phonePrefix: hasPhone ? '+34' : '',
+    email,
+    status: 'active' as const,
+    responsible: 'Eventos',
+    tags: ['evento'],
+    notes: '',
+    allowEmptyPhone: !hasPhone,
+    consents: { dataProcessing: false, commercial: false, thirdParty: false },
+    stats: {
+      totalOrders: 0,
+      lastOrderDate: null,
+      orderFrequencyDays: 0,
+      favoriteAddressId: null,
+      totalSpent: 0,
+      createdFrom: 'vertical' as const,
+    },
+  };
+
+  const { client, duplicates } = await createClientRequest(userId, payload as Client);
+  const resolved = client || duplicates[0] || null;
+  clientId = String(resolved?.id || '').trim();
+  if (!clientId) {
+    throw new Error('No se pudo crear el cliente en el CRM');
+  }
+  notifyCrmClientsSync();
+  return {
+    clientId,
+    clientName: String(resolved?.name || resolved?.fullName || clientName).trim(),
+    client: resolved,
+    created: Boolean(client),
+  };
+}
+
+/**
+ * La factura exige clientId en API. Si el evento solo tiene nombre, crea/vincula ficha CRM.
+ */
+async function ensureEventInvoiceClient(
+  userId: string,
+  event: EventRecord,
+  business?: {
+    business_id?: string;
+    businessId?: string;
+    id?: string;
+  } | null,
+): Promise<{ event: EventRecord; clientId: string; clientName: string }> {
+  const ensured = await ensureEventCrmClient(
+    userId,
+    {
+      clientId: event.clientId,
+      name: event.cliente,
+      phone: event.clientTelefono,
+      email: event.clientEmail,
+    },
+    business,
+  );
+  if (String(event.clientId || '').trim() === ensured.clientId) {
+    return { event, clientId: ensured.clientId, clientName: ensured.clientName };
+  }
+  const updated = await updateEventRecord(userId, event, { clientId: ensured.clientId });
+  return { event: updated, clientId: ensured.clientId, clientName: ensured.clientName };
+}
 
 export function summarizeEventFinancials(event: EventRecord): EventFinancialSummary {
   const presupuesto = Number(event.presupuesto) || 0;
@@ -69,6 +227,9 @@ type BusinessIssuer = {
   phone?: string;
   email?: string;
   logo?: string;
+  business_id?: string;
+  businessId?: string;
+  id?: string;
 };
 
 function quoteLinesToInvoiceLines(lines: QuoteLine[]) {
@@ -189,19 +350,25 @@ export async function registerEventDepositPayment(
     throw new Error('Indica un importe de señal mayor que 0');
   }
 
+  const ensured = await ensureEventInvoiceClient(userId, event, business);
+  let current = ensured.event;
+
   const { number, sequenceNumber } = await getNextInvoiceNumber(userId, 'EVT');
-  const line = calcInvoiceLine(`Señal — ${event.nombre}`, 1, depositAmount, 0, 21);
+  // Señal = lo cobrado (presupuesto ya lleva IVA). Base = importe / 1,21.
+  const split = splitGrossWithEventsIva(depositAmount);
+  const line = calcInvoiceLine(`Señal — ${current.nombre}`, 1, split.base, 0, Math.round(EVENTS_QUOTE_IVA_RATE * 100));
   const totals = calcInvoiceTotals([line]);
+  const invoiceTotal = totals.total;
   const today = new Date().toISOString().slice(0, 10);
 
   const invoice = await createClientInvoiceRequest(userId, {
-    clientId: event.clientId || '',
-    clientName: event.cliente,
+    clientId: ensured.clientId,
+    clientName: ensured.clientName,
     clientNif: '',
     clientAddress: '',
     clientCity: '',
     clientPostalCode: '',
-    clientEmail: event.clientEmail || '',
+    clientEmail: current.clientEmail || '',
     issuerName: business?.name || '',
     issuerNif: business?.taxId || '',
     issuerAddress: business?.address || '',
@@ -212,7 +379,7 @@ export async function registerEventDepositPayment(
     number,
     series: 'EVT',
     sequenceNumber,
-    vehicleName: event.nombre,
+    vehicleName: current.nombre,
     vehiclePlate: '',
     date: today,
     dueDate: today,
@@ -221,20 +388,20 @@ export async function registerEventDepositPayment(
     discountAmount: totals.discountAmount,
     taxAmount: totals.taxAmount,
     amountBase: totals.subtotal,
-    total: totals.total,
-    paid: depositAmount,
+    total: invoiceTotal,
+    paid: invoiceTotal,
     status: 'paid',
     paymentMethod: method,
-    notes: `Señal del evento ${event.nombre}`,
+    notes: `Señal del evento ${current.nombre}`,
     sourceType: 'service',
-    sourceQuoteId: event._id,
+    sourceQuoteId: current._id,
     sourceSaleId: null,
     financeMovementId: null,
     sentAt: null,
     sentTo: null,
     payments: [{
       id: `pay-${Date.now()}`,
-      amount: depositAmount,
+      amount: invoiceTotal,
       date: today,
       method,
       notes: 'Señal evento',
@@ -245,15 +412,15 @@ export async function registerEventDepositPayment(
     await linkClientInvoiceToFinanceRequest(userId, invoice.id).catch(() => null);
   }
 
-  const updated = await updateEventRecord(userId, event, {
+  const updated = await updateEventRecord(userId, current, {
     depositPaidAt: new Date().toISOString(),
-    depositPaidAmount: depositAmount,
+    depositPaidAmount: invoiceTotal,
     depositInvoiceId: invoice?.id || '',
   });
 
-  const stamped = await stampFullyPaidIfCrossed(userId, event, updated);
+  const stamped = await stampFullyPaidIfCrossed(userId, current, updated);
   const { maybeNotifyEventFullyPaid } = await import('./eventsNotifications');
-  void maybeNotifyEventFullyPaid(userId, event, stamped);
+  void maybeNotifyEventFullyPaid(userId, current, stamped);
 
   return { event: stamped, invoice };
 }
@@ -267,26 +434,33 @@ export async function createEventFinalInvoice(
     throw new Error('Ya existe una factura final para este evento');
   }
 
-  const quoteLines = parseQuoteLines(event.lineasPresupuesto);
+  const ensured = await ensureEventInvoiceClient(userId, event, business);
+  const current = ensured.event;
+
+  const quoteLines = parseQuoteLines(current.lineasPresupuesto);
   const invoiceLines = quoteLinesToInvoiceLines(quoteLines);
   if (invoiceLines.length === 0) {
-    invoiceLines.push(calcInvoiceLine(event.nombre, 1, Number(event.presupuesto) || 0, 0, 21));
+    // presupuesto ya incluye IVA → desglosar base + cuota.
+    const split = splitGrossWithEventsIva(Number(current.presupuesto) || 0);
+    invoiceLines.push(
+      calcInvoiceLine(current.nombre, 1, split.base, 0, Math.round(EVENTS_QUOTE_IVA_RATE * 100)),
+    );
   }
 
-  const depositPaid = Number(event.depositPaidAmount) || 0;
+  const depositPaid = Number(current.depositPaidAmount) || 0;
   const totals = calcInvoiceTotals(invoiceLines);
   const { number, sequenceNumber } = await getNextInvoiceNumber(userId, 'FAC');
   const today = new Date().toISOString().slice(0, 10);
-  const due = event.fecha || today;
+  const due = current.fecha || today;
 
   const invoice = await createClientInvoiceRequest(userId, {
-    clientId: event.clientId || '',
-    clientName: event.cliente,
+    clientId: ensured.clientId,
+    clientName: ensured.clientName,
     clientNif: '',
     clientAddress: '',
     clientCity: '',
     clientPostalCode: '',
-    clientEmail: event.clientEmail || '',
+    clientEmail: current.clientEmail || '',
     issuerName: business?.name || '',
     issuerNif: business?.taxId || '',
     issuerAddress: business?.address || '',
@@ -297,7 +471,7 @@ export async function createEventFinalInvoice(
     number,
     series: 'FAC',
     sequenceNumber,
-    vehicleName: event.nombre,
+    vehicleName: current.nombre,
     vehiclePlate: '',
     date: today,
     dueDate: due,
@@ -311,10 +485,10 @@ export async function createEventFinalInvoice(
     status: depositPaid >= totals.total ? 'paid' : 'pending',
     paymentMethod: '',
     notes: depositPaid > 0
-      ? `Factura evento ${event.nombre}. Señal ya cobrada: ${depositPaid.toLocaleString('es-ES')} €`
-      : `Factura evento ${event.nombre}`,
+      ? `Factura evento ${current.nombre}. Señal ya cobrada: ${depositPaid.toLocaleString('es-ES')} €`
+      : `Factura evento ${current.nombre}`,
     sourceType: 'service',
-    sourceQuoteId: event._id,
+    sourceQuoteId: current._id,
     sourceSaleId: null,
     financeMovementId: null,
     sentAt: null,
@@ -322,7 +496,7 @@ export async function createEventFinalInvoice(
     payments: [],
   });
 
-  const updated = await updateEventRecord(userId, event, {
+  const updated = await updateEventRecord(userId, current, {
     finalInvoiceId: invoice?.id || '',
   });
 

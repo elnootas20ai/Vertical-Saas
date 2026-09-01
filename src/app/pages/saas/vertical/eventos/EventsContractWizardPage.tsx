@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useBlocker, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Layout } from '../../../../components/saas/Layout';
 import { NuevoClienteModal } from '../../../../components/saas/NuevoClienteModal';
@@ -8,13 +8,26 @@ import { useApp } from '../../../../context/AppContext';
 import { useBusiness } from '../../../../context/BusinessContext';
 import { createVerticalApi, type VerticalEntity } from '../../../../lib/verticalApiFactory';
 import { listUsersRequest } from '../../../../lib/authApi';
-import { computeQuoteTotal, createEventDraft, loadEventServices, quoteLineFromCatalogItem, quoteLineFromService, resolveEventsUserId } from '../../../../lib/eventsFlow';
+import {
+  computeQuoteMoney,
+  createEventDraft,
+  loadEventById,
+  loadEventServices,
+  quoteLineFromCatalogItem,
+  quoteLineFromService,
+  resolveEventsUserId,
+  saveEventQuoteLines,
+  updateEventRecord,
+} from '../../../../lib/eventsFlow';
+import { ensureEventCrmClient } from '../../../../lib/eventsFinance';
 import {
   EVENT_TYPE_LABELS,
   type EventPlanningWorker,
   type EventType,
   type EventServiceRecord,
   type QuoteLine,
+  parsePlanningChecklist,
+  serializePlanningChecklist,
 } from '../../../../lib/eventsTypes';
 import { listCatalogItemsRequest, type CatalogItem } from '../../../../lib/deliveryApi';
 import { filterCatalogItemsForBusinessScope } from '../../../../lib/catalogBusinessScope';
@@ -24,11 +37,23 @@ import {
   suggestedDepositFromTotal,
 } from '../../../../lib/eventsQuoteSettings';
 import { useEventsActivationNav } from '../../../../hooks/useEventsActivationNav';
+import { useClientPhoneSearch } from '../../../../hooks/useClientPhoneSearch';
 import { buildActivationTargetUrl } from '../../../../lib/activationGuide';
 import { resolveBusinessScopeId } from '../../../../lib/deliverySetup';
 import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../../../lib/vertialUiTokens';
+import { formatMoneyEs } from '../../../../lib/formatNumberEs';
+import { mergeBusinessMembers } from '../../../../lib/schedulesDisplay';
 import {
-  ArrowLeft, ArrowRight, Check, Plus, Trash2, Loader2, User, CalendarDays, Receipt, Lock, UserPlus, Users,
+  clearContractWizardDraft,
+  hasMeaningfulContractDraft,
+  readContractWizardDraft,
+  writeContractWizardDraft,
+  type ContractWizardLocalDraft,
+  type ContractWizardStepId,
+} from '../../../../lib/eventsContractWizardDraft';
+import type { Client } from '../../../../context/AppContext';
+import {
+  ArrowLeft, ArrowRight, Check, Plus, Trash2, Loader2, User, CalendarDays, Receipt, Lock, UserPlus, Users, Search,
 } from 'lucide-react';
 
 interface Venue extends VerticalEntity {
@@ -45,7 +70,7 @@ const WIZARD_STEPS = [
   { id: 'confirmar', label: 'Confirmar', icon: Check },
 ] as const;
 
-type StepId = (typeof WIZARD_STEPS)[number]['id'];
+type StepId = ContractWizardStepId;
 
 const inputClass =
   'w-full rounded-xl border-2 border-gray-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100';
@@ -75,6 +100,7 @@ export function EventsContractWizardPage() {
 
   const [step, setStep] = useState<StepId>('cliente');
   const [saving, setSaving] = useState(false);
+  const [advancing, setAdvancing] = useState(false);
   const [venues, setVenues] = useState<Venue[]>([]);
   const [services, setServices] = useState<EventServiceRecord[]>([]);
   const [catalogProducts, setCatalogProducts] = useState<CatalogItem[]>([]);
@@ -99,7 +125,42 @@ export function EventsContractWizardPage() {
   const [deposito, setDeposito] = useState(0);
   const [notas, setNotas] = useState('');
   const [depositPercentRule, setDepositPercentRule] = useState(0);
+  const [draftEventId, setDraftEventId] = useState('');
+  const [restoredDraft, setRestoredDraft] = useState(false);
   const quoteDefaultsAppliedRef = useRef(false);
+  const draftHydratedRef = useRef(false);
+  const skipLeaveSaveRef = useRef(false);
+  const serverFlushInFlightRef = useRef<Promise<string | null> | null>(null);
+  const draftSnapshotRef = useRef<ContractWizardLocalDraft | null>(null);
+
+  useEffect(() => {
+    if (draftHydratedRef.current) return;
+    draftHydratedRef.current = true;
+    const saved = readContractWizardDraft(businessId || '');
+    if (!saved || !hasMeaningfulContractDraft(saved)) return;
+    const validStep = WIZARD_STEPS.some((s) => s.id === saved.step) ? saved.step : 'cliente';
+    setStep(validStep);
+    setClientId(saved.clientId || '');
+    setCliente(saved.cliente || '');
+    setClientEmail(saved.clientEmail || '');
+    setClientTelefono(saved.clientTelefono || '');
+    setNombre(saved.nombre || '');
+    if (saved.tipo) setTipo(saved.tipo);
+    setFecha(saved.fecha || '');
+    setInvitados(Number(saved.invitados) > 0 ? Number(saved.invitados) : 50);
+    setVenueId(saved.venueId || '');
+    setLugar(saved.lugar || '');
+    setLineas(Array.isArray(saved.lineas) && saved.lineas.length > 0 ? saved.lineas : [emptyLine()]);
+    setDeposito(Number(saved.deposito) || 0);
+    if (String(saved.notas || '').trim()) {
+      setNotas(saved.notas);
+      quoteDefaultsAppliedRef.current = true;
+    }
+    setWorkers(Array.isArray(saved.workers) ? saved.workers : []);
+    setProductQtyById(saved.productQtyById && typeof saved.productQtyById === 'object' ? saved.productQtyById : {});
+    if (saved.draftEventId) setDraftEventId(saved.draftEventId);
+    setRestoredDraft(true);
+  }, [businessId]);
 
   useEffect(() => {
     if (quoteDefaultsAppliedRef.current) return;
@@ -110,13 +171,183 @@ export function EventsContractWizardPage() {
     setDepositPercentRule(settings.depositPercent > 0 ? settings.depositPercent : 0);
   }, [businessId]);
 
-  const total = useMemo(() => computeQuoteTotal(lineas), [lineas]);
+  const quoteMoney = useMemo(() => computeQuoteMoney(lineas), [lineas]);
   const selectedWorkers = useMemo(() => workers.filter((w) => w.ok), [workers]);
 
+  const buildLocalDraft = useCallback((): ContractWizardLocalDraft => ({
+    step,
+    clientId,
+    cliente,
+    clientEmail,
+    clientTelefono,
+    nombre,
+    tipo,
+    fecha,
+    invitados,
+    venueId,
+    lugar,
+    lineas,
+    deposito,
+    notas,
+    workers,
+    productQtyById,
+    draftEventId: draftEventId || undefined,
+    updatedAt: new Date().toISOString(),
+  }), [
+    step, clientId, cliente, clientEmail, clientTelefono, nombre, tipo, fecha, invitados,
+    venueId, lugar, lineas, deposito, notas, workers, productQtyById, draftEventId,
+  ]);
+
   useEffect(() => {
-    if (!(depositPercentRule > 0) || !(total > 0)) return;
-    setDeposito(suggestedDepositFromTotal(total, depositPercentRule));
-  }, [total, depositPercentRule]);
+    draftSnapshotRef.current = buildLocalDraft();
+  }, [buildLocalDraft]);
+
+  useEffect(() => {
+    if (!draftHydratedRef.current) return;
+    const draft = buildLocalDraft();
+    if (!hasMeaningfulContractDraft(draft)) {
+      clearContractWizardDraft(businessId || '');
+      return;
+    }
+    const t = window.setTimeout(() => {
+      writeContractWizardDraft(businessId || '', draft);
+    }, 400);
+    return () => window.clearTimeout(t);
+  }, [buildLocalDraft, businessId]);
+
+  const flushServerDraft = useCallback(async (opts?: { silent?: boolean }): Promise<string | null> => {
+    if (skipLeaveSaveRef.current) return draftEventId || null;
+    if (!dataUserId) return null;
+    const snap = draftSnapshotRef.current || buildLocalDraft();
+    if (!hasMeaningfulContractDraft(snap)) return null;
+    if (serverFlushInFlightRef.current) return serverFlushInFlightRef.current;
+
+    const run = (async () => {
+      const draftNombre =
+        String(snap.nombre || '').trim()
+        || (String(snap.cliente || '').trim() ? `Borrador · ${snap.cliente.trim()}` : 'Borrador de evento');
+      const draftLugar = String(snap.lugar || '').trim() || 'Por definir';
+      const draftFecha = String(snap.fecha || '').trim() || new Date().toISOString().slice(0, 10);
+      const cleanedLines = (snap.lineas || []).filter((l) => String(l.concepto || '').trim());
+      const workersOk = (snap.workers || []).filter((w) => w.ok);
+      try {
+        let eventId = String(snap.draftEventId || draftEventId || '').trim();
+        if (eventId) {
+          const existing = await loadEventById(dataUserId, eventId);
+          if (existing) {
+            let updated = await updateEventRecord(dataUserId, existing, {
+              nombre: draftNombre,
+              tipo: snap.tipo,
+              fecha: draftFecha,
+              lugar: draftLugar,
+              cliente: String(snap.cliente || '').trim(),
+              clientId: snap.clientId || '',
+              clientEmail: snap.clientEmail || '',
+              clientTelefono: snap.clientTelefono || '',
+              venueId: snap.venueId || '',
+              invitados: Number(snap.invitados) || 0,
+              deposito: Number(snap.deposito) || 0,
+              notas: snap.notas || '',
+              planningChecklist: serializePlanningChecklist({
+                ...parsePlanningChecklist(existing.planningChecklist),
+                workers: workersOk,
+              }),
+            });
+            if (cleanedLines.length > 0) {
+              updated = await saveEventQuoteLines(dataUserId, updated, cleanedLines);
+            }
+            eventId = updated._id;
+          } else {
+            eventId = '';
+          }
+        }
+        if (!eventId) {
+          const created = await createEventDraft(dataUserId, {
+            nombre: draftNombre,
+            tipo: snap.tipo,
+            fecha: draftFecha,
+            lugar: draftLugar,
+            cliente: String(snap.cliente || '').trim(),
+            clientId: snap.clientId || '',
+            clientEmail: snap.clientEmail || '',
+            clientTelefono: snap.clientTelefono || '',
+            venueId: snap.venueId || '',
+            invitados: Number(snap.invitados) || 50,
+            lineas: cleanedLines,
+            deposito: Number(snap.deposito) || 0,
+            notas: snap.notas || '',
+            workers: workersOk,
+            business: currentBusiness,
+          });
+          eventId = created._id;
+        }
+        setDraftEventId(eventId);
+        writeContractWizardDraft(businessId || '', {
+          ...snap,
+          draftEventId: eventId,
+          updatedAt: new Date().toISOString(),
+        });
+        if (!opts?.silent) toast.success('Borrador guardado');
+        return eventId;
+      } catch {
+        writeContractWizardDraft(businessId || '', snap);
+        if (!opts?.silent) toast.message('Borrador guardado en este dispositivo');
+        return null;
+      } finally {
+        serverFlushInFlightRef.current = null;
+      }
+    })();
+
+    serverFlushInFlightRef.current = run;
+    return run;
+  }, [buildLocalDraft, businessId, currentBusiness, dataUserId, draftEventId]);
+
+  const leaveDirty = hasMeaningfulContractDraft({
+    clientId, cliente, nombre, fecha, lugar, lineas,
+  }) && !skipLeaveSaveRef.current;
+
+  const blocker = useBlocker(leaveDirty);
+
+  useEffect(() => {
+    if (blocker.state !== 'blocked') return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        if (!skipLeaveSaveRef.current) {
+          await Promise.race([
+            flushServerDraft({ silent: true }),
+            new Promise<null>((resolve) => {
+              window.setTimeout(() => resolve(null), 2500);
+            }),
+          ]);
+        }
+      } catch {
+        /* el borrador local ya está; no bloquear el menú */
+      } finally {
+        if (!cancelled) blocker.proceed?.();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [blocker, flushServerDraft]);
+
+  useEffect(() => {
+    const onPageHide = () => {
+      if (skipLeaveSaveRef.current) return;
+      const snap = draftSnapshotRef.current;
+      if (!snap || !hasMeaningfulContractDraft(snap)) return;
+      writeContractWizardDraft(businessId || '', snap);
+      void flushServerDraft({ silent: true });
+    };
+    window.addEventListener('pagehide', onPageHide);
+    return () => window.removeEventListener('pagehide', onPageHide);
+  }, [businessId, flushServerDraft]);
+
+  useEffect(() => {
+    if (!(depositPercentRule > 0) || !(quoteMoney.total > 0)) return;
+    setDeposito(suggestedDepositFromTotal(quoteMoney.total, depositPercentRule));
+  }, [quoteMoney.total, depositPercentRule]);
 
   useEffect(() => {
     if (!dataUserId) return;
@@ -149,17 +380,49 @@ export function EventsContractWizardPage() {
     void listUsersRequest(businessId)
       .then((res) => {
         const users = Array.isArray(res.users) ? res.users : [];
-        setTeam(
-          users
-            .map((u) => ({
-              id: String(u.user_id || u.id || '').trim(),
-              name: String(u.fullName || `${u.firstName || ''} ${u.lastName || ''}`).trim() || u.email,
-            }))
-            .filter((u) => u.id && u.name),
-        );
+        const apiMembers = users.map((u) => ({
+          user_id: String(u.user_id || u.id || '').trim(),
+          fullName: String(u.fullName || `${u.firstName || ''} ${u.lastName || ''}`).trim() || String(u.email || ''),
+          email: String(u.email || ''),
+          role: String(u.role || 'Usuario'),
+        })).filter((u) => u.user_id);
+        const ownerId = String(currentBusiness?.owner_user_id || '').trim();
+        const businessMembers = [...(currentBusiness?.members || [])];
+        if (
+          ownerId
+          && !businessMembers.some((m) => String(m.user_id || '').trim() === ownerId)
+        ) {
+          const ownerFromApi = apiMembers.find((m) => m.user_id === ownerId);
+          const self = user && String(user.user_id || '').trim() === ownerId ? user : null;
+          businessMembers.push({
+            user_id: ownerId,
+            fullName: ownerFromApi?.fullName
+              || String(self?.fullName || `${self?.firstName || ''} ${self?.lastName || ''}`).trim()
+              || ownerFromApi?.email
+              || String(self?.email || '')
+              || 'Titular',
+            email: ownerFromApi?.email || String(self?.email || ''),
+            role: 'Admin',
+            branch_id: null,
+            permissions: {},
+            joinedAt: '',
+          });
+        }
+        const merged = mergeBusinessMembers(businessMembers, apiMembers);
+        setTeam(merged.map((m) => ({ id: m.user_id, name: m.fullName })));
       })
-      .catch(() => setTeam([]));
-  }, [businessId]);
+      .catch(() => {
+        const members = currentBusiness?.members || [];
+        setTeam(
+          members
+            .map((m) => ({
+              id: String(m.user_id || '').trim(),
+              name: String(m.fullName || m.email || '').trim(),
+            }))
+            .filter((m) => m.id && m.name),
+        );
+      });
+  }, [businessId, currentBusiness?.members, currentBusiness?.owner_user_id, user]);
 
   // Sin clientes: al entrar al asistente, abrir alta de cliente (mismo flujo, primer paso).
   useEffect(() => {
@@ -239,8 +502,49 @@ export function EventsContractWizardPage() {
     return true;
   };
 
-  const goNext = () => {
+  const goNext = async () => {
     if (!validateStep()) return;
+    if (step === 'cliente') {
+      if (!dataUserId) {
+        toast.error('Sesión no válida');
+        return;
+      }
+      setAdvancing(true);
+      try {
+        const ensured = await ensureEventCrmClient(
+          dataUserId,
+          {
+            clientId,
+            name: cliente,
+            phone: clientTelefono,
+            email: clientEmail,
+          },
+          currentBusiness,
+        );
+        setClientId(ensured.clientId);
+        setCliente(ensured.clientName);
+        if (ensured.client) {
+          markCrmSelected(ensured.client);
+          if (ensured.client.email) setClientEmail(ensured.client.email);
+          const phone = [ensured.client.phonePrefix, ensured.client.phone]
+            .filter(Boolean)
+            .join(' ')
+            .trim() || ensured.client.phone || clientTelefono;
+          if (phone) setClientTelefono(phone);
+        }
+        if (ensured.created) {
+          toast.success(`Cliente «${ensured.clientName}» creado en el CRM`);
+          void eventsNav.reload();
+        } else if (!String(clientId || '').trim()) {
+          toast.success(`Cliente «${ensured.clientName}» vinculado al CRM`);
+        }
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'No se pudo guardar el cliente en el CRM');
+        return;
+      } finally {
+        setAdvancing(false);
+      }
+    }
     const next = WIZARD_STEPS[stepIndex + 1];
     if (next) setStep(next.id);
   };
@@ -250,13 +554,54 @@ export function EventsContractWizardPage() {
     if (prev) setStep(prev.id);
   };
 
+  const {
+    results: crmClientResults,
+    isSearching: isCrmSearching,
+    settledQuery: crmSettledQuery,
+    selectClient: markCrmSelected,
+    clearSelection: clearCrmSelection,
+  } = useClientPhoneSearch({
+    userId: dataUserId || '',
+    phone: cliente,
+    businessId: businessId || undefined,
+    enabled: step === 'cliente' && Boolean(dataUserId),
+    matchByName: true,
+    minQueryLength: 2,
+    debounceMs: 300,
+    resultLimit: 15,
+    keepSearchingWhileSelected: true,
+  });
+
+  const crmQuery = cliente.trim();
+  const crmQuerySettled = crmQuery.length >= 2 && crmSettledQuery === crmQuery;
+  const showCrmSuggestions = step === 'cliente' && !clientId && crmQuery.length >= 2;
+
+  const applyCrmClient = useCallback((hit: Client) => {
+    markCrmSelected(hit);
+    setClientId(hit.id);
+    setCliente(hit.name || hit.fullName || '');
+    setClientEmail(hit.email || '');
+    const phone = [hit.phonePrefix, hit.phone].filter(Boolean).join(' ').trim() || hit.phone || '';
+    setClientTelefono(phone);
+  }, [markCrmSelected]);
+
   const onSelectClient = (id: string) => {
     setClientId(id);
+    if (!id) {
+      clearCrmSelection();
+      return;
+    }
     const hit = clients.find((c) => c.id === id);
     if (!hit) return;
-    setCliente(hit.name || '');
-    setClientEmail(hit.email || '');
-    setClientTelefono(hit.phone || '');
+    applyCrmClient(hit);
+  };
+
+  const onClienteNameChange = (value: string) => {
+    setCliente(value);
+    if (clientId) {
+      setClientId('');
+      clearCrmSelection();
+    }
   };
 
   const applyCreatedClient = (created: { id: string; name: string; email?: string; phone?: string }) => {
@@ -310,23 +655,57 @@ export function EventsContractWizardPage() {
     if (!dataUserId) return;
     setSaving(true);
     try {
-      const event = await createEventDraft(dataUserId, {
-        nombre,
-        tipo,
-        fecha,
-        lugar: lugar.trim(),
-        cliente: cliente.trim(),
-        clientId,
-        clientEmail,
-        clientTelefono,
-        venueId,
-        invitados,
-        lineas: lineas.filter((l) => l.concepto.trim()),
-        deposito,
-        notas,
-        workers: selectedWorkers,
-        business: currentBusiness,
-      });
+      const cleanedLines = lineas.filter((l) => l.concepto.trim());
+      const eventId = String(draftEventId || '').trim();
+      let event: Awaited<ReturnType<typeof createEventDraft>> | null = null;
+      if (eventId) {
+        const existing = await loadEventById(dataUserId, eventId);
+        if (existing) {
+          let updated = await updateEventRecord(dataUserId, existing, {
+            nombre: nombre.trim(),
+            tipo,
+            fecha,
+            lugar: lugar.trim(),
+            cliente: cliente.trim(),
+            clientId,
+            clientEmail,
+            clientTelefono,
+            venueId,
+            invitados,
+            deposito,
+            notas,
+            planningChecklist: serializePlanningChecklist({
+              ...parsePlanningChecklist(existing.planningChecklist),
+              workers: selectedWorkers,
+            }),
+          });
+          if (cleanedLines.length > 0) {
+            updated = await saveEventQuoteLines(dataUserId, updated, cleanedLines);
+          }
+          event = updated;
+        }
+      }
+      if (!event) {
+        event = await createEventDraft(dataUserId, {
+          nombre,
+          tipo,
+          fecha,
+          lugar: lugar.trim(),
+          cliente: cliente.trim(),
+          clientId,
+          clientEmail,
+          clientTelefono,
+          venueId,
+          invitados,
+          lineas: cleanedLines,
+          deposito,
+          notas,
+          workers: selectedWorkers,
+          business: currentBusiness,
+        });
+      }
+      skipLeaveSaveRef.current = true;
+      clearContractWizardDraft(businessId || '');
       const code = String(event.portableTerminalCode || '').trim();
       toast.success(
         code
@@ -339,6 +718,42 @@ export function EventsContractWizardPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const discardLocalDraft = () => {
+    skipLeaveSaveRef.current = true;
+    clearContractWizardDraft(businessId || '');
+    setDraftEventId('');
+    setRestoredDraft(false);
+    setStep('cliente');
+    setClientId('');
+    setCliente('');
+    setClientEmail('');
+    setClientTelefono('');
+    setNombre('');
+    setTipo('boda');
+    setFecha('');
+    setInvitados(50);
+    setVenueId('');
+    setLugar('');
+    setLineas([emptyLine()]);
+    setDeposito(0);
+    setWorkers([]);
+    setProductQtyById({});
+    quoteDefaultsAppliedRef.current = false;
+    const settings = loadEventsQuoteSettings(businessId || '');
+    const rulesText = buildQuoteRulesText(settings);
+    setNotas(rulesText || '');
+    setDepositPercentRule(settings.depositPercent > 0 ? settings.depositPercent : 0);
+    quoteDefaultsAppliedRef.current = true;
+    skipLeaveSaveRef.current = false;
+    toast.message('Borrador local descartado');
+  };
+
+  const goBackToHub = async () => {
+    await flushServerDraft();
+    skipLeaveSaveRef.current = true;
+    navigate('/saas/vertical/eventos');
   };
 
   if (eventsNav.loading) {
@@ -387,10 +802,19 @@ export function EventsContractWizardPage() {
   return (
     <Layout>
       <div className="max-w-3xl mx-auto pb-10">
-        <button type="button" onClick={() => navigate('/saas/vertical/eventos')} className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 mb-4">
+        <button type="button" onClick={() => void goBackToHub()} className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 mb-4">
           <ArrowLeft className="w-4 h-4" /> Volver al centro
         </button>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">Nueva contratación</h1>
+
+        {restoredDraft && (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+            <span>Continúas un borrador guardado.</span>
+            <button type="button" onClick={discardLocalDraft} className="font-semibold underline underline-offset-2">
+              Empezar de cero
+            </button>
+          </div>
+        )}
 
         <div className="flex flex-wrap gap-2 mb-6">
           {WIZARD_STEPS.map((s, i) => {
@@ -419,9 +843,7 @@ export function EventsContractWizardPage() {
             <>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {clients.length === 0
-                    ? 'Primero crea el cliente; luego sigues con el evento.'
-                    : 'Elige un cliente o crea uno nuevo.'}
+                  Escribe el nombre o teléfono para buscar en el CRM, o crea uno nuevo.
                 </p>
                 <button
                   type="button"
@@ -429,16 +851,78 @@ export function EventsContractWizardPage() {
                   className="inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--v-blue,#2563eb)] hover:text-[#1d4ed8]"
                 >
                   <UserPlus className="w-4 h-4" />
-                  {clients.length === 0 ? 'Crear cliente' : 'Nuevo cliente'}
+                  Nuevo cliente
                 </button>
               </div>
               {clients.length > 0 && (
                 <select className={inputClass} value={clientId} onChange={(e) => onSelectClient(e.target.value)}>
-                  <option value="">— Cliente manual —</option>
+                  <option value="">— Cliente de la lista —</option>
                   {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               )}
-              <input className={inputClass} placeholder="Nombre cliente *" value={cliente} onChange={(e) => setCliente(e.target.value)} />
+              <div className="space-y-2">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                  <input
+                    className={`${inputClass} pl-9 pr-9`}
+                    placeholder="Nombre o teléfono — busca en CRM *"
+                    value={cliente}
+                    onChange={(e) => onClienteNameChange(e.target.value)}
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                  />
+                  {isCrmSearching && (
+                    <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-gray-400" />
+                  )}
+                  {Boolean(clientId) && !isCrmSearching && (
+                    <span
+                      className="absolute right-3 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-emerald-500"
+                      title="Cliente vinculado al CRM"
+                    />
+                  )}
+                </div>
+                {showCrmSuggestions && (
+                  <div className="overflow-hidden rounded-xl border-2 border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
+                    {isCrmSearching && !crmQuerySettled && (
+                      <div className="px-3 py-2.5 text-center text-xs text-gray-400">Buscando en el CRM…</div>
+                    )}
+                    {crmQuerySettled && crmClientResults.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => applyCrmClient(c)}
+                        className="flex w-full items-center gap-2.5 border-b border-gray-100 px-3 py-2.5 text-left text-sm last:border-b-0 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800"
+                      >
+                        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-100 dark:bg-blue-900/30">
+                          <Users className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate font-medium text-gray-900 dark:text-gray-100">
+                            {c.name || c.fullName || c.email || 'Cliente'}
+                          </div>
+                          <div className="truncate text-xs text-gray-500">
+                            {[c.phone ? `${c.phonePrefix || '+34'} ${c.phone}`.trim() : '', c.email]
+                              .filter(Boolean)
+                              .join(' · ')}
+                          </div>
+                        </div>
+                        <span className="shrink-0 text-xs font-semibold text-[var(--v-blue,#2563eb)]">Vincular</span>
+                      </button>
+                    ))}
+                    {crmQuerySettled && !isCrmSearching && crmClientResults.length === 0 && (
+                      <div className="px-3 py-2.5 text-center text-xs text-gray-500 dark:text-gray-400">
+                        Sin coincidencias — al pulsar Siguiente se crea en el CRM
+                      </div>
+                    )}
+                  </div>
+                )}
+                {Boolean(clientId) && (
+                  <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                    Cliente vinculado al CRM
+                  </p>
+                )}
+              </div>
               <div className="grid sm:grid-cols-2 gap-3">
                 <input className={inputClass} placeholder="Email" value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} />
                 <input className={inputClass} placeholder="Teléfono" value={clientTelefono} onChange={(e) => setClientTelefono(e.target.value)} />
@@ -599,8 +1083,27 @@ export function EventsContractWizardPage() {
               ))}
               <button type="button" onClick={() => setLineas((p) => [...p, emptyLine()])} className="text-sm text-[var(--v-blue,#2563eb)] font-semibold inline-flex items-center gap-1"><Plus className="w-4 h-4" /> Línea</button>
               <input type="number" className={inputClass} placeholder="Señal €" value={deposito} onChange={(e) => setDeposito(Number(e.target.value) || 0)} />
-              <textarea className={inputClass} placeholder="Notas" value={notas} onChange={(e) => setNotas(e.target.value)} />
-              <p className="font-bold text-lg">Total: {total.toLocaleString('es-ES')} €</p>
+              <textarea
+                className={`${inputClass} min-h-[9rem] resize-y`}
+                rows={6}
+                placeholder="Notas"
+                value={notas}
+                onChange={(e) => setNotas(e.target.value)}
+              />
+              <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-3 space-y-1 dark:border-gray-800 dark:bg-gray-900/50">
+                <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
+                  <span>Base imponible</span>
+                  <span className="tabular-nums">{formatMoneyEs(quoteMoney.subtotal)}</span>
+                </div>
+                <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
+                  <span>IVA (21%)</span>
+                  <span className="tabular-nums">{formatMoneyEs(quoteMoney.iva)}</span>
+                </div>
+                <div className="flex justify-between text-base font-bold text-gray-900 dark:text-gray-100 pt-1 border-t border-gray-200 dark:border-gray-700">
+                  <span>Total</span>
+                  <span className="tabular-nums">{formatMoneyEs(quoteMoney.total)}</span>
+                </div>
+              </div>
             </>
           )}          {step === 'trabajadores' && (
             <>
@@ -699,7 +1202,7 @@ export function EventsContractWizardPage() {
               <p><strong>Evento:</strong> {nombre}</p>
               <p><strong>Fecha:</strong> {fecha}</p>
               <p><strong>Lugar:</strong> {lugar}</p>
-              <p><strong>Total:</strong> {total.toLocaleString('es-ES')} €</p>
+              <p><strong>Total:</strong> {formatMoneyEs(quoteMoney.total)} <span className="text-gray-500 font-normal">(base {formatMoneyEs(quoteMoney.subtotal)} + IVA {formatMoneyEs(quoteMoney.iva)})</span></p>
               <p>
                 <strong>Trabajadores:</strong>{' '}
                 {selectedWorkers.length > 0
@@ -719,8 +1222,9 @@ export function EventsContractWizardPage() {
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Crear
             </button>
           ) : (
-            <button type="button" onClick={goNext} className={VERTIAL_BTN_PRIMARY}>
-              Siguiente <ArrowRight className="w-4 h-4" />
+            <button type="button" onClick={() => void goNext()} disabled={advancing} className={VERTIAL_BTN_PRIMARY}>
+              {advancing ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              Siguiente {advancing ? null : <ArrowRight className="w-4 h-4" />}
             </button>
           )}
         </div>

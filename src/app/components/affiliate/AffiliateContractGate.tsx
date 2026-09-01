@@ -94,8 +94,11 @@ export function AffiliateContractGate({
             />
             <span className="text-sm text-slate-700 leading-relaxed">
               He leído y acepto el <strong>Contrato del Programa de Afiliados Vertial</strong> (v.
-              {AFFILIATE_AGREEMENT_VERSION}). Entiendo las condiciones de comisiones, obligaciones legales
-              y que Vertial registrará esta aceptación con fecha e identificadores de sesión.
+              {AFFILIATE_AGREEMENT_VERSION}). Entiendo que las comisiones por cliente firmado cubren
+              como máximo 24 meses de cobros, que el modelo de comisiones puede variar, las
+              obligaciones (incluida la prohibición de difamar, difundir contenido sin permiso o cobrar
+              extras a espaldas de Vertial) y que Vertial registrará esta aceptación con fecha e
+              identificadores de sesión.
             </span>
           </label>
 

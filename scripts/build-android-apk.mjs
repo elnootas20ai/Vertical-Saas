@@ -114,10 +114,30 @@ function main() {
   };
 
   log(`modo: ${release ? 'release (Play Store)' : 'debug (prueba móvil)'}`);
-  log(`API nativa: ${process.env.VITE_NATIVE_API_ORIGIN || 'https://vertialapp.com (default build)'}`);
+  const apiOrigin = process.env.VITE_NATIVE_API_ORIGIN || 'https://vertialapp.com';
+  log(`API nativa: ${apiOrigin}`);
 
-  run('npm', ['run', 'build'], { env: gradleEnv });
-  run('npx', ['cap', 'sync', 'android'], { env: gradleEnv });
+  const googleServices = join(androidDir, 'app', 'google-services.json');
+  const fcmEnabled =
+    String(process.env.VITE_ANDROID_FCM_ENABLED || '').trim() === 'true'
+    || existsSync(googleServices);
+  if (fcmEnabled && !existsSync(googleServices)) {
+    fail('VITE_ANDROID_FCM_ENABLED=true pero falta android/app/google-services.json');
+  }
+  if (fcmEnabled) {
+    log('FCM Android: ON (google-services.json + VITE_ANDROID_FCM_ENABLED)');
+  } else {
+    log('FCM Android: OFF (sin google-services.json — push nativo desactivado en APK)');
+  }
+
+  const buildEnv = {
+    ...gradleEnv,
+    VITE_NATIVE_API_ORIGIN: apiOrigin,
+    VITE_ANDROID_FCM_ENABLED: fcmEnabled ? 'true' : '',
+  };
+
+  run('npm', ['run', 'build'], { env: buildEnv });
+  run('npx', ['cap', 'sync', 'android'], { env: buildEnv });
 
   const gradlew = platform() === 'win32' ? join(androidDir, 'gradlew.bat') : join(androidDir, 'gradlew');
   if (!existsSync(gradlew)) {

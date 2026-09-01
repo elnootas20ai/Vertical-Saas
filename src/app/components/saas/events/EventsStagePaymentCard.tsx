@@ -3,13 +3,18 @@
  */
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { Banknote, CheckCircle2, Loader2 } from 'lucide-react';
+import { Banknote, CheckCircle2, Download, Loader2, Receipt } from 'lucide-react';
 import type { EventRecord } from '../../../lib/eventsTypes';
 import {
   collectEventFinalBalance,
   registerEventDepositPayment,
   summarizeEventFinancials,
 } from '../../../lib/eventsFinance';
+import {
+  downloadClientInvoicePdf,
+  loadEventLinkedInvoices,
+} from '../../../lib/eventsInvoiceUi';
+import type { ClientInvoiceRecord } from '../../../lib/clientInvoicesApi';
 import { formatMoneyEs } from '../../../lib/formatNumberEs';
 import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY, VERTIAL_FOCUS_RING } from '../../../lib/vertialUiTokens';
 
@@ -20,6 +25,9 @@ type BusinessIssuer = {
   phone?: string;
   email?: string;
   logo?: string;
+  business_id?: string;
+  businessId?: string;
+  id?: string;
 };
 
 const inputClass =
@@ -33,6 +41,8 @@ type Props = {
   onEventUpdated: (event: EventRecord) => void;
   /** Tras cobrar señal, avanzar a contratado si aún está en aceptado. */
   onDepositDoneAdvance?: (event: EventRecord) => void | Promise<void>;
+  /** Ir al tab Finanzas (facturas del evento). */
+  onOpenFinanzas?: () => void;
 };
 
 export function EventsStagePaymentCard({
@@ -42,6 +52,7 @@ export function EventsStagePaymentCard({
   business,
   onEventUpdated,
   onDepositDoneAdvance,
+  onOpenFinanzas,
 }: Props) {
   const summary = summarizeEventFinancials(event);
   const defaultAmount = mode === 'deposit'
@@ -51,40 +62,123 @@ export function EventsStagePaymentCard({
   const [amount, setAmount] = useState(String(defaultAmount || ''));
   const [method, setMethod] = useState('transferencia');
   const [busy, setBusy] = useState(false);
+  const [linkedInvoice, setLinkedInvoice] = useState<ClientInvoiceRecord | null>(null);
 
   useEffect(() => {
     setAmount(String(defaultAmount || ''));
   }, [defaultAmount, event._id, mode]);
 
+  useEffect(() => {
+    const invoiceId = mode === 'deposit'
+      ? String(event.depositInvoiceId || '').trim()
+      : String(event.finalInvoiceId || '').trim();
+    if (!userId || !invoiceId) {
+      setLinkedInvoice(null);
+      return;
+    }
+    let cancelled = false;
+    void loadEventLinkedInvoices(userId, event)
+      .then((res) => {
+        if (cancelled) return;
+        setLinkedInvoice(mode === 'deposit' ? res.deposit : res.final);
+      })
+      .catch(() => {
+        if (!cancelled) setLinkedInvoice(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, mode, event.depositInvoiceId, event.finalInvoiceId, event._id]);
+
+  const downloadLinked = () => {
+    if (!linkedInvoice) {
+      toast.error('Factura aún no disponible');
+      onOpenFinanzas?.();
+      return;
+    }
+    try {
+      downloadClientInvoicePdf(linkedInvoice);
+      toast.success(`PDF ${linkedInvoice.number}`);
+    } catch {
+      toast.error('No se pudo descargar el PDF');
+    }
+  };
+
   if (mode === 'deposit' && event.depositPaidAt) {
     return (
-      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 dark:border-emerald-800 dark:bg-emerald-950/30">
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 space-y-2 dark:border-emerald-800 dark:bg-emerald-950/30">
         <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-200 inline-flex items-center gap-1.5">
           <CheckCircle2 className="w-4 h-4" />
           Señal cobrada
         </p>
-        <p className="mt-0.5 text-xs text-emerald-700/90 dark:text-emerald-300/90">
+        <p className="text-xs text-emerald-700/90 dark:text-emerald-300/90">
           {formatMoneyEs(Number(event.depositPaidAmount) || 0)}
+          {linkedInvoice?.number ? ` · Factura ${linkedInvoice.number}` : ''}
           {summary.pendiente > 0.01
             ? ` · Resta ${formatMoneyEs(summary.pendiente)} al finalizar`
             : ' · Sin pendiente'}
         </p>
+        <div className="flex flex-wrap gap-2">
+          {event.depositInvoiceId ? (
+            <button
+              type="button"
+              onClick={downloadLinked}
+              className={`${VERTIAL_BTN_SECONDARY} !min-h-9 text-xs`}
+            >
+              <Download className="w-3.5 h-3.5" />
+              Descargar factura
+            </button>
+          ) : null}
+          {onOpenFinanzas ? (
+            <button
+              type="button"
+              onClick={onOpenFinanzas}
+              className={`${VERTIAL_BTN_SECONDARY} !min-h-9 text-xs`}
+            >
+              <Receipt className="w-3.5 h-3.5" />
+              Ver en Finanzas
+            </button>
+          ) : null}
+        </div>
       </div>
     );
   }
 
   if (mode === 'final' && summary.pendiente <= 0.01) {
     return (
-      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 dark:border-emerald-800 dark:bg-emerald-950/30">
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 space-y-2 dark:border-emerald-800 dark:bg-emerald-950/30">
         <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-200 inline-flex items-center gap-1.5">
           <CheckCircle2 className="w-4 h-4" />
           Liquidado
         </p>
-        <p className="mt-0.5 text-xs text-emerald-700/90 dark:text-emerald-300/90">
+        <p className="text-xs text-emerald-700/90 dark:text-emerald-300/90">
           Señal {formatMoneyEs(summary.depositoCobrado)}
           {summary.cobradoFinal > 0 ? ` · Resto ${formatMoneyEs(summary.cobradoFinal)}` : ''}
           {' · '}Total {formatMoneyEs(summary.cobradoTotal)}
+          {linkedInvoice?.number ? ` · Factura ${linkedInvoice.number}` : ''}
         </p>
+        <div className="flex flex-wrap gap-2">
+          {event.finalInvoiceId ? (
+            <button
+              type="button"
+              onClick={downloadLinked}
+              className={`${VERTIAL_BTN_SECONDARY} !min-h-9 text-xs`}
+            >
+              <Download className="w-3.5 h-3.5" />
+              Descargar factura
+            </button>
+          ) : null}
+          {onOpenFinanzas ? (
+            <button
+              type="button"
+              onClick={onOpenFinanzas}
+              className={`${VERTIAL_BTN_SECONDARY} !min-h-9 text-xs`}
+            >
+              <Receipt className="w-3.5 h-3.5" />
+              Ver en Finanzas
+            </button>
+          ) : null}
+        </div>
       </div>
     );
   }
@@ -107,7 +201,7 @@ export function EventsStagePaymentCard({
           business,
         );
         onEventUpdated(updated);
-        toast.success('Señal registrada');
+        toast.success(updated.depositInvoiceId ? 'Señal registrada · factura creada' : 'Señal registrada');
         if (onDepositDoneAdvance) await onDepositDoneAdvance(updated);
       } else {
         const updated = await collectEventFinalBalance(
@@ -118,7 +212,7 @@ export function EventsStagePaymentCard({
           business,
         );
         onEventUpdated(updated);
-        toast.success('Pago final registrado');
+        toast.success(updated.finalInvoiceId ? 'Pago final registrado · factura creada' : 'Pago final registrado');
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'No se pudo registrar el cobro');

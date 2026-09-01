@@ -17,12 +17,15 @@ import { assertCanCreateBusiness } from '../services/entitlementEnforcement.js';
 import { findLikelyDuplicateBusiness, normalizeLinkedBusinessId } from '../shared/billing/onboardingBusiness.js';
 import {
   assertBusinessOwner,
+  assertBusinessTeamAccess,
   assertBusinessTeamManage,
   assertTenantAccountOwnerSelf,
   canChangeBusinessMemberRole,
   canRemoveBusinessMember,
   isBusinessOwner,
 } from '../services/businessAccess.js';
+import { getAuthUserId } from '../services/clockinsAccess.js';
+import { isVertialSuperAdminEmail } from '../utils/superAdmin.js';
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
@@ -107,7 +110,23 @@ export async function listBusinesses(req, res) {
     const { userId } = req.params;
     if (!userId) return badRequest(res, 'Falta userId');
 
-    const businesses = await listBusinessesByUser(req, userId);
+    const actorId = getAuthUserId(req);
+    if (!actorId) {
+      return res.status(401).json({ ok: false, error: 'No autenticado' });
+    }
+    const requested = String(userId || '').replace(/^account:/, '').trim();
+    const isSelf = actorId === requested;
+    const isSuper = isVertialSuperAdminEmail(req.authUser?.email);
+    if (!isSelf && !isSuper) {
+      return res.status(403).json({
+        ok: false,
+        error: 'Solo puedes listar tus propias empresas',
+        code: 'FORBIDDEN_BUSINESS_LIST',
+      });
+    }
+
+    // Solo empresas donde el userId es dueño o miembro (invitado no ve las otras del titular).
+    const businesses = await listBusinessesByUser(req, requested);
     return res.json({ ok: true, businesses: businesses.map(sanitizeBusiness) });
   } catch (error) {
     return res.status(500).json({
@@ -122,10 +141,16 @@ export async function getBusiness(req, res) {
     const { businessId } = req.params;
     if (!businessId) return badRequest(res, 'Falta businessId');
 
-    const business = await findBusinessById(req, businessId);
-    if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
+    const access = await assertBusinessTeamAccess(req, businessId);
+    if (!access.ok) {
+      return res.status(access.status).json({
+        ok: false,
+        error: access.error,
+        code: access.code || 'FORBIDDEN_BUSINESS',
+      });
+    }
 
-    return res.json({ ok: true, business: sanitizeBusiness(business) });
+    return res.json({ ok: true, business: sanitizeBusiness(access.business) });
   } catch (error) {
     return res.status(500).json({
       ok: false,

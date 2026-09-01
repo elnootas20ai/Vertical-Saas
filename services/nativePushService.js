@@ -6,15 +6,21 @@
  * Tokens en CouchDB `push_subscriptions` type `native_push_token`.
  */
 import crypto from 'node:crypto';
+import { readFileSync, existsSync } from 'node:fs';
 import apn from '@parse/node-apn';
+import { GoogleAuth } from 'google-auth-library';
 import { couchRequest, getCouchConfig } from './couchdb.js';
 import { couchJson } from './couchResponse.js';
 
 const PUSH_DB = 'push_subscriptions';
+const FCM_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
 
 let apnProvider = null;
 let apnLogged = false;
 let fcmLogged = false;
+let fcmAuth = null;
+let fcmProjectId = '';
+
 
 function hashToken(token) {
   return crypto.createHash('sha1').update(String(token)).digest('hex').slice(0, 16);
@@ -75,8 +81,62 @@ function getFcmServerKey() {
   return String(process.env.FIREBASE_SERVER_KEY || process.env.FCM_SERVER_KEY || '').trim();
 }
 
+/**
+ * Credenciales FCM HTTP v1 (cuenta de servicio Firebase).
+ * Env:
+ *   FCM_SERVICE_ACCOUNT_PATH=/ruta/firebase-adminsdk.json
+ *   FCM_SERVICE_ACCOUNT_JSON=<json completo o base64>
+ *   FCM_PROJECT_ID= opcional (si no viene en el JSON)
+ */
+function loadFcmServiceAccount() {
+  const path = String(process.env.FCM_SERVICE_ACCOUNT_PATH || process.env.FIREBASE_SERVICE_ACCOUNT_PATH || '').trim();
+  const raw = String(process.env.FCM_SERVICE_ACCOUNT_JSON || process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim();
+
+  let parsed = null;
+  if (path && existsSync(path)) {
+    try {
+      parsed = JSON.parse(readFileSync(path, 'utf8'));
+    } catch {
+      parsed = null;
+    }
+  } else if (raw) {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      try {
+        parsed = JSON.parse(Buffer.from(raw, 'base64').toString('utf8'));
+      } catch {
+        parsed = null;
+      }
+    }
+  }
+
+  if (!parsed || typeof parsed !== 'object') return null;
+  const projectId = String(
+    process.env.FCM_PROJECT_ID
+      || process.env.FIREBASE_PROJECT_ID
+      || parsed.project_id
+      || '',
+  ).trim();
+  if (!projectId || !parsed.client_email || !parsed.private_key) return null;
+  return { credentials: parsed, projectId };
+}
+
+function getFcmV1Client() {
+  const loaded = loadFcmServiceAccount();
+  if (!loaded) return null;
+  if (!fcmAuth) {
+    fcmAuth = new GoogleAuth({
+      credentials: loaded.credentials,
+      scopes: [FCM_SCOPE],
+    });
+    fcmProjectId = loaded.projectId;
+  }
+  return { auth: fcmAuth, projectId: fcmProjectId || loaded.projectId };
+}
+
 export function isNativePushConfigured() {
-  return Boolean(getApnProvider() || getFcmServerKey());
+  return Boolean(getApnProvider() || getFcmV1Client() || getFcmServerKey());
 }
 
 /**
@@ -212,15 +272,103 @@ async function sendApnsToTokens(req, userId, tokens, payload) {
 }
 
 /**
- * FCM legacy HTTP — aviso visible en lock screen Android (priority high).
+ * FCM HTTP v1 (recomendado) + fallback legacy Server key.
+ * Banner en bloqueo / bandeja (priority high + canal vertial_alerts).
  */
 async function sendFcmToTokens(req, userId, tokens, payload) {
-  const serverKey = getFcmServerKey();
-  if (!serverKey || tokens.length === 0) return { sent: 0, failed: 0 };
+  if (tokens.length === 0) return { sent: 0, failed: 0 };
 
+  const v1 = getFcmV1Client();
+  if (v1) return sendFcmV1ToTokens(req, userId, tokens, payload, v1);
+
+  const serverKey = getFcmServerKey();
+  if (!serverKey) return { sent: 0, failed: 0 };
+  return sendFcmLegacyToTokens(req, userId, tokens, payload, serverKey);
+}
+
+async function sendFcmV1ToTokens(req, userId, tokens, payload, { auth, projectId }) {
   if (!fcmLogged) {
     fcmLogged = true;
-    console.log('[NativePush] FCM listo (lock screen Android)');
+    console.log('[NativePush] FCM v1 listo (lock screen Android, project=%s)', projectId);
+  }
+
+  let accessToken;
+  try {
+    const client = await auth.getClient();
+    const tok = await client.getAccessToken();
+    accessToken = tok?.token || tok;
+  } catch (err) {
+    console.warn('[NativePush] FCM v1 token OAuth falló:', err?.message || err);
+    return { sent: 0, failed: tokens.length };
+  }
+  if (!accessToken) return { sent: 0, failed: tokens.length };
+
+  const data = stringData(payload.data);
+  const url = `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/messages:send`;
+  let sent = 0;
+  let failed = 0;
+
+  for (const doc of tokens) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: {
+            token: doc.token,
+            notification: {
+              title: payload.title || 'Vertial',
+              body: payload.body || '',
+            },
+            data: {
+              ...data,
+              route: data.route || '/saas/alerts',
+            },
+            android: {
+              priority: 'HIGH',
+              collapseKey: String(payload.collapseId || data.notificationId || 'vertial').slice(0, 64),
+              notification: {
+                channelId: 'vertial_alerts',
+                sound: 'default',
+                defaultVibrateTimings: true,
+                visibility: 'PUBLIC',
+              },
+            },
+          },
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (res.ok && body.name) {
+        sent += 1;
+      } else {
+        failed += 1;
+        const errCode = body.error?.details?.[0]?.errorCode
+          || body.error?.status
+          || '';
+        if (
+          String(errCode).includes('UNREGISTERED')
+          || String(errCode).includes('NOT_FOUND')
+          || String(body.error?.message || '').includes('Requested entity was not found')
+        ) {
+          await deleteNativeToken(req, userId, doc.platform, doc.token).catch(() => {});
+        }
+      }
+    } catch {
+      failed += 1;
+    }
+  }
+
+  return { sent, failed };
+}
+
+/** @deprecated Legacy HTTP; solo si FIREBASE_SERVER_KEY está definida. */
+async function sendFcmLegacyToTokens(req, userId, tokens, payload, serverKey) {
+  if (!fcmLogged) {
+    fcmLogged = true;
+    console.log('[NativePush] FCM legacy listo (lock screen Android)');
   }
 
   const data = stringData(payload.data);
@@ -238,18 +386,15 @@ async function sendFcmToTokens(req, userId, tokens, payload) {
         body: JSON.stringify({
           to: doc.token,
           priority: 'high',
-          // notification = banner en bloqueo / bandeja (no solo data silenciosa)
           notification: {
             title: payload.title || 'Vertial',
             body: payload.body || '',
             sound: 'default',
-            // visible en pantalla de bloqueo
             visibility: 'public',
             android_channel_id: 'vertial_alerts',
           },
           data: {
             ...data,
-            // Capacitor / plugin: ruta al tocar
             route: data.route || '/saas/alerts',
             click_action: 'OPEN_URI',
           },

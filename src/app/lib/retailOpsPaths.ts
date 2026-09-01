@@ -18,7 +18,7 @@ export const RESTAURANT_CEO_TPV_PATH = '/saas/caja/tpv';
 /** TPV gerente heladería. */
 export const HELADERIA_CEO_TPV_PATH = '/saas/vertical/heladeria/tpv';
 
-/** TPV gerente eventos (mismo motor TpvRapido, sin cambiar de cuenta). */
+/** TPV gerente eventos (Abrir caja del PDV elegido; no bootstrap/crear tienda delivery). */
 export const EVENTS_CEO_TPV_PATH = '/saas/vertical/eventos/operar';
 
 /** Caja gerente delivery. */
@@ -84,6 +84,7 @@ export function shouldForceRetailStoreReload(pathname: string): boolean {
     || pathname.includes('/heladeria-')
     || pathname.startsWith('/saas/vertical/delivery/')
     || pathname.startsWith('/saas/vertical/heladeria/')
+    || pathname.startsWith('/saas/vertical/eventos/')
     || pathname.startsWith('/saas/caja')
     || pathname.startsWith('/saas/sala')
     || pathname.startsWith('/saas/cocina')

@@ -129,6 +129,7 @@ import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { useDocumentTemplates } from '../../hooks/useDocumentTemplates';
 import { SAAS__CreateZoneModal } from '../../components/design-system/SAAS__CreateZoneModal';
 import { IntegrationsPanel } from '../../components/saas/IntegrationsPanel';
+import { EmailVerificationProfileBlock } from '../../components/saas/EmailVerificationProfileBlock';
 import { isWorkerAccount, type ActiveSession, type AuthUser, type RoleDefinition } from '../../lib/authApi';
 import {
   buildTemplatePreview,
@@ -4443,6 +4444,13 @@ export function Settings() {
                     <div className="md:col-span-2">
                       <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">Email de acceso</label>
                       <input value={user?.email || ''} readOnly className={`${inputClassName} bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400`} />
+                      <div className="mt-2">
+                        <EmailVerificationProfileBlock
+                          email={user?.email || ''}
+                          emailVerified={Boolean(user?.emailVerified)}
+                          refreshOwnSession
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>

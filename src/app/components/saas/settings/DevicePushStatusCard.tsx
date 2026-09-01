@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Bell, BellOff, Loader2, Smartphone } from 'lucide-react';
+import { Bell, BellOff, Loader2, Smartphone, Settings } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { PushNotifications } from '@capacitor/push-notifications';
 import { toast } from 'sonner';
 import { useAuth } from '../../../context/AuthContext';
 import { isWorkerAccount } from '../../../lib/authApi';
 import { isVertialNativeApp } from '../../../lib/vertialPrint/isNativeApp';
+import { openNativeAppSettings } from '../../../lib/vertialPrint/localNetworkPermission';
 import { canUseNativePushRegistration } from '../../../lib/nativePushRuntime';
 import {
   readPushConsent,
@@ -35,7 +36,7 @@ async function readDeviceStatus(): Promise<DeviceStatus> {
   return 'prompt';
 }
 
-/** Bloque Ajustes: estado del dispositivo + reactivar solo si el usuario cambió de idea. Solo CEO/empresa. */
+/** Bloque Ajustes: estado del dispositivo + reactivar / abrir Ajustes iOS. Solo CEO/empresa. */
 export function DevicePushStatusCard() {
   const { user } = useAuth();
   const userId = user?.user_id || null;
@@ -58,16 +59,28 @@ export function DevicePushStatusCard() {
     return () => window.removeEventListener('vertial:push-consent-changed', onChange);
   }, [refresh, isWorker]);
 
+  const handleOpenSystemSettings = async () => {
+    if (!isVertialNativeApp()) {
+      toast.message('Activa las notificaciones en la configuración del navegador');
+      return;
+    }
+    setBusy(true);
+    try {
+      const opened = await openNativeAppSettings();
+      if (!opened) {
+        toast.message('Abre Ajustes → Vertial → Notificaciones y actívalas a mano');
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleEnable = async () => {
     if (!userId || busy) return;
     setBusy(true);
     try {
       if (device === 'denied') {
-        toast.message(
-          isVertialNativeApp()
-            ? 'Actívalas en Ajustes del iPhone → Vertial → Notificaciones'
-            : 'Activa las notificaciones en la configuración del navegador',
-        );
+        await handleOpenSystemSettings();
         return;
       }
 
@@ -84,7 +97,7 @@ export function DevicePushStatusCard() {
             toast.success('Avisos activados');
           } else {
             writePushConsent(userId, 'declined', { force: true });
-            toast.message('Sin permiso del sistema');
+            toast.message('Sin permiso del sistema. Puedes activarlos en Ajustes del teléfono.');
           }
         } catch {
           toast.message('No se pudieron activar las notificaciones en este dispositivo');
@@ -130,22 +143,35 @@ export function DevicePushStatusCard() {
           </h3>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
             {active
-              ? 'Activos. Te llegan cierres de caja, fichajes y alertas importantes.'
+              ? 'Activos: resumen diario del negocio, cierres de caja y alertas importantes.'
               : device === 'denied'
-                ? 'Bloqueados en el sistema. Actívalos en Ajustes del teléfono.'
-                : 'Desactivados. Puedes activarlos aquí cuando quieras.'}
+                ? 'Bloqueados en el sistema. Ábrelas en Ajustes del teléfono → Vertial → Notificaciones.'
+                : 'Desactivados. Actívalos aquí (o en Ajustes del teléfono si iOS no pregunta).'}
           </p>
-          {!active ? (
-            <button
-              type="button"
-              onClick={() => void handleEnable()}
-              disabled={busy}
-              className="mt-3 inline-flex items-center gap-2 min-h-[40px] px-3 rounded-xl bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-xs font-bold disabled:opacity-50"
-            >
-              {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Bell className="w-3.5 h-3.5" />}
-              {device === 'denied' ? 'Cómo activarlas' : 'Activar avisos'}
-            </button>
-          ) : null}
+          <div className="mt-3 flex flex-wrap gap-2">
+            {!active ? (
+              <button
+                type="button"
+                onClick={() => void handleEnable()}
+                disabled={busy}
+                className="inline-flex items-center gap-2 min-h-[40px] px-3 rounded-xl bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-xs font-bold disabled:opacity-50"
+              >
+                {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Bell className="w-3.5 h-3.5" />}
+                {device === 'denied' ? 'Abrir Ajustes' : 'Activar avisos'}
+              </button>
+            ) : null}
+            {isVertialNativeApp() ? (
+              <button
+                type="button"
+                onClick={() => void handleOpenSystemSettings()}
+                disabled={busy}
+                className="inline-flex items-center gap-2 min-h-[40px] px-3 rounded-xl border-2 border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 text-xs font-bold disabled:opacity-50"
+              >
+                <Settings className="w-3.5 h-3.5" />
+                Ajustes del teléfono
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
     </div>

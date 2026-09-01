@@ -12,6 +12,14 @@ export type OwnershipType = 'propiedad' | 'alquiler';
 /** Eventos: PDV portátil fijo (kit permanente) o temporal (un evento / campaña). */
 export type EventsPdvKind = 'fixed' | 'temporary';
 
+/** PDV temporal de un evento: no debe listarse en tiendas/sidebar general. */
+export function isTemporaryEventWorkCenter(wc: Pick<WorkCenter, 'eventsPdvKind' | 'name'> | null | undefined): boolean {
+  if (!wc) return false;
+  if (wc.eventsPdvKind === 'temporary') return true;
+  // Fallback datos antiguos / producción sin eventsPdvKind persistido.
+  return /^evento\s*·/i.test(String(wc.name || '').trim());
+}
+
 export const WORK_CENTER_TYPE_LABELS: Record<WorkCenterType, string> = {
   oficina: 'Centro de trabajo (Oficinas)',
   punto_de_venta: 'Punto de venta (Establecimientos)',

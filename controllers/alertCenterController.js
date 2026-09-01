@@ -22,8 +22,22 @@ import {
   mutateAlertDeletion,
 } from '../services/alertHistory.js';
 import { ALERT_STATUSES, ALERT_PRIORITIES, ALERT_SOURCES } from '../services/alertConstants.js';
+import { assertBusinessTeamAccess } from '../services/businessAccess.js';
 
 const ALERT_PUT_MAX_ATTEMPTS = 4;
+
+async function requireAlertBusinessAccess(req, res, businessId) {
+  const access = await assertBusinessTeamAccess(req, businessId);
+  if (!access.ok) {
+    res.status(access.status).json({
+      ok: false,
+      error: access.error,
+      code: access.code || 'FORBIDDEN_BUSINESS',
+    });
+    return null;
+  }
+  return access;
+}
 
 function isRevisionConflict(error) {
   const msg = error instanceof Error ? error.message : String(error || '');
@@ -102,6 +116,9 @@ export async function listAlerts(req, res) {
     const { businessId } = req.params;
     if (!businessId) return res.status(400).json({ ok: false, error: 'Falta businessId' });
 
+    const access = await requireAlertBusinessAccess(req, res, businessId);
+    if (!access) return;
+
     const result = await listAlertsByBusiness(req, businessId, buildListFilters(req.query));
 
     return res.json({
@@ -128,6 +145,9 @@ export async function listAlertHistory(req, res) {
   try {
     const { businessId } = req.params;
     if (!businessId) return res.status(400).json({ ok: false, error: 'Falta businessId' });
+
+    const access = await requireAlertBusinessAccess(req, res, businessId);
+    if (!access) return;
 
     const result = await listAlertsByBusiness(req, businessId, buildListFilters(req.query, {
       historyOnly: true,
@@ -162,6 +182,9 @@ export async function getAlertTimeline(req, res) {
       return res.status(400).json({ ok: false, error: 'Faltan businessId o alertId' });
     }
 
+    const access = await requireAlertBusinessAccess(req, res, businessId);
+    if (!access) return;
+
     await ensureDatabase(req, NOTIFICATIONS_DB);
     const doc = await getDocument(req, NOTIFICATIONS_DB, alertId);
 
@@ -190,6 +213,9 @@ export async function getAlertSummary(req, res) {
     const { businessId } = req.params;
     if (!businessId) return res.status(400).json({ ok: false, error: 'Falta businessId' });
 
+    const access = await requireAlertBusinessAccess(req, res, businessId);
+    if (!access) return;
+
     const summary = await getAlertsSummary(req, businessId);
 
     return res.json({ ok: true, summary });
@@ -217,6 +243,9 @@ export async function updateAlertStatus(req, res) {
         error: `Estado inválido. Valores permitidos: ${ALERT_STATUSES.join(', ')}`,
       });
     }
+
+    const access = await requireAlertBusinessAccess(req, res, businessId);
+    if (!access) return;
 
     const now = new Date().toISOString();
     const userId = req.authUser?.userId || null;
@@ -260,6 +289,9 @@ export async function bulkUpdateAlertStatus(req, res) {
       });
     }
 
+    const access = await requireAlertBusinessAccess(req, res, businessId);
+    if (!access) return;
+
     const maxBulk = 100;
     const ids = alertIds.slice(0, maxBulk);
     await ensureDatabase(req, NOTIFICATIONS_DB);
@@ -302,6 +334,9 @@ export async function resolveAllUnresolvedAlerts(req, res) {
     if (!businessId) {
       return res.status(400).json({ ok: false, error: 'Falta businessId' });
     }
+
+    const access = await requireAlertBusinessAccess(req, res, businessId);
+    if (!access) return;
 
     const listed = await listAlertsByBusiness(req, businessId, {
       status: 'new,seen',
@@ -370,6 +405,9 @@ export async function assignAlert(req, res) {
       return res.status(400).json({ ok: false, error: 'Faltan businessId o alertId' });
     }
 
+    const access = await requireAlertBusinessAccess(req, res, businessId);
+    if (!access) return;
+
     await ensureDatabase(req, NOTIFICATIONS_DB);
     const doc = await getDocument(req, NOTIFICATIONS_DB, alertId);
 
@@ -404,6 +442,9 @@ export async function deleteAlert(req, res) {
     if (!businessId || !alertId) {
       return res.status(400).json({ ok: false, error: 'Faltan businessId o alertId' });
     }
+
+    const access = await requireAlertBusinessAccess(req, res, businessId);
+    if (!access) return;
 
     await ensureDatabase(req, NOTIFICATIONS_DB);
     const doc = await getDocument(req, NOTIFICATIONS_DB, alertId);

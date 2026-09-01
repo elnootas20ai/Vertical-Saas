@@ -22,6 +22,9 @@ import {
   type WorkCenter,
 } from '../../../../lib/workCentersApi';
 import {
+  clearAllRetailScopeCaches,
+} from '../../../../verticals/retailScopeRegistry';
+import {
   notifyDeliveryActiveStoreChanged,
   writeDeliveryOpsSelectedPdvId,
 } from '../../../../lib/deliveryOpsPdvSelection';
@@ -73,6 +76,7 @@ export function EventsTpvPage() {
       const sps = await listSalesPoints(dataUserId);
       const scopedWcs = filterWorkCentersForBusinessScope(sps, businessId, {
         accountBusinessCount,
+        includeTemporaryEventPdvs: true,
       }).filter(
         (sp) => sp.active !== false && sp.centerType === 'punto_de_venta',
       );
@@ -157,6 +161,10 @@ export function EventsTpvPage() {
     if (!pdvId) {
       toast.error('Este PDV aún no está listo. Pulsa Actualizar o crea de nuevo el código.');
       return;
+    }
+    if (businessId) {
+      // Caché antigua sin PDV temporales → el TPV pedía «crear tienda».
+      clearAllRetailScopeCaches(businessId);
     }
     if (businessId && dataUserId) {
       writeDeliveryOpsSelectedPdvId(businessId, dataUserId, pdvId);

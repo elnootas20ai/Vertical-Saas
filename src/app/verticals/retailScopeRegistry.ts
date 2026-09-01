@@ -121,10 +121,12 @@ export function filterRetailWorkCentersForScope(
   const kind = resolveRetailScopeKind(business.businessType);
 
   // Delivery: scope soft por businessId + huérfanas. Nunca filtrar por sala_room.
+  // Eventos: los PDV temporales (tablet del día) deben entrar al TPV / operar.
   if (kind === 'delivery') {
     return dedupeRetailWorkCentersForBusiness(
       filterWorkCentersForBusinessScope(pickRetailWorkCenters(workCenters), businessId, {
         accountBusinessCount: ctx.accountBusinessCount,
+        includeTemporaryEventPdvs: isEventsBusinessType(business.businessType),
       }),
     );
   }
@@ -141,9 +143,14 @@ export function filterRetailWorkCentersForScope(
   return sanitizeRetailScopeSnapshot(
     businessId,
     { retailWorkCenters: picked, allPointsOfSale: [] },
-    ctx.accountBusinessCount !== undefined
-      ? { accountBusinessCount: ctx.accountBusinessCount }
-      : undefined,
+    {
+      ...(ctx.accountBusinessCount !== undefined
+        ? { accountBusinessCount: ctx.accountBusinessCount }
+        : {}),
+      ...(isEventsBusinessType(business.businessType)
+        ? { includeTemporaryEventPdvs: true }
+        : {}),
+    },
   ).retailWorkCenters;
 }
 

@@ -133,7 +133,7 @@ workflows:
           set -e
           cd ios/App
           # Marketing: shell nativo + UI embebida (dist/). Actualizar UI = nuevo IPA.
-          agvtool new-marketing-version 1.18
+          agvtool new-marketing-version 1.19
           # Build: mayor que el último en TestFlight (si no, Apple rechaza el upload).
           LATEST_TF=""
           LATEST_TF=$(app-store-connect get-latest-testflight-build-number com.vertial.app 2>/dev/null || true)

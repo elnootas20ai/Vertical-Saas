@@ -162,6 +162,7 @@ import { startSupplierInvoicePolling } from './services/supplierInvoiceScheduler
 import { runAutoOrdersForAllUsers } from './services/autoOrderService.js';
 import { startSubscriptionLifecycle } from './services/subscriptionLifecycle.js';
 import { startDailyOpsDigest } from './services/dailyOpsDigest.js';
+import { startCeoDailyDigestScheduler } from './services/ceoDailyDigest.js';
 import { createVerticalRouter } from './services/verticalCrudFactory.js';
 import { allVerticalConfigs } from './verticalConfigs/all.js';
 import { requireAuthAndEmailVerified } from './middleware/auth.js';
@@ -3430,6 +3431,8 @@ if (backgroundEnginesEnabled) {
 
   // Resumen diario a ALERTS_ADMIN (backup + uptime); solo prod salvo ALERTS_OPS_IN_DEV
   startDailyOpsDigest();
+  // Resumen diario al CEO (push corto + campana): platos, marcas, en local por tienda
+  startCeoDailyDigestScheduler();
 }
 
 // CRM-02: Workflow engine scheduler — runs every 4 hours

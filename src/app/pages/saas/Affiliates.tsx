@@ -564,24 +564,37 @@ function FollowUpModal({ affiliates, onSave, onClose }: {
 // ── Commission Form Modal ─────────────────────────────────────────────────────
 
 interface CommissionFormData {
-  affiliateId: string; description: string;
-  amount: string; dueDate: string;
+  affiliateId: string;
+  contactId: string;
+  description: string;
+  amount: string;
+  dueDate: string;
 }
 
-function CommissionModal({ affiliates, onSave, onClose }: {
+function CommissionModal({ affiliates, contacts, onSave, onClose }: {
   affiliates: Affiliate[];
+  contacts: AffiliateContact[];
   onSave: (data: CommissionFormData) => void;
   onClose: () => void;
 }) {
   const accepted = affiliates.filter((a) => a.status === 'accepted');
   const [form, setForm] = useState<CommissionFormData>({
     affiliateId: getId(accepted[0]) || '',
+    contactId: '',
     description: '', amount: '',
     dueDate: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
   });
+  const [error, setError] = useState('');
 
   const field = (key: keyof CommissionFormData) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
-    setForm((f) => ({ ...f, [key]: e.target.value }));
+    setForm((f) => {
+      const next = { ...f, [key]: e.target.value };
+      if (key === 'affiliateId') next.contactId = '';
+      return next;
+    });
+
+  const affiliateContacts = contacts.filter((c) => c.affiliateId === form.affiliateId);
+  const selectedContact = affiliateContacts.find((c) => c._id === form.contactId);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
@@ -602,9 +615,32 @@ function CommissionModal({ affiliates, onSave, onClose }: {
             </div>
           </div>
           <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Cliente referido *</label>
+            <div className="relative">
+              <select value={form.contactId} onChange={field('contactId')}
+                className="w-full appearance-none bg-white dark:bg-gray-800 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 pr-8">
+                <option value="">Selecciona cliente…</option>
+                {affiliateContacts.map((c) => (
+                  <option key={c._id} value={c._id}>
+                    {c.contactName}{c.isPaying ? ' · pagando' : ''}{c.payingStartedAt ? ` · desde ${new Date(c.payingStartedAt).toLocaleDateString('es-ES')}` : ''}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            </div>
+            <p className="mt-1 text-[11px] text-slate-500">
+              Máx. 24 meses de comisión desde el primer cobro del cliente.
+              {selectedContact?.commissionEndsAt
+                ? ` Ventana hasta ${new Date(selectedContact.commissionEndsAt).toLocaleDateString('es-ES')}.`
+                : selectedContact && !selectedContact.payingStartedAt
+                  ? ' Marca el cliente como pagando para abrir la ventana.'
+                  : ''}
+            </p>
+          </div>
+          <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Descripción *</label>
             <input value={form.description} onChange={field('description')}
-              placeholder="Ej: Comisión por cliente referido - Empresa XYZ"
+              placeholder="Ej: Comisión mes 3 — Empresa XYZ"
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div className="grid grid-cols-2 gap-4">
@@ -620,10 +656,20 @@ function CommissionModal({ affiliates, onSave, onClose }: {
                 className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
           </div>
+          {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
         </div>
         <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-3">
           <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800 transition-colors">Cancelar</button>
-          <button onClick={() => onSave(form)} disabled={!form.description.trim() || !form.amount || !form.affiliateId}
+          <button
+            onClick={() => {
+              if (!form.contactId) {
+                setError('Elige el cliente referido');
+                return;
+              }
+              setError('');
+              onSave(form);
+            }}
+            disabled={!form.description.trim() || !form.amount || !form.affiliateId || !form.contactId}
             className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">
             Crear comisión
           </button>
@@ -867,15 +913,21 @@ export function Affiliates() {
   const handleSaveCommission = async (data: CommissionFormData) => {
     const aff = affiliates.find((a) => getId(a) === data.affiliateId);
     if (!aff) return;
+    const contact = contacts.find((c) => c._id === data.contactId);
     try {
       await createAffiliateCommission(userId, {
         affiliateId: getId(aff), affiliateName: aff.name,
+        contactId: data.contactId,
+        contactName: contact?.contactName,
         description: data.description, amount: Number(data.amount),
         status: 'pending', dueDate: data.dueDate || undefined,
       });
       setShowCommissionModal(false);
       load();
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      console.error(err);
+      alert(err instanceof Error ? err.message : 'No se pudo crear la comisión');
+    }
   };
 
   const handleCommissionStatus = async (id: string, status: CommissionStatus) => {
@@ -1641,7 +1693,7 @@ export function Affiliates() {
         <FollowUpModal affiliates={affiliates} onSave={handleSaveFollowUp} onClose={() => setShowFollowUpModal(false)} />
       )}
       {showCommissionModal && (
-        <CommissionModal affiliates={affiliates} onSave={handleSaveCommission} onClose={() => setShowCommissionModal(false)} />
+        <CommissionModal affiliates={affiliates} contacts={contacts} onSave={handleSaveCommission} onClose={() => setShowCommissionModal(false)} />
       )}
     </Layout>
   );

@@ -7,13 +7,17 @@ import { saasPathWithBusinessScope } from '../../../../lib/businessScopeUrl';
 import { resolveBusinessScopeId } from '../../../../lib/deliverySetup';
 import { loadEvents, loadAllEventQuotes, buildEventQuoteListRows, resolveEventsUserId } from '../../../../lib/eventsFlow';
 import { summarizeEventFinancials } from '../../../../lib/eventsFinance';
+import {
+  peekContractWizardDraft,
+  type ContractWizardDraftPeek,
+} from '../../../../lib/eventsContractWizardDraft';
 import { EVENT_STAGE_CONFIG, type EventContractStage, type EventRecord } from '../../../../lib/eventsTypes';
 import { EventHubStageProgress } from '../../../../components/saas/events/EventContractStepper';
 import { formatEventPaymentBreakdown } from '../../../../components/saas/events/EventsStagePaymentCard';
 import { VERTIAL_BTN_PRIMARY } from '../../../../lib/vertialUiTokens';
 import {
   PartyPopper, Plus, ArrowRight,
-  Loader2, RefreshCw, MapPin,
+  Loader2, RefreshCw, MapPin, FilePenLine,
 } from 'lucide-react';
 
 function fmtEuro(n: number): string {
@@ -55,6 +59,22 @@ export function EventsHub() {
   const [quoteDocs, setQuoteDocs] = useState<Awaited<ReturnType<typeof loadAllEventQuotes>>>([]);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [contractDraft, setContractDraft] = useState<ContractWizardDraftPeek | null>(null);
+
+  const refreshDraftPeek = useCallback(() => {
+    setContractDraft(peekContractWizardDraft(businessId || ''));
+  }, [businessId]);
+
+  useEffect(() => {
+    refreshDraftPeek();
+    const onFocus = () => refreshDraftPeek();
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
+    };
+  }, [refreshDraftPeek]);
 
   const refresh = useCallback(async () => {
     if (!dataUserId) {
@@ -76,8 +96,9 @@ export function EventsHub() {
       setLoadFailed(true);
     } finally {
       setLoading(false);
+      refreshDraftPeek();
     }
-  }, [dataUserId, businessesFetchSettled]);
+  }, [dataUserId, businessesFetchSettled, refreshDraftPeek]);
 
   useEffect(() => {
     if (!businessesFetchSettled && !dataUserId) return;
@@ -215,6 +236,22 @@ export function EventsHub() {
             </button>
           </div>
         </header>
+
+        {contractDraft && (
+          <button
+            type="button"
+            onClick={() => navigate(scoped('/saas/vertical/eventos/nueva-contratacion'))}
+            className="inline-flex max-w-full items-center gap-1.5 text-xs text-stone-500 hover:text-[var(--v-blue,#2563eb)] dark:text-stone-400 dark:hover:text-blue-300"
+          >
+            <FilePenLine className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">
+              Borrador: {contractDraft.title}
+              <span className="opacity-70"> · {contractDraft.stepLabel}</span>
+              {' — '}
+              <span className="font-semibold text-[var(--v-blue,#2563eb)] dark:text-blue-300">Continuar</span>
+            </span>
+          </button>
+        )}
 
         <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
           <section className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 overflow-hidden">

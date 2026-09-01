@@ -1,10 +1,13 @@
 /**
- * Barra inferior tablet bar/restaurante: Mesas · Cocina · Lista espera.
+ * Barra inferior tablet bar/restaurante: Salir a Vertial · Mesas · Cocina · Lista espera.
  * No reutiliza WorkerTpvBottomBar de Delivery.
  */
 import { useNavigate } from 'react-router-dom';
-import { Armchair, ChefHat, LayoutGrid } from 'lucide-react';
-import { readTpvTabletBinding } from '../../lib/tpvTabletSession';
+import { Armchair, ChefHat, LayoutGrid, LogOut } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
+import { isTpvTabletBound, leaveTpvTabletSession, readTpvTabletBinding } from '../../lib/tpvTabletSession';
+import { resolveTpvCeoExitPath } from '../../lib/retailOpsPaths';
 
 export type RestaurantTabletNavTab = 'mesas' | 'cocina' | 'espera';
 
@@ -36,6 +39,21 @@ type Props = {
 
 export function RestaurantTabletBottomNav({ active, className = '' }: Props) {
   const navigate = useNavigate();
+  const { logout } = useAuth();
+  const { currentBusiness } = useBusiness();
+  const tabletBound = isTpvTabletBound();
+
+  const handleExit = () => {
+    if (tabletBound) {
+      void leaveTpvTabletSession(logout, { navigate });
+      return;
+    }
+    navigate(
+      resolveTpvCeoExitPath(window.location.pathname, currentBusiness?.businessType),
+      { replace: true },
+    );
+  };
+
   const tabs: Array<{
     id: RestaurantTabletNavTab;
     label: string;
@@ -52,7 +70,17 @@ export function RestaurantTabletBottomNav({ active, className = '' }: Props) {
       className={`shrink-0 border-t border-stone-200 bg-white/95 px-2 py-1.5 dark:border-stone-700 dark:bg-stone-900/95 ${className}`}
       aria-label="Navegación tablet sala"
     >
-      <div className="mx-auto flex max-w-lg items-stretch gap-1.5">
+      <div className="mx-auto flex max-w-2xl items-stretch gap-1.5">
+        <button
+          type="button"
+          onClick={handleExit}
+          className="flex shrink-0 min-h-[44px] items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-bold text-slate-700 touch-manipulation hover:bg-blue-50/60 hover:border-blue-200 hover:text-[var(--v-blue,#2563eb)] dark:border-slate-600 dark:bg-stone-900 dark:text-slate-200 dark:hover:bg-blue-950/40"
+          title="Salir a Vertial"
+        >
+          <LogOut className="h-4 w-4" />
+          <span className="hidden sm:inline">Salir a Vertial</span>
+          <span className="sm:hidden">Salir</span>
+        </button>
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = active === tab.id;

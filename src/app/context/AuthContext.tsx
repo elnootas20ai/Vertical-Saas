@@ -338,7 +338,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearAuthTokens();
     });
 
-    // Tras actualizar TestFlight: no rehidratar la cuenta anterior (ni con cookie/basura local).
+    // Flag legacy de builds antiguas: si quedó activo, AuthContext aún puede
+    // exigir login limpio — enforceFreshLoginOnAppUpdate ya lo limpia al arrancar.
     if (mustForceFreshLogin()) {
       stopAuthSessionKeepalive();
       persistSession(null);

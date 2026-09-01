@@ -88,6 +88,8 @@ export interface AffiliateContact {
   cardAddedAt?: string;
   isPaying?: boolean;
   payingStartedAt?: string;
+  /** Fin de la ventana de 24 meses de comisión (desde primer cobro). */
+  commissionEndsAt?: string;
   monthlyAmount?: number;
   commissionPercent?: number;
   createdAt: string;

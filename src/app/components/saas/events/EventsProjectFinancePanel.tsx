@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import type { EventRecord } from '../../../lib/eventsTypes';
@@ -8,7 +8,13 @@ import {
   collectEventFinalBalance,
   sendEventFinalInvoiceEmail,
 } from '../../../lib/eventsFinance';
-import { Loader2, Receipt, Banknote, FileText, CheckCircle2, Mail } from 'lucide-react';
+import {
+  downloadClientInvoicePdf,
+  loadEventLinkedInvoices,
+} from '../../../lib/eventsInvoiceUi';
+import type { ClientInvoiceRecord } from '../../../lib/clientInvoicesApi';
+import { formatMoneyEs } from '../../../lib/formatNumberEs';
+import { Loader2, Receipt, Banknote, FileText, CheckCircle2, Mail, Download, ExternalLink } from 'lucide-react';
 
 type BusinessIssuer = {
   name?: string;
@@ -16,6 +22,9 @@ type BusinessIssuer = {
   address?: string;
   phone?: string;
   email?: string;
+  business_id?: string;
+  businessId?: string;
+  id?: string;
 };
 
 type Props = {
@@ -35,6 +44,37 @@ export function EventsProjectFinancePanel({ event, business, userId, onEventUpda
   const [finalMethod, setFinalMethod] = useState('transferencia');
   const [finalAmount, setFinalAmount] = useState(String(summary.pendiente || ''));
   const [busy, setBusy] = useState<string | null>(null);
+  const [depositInvoice, setDepositInvoice] = useState<ClientInvoiceRecord | null>(null);
+  const [finalInvoice, setFinalInvoice] = useState<ClientInvoiceRecord | null>(null);
+  const [loadingInvoices, setLoadingInvoices] = useState(false);
+
+  useEffect(() => {
+    if (!userId) return;
+    if (!event.depositInvoiceId && !event.finalInvoiceId) {
+      setDepositInvoice(null);
+      setFinalInvoice(null);
+      return;
+    }
+    let cancelled = false;
+    setLoadingInvoices(true);
+    void loadEventLinkedInvoices(userId, event)
+      .then((res) => {
+        if (cancelled) return;
+        setDepositInvoice(res.deposit);
+        setFinalInvoice(res.final);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setDepositInvoice(null);
+        setFinalInvoice(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingInvoices(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, event.depositInvoiceId, event.finalInvoiceId, event._id]);
 
   const run = async (key: string, fn: () => Promise<void>) => {
     setBusy(key);
@@ -47,6 +87,19 @@ export function EventsProjectFinancePanel({ event, business, userId, onEventUpda
     }
   };
 
+  const openPdf = (inv: ClientInvoiceRecord | null, label: string) => {
+    if (!inv) {
+      toast.error(`No se encontró la factura de ${label}`);
+      return;
+    }
+    try {
+      downloadClientInvoicePdf(inv);
+      toast.success(`PDF ${inv.number}`);
+    } catch {
+      toast.error('No se pudo descargar el PDF');
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -55,6 +108,49 @@ export function EventsProjectFinancePanel({ event, business, userId, onEventUpda
         <StatCard label="Resto cobrado" value={`${summary.cobradoFinal.toLocaleString('es-ES')} €`} tone={summary.cobradoFinal > 0 ? 'ok' : 'neutral'} />
         <StatCard label="Pendiente" value={`${summary.pendiente.toLocaleString('es-ES')} €`} tone={summary.pendiente > 0 ? 'warn' : 'ok'} />
       </div>
+
+      {(event.depositInvoiceId || event.finalInvoiceId) ? (
+        <section className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 p-5 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Receipt className="w-5 h-5 text-cyan-600" />
+              <h3 className="font-semibold">Facturas</h3>
+            </div>
+            <Link
+              to="/saas/client-billing"
+              className="inline-flex items-center gap-1 text-sm font-semibold text-cyan-700 dark:text-cyan-300 hover:underline"
+            >
+              Facturación clientes <ExternalLink className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+          {loadingInvoices ? (
+            <div className="flex items-center gap-2 text-sm text-gray-500">
+              <Loader2 className="w-4 h-4 animate-spin" /> Cargando facturas…
+            </div>
+          ) : (
+            <ul className="space-y-2">
+              {event.depositInvoiceId ? (
+                <InvoiceRow
+                  title="Señal"
+                  invoice={depositInvoice}
+                  fallbackId={event.depositInvoiceId}
+                  amount={Number(event.depositPaidAmount) || depositInvoice?.total || 0}
+                  onPdf={() => openPdf(depositInvoice, 'señal')}
+                />
+              ) : null}
+              {event.finalInvoiceId ? (
+                <InvoiceRow
+                  title="Factura final"
+                  invoice={finalInvoice}
+                  fallbackId={event.finalInvoiceId}
+                  amount={finalInvoice?.total || summary.facturaFinalTotal}
+                  onPdf={() => openPdf(finalInvoice, 'factura final')}
+                />
+              ) : null}
+            </ul>
+          )}
+        </section>
+      ) : null}
 
       {event.estado === 'finalizado' && (
         <div className={`rounded-xl border p-4 flex items-start gap-3 ${
@@ -82,9 +178,20 @@ export function EventsProjectFinancePanel({ event, business, userId, onEventUpda
         {event.depositPaidAt ? (
           <p className="text-sm text-emerald-700 dark:text-emerald-300">
             Señal registrada: {Number(event.depositPaidAmount || 0).toLocaleString('es-ES')} €
-            {event.depositInvoiceId && (
-              <> · <Link to="/saas/client-billing" className="underline">Ver facturación</Link></>
-            )}
+            {depositInvoice ? (
+              <>
+                {' · '}
+                <button
+                  type="button"
+                  onClick={() => openPdf(depositInvoice, 'señal')}
+                  className="underline font-semibold"
+                >
+                  Descargar factura {depositInvoice.number}
+                </button>
+              </>
+            ) : event.depositInvoiceId ? (
+              <> · <Link to="/saas/client-billing" className="underline">Ver en facturación</Link></>
+            ) : null}
           </p>
         ) : (
           <div className="grid sm:grid-cols-3 gap-3 items-end">
@@ -112,7 +219,7 @@ export function EventsProjectFinancePanel({ event, business, userId, onEventUpda
                   business,
                 );
                 onEventUpdated(updated);
-                toast.success('Señal registrada y vinculada a finanzas');
+                toast.success('Señal registrada · factura creada');
               })}
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-700 disabled:opacity-50"
             >
@@ -131,9 +238,20 @@ export function EventsProjectFinancePanel({ event, business, userId, onEventUpda
         {summary.pendiente <= 0.01 && summary.cobradoFinal > 0 ? (
           <p className="text-sm text-emerald-700 dark:text-emerald-300">
             Resto liquidado: {Number(event.finalPaidAmount || 0).toLocaleString('es-ES')} €
-            {event.finalInvoiceId && (
-              <> · <Link to="/saas/client-billing" className="underline">Ver facturación</Link></>
-            )}
+            {finalInvoice ? (
+              <>
+                {' · '}
+                <button
+                  type="button"
+                  onClick={() => openPdf(finalInvoice, 'factura final')}
+                  className="underline font-semibold"
+                >
+                  Descargar factura {finalInvoice.number}
+                </button>
+              </>
+            ) : event.finalInvoiceId ? (
+              <> · <Link to="/saas/client-billing" className="underline">Ver en facturación</Link></>
+            ) : null}
           </p>
         ) : (
           <div className="space-y-3">
@@ -168,7 +286,7 @@ export function EventsProjectFinancePanel({ event, business, userId, onEventUpda
                     business,
                   );
                   onEventUpdated(updated);
-                  toast.success('Pago final registrado');
+                  toast.success('Pago final registrado · factura creada');
                 })}
                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
               >
@@ -194,6 +312,53 @@ export function EventsProjectFinancePanel({ event, business, userId, onEventUpda
         )}
       </section>
     </div>
+  );
+}
+
+function InvoiceRow({
+  title,
+  invoice,
+  fallbackId,
+  amount,
+  onPdf,
+}: {
+  title: string;
+  invoice: ClientInvoiceRecord | null;
+  fallbackId: string;
+  amount: number;
+  onPdf: () => void;
+}) {
+  return (
+    <li className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-gray-100 px-3 py-2.5 dark:border-gray-800">
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+          {title}
+          {invoice?.number ? ` · ${invoice.number}` : ''}
+        </p>
+        <p className="text-xs text-gray-500 tabular-nums">
+          {formatMoneyEs(amount)}
+          {invoice?.status ? ` · ${invoice.status === 'paid' ? 'Cobrada' : invoice.status}` : ''}
+          {!invoice ? ` · id ${fallbackId.slice(0, 12)}…` : ''}
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={onPdf}
+          disabled={!invoice}
+          className="inline-flex min-h-9 items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+        >
+          <Download className="w-3.5 h-3.5" />
+          PDF
+        </button>
+        <Link
+          to="/saas/client-billing"
+          className="inline-flex min-h-9 items-center gap-1.5 rounded-xl bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-700"
+        >
+          Abrir
+        </Link>
+      </div>
+    </li>
   );
 }
 

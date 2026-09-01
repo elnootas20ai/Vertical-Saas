@@ -21,8 +21,10 @@ import {
 } from './deliveryApi';
 import type { Business } from './businessApi';
 import { resolveBusinessDataUserId } from './tenantUserId';
+import { isEventsBusinessType } from './deliveryOpsTypes';
 import {
   createWorkCenter,
+  isTemporaryEventWorkCenter,
   listWorkCentersForDelivery,
   updateWorkCenter,
   type WorkCenter,
@@ -249,7 +251,7 @@ export function readWorkCenterBusinessId(wc: WorkCenter | Record<string, unknown
 export function filterWorkCentersForBusinessScope(
   workCenters: WorkCenter[],
   businessId: string,
-  options?: { accountBusinessCount?: number },
+  options?: { accountBusinessCount?: number; includeTemporaryEventPdvs?: boolean },
 ): WorkCenter[] {
   const bid = normalizeBusinessScopeId(businessId);
   if (!bid) return [];
@@ -262,24 +264,29 @@ export function filterWorkCentersForBusinessScope(
   const mineRetail = mine.filter(isRetail);
   const accountN = options?.accountBusinessCount;
 
+  let result: WorkCenter[];
   if (accountN === undefined) {
-    return mine.sort((a, b) => a.name.localeCompare(b.name, 'es'));
-  }
-
-  // Clave: mirar tiendas retail, no «cualquier centro». Una oficina etiquetada no debe ocultar «pizzerias».
-  if (mineRetail.length === 0) {
+    result = mine.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  } else if (mineRetail.length === 0) {
     // Multi-empresa: no absorber tiendas huérfanas (bodegeta u otra vertical) en el scope activo.
     if (typeof accountN === 'number' && accountN > 1) {
-      return mine.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+      result = mine.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+    } else {
+      const legacyRetail = active.filter((wc) => !readWorkCenterBusinessId(wc) && isRetail(wc));
+      const merged = new Map<string, WorkCenter>();
+      for (const wc of mine) merged.set(wc._id, wc);
+      for (const wc of legacyRetail) merged.set(wc._id, wc);
+      result = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name, 'es'));
     }
-    const legacyRetail = active.filter((wc) => !readWorkCenterBusinessId(wc) && isRetail(wc));
-    const merged = new Map<string, WorkCenter>();
-    for (const wc of mine) merged.set(wc._id, wc);
-    for (const wc of legacyRetail) merged.set(wc._id, wc);
-    return [...merged.values()].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  } else {
+    result = mine.sort((a, b) => a.name.localeCompare(b.name, 'es'));
   }
 
-  return mine.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  // PDV temporales de eventos solo en /eventos/tpv (no sidebar / ajustes / TPV general).
+  if (!options?.includeTemporaryEventPdvs) {
+    result = result.filter((wc) => !isTemporaryEventWorkCenter(wc));
+  }
+  return result;
 }
 
 /**
@@ -325,7 +332,9 @@ export function workCentersStrictlyForBusiness(
 ): WorkCenter[] {
   const bid = normalizeBusinessScopeId(businessId);
   if (!bid) return [];
-  return workCenters.filter((wc) => readWorkCenterBusinessId(wc) === bid);
+  return workCenters
+    .filter((wc) => readWorkCenterBusinessId(wc) === bid)
+    .filter((wc) => !isTemporaryEventWorkCenter(wc));
 }
 
 function isRetailWorkCenterType(wc: WorkCenter): boolean {
@@ -551,6 +560,7 @@ export async function loadDeliveryStores(
 
   let workCenters = filterWorkCentersForBusinessScope(scopedWorkCenters, businessId, {
     accountBusinessCount: options?.accountBusinessCount,
+    includeTemporaryEventPdvs: isEventsBusinessType(business?.businessType),
   });
   workCenters = dedupeRetailWorkCentersForBusiness(workCenters);
 

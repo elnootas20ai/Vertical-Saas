@@ -123,11 +123,8 @@ export async function canActorTriggerEventsNotify(req, {
   if (eventOwner && actor === eventOwner) return true;
   if (dataUserId && actor === normalizeUserId(dataUserId)) return true;
 
-  const actorAccount = await findAccountByUserId(req, actor).catch(() => null);
-  if (actorAccount && eventOwner && normalizeUserId(actorAccount.invitedBy) === eventOwner) {
-    return true;
-  }
-
+  // Solo membresía del negocio del evento (no bastar invitedBy del titular:
+  // el admin invitado a empresa A no debe actuar sobre eventos de empresa B).
   const bid = bareBusinessId(event.business_id || event.businessId);
   if (!bid) {
     return Boolean(eventOwner && actor === eventOwner);

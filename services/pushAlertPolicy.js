@@ -54,6 +54,7 @@ async function userIsManagementInvite(req, userId) {
  * Fuera: retrasos normales, stock, CRM, login… (in-app sí, push no).
  */
 const EXTRA_CEO_PUSH = [
+  'ceo_daily_digest',
   'payment_overdue',
   'negative_cash_flow',
   'tax_deadline_overdue',

@@ -49,6 +49,7 @@ import { formatDateEs } from '../../lib/formatDateEs';
 import { formatIbanInput } from '../../lib/employmentBankUtils';
 import { computeTotalLaborCost, formatLaborCurrency, computeLaborCostBreakdown, applyLaborCostToEmployment } from '../../lib/laborCost';
 import { Layout } from '../../components/saas/Layout';
+import { EmailVerificationProfileBlock } from '../../components/saas/EmailVerificationProfileBlock';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import type {
@@ -1206,8 +1207,13 @@ export function TeamMemberDetail() {
                     {member.role || 'Usuario'}
                   </span>
                 </div>
-                <div className="mt-1 flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
+                <div className="mt-1 flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400 flex-wrap">
                   <span className="flex items-center gap-1"><Mail className="w-3.5 h-3.5" />{member.email}</span>
+                  <EmailVerificationProfileBlock
+                    email={member.email || ''}
+                    emailVerified={Boolean(member.emailVerified)}
+                    compact
+                  />
                   {member.phone && <span className="flex items-center gap-1"><Phone className="w-3.5 h-3.5" />{member.phone}</span>}
                   {emp.position && <span className="flex items-center gap-1"><Briefcase className="w-3.5 h-3.5" />{emp.position}</span>}
                 </div>
@@ -1350,6 +1356,15 @@ export function TeamMemberDetail() {
                   <InfoField label="Teléfono de emergencia" value={emp.emergencyPhone} />
                 ) : null}
                 <InfoField label="Fecha de registro" value={member.createdAt ? formatDateEs(member.createdAt) : undefined} />
+              </div>
+              <div className="mt-4">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                  Verificación del correo
+                </p>
+                <EmailVerificationProfileBlock
+                  email={member.email || ''}
+                  emailVerified={Boolean(member.emailVerified)}
+                />
               </div>
             </div>
 

@@ -10,7 +10,10 @@ import {
   type EventRecord,
 } from '../../../lib/eventsTypes';
 import { formatMoneyEs } from '../../../lib/formatNumberEs';
+import { mergeBusinessMembers } from '../../../lib/schedulesDisplay';
 import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY, VERTIAL_SURFACE } from '../../../lib/vertialUiTokens';
+import { useBusiness } from '../../../context/BusinessContext';
+import { useAuth } from '../../../context/AuthContext';
 import { Check, CheckCircle2, Loader2, MapPin, Plus, Sparkles, Users } from 'lucide-react';
 
 type Props = {
@@ -60,6 +63,8 @@ export function EventsProjectPlanningPanel({
   onEventUpdated,
   onMarkReady,
 }: Props) {
+  const { currentBusiness } = useBusiness();
+  const { user } = useAuth();
   const lines = useMemo(() => parseQuoteLines(event.lineasPresupuesto), [event.lineasPresupuesto]);
   const checklist = useMemo(
     () => parsePlanningChecklist(event.planningChecklist),
@@ -75,17 +80,49 @@ export function EventsProjectPlanningPanel({
     void listUsersRequest(businessId)
       .then((res) => {
         const users = Array.isArray(res.users) ? res.users : [];
-        setTeam(
-          users
-            .map((u) => ({
-              id: String(u.user_id || u.id || '').trim(),
-              name: String(u.fullName || `${u.firstName || ''} ${u.lastName || ''}`).trim() || u.email,
-            }))
-            .filter((u) => u.id && u.name),
-        );
+        const apiMembers = users.map((u) => ({
+          user_id: String(u.user_id || u.id || '').trim(),
+          fullName: String(u.fullName || `${u.firstName || ''} ${u.lastName || ''}`).trim() || String(u.email || ''),
+          email: String(u.email || ''),
+          role: String(u.role || 'Usuario'),
+        })).filter((u) => u.user_id);
+        const ownerId = String(currentBusiness?.owner_user_id || '').trim();
+        const businessMembers = [...(currentBusiness?.members || [])];
+        if (
+          ownerId
+          && !businessMembers.some((m) => String(m.user_id || '').trim() === ownerId)
+        ) {
+          const ownerFromApi = apiMembers.find((m) => m.user_id === ownerId);
+          const self = user && String(user.user_id || '').trim() === ownerId ? user : null;
+          businessMembers.push({
+            user_id: ownerId,
+            fullName: ownerFromApi?.fullName
+              || String(self?.fullName || `${self?.firstName || ''} ${self?.lastName || ''}`).trim()
+              || ownerFromApi?.email
+              || String(self?.email || '')
+              || 'Titular',
+            email: ownerFromApi?.email || String(self?.email || ''),
+            role: 'Admin',
+            branch_id: null,
+            permissions: {},
+            joinedAt: '',
+          });
+        }
+        const merged = mergeBusinessMembers(businessMembers, apiMembers);
+        setTeam(merged.map((m) => ({ id: m.user_id, name: m.fullName })));
       })
-      .catch(() => setTeam([]));
-  }, [businessId]);
+      .catch(() => {
+        const members = currentBusiness?.members || [];
+        setTeam(
+          members
+            .map((m) => ({
+              id: String(m.user_id || '').trim(),
+              name: String(m.fullName || m.email || '').trim(),
+            }))
+            .filter((m) => m.id && m.name),
+        );
+      });
+  }, [businessId, currentBusiness?.members, currentBusiness?.owner_user_id, user]);
 
   const persist = useCallback(async (next: EventPlanningChecklist) => {
     if (!canEdit) return;

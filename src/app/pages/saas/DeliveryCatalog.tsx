@@ -8770,14 +8770,14 @@ export function CatalogPage() {
     if (!usesTpvCatalogUi) return true;
     if (catalogMenuItems.some((i) => i.active)) return true;
     if (brands.length === 0) return false;
-    // Bar/restaurante: basta con una marca activa con nombre real (sin reglas delivery).
-    if (isRestaurantCatalog) {
+    // Bar/restaurante y eventos: basta con una marca activa con nombre real (sin reglas delivery).
+    if (isRestaurantCatalog || isEventsCatalog) {
       return brands.some(
         (b) => b.active !== false && !(isDefaultCommercialBrand(b) && isDefaultBrandNamePlaceholder(b.name)),
       );
     }
     return isDeliveryBrandActivationComplete(brands, brandSetupCtx);
-  }, [usesTpvCatalogUi, isRestaurantCatalog, brands, brandSetupCtx, catalogMenuItems]);
+  }, [usesTpvCatalogUi, isRestaurantCatalog, isEventsCatalog, brands, brandSetupCtx, catalogMenuItems]);
 
   /** No mostrar el aviso hasta tener marcas + tiendas cargadas (evita flash al entrar). */
   const brandCheckReady =
@@ -8857,12 +8857,14 @@ export function CatalogPage() {
               <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
               <div>
                 <p className="font-semibold text-amber-950 dark:text-amber-100">
-                  {isRestaurantCatalog ? 'Falta configurar la marca' : 'Marca sin completar'}
+                  {isRestaurantCatalog || isEventsCatalog ? 'Falta configurar la marca' : 'Marca sin completar'}
                 </p>
                 <p className="mt-1 text-sm text-amber-900/80 dark:text-amber-200/80">
-                  {isRestaurantCatalog
-                    ? 'Puedes usar el catálogo. Crea o activa tu marca en Ajustes → Marca para la carta de sala y barra.'
-                    : 'Puedes usar el catálogo igualmente. Completa la marca en Ajustes para carta, categorías y precios.'}
+                  {isEventsCatalog
+                    ? 'Puedes usar el catálogo. Crea o completa tu marca en Ajustes → Marca (carta TPV y precios).'
+                    : isRestaurantCatalog
+                      ? 'Puedes usar el catálogo. Crea o activa tu marca en Ajustes → Marca para la carta de sala y barra.'
+                      : 'Puedes usar el catálogo igualmente. Completa la marca en Ajustes para carta, categorías y precios.'}
                 </p>
               </div>
             </div>

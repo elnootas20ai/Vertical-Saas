@@ -6124,6 +6124,12 @@ export function TpvRegisterGate({
     const syncManagerPdvFromStorage = () => {
       // No cambiar de tienda a mitad de un pedido: evita volver a «Abrir caja».
       if (orderFlowActiveRef.current) return;
+      // CEO con PDV forzado (eventos / Ir a TPV): no sustituir por Bodegeta u otra del listado.
+      const forced = String(initialManagerPdvIdRef.current || '').trim();
+      if (forced) {
+        setManagerPdvPickId(forced);
+        return;
+      }
       const bid = resolveBusinessScopeId(currentBusiness);
       if (!bid || !dataUserId) return;
       const saved = readOpsSelectedPdvId(currentBusiness?.businessType, bid, dataUserId);
@@ -6307,6 +6313,16 @@ export function TpvRegisterGate({
     }
     return null;
   }, [activeSession, holdStickyWhileOpen]);
+
+  // Si un toast de apertura quedó pillado de otra sesión, limpiar al entrar/salir del gate.
+  useEffect(() => {
+    toast.dismiss('tpv-caja-abierta');
+    toast.dismiss('tpv-opening-busy');
+    return () => {
+      toast.dismiss('tpv-caja-abierta');
+      toast.dismiss('tpv-opening-busy');
+    };
+  }, []);
 
   /** Caja abierta de esta tienda (para Continuar en tablet / apertura). */
   const openingKnownOpenSession = useMemo(() => {
@@ -7311,6 +7327,7 @@ export function TpvRegisterGate({
       if (!attachOpenSession(reopened, { toastMessage: null })) return;
       toast.success(
         `Caja reabierta: ${reopened.pointOfSaleName || 'tienda'}${reopened.terminalName ? ` / ${reopened.terminalName}` : ''}`,
+        { id: 'tpv-caja-abierta', duration: 3200 },
       );
     } catch (err) {
       toast.error(toUserFacingMessage(err, 'No se pudo reabrir la caja'));
@@ -7410,7 +7427,10 @@ export function TpvRegisterGate({
       setOpeningResume(null);
       setSessions(prev => [created, ...prev]);
       window.dispatchEvent(new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: created }));
-      toast.success(`Caja abierta: ${data.pointOfSaleName ? `${data.pointOfSaleName} / ` : ''}${data.terminalName} — ${total.toFixed(2)}€`);
+      toast.success(
+        `Caja abierta: ${data.pointOfSaleName ? `${data.pointOfSaleName} / ` : ''}${data.terminalName} — ${total.toFixed(2)}€`,
+        { id: 'tpv-caja-abierta', duration: 3200 },
+      );
 
       const bid = resolveBusinessScopeId(currentBusiness);
       const pdvDoc = pointsOfSale.find((p) => p._id === pdvId);

@@ -47,6 +47,9 @@ Thumbs.db
 android/keystore.properties
 android/*.keystore
 *.jks
+android/app/google-services.json
+**/firebase-adminsdk*.json
+**/vertial-firebase*.json
 
 # Capacitor / nativo (artefactos locales; las carpetas android/ e ios/ sí se versionan)
 android/.gradle/

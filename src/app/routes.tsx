@@ -867,7 +867,7 @@ export const router = createBrowserRouter([
           { path: 'nightclub-inventory', element: <Navigate to="/saas/compras-stock" replace /> },
           { path: 'nightclub-artists', element: <RequireBusinessOwner><NightclubArtists /></RequireBusinessOwner> },
 
-          // Events
+          // Events — segmentos fijos ANTES de :eventId (ruta/tpv/… no son fichas).
           { path: 'vertical/eventos', element: <RequireWorkerPermission permission="sales"><EventsHub /></RequireWorkerPermission> },
           { path: 'vertical/eventos/nueva-contratacion', element: <RequireWorkerPermission permission="sales"><EventsContractWizardPage /></RequireWorkerPermission> },
           { path: 'vertical/eventos/tpv', element: <RequireWorkerPermission permission="sales"><EventsTpvPage /></RequireWorkerPermission> },

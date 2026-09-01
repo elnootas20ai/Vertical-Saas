@@ -16,6 +16,11 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
 import { VERTIAL_SUPER_ADMIN_EMAIL } from '../utils/superAdmin.js';
+import {
+  addMonthsIso,
+  AFFILIATE_COMMISSION_MONTHS_PER_CLIENT,
+  evaluateAffiliateCommissionEligibility,
+} from '../utils/affiliateCommissionWindow.js';
 
 // ── Public constants ───────────────────────────────────────────────────────────
 
@@ -345,40 +350,61 @@ async function applyAffiliateStatusChange(
 
   let statusEmailSent = false;
   let statusEmailError = null;
-  // Solo al aceptar: bienvenida al afiliado. Al rechazar: sin correo (evita avisos raros / “verificación”).
+  // Solo al aceptar: un único correo de bienvenida al email de la solicitud.
+  // (Antes se enviaba también al email de la cuenta Vertial enlazada → 2 correos si diferían;
+  // y un doble clic / carrera podía disparar dos envíos.)
   if (sendStatusEmail && status === 'accepted') {
     try {
+      const freshBeforeMail = await getDocument(req, AFFILIATES_DB, affiliateId);
+      if (freshBeforeMail?.statusEmailSentAt) {
+        return {
+          doc: freshBeforeMail,
+          previousStatus,
+          statusEmailSent: false,
+          statusEmailError: null,
+          unchanged: false,
+        };
+      }
+
+      const to = String(doc.email || '').trim().toLowerCase();
+      if (!to) {
+        return {
+          doc,
+          previousStatus,
+          statusEmailSent: false,
+          statusEmailError: 'El afiliado no tiene email',
+          unchanged: false,
+        };
+      }
+
+      // Reservar el envío antes de mandar (evita duplicados en peticiones paralelas).
+      try {
+        const claimDoc = freshBeforeMail && !freshBeforeMail.deletedAt ? freshBeforeMail : doc;
+        doc = await putAffiliateDocument(req, affiliateId, {
+          ...claimDoc,
+          status: 'accepted',
+          statusEmailSentAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+      } catch (claimErr) {
+        const again = await getDocument(req, AFFILIATES_DB, affiliateId).catch(() => null);
+        if (again?.statusEmailSentAt) {
+          return {
+            doc: again,
+            previousStatus,
+            statusEmailSent: false,
+            statusEmailError: null,
+            unchanged: false,
+          };
+        }
+        throw claimErr;
+      }
+
       const html = buildAffiliateAcceptedEmail(doc);
       const subject = `Tu código de afiliado ${doc.affiliateCode || ''} · Vertial`;
-      const recipients = new Set(
-        [doc.email].map((e) => String(e || '').trim().toLowerCase()).filter(Boolean),
-      );
-      const linkedUid = String(doc.linkedAccountUserId || '').trim();
-      if (linkedUid) {
-        try {
-          const linkedAcc = await findAccountByUserId(req, linkedUid);
-          const linkedEmail = String(linkedAcc?.email || '').trim().toLowerCase();
-          if (linkedEmail) recipients.add(linkedEmail);
-        } catch {
-          /* ignore */
-        }
-      }
-      for (const to of recipients) {
-        await sendEmail({ to, subject, html });
-      }
+      await sendEmail({ to, subject, html });
       statusEmailSent = true;
-      try {
-        const fresh = await getDocument(req, AFFILIATES_DB, affiliateId);
-        if (fresh && !fresh.deletedAt) {
-          doc = await putAffiliateDocument(req, affiliateId, {
-            ...fresh,
-            statusEmailSentAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          });
-        }
-      } catch (stampErr) {
-        logger.warn({ tag: 'AFFILIATE', affiliateId, stampErr }, 'Estado OK pero no se selló statusEmailSentAt');
-      }
+
       return {
         doc,
         previousStatus,
@@ -734,7 +760,7 @@ export async function portalRegisterClient(req, res) {
 }
 
 /** Versión del contrato — mantener alineada con AFFILIATE_AGREEMENT_VERSION (frontend). */
-export const AFFILIATE_AGREEMENT_VERSION_EXPORT = '2026-07-06-v1';
+export const AFFILIATE_AGREEMENT_VERSION_EXPORT = '2026-08-31-v3';
 
 const DNI_LETTERS = 'TRWAGMYFPDXBNJZSQVHLCKE';
 const AFFILIATE_KYC_MAX_BYTES = 2 * 1024 * 1024;
@@ -1501,6 +1527,9 @@ export async function createContactAdmin(req, res) {
       cardAddedAt: cardAdded ? now : undefined,
       isPaying: Boolean(isPaying),
       payingStartedAt: isPaying ? now : undefined,
+      commissionEndsAt: isPaying
+        ? addMonthsIso(now, AFFILIATE_COMMISSION_MONTHS_PER_CLIENT)
+        : undefined,
       monthlyAmount: monthlyAmount !== undefined ? Number(monthlyAmount) || 0 : 0,
       commissionPercent: commissionPercent !== undefined ? Number(commissionPercent) : undefined,
       createdAt: now,
@@ -1556,6 +1585,14 @@ export async function updateContactAdmin(req, res) {
       cardAddedAt: cardAdded && !existing.cardAddedAt ? now : existing.cardAddedAt,
       isPaying: isPaying !== undefined ? Boolean(isPaying) : (existing.isPaying ?? false),
       payingStartedAt: isPaying && !existing.payingStartedAt ? now : existing.payingStartedAt,
+      commissionEndsAt: (() => {
+        const nextPaying = isPaying !== undefined ? Boolean(isPaying) : (existing.isPaying ?? false);
+        const start = (isPaying && !existing.payingStartedAt) ? now : existing.payingStartedAt;
+        if (nextPaying && start && !existing.commissionEndsAt) {
+          return addMonthsIso(start, AFFILIATE_COMMISSION_MONTHS_PER_CLIENT);
+        }
+        return existing.commissionEndsAt;
+      })(),
       monthlyAmount: monthlyAmount !== undefined ? Number(monthlyAmount) || 0 : (existing.monthlyAmount ?? 0),
       commissionPercent: commissionPercent !== undefined ? Number(commissionPercent) : existing.commissionPercent,
       updatedAt: now,
@@ -1690,7 +1727,32 @@ export async function createCommissionAdmin(req, res) {
     if (!affiliateId) return badRequest(res, 'Falta affiliateId');
     if (!amount || isNaN(Number(amount))) return badRequest(res, 'El importe es obligatorio');
 
+    const linkedContactId = String(contactId || '').trim();
+    if (!linkedContactId) {
+      return badRequest(
+        res,
+        'Elige el cliente referido. Las comisiones se limitan a 24 meses desde su primer cobro.',
+      );
+    }
+
     await ensureAffiliatesDb(req);
+    const contact = await getDocument(req, AFFILIATES_DB, linkedContactId);
+    if (!contact || contact.type !== 'affiliate_contact' || contact.deletedAt) {
+      return res.status(404).json({ ok: false, error: 'Cliente referido no encontrado' });
+    }
+    if (String(contact.affiliateId || '') !== String(affiliateId)) {
+      return badRequest(res, 'Ese cliente no pertenece al afiliado seleccionado');
+    }
+
+    const all = await getAllDocuments(req, AFFILIATES_DB);
+    const eligibility = evaluateAffiliateCommissionEligibility({
+      contact,
+      commissions: all,
+    });
+    if (!eligibility.ok) {
+      return badRequest(res, eligibility.reason || 'Fuera de la ventana de comisión de 24 meses');
+    }
+
     const now = new Date().toISOString();
     const id = `afc-${uuidv4()}`;
     const doc = {
@@ -1699,8 +1761,8 @@ export async function createCommissionAdmin(req, res) {
       user_id: userId,
       affiliateId,
       affiliateName: affiliateName || '',
-      contactId: contactId || undefined,
-      contactName: contactName || undefined,
+      contactId: linkedContactId,
+      contactName: contactName || contact.contactName || undefined,
       clientId: clientId || undefined,
       clientName: clientName || undefined,
       description: description.trim(),
@@ -1708,6 +1770,8 @@ export async function createCommissionAdmin(req, res) {
       status: 'pending',
       dueDate: dueDate || undefined,
       paidAt: undefined,
+      commissionWindowEndsAt: eligibility.endsAt || undefined,
+      commissionMonthIndex: (eligibility.monthsUsed || 0) + 1,
       createdAt: now,
       updatedAt: now,
     };
@@ -1841,6 +1905,7 @@ async function sendAffiliateRequestEmails(payload) {
   let adminEmail = 'vertial.noreply@gmail.com';
   let adminHtml = '';
   const adminUrl = adminAffiliateRequestsUrl();
+  const subject = `Nueva solicitud de afiliado: ${payload.name}`;
   try {
     adminEmail = getAffiliateContactEmail();
     adminHtml = buildAffiliateRequestEmail(payload);
@@ -1853,36 +1918,36 @@ async function sendAffiliateRequestEmails(payload) {
     `;
   }
 
-  // Aviso al buzón admin (ALERTS_ADMIN_EMAIL): así Uriel lo ve aunque AFFILIATE_EMAIL falle.
-  try {
-    await sendAdminAlert({
-      key: `affiliate_request_${String(payload.email || '').toLowerCase()}`,
-      subject: `Nueva solicitud de afiliado: ${payload.name}`,
-      html: `${adminHtml}
-        <p style="margin:20px 0 0;">
-          <a href="${escapeHtml(adminUrl)}"
-             style="display:inline-block;background:#111827;color:#fff;padding:12px 18px;border-radius:10px;text-decoration:none;font-weight:700;">
-            Abrir Admin · Solicitudes afiliados
-          </a>
-        </p>`,
-      cooldownMs: 60_000,
-    });
-    meta.adminNotifiedAt = now;
-  } catch (alertErr) {
-    logger.warn({ tag: 'AFFILIATE', alertErr }, 'Fallo alerta admin de solicitud de afiliado');
-  }
-
+  // Un solo correo al admin (antes: sendAdminAlert + sendEmail → 2 veces al mismo buzón).
+  // Si falla el principal, se intenta la alerta admin como respaldo.
   try {
     await sendEmail({
       to: adminEmail,
-      subject: `Nueva solicitud de afiliado: ${payload.name}`,
+      subject,
       html: adminHtml,
       replyTo: payload.email,
     });
     meta.adminNotifiedAt = now;
     logger.info({ tag: 'AFFILIATE', to: adminEmail }, 'Email de solicitud enviado al admin');
   } catch (emailErr) {
-    logger.warn({ tag: 'AFFILIATE', emailErr, to: adminEmail }, 'Fallo email admin de solicitud de afiliado');
+    logger.warn({ tag: 'AFFILIATE', emailErr, to: adminEmail }, 'Fallo email admin de solicitud; intento alerta admin');
+    try {
+      await sendAdminAlert({
+        key: `affiliate_request_${String(payload.email || '').toLowerCase()}`,
+        subject,
+        html: `${adminHtml}
+          <p style="margin:20px 0 0;">
+            <a href="${escapeHtml(adminUrl)}"
+               style="display:inline-block;background:#111827;color:#fff;padding:12px 18px;border-radius:10px;text-decoration:none;font-weight:700;">
+              Abrir Admin · Solicitudes afiliados
+            </a>
+          </p>`,
+        cooldownMs: 60_000,
+      });
+      meta.adminNotifiedAt = now;
+    } catch (alertErr) {
+      logger.warn({ tag: 'AFFILIATE', alertErr }, 'Fallo alerta admin de solicitud de afiliado');
+    }
   }
 
   try {

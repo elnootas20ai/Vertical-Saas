@@ -188,7 +188,6 @@ export function generateInvoicePdf(invoice: InvoiceData): void {
   y += 8;
 
   // ─── Tax summary ─────────────────────────────────────────────────────────────
-  // Group by tax rate
   const taxGroups = new Map<number, { base: number; tax: number }>();
   for (const line of invoice.lines) {
     const prev = taxGroups.get(line.taxRate) || { base: 0, tax: 0 };
@@ -201,60 +200,52 @@ export function generateInvoicePdf(invoice: InvoiceData): void {
   const totalTax = Array.from(taxGroups.values()).reduce((s, g) => s + g.tax, 0);
   const totalAmount = totalBase + totalTax;
 
-  // IVA breakdown table (right-aligned)
-  const sumX = margin + contentW - 70;
-  const sumW = 70;
+  // Resumen a la derecha: filas claras (sin columnas solapadas).
+  const sumW = 78;
+  const sumX = margin + contentW - sumW;
+  const rateRows = Array.from(taxGroups.entries()).sort((a, b) => a[0] - b[0]);
+  // 2 filas por tipo de IVA (base + cuota).
+  const boxH = 6 + rateRows.length * 12;
 
   doc.setFillColor(248, 250, 252);
-  doc.roundedRect(sumX, y - 3, sumW, 10 + taxGroups.size * 7, 2, 2, 'F');
+  doc.roundedRect(sumX, y - 2, sumW, boxH, 2, 2, 'F');
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7);
-  doc.setTextColor(100, 116, 139);
-  doc.text('BASE IMPONIBLE', sumX + 4, y + 2);
-  doc.text('CUOTA IVA', sumX + 44, y + 2);
-  doc.text('TOTAL', sumX + sumW - 3, y + 2, { align: 'right' });
-
-  y += 7;
+  let rowY = y + 3;
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
+  for (const [rate, group] of rateRows) {
+    doc.setTextColor(71, 85, 105);
+    doc.text(`Base IVA ${rate}%`, sumX + 3, rowY);
+    doc.text(formatCurrency(group.base), sumX + sumW - 3, rowY, { align: 'right' });
+    rowY += 6;
+    doc.text(`Cuota IVA ${rate}%`, sumX + 3, rowY);
+    doc.text(formatCurrency(group.tax), sumX + sumW - 3, rowY, { align: 'right' });
+    rowY += 6;
+  }
 
-  Array.from(taxGroups.entries())
-    .sort((a, b) => a[0] - b[0])
-    .forEach(([rate, group]) => {
-      doc.setTextColor(71, 85, 105);
-      doc.text(`IVA ${rate}%`, sumX + 4, y + 1);
-      doc.text(formatCurrency(group.base), sumX + 28, y + 1, { align: 'right' });
-      doc.text(formatCurrency(group.tax), sumX + 56, y + 1, { align: 'right' });
-      doc.text(formatCurrency(group.base + group.tax), sumX + sumW - 3, y + 1, { align: 'right' });
-      y += 7;
-    });
+  rowY = Math.max(rowY, y - 2 + boxH) + 3;
+  drawHRule(doc, rowY - 2, sumX + 3, sumX + sumW - 3, [203, 213, 225]);
+  rowY += 3;
 
-  y += 2;
-  drawHRule(doc, y, sumX, sumX + sumW, [203, 213, 225]);
-  y += 7;
-
-  // Total row
   doc.setFillColor(15, 23, 42);
-  doc.roundedRect(sumX, y - 3, sumW, 10, 2, 2, 'F');
+  doc.roundedRect(sumX, rowY - 3, sumW, 12, 2, 2, 'F');
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
   doc.setTextColor(255, 255, 255);
-  doc.text('TOTAL FACTURA', sumX + 4, y + 3);
-  doc.setFontSize(10);
-  doc.setTextColor(251, 191, 36); // amber-400
-  doc.text(formatCurrency(totalAmount), sumX + sumW - 3, y + 3.5, { align: 'right' });
+  doc.text('TOTAL FACTURA', sumX + 3, rowY + 4);
+  doc.setFontSize(11);
+  doc.setTextColor(251, 191, 36);
+  doc.text(formatCurrency(totalAmount), sumX + sumW - 3, rowY + 4.5, { align: 'right' });
 
-  y += 16;
-
-  // ─── Summary totals left column ──────────────────────────────────────────────
-  const summaryY = y - 40;
+  // Método + totales a la izquierda (alineados con el bloque derecho).
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(71, 85, 105);
-  doc.text(`Método de pago: ${invoice.payMethod || 'No especificado'}`, margin, summaryY);
-  doc.text(`Base imponible total: ${formatCurrency(totalBase)}`, margin, summaryY + 7);
-  doc.text(`IVA total: ${formatCurrency(totalTax)}`, margin, summaryY + 14);
+  doc.text(`Método de pago: ${invoice.payMethod || 'No especificado'}`, margin, y + 3);
+  doc.text(`Base imponible: ${formatCurrency(totalBase)}`, margin, y + 10);
+  doc.text(`IVA: ${formatCurrency(totalTax)}`, margin, y + 17);
+
+  y = Math.max(y + 22, rowY + 14);
 
   // ─── Notes ───────────────────────────────────────────────────────────────────
   if (invoice.notes) {

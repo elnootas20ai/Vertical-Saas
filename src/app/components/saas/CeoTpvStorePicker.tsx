@@ -167,7 +167,7 @@ export function buildCeoTpvStoreRows(
   workCenters: WorkCenter[],
   pointsOfSale: PointOfSale[],
   businessId?: string,
-  options?: { accountBusinessCount?: number },
+  options?: { accountBusinessCount?: number; includeTemporaryEventPdvs?: boolean },
 ): DeliverySidebarStoreRow[] {
   const retailBase = workCenters.filter(
     (wc) =>
@@ -177,6 +177,7 @@ export function buildCeoTpvStoreRows(
   const retail = businessId
     ? filterWorkCentersForBusinessScope(retailBase, businessId, {
         accountBusinessCount: options?.accountBusinessCount ?? 1,
+        includeTemporaryEventPdvs: options?.includeTemporaryEventPdvs === true,
       })
     : retailBase;
 

@@ -254,6 +254,14 @@ export const ALL_ALERT_RULE_DEFINITIONS = [
   r('user_login_new', 'seguridad', 'sistema', 'Nuevo inicio de sesión', 'Acceso desde dispositivo o ubicación nueva', { channels: ['email', 'inApp'], urgency: 'high' }),
   r('user_role_changed', 'seguridad', 'sistema', 'Cambio de rol', 'Se modificó el rol o permisos de un usuario', { channels: ['email', 'inApp'], urgency: 'high' }),
   r('system_update', 'sistema', 'sistema', 'Actualización del sistema', 'Nueva versión o mantenimiento programado', { enabled: false, urgency: 'low' }),
+  r(
+    'ceo_daily_digest',
+    'caja',
+    'operaciones',
+    'Resumen diario del negocio',
+    'Al final del día: platos, totales por marca/tienda, cobros y dinero en local (push corto + campana larga). Obligatorio para el CEO.',
+    { ...pushInApp, urgency: 'low', schedule: 'digest_daily' },
+  ),
 ];
 
 /**
