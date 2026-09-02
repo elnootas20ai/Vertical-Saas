@@ -269,16 +269,8 @@ function isComboExpansionLine(expanded) {
 }
 
 async function hasReferenceStockMovements(req, userId, referenceId, referenceType) {
-  const db = getCatalogDbName();
-  await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
-  return docs.some(
-    (doc) =>
-      doc?.type === 'stock_movement' &&
-      doc?.user_id === userId &&
-      doc?.referenceId === referenceId &&
-      doc?.referenceType === referenceType,
-  );
+  const movements = await listMovementsByReference(req, userId, referenceId, referenceType);
+  return (movements || []).length > 0;
 }
 
 /** Descuenta stock al registrar un consumo de equipo (receta → ingredientes; sin receta → artículo de almacén). */
