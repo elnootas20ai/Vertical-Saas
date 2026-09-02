@@ -218,6 +218,11 @@ export function writeTpvTabletBinding(
       boundAt: binding.boundAt || new Date().toISOString(),
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    try {
+      window.dispatchEvent(new CustomEvent('vertial:store-tablet-session', { detail: { active: true } }));
+    } catch {
+      /* ignore */
+    }
   } catch {
     // ignore
   }
@@ -226,6 +231,11 @@ export function writeTpvTabletBinding(
 export function clearTpvTabletBinding(): void {
   try {
     localStorage.removeItem(STORAGE_KEY);
+    try {
+      window.dispatchEvent(new CustomEvent('vertial:store-tablet-session', { detail: { active: false } }));
+    } catch {
+      /* ignore */
+    }
   } catch {
     // ignore
   }

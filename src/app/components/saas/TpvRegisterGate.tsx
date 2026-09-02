@@ -1892,7 +1892,7 @@ function ClosingExcelLikeSummary({
         </p>
         {!compact ? (
           <p className="text-[11px] text-stone-500 mt-0.5 leading-snug">
-            Canales, marcas (Vertial + Integraciones) y unidades del día
+            Canales y marcas (Vertial + Integraciones)
           </p>
         ) : null}
       </div>
@@ -1962,41 +1962,6 @@ function ClosingExcelLikeSummary({
           </div>
         </div>
       ) : null}
-
-      <div className={`grid grid-cols-3 gap-px bg-stone-100 dark:bg-stone-800 border-t border-stone-100 dark:border-stone-800`}>
-        {([
-          {
-            label: 'Pizzas',
-            value: amounts.pizza,
-            tpv: amounts.pizzaTpv,
-            apps: amounts.pizzaApps,
-          },
-          {
-            label: 'Burgers',
-            value: amounts.burger,
-            tpv: amounts.burgerTpv,
-            apps: amounts.burgerApps,
-          },
-          {
-            label: 'Tacos',
-            value: amounts.taco,
-            tpv: amounts.tacoTpv,
-            apps: amounts.tacoApps,
-          },
-        ]).map((u) => (
-          <div key={u.label} className={`bg-white dark:bg-stone-950 text-center ${compact ? 'px-1 py-1.5' : 'px-2 py-2'}`}>
-            <p className="text-[10px] font-semibold text-stone-500">{u.label}</p>
-            <p className={`font-black tabular-nums text-stone-900 dark:text-stone-50 ${compact ? 'text-base' : 'text-xl'}`}>
-              {u.value}
-            </p>
-            {u.tpv != null || u.apps != null ? (
-              <p className={`mt-0.5 text-stone-400 tabular-nums leading-snug ${compact ? 'text-[8px]' : 'text-[9px]'}`}>
-                Vertial {u.tpv ?? 0} · Caja 2 {u.apps ?? 0}
-              </p>
-            ) : null}
-          </div>
-        ))}
-      </div>
 
       <div className={`border-t border-stone-100 dark:border-stone-800 space-y-1 ${compact ? 'px-3 py-2' : 'px-3.5 py-2.5'}`}>
         <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400 mb-1">
@@ -3663,60 +3628,6 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 );
               })()}
 
-              {/* Unidades = Tienda (paso 1) + Glovo+Uber+Just+Flip (pasos 2–5) */}
-              <div className="shrink-0 rounded-2xl border border-stone-200 dark:border-stone-700 bg-stone-50/80 dark:bg-stone-900/40 px-3 py-2.5">
-                <div className="mb-2 flex items-start justify-between gap-2">
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
-                      Unidades del día · todo lo hecho
-                    </p>
-                    <div className="text-[10px] text-stone-500 mt-0.5 leading-snug space-y-0.5">
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                        <span className="font-semibold text-emerald-600 dark:text-emerald-400">Vertial</span>
-                        <DeliveryFoodUnitLabel unit="pizza" count={tpvClosingFood.pizza} size="xs" />
-                        <DeliveryFoodUnitLabel unit="burger" count={tpvClosingFood.burger} size="xs" />
-                        <DeliveryFoodUnitLabel unit="taco" count={tpvClosingFood.taco} size="xs" />
-                      </div>
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                        <span className="font-semibold text-blue-600 dark:text-blue-400">Integraciones</span>
-                        <DeliveryFoodUnitLabel unit="pizza" count={appsFoodTotals.pizza} size="xs" />
-                        <DeliveryFoodUnitLabel unit="burger" count={appsFoodTotals.burger} size="xs" />
-                        <DeliveryFoodUnitLabel unit="taco" count={appsFoodTotals.taco} size="xs" />
-                      </div>
-                    </div>
-                  </div>
-                  <p className="shrink-0 text-[11px] font-black tabular-nums text-stone-700 dark:text-stone-200">
-                    {closingFood.pizza + closingFood.burger + closingFood.taco} uds
-                  </p>
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  {([
-                    { key: 'pizza' as const, label: 'Pizzas' },
-                    { key: 'burger' as const, label: 'Burgers' },
-                    { key: 'taco' as const, label: 'Tacos' },
-                  ]).map((u) => (
-                    <div
-                      key={u.key}
-                      className="rounded-xl bg-white dark:bg-stone-950 border border-stone-200 dark:border-stone-700 px-2 py-2 text-center"
-                    >
-                      <p className="text-[10px] font-semibold text-stone-500">{u.label}</p>
-                      <p className="mt-0.5 inline-flex items-center justify-center gap-1.5 text-2xl font-black tabular-nums text-stone-900 dark:text-stone-50 leading-none">
-                        {closingFood[u.key]}
-                        <DeliveryFoodUnitIcon unit={u.key} className="w-5 h-5" />
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <input
-                type="text"
-                className="shrink-0 w-full min-h-10 px-3 py-2 border border-stone-200 dark:border-stone-700 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 text-sm"
-                placeholder="Notas (opcional)"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-              />
-
               <button
                 type="button"
                 onClick={() => setShowExtraDetail((v) => !v)}
@@ -3850,6 +3761,56 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 </div>
               ) : null}
 
+              {/* Resumen € → unidades → fondo → notas (abajo del todo) */}
+              <div className="shrink-0">
+                <ClosingExcelLikeSummary amounts={excelDaySummary} brandLabels={brandLabels} />
+              </div>
+
+              <div className="shrink-0 rounded-2xl border border-stone-200 dark:border-stone-700 bg-stone-50/80 dark:bg-stone-900/40 px-3 py-2.5">
+                <div className="mb-2 flex items-start justify-between gap-2">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
+                      Unidades del día · todo lo hecho
+                    </p>
+                    <div className="text-[10px] text-stone-500 mt-0.5 leading-snug space-y-0.5">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                        <span className="font-semibold text-emerald-600 dark:text-emerald-400">Vertial</span>
+                        <DeliveryFoodUnitLabel unit="pizza" count={tpvClosingFood.pizza} size="xs" />
+                        <DeliveryFoodUnitLabel unit="burger" count={tpvClosingFood.burger} size="xs" />
+                        <DeliveryFoodUnitLabel unit="taco" count={tpvClosingFood.taco} size="xs" />
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                        <span className="font-semibold text-blue-600 dark:text-blue-400">Integraciones</span>
+                        <DeliveryFoodUnitLabel unit="pizza" count={appsFoodTotals.pizza} size="xs" />
+                        <DeliveryFoodUnitLabel unit="burger" count={appsFoodTotals.burger} size="xs" />
+                        <DeliveryFoodUnitLabel unit="taco" count={appsFoodTotals.taco} size="xs" />
+                      </div>
+                    </div>
+                  </div>
+                  <p className="shrink-0 text-[11px] font-black tabular-nums text-stone-700 dark:text-stone-200">
+                    {closingFood.pizza + closingFood.burger + closingFood.taco} uds
+                  </p>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    { key: 'pizza' as const, label: 'Pizzas' },
+                    { key: 'burger' as const, label: 'Burgers' },
+                    { key: 'taco' as const, label: 'Tacos' },
+                  ]).map((u) => (
+                    <div
+                      key={u.key}
+                      className="rounded-xl bg-white dark:bg-stone-950 border border-stone-200 dark:border-stone-700 px-2 py-2 text-center"
+                    >
+                      <p className="text-[10px] font-semibold text-stone-500">{u.label}</p>
+                      <p className="mt-0.5 inline-flex items-center justify-center gap-1.5 text-2xl font-black tabular-nums text-stone-900 dark:text-stone-50 leading-none">
+                        {closingFood[u.key]}
+                        <DeliveryFoodUnitIcon unit={u.key} className="w-5 h-5" />
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               <div className={`shrink-0 rounded-2xl border px-3 py-3 space-y-2 ${nextDayFondoCardClass}`}>
                 <div>
                   <span className={`text-[11px] font-bold flex items-center gap-1.5 ${
@@ -3921,10 +3882,13 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 ) : null}
               </div>
 
-              {/* Resumen de todo (mismo que Excel) — debajo del fondo, antes de confirmar */}
-              <div className="shrink-0">
-                <ClosingExcelLikeSummary amounts={excelDaySummary} brandLabels={brandLabels} />
-              </div>
+              <input
+                type="text"
+                className="shrink-0 w-full min-h-10 px-3 py-2 border border-stone-200 dark:border-stone-700 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 text-sm"
+                placeholder="Notas (opcional)"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+              />
             </div>
           ) : null}
         </div>

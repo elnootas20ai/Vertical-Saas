@@ -1,7 +1,7 @@
 /**
- * Permisos nativos al entrar (iOS/Android):
- * 1) Notificaciones (push) — una vez por cuenta
- * 2) Ubicación — para fichaje (diálogo del sistema)
+ * Permisos nativos al entrar (iOS/Android), en este orden y una sola vez:
+ * 1) Notificaciones (push)
+ * 2) Ubicación (fichaje) — solo cuando el flujo de push ha terminado
  *
  * En web/PWA no fuerza ubicación aquí (sale al fichar).
  */
@@ -16,9 +16,12 @@ import {
 } from '../../lib/pushPermissionConsent';
 import { ensureLocationPermissionPrompt } from '../../hooks/useGeolocation';
 import { canUseNativePushRegistration } from '../../lib/nativePushRuntime';
+import { shouldRegisterNativePushOnThisDevice } from '../../lib/nativePushDevice';
 
-const ASK_DELAY_MS = 900;
-const LOCATION_ASK_DELAY_MS = 2800;
+/** Pequeña pausa para que la UI de login asiente antes del diálogo del SO. */
+const ASK_DELAY_MS = 600;
+/** Pausa entre cerrar el diálogo de push y pedir ubicación. */
+const AFTER_PUSH_BEFORE_LOCATION_MS = 700;
 
 async function systemReceiveStatus(): Promise<'granted' | 'denied' | 'prompt' | 'unsupported'> {
   if (isVertialNativeApp()) {
@@ -91,6 +94,12 @@ function markAskedLocation(userId: string): void {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
 /**
  * Pide el diálogo del SO si aún no está concedido.
  * En Android 13+ es POST_NOTIFICATIONS; en &lt;13 Capacitor lo da por granted sin diálogo.
@@ -124,102 +133,100 @@ async function ensureNativePushPermission(
     return 'error';
   }
 
-  // status === denied: el SO ya bloqueó; no hay diálogo que mostrar
+  // status === denied: el SO ya bloqueó; no hay diálogo que mostrar → activar desde Ajustes
   if (readPushConsent(userId).decision !== 'declined') {
     writePushConsent(userId, 'declined', { force: true });
   }
   return 'denied';
 }
 
+async function askLocationOnce(userId: string): Promise<void> {
+  if (!isVertialNativeApp()) return;
+  if (alreadyAskedLocation(userId)) return;
+  markAskedLocation(userId);
+  await ensureLocationPermissionPrompt();
+}
+
 export function PushPermissionGate({ userId }: { userId: string | null }) {
-  const finishedForUserRef = useRef<string | null>(null);
+  const finishedPushForUserRef = useRef<string | null>(null);
   const locationRanRef = useRef<string | null>(null);
 
+  // Un solo flujo: notificaciones primero → luego ubicación (nunca en paralelo).
   useEffect(() => {
     if (!userId) return;
-    if (finishedForUserRef.current === userId) return;
+    if (finishedPushForUserRef.current === userId && locationRanRef.current === userId) return;
 
     let cancelled = false;
-    let finished = false;
 
     const timer = window.setTimeout(() => {
       void (async () => {
         if (cancelled) return;
 
-        // Hydrate no debe impedir el diálogo si el SO aún está en "prompt".
-        await hydratePushConsentFromAccount(userId);
-        if (cancelled) return;
+        const wantPush = isVertialNativeApp() && shouldRegisterNativePushOnThisDevice();
 
-        const outcome = await ensureNativePushPermission(userId);
-        if (cancelled) return;
+        // 1) Push solo en teléfono (CEO). Tablets de tienda: saltar.
+        if (wantPush && finishedPushForUserRef.current !== userId) {
+          await hydratePushConsentFromAccount(userId);
+          if (cancelled) return;
 
-        // Solo marcar "ya hecho" si hubo resultado real (no error de plugin).
-        if (outcome !== 'error') {
-          finished = true;
-          finishedForUserRef.current = userId;
+          const outcome = await ensureNativePushPermission(userId);
+          if (cancelled) return;
+
+          if (outcome !== 'error') {
+            finishedPushForUserRef.current = userId;
+          }
+        } else if (!wantPush) {
+          finishedPushForUserRef.current = userId;
         }
+
+        if (cancelled) return;
+
+        // 2) Ubicación solo después del push (y una sola vez) — sí en tablets
+        if (locationRanRef.current === userId) return;
+        if (alreadyAskedLocation(userId)) {
+          locationRanRef.current = userId;
+          return;
+        }
+
+        await sleep(AFTER_PUSH_BEFORE_LOCATION_MS);
+        if (cancelled) return;
+
+        locationRanRef.current = userId;
+        await askLocationOnce(userId);
       })();
     }, ASK_DELAY_MS);
 
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
-      // Si el efecto se desmontó antes de terminar, permitir reintento.
-      if (!finished && finishedForUserRef.current === userId) {
-        finishedForUserRef.current = null;
-      }
     };
   }, [userId]);
 
-  // Al volver a primer plano: si aún no hay permiso, volver a intentar (Android).
+  // Al volver a primer plano: si aún no hay permiso de push (solo teléfono), reintentar.
   useEffect(() => {
     if (!userId || !isVertialNativeApp()) return;
+    if (!shouldRegisterNativePushOnThisDevice()) return;
 
     const onVisible = () => {
       if (document.visibilityState !== 'visible') return;
-      if (finishedForUserRef.current === userId) return;
+      if (finishedPushForUserRef.current === userId) return;
       void (async () => {
         const status = await systemReceiveStatus();
         if (status === 'granted') {
           writePushConsent(userId, 'accepted');
           triggerPushRegister();
-          finishedForUserRef.current = userId;
+          finishedPushForUserRef.current = userId;
           return;
         }
         if (status === 'prompt') {
           const outcome = await ensureNativePushPermission(userId);
-          if (outcome !== 'error') finishedForUserRef.current = userId;
+          if (outcome !== 'error') finishedPushForUserRef.current = userId;
         }
       })();
     };
 
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [userId]);
-
-  // Ubicación (fichaje): una vez por cuenta en app nativa, tras el push
-  useEffect(() => {
-    if (!userId || !isVertialNativeApp()) return;
-    if (locationRanRef.current === userId) return;
-    if (alreadyAskedLocation(userId)) {
-      locationRanRef.current = userId;
-      return;
-    }
-
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        if (cancelled) return;
-        locationRanRef.current = userId;
-        markAskedLocation(userId);
-        await ensureLocationPermissionPrompt();
-      })();
-    }, LOCATION_ASK_DELAY_MS);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
   }, [userId]);
 
   return null;

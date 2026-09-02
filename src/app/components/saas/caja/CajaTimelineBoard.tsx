@@ -33,6 +33,12 @@ import {
   nowMinutesOfDay,
   type CajaTimelineBarKind,
 } from '../../../lib/cajaTimelineLayout';
+import {
+  buildMergedStoreDigestBlocks,
+  fmtDayEs,
+  money as digestMoney,
+  unitsLine as digestUnitsLine,
+} from '../../../../../shared/caja/ceoDailyDigestFormat.js';
 
 const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
 
@@ -193,6 +199,18 @@ export function CajaTimelineBoard({
     if (onlyOpenNow) list = list.filter((s) => s.status === 'open');
     return list;
   }, [sessions, selectedDate, filterPdv, onlyOpenNow]);
+
+  /** Cierres del día (respeta filtro de tienda; ignora «solo abiertas»). */
+  const dayDigestBlocks = useMemo(() => {
+    let list = sessions.filter((s) => sessionBelongsToCajaDay(s, selectedDate) && s.status === 'closed');
+    if (filterPdv) list = list.filter((s) => s.pointOfSaleId === filterPdv);
+    return buildMergedStoreDigestBlocks(list);
+  }, [sessions, selectedDate, filterPdv]);
+
+  const dayDigestTotal = useMemo(
+    () => digestMoney(dayDigestBlocks.reduce((a, b) => a + Number(b.cobrado || 0), 0)),
+    [dayDigestBlocks],
+  );
 
   const tracks = useMemo(
     () => buildCajaTimelineTracks(daySessions, selectedDate, now),
@@ -738,6 +756,141 @@ export function CajaTimelineBoard({
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+        </section>
+
+        {/* Resumen del día (mismo contenido que el digest CEO) — encima de las cajas */}
+        <section className="mb-4 rounded-2xl border border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-900 overflow-hidden">
+          <div className="px-4 py-3 border-b border-stone-100 dark:border-stone-800 flex flex-wrap items-baseline justify-between gap-2">
+            <div className="min-w-0">
+              <h2 className="text-[13px] font-semibold m-0 text-stone-900 dark:text-stone-100">
+                Resumen del día · {fmtDayEs(selectedDate)}
+              </h2>
+              <p className="m-0 mt-0.5 text-[11px] text-stone-500 dark:text-stone-400">
+                Cierres del día{filterPdv ? ` · ${locSingular.toLowerCase()} filtrada` : ''}
+              </p>
+            </div>
+            {dayDigestBlocks.length > 0 ? (
+              <p className="text-base font-black tabular-nums text-stone-900 dark:text-stone-50 shrink-0">
+                {formatMoneyEs(dayDigestTotal)}
+              </p>
+            ) : null}
+          </div>
+
+          {dayDigestBlocks.length === 0 ? (
+            <p className="px-4 py-6 text-center text-sm text-stone-400 m-0">
+              Sin cierres de caja en este día
+            </p>
+          ) : (
+            <div className="divide-y divide-stone-100 dark:divide-stone-800">
+              {dayDigestBlocks.map((b) => {
+                const units = digestUnitsLine(b);
+                const hasDiff = Math.abs(Number(b.difference) || 0) >= 0.01;
+                const diffSign = Number(b.difference) > 0 ? '+' : '';
+                return (
+                  <div key={b.name} className="px-4 py-3.5">
+                    <p className="text-[12px] font-bold uppercase tracking-wide text-stone-800 dark:text-stone-100 m-0">
+                      {b.name}
+                    </p>
+                    {(b.brands || []).length > 0 ? (
+                      <ul className="mt-1.5 space-y-0.5 m-0 p-0 list-none">
+                        {(b.brands || []).map((br) => (
+                          <li
+                            key={`${b.name}-${br.name}`}
+                            className="flex justify-between gap-3 text-[12.5px] tabular-nums text-stone-700 dark:text-stone-200"
+                          >
+                            <span className="truncate">{br.name}</span>
+                            <span className="font-semibold shrink-0">{formatMoneyEs(br.euros)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {units ? (
+                      <p className="m-0 mt-1.5 text-[11px] text-stone-500 dark:text-stone-400">{units}</p>
+                    ) : null}
+                    <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[12px] tabular-nums sm:grid-cols-3">
+                      <p className="m-0 text-stone-600 dark:text-stone-300">
+                        Cobrado{' '}
+                        <span className="font-bold text-stone-900 dark:text-stone-50">
+                          {formatMoneyEs(b.cobrado)}
+                        </span>
+                      </p>
+                      <p className="m-0 text-stone-600 dark:text-stone-300">
+                        Tarjeta{' '}
+                        <span className="font-semibold text-stone-900 dark:text-stone-100">
+                          {formatMoneyEs(b.tarjeta)}
+                        </span>
+                      </p>
+                      <p className="m-0 text-stone-600 dark:text-stone-300">
+                        Efectivo{' '}
+                        <span className="font-semibold text-stone-900 dark:text-stone-100">
+                          {formatMoneyEs(b.efectivo)}
+                        </span>
+                      </p>
+                      <p className="m-0 text-stone-600 dark:text-stone-300">
+                        En local{' '}
+                        <span className="font-semibold text-stone-900 dark:text-stone-100">
+                          {formatMoneyEs(b.enLocal)}
+                        </span>
+                      </p>
+                      {b.retirado > 0 ? (
+                        <p className="m-0 text-stone-600 dark:text-stone-300">
+                          Retirado{' '}
+                          <span className="font-semibold text-rose-700 dark:text-rose-300">
+                            {formatMoneyEs(b.retirado)}
+                          </span>
+                        </p>
+                      ) : null}
+                      {b.cashIn > 0 || b.cashOut > 0 ? (
+                        <p className="m-0 text-stone-600 dark:text-stone-300 col-span-2 sm:col-span-1">
+                          {b.cashIn > 0 ? `Entradas ${formatMoneyEs(b.cashIn)}` : null}
+                          {b.cashIn > 0 && b.cashOut > 0 ? ' · ' : null}
+                          {b.cashOut > 0 ? `Salidas ${formatMoneyEs(b.cashOut)}` : null}
+                        </p>
+                      ) : null}
+                    </div>
+                    <p
+                      className={`m-0 mt-2 text-[11px] font-semibold ${
+                        hasDiff
+                          ? 'text-amber-700 dark:text-amber-300'
+                          : 'text-emerald-700 dark:text-emerald-400'
+                      }`}
+                    >
+                      {hasDiff
+                        ? `Descuadre ${diffSign}${formatMoneyEs(b.difference)}`
+                        : 'Cierre OK · sin descuadre'}
+                    </p>
+                    {b.notes ? (
+                      <p className="m-0 mt-1.5 text-[11px] text-stone-500 dark:text-stone-400 leading-snug">
+                        Notas · {b.notes}
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              })}
+
+              {dayDigestBlocks.length > 1 ? (
+                <div className="px-4 py-3 bg-stone-50/80 dark:bg-stone-800/40">
+                  <p className="m-0 text-[10px] font-bold uppercase tracking-wide text-stone-400">
+                    Total empresa
+                  </p>
+                  <p className="m-0 mt-1 text-[13px] font-black tabular-nums text-stone-900 dark:text-stone-50">
+                    Facturado {formatMoneyEs(dayDigestTotal)}
+                  </p>
+                  <ul className="mt-1.5 space-y-0.5 m-0 p-0 list-none">
+                    {dayDigestBlocks.map((b) => (
+                      <li
+                        key={`enlocal-${b.name}`}
+                        className="flex justify-between gap-3 text-[12px] tabular-nums text-stone-600 dark:text-stone-300"
+                      >
+                        <span className="truncate">En local · {b.name}</span>
+                        <span className="font-semibold shrink-0">{formatMoneyEs(b.enLocal)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </div>
           )}
         </section>

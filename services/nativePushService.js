@@ -454,6 +454,7 @@ async function sendFcmLegacyToTokens(req, userId, tokens, payload, serverKey) {
 
 /**
  * Envía push nativo para que salga con el móvil bloqueado (iOS APNs + Android FCM).
+ * Destino = todos los tokens de esa cuenta (CEO en el dispositivo donde esté logueado).
  */
 export async function sendNativePushToUser(req, userId, payload) {
   const [iosTokens, androidTokens] = await Promise.all([

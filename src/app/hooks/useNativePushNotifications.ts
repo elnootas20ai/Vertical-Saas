@@ -6,6 +6,9 @@ import { ensureFreshAccessToken, loadStoredTokens } from '../lib/authApi';
 import { isVertialNativeApp } from '../lib/vertialPrint/isNativeApp';
 import { readPushConsent, writePushConsent } from '../lib/pushPermissionConsent';
 import { canUseNativePushRegistration } from '../lib/nativePushRuntime';
+import {
+  shouldRegisterNativePushOnThisDevice,
+} from '../lib/nativePushDevice';
 import { queuePushDeepLink } from '../lib/pushDeepLink';
 
 /** Siempre leer el JWT actual: el prop `token` de AppContext se memoiza y caduca ~15 min. */
@@ -95,6 +98,16 @@ export function useNativePushNotifications({ userId, token }: UseNativePushNotif
     if (!isVertialNativeApp() || !userId) return;
     if (platform !== 'ios' && platform !== 'android') return;
     if (platform === 'android' && !canUseNativePushRegistration()) return;
+    // Sesión tienda (código PDV): este aparato no recibe push de la cuenta CEO.
+    if (!shouldRegisterNativePushOnThisDevice()) {
+      const deviceToken = deviceTokenRef.current;
+      const auth = await resolveAuthForPush(lastAuthTokenRef.current || token);
+      if (deviceToken && auth) {
+        unregisterNativeToken(apiBase, auth, deviceToken, platform).catch(() => {});
+        deviceTokenRef.current = null;
+      }
+      return;
+    }
 
     const auth = await resolveAuthForPush(lastAuthTokenRef.current || token);
     if (!auth) return;
@@ -161,6 +174,7 @@ export function useNativePushNotifications({ userId, token }: UseNativePushNotif
     if (!isVertialNativeApp() || !userId) return;
     if (platform !== 'ios' && platform !== 'android') return;
     if (platform === 'android' && !canUseNativePushRegistration()) return;
+    if (!shouldRegisterNativePushOnThisDevice()) return;
 
     let cancelled = false;
 
@@ -223,6 +237,17 @@ export function useNativePushNotifications({ userId, token }: UseNativePushNotif
     };
     window.addEventListener('vertial:push-register-now', onRegisterNow);
     document.addEventListener('visibilitychange', onVisible);
+    const onStoreTablet = (ev: Event) => {
+      const active = Boolean((ev as CustomEvent<{ active?: boolean }>).detail?.active);
+      if (active) {
+        // Entró en modo tienda: quitar push de este aparato de la cuenta CEO.
+        void register();
+      } else {
+        // Salió de modo tienda: si sigue el CEO, volver a registrar.
+        void register();
+      }
+    };
+    window.addEventListener('vertial:store-tablet-session', onStoreTablet);
 
     return () => {
       cancelled = true;
@@ -230,6 +255,7 @@ export function useNativePushNotifications({ userId, token }: UseNativePushNotif
       cleanupListeners.current = null;
       window.removeEventListener('vertial:push-register-now', onRegisterNow);
       document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('vertial:store-tablet-session', onStoreTablet);
     };
   }, [userId, token, apiBase, platform, register]);
 

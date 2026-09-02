@@ -39,13 +39,55 @@ test('parseDigestTimeToMinutes', () => {
   assert.equal(parseDigestTimeToMinutes('09:00'), 9 * 60);
 });
 
-test('push corto: platos + total + OK/descuadre por tienda', () => {
+test('push: facturación + marcas + salidas + OK/descuadre', () => {
   const body = formatCeoDailyPushBody([
-    { name: 'Tiana', pizza: 48, burger: 6, taco: 9, cobrado: 980.94, difference: 0 },
-    { name: 'Badalona', pizza: 16, burger: 2, taco: 1, cobrado: 243.62, difference: 12.5 },
+    {
+      name: 'Tiana',
+      pizza: 48,
+      burger: 6,
+      taco: 9,
+      cobrado: 980.94,
+      difference: 0,
+      cashOut: 160,
+      brands: [
+        { name: 'Modomio', euros: 700 },
+        { name: 'Black Burger', euros: 280.94 },
+      ],
+    },
+    {
+      name: 'Badalona',
+      pizza: 16,
+      burger: 2,
+      taco: 1,
+      cobrado: 243.62,
+      difference: 12.5,
+      cashOut: 0,
+      brands: [{ name: 'Modomio', euros: 243.62 }],
+    },
   ]);
   assert.match(body, /Tiana 48 pizzas · 6 burgers · 9 tacos · 980,94 € · OK/);
+  assert.match(body, /Modomio 700,00 € · Black Burger 280,94 €/);
+  assert.match(body, /Salidas 160,00 €/);
   assert.match(body, /Badalona 16 pizzas · 2 burgers · 1 taco · 243,62 € · Descuadre \+12,50 €/);
+  assert.match(body, /Modomio 243,62 €/);
+  assert.doesNotMatch(body, /Badalona[\s\S]*Salidas/);
+});
+
+test('push incluye notas de cierre si hay', () => {
+  const body = formatCeoDailyPushBody([
+    {
+      name: 'Badalona',
+      pizza: 2,
+      burger: 0,
+      taco: 0,
+      cobrado: 50,
+      difference: 0,
+      cashOut: 0,
+      brands: [],
+      notes: 'Falta cambio monedas',
+    },
+  ]);
+  assert.match(body, /Notas: Falta cambio monedas/);
 });
 
 test('campana: cierre OK o descuadre en el bloque', () => {
