@@ -249,6 +249,8 @@ export function BottomNav() {
 
   const isSaasRoute = location.pathname.startsWith('/saas');
   if (!isSaasRoute) return null;
+  // Panel super-admin: barra fija Guardar/Aprobar; la bottom nav tapaba los botones en móvil.
+  if (location.pathname.startsWith('/saas/admin')) return null;
 
   const workerUnread = notifications.filter((n) => !n.read).length;
   const badgeCount = isWorker ? workerUnread : alertCenterUnresolved;

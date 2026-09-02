@@ -52,8 +52,15 @@ export function WorkerLogin() {
   const [codeValue, setCodeValue] = useState('');
   const [codeInfo, setCodeInfo] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [resendCooldownSec, setResendCooldownSec] = useState(0);
   const [peekPassword, setPeekPassword] = useState(false);
   const [googleTimedOut, setGoogleTimedOut] = useState(false);
+
+  useEffect(() => {
+    if (resendCooldownSec <= 0) return;
+    const t = window.setTimeout(() => setResendCooldownSec((s) => Math.max(0, s - 1)), 1000);
+    return () => window.clearTimeout(t);
+  }, [resendCooldownSec]);
 
   // Si vienes de salir del TPV tablet → pantalla de código (no quedarte aquí sin poder reactivar).
   useEffect(() => {
@@ -128,7 +135,8 @@ export function WorkerLogin() {
     if (result.code === 'REQUIRES_LOGIN_CODE') {
       setLoginMode('emailCode');
       setCodeValue('');
-      setCodeInfo(result.error || 'Te hemos enviado un código por email. Caduca en 10 minutos.');
+      setResendCooldownSec(60);
+      setCodeInfo(result.error || 'Te hemos enviado un código por email. Caduca en 10 minutos. Revisa también spam.');
       setErrors({});
       return;
     }
@@ -156,6 +164,10 @@ export function WorkerLogin() {
       setErrors({ email: t('auth.errors.emailRequired') });
       return;
     }
+    if (resendCooldownSec > 0) {
+      setCodeInfo(`Espera ${resendCooldownSec}s antes de reenviar (mira también spam).`);
+      return;
+    }
     setIsSubmitting(true);
     setCodeInfo(null);
     setErrors({});
@@ -163,9 +175,14 @@ export function WorkerLogin() {
     setIsSubmitting(false);
     if (result.success) {
       setLoginMode('emailCode');
-      setCodeInfo(result.info || 'Revisa tu correo. El código caduca en 10 minutos.');
+      setResendCooldownSec(60);
+      setCodeInfo(result.info || 'Código enviado. Revisa tu correo y spam. Caduca en 10 minutos.');
     } else {
-      setErrors({ email: result.error || 'No se pudo enviar el código' });
+      const msg = result.error || 'No se pudo enviar el código';
+      if (/recientemente|espera|cooldown/i.test(msg)) {
+        setResendCooldownSec((s) => (s > 0 ? s : 60));
+      }
+      setErrors({ email: msg });
     }
   };
 
@@ -370,10 +387,14 @@ export function WorkerLogin() {
                   variant="outline"
                   fullWidth
                   size="md"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || resendCooldownSec > 0}
                   onClick={() => void handleRequestCode()}
                 >
-                  No me ha llegado — reenviar
+                  {isSubmitting
+                    ? 'Enviando…'
+                    : resendCooldownSec > 0
+                      ? `Reenviar en ${resendCooldownSec}s`
+                      : 'No me ha llegado — reenviar'}
                 </ACCESO__Button>
                 <button
                   type="button"

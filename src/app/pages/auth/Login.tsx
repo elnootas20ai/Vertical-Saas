@@ -61,8 +61,15 @@ export function Login() {
   const [tpvStoreCode, setTpvStoreCode] = useState('');
   const [codeInfo, setCodeInfo] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [resendCooldownSec, setResendCooldownSec] = useState(0);
   const [peekPassword, setPeekPassword] = useState(false);
   const [googleTimedOut, setGoogleTimedOut] = useState(false);
+
+  useEffect(() => {
+    if (resendCooldownSec <= 0) return;
+    const t = window.setTimeout(() => setResendCooldownSec((s) => Math.max(0, s - 1)), 1000);
+    return () => window.clearTimeout(t);
+  }, [resendCooldownSec]);
 
   useEffect(() => {
     const state = location.state as { mode?: string; terminalCode?: string } | null;
@@ -176,7 +183,11 @@ export function Login() {
     } else if (result.code === 'REQUIRES_LOGIN_CODE') {
       setLoginMode('emailCode');
       setCodeValue('');
-      setCodeInfo(result.error || 'Te hemos enviado un código por email. Caduca en 10 minutos.');
+      setResendCooldownSec(60);
+      setCodeInfo(
+        result.error
+          || 'Te hemos enviado un código. Revisa el correo de seguridad / alertas Vertial (no siempre es el mismo de login) y spam. Caduca en 10 minutos.',
+      );
       setErrors({});
     } else if (result.code === 'ACCOUNT_LOCKED') {
       setLockInfo({ lockUntil: result.lockUntil });
@@ -199,6 +210,10 @@ export function Login() {
       setErrors({ email: t('auth.errors.emailRequired') });
       return;
     }
+    if (resendCooldownSec > 0) {
+      setCodeInfo(`Espera ${resendCooldownSec}s antes de reenviar (mira también spam).`);
+      return;
+    }
     setIsSubmitting(true);
     setCodeInfo(null);
     setErrors({});
@@ -206,9 +221,17 @@ export function Login() {
     setIsSubmitting(false);
     if (result.success) {
       setLoginMode('emailCode');
-      setCodeInfo(result.info || 'Revisa tu correo. El código caduca en 10 minutos.');
+      setResendCooldownSec(60);
+      setCodeInfo(
+        result.info
+          || 'Código reenviado. Revisa el correo de seguridad / alertas Vertial y spam. Llega en unos segundos.',
+      );
     } else {
-      setErrors({ email: result.error || 'No se pudo enviar el código' });
+      const msg = result.error || 'No se pudo enviar el código';
+      if (/recientemente|espera|cooldown/i.test(msg)) {
+        setResendCooldownSec((s) => (s > 0 ? s : 60));
+      }
+      setErrors({ email: msg });
     }
   };
 
@@ -396,7 +419,8 @@ export function Login() {
           {loginMode === 'emailCode' ? (
             <form onSubmit={handleVerifyCode} className="space-y-4">
               <p className="text-sm text-gray-600 dark:text-gray-400 -mt-1 leading-snug">
-                Te enviamos un <strong className="font-semibold text-gray-800 dark:text-gray-200">código de 6 dígitos</strong> al correo. Escríbelo aquí para entrar.
+                Te enviamos un <strong className="font-semibold text-gray-800 dark:text-gray-200">código de 6 dígitos</strong>.
+                {' '}En cuentas admin suele ir al <strong className="font-semibold">correo de alertas/seguridad</strong>, no siempre al email de login. Revisa también spam.
               </p>
               <ACCESO__Input
                 label={t('auth.email')}
@@ -439,10 +463,14 @@ export function Login() {
                   variant="outline"
                   fullWidth
                   size="md"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || resendCooldownSec > 0}
                   onClick={() => void handleRequestCode()}
                 >
-                  No me ha llegado — reenviar
+                  {isSubmitting
+                    ? 'Enviando…'
+                    : resendCooldownSec > 0
+                      ? `Reenviar en ${resendCooldownSec}s`
+                      : 'No me ha llegado — reenviar'}
                 </ACCESO__Button>
                 <button
                   type="button"

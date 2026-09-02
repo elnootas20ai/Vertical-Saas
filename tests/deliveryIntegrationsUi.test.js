@@ -9,6 +9,8 @@ import {
   DEFAULT_DELIVERY_INTEGRATIONS,
   sumAggregatorCash,
   sumAggregatorCard,
+  sumClosingBrandTotals,
+  resolveClosingChannelTotalSales,
 } from '../src/app/lib/deliveryIntegrationsUi.ts';
 
 describe('deliveryIntegrationsUi', () => {
@@ -177,5 +179,31 @@ describe('deliveryIntegrationsUi', () => {
     const apps =
       sumAggregatorCash(manual) + sumAggregatorCard(manual);
     expect(apps).toBe(175.5);
+  });
+
+  it('no reutiliza total legacy cuando marcas vacías (Uber 2 € fantasma)', () => {
+    const brandIds = ['brand-modomio'];
+    const lines = {
+      total: '2,00',
+      totalByBrand: { 'brand-modomio': '' },
+    };
+    const resolved = resolveClosingChannelTotalSales(lines, 0, brandIds);
+    expect(resolved.totalSales).toBe(0);
+    expect(resolved.fromBrands).toBe(false);
+  });
+
+  it('suma marcas cuando están rellenas', () => {
+    const brandIds = ['brand-modomio', 'brand-bb'];
+    const lines = {
+      total: '99,00',
+      totalByBrand: { 'brand-modomio': '94,50', 'brand-bb': '' },
+    };
+    expect(sumClosingBrandTotals(lines, brandIds)).toBe(94.5);
+    expect(resolveClosingChannelTotalSales(lines, 0, brandIds).totalSales).toBe(94.5);
+  });
+
+  it('sin marcas usa total legacy o sistema', () => {
+    expect(resolveClosingChannelTotalSales({ total: '26,50' }, 0, []).totalSales).toBe(26.5);
+    expect(resolveClosingChannelTotalSales({ total: '' }, 12, []).totalSales).toBe(12);
   });
 });

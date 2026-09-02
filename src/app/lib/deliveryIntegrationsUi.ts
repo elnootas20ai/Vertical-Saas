@@ -110,6 +110,52 @@ export interface AggregatorCashRow {
   manualOverride?: boolean;
 }
 
+/** Líneas de cierre por canal (total legacy + desglose por marca). */
+export type AggregatorClosingChannelLines = {
+  total: string;
+  totalByBrand?: Record<string, string>;
+};
+
+/** Suma totales por marca del borrador. -1 si ninguno rellenado. */
+export function sumClosingBrandTotals(
+  lines: AggregatorClosingChannelLines | undefined,
+  brandIds: string[],
+): number {
+  if (!lines || brandIds.length === 0) return -1;
+  const byBrand = lines.totalByBrand || {};
+  let sum = 0;
+  let any = false;
+  for (const id of brandIds) {
+    const p = parseAggregatorAmount(String(byBrand[id] ?? ''));
+    if (p != null) {
+      sum += p;
+      any = true;
+    }
+  }
+  return any ? Math.round(sum * 100) / 100 : -1;
+}
+
+/**
+ * Total Caja 2 de un canal al cerrar.
+ * Con marcas activas, no reutiliza `total` legacy si las marcas quedaron vacías
+ * (evita 2 € fantasma en Uber/Glovo tras borrar el input visible).
+ */
+export function resolveClosingChannelTotalSales(
+  lines: AggregatorClosingChannelLines,
+  systemTotal: number,
+  brandIds: string[],
+): { totalSales: number; fromBrands: boolean } {
+  const brandSum = sumClosingBrandTotals(lines, brandIds);
+  if (brandIds.length > 0) {
+    if (brandSum >= 0) return { totalSales: brandSum, fromBrands: true };
+    return { totalSales: 0, fromBrands: false };
+  }
+  if (brandSum >= 0) return { totalSales: brandSum, fromBrands: true };
+  const parsedTotal = parseAggregatorAmount(lines.total);
+  if (parsedTotal != null) return { totalSales: parsedTotal, fromBrands: false };
+  return { totalSales: Math.max(0, systemTotal), fromBrands: false };
+}
+
 export function parseAggregatorAmount(raw: string): number | null {
   const s = String(raw || '').replace(/\s/g, '').trim();
   if (!s) return null;

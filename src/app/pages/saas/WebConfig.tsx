@@ -8,6 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Globe, Save, Loader2, ExternalLink, Copy, CheckCircle,
   Store, AlertCircle, QrCode, Truck, ShoppingBag, ChevronRight, ImageIcon, Palette, Printer, RefreshCw,
+  Settings2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
@@ -32,6 +33,10 @@ import {
   regenerateMesaQrTokenRequest,
 } from '../../lib/mesaQr';
 import { Layout } from '../../components/saas/Layout';
+import {
+  normalizeWebCustomDomain,
+  WebDnsSettingsModal,
+} from '../../components/saas/WebDnsSettingsModal';
 import {
   VERTIAL_BTN_PRIMARY,
   VERTIAL_BTN_SECONDARY,
@@ -60,6 +65,7 @@ const COLOR_PRESETS = [
 
 const DEFAULT_CONFIG: Partial<WebConfigType> = {
   slug: '',
+  customDomain: '',
   enabled: false,
   storeName: '',
   storeDescription: '',
@@ -116,6 +122,7 @@ export function WebConfig() {
   const [mesaTables, setMesaTables] = useState<DiningTable[]>([]);
   const [mesaQrLoading, setMesaQrLoading] = useState(false);
   const [mesaQrBusyId, setMesaQrBusyId] = useState('');
+  const [dnsOpen, setDnsOpen] = useState(false);
   const logoInputRef = useRef<HTMLInputElement | null>(null);
 
   const businessId = currentBusiness?.business_id || '';
@@ -244,28 +251,31 @@ export function WebConfig() {
   };
 
   const handleSave = async () => {
-    if (!businessId) return;
+    if (!businessId) return false;
     if (!String(config.slug || '').trim()) {
       setError('Indica el enlace público (slug), ej. modomio');
-      return;
+      return false;
     }
     if ((config.salesPointIds || []).length === 0) {
       setError('Elige al menos una tienda para la web de pedir');
-      return;
+      return false;
     }
     setSaving(true);
     setError('');
     try {
       const res = await saveWebConfigRequest(businessId, {
         ...config,
+        customDomain: normalizeWebCustomDomain(String(config.customDomain || '')),
         salesPointIds: config.salesPointIds || [],
       });
       setConfig((prev) => ({ ...prev, ...res.config }));
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
+      return true;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error al guardar';
       setError(msg);
+      return false;
     } finally {
       setSaving(false);
     }
@@ -305,15 +315,30 @@ export function WebConfig() {
               La carta es la del SaaS.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => void handleSave()}
-            disabled={saving}
-            className={`${VERTIAL_BTN_PRIMARY} shrink-0`}
-          >
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : saved ? <CheckCircle className="h-4 w-4" /> : <Save className="h-4 w-4" />}
-            {saving ? 'Guardando…' : saved ? 'Guardado' : 'Guardar'}
-          </button>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setDnsOpen(true)}
+              className={`${VERTIAL_BTN_SECONDARY} shrink-0`}
+            >
+              <Settings2 className="h-4 w-4" />
+              DNS
+              {config.customDomain ? (
+                <span className="hidden max-w-[9rem] truncate font-mono text-[10px] text-stone-500 sm:inline">
+                  {config.customDomain}
+                </span>
+              ) : null}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSave()}
+              disabled={saving}
+              className={`${VERTIAL_BTN_PRIMARY} shrink-0`}
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : saved ? <CheckCircle className="h-4 w-4" /> : <Save className="h-4 w-4" />}
+              {saving ? 'Guardando…' : saved ? 'Guardado' : 'Guardar'}
+            </button>
+          </div>
         </div>
 
         {error ? (
@@ -923,6 +948,21 @@ export function WebConfig() {
           </div>
         ) : null}
       </div>
+
+      <WebDnsSettingsModal
+        open={dnsOpen}
+        onClose={() => setDnsOpen(false)}
+        domain={String(config.customDomain || '')}
+        onChangeDomain={(value) => updateConfig('customDomain', value)}
+        saving={saving}
+        onSave={async () => {
+          const ok = await handleSave();
+          if (ok) {
+            toast.success('Dominio guardado');
+            setDnsOpen(false);
+          }
+        }}
+      />
     </Layout>
   );
 }

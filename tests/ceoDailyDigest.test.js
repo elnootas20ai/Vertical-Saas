@@ -39,13 +39,55 @@ test('parseDigestTimeToMinutes', () => {
   assert.equal(parseDigestTimeToMinutes('09:00'), 9 * 60);
 });
 
-test('push corto: platos + total por tienda', () => {
+test('push corto: platos + total + OK/descuadre por tienda', () => {
   const body = formatCeoDailyPushBody([
-    { name: 'Tiana', pizza: 48, burger: 6, taco: 9, cobrado: 980.94 },
-    { name: 'Badalona', pizza: 16, burger: 2, taco: 1, cobrado: 243.62 },
+    { name: 'Tiana', pizza: 48, burger: 6, taco: 9, cobrado: 980.94, difference: 0 },
+    { name: 'Badalona', pizza: 16, burger: 2, taco: 1, cobrado: 243.62, difference: 12.5 },
   ]);
-  assert.match(body, /Tiana 48 pizzas · 6 burgers · 9 tacos · 980,94 €/);
-  assert.match(body, /Badalona 16 pizzas · 2 burgers · 1 taco · 243,62 €/);
+  assert.match(body, /Tiana 48 pizzas · 6 burgers · 9 tacos · 980,94 € · OK/);
+  assert.match(body, /Badalona 16 pizzas · 2 burgers · 1 taco · 243,62 € · Descuadre \+12,50 €/);
+});
+
+test('campana: cierre OK o descuadre en el bloque', () => {
+  const ok = formatCeoDailyCampanaBody(
+    [{
+      name: 'Tiana',
+      brands: [],
+      pizza: 1,
+      burger: 0,
+      taco: 0,
+      cobrado: 10,
+      tarjeta: 10,
+      efectivo: 0,
+      enLocal: 5,
+      cashIn: 0,
+      cashOut: 0,
+      retirado: 0,
+      difference: 0,
+    }],
+    '2026-09-02',
+  );
+  assert.match(ok, /Cierre OK · sin descuadre/);
+
+  const bad = formatCeoDailyCampanaBody(
+    [{
+      name: 'Tiana',
+      brands: [],
+      pizza: 1,
+      burger: 0,
+      taco: 0,
+      cobrado: 10,
+      tarjeta: 10,
+      efectivo: 0,
+      enLocal: 5,
+      cashIn: 0,
+      cashOut: 0,
+      retirado: 0,
+      difference: -3.2,
+    }],
+    '2026-09-02',
+  );
+  assert.match(bad, /Descuadre {2}-3,20 €/);
 });
 
 test('campana larga: en local por tienda, sin sumar locales', () => {

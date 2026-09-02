@@ -17,8 +17,8 @@ import {
 import { ensureLocationPermissionPrompt } from '../../hooks/useGeolocation';
 import { canUseNativePushRegistration } from '../../lib/nativePushRuntime';
 
-const ASK_DELAY_MS = 1600;
-const LOCATION_ASK_DELAY_MS = 3200;
+const ASK_DELAY_MS = 900;
+const LOCATION_ASK_DELAY_MS = 2800;
 
 async function systemReceiveStatus(): Promise<'granted' | 'denied' | 'prompt' | 'unsupported'> {
   if (isVertialNativeApp()) {
@@ -40,21 +40,25 @@ async function systemReceiveStatus(): Promise<'granted' | 'denied' | 'prompt' | 
   return 'prompt';
 }
 
-async function requestSystemPermission(): Promise<'granted' | 'denied'> {
+async function requestSystemPermission(): Promise<'granted' | 'denied' | 'error'> {
   if (isVertialNativeApp()) {
     if (Capacitor.getPlatform() === 'android' && !canUseNativePushRegistration()) {
-      return 'denied';
+      return 'error';
     }
     try {
       const req = await PushNotifications.requestPermissions();
       return req.receive === 'granted' ? 'granted' : 'denied';
     } catch {
-      return 'denied';
+      return 'error';
     }
   }
-  if (!('Notification' in window)) return 'denied';
-  const result = await Notification.requestPermission();
-  return result === 'granted' ? 'granted' : 'denied';
+  if (!('Notification' in window)) return 'error';
+  try {
+    const result = await Notification.requestPermission();
+    return result === 'granted' ? 'granted' : 'denied';
+  } catch {
+    return 'error';
+  }
 }
 
 function triggerPushRegister(): void {
@@ -87,66 +91,72 @@ function markAskedLocation(userId: string): void {
   }
 }
 
+/**
+ * Pide el diálogo del SO si aún no está concedido.
+ * En Android 13+ es POST_NOTIFICATIONS; en &lt;13 Capacitor lo da por granted sin diálogo.
+ */
+async function ensureNativePushPermission(
+  userId: string,
+): Promise<'granted' | 'denied' | 'skipped' | 'error'> {
+  const status = await systemReceiveStatus();
+  if (status === 'unsupported') return 'error';
+  if (status === 'granted') {
+    if (readPushConsent(userId).decision !== 'accepted') {
+      writePushConsent(userId, 'accepted');
+    }
+    triggerPushRegister();
+    return 'granted';
+  }
+
+  // Si el SO aún puede mostrar el diálogo (prompt), pedirlo aunque local diga declined
+  // (a veces se marcó declined sin haber mostrado el popup).
+  if (status === 'prompt') {
+    const result = await requestSystemPermission();
+    if (result === 'granted') {
+      writePushConsent(userId, 'accepted');
+      triggerPushRegister();
+      return 'granted';
+    }
+    if (result === 'denied') {
+      writePushConsent(userId, 'declined', { force: true });
+      return 'denied';
+    }
+    return 'error';
+  }
+
+  // status === denied: el SO ya bloqueó; no hay diálogo que mostrar
+  if (readPushConsent(userId).decision !== 'declined') {
+    writePushConsent(userId, 'declined', { force: true });
+  }
+  return 'denied';
+}
+
 export function PushPermissionGate({ userId }: { userId: string | null }) {
-  const ranForUserRef = useRef<string | null>(null);
+  const finishedForUserRef = useRef<string | null>(null);
   const locationRanRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!userId) return;
-    if (ranForUserRef.current === userId) return;
+    if (finishedForUserRef.current === userId) return;
 
     let cancelled = false;
+    let finished = false;
+
     const timer = window.setTimeout(() => {
       void (async () => {
         if (cancelled) return;
-        ranForUserRef.current = userId;
 
-        const accountDecision = await hydratePushConsentFromAccount(userId);
+        // Hydrate no debe impedir el diálogo si el SO aún está en "prompt".
+        await hydratePushConsentFromAccount(userId);
         if (cancelled) return;
 
-        const status = await systemReceiveStatus();
+        const outcome = await ensureNativePushPermission(userId);
         if (cancelled) return;
 
-        if (status === 'unsupported') return;
-
-        // Ya concedió el SO → marcar accepted forever + registrar token
-        if (status === 'granted') {
-          if (readPushConsent(userId).decision !== 'accepted') {
-            writePushConsent(userId, 'accepted');
-          }
-          triggerPushRegister();
-          return;
-        }
-
-        // Cuenta ya dijo sí (p. ej. reinstalación): volver a pedir al SO si hace falta
-        if (accountDecision === 'accepted') {
-          if (status === 'prompt') {
-            const result = await requestSystemPermission();
-            if (cancelled) return;
-            if (result === 'granted') {
-              writePushConsent(userId, 'accepted');
-              triggerPushRegister();
-            }
-            return;
-          }
-          return;
-        }
-
-        if (accountDecision === 'declined') {
-          return;
-        }
-
-        if (status === 'denied') {
-          writePushConsent(userId, 'declined');
-          return;
-        }
-
-        // Primera vez: diálogo nativo del sistema
-        if (status === 'prompt' && readPushConsent(userId).decision === 'unset') {
-          const result = await requestSystemPermission();
-          if (cancelled) return;
-          writePushConsent(userId, result === 'granted' ? 'accepted' : 'declined');
-          if (result === 'granted') triggerPushRegister();
+        // Solo marcar "ya hecho" si hubo resultado real (no error de plugin).
+        if (outcome !== 'error') {
+          finished = true;
+          finishedForUserRef.current = userId;
         }
       })();
     }, ASK_DELAY_MS);
@@ -154,7 +164,37 @@ export function PushPermissionGate({ userId }: { userId: string | null }) {
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
+      // Si el efecto se desmontó antes de terminar, permitir reintento.
+      if (!finished && finishedForUserRef.current === userId) {
+        finishedForUserRef.current = null;
+      }
     };
+  }, [userId]);
+
+  // Al volver a primer plano: si aún no hay permiso, volver a intentar (Android).
+  useEffect(() => {
+    if (!userId || !isVertialNativeApp()) return;
+
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (finishedForUserRef.current === userId) return;
+      void (async () => {
+        const status = await systemReceiveStatus();
+        if (status === 'granted') {
+          writePushConsent(userId, 'accepted');
+          triggerPushRegister();
+          finishedForUserRef.current = userId;
+          return;
+        }
+        if (status === 'prompt') {
+          const outcome = await ensureNativePushPermission(userId);
+          if (outcome !== 'error') finishedForUserRef.current = userId;
+        }
+      })();
+    };
+
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
   }, [userId]);
 
   // Ubicación (fichaje): una vez por cuenta en app nativa, tras el push

@@ -1,7 +1,6 @@
 /**
- * Resumen diario al CEO — push corto (platos + €) + campana larga (marcas, cobros, en local).
- * Aplica a todos los negocios con caja TPV (delivery / restaurant / events).
- * Si no hay cierres ese día: aviso corto «Sin cierres…».
+ * Resumen al CEO al cerrar caja (push corto + campana larga).
+ * Se dispara en cada cierre TPV — no a una hora fija.
  */
 import {
   BUSINESSES_DB,
@@ -193,21 +192,32 @@ function unitsLine(b) {
   return parts.join(' · ');
 }
 
-/** Push corto: platos + total por tienda */
-export function formatCeoDailyPushBody(blocks, { emptyMessage } = {}) {
+function closeStatusSuffix(b) {
+  const diff = money(b?.difference);
+  if (Math.abs(diff) >= 0.01) {
+    const sign = diff > 0 ? '+' : '';
+    return ` · Descuadre ${sign}${fmtEs(diff)} €`;
+  }
+  return ' · OK';
+}
+
+/** Push corto: platos + total + OK/descuadre por tienda */
+export function formatCeoDailyPushBody(blocks, { emptyMessage, includeCloseStatus = true } = {}) {
   if (!blocks?.length) {
     return emptyMessage || 'Sin cierres de caja hoy';
   }
   return blocks
     .map((b) => {
       const units = unitsLine(b);
-      if (units) return `${b.name} ${units} · ${fmtEs(b.cobrado)} €`;
-      return `${b.name} ${fmtEs(b.cobrado)} €`;
+      const base = units
+        ? `${b.name} ${units} · ${fmtEs(b.cobrado)} €`
+        : `${b.name} ${fmtEs(b.cobrado)} €`;
+      return includeCloseStatus ? `${base}${closeStatusSuffix(b)}` : base;
     })
     .join('\n');
 }
 
-/** Campana larga */
+/** Campana larga — líneas claras para móvil */
 export function formatCeoDailyCampanaBody(blocks, dayKey, { businessName } = {}) {
   const header = `Resumen del día · ${fmtDayEs(dayKey)}`;
   if (!blocks?.length) {
@@ -215,19 +225,20 @@ export function formatCeoDailyCampanaBody(blocks, dayKey, { businessName } = {})
     return `${header}\n\nSin cierres de caja registrados hoy${biz}.`;
   }
 
-  const out = [header, ''];
+  const out = [header];
   for (const b of blocks) {
+    out.push('');
     out.push(String(b.name || 'Tienda').toUpperCase());
     for (const br of b.brands || []) {
-      out.push(`${br.name}  ${fmtEs(br.euros)} €`);
+      const brand = String(br.name || '').trim() || 'Marca';
+      out.push(`· ${brand}  ${fmtEs(br.euros)} €`);
     }
     const units = unitsLine(b);
     if (units) out.push(units);
-    out.push(
-      `Cobrado ${fmtEs(b.cobrado)} € (tarjeta ${fmtEs(b.tarjeta)} · efectivo ${fmtEs(b.efectivo)})`,
-    );
-    out.push(`En local ${fmtEs(b.enLocal)} €`);
-    if (b.retirado > 0) out.push(`Retirado ${fmtEs(b.retirado)} €`);
+    out.push(`Cobrado  ${fmtEs(b.cobrado)} €`);
+    out.push(`Tarjeta ${fmtEs(b.tarjeta)} € · Efectivo ${fmtEs(b.efectivo)} €`);
+    out.push(`En local  ${fmtEs(b.enLocal)} €`);
+    if (b.retirado > 0) out.push(`Retirado  ${fmtEs(b.retirado)} €`);
     if (b.cashIn > 0 || b.cashOut > 0) {
       const bits = [];
       if (b.cashIn > 0) bits.push(`Entradas ${fmtEs(b.cashIn)} €`);
@@ -235,18 +246,27 @@ export function formatCeoDailyCampanaBody(blocks, dayKey, { businessName } = {})
       out.push(bits.join(' · '));
     }
     if (Math.abs(b.difference) >= 0.01) {
-      out.push(`Descuadre ${fmtEs(b.difference)} €`);
+      const sign = Number(b.difference) > 0 ? '+' : '';
+      out.push(`Descuadre  ${sign}${fmtEs(b.difference)} €`);
+    } else {
+      out.push('Cierre OK · sin descuadre');
     }
-    out.push('');
   }
 
+  out.push('');
   out.push('TOTAL EMPRESA');
   const facturado = money(blocks.reduce((a, b) => a + Number(b.cobrado || 0), 0));
-  out.push(`Facturado ${fmtEs(facturado)} €`);
+  out.push(`Facturado  ${fmtEs(facturado)} €`);
   for (const b of blocks) {
     out.push(`En local · ${b.name}  ${fmtEs(b.enLocal)} €`);
   }
   return out.join('\n').trim();
+}
+
+/** Vista corta para la lista de la campana (1–3 líneas). */
+export function formatCeoDailyCampanaPreview(blocks) {
+  if (!blocks?.length) return 'Sin cierres de caja';
+  return formatCeoDailyPushBody(blocks);
 }
 
 function cajaRouteForBusiness(business) {
@@ -288,13 +308,18 @@ async function listActiveBusinesses() {
 }
 
 /**
- * Emite resumen para un negocio + día.
- * @returns {Promise<{ sent: boolean, reason?: string }>}
+ * Emite resumen para un negocio + día (una o varias sesiones).
+ * @param {{ dedupKey?: string, pushTitle?: string, collapseId?: string }} [opts]
+ * @returns {Promise<{ sent: boolean, reason?: string, stores?: number, recipients?: number }>}
  */
 export async function emitCeoDailyDigestForBusiness({
   business,
   dayKey,
   sessionsForBusiness,
+  dedupKey: dedupKeyOverride,
+  pushTitle,
+  title: titleOverride,
+  collapseId,
 } = {}) {
   const businessId = bareId(business?._id || business?.id);
   if (!businessId || !dayKey) return { sent: false, reason: 'missing_ids' };
@@ -332,17 +357,24 @@ export async function emitCeoDailyDigestForBusiness({
     }, new Map());
 
   const storeBlocks = Array.from(blocks.values());
+  if (!storeBlocks.length) return { sent: false, reason: 'no_stores' };
+
   const bizName = String(business.name || business.companyName || '').trim();
+  const storeLabel = storeBlocks.length === 1 ? storeBlocks[0].name : '';
   const pushBody = formatCeoDailyPushBody(storeBlocks);
   const campanaBody = formatCeoDailyCampanaBody(storeBlocks, dayKey, { businessName: bizName });
-  const title = `Resumen del día · ${fmtDayEs(dayKey)}${bizName ? ` · ${bizName}` : ''}`;
+  const listPreview = formatCeoDailyCampanaPreview(storeBlocks);
+  const title = String(titleOverride || '').trim()
+    || (storeLabel
+      ? `Resumen · ${storeLabel} · ${fmtDayEs(dayKey)}`
+      : `Resumen del día · ${fmtDayEs(dayKey)}${bizName ? ` · ${bizName}` : ''}`);
 
   const recipients = await filterManagementRecipientIds(
     resolveCeoDailyDigestRecipients(business),
   );
   if (!recipients.length) return { sent: false, reason: 'no_recipients' };
 
-  const dedupKey = `ceo-daily-digest:${businessId}:${dayKey}`;
+  const dedupKey = String(dedupKeyOverride || `ceo-daily-digest:${businessId}:${dayKey}`).trim();
   const route = cajaRouteForBusiness(business);
 
   const created = await emitPositiveAlert({
@@ -360,6 +392,8 @@ export async function emitCeoDailyDigestForBusiness({
       ruleId: CEO_DAILY_DIGEST_RULE_ID,
       dayKey,
       storeCount: storeBlocks.length,
+      storeLabel: storeLabel || undefined,
+      listPreview,
     },
   });
 
@@ -367,33 +401,105 @@ export async function emitCeoDailyDigestForBusiness({
     return { sent: false, reason: 'dedup_or_empty' };
   }
 
+  const pushHeadline = String(pushTitle || (storeLabel ? `Resumen · ${storeLabel}` : `Resumen · ${fmtDayEs(dayKey)}`)).trim();
+  const collapse = String(collapseId || `ceo-digest-${dedupKey}`).slice(0, 64);
+
   for (const uid of recipients) {
     sendPushToUser(
       fakeReq,
       uid,
       {
-        title: `Resumen · ${fmtDayEs(dayKey)}`,
+        title: 'Vertial',
         body: pushBody,
         data: {
           route,
           notificationId: String(created.find((n) => n.user_id === uid || n.userId === uid)?.id || ''),
           ruleId: CEO_DAILY_DIGEST_RULE_ID,
+          title: pushHeadline,
         },
-        collapseId: `ceo-digest-${businessId}-${dayKey}`,
+        collapseId: collapse,
       },
       {
         ruleId: CEO_DAILY_DIGEST_RULE_ID,
         category: CEO_DAILY_DIGEST_RULE_ID,
         channels: ['push'],
       },
-    ).catch(() => null);
+    ).catch((err) => {
+      logger.warn(
+        { tag: 'CEO_DAILY_DIGEST', err: err?.message, userId: uid },
+        'Push resumen CEO falló',
+      );
+    });
   }
 
   return { sent: true, stores: storeBlocks.length, recipients: recipients.length };
 }
 
 /**
- * Recorre negocios y emite digests del día (idempotente por dedup).
+ * Al cerrar una caja TPV: UNA sola campana + push
+ * (resumen del turno + OK o descuadre). No emite avisos aparte.
+ */
+export async function emitCeoDigestForClosedSession({ business, session } = {}) {
+  if (!session?._id || session.status !== 'closed') {
+    return { sent: false, reason: 'not_closed' };
+  }
+  const businessId = bareId(business?._id || business?.id || session.business_id || session.businessId);
+  if (!businessId) return { sent: false, reason: 'missing_business' };
+
+  let full = business;
+  if (!full || !resolveCeoDailyDigestRecipients(full).length) {
+    full = (await findBusinessById(fakeReq, businessId).catch(() => null)) || business;
+  }
+  if (!full) return { sent: false, reason: 'business_not_found' };
+
+  const dayKey = sessionDayKey(session) || madridDayKey();
+  const sessionId = String(session._id).trim();
+  const store = shortStoreLabel(
+    session.pointOfSaleName || session.salesPointName || session.pdvName || 'Tienda',
+  );
+  const diff = money(session.difference);
+  const hasDiscrepancy = Math.abs(diff) >= 0.01;
+  const pushTitle = hasDiscrepancy
+    ? `Cierre con descuadre · ${store}`
+    : `Cierre OK · ${store}`;
+
+  try {
+    const result = await emitCeoDailyDigestForBusiness({
+      business: full,
+      dayKey,
+      sessionsForBusiness: [session],
+      dedupKey: `ceo-close-digest:${sessionId}`,
+      collapseId: `ceo-close-${sessionId}`.slice(0, 64),
+      pushTitle,
+      title: pushTitle,
+    });
+    if (result.sent) {
+      logger.info(
+        {
+          tag: 'CEO_DAILY_DIGEST',
+          businessId,
+          sessionId,
+          dayKey,
+          stores: result.stores,
+          recipients: result.recipients,
+          discrepancy: hasDiscrepancy,
+        },
+        'Cierre unificado emitido (resumen + OK/descuadre)',
+      );
+    }
+    return result;
+  } catch (err) {
+    logger.warn(
+      { tag: 'CEO_DAILY_DIGEST', businessId, sessionId, err: err?.message },
+      'Error resumen CEO al cerrar caja',
+    );
+    return { sent: false, reason: 'error' };
+  }
+}
+
+/**
+ * Recorre negocios y emite digests del día (uso manual / ops).
+ * En producción el disparo normal es al cerrar caja.
  */
 export async function runCeoDailyDigests(dayKey = madridDayKey()) {
   const sessions = await loadClosedSessionsForDay(dayKey);
@@ -418,7 +524,6 @@ export async function runCeoDailyDigests(dayKey = madridDayKey()) {
       continue;
     }
     try {
-      // Asegurar owner cargado
       const full = (await findBusinessById(fakeReq, bid).catch(() => null)) || business;
       const result = await emitCeoDailyDigestForBusiness({
         business: full,
@@ -445,36 +550,12 @@ export async function runCeoDailyDigests(dayKey = madridDayKey()) {
 
 let schedulerStarted = false;
 
+/** Ya no programa a las 23:50: el resumen sale al cerrar caja. */
 export function startCeoDailyDigestScheduler() {
   if (schedulerStarted) return;
   schedulerStarted = true;
-
-  const digestMinutes = parseDigestTimeToMinutes(
-    process.env.CEO_DAILY_DIGEST_TIME || '23:50',
-  );
-  const intervalMs = Number(process.env.CEO_DAILY_DIGEST_INTERVAL_MS || 10 * 60_000);
-  const sentDays = new Set();
-
-  const tick = () => {
-    const day = madridDayKey();
-    const mins = madridMinutesOfDay();
-    if (mins < digestMinutes) return;
-    if (sentDays.has(day)) return;
-    sentDays.add(day);
-    runCeoDailyDigests(day).catch((err) => {
-      sentDays.delete(day);
-      logger.warn({ tag: 'CEO_DAILY_DIGEST', err: err?.message }, 'Fallo scheduler digest CEO');
-    });
-  };
-
-  setTimeout(tick, 60_000);
-  setInterval(tick, intervalMs);
   logger.info(
-    {
-      tag: 'CEO_DAILY_DIGEST',
-      digestTime: process.env.CEO_DAILY_DIGEST_TIME || '23:50',
-      intervalMs,
-    },
-    'Scheduler resumen diario CEO iniciado',
+    { tag: 'CEO_DAILY_DIGEST', mode: 'on_register_close' },
+    'Resumen CEO: se emite al cerrar caja (sin hora fija)',
   );
 }

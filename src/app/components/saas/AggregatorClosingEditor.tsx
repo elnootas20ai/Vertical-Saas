@@ -22,8 +22,10 @@ import { Banknote, Check, CreditCard, Plug, Store } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FocusEvent } from 'react';
 import {
   parseAggregatorAmount,
+  resolveClosingChannelTotalSales,
   sumAggregatorCash,
   sumAggregatorCard,
+  sumClosingBrandTotals,
   type AggregatorCashRow,
 } from '../../lib/deliveryIntegrationsUi';
 
@@ -200,37 +202,6 @@ function moneyToDraft(n: number): string {
   return n.toFixed(2).replace('.', ',');
 }
 
-/** Suma totales por marca del borrador. -1 si ninguno rellenado. */
-function sumDraftBrandTotals(
-  lines: ChannelClosingDraft | undefined,
-  brandIds: string[],
-): number {
-  if (!lines || brandIds.length === 0) return -1;
-  const byBrand = lines.totalByBrand || {};
-  let sum = 0;
-  let any = false;
-  for (const id of brandIds) {
-    const p = parseAggregatorAmount(String(byBrand[id] ?? ''));
-    if (p != null) {
-      sum += p;
-      any = true;
-    }
-  }
-  return any ? Math.round(sum * 100) / 100 : -1;
-}
-
-function resolveChannelTotalSales(
-  lines: ChannelClosingDraft,
-  systemTotal: number,
-  brandIds: string[],
-): { totalSales: number; fromBrands: boolean } {
-  const brandSum = sumDraftBrandTotals(lines, brandIds);
-  if (brandSum >= 0) return { totalSales: brandSum, fromBrands: true };
-  const parsedTotal = parseAggregatorAmount(lines.total);
-  if (parsedTotal != null) return { totalSales: parsedTotal, fromBrands: false };
-  return { totalSales: Math.max(0, systemTotal), fromBrands: false };
-}
-
 /** Acepta borrador nuevo o legacy (cash/card por pizza/burger/taco). */
 function normalizeChannelDraft(
   raw: unknown,
@@ -380,6 +351,24 @@ export function AggregatorClosingEditor({
     }
   }, [initialManualDraft]);
 
+  /** Borrador auto-guardado: quitar `total` legacy si las marcas están vacías. */
+  useEffect(() => {
+    if (marcaBrandIds.length === 0) return;
+    setDraft((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const row of autoRows) {
+        const ch = row.platform.channel;
+        const lines = next[ch];
+        if (!lines?.total?.trim()) continue;
+        if (sumClosingBrandTotals(lines, marcaBrandIds) >= 0) continue;
+        next[ch] = { ...lines, total: '' };
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [autoRows, marcaBrandIds]);
+
   useEffect(() => {
     setDraft((prev) => {
       const next = { ...prev };
@@ -469,7 +458,7 @@ export function AggregatorClosingEditor({
 
       // Total de esta vista = solo hecho en app (2ª caja / marcas).
       // El no pagado NUNCA suma aquí: va aparte al cajón (cashSales / cardSales).
-      const resolved = resolveChannelTotalSales(lines, row.totalSales, marcaBrandIds);
+      const resolved = resolveClosingChannelTotalSales(lines, row.totalSales, marcaBrandIds);
       const totalSales = resolved.totalSales;
 
       appTotal += totalSales;
@@ -607,13 +596,13 @@ export function AggregatorClosingEditor({
     setDraft((prev) => {
       const cur = prev[channel] || emptyChannel();
       const totalByBrand = { ...(cur.totalByBrand || {}), [brandId]: value };
-      const brandSum = sumDraftBrandTotals({ ...cur, totalByBrand }, marcaBrandIds);
+      const brandSum = sumClosingBrandTotals({ ...cur, totalByBrand }, marcaBrandIds);
       return {
         ...prev,
         [channel]: {
           ...cur,
           totalByBrand,
-          total: brandSum >= 0 ? moneyToDraft(brandSum) : cur.total,
+          total: brandSum >= 0 ? moneyToDraft(brandSum) : '',
         },
       };
     });
@@ -779,7 +768,7 @@ export function AggregatorClosingEditor({
   const channelReady = (ch: string): boolean => {
     const lines = draft[ch];
     if (!lines) return false;
-    const resolved = resolveChannelTotalSales(
+    const resolved = resolveClosingChannelTotalSales(
       lines,
       autoRows.find((r) => r.platform.channel === ch)?.totalSales ?? 0,
       marcaBrandIds,

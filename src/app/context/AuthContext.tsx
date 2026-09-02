@@ -338,19 +338,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearAuthTokens();
     });
 
-    // Flag legacy de builds antiguas: si quedó activo, AuthContext aún puede
-    // exigir login limpio — enforceFreshLoginOnAppUpdate ya lo limpia al arrancar.
+    // Flag legacy de builds antiguas: solo limpiar, nunca echar de la sesión.
     if (mustForceFreshLogin()) {
-      stopAuthSessionKeepalive();
-      persistSession(null);
-      clearAuthTokens();
-      setUser(null);
-      setIsAuthenticated(false);
-      setSessionSyncedWithServer(true);
-      setIsInitializing(false);
-      return () => {
-        cancelled = true;
-      };
+      clearForceFreshLogin();
     }
 
     const sessionUser = localStorage.getItem(SESSION_USER_STORAGE_KEY);

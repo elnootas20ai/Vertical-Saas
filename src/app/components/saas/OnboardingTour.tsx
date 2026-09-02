@@ -133,6 +133,13 @@ export function OnboardingTour({ onComplete }: Props) {
       return;
     }
 
+    // Super-admin en panel interno: el overlay del tour bloqueaba toques (Guardar/Aprobar).
+    if (location.pathname.startsWith('/saas/admin')) {
+      showLockRef.current = false;
+      setTourGate('hide');
+      return;
+    }
+
     if (!accountUserId || !businessId || !businessesFetchSettled || !currentBusiness?.businessType) {
       if (!showLockRef.current) setTourGate('loading');
       return;
@@ -234,6 +241,7 @@ export function OnboardingTour({ onComplete }: Props) {
     checklistTotalSteps,
     hasActivationFocus,
     steps,
+    location.pathname,
   ]);
 
   useEffect(() => {

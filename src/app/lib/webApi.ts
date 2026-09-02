@@ -103,6 +103,8 @@ export interface WebConfig {
   type: 'web_config';
   business_id: string;
   slug: string;
+  /** Dominio propio del cliente (ej. pedidos.tunegocio.es). CNAME → shops.vertialapp.com */
+  customDomain?: string;
   enabled: boolean;
   storeName: string;
   storeDescription: string;

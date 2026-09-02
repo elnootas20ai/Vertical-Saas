@@ -12807,6 +12807,12 @@ export function buildWebConfigDocument(businessId, data = {}, existing = null) {
     id,
     business_id: businessId,
     slug: String(data.slug || existing?.slug || ''),
+    customDomain: String(data.customDomain ?? existing?.customDomain ?? '')
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, '')
+      .replace(/\/.*$/, '')
+      .replace(/\.$/, ''),
     enabled: data.enabled !== undefined ? Boolean(data.enabled) : (existing?.enabled ?? false),
 
     storeName: String(data.storeName || existing?.storeName || ''),
@@ -12902,6 +12908,7 @@ export function sanitizeWebConfig(doc) {
     id: doc._id,
     business_id: doc.business_id || '',
     slug: doc.slug || '',
+    customDomain: String(doc.customDomain || '').trim().toLowerCase(),
     enabled: Boolean(doc.enabled),
     storeName: doc.storeName || '',
     storeDescription: doc.storeDescription || '',

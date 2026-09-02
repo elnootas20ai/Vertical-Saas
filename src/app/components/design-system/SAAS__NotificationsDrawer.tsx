@@ -63,6 +63,29 @@ function isRrhhPersonal(n: AppNotification): boolean {
   );
 }
 
+function alertListMessage(n: AppNotification): string {
+  const preview = String(n.metadata?.listPreview || '').trim();
+  if (preview) return preview;
+  const cat = String(n.category || n.metadata?.ruleId || '').trim();
+  if (cat === 'ceo_daily_digest') {
+    const lines = String(n.message || '')
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean);
+    // Saltar cabecera; mostrar tienda + cobrado / platos
+    return lines.slice(1, 4).join('\n') || lines[0] || '';
+  }
+  return String(n.message || '');
+}
+
+function alertMessageClass(n: AppNotification): string {
+  const cat = String(n.category || n.metadata?.ruleId || '').trim();
+  if (cat === 'ceo_daily_digest' || String(n.message || '').includes('\n')) {
+    return 'mt-0.5 block text-xs text-stone-500 whitespace-pre-line line-clamp-4';
+  }
+  return 'mt-0.5 block text-xs text-stone-500 line-clamp-2';
+}
+
 function alertKind(n: AppNotification): { label: string; Icon: LucideIcon; tone: 'positive' | 'neutral' | 'negative' } {
   const title = String(n.title || '');
   const entity = String(n.entityType || '').toLowerCase();
@@ -260,7 +283,7 @@ function WorkerInbox({ isOpen, onClose }: Props) {
                       {n.title}
                     </span>
                     {n.message ? (
-                      <span className="mt-0.5 block text-xs text-stone-500 line-clamp-2">{n.message}</span>
+                      <span className={alertMessageClass(n)}>{alertListMessage(n)}</span>
                     ) : null}
                     {resolvePersonalRoute(n) ? (
                       <span className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--v-blue,#2563eb)]">
@@ -568,7 +591,7 @@ function ManagerInbox({
                         {n.title}
                       </span>
                       {n.message ? (
-                        <span className="mt-0.5 block text-xs text-stone-500 line-clamp-2">{n.message}</span>
+                        <span className={alertMessageClass(n)}>{alertListMessage(n)}</span>
                       ) : null}
                     </span>
                   </button>

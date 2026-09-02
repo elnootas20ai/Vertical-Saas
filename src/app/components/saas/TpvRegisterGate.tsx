@@ -1533,6 +1533,14 @@ type ClosingBrandLine = {
   total: number;
 };
 
+type ClosingCashMoveLine = {
+  id: string;
+  type: string;
+  amount: number;
+  date: string;
+  description?: string;
+};
+
 type ClosingExcelLikeAmounts = {
   efectivo: number;
   tpv: number;
@@ -1545,12 +1553,27 @@ type ClosingExcelLikeAmounts = {
   pizza: number;
   burger: number;
   taco: number;
+  /** Desglose unidades (solo UI): Vertial / Integraciones. */
+  pizzaTpv?: number;
+  burgerTpv?: number;
+  tacoTpv?: number;
+  pizzaApps?: number;
+  burgerApps?: number;
+  tacoApps?: number;
   expected: number;
   counted: number;
   diff: number;
   unpaidCash: number;
   unpaidCard: number;
   brands: ClosingBrandLine[];
+  /** Arqueo: desglose del esperado (si hay datos de sesión). */
+  drawerInitialCash?: number;
+  drawerCashSales?: number;
+  drawerCashIn?: number;
+  drawerCashOut?: number;
+  drawerCashReturns?: number;
+  drawerStaffCash?: number;
+  drawerMoves?: ClosingCashMoveLine[];
 };
 
 function sumAppsBrandTotalsBySlot(
@@ -1777,6 +1800,16 @@ function excelLikeAmountsFromClosedSession(
   ) / 100;
   /** TOTAL = canales (TPV + apps). No pagado es desglose del cajón, ya va en Glovo/Uber/… */
   const total = amounts.total;
+  const drawerCashIn = Math.round(
+    (session.transactions || [])
+      .filter((t) => t.type === 'cash_in')
+      .reduce((s, t) => s + (Number(t.amount) || 0), 0) * 100,
+  ) / 100;
+  const drawerCashOut = Math.round(
+    (session.transactions || [])
+      .filter((t) => t.type === 'cash_out')
+      .reduce((s, t) => s + (Number(t.amount) || 0), 0) * 100,
+  ) / 100;
   return {
     efectivo: amounts.efectivo,
     tpv: amounts.tpv,
@@ -1795,6 +1828,21 @@ function excelLikeAmountsFromClosedSession(
     unpaidCash,
     unpaidCard,
     brands: brandsFromClosedSession(session, brandLabels),
+    drawerInitialCash: Math.round((Number(session.initialCashAmount) || 0) * 100) / 100,
+    drawerCashSales: amounts.efectivo,
+    drawerCashIn,
+    drawerCashOut,
+    drawerCashReturns: sumCashReturns(session),
+    drawerStaffCash: sumCashStaffConsumption(session),
+    drawerMoves: (session.transactions || [])
+      .filter((t) => t.type === 'cash_in' || t.type === 'cash_out' || t.type === 'return')
+      .map((t) => ({
+        id: String(t.id),
+        type: String(t.type),
+        amount: Number(t.amount) || 0,
+        date: String(t.date || ''),
+        description: t.description ? String(t.description) : undefined,
+      })),
   };
 }
 
@@ -1917,15 +1965,35 @@ function ClosingExcelLikeSummary({
 
       <div className={`grid grid-cols-3 gap-px bg-stone-100 dark:bg-stone-800 border-t border-stone-100 dark:border-stone-800`}>
         {([
-          { label: 'Pizzas', value: amounts.pizza },
-          { label: 'Burgers', value: amounts.burger },
-          { label: 'Tacos', value: amounts.taco },
+          {
+            label: 'Pizzas',
+            value: amounts.pizza,
+            tpv: amounts.pizzaTpv,
+            apps: amounts.pizzaApps,
+          },
+          {
+            label: 'Burgers',
+            value: amounts.burger,
+            tpv: amounts.burgerTpv,
+            apps: amounts.burgerApps,
+          },
+          {
+            label: 'Tacos',
+            value: amounts.taco,
+            tpv: amounts.tacoTpv,
+            apps: amounts.tacoApps,
+          },
         ]).map((u) => (
           <div key={u.label} className={`bg-white dark:bg-stone-950 text-center ${compact ? 'px-1 py-1.5' : 'px-2 py-2'}`}>
             <p className="text-[10px] font-semibold text-stone-500">{u.label}</p>
             <p className={`font-black tabular-nums text-stone-900 dark:text-stone-50 ${compact ? 'text-base' : 'text-xl'}`}>
               {u.value}
             </p>
+            {u.tpv != null || u.apps != null ? (
+              <p className={`mt-0.5 text-stone-400 tabular-nums leading-snug ${compact ? 'text-[8px]' : 'text-[9px]'}`}>
+                Vertial {u.tpv ?? 0} · Caja 2 {u.apps ?? 0}
+              </p>
+            ) : null}
           </div>
         ))}
       </div>
@@ -1934,8 +2002,108 @@ function ClosingExcelLikeSummary({
         <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400 mb-1">
           Arqueo del cajón
         </p>
-        <div className="flex justify-between gap-2 text-xs text-stone-600 dark:text-stone-300">
-          <span>Esperado en cajón</span>
+        {amounts.drawerInitialCash != null ? (
+          <>
+            <div className="flex justify-between gap-2 text-xs text-stone-500">
+              <span>Fondo apertura</span>
+              <span className="font-semibold tabular-nums text-stone-800 dark:text-stone-100">
+                {formatMoneyEs(amounts.drawerInitialCash)}
+              </span>
+            </div>
+            <div className="flex justify-between gap-2 text-xs text-stone-600 dark:text-stone-300">
+              <span>+ Cobros efectivo</span>
+              <span className="font-semibold tabular-nums">
+                {formatMoneyEs(amounts.drawerCashSales ?? 0)}
+              </span>
+            </div>
+            {(amounts.drawerStaffCash || 0) > 0 ? (
+              <div className="flex justify-between gap-2 text-xs text-stone-600 dark:text-stone-300">
+                <span>+ Consumo equipo</span>
+                <span className="font-semibold tabular-nums">
+                  {formatMoneyEs(amounts.drawerStaffCash || 0)}
+                </span>
+              </div>
+            ) : null}
+            <div className="flex justify-between gap-2 text-xs text-stone-600 dark:text-stone-300">
+              <span>+ Entradas</span>
+              <span className="font-semibold tabular-nums">
+                {formatMoneyEs(amounts.drawerCashIn ?? 0)}
+              </span>
+            </div>
+            {(amounts.drawerCashReturns || 0) > 0 ? (
+              <div className="flex justify-between gap-2 text-xs text-stone-600 dark:text-stone-300">
+                <span>− Devoluciones</span>
+                <span className="font-semibold tabular-nums">
+                  {formatMoneyEs(amounts.drawerCashReturns || 0)}
+                </span>
+              </div>
+            ) : null}
+            <div className="flex justify-between gap-2 text-xs text-stone-600 dark:text-stone-300">
+              <span>− Salidas</span>
+              <span className="font-semibold tabular-nums">
+                {formatMoneyEs(amounts.drawerCashOut ?? 0)}
+              </span>
+            </div>
+            {(amounts.drawerMoves || []).length > 0 ? (
+              <div className="pl-2 space-y-0.5 py-0.5">
+                {[...(amounts.drawerMoves || [])].reverse().map((tx) => {
+                  const isIn = tx.type === 'cash_in';
+                  const label =
+                    tx.type === 'cash_out' && /^pago trabajador/i.test(String(tx.description || ''))
+                      ? 'Pago trabajador'
+                      : tx.type === 'cash_in'
+                        ? 'Entrada'
+                        : tx.type === 'cash_out'
+                          ? 'Salida'
+                          : tx.type === 'return'
+                            ? 'Devolución'
+                            : tx.type;
+                  const time = tx.date
+                    ? new Date(tx.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })
+                    : '';
+                  return (
+                    <div
+                      key={tx.id}
+                      className="flex items-center justify-between gap-2 text-[11px] text-stone-500 dark:text-stone-400"
+                    >
+                      <span className="min-w-0 truncate">
+                        {time ? <span className="mr-1.5 text-stone-400">{time}</span> : null}
+                        <span className="font-semibold text-stone-600 dark:text-stone-300">{label}</span>
+                        {tx.description ? (
+                          <span className="ml-1 truncate">{tx.description}</span>
+                        ) : null}
+                      </span>
+                      <span
+                        className={`shrink-0 font-bold tabular-nums ${
+                          isIn
+                            ? 'text-emerald-700 dark:text-emerald-300'
+                            : 'text-rose-700 dark:text-rose-300'
+                        }`}
+                      >
+                        {isIn ? '+' : '−'}
+                        {formatMoneyEs(tx.amount)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+            {(amounts.unpaidCash || 0) > 0 ? (
+              <div className="flex justify-between gap-2 text-xs text-stone-600 dark:text-stone-300">
+                <span>+ No pagado efectivo apps</span>
+                <span className="font-semibold tabular-nums">
+                  {formatMoneyEs(amounts.unpaidCash)}
+                </span>
+              </div>
+            ) : null}
+          </>
+        ) : null}
+        <div className={`flex justify-between gap-2 text-xs text-stone-600 dark:text-stone-300 ${
+          amounts.drawerInitialCash != null ? 'border-t border-stone-100 dark:border-stone-800 pt-1.5' : ''
+        }`}>
+          <span className={amounts.drawerInitialCash != null ? 'font-bold' : undefined}>
+            Esperado en cajón
+          </span>
           <span className="font-bold tabular-nums text-stone-900 dark:text-stone-100">{formatMoneyEs(amounts.expected)}</span>
         </div>
         <div className="flex justify-between gap-2 text-xs text-stone-600 dark:text-stone-300">
@@ -2246,12 +2414,33 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
       pizza: closingFood.pizza,
       burger: closingFood.burger,
       taco: closingFood.taco,
+      pizzaTpv: tpvClosingFood.pizza,
+      burgerTpv: tpvClosingFood.burger,
+      tacoTpv: tpvClosingFood.taco,
+      pizzaApps: appsFoodTotals.pizza,
+      burgerApps: appsFoodTotals.burger,
+      tacoApps: appsFoodTotals.taco,
       expected: dayDrawerExpected,
       counted: countedTotal,
       diff,
       unpaidCash,
       unpaidCard,
       brands: [],
+      drawerInitialCash: r2(Number(session.initialCashAmount) || 0),
+      drawerCashSales: efectivo,
+      drawerCashIn: r2(Number(summary.totalCashIn) || 0),
+      drawerCashOut: r2(Number(summary.totalCashOut) || 0),
+      drawerCashReturns: cashReturnsTotal,
+      drawerStaffCash: cashStaffConsumption,
+      drawerMoves: (session.transactions || [])
+        .filter((t) => t.type === 'cash_in' || t.type === 'cash_out' || t.type === 'return')
+        .map((t) => ({
+          id: String(t.id),
+          type: String(t.type),
+          amount: Number(t.amount) || 0,
+          date: String(t.date || ''),
+          description: t.description ? String(t.description) : undefined,
+        })),
     };
   }, [
     finalAggregatorRows,
@@ -2259,14 +2448,26 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     tpvCardSales,
     summary.salesByMethod.bizum,
     summary.salesByMethod.otro,
+    summary.totalCashIn,
+    summary.totalCashOut,
     closingFood.pizza,
     closingFood.burger,
     closingFood.taco,
+    tpvClosingFood.pizza,
+    tpvClosingFood.burger,
+    tpvClosingFood.taco,
+    appsFoodTotals.pizza,
+    appsFoodTotals.burger,
+    appsFoodTotals.taco,
     dayDrawerExpected,
     countedTotal,
     diff,
     aggregatorCashTotal,
     aggregatorCardTotal,
+    session.initialCashAmount,
+    session.transactions,
+    cashReturnsTotal,
+    cashStaffConsumption,
   ]);
   const cashSlotDisplay = cashSlotFocused
     ? cashSlot
@@ -2470,6 +2671,62 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     ),
     [brandBillingRaw, closingBrands, billingRules, brandLabels],
   );
+
+  /**
+   * Integraciones (paso final): siempre las marcas contratadas (hojas Facturación),
+   * aunque el total apps sea 0 € — antes solo salían filas con revenue > 0.
+   */
+  const integracionesBrandRows = useMemo(() => {
+    if (!closingBrands.length) return [] as Array<{ brandId: string; name: string; revenue: number }>;
+    const snapshotBrandMap = appsSnapshot?.brandTotalsByChannel;
+    const byBrand: Record<string, number> = {};
+    let hasSnapMoney = false;
+    if (snapshotBrandMap && Object.keys(snapshotBrandMap).length > 0) {
+      for (const perBrand of Object.values(snapshotBrandMap)) {
+        if (!perBrand || typeof perBrand !== 'object') continue;
+        for (const [brandId, raw] of Object.entries(perBrand)) {
+          const n = Number(raw) || 0;
+          if (n <= 0) continue;
+          hasSnapMoney = true;
+          byBrand[brandId] = Math.round(((byBrand[brandId] || 0) + n) * 100) / 100;
+        }
+      }
+    }
+    let appsRows: Array<{ brandId: string; name: string; revenue: number }>;
+    if (hasSnapMoney) {
+      appsRows = Object.entries(byBrand).map(([brandId, revenue]) => ({
+        brandId,
+        name: displayBrandName(brandId, brandLabels),
+        revenue,
+      }));
+    } else {
+      appsRows = scaleAppsBrandTotalsToAppTotal(
+        appsBrandBilling.rows,
+        appsBrandBilling.unbranded,
+        hechoAppsTotal,
+      ).rows;
+    }
+    return closingBrands.map((slot) => {
+      const memberIds = slot.memberBrandIds?.length ? slot.memberBrandIds : [slot.brandId];
+      const aliases = new Set<string>();
+      for (const id of memberIds) {
+        for (const a of brandIdAliases(id)) aliases.add(a);
+      }
+      const matching = appsRows.filter(
+        (r) => aliases.has(r.brandId) || brandIdAliases(r.brandId).some((a) => aliases.has(a)),
+      );
+      const revenue =
+        Math.round(matching.reduce((s, r) => s + (Number(r.revenue) || 0), 0) * 100) / 100;
+      return { brandId: slot.brandId, name: slot.name, revenue };
+    });
+  }, [
+    closingBrands,
+    appsSnapshot?.brandTotalsByChannel,
+    brandLabels,
+    appsBrandBilling.rows,
+    appsBrandBilling.unbranded,
+    hechoAppsTotal,
+  ]);
 
   /** Resumen final con marcas (Caja 1 tienda + Caja 2 apps). */
   const excelDaySummary = useMemo((): ClosingExcelLikeAmounts => {
@@ -3048,16 +3305,24 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                       <span className="inline-flex items-center gap-1 font-semibold">
                         <Banknote className="w-3 h-3" /> Efectivo
                       </span>
-                      <span className="font-black tabular-nums">
-                        {formatMoneyEs(summary.salesByMethod.efectivo)}
+                      <span className="font-black tabular-nums text-right">
+                        {formatDecimalEs(tpvCashSales)} +{' '}
+                        {formatDecimalEs(aggregatorCashTotal)} ={' '}
+                        {formatMoneyEs(
+                          Math.round((tpvCashSales + aggregatorCashTotal) * 100) / 100,
+                        )}
                       </span>
                     </div>
                     <div className={`flex justify-between gap-2 ${VERTIAL_CARD_TEXT}`}>
                       <span className="inline-flex items-center gap-1 font-semibold">
                         <CreditCard className="w-3 h-3" /> Tarjeta
                       </span>
-                      <span className="font-black tabular-nums">
-                        {formatMoneyEs(summary.salesByMethod.tarjeta)}
+                      <span className="font-black tabular-nums text-right">
+                        {formatDecimalEs(tpvCardSales)} +{' '}
+                        {formatDecimalEs(aggregatorCardTotal)} ={' '}
+                        {formatMoneyEs(
+                          Math.round((tpvCardSales + aggregatorCardTotal) * 100) / 100,
+                        )}
                       </span>
                     </div>
                     {(summary.salesByMethod.bizum || 0) + (summary.salesByMethod.otro || 0) > 0 ? (
@@ -3070,30 +3335,40 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                         </span>
                       </div>
                     ) : null}
-                    {aggregatorCashTotal > 0 ? (
-                      <div className={`flex justify-between gap-2 ${VERTIAL_CASH_TEXT}`}>
-                        <span className="font-semibold">No pagado efectivo → cajón</span>
-                        <span className="font-black tabular-nums">
+                  </div>
+                  <div className="grid grid-cols-1 gap-1.5">
+                    <div
+                      className={`rounded-xl border px-2.5 py-2 ${VERTIAL_CASH_BORDER} ${VERTIAL_CASH_BG}`}
+                    >
+                      <div className={`flex items-center justify-between gap-2 ${VERTIAL_CASH_TEXT}`}>
+                        <span className="inline-flex items-center gap-1.5 text-[11px] font-bold">
+                          <Banknote className="w-3.5 h-3.5" />
+                          Efectivo no pagado
+                        </span>
+                        <span className="text-base font-black tabular-nums">
                           {formatMoneyEs(aggregatorCashTotal)}
                         </span>
                       </div>
-                    ) : null}
-                  </div>
-                  <div
-                    className={`rounded-xl border px-2.5 py-2 ${VERTIAL_CARD_BORDER} ${VERTIAL_CARD_BG}`}
-                  >
-                    <div className={`flex items-center justify-between gap-2 ${VERTIAL_CARD_TEXT}`}>
-                      <span className="inline-flex items-center gap-1.5 text-[11px] font-bold">
-                        <CreditCard className="w-3.5 h-3.5" />
-                        Tarjeta no pagado
-                      </span>
-                      <span className="text-base font-black tabular-nums">
-                        {formatMoneyEs(aggregatorCardTotal)}
-                      </span>
+                      <p className="mt-0.5 text-[10px] text-stone-500 dark:text-stone-400">
+                        Apps · suma al cajón (esperado)
+                      </p>
                     </div>
-                    <p className="mt-0.5 text-[10px] text-stone-500 dark:text-stone-400">
-                      Apps · no suma al total (ya en integradores)
-                    </p>
+                    <div
+                      className={`rounded-xl border px-2.5 py-2 ${VERTIAL_CARD_BORDER} ${VERTIAL_CARD_BG}`}
+                    >
+                      <div className={`flex items-center justify-between gap-2 ${VERTIAL_CARD_TEXT}`}>
+                        <span className="inline-flex items-center gap-1.5 text-[11px] font-bold">
+                          <CreditCard className="w-3.5 h-3.5" />
+                          Tarjeta no pagado
+                        </span>
+                        <span className="text-base font-black tabular-nums">
+                          {formatMoneyEs(aggregatorCardTotal)}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-[10px] text-stone-500 dark:text-stone-400">
+                        Apps · no suma al total (ya en integradores)
+                      </p>
+                    </div>
                   </div>
                   {brandBilling.rows.length > 0 ? (
                     <div className="border-t border-stone-100 dark:border-stone-800 pt-1.5 space-y-1">
@@ -3146,7 +3421,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                         Integraciones
                       </p>
                       <p className="text-sm font-bold text-blue-950 dark:text-blue-50">
-                        Hecho en app
+                        Hecho en app · total de todas
                       </p>
                     </div>
                     <div className="text-right shrink-0">
@@ -3161,7 +3436,6 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                       : finalAggregatorRows
                     ).map((r) => {
                       const amt = Number(r.totalSales) || 0;
-                      if (amt <= 0) return null;
                       return (
                         <div
                           key={r.platform.channel}
@@ -3175,9 +3449,12 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                       );
                     })}
                   </div>
-                  {appsBrandBilling.rows.length > 0 ? (
+                  {integracionesBrandRows.length > 0 ? (
                     <div className="border-t border-blue-200/60 dark:border-blue-900/40 pt-1.5 space-y-0.5">
-                      {appsBrandBilling.rows.map((row) => (
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-blue-600/70 dark:text-blue-300/70 mb-0.5">
+                        Por marca
+                      </p>
+                      {integracionesBrandRows.map((row) => (
                         <div
                           key={row.brandId}
                           className="flex justify-between gap-2 text-[10px] text-blue-900/70 dark:text-blue-100/70"
@@ -3194,11 +3471,6 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                     <DeliveryFoodUnitLabel unit="pizza" count={appsFoodTotals.pizza} size="xs" muted />
                     <DeliveryFoodUnitLabel unit="burger" count={appsFoodTotals.burger} size="xs" muted />
                     <DeliveryFoodUnitLabel unit="taco" count={appsFoodTotals.taco} size="xs" muted />
-                    <span className="ml-0.5 font-semibold text-blue-800/80 dark:text-blue-100/80 tabular-nums">
-                      ·{' '}
-                      {appsFoodTotals.pizza + appsFoodTotals.burger + appsFoodTotals.taco}{' '}
-                      uds
-                    </span>
                   </div>
                 </div>
               </div>
@@ -3445,22 +3717,6 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 onChange={(e) => setNotes(e.target.value)}
               />
 
-              {/* Resumen final — misma fila que el Excel de Facturación */}
-              <div className="shrink-0 space-y-2">
-                <ClosingExcelLikeSummary amounts={excelDaySummary} brandLabels={brandLabels} />
-                <p className="text-[11px] text-stone-500 px-0.5 tabular-nums">
-                  Comprobación: Vertial {formatMoneyEs(caja1Total)} + Integraciones {formatMoneyEs(integratorsTotal)}
-                  {' = '}
-                  <strong className="text-stone-800 dark:text-stone-100">{formatMoneyEs(dayMoneyTotal)}</strong>
-                  {dayCardCollected > 0 ? (
-                    <>
-                      {' · '}
-                      <span className={VERTIAL_CARD_TEXT}>Tarjeta cobrada {formatMoneyEs(dayCardCollected)}</span>
-                    </>
-                  ) : null}
-                </p>
-              </div>
-
               <button
                 type="button"
                 onClick={() => setShowExtraDetail((v) => !v)}
@@ -3663,6 +3919,11 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                     Usar el contado ({formatMoneyEs(countedTotal)})
                   </button>
                 ) : null}
+              </div>
+
+              {/* Resumen de todo (mismo que Excel) — debajo del fondo, antes de confirmar */}
+              <div className="shrink-0">
+                <ClosingExcelLikeSummary amounts={excelDaySummary} brandLabels={brandLabels} />
               </div>
             </div>
           ) : null}

@@ -287,7 +287,18 @@ async function dispatchLoginOtp(req, account) {
   const to = resolveLoginOtpDestination(account);
   const accountEmail = String(account?.email || '').trim().toLowerCase();
   const { subject, html } = buildLoginCodeEmail(account.email, code);
-  await sendEmail({ to, subject, html, requireDelivery: true });
+
+  // No bloquear 10–15s al usuario: el código ya está guardado; el SMTP va en segundo plano.
+  void sendEmail({ to, subject, html, requireDelivery: true })
+    .then(() => {
+      logger.info({ tag: 'AUTH_LOGIN_OTP', to, account: accountEmail }, 'OTP enviado');
+    })
+    .catch((err) => {
+      logger.error(
+        { tag: 'AUTH_LOGIN_OTP', to, account: accountEmail, err: err?.message || err },
+        'Fallo envío OTP (código ya generado)',
+      );
+    });
 
   if (process.env.NODE_ENV !== 'production') {
     console.log(`[AUTH_LOGIN_OTP] account=${accountEmail} primary=${to} code=${code}`);

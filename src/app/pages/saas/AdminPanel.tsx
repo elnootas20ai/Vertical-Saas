@@ -142,6 +142,7 @@ const API_BASE = getApiBase();
 
 async function apiFetch(path: string, init?: RequestInit) {
   const res = await fetch(`${API_BASE}${path}`, {
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
     ...init,
   });
@@ -1269,7 +1270,7 @@ export function EditClientModal({ account, onClose, onSaved, layout = 'modal' }:
       </div>
 
       {isPage && modalTab === 'manage' && (
-        <div className="fixed bottom-0 inset-x-0 z-20 border-t border-stone-200 dark:border-stone-800 bg-white/95 dark:bg-stone-950/95 backdrop-blur-sm px-4 py-3">
+        <div className="fixed bottom-0 inset-x-0 z-50 border-t border-stone-200 dark:border-stone-800 bg-white/95 dark:bg-stone-950/95 backdrop-blur-sm px-4 py-3 safe-area-bottom">
           <div className="max-w-4xl mx-auto flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
             <button type="button" onClick={onClose} className={VERTIAL_BTN_SECONDARY}>
               <ArrowLeft className="w-4 h-4" />

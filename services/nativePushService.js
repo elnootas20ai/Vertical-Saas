@@ -14,6 +14,11 @@ import { couchJson } from './couchResponse.js';
 
 const PUSH_DB = 'push_subscriptions';
 const FCM_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
+/** Canal Android con sonido (v2: el v1 podía quedar sin sonido si se creó mal). */
+export const ANDROID_ALERTS_CHANNEL_ID = 'vertial_alerts_v3';
+/** Opcional: imagen grande a la derecha / expandida. Vacío = solo icono izquierdo (sin logo a la derecha). */
+const ANDROID_NOTIFICATION_IMAGE =
+  String(process.env.FCM_NOTIFICATION_IMAGE_URL || '').trim();
 
 let apnProvider = null;
 let apnLogged = false;
@@ -131,6 +136,13 @@ function getFcmV1Client() {
       scopes: [FCM_SCOPE],
     });
     fcmProjectId = loaded.projectId;
+  }
+  if (!fcmLogged) {
+    fcmLogged = true;
+    console.log(
+      '[NativePush] FCM v1 listo (lock screen Android, project=%s)',
+      fcmProjectId || loaded.projectId,
+    );
   }
   return { auth: fcmAuth, projectId: fcmProjectId || loaded.projectId };
 }
@@ -295,7 +307,12 @@ async function sendFcmV1ToTokens(req, userId, tokens, payload, { auth, projectId
   let accessToken;
   try {
     const client = await auth.getClient();
-    const tok = await client.getAccessToken();
+    const tok = await Promise.race([
+      client.getAccessToken(),
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('FCM OAuth timeout')), 12_000);
+      }),
+    ]);
     accessToken = tok?.token || tok;
   } catch (err) {
     console.warn('[NativePush] FCM v1 token OAuth falló:', err?.message || err);
@@ -322,6 +339,7 @@ async function sendFcmV1ToTokens(req, userId, tokens, payload, { auth, projectId
             notification: {
               title: payload.title || 'Vertial',
               body: payload.body || '',
+              ...(ANDROID_NOTIFICATION_IMAGE ? { image: ANDROID_NOTIFICATION_IMAGE } : {}),
             },
             data: {
               ...data,
@@ -331,10 +349,17 @@ async function sendFcmV1ToTokens(req, userId, tokens, payload, { auth, projectId
               priority: 'HIGH',
               collapseKey: String(payload.collapseId || data.notificationId || 'vertial').slice(0, 64),
               notification: {
-                channelId: 'vertial_alerts',
-                sound: 'default',
+                channelId: ANDROID_ALERTS_CHANNEL_ID,
+                sound: 'vertial_alert',
+                defaultSound: true,
                 defaultVibrateTimings: true,
+                notificationCount: 1,
                 visibility: 'PUBLIC',
+                // Sin `icon` silueta: Samsung/Android usa el icono de la app (V a color).
+                color: '#22C55E',
+                ...(ANDROID_NOTIFICATION_IMAGE
+                  ? { image: ANDROID_NOTIFICATION_IMAGE }
+                  : {}),
               },
             },
           },
@@ -345,6 +370,10 @@ async function sendFcmV1ToTokens(req, userId, tokens, payload, { auth, projectId
         sent += 1;
       } else {
         failed += 1;
+        console.warn(
+          '[NativePush] FCM v1 fallo',
+          body.error?.message || body.error?.status || res.status,
+        );
         const errCode = body.error?.details?.[0]?.errorCode
           || body.error?.status
           || '';
@@ -391,7 +420,7 @@ async function sendFcmLegacyToTokens(req, userId, tokens, payload, serverKey) {
             body: payload.body || '',
             sound: 'default',
             visibility: 'public',
-            android_channel_id: 'vertial_alerts',
+            android_channel_id: ANDROID_ALERTS_CHANNEL_ID,
           },
           data: {
             ...data,

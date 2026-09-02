@@ -646,15 +646,19 @@ async function tryRefreshToken(): Promise<RefreshOutcome> {
       };
 
       const applyOk = (payload: ApiEnvelope<AuthUser>) => {
-        // Login/logout durante el refresh: no reinstalar tokens de la cuenta vieja.
+        // Login/logout o /me reemitió JWT mientras refrescábamos.
+        // Si localStorage ya tiene access token, la sesión sigue viva: no devolver
+        // 'rejected' (eso dispara logout en authFetch/request en Android).
         if (epochAtStart !== _authSessionEpoch) {
           loadStoredTokens();
+          if (_inMemoryToken) return 'refreshed' as const;
           return 'rejected' as const;
         }
-        // Otra pestaña ya escribió otro refresh en localStorage: no pisar su cuenta.
+        // Otra pestaña ya escribió otro refresh: adoptar el suyo si hay access.
         const currentLsRefresh = localStorage.getItem(REFRESH_STORAGE_KEY);
         if (currentLsRefresh && refreshUsed && currentLsRefresh !== refreshUsed) {
           loadStoredTokens();
+          if (_inMemoryToken) return 'refreshed' as const;
           return 'rejected' as const;
         }
         if (payload.accessToken) {
