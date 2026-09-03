@@ -12588,9 +12588,29 @@ export function sanitizeWarehouse(doc) {
 export async function listWarehousesByUser(req, userId) {
   const db = getCatalogDbName();
   await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
+  await ensureCatalogTypeUserIndex(req, db);
+  const uid = String(userId || '').trim();
+
+  // Mango por type+user_id: nunca _all_docs del catálogo compartido
+  // (en prod hay miles de docs y deja el Almacén en «Cargando…»).
+  let docs = [];
+  try {
+    const selector = uid ? { type: 'warehouse', user_id: uid } : { type: 'warehouse' };
+    docs = await findDocuments(req, db, selector, { pageSize: 200, maxDocs: 2_000 });
+  } catch {
+    if (uid) {
+      try {
+        docs = await findDocuments(req, db, { type: 'warehouse', user_id: uid }, { pageSize: 200, maxDocs: 2_000 });
+      } catch {
+        docs = [];
+      }
+    } else {
+      docs = [];
+    }
+  }
+
   return docs
-    .filter((doc) => doc?.type === 'warehouse' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .filter((doc) => doc?.type === 'warehouse' && !doc?.deletedAt && (!uid || doc?.user_id === uid))
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
 }
 

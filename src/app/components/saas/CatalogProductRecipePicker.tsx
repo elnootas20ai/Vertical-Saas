@@ -7,28 +7,13 @@ import {
   resolveIngredientRole,
   type StoreIngredient,
 } from '../../lib/catalogCustomization';
+import {
+  formatRecipeQtyDisplay,
+  isRecipeQtyDraftAllowed,
+  parseRecipeQtyDraft,
+  sanitizeRecipeQtyTyping,
+} from '../../lib/recipeQtyInput';
 import { VERTIAL_BTN_PRIMARY } from '../../lib/vertialUiTokens';
-
-/** Borrador de cantidad: coma y punto valen igual como decimal. */
-function parseRecipeQtyDraft(raw: string, opts?: { commitIncomplete?: boolean }): number | null {
-  let trimmed = String(raw || '')
-    .trim()
-    .replace(/\s/g, '')
-    .replace(',', '.');
-  if (trimmed === '' || trimmed === '.') return null;
-  if (trimmed.endsWith('.')) {
-    if (!opts?.commitIncomplete) return null;
-    trimmed = trimmed.slice(0, -1);
-    if (trimmed === '') return null;
-  }
-  const n = Number(trimmed);
-  if (!Number.isFinite(n) || n < 0) return null;
-  return Math.round(n * 1000) / 1000;
-}
-
-function isRecipeQtyDraftAllowed(raw: string): boolean {
-  return raw === '' || /^\d*[.,]?\d*$/.test(raw);
-}
 
 function RecipeQtyInput({
   value,
@@ -39,20 +24,20 @@ function RecipeQtyInput({
   onCommit: (n: number) => void;
   ariaLabel: string;
 }) {
-  const [draft, setDraft] = useState(() => String(value).replace('.', ','));
+  const [draft, setDraft] = useState(() => formatRecipeQtyDisplay(value));
   const [focused, setFocused] = useState(false);
 
   useEffect(() => {
-    if (!focused) setDraft(String(value).replace('.', ','));
+    if (!focused) setDraft(formatRecipeQtyDisplay(value));
   }, [value, focused]);
 
   const commit = () => {
     const parsed = parseRecipeQtyDraft(draft, { commitIncomplete: true });
     if (parsed == null) {
-      setDraft(String(value).replace('.', ','));
+      setDraft(formatRecipeQtyDisplay(value));
       return;
     }
-    setDraft(String(parsed).replace('.', ','));
+    setDraft(formatRecipeQtyDisplay(parsed));
     if (parsed !== value) onCommit(parsed);
   };
 
@@ -60,16 +45,14 @@ function RecipeQtyInput({
     <input
       type="text"
       inputMode="decimal"
+      autoComplete="off"
       value={draft}
       onChange={(e) => {
-        const next = e.target.value;
-        if (!isRecipeQtyDraftAllowed(next)) return;
+        const next = sanitizeRecipeQtyTyping(e.target.value);
+        if (!isRecipeQtyDraftAllowed(next) && next !== '') return;
         setDraft(next);
       }}
-      onFocus={(e) => {
-        setFocused(true);
-        e.target.select();
-      }}
+      onFocus={() => setFocused(true)}
       onBlur={() => {
         setFocused(false);
         commit();
@@ -78,7 +61,7 @@ function RecipeQtyInput({
         if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
       }}
       aria-label={ariaLabel}
-      placeholder="0"
+      placeholder="0,15"
       className="w-24 px-2.5 py-2 rounded-xl border-2 border-stone-200 bg-white text-sm font-semibold tabular-nums text-center outline-none focus:border-[var(--v-blue,#2563eb)] dark:border-stone-700 dark:bg-stone-900"
     />
   );
