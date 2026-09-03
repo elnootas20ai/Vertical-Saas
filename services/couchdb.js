@@ -300,6 +300,11 @@ const clientDocumentsByUser = new Map();
 const clientDocumentsGeneration = new Map();
 const clientsUserIndexReady = new Set();
 const deliveryTypeUserIndexReady = new Set();
+const accountsIndexReady = new Set();
+const businessesIndexReady = new Set();
+const clockinsIndexReady = new Set();
+const teamInvitationsIndexReady = new Set();
+const pdvTerminalCodeIndexReady = new Set();
 
 /** Índice type+user_id en delivery (sesiones caja / PDV) — evita _all_docs del DB entero. */
 async function ensureDeliveryTypeUserIndex(req, dbName) {
@@ -316,6 +321,47 @@ async function ensureDeliveryTypeUserIndex(req, dbName) {
     `idx-${safeDb}-type-user-val`,
   ).catch(() => null);
   deliveryTypeUserIndexReady.add(dbName);
+}
+
+async function ensureAccountsEmailIndex(req) {
+  if (accountsIndexReady.has(ACCOUNTS_DB)) return;
+  await ensureDatabase(req, ACCOUNTS_DB);
+  await ensureIndex(req, ACCOUNTS_DB, ['type', 'email'], 'idx-accounts-type-email').catch(() => null);
+  await ensureIndex(req, ACCOUNTS_DB, ['type', 'user_id'], 'idx-accounts-type-user').catch(() => null);
+  await ensureIndex(req, ACCOUNTS_DB, ['type', 'appleId'], 'idx-accounts-type-apple').catch(() => null);
+  accountsIndexReady.add(ACCOUNTS_DB);
+}
+
+async function ensureBusinessesUserIndex(req) {
+  if (businessesIndexReady.has(BUSINESSES_DB)) return;
+  await ensureDatabase(req, BUSINESSES_DB);
+  await ensureIndex(req, BUSINESSES_DB, ['type', 'owner_user_id'], 'idx-biz-type-owner').catch(() => null);
+  await ensureIndex(req, BUSINESSES_DB, ['type', 'members.user_id'], 'idx-biz-type-member').catch(() => null);
+  businessesIndexReady.add(BUSINESSES_DB);
+}
+
+async function ensureClockinsBusinessIndex(req, dbName) {
+  if (clockinsIndexReady.has(dbName)) return;
+  const safeDb = String(dbName || '').replace(/[^a-z0-9]/g, '-');
+  await ensureIndex(req, dbName, ['type', 'business_id'], `idx-${safeDb}-type-biz`).catch(() => null);
+  clockinsIndexReady.add(dbName);
+}
+
+async function ensureTeamInvitationsEmailIndex(req) {
+  if (teamInvitationsIndexReady.has(TEAM_INVITATIONS_DB)) return;
+  await ensureDatabase(req, TEAM_INVITATIONS_DB);
+  await ensureIndex(req, TEAM_INVITATIONS_DB, ['type', 'email', 'status'], 'idx-inv-type-email-status').catch(() => null);
+  await ensureIndex(req, TEAM_INVITATIONS_DB, ['type', 'business_id'], 'idx-inv-type-biz').catch(() => null);
+  teamInvitationsIndexReady.add(TEAM_INVITATIONS_DB);
+}
+
+async function ensurePdvTerminalCodeIndex(req, dbName) {
+  if (pdvTerminalCodeIndexReady.has(dbName)) return;
+  const safeDb = String(dbName || '').replace(/[^a-z0-9_-]/g, '-');
+  await ensureIndex(req, dbName, ['type', 'terminalCode'], `idx-${safeDb}-pdv-termcode`).catch(() => null);
+  await ensureIndex(req, dbName, ['type', 'code'], `idx-${safeDb}-pdv-code`).catch(() => null);
+  await ensureIndex(req, dbName, ['type', 'terminals.code'], `idx-${safeDb}-pdv-terms-code`).catch(() => null);
+  pdvTerminalCodeIndexReady.add(dbName);
 }
 const clientDocumentsInflight = new Map();
 
@@ -460,11 +506,12 @@ function writeClientDocumentsCache(uid, docs) {
 
 /**
  * Lectura Mango paginada. Preferible a _all_docs cuando hay índice.
+ * Default maxDocs 5k (antes 50k): callers calientes deben pasar tope explícito.
  */
 export async function findDocuments(req, dbName, selector, options = {}) {
   const encodedDbName = encodeURIComponent(dbName);
   const pageSize = Math.min(Math.max(1, Number(options.pageSize) || 500), 1000);
-  const maxDocs = Math.min(Math.max(1, Number(options.maxDocs) || 50_000), 100_000);
+  const maxDocs = Math.min(Math.max(1, Number(options.maxDocs) || 5_000), 100_000);
   const docs = [];
   let bookmark;
   let previousBookmark;
@@ -1869,16 +1916,20 @@ export async function listNotificationsByUser(req, userId) {
   const uid = String(userId || '').trim();
   if (!uid) return [];
 
+  await setupDatabaseIndexes(req, NOTIFICATIONS_DB).catch(() => null);
+
+  // Front capea ~80; no hace falta 3k ni _all_docs de toda la DB.
   let docs = [];
   try {
     docs = await findDocuments(
       req,
       NOTIFICATIONS_DB,
       { type: 'notification', user_id: uid },
-      { pageSize: 400, maxDocs: 3_000 },
+      { pageSize: 200, maxDocs: 400 },
     );
   } catch {
-    docs = await getAllDocuments(req, NOTIFICATIONS_DB);
+    // Índice aún no listo: vacío (nunca escanear notifications enteras).
+    docs = [];
   }
 
   return docs
@@ -2489,7 +2540,18 @@ export async function findAllAccountsByEmail(req, email) {
   }
 
   await ensureDatabase(req, ACCOUNTS_DB);
-  const docs = await getAllDocuments(req, ACCOUNTS_DB);
+  await ensureAccountsEmailIndex(req);
+  let docs = [];
+  try {
+    docs = await findDocuments(
+      req,
+      ACCOUNTS_DB,
+      { type: 'account', email: normalizedEmail },
+      { pageSize: 50, maxDocs: 100 },
+    );
+  } catch {
+    docs = [];
+  }
   return findDuplicateEmailAccounts(docs, normalizedEmail);
 }
 
@@ -2510,8 +2572,18 @@ export async function findAccountByAppleId(req, appleId) {
   }
 
   await ensureDatabase(req, ACCOUNTS_DB);
-  const docs = await getAllDocuments(req, ACCOUNTS_DB);
-  return docs.find((doc) => doc.type === 'account' && !doc.deletedAt && doc.appleId === id) || null;
+  await ensureAccountsEmailIndex(req);
+  try {
+    const docs = await findDocuments(
+      req,
+      ACCOUNTS_DB,
+      { type: 'account', appleId: id },
+      { pageSize: 10, maxDocs: 20 },
+    );
+    return docs.find((doc) => doc.type === 'account' && !doc.deletedAt && doc.appleId === id) || null;
+  } catch {
+    return null;
+  }
 }
 
 export async function findAccountByUserId(req, userId) {
@@ -2550,7 +2622,18 @@ export async function resolveDataOwnerUserId(req, userId) {
 
 export async function listAccounts(req) {
   await ensureDatabase(req, ACCOUNTS_DB);
-  const docs = await getAllDocuments(req, ACCOUNTS_DB);
+  await ensureAccountsEmailIndex(req);
+  let docs = [];
+  try {
+    docs = await findDocuments(
+      req,
+      ACCOUNTS_DB,
+      { type: 'account' },
+      { pageSize: 500, maxDocs: 10_000 },
+    );
+  } catch {
+    docs = [];
+  }
 
   return docs
     .filter((doc) => doc?.type === 'account' && !doc?.deletedAt)
@@ -2563,8 +2646,10 @@ export async function saveAccount(req, account) {
   }
 
   await ensureDatabase(req, ACCOUNTS_DB);
-  const docs = await getAllDocuments(req, ACCOUNTS_DB);
-  assertAccountEmailUnique(docs, account.email, account.user_id);
+  const emailDocs = account.email
+    ? await findAllAccountsByEmail(req, account.email)
+    : [];
+  assertAccountEmailUnique(emailDocs, account.email, account.user_id);
 
   let doc = account;
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -2994,8 +3079,24 @@ export function getClockinsDbName() {
 export async function listClockinsByBusiness(req, businessId) {
   const db = getClockinsDbName();
   await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
+  await ensureClockinsBusinessIndex(req, db);
   const bareId = String(businessId || '').replace(/^business:/, '').trim();
+  if (!bareId) return [];
+  let docs = [];
+  try {
+    docs = await findDocuments(
+      req,
+      db,
+      { type: 'clockin', business_id: bareId },
+      { pageSize: 500, maxDocs: 20_000 },
+    );
+  } catch {
+    try {
+      docs = await findDocuments(req, db, { type: 'clockin' }, { pageSize: 500, maxDocs: 20_000 });
+    } catch {
+      docs = [];
+    }
+  }
   return docs
     .filter((doc) => {
       if (doc?.type !== 'clockin' || doc?.deletedAt) return false;
@@ -4272,16 +4373,15 @@ export async function getClientDocumentsForUser(req, userId) {
     let docs;
     try {
       // Solo clientes del titular (no _all_docs de toda la DB multi-tenant).
-      // pageSize 1000 → menos idas a Couch en carteras grandes (~6k docs ≈ 7 páginas).
       docs = await findDocuments(
         req,
         db,
         { type: 'client', user_id: uid },
-        { pageSize: 1000, maxDocs: 50_000 },
+        { pageSize: 1000, maxDocs: 20_000 },
       );
     } catch {
-      const all = await getAllDocuments(req, db);
-      docs = all.filter((doc) => doc?.type === 'client' && doc?.user_id === uid);
+      // Índice aún no listo: vacío (nunca escanear clients DB entero).
+      docs = [];
     }
 
     const clients = docs.filter(
@@ -6462,13 +6562,14 @@ export function sanitizeDeliveryOrder(doc) {
 
 /**
  * Pedidos delivery del titular.
- * @param {{ dateFrom?: string }} [options] Si hay dateFrom (ISO), Couch filtra por createdAt
+ * @param {{ dateFrom?: string, maxDocs?: number }} [options] Si hay dateFrom (ISO), Couch filtra por createdAt
  *   — el TPV/caja del día no deben cargar meses de histórico.
  */
 export async function listDeliveryOrdersByUser(req, userId, options = {}) {
   const uid = String(userId || '').trim();
   const dateFrom = String(options?.dateFrom || '').trim();
-  const maxDocs = Math.min(Math.max(1, Number(options?.maxDocs) || 100_000), 100_000);
+  // Default 8k (antes 100k): callers calientes pasan dateFrom / maxDocs explícito.
+  const maxDocs = Math.min(Math.max(1, Number(options?.maxDocs) || 8_000), 100_000);
   const db = getDeliveryDbName();
   await ensureDatabase(req, db);
   await ensureDeliveryTypeUserIndex(req, db);
@@ -6480,26 +6581,17 @@ export async function listDeliveryOrdersByUser(req, userId, options = {}) {
     ? { ...baseSelector, createdAt: { $gte: dateFrom } }
     : baseSelector;
 
-  // Mango por type+user_id (+ createdAt si hay ventana): no _all_docs del DB compartido.
-  let docs;
+  // Mango por type+user_id (+ createdAt si hay ventana). Nunca _all_docs del DB compartido.
+  let docs = [];
   try {
     docs = await findDocuments(req, db, selector, { pageSize: 500, maxDocs });
   } catch {
     if (dateFrom) {
-      // Índice compuesto aún no listo: al menos limitamos al titular y filtramos en memoria.
       try {
         docs = await findDocuments(req, db, baseSelector, { pageSize: 500, maxDocs });
       } catch {
-        const all = await getDeliveryDatabaseDocumentsInflight(req);
-        docs = all.filter(
-          (doc) => doc?.type === 'delivery_order' && (!uid || doc?.user_id === uid),
-        );
+        docs = [];
       }
-    } else {
-      const all = await getDeliveryDatabaseDocumentsInflight(req);
-      docs = all.filter(
-        (doc) => doc?.type === 'delivery_order' && (!uid || doc?.user_id === uid),
-      );
     }
   }
 
@@ -8014,10 +8106,59 @@ export async function findPointOfSaleByTerminalCode(req, terminalCode, excludePd
 
 /** Resuelve código tablet (PDV) o código de terminal sala (SALA-*). */
 export async function resolveTerminalLoginCode(req, terminalCode, excludePdvId = '') {
+  const code = String(terminalCode || '').trim().toUpperCase();
+  if (!code) return null;
   const db = getDeliveryDbName();
   await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
-  return resolveTerminalLoginFromDocs(docs, terminalCode, excludePdvId);
+  await ensurePdvTerminalCodeIndex(req, db);
+
+  const tryResolve = (docs) => resolveTerminalLoginFromDocs(docs, code, excludePdvId);
+
+  try {
+    const byTerminal = await findDocuments(
+      req,
+      db,
+      { type: 'point_of_sale', terminalCode: code },
+      { pageSize: 50, maxDocs: 100 },
+    );
+    const hit = tryResolve(byTerminal);
+    if (hit) return hit;
+  } catch { /* continue */ }
+
+  try {
+    const byCode = await findDocuments(
+      req,
+      db,
+      { type: 'point_of_sale', code },
+      { pageSize: 50, maxDocs: 100 },
+    );
+    const hit = tryResolve(byCode);
+    if (hit) return hit;
+  } catch { /* continue */ }
+
+  try {
+    const byNested = await findDocuments(
+      req,
+      db,
+      { type: 'point_of_sale', 'terminals.code': code },
+      { pageSize: 50, maxDocs: 100 },
+    );
+    const hit = tryResolve(byNested);
+    if (hit) return hit;
+  } catch { /* continue */ }
+
+  // Fallback estrecho: solo PDVs (nunca _all_docs del delivery compartido).
+  try {
+    const pdvs = await findDocuments(
+      req,
+      db,
+      { type: 'point_of_sale' },
+      { pageSize: 500, maxDocs: 5_000 },
+    );
+    return tryResolve(pdvs);
+  } catch {
+    return null;
+  }
 }
 
 export async function findTeamMemberByPosPin(req, businessId, pin) {
@@ -8025,16 +8166,22 @@ export async function findTeamMemberByPosPin(req, businessId, pin) {
   const business = await findBusinessById(req, businessId);
   if (!business) return null;
 
-  const memberIds = new Set(
-    (Array.isArray(business.members) ? business.members : [])
-      .map((m) => String(m.user_id || '').trim())
-      .filter(Boolean),
-  );
-  if (business.owner_user_id) memberIds.add(String(business.owner_user_id).trim());
+  const memberIds = [
+    ...new Set(
+      [
+        ...(Array.isArray(business.members) ? business.members : []).map((m) =>
+          String(m.user_id || '').trim(),
+        ),
+        String(business.owner_user_id || '').trim(),
+      ].filter(Boolean),
+    ),
+  ];
 
-  const accounts = await listAccounts(req);
+  const accounts = await Promise.all(
+    memberIds.map((id) => findAccountByUserId(req, id).catch(() => null)),
+  );
   for (const account of accounts) {
-    if (!memberIds.has(account.user_id)) continue;
+    if (!account) continue;
     if (account.deletedAt || account.status === 'inactive') continue;
     if (account.posPinHash && verifyPosPin(pin, account.posPinHash)) {
       return account;
@@ -8614,7 +8761,8 @@ export function sumTpvRegisterReturnAmountForOrder(transactions, orderId) {
 }
 
 export async function getNextDeliveryTicketNumber(req, userId) {
-  const orders = await listDeliveryOrdersByUser(req, userId);
+  // Solo recientes: el máximo T-NNNNNN está entre los más nuevos.
+  const orders = await listDeliveryOrdersByUser(req, userId, { maxDocs: 3_000 });
   const maxNum = (Array.isArray(orders) ? orders : []).reduce((max, o) => {
     const m = String(o?.ticketNumber || '').match(/^T-(\d+)$/i);
     const n = m ? parseInt(m[1], 10) : 0;
@@ -11839,18 +11987,14 @@ export async function listCatalogItemsByUser(req, userId, { module: filterModule
     if (uid && filterModule === 'stock') {
       selector = { type: 'catalog_item', user_id: uid, module: 'stock' };
     } else if (uid && filterModule === 'catalog') {
-      // Carta: excluir almacén puro en el servidor (menos payload).
-      selector = {
-        type: 'catalog_item',
-        user_id: uid,
-        module: { $ne: 'stock' },
-      };
+      // Igualdad indexable type+user_id; el post-filter (module||'catalog') mantiene semántica.
+      selector = { type: 'catalog_item', user_id: uid };
     } else if (uid) {
       selector = { type: 'catalog_item', user_id: uid };
     } else if (filterModule === 'stock') {
       selector = { type: 'catalog_item', module: 'stock' };
     } else if (filterModule === 'catalog') {
-      selector = { type: 'catalog_item', module: { $ne: 'stock' } };
+      selector = { type: 'catalog_item' };
     } else {
       selector = { type: 'catalog_item' };
     }
@@ -12673,7 +12817,49 @@ export async function listBusinessesByUser(req, userId) {
   const uid = String(userId || '').replace(/^account:/, '').trim();
   if (!uid) return [];
   await ensureDatabase(req, BUSINESSES_DB);
-  const docs = await getAllDocuments(req, BUSINESSES_DB);
+  await ensureBusinessesUserIndex(req);
+
+  let docs = [];
+  let mangoOk = false;
+  try {
+    const [owned, memberOf] = await Promise.all([
+      findDocuments(
+        req,
+        BUSINESSES_DB,
+        { type: 'business', owner_user_id: uid },
+        { pageSize: 200, maxDocs: 1_000 },
+      ).catch(() => []),
+      findDocuments(
+        req,
+        BUSINESSES_DB,
+        { type: 'business', 'members.user_id': uid },
+        { pageSize: 200, maxDocs: 1_000 },
+      ).catch(() => []),
+    ]);
+    mangoOk = true;
+    const byId = new Map();
+    for (const d of [...owned, ...memberOf]) {
+      if (d?._id) byId.set(d._id, d);
+    }
+    docs = [...byId.values()];
+  } catch {
+    docs = [];
+  }
+
+  // Solo si falló Mango dirigido: type=business (nunca _all_docs).
+  if (!mangoOk) {
+    try {
+      docs = await findDocuments(
+        req,
+        BUSINESSES_DB,
+        { type: 'business' },
+        { pageSize: 500, maxDocs: 5_000 },
+      );
+    } catch {
+      docs = [];
+    }
+  }
+
   return docs
     .filter(
       (doc) =>
@@ -13384,14 +13570,45 @@ export async function listPendingInvitationsByEmail(req, email) {
   const normalized = normalizeEmailForLookup(email);
   if (!normalized) return [];
   await ensureDatabase(req, TEAM_INVITATIONS_DB);
-  const docs = await getAllDocuments(req, TEAM_INVITATIONS_DB);
+  await ensureTeamInvitationsEmailIndex(req);
+  let docs = [];
+  try {
+    docs = await findDocuments(
+      req,
+      TEAM_INVITATIONS_DB,
+      { type: 'team_invitation', email: normalized, status: 'pending' },
+      { pageSize: 100, maxDocs: 500 },
+    );
+  } catch {
+    try {
+      docs = await findDocuments(
+        req,
+        TEAM_INVITATIONS_DB,
+        { type: 'team_invitation', email: normalized },
+        { pageSize: 100, maxDocs: 500 },
+      );
+    } catch {
+      docs = [];
+    }
+  }
   return docs.filter((d) => isInvitationActive(d) && d.email === normalized);
 }
 
 export async function listInvitationsByBusiness(req, businessId, { includeAll = false } = {}) {
   if (!businessId) return [];
   await ensureDatabase(req, TEAM_INVITATIONS_DB);
-  const docs = await getAllDocuments(req, TEAM_INVITATIONS_DB);
+  await ensureTeamInvitationsEmailIndex(req);
+  let docs = [];
+  try {
+    docs = await findDocuments(
+      req,
+      TEAM_INVITATIONS_DB,
+      { type: 'team_invitation', business_id: businessId },
+      { pageSize: 200, maxDocs: 2_000 },
+    );
+  } catch {
+    docs = [];
+  }
   return docs.filter((d) => {
     if (!d || d.type !== 'team_invitation' || d.deletedAt) return false;
     if (d.business_id !== businessId) return false;
@@ -13403,9 +13620,8 @@ export async function listInvitationsByBusiness(req, businessId, { includeAll = 
 export async function findPendingInvitationForEmailAndBusiness(req, email, businessId) {
   const normalized = normalizeEmailForLookup(email);
   if (!normalized || !businessId) return null;
-  await ensureDatabase(req, TEAM_INVITATIONS_DB);
-  const docs = await getAllDocuments(req, TEAM_INVITATIONS_DB);
-  return docs.find((d) => isInvitationActive(d) && d.email === normalized && d.business_id === businessId) || null;
+  const pending = await listPendingInvitationsByEmail(req, normalized);
+  return pending.find((d) => d.business_id === businessId) || null;
 }
 
 // ─── Worker invite links (QR / enlace abierto por centro de trabajo) ─────────
@@ -14776,13 +14992,14 @@ async function getNotificationDocsForScope(req, scopeId) {
     await setupDatabaseIndexes(req, NOTIFICATIONS_DB).catch(() => null);
 
     const bizVariants = [scope, `business:${scope}`];
+    const mangoOpts = { pageSize: 200, maxDocs: 800 };
     const queries = [
       ...bizVariants.map((businessId) =>
         findDocuments(
           req,
           NOTIFICATIONS_DB,
           { type: 'notification', businessId },
-          { pageSize: 400, maxDocs: 4_000 },
+          mangoOpts,
         ).catch(() => []),
       ),
       // Scope = user_id (sin empresa activa). Con businessId en el doc, matchesScope ya no mezcla empresas.
@@ -14790,21 +15007,12 @@ async function getNotificationDocsForScope(req, scopeId) {
         req,
         NOTIFICATIONS_DB,
         { type: 'notification', user_id: scope },
-        { pageSize: 400, maxDocs: 4_000 },
+        mangoOpts,
       ).catch(() => []),
     ];
 
-    let batches = await Promise.all(queries);
-    const any = batches.some((b) => Array.isArray(b) && b.length > 0);
-    if (!any) {
-      // Fallback legado si el índice aún no está listo
-      try {
-        const all = await getAllDocuments(req, NOTIFICATIONS_DB);
-        batches = [all];
-      } catch {
-        batches = [];
-      }
-    }
+    // Sin fallback _all_docs: si el índice falla, vacío (mejor que tumbar Couch).
+    const batches = await Promise.all(queries);
 
     const byId = new Map();
     for (const batch of batches) {

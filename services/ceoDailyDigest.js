@@ -45,6 +45,9 @@ export {
 
 export const CEO_DAILY_DIGEST_RULE_ID = 'ceo_daily_digest';
 
+/** Category APNs → iOS Notification Content Extension (texto expandido). */
+export const VERTIAL_EXPANDABLE_PUSH_CATEGORY = 'VERTIAL_EXPANDABLE';
+
 const CAJA_BUSINESS_TYPES = new Set(['delivery', 'restaurant', 'events', 'food', 'heladeria']);
 
 function bareId(value) {
@@ -218,11 +221,13 @@ export async function emitCeoDailyDigestForBusiness({
       {
         title: 'Vertial',
         body: pushBody,
+        category: VERTIAL_EXPANDABLE_PUSH_CATEGORY,
         data: {
           route,
           notificationId: String(created.find((n) => n.user_id === uid || n.userId === uid)?.id || ''),
           ruleId: CEO_DAILY_DIGEST_RULE_ID,
           title: pushHeadline,
+          category: VERTIAL_EXPANDABLE_PUSH_CATEGORY,
         },
         collapseId: collapse,
       },

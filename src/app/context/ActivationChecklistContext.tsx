@@ -656,7 +656,7 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
     // Al recuperar foco no hay datos nuevos casi nunca: throttle para no
     // relanzar tiendas + marcas + catálogo en cada cambio de pestaña.
     const onFocus = () => {
-      if (Date.now() - lastLoadAt < 30_000) return;
+      if (Date.now() - lastLoadAt < 120_000) return;
       void load();
     };
     window.addEventListener('work-centers:changed', scheduleLoad);

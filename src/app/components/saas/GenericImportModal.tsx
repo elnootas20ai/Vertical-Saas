@@ -293,11 +293,16 @@ export function GenericImportModal({
         setImportReport(report);
         setStep('results');
         toast.success(
-          `${count} entrada(s) importadas. Revisa los avisos antes de continuar.`,
+          `Carga completada · ${count} entrada${count === 1 ? '' : 's'}. Revisa los avisos.`,
           { duration: 6000 },
         );
       } else {
-        setStep('success');
+        toast.success(
+          `Carga completada · ${count} entrada${count === 1 ? '' : 's'}`,
+          { duration: 6000 },
+        );
+        resetImportState();
+        onClose();
       }
     } catch (err) {
       if (isImportAbortError(err) || abortController.signal.aborted || importCancelledRef.current) {
@@ -358,7 +363,7 @@ export function GenericImportModal({
                 {step === 'preview' && `${mappedEntries.length} entradas listas para importar`}
                 {step === 'importing' && (importProgress?.phase || 'Importando datos…')}
                 {step === 'results' && 'Resultado de la importación'}
-                {step === 'success' && 'Importación completada'}
+                {step === 'success' && 'Carga completada'}
               </p>
             </div>
           </div>
@@ -647,7 +652,7 @@ export function GenericImportModal({
               </div>
               <div className="space-y-2">
                 <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
-                  Importación completada
+                  Carga completada
                 </p>
                 <p className="text-sm text-gray-600 dark:text-gray-400">
                   {importSuccessCount} entrada(s) de {normalizedImportLabel.toLowerCase()} importadas correctamente.

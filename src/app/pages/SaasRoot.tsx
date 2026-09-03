@@ -1,8 +1,10 @@
 import { Outlet, useLocation, useNavigate, Navigate } from 'react-router';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { Loader2 } from 'lucide-react';
+
+import '../../styles/vertial-saas.css';
 
 import { AppProvider, useApp } from '../context/AppContext';
 import { PlanScopedBusinessProvider } from '../context/PlanScopedBusinessProvider';
@@ -644,6 +646,26 @@ export function SaasRoot() {
   return <SaasRootProviders />;
 }
 
+/** Solo desguace / rutas scrapyard: evita listScrapyardVehicles en Delivery etc. */
+function needsScrapyardProvider(pathname: string, businessType: string | undefined | null) {
+  if (String(businessType || '') === 'scrapyard') return true;
+  const p = String(pathname || '');
+  return (
+    p.includes('/scrapyard')
+    || p.includes('/desguaces')
+    || p.includes('/vertical/desguaces')
+  );
+}
+
+function ScrapyardProviderGate({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  const businessType = useBusinessOptional()?.currentBusiness?.businessType;
+  if (!needsScrapyardProvider(location.pathname, businessType)) {
+    return <>{children}</>;
+  }
+  return <ScrapyardProvider>{children}</ScrapyardProvider>;
+}
+
 function SaasRootProviders() {
   return (
     <SetupProgressProvider>
@@ -652,12 +674,12 @@ function SaasRootProviders() {
           <AppProvider>
             <PlanScopedBusinessProvider>
               <PlanUpgradePrepProvider>
-                <ScrapyardProvider>
+                <ScrapyardProviderGate>
                   <ActivationChecklistProvider>
                     <BusinessScopeUrlSync />
                     <SaasContent />
                   </ActivationChecklistProvider>
-                </ScrapyardProvider>
+                </ScrapyardProviderGate>
               </PlanUpgradePrepProvider>
             </PlanScopedBusinessProvider>
           </AppProvider>

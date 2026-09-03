@@ -63,7 +63,10 @@ export function useDeliveryOrdersLive({
 
   useEffect(() => {
     if (!enabled || !authUserId || fallbackPollMs <= 0 || sseOk) return;
-    const iv = setInterval(onRefresh, fallbackPollMs);
+    const iv = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      onRefresh();
+    }, fallbackPollMs);
     return () => clearInterval(iv);
   }, [enabled, authUserId, fallbackPollMs, sseOk, onRefresh]);
 

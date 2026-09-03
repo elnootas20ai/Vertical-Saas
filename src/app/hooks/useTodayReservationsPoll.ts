@@ -26,7 +26,10 @@ export function useTodayReservationsPoll(
 
   useEffect(() => {
     void reloadReservations();
-    const interval = setInterval(() => void reloadReservations(), 20_000);
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      void reloadReservations();
+    }, 30_000);
     return () => clearInterval(interval);
   }, [reloadReservations]);
 

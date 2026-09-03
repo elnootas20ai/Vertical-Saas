@@ -1,0 +1,1 @@
+function u(n,r){var e,t;return String(((t=(e=r.find(i=>i.user_id===n))==null?void 0:e.employment)==null?void 0:t.salesPointId)||"").trim()}function s(n,r){const e=String(n||"").trim(),t=String(r||"").trim();return!e||!t?!1:e===t||e===`wc:${t}`||t===`wc:${e}`}function f(n,r,e,t){if(r==="all")return!0;const i=u(n,e);return!!(s(i,r)||t&&s(t,r))}export{f as m,s};

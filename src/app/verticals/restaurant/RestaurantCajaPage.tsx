@@ -730,7 +730,10 @@ export function RestaurantCajaPage() {
   }, [loading, scopedSessions, deepLinkSessionId, validateParam, setSearchParams]);
 
   useEffect(() => {
-    const id = window.setInterval(() => { void loadData({ silent: true }); }, 30000);
+    const id = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      void loadData({ silent: true });
+    }, 30_000);
     return () => window.clearInterval(id);
   }, [loadData]);
 

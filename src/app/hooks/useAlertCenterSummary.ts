@@ -7,6 +7,8 @@ import {
   mergeDocumentAlertsIntoSummary,
 } from '../lib/documentAlertsApi';
 import { resolveBusinessDataUserId } from '../lib/tenantUserId';
+import { supportsVehicleInventoryModule } from '../lib/vehicleVertical';
+import { isCompraventaBusinessType } from '../lib/compraventaSetup';
 
 export function useAlertCenterSummary(
   businessId: string | undefined,
@@ -16,7 +18,10 @@ export function useAlertCenterSummary(
   const currentBusiness = useBusinessOptional()?.currentBusiness;
   const resolvedDataUserId =
     options?.dataUserId ?? resolveBusinessDataUserId(auth?.user ?? null, currentBusiness);
-  const includeDocumentAlerts = options?.includeDocumentAlerts !== false;
+  const bt = currentBusiness?.businessType;
+  const includeDocumentAlerts =
+    options?.includeDocumentAlerts ??
+    (supportsVehicleInventoryModule(bt) || isCompraventaBusinessType(bt));
 
   const [summary, setSummary] = useState<AlertSummary | null>(null);
   const [loading, setLoading] = useState(Boolean(businessId));
@@ -75,8 +80,22 @@ export function useAlertCenterSummary(
     void reload();
     const pollMs = options?.pollMs ?? 300_000;
     if (!businessId || pollMs <= 0) return undefined;
-    const id = window.setInterval(() => { void reload(); }, pollMs);
-    return () => window.clearInterval(id);
+
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      void reload();
+    };
+    const id = window.setInterval(tick, pollMs);
+
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void reload();
+    };
+    document.addEventListener('visibilitychange', onVis);
+
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVis);
+    };
   }, [businessId, reload, options?.pollMs]);
 
   return { summary, loading, reload, unresolved: summary?.unresolved ?? 0 };

@@ -175,22 +175,23 @@ async function sendWebPushToUser(req, userId, payload) {
 /**
  * Envía push web y nativo (iOS APNs) según política de alertas.
  *
- * - Con ruleId/category: solo whitelist + plan (pushAlertPolicy) → iPhone con sonido.
- * - Sin contexto de regla (avisos puntuales): web + nativo siempre.
+ * Por ahora solo cierre de caja (whitelist desde catálogo Alertas).
+ * Sin ruleId/category → no push (evita fichajes/chat/etc. al iPhone).
  *
  * @param {object|null} req
  * @param {string} userId
- * @param {{ title: string; body: string; data?: Record<string, unknown>; sound?: string; badge?: number; collapseId?: string }} payload
+ * @param {{ title: string; body: string; data?: Record<string, unknown>; sound?: string; badge?: number; collapseId?: string; category?: string; mutableContent?: boolean }} payload
  * @param {{ ruleId?: string; category?: string; channels?: string[] }} [options]
  */
 export async function sendPushToUser(req, userId, payload, options = {}) {
   const { ruleId, category, channels = ['push'] } = options;
   const hasRuleContext = Boolean(ruleId || category);
 
-  if (hasRuleContext) {
-    const allowed = await shouldSendMobilePush(req, { userId, ruleId, category, channels });
-    if (!allowed) return;
-  }
+  // Sin regla de Alertas: no enviar (campana in-app puede seguir por su sitio).
+  if (!hasRuleContext) return;
+
+  const allowed = await shouldSendMobilePush(req, { userId, ruleId, category, channels });
+  if (!allowed) return;
 
   // APNs/FCM: data solo strings
   const rawData = payload.data && typeof payload.data === 'object' ? payload.data : {};
@@ -200,9 +201,14 @@ export async function sendPushToUser(req, userId, payload, options = {}) {
     data[k] = typeof v === 'string' ? v : String(v);
   }
 
+  /** Category iOS Content Extension (expandir parte largo). */
+  const apnsCategory = String(payload.category || data.apnsCategory || '').trim();
+  if (apnsCategory && !data.category) data.category = apnsCategory;
+
   const nativePayload = {
     ...payload,
     data,
+    category: apnsCategory || undefined,
     sound: payload.sound || 'default',
     collapseId: payload.collapseId || data.notificationId || undefined,
   };

@@ -8,8 +8,20 @@ import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useModalClose } from '../../hooks/useModalClose';
+import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
+import { GenericImportModal } from '../../components/saas/GenericImportModal';
 import { createVerticalApi, type VerticalEntity } from '../../lib/verticalApiFactory';
 import { resolveEventsUserId } from '../../lib/eventsFlow';
+import { bulkCreateVerticalEntries, entryStr } from '../../lib/bulkVerticalImport';
+import {
+  downloadEventsTpvCatalogImportTemplate,
+  EVENTS_TPV_CATALOG_HEADER_ALIASES,
+  EVENTS_TPV_CATALOG_IMPORT_FIELDS,
+  EVENTS_TPV_CATALOG_SHEET_NAME,
+  EVENTS_TPV_CATALOG_TEMPLATE_FILENAME,
+  isEventsTpvCatalogExampleName,
+  parseEventsTpvCatalogPrice,
+} from '../../lib/eventsTpvCatalogExcelTemplate';
 import {
   VERTIAL_BTN_PRIMARY,
   VERTIAL_BTN_SECONDARY,
@@ -50,6 +62,7 @@ export function EventsTpvProductsCatalog() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [editing, setEditing] = useState<EventTpvProduct | null>(null);
   const [form, setForm] = useState<ProductForm>(EMPTY);
   const [precioText, setPrecioText] = useState('');
@@ -153,6 +166,35 @@ export function EventsTpvProductsCatalog() {
     }
   };
 
+  const handleImportEntries = async (entries: Record<string, string>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return 0;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+      const nombre = entryStr(e, 'name', 'nombre');
+      if (!nombre || isEventsTpvCatalogExampleName(nombre)) return null;
+      const descParts = [
+        entryStr(e, 'description', 'descripcion'),
+        entryStr(e, 'category', 'categoria')
+          ? `Cat: ${entryStr(e, 'category', 'categoria')}`
+          : '',
+      ].filter(Boolean);
+      return {
+        nombre,
+        precio: parseEventsTpvCatalogPrice(entryStr(e, 'price', 'precio')),
+        descripcion: descParts.join(' · '),
+        activo: true,
+      };
+    });
+    if (created > 0) {
+      await loadData();
+    } else {
+      toast.error('No se pudo importar ningún producto (¿filas de ejemplo?)');
+    }
+    return created;
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16 text-stone-500">
@@ -179,9 +221,15 @@ export function EventsTpvProductsCatalog() {
               className="w-full min-h-11 rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 pl-10 pr-3 text-sm"
             />
           </div>
-          <button type="button" onClick={openCreate} className={VERTIAL_BTN_PRIMARY}>
-            Nuevo producto
-          </button>
+          <AddButtonDropdown
+            label="Nuevo producto"
+            onQuickAdd={openCreate}
+            onImport={() => setShowImportModal(true)}
+            quickAddLabel="Alta rápida"
+            quickAddDesc="Formulario de producto"
+            importAddLabel="Importar Excel"
+            importAddDesc="Plantilla con nombre, precio y más"
+          />
         </div>
 
         <div className={`${VERTIAL_SURFACE} overflow-hidden`}>
@@ -332,6 +380,19 @@ export function EventsTpvProductsCatalog() {
           </div>
         </div>
       )}
+
+      <GenericImportModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        moduleLabel="Productos TPV evento"
+        templateFileName={EVENTS_TPV_CATALOG_TEMPLATE_FILENAME}
+        fields={EVENTS_TPV_CATALOG_IMPORT_FIELDS}
+        onImport={handleImportEntries}
+        onDownloadTemplate={downloadEventsTpvCatalogImportTemplate}
+        headerAliases={EVENTS_TPV_CATALOG_HEADER_ALIASES}
+        skipMappingWhenComplete
+        importSheetName={EVENTS_TPV_CATALOG_SHEET_NAME}
+      />
     </>
   );
 }

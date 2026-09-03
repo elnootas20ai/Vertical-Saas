@@ -14,10 +14,11 @@ import {
 import { EVENT_STAGE_CONFIG, type EventContractStage, type EventRecord } from '../../../../lib/eventsTypes';
 import { EventHubStageProgress } from '../../../../components/saas/events/EventContractStepper';
 import { formatEventPaymentBreakdown } from '../../../../components/saas/events/EventsStagePaymentCard';
+import { EventsFixedPdvsHubModal } from '../../../../components/saas/events/EventsFixedPdvsHubModal';
 import { VERTIAL_BTN_PRIMARY } from '../../../../lib/vertialUiTokens';
 import {
   PartyPopper, Plus, ArrowRight,
-  Loader2, RefreshCw, MapPin, FilePenLine,
+  Loader2, RefreshCw, MapPin, FilePenLine, ChevronDown,
 } from 'lucide-react';
 
 function fmtEuro(n: number): string {
@@ -44,10 +45,30 @@ function hubPaymentLabel(event: EventRecord): { text: string; className: string 
   return { text, className: 'text-rose-700 dark:text-rose-300' };
 }
 
+function readHubSectionOpen(key: string, fallback = false): boolean {
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const v = sessionStorage.getItem(key);
+    if (v === '1') return true;
+    if (v === '0') return false;
+  } catch {
+    /* noop */
+  }
+  return fallback;
+}
+
+function writeHubSectionOpen(key: string, open: boolean) {
+  try {
+    sessionStorage.setItem(key, open ? '1' : '0');
+  } catch {
+    /* noop */
+  }
+}
+
 export function EventsHub() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { currentBusiness, businessesFetchSettled } = useBusiness();
+  const { currentBusiness, businesses, businessesFetchSettled } = useBusiness();
   const businessId = resolveBusinessScopeId(currentBusiness);
   const dataUserId = useMemo(
     () => resolveEventsUserId(user, currentBusiness),
@@ -60,6 +81,13 @@ export function EventsHub() {
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [contractDraft, setContractDraft] = useState<ContractWizardDraftPeek | null>(null);
+  const [contratacionesOpen, setContratacionesOpen] = useState(() =>
+    readHubSectionOpen('events_hub_contrataciones_open', false),
+  );
+  const [presupuestosOpen, setPresupuestosOpen] = useState(() =>
+    readHubSectionOpen('events_hub_presupuestos_open', false),
+  );
+  const [fixedPdvsOpen, setFixedPdvsOpen] = useState(false);
 
   const refreshDraftPeek = useCallback(() => {
     setContractDraft(peekContractWizardDraft(businessId || ''));
@@ -271,159 +299,18 @@ export function EventsHub() {
           </button>
         )}
 
-        <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
-          <section className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 overflow-hidden">
-            <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-200 dark:border-gray-800">
-              <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Contrataciones recientes</h2>
-              <Link
-                to={scoped('/saas/vertical/eventos/contrataciones')}
-                className="text-xs font-semibold text-cyan-600 hover:text-cyan-700 inline-flex items-center gap-1"
-              >
-                Ver todas
-                <ArrowRight className="w-3.5 h-3.5" />
-              </Link>
-            </div>
-            {loading ? (
-              <div className="flex items-center justify-center gap-2 py-12 text-gray-500">
-                <Loader2 className="w-5 h-5 animate-spin" />
-                Cargando…
-              </div>
-            ) : recent.length === 0 ? (
-              <div className="py-12 text-center px-4">
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {loadFailed
-                    ? 'No se pudieron cargar las contrataciones. Pulsa Actualizar.'
-                    : 'No hay contrataciones en curso.'}
-                </p>
-                {!loadFailed && (
-                  <button
-                    type="button"
-                    onClick={() => navigate(scoped('/saas/vertical/eventos/nueva-contratacion'))}
-                    className="mt-3 text-sm font-semibold text-cyan-600 hover:underline"
-                  >
-                    Crear la primera
-                  </button>
-                )}
-              </div>
-            ) : (
-              <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-                {recent.map((event) => {
-                  const stageCfg = EVENT_STAGE_CONFIG[event.estado] || EVENT_STAGE_CONFIG.presupuesto;
-                  const barClass = stageCfg.bar || 'bg-slate-400';
-                  const pay = hubPaymentLabel(event);
-                  return (
-                    <li key={event._id}>
-                      <button
-                        type="button"
-                        onClick={() => navigate(scoped(`/saas/vertical/eventos/${event._id}`))}
-                        className="w-full flex text-left hover:bg-blue-50/40 dark:hover:bg-blue-950/20"
-                      >
-                        <span className={`w-1 shrink-0 ${barClass}`} aria-hidden />
-                        <div className="flex-1 min-w-0 space-y-1.5 px-4 py-3">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <p className="font-semibold text-gray-900 dark:text-gray-100 truncate">{event.nombre}</p>
-                              <p className="text-xs text-gray-500 dark:text-gray-400 flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
-                                <span>{event.cliente}</span>
-                                {event.fecha && <span>{new Date(event.fecha).toLocaleDateString('es-ES')}</span>}
-                                {event.lugar && (
-                                  <span className="inline-flex items-center gap-0.5 truncate">
-                                    <MapPin className="w-3 h-3 shrink-0" />
-                                    {event.lugar}
-                                  </span>
-                                )}
-                              </p>
-                            </div>
-                            <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 tabular-nums shrink-0">
-                              {fmtEuro(Number(event.presupuesto) || 0)}
-                            </span>
-                          </div>
-                          <EventHubStageProgress stage={event.estado} />
-                          <p className={`text-[11px] font-semibold ${pay.className}`}>{pay.text}</p>
-                        </div>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
-
-          <section className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 overflow-hidden">
-            <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-200 dark:border-gray-800">
-              <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Presupuestos abiertos</h2>
-              <Link
-                to={scoped('/saas/vertical/eventos/presupuestos')}
-                className="text-xs font-semibold text-cyan-600 hover:text-cyan-700 inline-flex items-center gap-1"
-              >
-                Ver todos
-                <ArrowRight className="w-3.5 h-3.5" />
-              </Link>
-            </div>
-            {loading ? (
-              <div className="flex items-center justify-center gap-2 py-12 text-gray-500">
-                <Loader2 className="w-5 h-5 animate-spin" />
-                Cargando…
-              </div>
-            ) : recentQuotes.length === 0 ? (
-              <div className="py-12 text-center px-4">
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {loadFailed
-                    ? 'No se pudieron cargar los presupuestos. Pulsa Actualizar.'
-                    : 'Aún no hay presupuestos abiertos.'}
-                </p>
-                {!loadFailed && (
-                  <button
-                    type="button"
-                    onClick={() => navigate(scoped('/saas/vertical/eventos/nueva-contratacion'))}
-                    className="mt-3 text-sm font-semibold text-cyan-600 hover:underline"
-                  >
-                    Crear el primero
-                  </button>
-                )}
-              </div>
-            ) : (
-              <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-                {recentQuotes.map((row) => {
-                  const { stage, rejected } = quoteRowStage(row.kind);
-                  const stageCfg = EVENT_STAGE_CONFIG[stage] || EVENT_STAGE_CONFIG.presupuesto;
-                  const barClass = rejected ? 'bg-[var(--v-rose,#e11d48)]' : (stageCfg.bar || 'bg-slate-400');
-                  return (
-                    <li key={row.id}>
-                      <button
-                        type="button"
-                        onClick={() => navigate(scoped(`/saas/vertical/eventos/${row.eventId}`))}
-                        className="w-full flex text-left hover:bg-blue-50/40 dark:hover:bg-blue-950/20"
-                      >
-                        <span className={`w-1 shrink-0 ${barClass}`} aria-hidden />
-                        <div className="flex-1 min-w-0 space-y-1.5 px-4 py-3">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <p className="font-semibold text-gray-900 dark:text-gray-100 truncate">{row.nombre}</p>
-                              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{row.cliente}</p>
-                            </div>
-                            <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 tabular-nums shrink-0">
-                              {fmtEuro(row.importe)}
-                            </span>
-                          </div>
-                          <EventHubStageProgress stage={stage} rejected={rejected} />
-                        </div>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
-        </div>
-
         <section className="grid gap-3 sm:grid-cols-3">
+          <button
+            type="button"
+            onClick={() => setFixedPdvsOpen(true)}
+            className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 p-4 hover:border-cyan-300 dark:hover:border-cyan-700 transition-colors text-left"
+          >
+            <p className="font-semibold text-gray-900 dark:text-gray-100">Eventos fijos</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Ajustes, carga de productos y código TPV
+            </p>
+          </button>
           {[
-            {
-              label: 'Eventos fijos',
-              path: '/saas/vertical/eventos/tpv',
-              hint: 'PDV fijos: fechas, carga y código TPV',
-            },
             { label: 'Servicios', path: '/saas/events-services', hint: 'Contratación, productos de cobro, espacios y más' },
             { label: 'Ruta de eventos', path: '/saas/vertical/eventos/ruta', hint: 'Eventos, alta y control' },
           ].map((item) => (
@@ -437,7 +324,217 @@ export function EventsHub() {
             </Link>
           ))}
         </section>
+
+        <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
+          <section className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 overflow-hidden">
+            <div className={`flex items-center justify-between gap-3 px-4 py-3 ${contratacionesOpen ? 'border-b border-gray-200 dark:border-gray-800' : ''}`}>
+              <button
+                type="button"
+                onClick={() => {
+                  setContratacionesOpen((v) => {
+                    const next = !v;
+                    writeHubSectionOpen('events_hub_contrataciones_open', next);
+                    return next;
+                  });
+                }}
+                aria-expanded={contratacionesOpen}
+                className="flex min-w-0 flex-1 items-center gap-2 text-left"
+              >
+                <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
+                  Contrataciones recientes
+                </h2>
+                {!loading && recent.length > 0 ? (
+                  <span className="text-[10px] font-semibold text-stone-400 tabular-nums shrink-0">
+                    {recent.length}
+                  </span>
+                ) : null}
+                <ChevronDown
+                  className={`h-4 w-4 shrink-0 text-stone-400 transition-transform ${contratacionesOpen ? 'rotate-180' : ''}`}
+                />
+              </button>
+              <Link
+                to={scoped('/saas/vertical/eventos/contrataciones')}
+                className="text-xs font-semibold text-cyan-600 hover:text-cyan-700 inline-flex items-center gap-1 shrink-0"
+                onClick={(e) => e.stopPropagation()}
+              >
+                Ver todas
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+            {contratacionesOpen ? (
+              loading ? (
+                <div className="flex items-center justify-center gap-2 py-12 text-gray-500">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  Cargando…
+                </div>
+              ) : recent.length === 0 ? (
+                <div className="py-12 text-center px-4">
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    {loadFailed
+                      ? 'No se pudieron cargar las contrataciones. Pulsa Actualizar.'
+                      : 'No hay contrataciones en curso.'}
+                  </p>
+                  {!loadFailed && (
+                    <button
+                      type="button"
+                      onClick={() => navigate(scoped('/saas/vertical/eventos/nueva-contratacion'))}
+                      className="mt-3 text-sm font-semibold text-cyan-600 hover:underline"
+                    >
+                      Crear la primera
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+                  {recent.map((event) => {
+                    const stageCfg = EVENT_STAGE_CONFIG[event.estado] || EVENT_STAGE_CONFIG.presupuesto;
+                    const barClass = stageCfg.bar || 'bg-slate-400';
+                    const pay = hubPaymentLabel(event);
+                    return (
+                      <li key={event._id}>
+                        <button
+                          type="button"
+                          onClick={() => navigate(scoped(`/saas/vertical/eventos/${event._id}`))}
+                          className="w-full flex text-left hover:bg-blue-50/40 dark:hover:bg-blue-950/20"
+                        >
+                          <span className={`w-1 shrink-0 ${barClass}`} aria-hidden />
+                          <div className="flex-1 min-w-0 space-y-1.5 px-4 py-3">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="font-semibold text-gray-900 dark:text-gray-100 truncate">{event.nombre}</p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
+                                  <span>{event.cliente}</span>
+                                  {event.fecha && <span>{new Date(event.fecha).toLocaleDateString('es-ES')}</span>}
+                                  {event.lugar && (
+                                    <span className="inline-flex items-center gap-0.5 truncate">
+                                      <MapPin className="w-3 h-3 shrink-0" />
+                                      {event.lugar}
+                                    </span>
+                                  )}
+                                </p>
+                              </div>
+                              <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 tabular-nums shrink-0">
+                                {fmtEuro(Number(event.presupuesto) || 0)}
+                              </span>
+                            </div>
+                            <EventHubStageProgress stage={event.estado} />
+                            <p className={`text-[11px] font-semibold ${pay.className}`}>{pay.text}</p>
+                          </div>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )
+            ) : null}
+          </section>
+
+          <section className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 overflow-hidden">
+            <div className={`flex items-center justify-between gap-3 px-4 py-3 ${presupuestosOpen ? 'border-b border-gray-200 dark:border-gray-800' : ''}`}>
+              <button
+                type="button"
+                onClick={() => {
+                  setPresupuestosOpen((v) => {
+                    const next = !v;
+                    writeHubSectionOpen('events_hub_presupuestos_open', next);
+                    return next;
+                  });
+                }}
+                aria-expanded={presupuestosOpen}
+                className="flex min-w-0 flex-1 items-center gap-2 text-left"
+              >
+                <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
+                  Presupuestos abiertos
+                </h2>
+                {!loading && recentQuotes.length > 0 ? (
+                  <span className="text-[10px] font-semibold text-stone-400 tabular-nums shrink-0">
+                    {recentQuotes.length}
+                  </span>
+                ) : null}
+                <ChevronDown
+                  className={`h-4 w-4 shrink-0 text-stone-400 transition-transform ${presupuestosOpen ? 'rotate-180' : ''}`}
+                />
+              </button>
+              <Link
+                to={scoped('/saas/vertical/eventos/presupuestos')}
+                className="text-xs font-semibold text-cyan-600 hover:text-cyan-700 inline-flex items-center gap-1 shrink-0"
+                onClick={(e) => e.stopPropagation()}
+              >
+                Ver todos
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+            {presupuestosOpen ? (
+              loading ? (
+                <div className="flex items-center justify-center gap-2 py-12 text-gray-500">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  Cargando…
+                </div>
+              ) : recentQuotes.length === 0 ? (
+                <div className="py-12 text-center px-4">
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    {loadFailed
+                      ? 'No se pudieron cargar los presupuestos. Pulsa Actualizar.'
+                      : 'Aún no hay presupuestos abiertos.'}
+                  </p>
+                  {!loadFailed && (
+                    <button
+                      type="button"
+                      onClick={() => navigate(scoped('/saas/vertical/eventos/nueva-contratacion'))}
+                      className="mt-3 text-sm font-semibold text-cyan-600 hover:underline"
+                    >
+                      Crear el primero
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+                  {recentQuotes.map((row) => {
+                    const { stage, rejected } = quoteRowStage(row.kind);
+                    const stageCfg = EVENT_STAGE_CONFIG[stage] || EVENT_STAGE_CONFIG.presupuesto;
+                    const barClass = rejected ? 'bg-[var(--v-rose,#e11d48)]' : (stageCfg.bar || 'bg-slate-400');
+                    return (
+                      <li key={row.id}>
+                        <button
+                          type="button"
+                          onClick={() => navigate(scoped(`/saas/vertical/eventos/${row.eventId}`))}
+                          className="w-full flex text-left hover:bg-blue-50/40 dark:hover:bg-blue-950/20"
+                        >
+                          <span className={`w-1 shrink-0 ${barClass}`} aria-hidden />
+                          <div className="flex-1 min-w-0 space-y-1.5 px-4 py-3">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="font-semibold text-gray-900 dark:text-gray-100 truncate">{row.nombre}</p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{row.cliente}</p>
+                              </div>
+                              <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 tabular-nums shrink-0">
+                                {fmtEuro(row.importe)}
+                              </span>
+                            </div>
+                            <EventHubStageProgress stage={stage} rejected={rejected} />
+                          </div>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )
+            ) : null}
+          </section>
+        </div>
       </div>
+
+      {dataUserId ? (
+        <EventsFixedPdvsHubModal
+          open={fixedPdvsOpen}
+          userId={dataUserId}
+          businessId={businessId || undefined}
+          business={currentBusiness}
+          accountBusinessCount={businessesFetchSettled ? businesses.length : undefined}
+          tpvPath={scoped('/saas/vertical/eventos/tpv')}
+          onClose={() => setFixedPdvsOpen(false)}
+        />
+      ) : null}
     </Layout>
   );
 }

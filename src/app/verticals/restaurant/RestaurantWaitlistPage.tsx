@@ -124,6 +124,7 @@ export function RestaurantWaitlistPage() {
 
   useEffect(() => {
     const refresh = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       void load();
     }, 45_000);
     return () => window.clearInterval(refresh);

@@ -258,9 +258,12 @@ export function DeliveryOrders() {
 
   useSyncDeliveryPdvFilter(activePdvs, applyGlobalPdvFilter);
 
-  // Auto-refresh every 30s
+  // Auto-refresh every 30s (pausa con pestaña oculta)
   useEffect(() => {
-    const interval = setInterval(() => { if (!loading) loadData(); }, 30_000);
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      if (!loading) loadData();
+    }, 30_000);
     return () => clearInterval(interval);
   }, [loadData, loading]);
 

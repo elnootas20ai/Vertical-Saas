@@ -52,7 +52,7 @@ import { businessTicketInfoFrom, formatTicketCustomerAddress, formatTicketCustom
 import { OrderTicketButtons } from '../../components/delivery/OrderTicketButtons';
 import { fetchClientPromotionsRequest, type ClientPromotion } from '../../lib/clientPromotionsApi';
 import { useTpvCatalog } from '../../hooks/useTpvCatalog';
-import { useEventPortableTpvAllowlist } from '../../hooks/useEventPortableTpvAllowlist';
+import { useEventPortableTpvScope } from '../../hooks/useEventPortableTpvAllowlist';
 import { prefetchTpvCatalog } from '../../lib/tpvCatalogCache';
 import { TpvProductPicker } from '../../components/saas/tpv/TpvProductPicker';
 import { TpvItemCustomizeModal } from '../../components/saas/tpv/TpvItemCustomizeModal';
@@ -1117,7 +1117,7 @@ export function TpvRapidoOrderFlow({
     return null;
   }, [register]);
 
-  const { addClient, clients, clientsTotalCount } = useApp();
+  const { addClient, clients, clientsTotalCount, refreshClients } = useApp();
   const { currentBusiness, businesses, businessesFetchSettled, switchBusiness } = useBusiness();
   const navigate = useNavigate();
   const location = useLocation();
@@ -1125,6 +1125,12 @@ export function TpvRapidoOrderFlow({
   const goBack = onBack ?? (() => navigate(tpvExitPath, { replace: true }));
   const [searchParams, setSearchParams] = useSearchParams();
   const appliedClientIdFromUrl = useRef<string | null>(null);
+
+  // Conteo clientes diferido (no al boot SaaS Delivery): al abrir TPV.
+  useEffect(() => {
+    void refreshClients();
+  }, [refreshClients]);
+
   const tabletBinding = useMemo(() => readTpvTabletBinding(), []);
   const registerScope = useMemo(
     () => resolveTpvRegisterScope({
@@ -1482,11 +1488,12 @@ export function TpvRapidoOrderFlow({
     return register.clockedInWorkers.find((w) => w.id === effectiveOrderTakerId) || null;
   }, [register, effectiveOrderTakerId, user?.fullName]);
 
-  const eventCatalogAllowlist = useEventPortableTpvAllowlist();
+  const eventTpvScope = useEventPortableTpvScope();
   const { catalog, brands, loadingCatalog } = useTpvCatalog(userId, tpvCatalogBusinessId, {
     businesses,
     accountBusinessCount: businesses.length,
-    catalogItemIdAllowlist: eventCatalogAllowlist,
+    catalogItemIdAllowlist: eventTpvScope.allowlist,
+    eventTpvPriceByItemId: eventTpvScope.priceByItemId,
   });
 
   useEffect(() => {

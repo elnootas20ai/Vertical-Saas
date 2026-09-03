@@ -1,6 +1,5 @@
-import i18n from 'i18next';
-import { initReactI18next } from 'react-i18next';
-import { I18N_LANG_STORAGE_KEY, LANDING_I18N } from './landingI18n';
+import i18n from './i18nBootstrap';
+import { LANDING_I18N } from './landingI18n';
 
 // ─── Traducciones ─────────────────────────────────────────────────────────────
 
@@ -8487,38 +8486,18 @@ Object.assign(pt.translation, { landing: LANDING_I18N.pt });
 Object.assign(fr.translation, { landing: LANDING_I18N.fr });
 Object.assign(it.translation, { landing: LANDING_I18N.it });
 
-function readStoredLanguage(): string {
-  try {
-    const stored = localStorage.getItem(I18N_LANG_STORAGE_KEY);
-    if (stored && ['es', 'en', 'pt', 'fr', 'it'].includes(stored)) return stored;
-  } catch {
-    /* noop */
+const SAAS_BUNDLES: Record<string, typeof es> = { es, en, pt, fr, it };
+let saasI18nReady = false;
+
+/** Fusiona traducciones SaaS/auth en la instancia bootstrapeada (idempotente). */
+export function ensureSaasI18n(): void {
+  if (saasI18nReady) return;
+  for (const [lng, res] of Object.entries(SAAS_BUNDLES)) {
+    i18n.addResourceBundle(lng, 'translation', res.translation, true, true);
   }
-  return 'es';
+  saasI18nReady = true;
 }
 
-i18n
-  .use(initReactI18next)
-  .init({
-    resources: { es, en, pt, fr, it },
-    lng: typeof window !== 'undefined' ? readStoredLanguage() : 'es',
-    fallbackLng: 'es',
-    supportedLngs: ['es', 'en', 'pt', 'fr', 'it'],
-    defaultNS: 'translation',
-    interpolation: {
-      escapeValue: false,
-    },
-  });
-
-i18n.on('languageChanged', (lng) => {
-  try {
-    localStorage.setItem(I18N_LANG_STORAGE_KEY, lng);
-    if (typeof document !== 'undefined') {
-      document.documentElement.lang = lng;
-    }
-  } catch {
-    /* noop */
-  }
-});
+ensureSaasI18n();
 
 export default i18n;

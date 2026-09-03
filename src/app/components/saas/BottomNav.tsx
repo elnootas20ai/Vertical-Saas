@@ -244,7 +244,7 @@ export function BottomNav() {
   const alertCenterBusinessId = useAlertCenterBusinessId();
   const { unresolved: alertCenterUnresolved, summary } = useAlertCenterSummary(
     !isWorker ? alertCenterBusinessId : undefined,
-    { pollMs: 45_000 },
+    { pollMs: 120_000 },
   );
 
   const isSaasRoute = location.pathname.startsWith('/saas');

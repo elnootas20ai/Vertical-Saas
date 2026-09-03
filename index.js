@@ -233,6 +233,7 @@ import {
   writeChangelog,
   ensureDatabase,
   getAllDocuments,
+  findDocuments,
   putDocument,
   VEHICLES_DESIGN_VIEWS,
   ACCOUNTS_DESIGN_VIEWS,
@@ -2151,10 +2152,12 @@ app.get('/api/dashboard/kpis/:userId', async (req, res) => {
     try {
       const { findAccountByUserId } = await import('./services/couchdb.js');
       const account = await findAccountByUserId(req, userId).catch(() => null);
-      businessType = String(account?.businessType || '').trim();
+      businessType = String(
+        account?.businessType || account?.onboardingData?.businessType || '',
+      ).trim();
     } catch { /* best-effort */ }
 
-    const cacheKey = cacheService.buildKey('kpi', userId, 'v3');
+    const cacheKey = cacheService.buildKey('kpi', userId, 'v4');
     const cached = cacheService.get(cacheKey);
     if (cached) {
       res.setHeader('X-Cache', 'HIT');
@@ -2192,16 +2195,24 @@ app.get('/api/dashboard/kpis/:userId', async (req, res) => {
       );
     }
 
+    // Food / ops verticals: no need vehicle CRM / parts / workshop full scans.
+    const skipVehicleCrm = ['delivery', 'restaurant', 'iceCreamShop', 'butcherShop', 'events'].includes(
+      businessType,
+    );
+    const emptyDocs = Promise.resolve([]);
+
     const [vehicleDocsPrimary, vehicleDocsLegacy, leadDocs, saleDocs, financeDocs, clockinDocs, catalogDocs, partsDocs, workshopDocs, deliveryDocs] = await Promise.all([
-      fetchAllDocs(vehiclesDb).catch(() => []),
-      vehiclesDb !== legacyVehiclesDb ? fetchAllDocs(legacyVehiclesDb).catch(() => []) : Promise.resolve([]),
-      fetchAllDocs(leadsDb).catch(() => []),
-      fetchAllDocs(salesDb).catch(() => []),
+      skipVehicleCrm ? emptyDocs : fetchAllDocs(vehiclesDb).catch(() => []),
+      skipVehicleCrm || vehiclesDb === legacyVehiclesDb
+        ? emptyDocs
+        : fetchAllDocs(legacyVehiclesDb).catch(() => []),
+      skipVehicleCrm ? emptyDocs : fetchAllDocs(leadsDb).catch(() => []),
+      skipVehicleCrm ? emptyDocs : fetchAllDocs(salesDb).catch(() => []),
       fetchAllDocs(financeDb).catch(() => []),
       fetchAllDocs(clockinsDb).catch(() => []),
       fetchAllDocs(catalogDb).catch(() => []),
-      fetchAllDocs(partsDb).catch(() => []),
-      fetchAllDocs(workshopDb).catch(() => []),
+      skipVehicleCrm ? emptyDocs : fetchAllDocs(partsDb).catch(() => []),
+      skipVehicleCrm ? emptyDocs : fetchAllDocs(workshopDb).catch(() => []),
       fetchAllDocs(deliveryDb).catch(() => []),
     ]);
 
@@ -3478,13 +3489,16 @@ if (backgroundEnginesEnabled) {
 async function runLeadEngine() {
   try {
     const fakeReq = { headers: {} };
-    const res = await couchRequest(fakeReq, `/${encodeURIComponent(ACCOUNTS_DB)}/_all_docs?include_docs=true`);
-    if (!res.ok) return;
-    const body = await res.json().catch(() => ({ rows: [] }));
+    await ensureDatabase(fakeReq, ACCOUNTS_DB);
+    const accounts = await findDocuments(
+      fakeReq,
+      ACCOUNTS_DB,
+      { type: 'account' },
+      { pageSize: 500, maxDocs: 10_000, fields: ['_id', 'type', 'user_id', 'deletedAt'] },
+    ).catch(() => []);
     const userIds = [
       ...new Set(
-        (body.rows || [])
-          .map((r) => r.doc)
+        (accounts || [])
           .filter((d) => d && d.type === 'account' && !d.deletedAt)
           .map((d) => d.user_id)
           .filter(Boolean),

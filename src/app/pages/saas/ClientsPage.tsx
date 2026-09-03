@@ -1952,7 +1952,13 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   }, [invoicesStorageKey, user?.id]);
 
   useEffect(() => {
-    localStorage.setItem(invoicesStorageKey, JSON.stringify(invoices));
+    try {
+      // Cap offline: no volcar cientos de facturas a localStorage.
+      const capped = Array.isArray(invoices) ? invoices.slice(0, 50) : [];
+      localStorage.setItem(invoicesStorageKey, JSON.stringify(capped));
+    } catch {
+      /* quota */
+    }
   }, [invoices, invoicesStorageKey]);
 
   const allInvoices = useMemo<Invoice[]>(() => invoices, [invoices]);

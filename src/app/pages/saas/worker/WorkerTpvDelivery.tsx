@@ -1621,7 +1621,10 @@ export function WorkerTpvDelivery({
 
   useEffect(() => {
     if (!userId) return;
-    const interval = setInterval(() => void loadOrders({ silent: true }), 30000);
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      void loadOrders({ silent: true });
+    }, 30_000);
     return () => clearInterval(interval);
   }, [userId, loadOrders]);
 

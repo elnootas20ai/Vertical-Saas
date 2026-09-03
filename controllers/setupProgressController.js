@@ -11,8 +11,8 @@ import {
   ensureDatabase,
   findAccountByUserId,
   findBusinessById,
+  findDocuments,
   findSetupProgressByUserId,
-  getAllDocuments,
   listBusinessesByUser,
   sanitizeSetupProgress,
   saveSetupProgress,
@@ -51,6 +51,16 @@ async function getOrCreateProgress(req, userId) {
       changed = true;
     }
 
+    // Ya completado / saltado: no re-escanear DBs en cada GET (load-only).
+    if (doc.overallCompleted || doc.skippedAt) {
+      if (changed) {
+        recalcOverall(doc);
+        doc.updatedAt = new Date().toISOString();
+        doc = await saveSetupProgress(req, doc);
+      }
+      return doc;
+    }
+
     const businessScopedStepKeys = [
       'initial_team',
       'locations',
@@ -60,15 +70,26 @@ async function getOrCreateProgress(req, userId) {
       'first_operation',
     ];
 
-    for (const stepKey of businessScopedStepKeys) {
+    const pending = businessScopedStepKeys.filter((stepKey) => {
       const step = doc.steps.find((s) => s.key === stepKey);
-      if (!step) continue;
+      return step && !step.completed && !step.skipped;
+    });
 
-      const shouldBeCompleted = await verifyStep(req, userId, stepKey, account, targetBusinessId);
-      if (step.completed !== shouldBeCompleted) {
-        step.completed = shouldBeCompleted;
-        step.completedAt = shouldBeCompleted ? step.completedAt || new Date().toISOString() : null;
-        changed = true;
+    if (pending.length > 0) {
+      const results = await Promise.all(
+        pending.map(async (stepKey) => ({
+          stepKey,
+          ok: await verifyStep(req, userId, stepKey, account, targetBusinessId),
+        })),
+      );
+      for (const { stepKey, ok } of results) {
+        const step = doc.steps.find((s) => s.key === stepKey);
+        if (!step) continue;
+        if (step.completed !== ok) {
+          step.completed = ok;
+          step.completedAt = ok ? step.completedAt || new Date().toISOString() : null;
+          changed = true;
+        }
       }
     }
 
@@ -331,14 +352,13 @@ async function verifyStep(req, userId, stepKey, account, businessId) {
         const locDb = `${process.env.COUCHDB_DB || 'vertial'}-locations`;
         try {
           await ensureDatabase(req, locDb);
-          const locs = await getAllDocuments(req, locDb);
-          const businessLocs = locs.filter(
-            (d) =>
-              d?.type === 'location' &&
-              !d?.deletedAt &&
-              d?.business_id === targetBusinessId,
+          const locs = await findDocuments(
+            req,
+            locDb,
+            { type: 'location', business_id: targetBusinessId },
+            { pageSize: 1, maxDocs: 1 },
           );
-          return businessLocs.length >= 1;
+          return locs.some((d) => d && !d.deletedAt);
         } catch {
           return false;
         }
@@ -348,11 +368,13 @@ async function verifyStep(req, userId, stepKey, account, businessId) {
         const clientDb = `${process.env.COUCHDB_DB || 'vertial'}-clients`;
         try {
           await ensureDatabase(req, clientDb);
-          const clients = await getAllDocuments(req, clientDb);
-          const businessClients = clients.filter(
-            (d) => !d?.deletedAt && d?.business_id === targetBusinessId,
+          const clients = await findDocuments(
+            req,
+            clientDb,
+            { business_id: targetBusinessId },
+            { pageSize: 1, maxDocs: 1 },
           );
-          return businessClients.length >= 1;
+          return clients.some((d) => d && !d.deletedAt);
         } catch {
           return false;
         }
@@ -362,14 +384,13 @@ async function verifyStep(req, userId, stepKey, account, businessId) {
         const catDb = getCatalogDbName();
         try {
           await ensureDatabase(req, catDb);
-          const items = await getAllDocuments(req, catDb);
-          const businessItems = items.filter(
-            (d) =>
-              d?.type === 'catalog_item' &&
-              !d?.deletedAt &&
-              d?.business_id === targetBusinessId,
+          const items = await findDocuments(
+            req,
+            catDb,
+            { type: 'catalog_item', business_id: targetBusinessId },
+            { pageSize: 1, maxDocs: 1 },
           );
-          return businessItems.length >= 1;
+          return items.some((d) => d && !d.deletedAt);
         } catch {
           return false;
         }
@@ -379,14 +400,16 @@ async function verifyStep(req, userId, stepKey, account, businessId) {
         const catDb2 = getCatalogDbName();
         try {
           await ensureDatabase(req, catDb2);
-          const items = await getAllDocuments(req, catDb2);
-          const withStock = items.filter((d) =>
-            d?.type === 'catalog_item' &&
-            !d?.deletedAt &&
-            d?.business_id === targetBusinessId &&
-            (d.stockQuantity || 0) > 0,
+          // Existencia con stock: limit 1 + filtro en memoria de un lote pequeño.
+          const items = await findDocuments(
+            req,
+            catDb2,
+            { type: 'catalog_item', business_id: targetBusinessId },
+            { pageSize: 50, maxDocs: 50 },
           );
-          return withStock.length >= 1;
+          return items.some(
+            (d) => d && !d.deletedAt && (Number(d.stockQuantity) || 0) > 0,
+          );
         } catch {
           return false;
         }
@@ -396,9 +419,13 @@ async function verifyStep(req, userId, stepKey, account, businessId) {
         const salesDb = `${process.env.COUCHDB_DB || 'vertial'}-sales`;
         try {
           await ensureDatabase(req, salesDb);
-          const sales = await getAllDocuments(req, salesDb);
-          const businessSales = sales.filter((d) => !d?.deletedAt && d?.business_id === targetBusinessId);
-          return businessSales.length >= 1;
+          const sales = await findDocuments(
+            req,
+            salesDb,
+            { business_id: targetBusinessId },
+            { pageSize: 1, maxDocs: 1 },
+          );
+          return sales.some((d) => d && !d.deletedAt);
         } catch {
           return false;
         }
@@ -407,11 +434,13 @@ async function verifyStep(req, userId, stepKey, account, businessId) {
         const workshopDb = getWorkshopDbName();
         try {
           await ensureDatabase(req, workshopDb);
-          const docs = await getAllDocuments(req, workshopDb);
-          const orders = docs.filter(
-            (d) => d?.type === 'work_order' && d?.user_id === userId && !d?.deletedAt,
+          const orders = await findDocuments(
+            req,
+            workshopDb,
+            { type: 'work_order', user_id: userId },
+            { pageSize: 1, maxDocs: 1 },
           );
-          return orders.length >= 1;
+          return orders.some((d) => d && !d.deletedAt);
         } catch {
           return false;
         }

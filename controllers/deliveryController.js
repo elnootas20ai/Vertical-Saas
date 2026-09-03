@@ -85,6 +85,7 @@ import {
   getFinanceDbName,
   buildFinanceDocument,
   listBrandsByBusiness,
+  findDocuments,
 } from '../services/couchdb.js';
 import { randomUUID } from 'node:crypto';
 import {
@@ -1815,7 +1816,7 @@ export async function clientOrderHistory(req, res) {
       return res.status(404).json({ ok: false, error: 'Cliente no encontrado' });
     }
 
-    let orders = await listDeliveryOrdersByUser(req, userId);
+    let orders = await listDeliveryOrdersByUser(req, userId, { maxDocs: 8_000 });
     orders = orders
       .filter((o) => deliveryOrderMatchesClient(o, clientId, client.phone) && !isCancelledDeliveryOrder(o))
       .map(sanitizeDeliveryOrder)
@@ -1838,7 +1839,46 @@ export async function listCatalogItems(req, res) {
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     const filterModule = req.query.module || undefined;
     const view = String(req.query.view || '').trim().toLowerCase();
-    let items = await listCatalogItemsByUser(req, userId, { module: filterModule });
+    // TPV: proyección ligera (sin images/recipes gordas); post-sanitize igual.
+    const tpvFields =
+      view === 'tpv'
+        ? [
+            '_id',
+            '_rev',
+            'type',
+            'user_id',
+            'module',
+            'itemType',
+            'name',
+            'description',
+            'category',
+            'unitPrice',
+            'staffPrice',
+            'taxRate',
+            'stockQuantity',
+            'minStock',
+            'unit',
+            'allergens',
+            'active',
+            'available',
+            'webVisible',
+            'brandIds',
+            'comboItems',
+            'salesChannels',
+            'isStockItem',
+            'warehouseStock',
+            'customFields',
+            'business_id',
+            'businessId',
+            'barcode',
+            'sku',
+            'deletedAt',
+          ]
+        : undefined;
+    let items = await listCatalogItemsByUser(req, userId, {
+      module: filterModule,
+      ...(tpvFields ? { fields: tpvFields } : {}),
+    });
     // TPV: solo ocultar almacén puro. Carta con isStockItem (control stock) SÍ se vende.
     if (view === 'tpv') {
       const comboReferencedIds = collectComboReferencedProductIds(items);
@@ -5297,6 +5337,8 @@ export async function getOpsCenter(req, res) {
       .replace(/^business:/, '')
       .trim();
     const targetDate = dateParam || new Date().toISOString().slice(0, 10);
+    const lite =
+      String(req.query.lite || '') === '1' || String(req.query.detail || '') === '0';
 
     const db = getDeliveryDbName();
     await ensureDatabase(req, db);
@@ -5523,7 +5565,9 @@ export async function getOpsCenter(req, res) {
     const foodFamilyCounts = buildFoodFamilyCountsFromOrders(foodCountable);
 
     // Resumen ligero del día por pedido (monitor «por tienda»).
-    const dayOrdersBrief = foodCountable
+    const dayOrdersBrief = lite
+      ? []
+      : foodCountable
       .map((o) => ({
         _id: o._id,
         orderNumber: o.orderNumber || o._id,
@@ -5537,7 +5581,7 @@ export async function getOpsCenter(req, res) {
 
     let brandLabels = {};
     const brandBusinessId = businessIdQuery || '';
-    if (brandBusinessId) {
+    if (!lite && brandBusinessId) {
       try {
         const brands = await listBrandsByBusiness(req, brandBusinessId);
         brandLabels = Object.fromEntries(
@@ -6047,7 +6091,11 @@ export async function getDriversStats(req, res) {
   try {
     const { userId } = req.params;
     const drivers = await listDriversByUser(req, userId);
-    const orders = await listDeliveryOrdersByUser(req, userId);
+    const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+    const orders = await listDeliveryOrdersByUser(req, userId, {
+      dateFrom: since,
+      maxDocs: 3_000,
+    });
     const stats = drivers.map(d => {
       const driverOrders = orders.filter(o => o.driverId === d._id);
       return {
@@ -6069,8 +6117,22 @@ export async function getRepartoConfig(req, res) {
     const { userId } = req.params;
     const db = getDeliveryDbName();
     await ensureDatabase(req, db);
-    const docs = await getAllDocuments(req, db);
-    const config = docs.find(d => d?.type === 'reparto_config' && d?.user_id === userId);
+    const id = `reparto_config:${userId}`;
+    let config = await getDocument(req, db, id).catch(() => null);
+    const matches = (doc) =>
+      doc
+      && doc.type === 'reparto_config'
+      && String(doc.user_id || '') === String(userId || '');
+    // Legacy: doc con otro _id → Mango estrecho (nunca _all_docs del delivery DB).
+    if (!matches(config)) {
+      const found = await findDocuments(
+        req,
+        db,
+        { type: 'reparto_config', user_id: userId },
+        { pageSize: 1, maxDocs: 1 },
+      ).catch(() => []);
+      config = found.find(matches) || null;
+    }
     return res.json({ ok: true, config: config ? sanitizeRepartoConfig(config) : null });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al obtener configuración' });
@@ -6083,8 +6145,21 @@ export async function saveRepartoConfig(req, res) {
     const data = req.body || {};
     const db = getDeliveryDbName();
     await ensureDatabase(req, db);
-    const docs = await getAllDocuments(req, db);
-    const existing = docs.find(d => d?.type === 'reparto_config' && d?.user_id === userId);
+    const id = `reparto_config:${userId}`;
+    let existing = await getDocument(req, db, id).catch(() => null);
+    const matches = (doc) =>
+      doc
+      && doc.type === 'reparto_config'
+      && String(doc.user_id || '') === String(userId || '');
+    if (!matches(existing)) {
+      const found = await findDocuments(
+        req,
+        db,
+        { type: 'reparto_config', user_id: userId },
+        { pageSize: 1, maxDocs: 1 },
+      ).catch(() => []);
+      existing = found.find(matches) || null;
+    }
     const doc = buildRepartoConfigDocument(userId, data, existing);
     const saved = await putDocument(req, db, doc._id, doc);
     return res.json({ ok: true, config: sanitizeRepartoConfig({ ...doc, _rev: saved.rev }) });
@@ -6107,7 +6182,11 @@ export async function autoAssignDriver(req, res) {
     if (active.length === 0) {
       return badRequest(res, 'No hay repartidores disponibles');
     }
-    const orders = await listDeliveryOrdersByUser(req, userId);
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const orders = await listDeliveryOrdersByUser(req, userId, {
+      dateFrom: since,
+      maxDocs: 2_000,
+    });
     let best = active[0];
     let minLoad = Infinity;
     for (const d of active) {

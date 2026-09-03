@@ -18,7 +18,6 @@ import {
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
-import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 import { bulkCreateVerticalEntries, entryStr } from '../../lib/bulkVerticalImport';
 import {
@@ -124,7 +123,6 @@ function EventsServicesCatalog() {
   const [editing, setEditing] = useState<EventService | null>(null);
   const [form, setForm] = useState<ServiceForm>(EMPTY_FORM);
   const [precioText, setPrecioText] = useState('');
-  const [showAIModal, setShowAIModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
 
   const loadData = useCallback(async () => {
@@ -263,18 +261,9 @@ function EventsServicesCatalog() {
     }
   };
 
-  const handleAIEntries = persistEntries;
   const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   const fmt = (n: number) => n.toLocaleString('es-ES', { style: 'currency', currency: 'EUR', minimumFractionDigits: 0 });
-
-  const MODULE_AI_FIELDS: AIFieldDef[] = [
-    { key: 'name', label: 'Nombre' },
-    { key: 'category', label: 'Categoría' },
-    { key: 'price', label: 'Precio' },
-    { key: 'unit', label: 'Unidad' },
-    { key: 'description', label: 'Descripción' },
-  ];
 
   const MODULE_IMPORT_FIELDS: ImportFieldDef[] = EVENTS_SERVICES_IMPORT_FIELDS;
 
@@ -337,7 +326,6 @@ function EventsServicesCatalog() {
             <AddButtonDropdown
               label="Nuevo servicio"
               onQuickAdd={openCreate}
-              onAIAdd={() => setShowAIModal(true)}
               onImport={() => setShowImportModal(true)}
               quickAddLabel="Alta rápida"
               quickAddDesc="Formulario de servicio"
@@ -488,14 +476,6 @@ function EventsServicesCatalog() {
         </div>
       )}
 
-      <AIAddModal
-        isOpen={showAIModal}
-        onClose={() => setShowAIModal(false)}
-        module="events_services"
-        moduleLabel="Servicios"
-        fields={MODULE_AI_FIELDS}
-        onEntriesParsed={handleAIEntries}
-      />
       <GenericImportModal
         isOpen={showImportModal}
         onClose={() => setShowImportModal(false)}

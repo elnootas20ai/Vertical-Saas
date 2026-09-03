@@ -43,7 +43,7 @@ import {
   couchRequest,
   ensureDatabase,
   findAccountByUserId,
-  getAllDocuments,
+  findDocuments,
   getCatalogDbName,
   getClockinsDbName,
   getDeliveryDbName,
@@ -90,7 +90,12 @@ function daysBetween(dateStr, now) {
 async function fetchAllDocsOfType(dbName, type) {
   try {
     await ensureDatabase(fakeReq, dbName);
-    const docs = await getAllDocuments(fakeReq, dbName);
+    const docs = await findDocuments(
+      fakeReq,
+      dbName,
+      { type },
+      { pageSize: 500, maxDocs: 10_000 },
+    );
     return docs.filter((d) => d?.type === type && !d?.deletedAt);
   } catch {
     return [];
@@ -100,7 +105,13 @@ async function fetchAllDocsOfType(dbName, type) {
 async function fetchAllDocs(dbName) {
   try {
     await ensureDatabase(fakeReq, dbName);
-    const docs = await getAllDocuments(fakeReq, dbName);
+    // Capado: evita _all_docs ilimitado en motores background.
+    const docs = await findDocuments(
+      fakeReq,
+      dbName,
+      { _id: { $gt: null } },
+      { pageSize: 500, maxDocs: 15_000 },
+    );
     return docs.filter((d) => d && !String(d._id || '').startsWith('_design/') && !d.deletedAt);
   } catch {
     return [];
@@ -3968,7 +3979,12 @@ async function getButcherAlerts(userId, now) {
   try {
     const butcherDb = getButcherDbName();
     await ensureDatabase(fakeReq, butcherDb);
-    const docs = await getAllDocuments(fakeReq, butcherDb);
+    const docs = await findDocuments(
+      fakeReq,
+      butcherDb,
+      { type: 'butcher_order', user_id: userId },
+      { pageSize: 500, maxDocs: 5_000 },
+    ).catch(() => []);
 
     const userOrders = docs.filter((d) => d?.type === 'butcher_order' && !d?.deletedAt && d?.user_id === userId);
     const today = now.toISOString().slice(0, 10);

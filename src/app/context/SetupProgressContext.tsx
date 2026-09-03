@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useAuth } from './AuthContext';
 import {
   getSetupProgressRequest,
@@ -77,13 +77,20 @@ export function SetupProgressProvider({ children }: { children: ReactNode }) {
     }
   }, [userId]);
 
+  const lastFetchAtRef = useRef(0);
+
   useEffect(() => {
-    fetchProgress();
+    lastFetchAtRef.current = Date.now();
+    void fetchProgress();
   }, [fetchProgress]);
 
   useEffect(() => {
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible' && userId) fetchProgress();
+      if (document.visibilityState !== 'visible' || !userId) return;
+      // Throttle: no re-verificar setup en cada cambio de pestaña (antes ~110s en prod).
+      if (Date.now() - lastFetchAtRef.current < 5 * 60_000) return;
+      lastFetchAtRef.current = Date.now();
+      void fetchProgress();
     };
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);

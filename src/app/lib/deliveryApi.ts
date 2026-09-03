@@ -2966,6 +2966,8 @@ export interface OpsCenterFilters {
   channel?: string;
   timeSlot?: string;
   date?: string;
+  /** Fase 1: KPIs + activos sin marcas ni dayOrdersBrief (menos payload / Couch). */
+  lite?: boolean;
 }
 
 /** YYYY-MM-DD en la zona horaria local del navegador (inputs type="date"). */
@@ -2987,6 +2989,7 @@ function opsCenterCacheKey(userId: string, filters?: OpsCenterFilters): string {
     filters?.channel || '',
     filters?.timeSlot || '',
     filters?.date || localDateInputValue(),
+    filters?.lite ? 'lite' : 'full',
   ].join('|');
 }
 
@@ -3008,6 +3011,7 @@ export async function getOpsCenterRequest(
   if (filters?.businessId) params.set('businessId', filters.businessId);
   if (filters?.channel) params.set('channel', filters.channel);
   if (filters?.timeSlot) params.set('timeSlot', filters.timeSlot);
+  if (filters?.lite) params.set('lite', '1');
   params.set('date', filters?.date || localDateInputValue());
   const qs = params.toString() ? `?${params.toString()}` : '';
   // Ops-center agrega pedidos+cajas+alertas; en cuentas grandes puede ir >50s si el API está cargado.

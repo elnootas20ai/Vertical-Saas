@@ -237,6 +237,7 @@ export function WorkerChat() {
   useEffect(() => {
     if (!businessId || !selectedChannelId) return;
     const sync = async () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       try {
         const res = await listChatMessages(businessId, selectedChannelId, 100);
         setMessages((prev) => mergeRemoteMessages(prev, res.messages || []));
@@ -244,7 +245,7 @@ export function WorkerChat() {
         /* ignore */
       }
     };
-    const id = window.setInterval(() => void sync(), 6_000);
+    const id = window.setInterval(() => void sync(), 30_000);
     const onVis = () => {
       if (document.visibilityState === 'visible') void sync();
     };

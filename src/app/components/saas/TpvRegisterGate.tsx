@@ -6930,11 +6930,29 @@ export function TpvRegisterGate({
   // Cache pedidos del turno para poder cerrar apps/marcas sin red.
   useEffect(() => {
     if (!dataUserId || !isTpvRegisterSessionOpen(activeSession)) return;
-    prefetchShiftOrdersForSession(dataUserId, activeSession);
-    const t = window.setInterval(() => {
+    let cancelled = false;
+    const run = () => {
+      if (cancelled) return;
       prefetchShiftOrdersForSession(dataUserId, activeSession);
+    };
+    // Primer prefetch en idle: no pelear con apertura de caja / carta.
+    let idleId: number | null = null;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      idleId = window.requestIdleCallback(run, { timeout: 2500 });
+    } else {
+      timeoutId = window.setTimeout(run, 800);
+    }
+    const t = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      run();
     }, 120_000);
-    return () => window.clearInterval(t);
+    return () => {
+      cancelled = true;
+      if (idleId != null && 'cancelIdleCallback' in window) window.cancelIdleCallback(idleId);
+      if (timeoutId) clearTimeout(timeoutId);
+      window.clearInterval(t);
+    };
   }, [dataUserId, activeSession?._id, activeSession?.openedAt, activeSession?.pointOfSaleId]);
 
   // Catálogo de marcas → nombres legibles en resumen «Caja cerrada» / Marcas.
@@ -6944,19 +6962,35 @@ export function TpvRegisterGate({
       setPostCloseBrandLabels({});
       return;
     }
+    // Solo con caja abierta (o browse): no al montar el gate vacío.
+    if (!isTpvRegisterSessionOpen(activeSession) && !browseWithoutOpen) {
+      return;
+    }
     let cancelled = false;
-    void listBrandsRequest(bid)
-      .then((brands) => {
-        if (cancelled) return;
-        setPostCloseBrandLabels(buildBrandLabelsMap((brands || []).filter((b) => b && !b.deletedAt)));
-      })
-      .catch(() => {
-        if (!cancelled) setPostCloseBrandLabels({});
-      });
+    const run = () => {
+      if (cancelled) return;
+      void listBrandsRequest(bid)
+        .then((brands) => {
+          if (cancelled) return;
+          setPostCloseBrandLabels(buildBrandLabelsMap((brands || []).filter((b) => b && !b.deletedAt)));
+        })
+        .catch(() => {
+          if (!cancelled) setPostCloseBrandLabels({});
+        });
+    };
+    let idleId: number | null = null;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      idleId = window.requestIdleCallback(run, { timeout: 3000 });
+    } else {
+      timeoutId = window.setTimeout(run, 1000);
+    }
     return () => {
       cancelled = true;
+      if (idleId != null && 'cancelIdleCallback' in window) window.cancelIdleCallback(idleId);
+      if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [scopeBusinessId]);
+  }, [scopeBusinessId, activeSession?._id, browseWithoutOpen]);
 
   useEffect(() => {
     if (!isTpvRegisterSessionOpen(activeSession) && !browseWithoutOpen) {

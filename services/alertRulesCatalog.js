@@ -304,6 +304,43 @@ export const MANAGER_FOCUS_ENABLED_RULE_IDS = [
 /** Reglas visibles en ajustes Delivery (mismo pack; el resto se oculta). */
 export const DELIVERY_COMPACT_VISIBLE_RULE_IDS = DELIVERY_CEO_DEFAULT_ENABLED_RULE_IDS;
 
+/**
+ * ¿Es alerta de «cierre de caja» según el catálogo del Centro de alertas SaaS?
+ * Fuente: categoría `caja` (resumen al cerrar) + departamento `pdvs` (caja TPV),
+ * excluyendo apertura y ruido (devoluciones). Sin listar IDs sueltos fuera del catálogo.
+ */
+export function isCierreCajaAlertRule(rule) {
+  if (!rule || typeof rule !== 'object') return false;
+  const id = String(rule.id || '');
+  const category = String(rule.category || '');
+  const department = String(rule.department || '');
+  const label = String(rule.label || '');
+
+  // Alertas → categoría «caja»: resumen unificado al cerrar turno (push + campana).
+  if (category === 'caja') return true;
+
+  // Alertas → departamento «pdvs»: caja TPV (delivery / eventos).
+  if (department !== 'pdvs') return false;
+
+  // Apertura ≠ cierre.
+  if (id.includes('not_opened') || /sin abrir/i.test(label)) return false;
+  // Devoluciones del día ≠ evento de cierre.
+  if (id === 'register_high_return' || /devolucion/i.test(label)) return false;
+
+  return true;
+}
+
+/** IDs de reglas de cierre con canal push en el catálogo (o resumen CEO). */
+export function listCierreCajaMobilePushRuleIds() {
+  return ALL_ALERT_RULE_DEFINITIONS
+    .filter(isCierreCajaAlertRule)
+    .filter((rule) => {
+      if (String(rule.category || '') === 'caja') return true;
+      return Array.isArray(rule.channels) && rule.channels.includes('push');
+    })
+    .map((rule) => String(rule.id));
+}
+
 export function isDeliveryCompactAlertRuleId(id) {
   return DELIVERY_COMPACT_VISIBLE_RULE_IDS.includes(String(id || ''));
 }

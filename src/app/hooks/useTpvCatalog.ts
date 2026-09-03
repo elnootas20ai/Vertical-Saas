@@ -16,6 +16,20 @@ import { filterCatalogByEventAllowlist } from '../lib/eventsPortableTpv';
 
 const REVALIDATE_MS = 60_000;
 
+function applyEventTpvPrices(
+  items: CatalogItem[],
+  priceByItemId: Record<string, number> | null | undefined,
+): CatalogItem[] {
+  if (!priceByItemId) return items;
+  return items.map((item) => {
+    const id = String(item._id || '').trim();
+    if (!id || !(id in priceByItemId)) return item;
+    const price = Number(priceByItemId[id]);
+    if (!Number.isFinite(price) || price < 0) return item;
+    return { ...item, unitPrice: price };
+  });
+}
+
 export function useTpvCatalog(
   userId: string | undefined,
   scopeBusinessId: string,
@@ -24,11 +38,14 @@ export function useTpvCatalog(
     businesses?: TpvCatalogBusinessRef[];
     /** Si viene (p. ej. PDV de evento), solo esos productos. null = sin filtro. */
     catalogItemIdAllowlist?: string[] | null;
+    /** Precios de carga PDV fijo (sobrescriben unitPrice de carta). */
+    eventTpvPriceByItemId?: Record<string, number> | null;
   },
 ) {
   const businesses = options?.businesses ?? [];
   const accountBusinessCount = options?.accountBusinessCount;
   const allowlist = options?.catalogItemIdAllowlist;
+  const priceByItemId = options?.eventTpvPriceByItemId;
 
   const fetchInput = useMemo((): TpvCatalogFetchInput => ({
     scopeBusinessId: String(scopeBusinessId || '').trim(),
@@ -182,8 +199,8 @@ export function useTpvCatalog(
   }, [userId, reloadCatalog]);
 
   const scopedCatalog = useMemo(
-    () => filterCatalogByEventAllowlist(catalog, allowlist),
-    [catalog, allowlist],
+    () => applyEventTpvPrices(filterCatalogByEventAllowlist(catalog, allowlist), priceByItemId),
+    [catalog, allowlist, priceByItemId],
   );
 
   return { catalog: scopedCatalog, brands, loadingCatalog, reloadCatalog, catalogBusinessId };

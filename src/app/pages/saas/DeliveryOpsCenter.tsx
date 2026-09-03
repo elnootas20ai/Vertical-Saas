@@ -2051,13 +2051,32 @@ export function DeliveryOpsCenter() {
           ...baseFilters,
           ...(resolvedOpsPdvId ? { salesPointId: resolvedOpsPdvId } : {}),
         };
-        const r = await getOpsCenterRequest(authUserId, effectiveFilters, reqOpts);
+        // Fase 1 lite → paint rápido; fase 2 full (marcas + dayOrdersBrief) sin bloquear.
+        const rLite = await getOpsCenterRequest(
+          authUserId,
+          { ...effectiveFilters, lite: true },
+          reqOpts,
+        );
         if (seq !== loadSeqRef.current) return;
         setLiveByPdv({});
         liveAccumRef.current = {};
         hasOpsDataRef.current = true;
-        setData(r);
+        setData(rLite);
         setLastUp(new Date());
+        setLoading(false);
+        try {
+          const rFull = await getOpsCenterRequest(
+            authUserId,
+            { ...effectiveFilters, lite: false },
+            { ...reqOpts, bypassCache: true },
+          );
+          if (seq !== loadSeqRef.current) return;
+          setData(rFull);
+          setLastUp(new Date());
+        } catch (e) {
+          if (abortCtrl.signal.aborted || seq !== loadSeqRef.current) return;
+          console.error('ops-center detail error', e);
+        }
       }
     } catch (e) {
       if (seq === loadSeqRef.current && !abortCtrl.signal.aborted) console.error('ops-center error', e);
@@ -2154,7 +2173,10 @@ export function DeliveryOpsCenter() {
       }
       return;
     }
-    poll.current = setInterval(() => { void load({ bypassCache: true }); }, 30000);
+    poll.current = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      void load({ bypassCache: true });
+    }, 30000);
     return () => { if (poll.current) clearInterval(poll.current); };
   }, [load, sseOk]);
 

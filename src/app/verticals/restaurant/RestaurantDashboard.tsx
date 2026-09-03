@@ -298,6 +298,7 @@ export function RestaurantDashboard({ onSelectGeneral }: VerticalDashboardProps)
   // Polling de respaldo (más corto si el SSE no está conectado).
   useEffect(() => {
     const iv = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       void load();
     }, sseOk ? 60_000 : 30_000);
     return () => clearInterval(iv);

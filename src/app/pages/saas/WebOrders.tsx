@@ -122,10 +122,11 @@ export function WebOrders() {
   useEffect(() => {
     if (!businessId) return;
     const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       listWebOrdersRequest(businessId)
         .then((res) => setOrders(res.orders || []))
         .catch(() => {});
-    }, 15000);
+    }, 30_000);
     return () => clearInterval(interval);
   }, [businessId]);
 

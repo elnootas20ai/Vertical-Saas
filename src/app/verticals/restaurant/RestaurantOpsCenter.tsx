@@ -303,10 +303,18 @@ export function RestaurantOpsCenter() {
   }, [load]);
 
   useEffect(() => {
-    pollRef.current = setInterval(() => { void load(); }, 30_000);
+    pollRef.current = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      void load();
+    }, 30_000);
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void load();
+    };
+    document.addEventListener('visibilitychange', onVis);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
       pollRef.current = null;
+      document.removeEventListener('visibilitychange', onVis);
     };
   }, [load]);
 

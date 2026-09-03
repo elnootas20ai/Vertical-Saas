@@ -151,7 +151,7 @@ function KitchenOrderCard({
 }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
-    const iv = setInterval(() => setNow(Date.now()), 10000);
+    const iv = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(iv);
   }, []);
 

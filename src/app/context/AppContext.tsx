@@ -6,7 +6,8 @@ import { PushPermissionGate } from '../components/saas/PushPermissionGate';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from './AuthContext';
 import { useBusinessOptional } from './BusinessContext';
-import { resolveVehicleListBusinessId } from '../lib/vehicleVertical';
+import { resolveVehicleListBusinessId, supportsVehicleInventoryModule } from '../lib/vehicleVertical';
+import { isCompraventaBusinessType } from '../lib/compraventaSetup';
 import type { BillingSubscription as PersistedBillingSubscription } from '../lib/authApi';
 import { isWorkerAccount, logActivityRequest } from '../lib/authApi';
 import { persistVertialJsonCache, pruneVertialStorageIfNeeded } from '../lib/clientSessionStorage';
@@ -1149,11 +1150,16 @@ function deserializeSubscription(
   };
 }
 
-// ─── Demo seed ────────────────────────────────────────────────────────────────
+// ─── App provider ─────────────────────────────────────────────────────────────
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const { user: authUser } = useAuth();
   const currentBusiness = useBusinessOptional()?.currentBusiness ?? null;
+  /** CRM compraventa/desguace/taller… — no hidratar en delivery/restaurant/etc. */
+  const needsCrmBoot =
+    Boolean(currentBusiness?.businessType) &&
+    (supportsVehicleInventoryModule(currentBusiness?.businessType) ||
+      isCompraventaBusinessType(currentBusiness?.businessType));
   const scopeKey = currentBusiness?.business_id
     ? `b:${currentBusiness.business_id}`
     : authUser?.user_id
@@ -1183,53 +1189,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const saved = localStorage.getItem('vertial-leads:guest');
       if (saved) return JSON.parse(saved).map(deserializeLead);
-      return [
-        {
-          id: 'LEAD-001',
-          type: 'lead',
-          name: 'Carlos Martínez Ruiz',
-          phone: '654 321 789',
-          email: 'carlos.martinez@email.com',
-          source: 'Sitio web',
-          status: 'new',
-          vehicleInterest: 'BMW Serie 3 2020',
-          vehicleInterestId: '',
-          budget: '28.000€',
-          notes: 'Solicitó financiación a 48 meses.',
-          responsible: 'Juan García',
-          createdAt: new Date('2024-03-07'),
-        },
-        {
-          id: 'LEAD-002',
-          type: 'lead',
-          name: 'Laura Fernández López',
-          phone: '622 555 444',
-          email: 'laura.fernandez@email.com',
-          source: 'Referido',
-          status: 'contacted',
-          vehicleInterest: 'Audi A4 2019',
-          vehicleInterestId: '',
-          budget: '25.000€',
-          notes: 'Quiere ver dos opciones este fin de semana.',
-          responsible: 'María López',
-          createdAt: new Date('2024-03-06'),
-        },
-        {
-          id: 'LEAD-003',
-          type: 'lead',
-          name: 'Miguel Sánchez Torres',
-          phone: '611 222 333',
-          email: 'miguel.sanchez@email.com',
-          source: 'Llamada telefónica',
-          status: 'appointment',
-          vehicleInterest: 'Mercedes C-Class 2021',
-          vehicleInterestId: '',
-          budget: '35.000€',
-          notes: 'Cita agendada para revisión de vehículo.',
-          responsible: 'Carlos Ruiz',
-          createdAt: new Date('2024-03-05'),
-        },
-      ];
+      return [];
     } catch { return []; }
   });
 
@@ -1237,96 +1197,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const saved = localStorage.getItem('vertial-clients:guest');
       if (saved) return JSON.parse(saved).map(deserializeClient);
-      // Si no hay clientes guardados, crear algunos de ejemplo
-      return [
-        {
-          id: 'CLIENT-001',
-          name: 'Carlos Martínez González',
-          phone: '+34 612 345 678',
-          email: 'carlos.martinez@email.com',
-          dni: '12345678A',
-          address: 'Calle Mayor 123',
-          city: 'Madrid',
-          postalCode: '28013',
-          status: 'active' as const,
-          responsible: 'Juan García',
-          notes: 'Cliente preferente',
-          consents: { dataProcessing: true, commercial: true, thirdParty: false },
-          documentsCount: 3,
-          interactions: [
-            {
-              id: 'INT-001',
-              type: 'note',
-              title: 'Seguimiento premium',
-              description: 'Solicita propuestas de SUV premium con entrega inmediata.',
-              date: '2024-03-01T10:00:00.000Z',
-              user: 'Juan García',
-            },
-          ],
-          documentsList: [
-            { id: 'DOC-001', name: 'Contrato marco', date: '2024-01-15', status: 'Firmado' },
-            { id: 'DOC-002', name: 'DNI cliente', date: '2024-01-15', status: 'Validado' },
-            { id: 'DOC-003', name: 'Justificante transferencia', date: '2024-01-18', status: 'Recibido' },
-          ],
-          createdAt: new Date('2024-01-15'),
-        },
-        {
-          id: 'CLIENT-002',
-          name: 'Laura Fernández Ruiz',
-          phone: '+34 623 456 789',
-          email: 'laura.fernandez@email.com',
-          dni: '23456789B',
-          address: 'Avenida de la Constitución 45',
-          city: 'Barcelona',
-          postalCode: '08001',
-          status: 'active' as const,
-          responsible: 'María López',
-          consents: { dataProcessing: true, commercial: false, thirdParty: false },
-          documentsCount: 1,
-          documentsList: [
-            { id: 'DOC-004', name: 'Reserva firmada', date: '2024-02-10', status: 'Firmado' },
-          ],
-          createdAt: new Date('2024-02-10'),
-        },
-        {
-          id: 'CLIENT-003',
-          name: 'Miguel Sánchez Pérez',
-          phone: '+34 634 567 890',
-          email: 'miguel.sanchez@email.com',
-          dni: '34567890C',
-          status: 'active' as const,
-          responsible: 'Carlos Ruiz',
-          notes: 'Interesado en SUV',
-          consents: { dataProcessing: true, commercial: true, thirdParty: false },
-          createdAt: new Date('2024-03-05'),
-        },
-        {
-          id: 'CLIENT-004',
-          name: 'Ana Rodríguez López',
-          phone: '+34 645 678 901',
-          email: 'ana.rodriguez@email.com',
-          dni: '45678901D',
-          address: 'Plaza España 8',
-          city: 'Valencia',
-          postalCode: '46001',
-          status: 'active' as const,
-          responsible: 'Juan García',
-          consents: { dataProcessing: true, commercial: false, thirdParty: false },
-          createdAt: new Date('2024-01-20'),
-        },
-        {
-          id: 'CLIENT-005',
-          name: 'David García Moreno',
-          phone: '+34 656 789 012',
-          email: 'david.garcia@email.com',
-          dni: '56789012E',
-          status: 'active' as const,
-          responsible: 'María López',
-          notes: 'Cliente corporativo',
-          consents: { dataProcessing: true, commercial: true, thirdParty: true },
-          createdAt: new Date('2024-02-28'),
-        },
-      ];
+      return [];
     } catch { return []; }
   });
 
@@ -1522,6 +1393,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setIsLoadingVehicles(false);
       return;
     }
+    if (!needsCrmBoot) {
+      setVehicles([]);
+      setIsLoadingVehicles(false);
+      return;
+    }
 
     let cancelled = false;
     setIsLoadingVehicles(true);
@@ -1548,7 +1424,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [authUser?.user_id, currentBusiness?.business_id]);
+  }, [authUser?.user_id, currentBusiness?.business_id, needsCrmBoot, vehiclesStorageKey]);
 
   useEffect(() => {
     if (!authUser?.user_id) {
@@ -1560,6 +1436,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       } catch (storageError) {
         console.error('Error loading guest leads:', storageError);
       }
+      return;
+    }
+    if (!needsCrmBoot) {
+      setLeads([]);
       return;
     }
 
@@ -1586,7 +1466,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [authUser?.user_id]);
+  }, [authUser?.user_id, needsCrmBoot]);
 
   useEffect(() => {
     if (!authUser?.user_id) {
@@ -1600,6 +1480,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       } catch (storageError) {
         console.error('Error loading guest clients:', storageError);
       }
+      setIsLoadingClients(false);
+      return;
+    }
+
+    // Delivery/food/etc.: no pedir conteo CRM al boot (TPV/CRM lo refrescan al abrir).
+    if (!needsCrmBoot) {
+      setClients([]);
+      setClientsTotalCount(0);
       setIsLoadingClients(false);
       return;
     }
@@ -1637,7 +1525,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [authUser?.user_id]);
+  }, [authUser?.user_id, needsCrmBoot]);
 
   useEffect(() => {
     if (!authUser?.user_id) {
@@ -1704,6 +1592,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       } catch { /* ignore */ }
       return;
     }
+    if (!needsCrmBoot) {
+      setSales([]);
+      return;
+    }
 
     let cancelled = false;
     listSalesRecords()
@@ -1734,7 +1626,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         } catch { /* ignore */ }
       });
     return () => { cancelled = true; };
-  }, [authUser?.user_id]);
+  }, [authUser?.user_id, needsCrmBoot]);
 
   // ─── Load documents from CouchDB ─────────────────────────────────────────
   useEffect(() => {
@@ -1743,6 +1635,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const saved = localStorage.getItem('vertial-documents');
         if (saved) setDocuments(JSON.parse(saved).map(deserializeDocument));
       } catch { /* ignore */ }
+      return;
+    }
+    if (!needsCrmBoot) {
+      setDocuments([]);
       return;
     }
 
@@ -1761,7 +1657,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         } catch { /* ignore */ }
       });
     return () => { cancelled = true; };
-  }, [authUser?.user_id]);
+  }, [authUser?.user_id, needsCrmBoot]);
 
   // ─── Load parking zones from CouchDB ─────────────────────────────────────
   useEffect(() => {
@@ -1772,6 +1668,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       } catch {
         setParkingZones([]);
       }
+      return;
+    }
+    if (!needsCrmBoot) {
+      setParkingZones([]);
       return;
     }
 
@@ -1792,7 +1692,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       });
     return () => { cancelled = true; };
-  }, [authUser?.user_id, parkingZonesStorageKey]);
+  }, [authUser?.user_id, parkingZonesStorageKey, needsCrmBoot]);
 
   useEffect(() => {
     if (authUser?.user_id) return;
@@ -2603,7 +2503,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     token: pushUserId ? sseToken : null,
   });
 
-  const refreshClients = async () => {
+  const refreshClients = useCallback(async () => {
     if (!authUser?.user_id) return;
     try {
       const dataUserId =
@@ -2613,9 +2513,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch {
       // Silenciado: el total actual permanece como fallback.
     }
-  };
+  }, [authUser]);
 
-  const refreshLeads = async () => {
+  const refreshLeads = useCallback(async () => {
     if (!authUser?.user_id) return;
     try {
       const fresh = await listLeadsRequest(authUser.user_id);
@@ -2623,9 +2523,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch {
       // Silenciado: la lista actual permanece como fallback.
     }
-  };
+  }, [authUser?.user_id]);
 
-  const refreshDocuments = async () => {
+  const refreshDocuments = useCallback(async () => {
     if (!authUser?.user_id) return;
     try {
       const records = await listDocumentsRequest(authUser.user_id);
@@ -2633,7 +2533,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch {
       // Silenciado: la lista actual permanece como fallback.
     }
-  };
+  }, [authUser?.user_id]);
 
   const value: AppContextType = {
     vehicles, isLoadingVehicles, isLoadingClients, clientsTotalCount, parkingZones, leads, clients, notifications, sales, documents, locations, user, subscription,

@@ -2,7 +2,7 @@
 @import './tailwind.css';
 @import './theme.css';
 @import './dark-mode.css';
-@import './vertial-saas.css';
+/* vertial-saas.css: solo en SaasRoot (no en landing/auth) */
 
 * {
   scrollbar-width: none;

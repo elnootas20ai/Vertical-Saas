@@ -1,5 +1,5 @@
 import { createBrowserRouter, Navigate, Outlet, useLocation, useParams } from 'react-router-dom';
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, type ComponentType } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { useAuth } from './context/AuthContext';
@@ -34,106 +34,10 @@ import { Gate } from './pages/auth/Gate';
 import { RequireEmailVerified } from './components/RequireEmailVerified';
 import { DELIVERY_CRM_REDIRECT_PATH } from './lib/deliveryCrmFeature';
 import { VerifyEmailPending } from './pages/auth/VerifyEmailPending';
-import { SaasRoot } from './pages/SaasRoot';
-import { Dashboard } from './pages/saas/Dashboard';
-import { Operations } from './pages/saas/Operations';
-import { CompraventaHub } from './pages/saas/CompraventaHub';
-import { VehicleEntryPage } from './pages/saas/VehicleEntryPage';
-import { OperationDetail } from './pages/saas/OperationDetail';
-import { Vehicles } from './pages/saas/Vehicles';
-import { VehicleDetail } from './pages/saas/VehicleDetail';
-import { PublicacionVentaPage } from './pages/saas/PublicacionVentaPage';
-import { Locations } from './pages/saas/Locations';
-import { LocationZone } from './pages/saas/LocationZone';
-import { ClientsPage } from './pages/saas/ClientsPage';
-import { ClientDetail } from './pages/saas/ClientDetail';
-import { ClientPortal } from './pages/public/ClientPortal';
-import { DocumentsPage } from './pages/saas/DocumentsPage';
-import { DocumentDetail } from './pages/saas/DocumentDetail';
-import { Pipeline } from './pages/saas/Pipeline';
-import { Sales } from './pages/saas/Sales';
-import { SaleDetail } from './pages/saas/SaleDetail';
-import { SalesMetrics } from './pages/saas/SalesMetrics';
-import { Ancove } from './pages/saas/Ancove';
-import { Team } from './pages/saas/Team';
-import { TeamMemberDetail } from './pages/saas/TeamMemberDetail';
-import { Invitations } from './pages/saas/Invitations';
-import { Finance } from './pages/saas/Finance';
-import { VerifactuPage } from './pages/saas/VerifactuPage';
-import { AdminPanel } from './pages/saas/AdminPanel';
-import { AdminClientDetail } from './pages/saas/AdminClientDetail';
-import { Settings } from './pages/saas/Settings';
-import { ConfiguracionGeneral } from './pages/saas/ConfiguracionGeneral';
-import { Billing } from './pages/saas/Billing';
-import { HelpCenter } from './pages/saas/HelpCenter';
-import { Suspended } from './pages/saas/Suspended';
-import { SubscriptionPaymentPage } from './pages/saas/SubscriptionPaymentPage';
-import { Reports } from './pages/saas/Reports';
-import AlertCenterPage from './pages/saas/AlertCenterPage';
-import OcrReviewPage from './pages/saas/OcrReviewPage';
-import { CalendarView } from './pages/saas/CalendarView';
-import { Quotes } from './pages/saas/Quotes';
-import { Groups } from './pages/saas/Groups';
-import { QAFinal } from './pages/saas/QAFinal';
-import { BlockA1Checklist } from './pages/saas/BlockA1Checklist';
-import { BlockA2Checklist } from './pages/saas/BlockA2Checklist';
-import { BlockA3Checklist } from './pages/saas/BlockA3Checklist';
-import { SAAS__FlowMap } from './pages/saas/SAAS__FlowMap';
-import { NavigationMap } from './pages/NavigationMap';
-import { Block1QA } from './pages/qa/Block1QA';
-import { Block2QA } from './pages/qa/Block2QA';
-import { Block3QA } from './pages/qa/Block3QA';
-import { Block4QA } from './pages/qa/Block4QA';
-import { FinalQA } from './pages/qa/FinalQA';
-import { QAIndex } from './pages/qa/QAIndex';
-import { ProjectSummary } from './pages/ProjectSummary';
-import { AccessFlowDemo } from './pages/AccessFlowDemo';
-import { SubscriptionDemo } from './pages/SubscriptionDemo';
-import { DemoIndex } from './pages/DemoIndex';
-import { VertialPitchDeck } from './pages/VertialPitchDeck';
-import { SaasNavigationDemo } from './pages/SaasNavigationDemo';
-import { SaasFlowMap } from './pages/SaasFlowMap';
-import { SaasQACheck } from './pages/SaasQACheck';
-import { OperationsDemo } from './pages/OperationsDemo';
-import { LocationsDemo } from './pages/LocationsDemo';
-import { EmbedLeadForm } from './pages/public/EmbedLeadForm';
-import { AffiliatePage } from './pages/public/AffiliatePage';
-import { AffiliatePortal } from './pages/public/AffiliatePortal';
-import { BookingPage } from './pages/public/BookingPage';
-import { MeetingsPage } from './pages/public/MeetingsPage';
-import { GdprPanel } from './pages/saas/GdprPanel';
-import { VehiclePublic } from './pages/public/VehiclePublic';
-import { SignaturePublic } from './pages/public/SignaturePublic';
-import { LegalHubPage } from './pages/public/LegalHubPage';
-import { LegalDocumentPage } from './pages/public/LegalDocumentPage';
-import { Workshop } from './pages/saas/Workshop';
-import { WorkOrderDetail } from './pages/saas/WorkOrderDetail';
-import { Parts } from './pages/saas/Parts';
-import { TechnicianView } from './pages/saas/TechnicianView';
-import { Commissions } from './pages/saas/Commissions';
-import { PayrollPage } from './pages/saas/PayrollPage';
-import { GestoriaHubPage } from './pages/saas/GestoriaHubPage';
 import { RedirectLegacyDelivery } from './components/saas/RedirectLegacyDelivery';
-import { RestaurantReservationsRouteEntry } from './verticals/restaurant/RestaurantReservationsRouteEntry';
-import { RestaurantWaitlistPage } from './verticals/restaurant/RestaurantWaitlistPage';
-import { RestaurantKitchenRouteEntry } from './verticals/restaurant/RestaurantKitchenRouteEntry';
-import { RestaurantReportsPage } from './verticals/restaurant/RestaurantReportsPage';
-import { RestaurantCajaRouteEntry } from './verticals/restaurant/RestaurantCajaRouteEntry';
-import { RestaurantCeoTpvPage } from './verticals/restaurant/RestaurantCeoTpvPage';
-import { RestaurantSalaRouteEntry } from './verticals/restaurant/RestaurantSalaRouteEntry';
-import { RestaurantOpsCenter } from './verticals/restaurant/RestaurantOpsCenter';
 import { RequireRestaurantVertical } from './components/saas/RequireRestaurantVertical';
 import { RequireSalaAccess } from './components/saas/RequireSalaAccess';
-import { DeliveryReparto } from './pages/saas/DeliveryReparto';
-import { DeliveryMontaje } from './pages/saas/DeliveryMontaje';
-import { DeliveryKitchen } from './pages/saas/DeliveryKitchen';
-import { VerticalCatalogEntry, VerticalArticlesRedirect } from './pages/saas/VerticalCatalogEntry';
-import InventoryPage from './pages/saas/InventoryPage';
-import { DealershipWorkers } from './pages/saas/DealershipWorkers';
-import { TpvRapidoPage } from './pages/saas/TpvRapidoPage';
-import { TpvQuickBridgePage } from './pages/saas/TpvQuickBridgePage';
 import { TpvRouteShell } from './components/saas/TpvRouteShell';
-import { CajaPage } from './pages/saas/CajaPage';
 import { RequirePdvTerminal } from './components/saas/RequirePdvTerminal';
 import { RequireTpvTabletEntry } from './components/saas/RequireTpvTabletEntry';
 import { RedirectLegacyDeliveryTpv } from './components/saas/RedirectLegacyDeliveryTpv';
@@ -147,238 +51,326 @@ import { RequireWebOrderingVertical } from './components/saas/RequireWebOrdering
 import { RedirectEventsFromRetailRoutes } from './components/saas/RedirectEventsFromRetailRoutes';
 import { RequireSuperAdmin } from './components/saas/RequireSuperAdmin';
 import { RequireWorkerPermission } from './components/saas/RequireWorkerPermission';
-import { ChangelogPage } from './pages/saas/ChangelogPage';
-import { WorkOrderStatus } from './pages/public/WorkOrderStatus';
-import { WebStorefront } from './pages/public/WebStorefront';
-import { MesaQrPublicPage } from './pages/public/MesaQrPublicPage';
-import { QuotePublicResponse } from './pages/public/QuotePublicResponse';
-import { WebConfig } from './pages/saas/WebConfig';
-import { WebOrders } from './pages/saas/WebOrders';
-import { DeliveryIntegrations } from './pages/saas/DeliveryIntegrations';
-import { DeliveryReports } from './pages/saas/DeliveryReports';
-import { CleaningHub } from './pages/saas/CleaningHub';
-import { CleaningWorkers } from './pages/saas/CleaningWorkers';
-import { CleaningServices } from './pages/saas/CleaningServices';
-import { CleaningRoutes } from './pages/saas/CleaningRoutes';
-import { CleaningExecution } from './pages/saas/CleaningExecution';
-import { ServiceContractsPage } from './pages/saas/ServiceContractsPage';
 // Cleaning vertical pages (dedicated CRM/billing/stock for limpieza)
-import { CleaningClientsPage } from './pages/saas/CleaningClientsPage';
-import { CleaningBilling } from './pages/saas/CleaningBilling';
-import { CleaningMaterialsPage } from './pages/saas/CleaningMaterialsPage';
-import { CleaningReports } from './pages/saas/CleaningReports';
-import { CleaningChecklist } from './pages/saas/CleaningChecklist';
-import { CleaningQuality } from './pages/saas/CleaningQuality';
-import { CleaningReviews } from './pages/saas/CleaningReviews';
-import { CleaningIncidents } from './pages/saas/CleaningIncidents';
-import { WorkerMaterials } from './pages/saas/worker/WorkerMaterials';
-import { Chat } from './pages/saas/Chat';
-import { SupplierInvoiceEmailPage } from './pages/saas/SupplierInvoiceEmailPage';
-import { ClientBillingPage } from './pages/saas/ClientBillingPage';
-import { IncomeExpensesPage } from './pages/saas/IncomeExpensesPage';
-import { EbitdaPage } from './pages/saas/EbitdaPage';
-import { TaxesPage } from './pages/saas/TaxesPage';
-import { BankReconciliationPage } from './pages/saas/BankReconciliationPage';
-import { ArticlesPage } from './pages/saas/ArticlesPage';
-import { SuppliersPage } from './pages/saas/SuppliersPage';
-import { SuppliersLayout } from './pages/saas/suppliers/SuppliersLayout';
-import { SupplierDetailPage } from './pages/saas/SupplierDetailPage';
-import { ComprasStockPage } from './pages/saas/ComprasStockPage';
-import { PromotionsPage } from './pages/saas/PromotionsPage';
 
-import { Clockins } from './pages/saas/Clockins';
-import { Schedules } from './pages/saas/Schedules';
-import { Vacations } from './pages/saas/Vacations';
-import { SchedulesVacations } from './pages/saas/SchedulesVacations';
-import { HrRequestsPage } from './pages/saas/HrRequestsPage';
-import { Affiliates } from './pages/saas/Affiliates';
-import { SetupOnboarding } from './pages/saas/SetupOnboarding';
 
 // ── Gym ──
-import { GymClasses } from './pages/saas/GymClasses';
-import { GymMemberships } from './pages/saas/GymMemberships';
-import { GymRoutines } from './pages/saas/GymRoutines';
-import { GymAccess } from './pages/saas/GymAccess';
-import { GymMembers } from './pages/saas/GymMembers';
-import { GymTrainers } from './pages/saas/GymTrainers';
-import { GymDashboard } from './pages/saas/dashboards/GymDashboard';
 
 // ── Clinic ──
-import { ClinicHistory } from './pages/saas/ClinicHistory';
-import { ClinicTreatments } from './pages/saas/ClinicTreatments';
-import { ClinicPrescriptions } from './pages/saas/ClinicPrescriptions';
 
 // ── Hotel ──
-import { HotelReservations } from './pages/saas/HotelReservations';
-import { HotelRooms } from './pages/saas/HotelRooms';
 // HotelGuests removed (duplicate of ClientsPage)
-import { HotelCheckin } from './pages/saas/HotelCheckin';
-import { HotelHousekeeping } from './pages/saas/HotelHousekeeping';
-import { HotelRoomService } from './pages/saas/HotelRoomService';
 
 // ── Construction ──
-import { ConstructionProjects } from './pages/saas/ConstructionProjects';
-import { ConstructionProjectDetail } from './pages/saas/ConstructionProjectDetail';
-import { ConstructionBudgets } from './pages/saas/ConstructionBudgets';
 // ConstructionClients removed (duplicate of ClientsPage)
 // ConstructionWorkers removed (duplicate of Team)
-import { ConstructionTasks } from './pages/saas/ConstructionTasks';
-import { ConstructionExecution } from './pages/saas/ConstructionExecution';
-import { ConstructionOpsCenter } from './pages/saas/ConstructionOpsCenter';
-import { ConstructionCollections } from './pages/saas/ConstructionCollections';
-import { ConstructionPayments } from './pages/saas/ConstructionPayments';
 // ConstructionReports removed (duplicate of Reports)
-import { ConstructionIncidents } from './pages/saas/ConstructionIncidents';
 // ConstructionDocuments removed (duplicate of DocumentsPage)
-import { QuickBudgetPage } from './pages/saas/QuickBudgetPage';
-import { ConstructionClosure } from './pages/saas/ConstructionClosure';
-import { ConstructionPartidasGremios } from './pages/saas/ConstructionPartidasGremios';
 
 // ── Academy ──
-import { AcademyCourses } from './pages/saas/AcademyCourses';
-import { AcademyEnrollments } from './pages/saas/AcademyEnrollments';
-import { AcademyGrades } from './pages/saas/AcademyGrades';
 
 // ── Real Estate ──
-import { RealEstateProperties } from './pages/saas/RealEstateProperties';
-import { RealEstateVisits } from './pages/saas/RealEstateVisits';
-import { RealEstateContracts } from './pages/saas/RealEstateContracts';
 // RealEstateOwners/Tenants removed (duplicate of ClientsPage)
-import { RealEstateAppraisals } from './pages/saas/RealEstateAppraisals';
 
 // ── Lawyer ──
-import { LawyerOpsCenter } from './pages/saas/LawyerOpsCenter';
-import { LawyerCaptacion } from './pages/saas/LawyerCaptacion';
-import { LawyerCases } from './pages/saas/LawyerCases';
-import { LawyerGestion } from './pages/saas/LawyerGestion';
-import { LawyerArchivo } from './pages/saas/LawyerArchivo';
-import { LawyerHearings } from './pages/saas/LawyerHearings';
-import { LawyerDeadlines } from './pages/saas/LawyerDeadlines';
-import { LawyerBilling } from './pages/saas/LawyerBilling';
 
 // ── Nightclub ──
-import { NightclubEvents } from './pages/saas/NightclubEvents';
-import { NightclubVIP } from './pages/saas/NightclubVIP';
-import { NightclubPromoters } from './pages/saas/NightclubPromoters';
-import { NightclubGuestlist } from './pages/saas/NightclubGuestlist';
 // NightclubInventory removed (duplicate of ComprasStockPage)
-import { NightclubArtists } from './pages/saas/NightclubArtists';
 
 // ── Events ──
-import { EventsServices, RedirectToEventsServicesTab } from './pages/saas/EventsServices';
-import { EventsHub } from './pages/saas/vertical/eventos/EventsHub';
-import { EventsContractWizardPage } from './pages/saas/vertical/eventos/EventsContractWizardPage';
-import { EventsPipelinePage } from './pages/saas/vertical/eventos/EventsPipelinePage';
-import { EventsQuotesPage } from './pages/saas/vertical/eventos/EventsQuotesPage';
-import { EventsRoutePage } from './pages/saas/vertical/eventos/EventsRoutePage';
-import { EventsProjectPage } from './pages/saas/vertical/eventos/EventsProjectPage';
-import { EventsTpvPage } from './pages/saas/vertical/eventos/EventsTpvPage';
 
 // ── Hair Salon ──
-import { SalonServices } from './pages/saas/SalonServices';
-import { SalonLoyalty } from './pages/saas/SalonLoyalty';
 
 // ── Scrapyard ──
-import { ScrapyardHub } from './pages/saas/ScrapyardHub';
-import { ScrapyardVehicles } from './pages/saas/ScrapyardVehicles';
-import { ScrapyardVehicleDetail } from './pages/saas/ScrapyardVehicleDetail';
-import { ScrapyardParts } from './pages/saas/ScrapyardParts';
 // ScrapyardInventory removed (duplicate of ComprasStockPage)
-import { ScrapyardDeregistrations } from './pages/saas/ScrapyardDeregistrations';
 // ScrapyardSales removed (duplicate of Sales)
-import { ScrapyardEnvironment } from './pages/saas/ScrapyardEnvironment';
-import { ScrapyardExpedition } from './pages/saas/ScrapyardExpedition';
-import { ScrapyardPurchasesPage } from './pages/saas/ScrapyardPurchasesPage';
 // ScrapyardReports removed (duplicate of Reports)
-import { ScrapyardDocumentationPage } from './pages/saas/ScrapyardDocumentationPage';
 // ScrapyardWorkers removed (duplicate of Team)
-import { ScrapyardDismantling } from './pages/saas/ScrapyardDismantling';
 
 // ── Spare Parts ──
-import { SparePartsCompatibility } from './pages/saas/SparePartsCompatibility';
-import { SparePartsCounter } from './pages/saas/SparePartsCounter';
 
 // ── Taxi ──
-import { TaxiFleet } from './pages/saas/TaxiFleet';
-import { TaxiTrips } from './pages/saas/TaxiTrips';
-import { TaxiShifts } from './pages/saas/TaxiShifts';
 
 // ── Pharmacy ──
-import { PharmacyPrescriptions } from './pages/saas/PharmacyPrescriptions';
-import { PharmacyGuard } from './pages/saas/PharmacyGuard';
 
 // ── Car Wash ──
-import { CarWashServices } from './pages/saas/CarWashServices';
-import { CarWashMemberships } from './pages/saas/CarWashMemberships';
 
 // ── Vet ──
-import { VetPatients } from './pages/saas/VetPatients';
-import { VetHistory } from './pages/saas/VetHistory';
-import { VetVaccinations } from './pages/saas/VetVaccinations';
 
 // ── Tobacco Shop (Estanco) ──
-import { TobaccoLottery } from './pages/saas/TobaccoLottery';
-import { TobaccoRegulatory } from './pages/saas/TobaccoRegulatory';
 
 // ── Butcher Shop (Carnicería) ──
-import { ButcherHub } from './pages/saas/ButcherHub';
-import { ButcherClients } from './pages/saas/ButcherClients';
-import { ButcherProducts } from './pages/saas/ButcherProducts';
-import { ButcherOrders } from './pages/saas/ButcherOrders';
-import { ButcherSales } from './pages/saas/ButcherSales';
-import { ButcherReports } from './pages/saas/ButcherReports';
-import { ButcherTraceability } from './pages/saas/ButcherTraceability';
-import { ButcherWaste } from './pages/saas/ButcherWaste';
-import { ButcherPurchasesPage } from './pages/saas/ButcherPurchasesPage';
-import { ButcherReparto } from './pages/saas/ButcherReparto';
-import { ButcherDespiece } from './pages/saas/ButcherDespiece';
-import { ButcherScaleSetup } from './pages/saas/ButcherScaleSetup';
-import { ButcherTpvPage } from './pages/saas/ButcherTpvPage';
-import { WorkerButcherReparto } from './pages/saas/WorkerButcherReparto';
-import {
-  HeladeriaOpsPage,
-  HeladeriaTpvPage,
-  HeladeriaCajaPage,
-  HeladeriaEncargosPage,
-  HeladeriaIntegracionesPage,
-} from './verticals/heladeria';
-import { CompraventaCrm } from './pages/saas/vertical/compraventa/CompraventaCrm';
-import { CompraventaComprasPage } from './pages/saas/vertical/compraventa/CompraventaComprasPage';
-import { CompraventaVentasPage } from './pages/saas/vertical/compraventa/CompraventaVentasPage';
-import { CompraventaTasacionesPage } from './pages/saas/vertical/compraventa/CompraventaTasacionesPage';
-import { CompraventaEntregasPage } from './pages/saas/vertical/compraventa/CompraventaEntregasPage';
-import { CompraventaFiscalCalculatorPage } from './pages/saas/vertical/compraventa/CompraventaFiscalCalculatorPage';
-import { PreparationExpenses } from './pages/saas/PreparationExpenses';
-import { ButcherWorkerOrders } from './pages/saas/ButcherWorkerOrders';
 
-import { SalesPointTpvPage } from './pages/saas/SalesPointTpvPage';
-import { ClockKiosk } from './pages/saas/ClockKiosk';
 
-import {
-  WorkerIdentitySetup,
-  WorkerPayrollSetup,
-  WorkerTasks,
-  WorkerCalendar,
-  WorkerRequests,
-  WorkerClock,
-  WorkerChat,
-  WorkerDocs,
-  WorkerOnboarding,
-  WorkerProfile,
-  WorkerContractInfo,
-  WorkerPosition,
-  WorkerNotifications,
-  WorkerSecurity,
-  WorkerTpv,
-  WorkerTpvEntry,
-  WorkerTpvDeliveryRoute,
-  WorkerConstructionReport,
-  WorkerStockReviewPage,
-  WorkerEventsOps,
-  WorkerEventDayPage,
-} from './pages/saas/worker';
-import { UserDashboard } from './pages/saas/UserDashboard';
 import { AuthRouteLoading } from './components/AuthRouteLoading';
+import { ProtectedRoute } from './components/ProtectedRoute';
+
+/** Lazy page helper — named export → default for React.lazy */
+function lazyPage<M extends Record<string, unknown>>(
+  loader: () => Promise<M>,
+  exportName: keyof M,
+) {
+  return lazy(() =>
+    loader().then((m) => ({
+      default: m[exportName] as ComponentType<any>,
+    })),
+  );
+}
+
+// ── Lazy SaaS / public / vertical pages (Ola 1) ──
+const SaasRoot = lazyPage(() => import('./pages/SaasRoot'), 'SaasRoot');
+const Dashboard = lazyPage(() => import('./pages/saas/Dashboard'), 'Dashboard');
+const Operations = lazyPage(() => import('./pages/saas/Operations'), 'Operations');
+const CompraventaHub = lazyPage(() => import('./pages/saas/CompraventaHub'), 'CompraventaHub');
+const VehicleEntryPage = lazyPage(() => import('./pages/saas/VehicleEntryPage'), 'VehicleEntryPage');
+const OperationDetail = lazyPage(() => import('./pages/saas/OperationDetail'), 'OperationDetail');
+const Vehicles = lazyPage(() => import('./pages/saas/Vehicles'), 'Vehicles');
+const VehicleDetail = lazyPage(() => import('./pages/saas/VehicleDetail'), 'VehicleDetail');
+const PublicacionVentaPage = lazyPage(() => import('./pages/saas/PublicacionVentaPage'), 'PublicacionVentaPage');
+const Locations = lazyPage(() => import('./pages/saas/Locations'), 'Locations');
+const LocationZone = lazyPage(() => import('./pages/saas/LocationZone'), 'LocationZone');
+const ClientsPage = lazyPage(() => import('./pages/saas/ClientsPage'), 'ClientsPage');
+const ClientDetail = lazyPage(() => import('./pages/saas/ClientDetail'), 'ClientDetail');
+const ClientPortal = lazyPage(() => import('./pages/public/ClientPortal'), 'ClientPortal');
+const DocumentsPage = lazyPage(() => import('./pages/saas/DocumentsPage'), 'DocumentsPage');
+const DocumentDetail = lazyPage(() => import('./pages/saas/DocumentDetail'), 'DocumentDetail');
+const Pipeline = lazyPage(() => import('./pages/saas/Pipeline'), 'Pipeline');
+const Sales = lazyPage(() => import('./pages/saas/Sales'), 'Sales');
+const SaleDetail = lazyPage(() => import('./pages/saas/SaleDetail'), 'SaleDetail');
+const SalesMetrics = lazyPage(() => import('./pages/saas/SalesMetrics'), 'SalesMetrics');
+const Ancove = lazyPage(() => import('./pages/saas/Ancove'), 'Ancove');
+const Team = lazyPage(() => import('./pages/saas/Team'), 'Team');
+const TeamMemberDetail = lazyPage(() => import('./pages/saas/TeamMemberDetail'), 'TeamMemberDetail');
+const Invitations = lazyPage(() => import('./pages/saas/Invitations'), 'Invitations');
+const Finance = lazyPage(() => import('./pages/saas/Finance'), 'Finance');
+const VerifactuPage = lazyPage(() => import('./pages/saas/VerifactuPage'), 'VerifactuPage');
+const AdminPanel = lazyPage(() => import('./pages/saas/AdminPanel'), 'AdminPanel');
+const AdminClientDetail = lazyPage(() => import('./pages/saas/AdminClientDetail'), 'AdminClientDetail');
+const Settings = lazyPage(() => import('./pages/saas/Settings'), 'Settings');
+const ConfiguracionGeneral = lazyPage(() => import('./pages/saas/ConfiguracionGeneral'), 'ConfiguracionGeneral');
+const Billing = lazyPage(() => import('./pages/saas/Billing'), 'Billing');
+const HelpCenter = lazyPage(() => import('./pages/saas/HelpCenter'), 'HelpCenter');
+const Suspended = lazyPage(() => import('./pages/saas/Suspended'), 'Suspended');
+const SubscriptionPaymentPage = lazyPage(() => import('./pages/saas/SubscriptionPaymentPage'), 'SubscriptionPaymentPage');
+const Reports = lazyPage(() => import('./pages/saas/Reports'), 'Reports');
+const AlertCenterPage = lazy(() => import('./pages/saas/AlertCenterPage'));
+const OcrReviewPage = lazy(() => import('./pages/saas/OcrReviewPage'));
+const CalendarView = lazyPage(() => import('./pages/saas/CalendarView'), 'CalendarView');
+const Quotes = lazyPage(() => import('./pages/saas/Quotes'), 'Quotes');
+const Groups = lazyPage(() => import('./pages/saas/Groups'), 'Groups');
+const EmbedLeadForm = lazyPage(() => import('./pages/public/EmbedLeadForm'), 'EmbedLeadForm');
+const AffiliatePage = lazyPage(() => import('./pages/public/AffiliatePage'), 'AffiliatePage');
+const AffiliatePortal = lazyPage(() => import('./pages/public/AffiliatePortal'), 'AffiliatePortal');
+const BookingPage = lazyPage(() => import('./pages/public/BookingPage'), 'BookingPage');
+const MeetingsPage = lazyPage(() => import('./pages/public/MeetingsPage'), 'MeetingsPage');
+const GdprPanel = lazyPage(() => import('./pages/saas/GdprPanel'), 'GdprPanel');
+const VehiclePublic = lazyPage(() => import('./pages/public/VehiclePublic'), 'VehiclePublic');
+const SignaturePublic = lazyPage(() => import('./pages/public/SignaturePublic'), 'SignaturePublic');
+const LegalHubPage = lazyPage(() => import('./pages/public/LegalHubPage'), 'LegalHubPage');
+const LegalDocumentPage = lazyPage(() => import('./pages/public/LegalDocumentPage'), 'LegalDocumentPage');
+const Workshop = lazyPage(() => import('./pages/saas/Workshop'), 'Workshop');
+const WorkOrderDetail = lazyPage(() => import('./pages/saas/WorkOrderDetail'), 'WorkOrderDetail');
+const Parts = lazyPage(() => import('./pages/saas/Parts'), 'Parts');
+const TechnicianView = lazyPage(() => import('./pages/saas/TechnicianView'), 'TechnicianView');
+const Commissions = lazyPage(() => import('./pages/saas/Commissions'), 'Commissions');
+const PayrollPage = lazyPage(() => import('./pages/saas/PayrollPage'), 'PayrollPage');
+const GestoriaHubPage = lazyPage(() => import('./pages/saas/GestoriaHubPage'), 'GestoriaHubPage');
+const RestaurantReservationsRouteEntry = lazyPage(() => import('./verticals/restaurant/RestaurantReservationsRouteEntry'), 'RestaurantReservationsRouteEntry');
+const RestaurantWaitlistPage = lazyPage(() => import('./verticals/restaurant/RestaurantWaitlistPage'), 'RestaurantWaitlistPage');
+const RestaurantKitchenRouteEntry = lazyPage(() => import('./verticals/restaurant/RestaurantKitchenRouteEntry'), 'RestaurantKitchenRouteEntry');
+const RestaurantReportsPage = lazyPage(() => import('./verticals/restaurant/RestaurantReportsPage'), 'RestaurantReportsPage');
+const RestaurantCajaRouteEntry = lazyPage(() => import('./verticals/restaurant/RestaurantCajaRouteEntry'), 'RestaurantCajaRouteEntry');
+const RestaurantCeoTpvPage = lazyPage(() => import('./verticals/restaurant/RestaurantCeoTpvPage'), 'RestaurantCeoTpvPage');
+const RestaurantSalaRouteEntry = lazyPage(() => import('./verticals/restaurant/RestaurantSalaRouteEntry'), 'RestaurantSalaRouteEntry');
+const RestaurantOpsCenter = lazyPage(() => import('./verticals/restaurant/RestaurantOpsCenter'), 'RestaurantOpsCenter');
+const DeliveryReparto = lazyPage(() => import('./pages/saas/DeliveryReparto'), 'DeliveryReparto');
+const DeliveryMontaje = lazyPage(() => import('./pages/saas/DeliveryMontaje'), 'DeliveryMontaje');
+const DeliveryKitchen = lazyPage(() => import('./pages/saas/DeliveryKitchen'), 'DeliveryKitchen');
+const VerticalCatalogEntry = lazyPage(() => import('./pages/saas/VerticalCatalogEntry'), 'VerticalCatalogEntry');
+const VerticalArticlesRedirect = lazyPage(() => import('./pages/saas/VerticalCatalogEntry'), 'VerticalArticlesRedirect');
+const InventoryPage = lazy(() => import('./pages/saas/InventoryPage'));
+const DealershipWorkers = lazyPage(() => import('./pages/saas/DealershipWorkers'), 'DealershipWorkers');
+const TpvRapidoPage = lazyPage(() => import('./pages/saas/TpvRapidoPage'), 'TpvRapidoPage');
+const TpvQuickBridgePage = lazyPage(() => import('./pages/saas/TpvQuickBridgePage'), 'TpvQuickBridgePage');
+const CajaPage = lazyPage(() => import('./pages/saas/CajaPage'), 'CajaPage');
+const ChangelogPage = lazyPage(() => import('./pages/saas/ChangelogPage'), 'ChangelogPage');
+const WorkOrderStatus = lazyPage(() => import('./pages/public/WorkOrderStatus'), 'WorkOrderStatus');
+const WebStorefront = lazyPage(() => import('./pages/public/WebStorefront'), 'WebStorefront');
+const MesaQrPublicPage = lazyPage(() => import('./pages/public/MesaQrPublicPage'), 'MesaQrPublicPage');
+const QuotePublicResponse = lazyPage(() => import('./pages/public/QuotePublicResponse'), 'QuotePublicResponse');
+const WebConfig = lazyPage(() => import('./pages/saas/WebConfig'), 'WebConfig');
+const WebOrders = lazyPage(() => import('./pages/saas/WebOrders'), 'WebOrders');
+const DeliveryIntegrations = lazyPage(() => import('./pages/saas/DeliveryIntegrations'), 'DeliveryIntegrations');
+const DeliveryReports = lazyPage(() => import('./pages/saas/DeliveryReports'), 'DeliveryReports');
+const CleaningHub = lazyPage(() => import('./pages/saas/CleaningHub'), 'CleaningHub');
+const CleaningWorkers = lazyPage(() => import('./pages/saas/CleaningWorkers'), 'CleaningWorkers');
+const CleaningServices = lazyPage(() => import('./pages/saas/CleaningServices'), 'CleaningServices');
+const CleaningRoutes = lazyPage(() => import('./pages/saas/CleaningRoutes'), 'CleaningRoutes');
+const CleaningExecution = lazyPage(() => import('./pages/saas/CleaningExecution'), 'CleaningExecution');
+const ServiceContractsPage = lazyPage(() => import('./pages/saas/ServiceContractsPage'), 'ServiceContractsPage');
+const CleaningClientsPage = lazyPage(() => import('./pages/saas/CleaningClientsPage'), 'CleaningClientsPage');
+const CleaningBilling = lazyPage(() => import('./pages/saas/CleaningBilling'), 'CleaningBilling');
+const CleaningMaterialsPage = lazyPage(() => import('./pages/saas/CleaningMaterialsPage'), 'CleaningMaterialsPage');
+const CleaningReports = lazyPage(() => import('./pages/saas/CleaningReports'), 'CleaningReports');
+const CleaningChecklist = lazyPage(() => import('./pages/saas/CleaningChecklist'), 'CleaningChecklist');
+const CleaningQuality = lazyPage(() => import('./pages/saas/CleaningQuality'), 'CleaningQuality');
+const CleaningReviews = lazyPage(() => import('./pages/saas/CleaningReviews'), 'CleaningReviews');
+const CleaningIncidents = lazyPage(() => import('./pages/saas/CleaningIncidents'), 'CleaningIncidents');
+const WorkerMaterials = lazyPage(() => import('./pages/saas/worker/WorkerMaterials'), 'WorkerMaterials');
+const Chat = lazyPage(() => import('./pages/saas/Chat'), 'Chat');
+const SupplierInvoiceEmailPage = lazyPage(() => import('./pages/saas/SupplierInvoiceEmailPage'), 'SupplierInvoiceEmailPage');
+const ClientBillingPage = lazyPage(() => import('./pages/saas/ClientBillingPage'), 'ClientBillingPage');
+const IncomeExpensesPage = lazyPage(() => import('./pages/saas/IncomeExpensesPage'), 'IncomeExpensesPage');
+const EbitdaPage = lazyPage(() => import('./pages/saas/EbitdaPage'), 'EbitdaPage');
+const TaxesPage = lazyPage(() => import('./pages/saas/TaxesPage'), 'TaxesPage');
+const BankReconciliationPage = lazyPage(() => import('./pages/saas/BankReconciliationPage'), 'BankReconciliationPage');
+const ArticlesPage = lazyPage(() => import('./pages/saas/ArticlesPage'), 'ArticlesPage');
+const SuppliersPage = lazyPage(() => import('./pages/saas/SuppliersPage'), 'SuppliersPage');
+const SuppliersLayout = lazyPage(() => import('./pages/saas/suppliers/SuppliersLayout'), 'SuppliersLayout');
+const SupplierDetailPage = lazyPage(() => import('./pages/saas/SupplierDetailPage'), 'SupplierDetailPage');
+const ComprasStockPage = lazyPage(() => import('./pages/saas/ComprasStockPage'), 'ComprasStockPage');
+const PromotionsPage = lazyPage(() => import('./pages/saas/PromotionsPage'), 'PromotionsPage');
+const Clockins = lazyPage(() => import('./pages/saas/Clockins'), 'Clockins');
+const Schedules = lazyPage(() => import('./pages/saas/Schedules'), 'Schedules');
+const Vacations = lazyPage(() => import('./pages/saas/Vacations'), 'Vacations');
+const SchedulesVacations = lazyPage(() => import('./pages/saas/SchedulesVacations'), 'SchedulesVacations');
+const HrRequestsPage = lazyPage(() => import('./pages/saas/HrRequestsPage'), 'HrRequestsPage');
+const Affiliates = lazyPage(() => import('./pages/saas/Affiliates'), 'Affiliates');
+const SetupOnboarding = lazyPage(() => import('./pages/saas/SetupOnboarding'), 'SetupOnboarding');
+const GymClasses = lazyPage(() => import('./pages/saas/GymClasses'), 'GymClasses');
+const GymMemberships = lazyPage(() => import('./pages/saas/GymMemberships'), 'GymMemberships');
+const GymRoutines = lazyPage(() => import('./pages/saas/GymRoutines'), 'GymRoutines');
+const GymAccess = lazyPage(() => import('./pages/saas/GymAccess'), 'GymAccess');
+const GymMembers = lazyPage(() => import('./pages/saas/GymMembers'), 'GymMembers');
+const GymTrainers = lazyPage(() => import('./pages/saas/GymTrainers'), 'GymTrainers');
+const GymDashboard = lazyPage(() => import('./pages/saas/dashboards/GymDashboard'), 'GymDashboard');
+const ClinicHistory = lazyPage(() => import('./pages/saas/ClinicHistory'), 'ClinicHistory');
+const ClinicTreatments = lazyPage(() => import('./pages/saas/ClinicTreatments'), 'ClinicTreatments');
+const ClinicPrescriptions = lazyPage(() => import('./pages/saas/ClinicPrescriptions'), 'ClinicPrescriptions');
+const HotelReservations = lazyPage(() => import('./pages/saas/HotelReservations'), 'HotelReservations');
+const HotelRooms = lazyPage(() => import('./pages/saas/HotelRooms'), 'HotelRooms');
+const HotelCheckin = lazyPage(() => import('./pages/saas/HotelCheckin'), 'HotelCheckin');
+const HotelHousekeeping = lazyPage(() => import('./pages/saas/HotelHousekeeping'), 'HotelHousekeeping');
+const HotelRoomService = lazyPage(() => import('./pages/saas/HotelRoomService'), 'HotelRoomService');
+const ConstructionProjects = lazyPage(() => import('./pages/saas/ConstructionProjects'), 'ConstructionProjects');
+const ConstructionProjectDetail = lazyPage(() => import('./pages/saas/ConstructionProjectDetail'), 'ConstructionProjectDetail');
+const ConstructionBudgets = lazyPage(() => import('./pages/saas/ConstructionBudgets'), 'ConstructionBudgets');
+const ConstructionTasks = lazyPage(() => import('./pages/saas/ConstructionTasks'), 'ConstructionTasks');
+const ConstructionExecution = lazyPage(() => import('./pages/saas/ConstructionExecution'), 'ConstructionExecution');
+const ConstructionOpsCenter = lazyPage(() => import('./pages/saas/ConstructionOpsCenter'), 'ConstructionOpsCenter');
+const ConstructionCollections = lazyPage(() => import('./pages/saas/ConstructionCollections'), 'ConstructionCollections');
+const ConstructionPayments = lazyPage(() => import('./pages/saas/ConstructionPayments'), 'ConstructionPayments');
+const ConstructionIncidents = lazyPage(() => import('./pages/saas/ConstructionIncidents'), 'ConstructionIncidents');
+const QuickBudgetPage = lazyPage(() => import('./pages/saas/QuickBudgetPage'), 'QuickBudgetPage');
+const ConstructionClosure = lazyPage(() => import('./pages/saas/ConstructionClosure'), 'ConstructionClosure');
+const ConstructionPartidasGremios = lazyPage(() => import('./pages/saas/ConstructionPartidasGremios'), 'ConstructionPartidasGremios');
+const AcademyCourses = lazyPage(() => import('./pages/saas/AcademyCourses'), 'AcademyCourses');
+const AcademyEnrollments = lazyPage(() => import('./pages/saas/AcademyEnrollments'), 'AcademyEnrollments');
+const AcademyGrades = lazyPage(() => import('./pages/saas/AcademyGrades'), 'AcademyGrades');
+const RealEstateProperties = lazyPage(() => import('./pages/saas/RealEstateProperties'), 'RealEstateProperties');
+const RealEstateVisits = lazyPage(() => import('./pages/saas/RealEstateVisits'), 'RealEstateVisits');
+const RealEstateContracts = lazyPage(() => import('./pages/saas/RealEstateContracts'), 'RealEstateContracts');
+const RealEstateAppraisals = lazyPage(() => import('./pages/saas/RealEstateAppraisals'), 'RealEstateAppraisals');
+const LawyerOpsCenter = lazyPage(() => import('./pages/saas/LawyerOpsCenter'), 'LawyerOpsCenter');
+const LawyerCaptacion = lazyPage(() => import('./pages/saas/LawyerCaptacion'), 'LawyerCaptacion');
+const LawyerCases = lazyPage(() => import('./pages/saas/LawyerCases'), 'LawyerCases');
+const LawyerGestion = lazyPage(() => import('./pages/saas/LawyerGestion'), 'LawyerGestion');
+const LawyerArchivo = lazyPage(() => import('./pages/saas/LawyerArchivo'), 'LawyerArchivo');
+const LawyerHearings = lazyPage(() => import('./pages/saas/LawyerHearings'), 'LawyerHearings');
+const LawyerDeadlines = lazyPage(() => import('./pages/saas/LawyerDeadlines'), 'LawyerDeadlines');
+const LawyerBilling = lazyPage(() => import('./pages/saas/LawyerBilling'), 'LawyerBilling');
+const NightclubEvents = lazyPage(() => import('./pages/saas/NightclubEvents'), 'NightclubEvents');
+const NightclubVIP = lazyPage(() => import('./pages/saas/NightclubVIP'), 'NightclubVIP');
+const NightclubPromoters = lazyPage(() => import('./pages/saas/NightclubPromoters'), 'NightclubPromoters');
+const NightclubGuestlist = lazyPage(() => import('./pages/saas/NightclubGuestlist'), 'NightclubGuestlist');
+const NightclubArtists = lazyPage(() => import('./pages/saas/NightclubArtists'), 'NightclubArtists');
+const EventsServices = lazyPage(() => import('./pages/saas/EventsServices'), 'EventsServices');
+const RedirectToEventsServicesTab = lazyPage(() => import('./pages/saas/EventsServices'), 'RedirectToEventsServicesTab');
+const EventsHub = lazyPage(() => import('./pages/saas/vertical/eventos/EventsHub'), 'EventsHub');
+const EventsContractWizardPage = lazyPage(() => import('./pages/saas/vertical/eventos/EventsContractWizardPage'), 'EventsContractWizardPage');
+const EventsPipelinePage = lazyPage(() => import('./pages/saas/vertical/eventos/EventsPipelinePage'), 'EventsPipelinePage');
+const EventsQuotesPage = lazyPage(() => import('./pages/saas/vertical/eventos/EventsQuotesPage'), 'EventsQuotesPage');
+const EventsRoutePage = lazyPage(() => import('./pages/saas/vertical/eventos/EventsRoutePage'), 'EventsRoutePage');
+const EventsProjectPage = lazyPage(() => import('./pages/saas/vertical/eventos/EventsProjectPage'), 'EventsProjectPage');
+const EventsTpvPage = lazyPage(() => import('./pages/saas/vertical/eventos/EventsTpvPage'), 'EventsTpvPage');
+const SalonServices = lazyPage(() => import('./pages/saas/SalonServices'), 'SalonServices');
+const SalonLoyalty = lazyPage(() => import('./pages/saas/SalonLoyalty'), 'SalonLoyalty');
+const ScrapyardHub = lazyPage(() => import('./pages/saas/ScrapyardHub'), 'ScrapyardHub');
+const ScrapyardVehicles = lazyPage(() => import('./pages/saas/ScrapyardVehicles'), 'ScrapyardVehicles');
+const ScrapyardVehicleDetail = lazyPage(() => import('./pages/saas/ScrapyardVehicleDetail'), 'ScrapyardVehicleDetail');
+const ScrapyardParts = lazyPage(() => import('./pages/saas/ScrapyardParts'), 'ScrapyardParts');
+const ScrapyardDeregistrations = lazyPage(() => import('./pages/saas/ScrapyardDeregistrations'), 'ScrapyardDeregistrations');
+const ScrapyardEnvironment = lazyPage(() => import('./pages/saas/ScrapyardEnvironment'), 'ScrapyardEnvironment');
+const ScrapyardExpedition = lazyPage(() => import('./pages/saas/ScrapyardExpedition'), 'ScrapyardExpedition');
+const ScrapyardPurchasesPage = lazyPage(() => import('./pages/saas/ScrapyardPurchasesPage'), 'ScrapyardPurchasesPage');
+const ScrapyardDocumentationPage = lazyPage(() => import('./pages/saas/ScrapyardDocumentationPage'), 'ScrapyardDocumentationPage');
+const ScrapyardDismantling = lazyPage(() => import('./pages/saas/ScrapyardDismantling'), 'ScrapyardDismantling');
+const SparePartsCompatibility = lazyPage(() => import('./pages/saas/SparePartsCompatibility'), 'SparePartsCompatibility');
+const SparePartsCounter = lazyPage(() => import('./pages/saas/SparePartsCounter'), 'SparePartsCounter');
+const TaxiFleet = lazyPage(() => import('./pages/saas/TaxiFleet'), 'TaxiFleet');
+const TaxiTrips = lazyPage(() => import('./pages/saas/TaxiTrips'), 'TaxiTrips');
+const TaxiShifts = lazyPage(() => import('./pages/saas/TaxiShifts'), 'TaxiShifts');
+const PharmacyPrescriptions = lazyPage(() => import('./pages/saas/PharmacyPrescriptions'), 'PharmacyPrescriptions');
+const PharmacyGuard = lazyPage(() => import('./pages/saas/PharmacyGuard'), 'PharmacyGuard');
+const CarWashServices = lazyPage(() => import('./pages/saas/CarWashServices'), 'CarWashServices');
+const CarWashMemberships = lazyPage(() => import('./pages/saas/CarWashMemberships'), 'CarWashMemberships');
+const VetPatients = lazyPage(() => import('./pages/saas/VetPatients'), 'VetPatients');
+const VetHistory = lazyPage(() => import('./pages/saas/VetHistory'), 'VetHistory');
+const VetVaccinations = lazyPage(() => import('./pages/saas/VetVaccinations'), 'VetVaccinations');
+const TobaccoLottery = lazyPage(() => import('./pages/saas/TobaccoLottery'), 'TobaccoLottery');
+const TobaccoRegulatory = lazyPage(() => import('./pages/saas/TobaccoRegulatory'), 'TobaccoRegulatory');
+const ButcherHub = lazyPage(() => import('./pages/saas/ButcherHub'), 'ButcherHub');
+const ButcherClients = lazyPage(() => import('./pages/saas/ButcherClients'), 'ButcherClients');
+const ButcherProducts = lazyPage(() => import('./pages/saas/ButcherProducts'), 'ButcherProducts');
+const ButcherOrders = lazyPage(() => import('./pages/saas/ButcherOrders'), 'ButcherOrders');
+const ButcherSales = lazyPage(() => import('./pages/saas/ButcherSales'), 'ButcherSales');
+const ButcherReports = lazyPage(() => import('./pages/saas/ButcherReports'), 'ButcherReports');
+const ButcherTraceability = lazyPage(() => import('./pages/saas/ButcherTraceability'), 'ButcherTraceability');
+const ButcherWaste = lazyPage(() => import('./pages/saas/ButcherWaste'), 'ButcherWaste');
+const ButcherPurchasesPage = lazyPage(() => import('./pages/saas/ButcherPurchasesPage'), 'ButcherPurchasesPage');
+const ButcherReparto = lazyPage(() => import('./pages/saas/ButcherReparto'), 'ButcherReparto');
+const ButcherDespiece = lazyPage(() => import('./pages/saas/ButcherDespiece'), 'ButcherDespiece');
+const ButcherScaleSetup = lazyPage(() => import('./pages/saas/ButcherScaleSetup'), 'ButcherScaleSetup');
+const ButcherTpvPage = lazyPage(() => import('./pages/saas/ButcherTpvPage'), 'ButcherTpvPage');
+const WorkerButcherReparto = lazyPage(() => import('./pages/saas/WorkerButcherReparto'), 'WorkerButcherReparto');
+const HeladeriaOpsPage = lazyPage(() => import('./verticals/heladeria/HeladeriaOpsPage'), 'HeladeriaOpsPage');
+const HeladeriaTpvPage = lazyPage(() => import('./verticals/heladeria/HeladeriaTpvPage'), 'HeladeriaTpvPage');
+const HeladeriaCajaPage = lazyPage(() => import('./verticals/heladeria/HeladeriaCajaPage'), 'HeladeriaCajaPage');
+const HeladeriaEncargosPage = lazyPage(() => import('./verticals/heladeria/HeladeriaEncargosPage'), 'HeladeriaEncargosPage');
+const HeladeriaIntegracionesPage = lazyPage(() => import('./verticals/heladeria/HeladeriaIntegracionesPage'), 'HeladeriaIntegracionesPage');
+const CompraventaCrm = lazyPage(() => import('./pages/saas/vertical/compraventa/CompraventaCrm'), 'CompraventaCrm');
+const CompraventaComprasPage = lazyPage(() => import('./pages/saas/vertical/compraventa/CompraventaComprasPage'), 'CompraventaComprasPage');
+const CompraventaVentasPage = lazyPage(() => import('./pages/saas/vertical/compraventa/CompraventaVentasPage'), 'CompraventaVentasPage');
+const CompraventaTasacionesPage = lazyPage(() => import('./pages/saas/vertical/compraventa/CompraventaTasacionesPage'), 'CompraventaTasacionesPage');
+const CompraventaEntregasPage = lazyPage(() => import('./pages/saas/vertical/compraventa/CompraventaEntregasPage'), 'CompraventaEntregasPage');
+const CompraventaFiscalCalculatorPage = lazyPage(() => import('./pages/saas/vertical/compraventa/CompraventaFiscalCalculatorPage'), 'CompraventaFiscalCalculatorPage');
+const PreparationExpenses = lazyPage(() => import('./pages/saas/PreparationExpenses'), 'PreparationExpenses');
+const ButcherWorkerOrders = lazyPage(() => import('./pages/saas/ButcherWorkerOrders'), 'ButcherWorkerOrders');
+const SalesPointTpvPage = lazyPage(() => import('./pages/saas/SalesPointTpvPage'), 'SalesPointTpvPage');
+const ClockKiosk = lazyPage(() => import('./pages/saas/ClockKiosk'), 'ClockKiosk');
+const WorkerIdentitySetup = lazyPage(() => import('./pages/saas/worker/WorkerIdentitySetup'), 'WorkerIdentitySetup');
+const WorkerPayrollSetup = lazyPage(() => import('./pages/saas/worker/WorkerPayrollSetup'), 'WorkerPayrollSetup');
+const WorkerTasks = lazyPage(() => import('./pages/saas/worker/WorkerTasks'), 'WorkerTasks');
+const WorkerCalendar = lazyPage(() => import('./pages/saas/worker/WorkerCalendar'), 'WorkerCalendar');
+const WorkerRequests = lazyPage(() => import('./pages/saas/worker/WorkerRequests'), 'WorkerRequests');
+const WorkerClock = lazyPage(() => import('./pages/saas/worker/WorkerClock'), 'WorkerClock');
+const WorkerChat = lazyPage(() => import('./pages/saas/worker/WorkerChat'), 'WorkerChat');
+const WorkerDocs = lazyPage(() => import('./pages/saas/worker/WorkerDocs'), 'WorkerDocs');
+const WorkerOnboarding = lazyPage(() => import('./pages/saas/worker/WorkerOnboarding'), 'WorkerOnboarding');
+const WorkerProfile = lazyPage(() => import('./pages/saas/worker/WorkerProfile'), 'WorkerProfile');
+const WorkerContractInfo = lazyPage(() => import('./pages/saas/worker/WorkerContractInfo'), 'WorkerContractInfo');
+const WorkerPosition = lazyPage(() => import('./pages/saas/worker/WorkerPosition'), 'WorkerPosition');
+const WorkerNotifications = lazyPage(() => import('./pages/saas/worker/WorkerNotifications'), 'WorkerNotifications');
+const WorkerSecurity = lazyPage(() => import('./pages/saas/worker/WorkerSecurity'), 'WorkerSecurity');
+const WorkerTpv = lazyPage(() => import('./pages/saas/worker/WorkerTpv'), 'WorkerTpv');
+const WorkerTpvEntry = lazyPage(() => import('./pages/saas/worker/WorkerTpv'), 'WorkerTpvEntry');
+const WorkerTpvDeliveryRoute = lazyPage(() => import('./pages/saas/worker/WorkerTpv'), 'WorkerTpvDeliveryRoute');
+const WorkerConstructionReport = lazyPage(() => import('./pages/saas/worker/WorkerConstructionReport'), 'WorkerConstructionReport');
+const WorkerStockReviewPage = lazyPage(() => import('./pages/saas/worker/WorkerStockReviewPage'), 'WorkerStockReviewPage');
+const WorkerEventsOps = lazyPage(() => import('./pages/saas/worker/WorkerEventsOps'), 'WorkerEventsOps');
+const WorkerEventDayPage = lazyPage(() => import('./pages/saas/worker/WorkerEventDayPage'), 'WorkerEventDayPage');
+const UserDashboard = lazyPage(() => import('./pages/saas/UserDashboard'), 'UserDashboard');
+
 
 function MechanicStandalone() {
   return (
@@ -453,19 +445,34 @@ const DeliveryOpsCenterLazy = lazy(() =>
   import('./pages/saas/DeliveryOpsCenter').then((m) => ({ default: m.DeliveryOpsCenter })),
 );
 
+/** Pitch ventas: lazy (no va en el bundle inicial de landing/SaaS). */
+const VertialPitchDeckLazy = lazy(() =>
+  import('./pages/VertialPitchDeck').then((m) => ({ default: m.VertialPitchDeck })),
+);
+
+function RouteChunkFallback({ label }: { label: string }) {
+  return (
+    <div className="flex min-h-[40vh] items-center justify-center px-4">
+      <div className="flex flex-col items-center gap-3">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-gray-300 border-t-[var(--v-blue,#2563eb)] dark:border-gray-600 dark:border-t-blue-400" />
+        <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{label}</p>
+      </div>
+    </div>
+  );
+}
+
 function DeliveryOpsCenterRoute() {
   return (
-    <Suspense
-      fallback={
-        <div className="flex min-h-[40vh] items-center justify-center px-4">
-          <div className="flex flex-col items-center gap-3">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-gray-300 border-t-[var(--v-blue,#2563eb)] dark:border-gray-600 dark:border-t-blue-400" />
-            <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Cargando operativa…</p>
-          </div>
-        </div>
-      }
-    >
+    <Suspense fallback={<RouteChunkFallback label="Cargando operativa…" />}>
       <DeliveryOpsCenterLazy />
+    </Suspense>
+  );
+}
+
+function PresentacionRoute() {
+  return (
+    <Suspense fallback={<RouteChunkFallback label="Cargando presentación…" />}>
+      <VertialPitchDeckLazy />
     </Suspense>
   );
 }
@@ -480,24 +487,8 @@ export const router = createBrowserRouter([
         Component: HomeEntry,
       },
       {
-        path: 'demos',
-        Component: DemoIndex,
-      },
-      {
         path: 'presentacion',
-        Component: VertialPitchDeck,
-      },
-      {
-        path: 'project-summary',
-        Component: ProjectSummary,
-      },
-      {
-        path: 'access-flow-demo',
-        Component: AccessFlowDemo,
-      },
-      {
-        path: 'subscription-demo',
-        Component: SubscriptionDemo,
+        Component: PresentacionRoute,
       },
       {
         path: 'auth/entry',
@@ -1024,11 +1015,6 @@ export const router = createBrowserRouter([
           { path: 'changelog', Component: ChangelogPage },
           { path: 'subscription', Component: SubscriptionPaymentPage },
           { path: 'suspended', Component: Suspended },
-          { path: 'qa-final', Component: QAFinal },
-          { path: 'block-a1-checklist', Component: BlockA1Checklist },
-          { path: 'block-a2-checklist', Component: BlockA2Checklist },
-          { path: 'block-a3-checklist', Component: BlockA3Checklist },
-          { path: 'saas-flow-map', Component: SAAS__FlowMap },
 
           // Worker mode
           { path: 'worker/events', Component: WorkerEventsOps },
@@ -1057,54 +1043,6 @@ export const router = createBrowserRouter([
           { path: 'worker/butcher-reparto', Component: WorkerButcherReparto },
           { path: 'worker/materials', element: <RequireCleaningVertical><WorkerMaterials /></RequireCleaningVertical> },
         ],
-      },
-      {
-        path: 'navigation-map',
-        Component: NavigationMap,
-      },
-      {
-        path: 'qa',
-        Component: QAIndex,
-      },
-      {
-        path: 'qa/block-1',
-        Component: Block1QA,
-      },
-      {
-        path: 'qa/block-2',
-        Component: Block2QA,
-      },
-      {
-        path: 'qa/block-3',
-        Component: Block3QA,
-      },
-      {
-        path: 'qa/block-4',
-        Component: Block4QA,
-      },
-      {
-        path: 'qa/final',
-        Component: FinalQA,
-      },
-      {
-        path: 'saas-navigation-demo',
-        Component: SaasNavigationDemo,
-      },
-      {
-        path: 'saas-flow-map',
-        Component: SaasFlowMap,
-      },
-      {
-        path: 'saas-qa-check',
-        Component: SaasQACheck,
-      },
-      {
-        path: 'operations-demo',
-        Component: OperationsDemo,
-      },
-      {
-        path: 'locations-demo',
-        Component: LocationsDemo,
       },
       {
         path: 'affiliados',

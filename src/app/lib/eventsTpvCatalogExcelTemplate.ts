@@ -192,3 +192,28 @@ export function buildEventsTpvCatalogImportWorkbook(): XLSX.WorkBook {
 export function downloadEventsTpvCatalogImportTemplate() {
   XLSX.writeFile(buildEventsTpvCatalogImportWorkbook(), EVENTS_TPV_CATALOG_TEMPLATE_FILENAME);
 }
+
+export function isEventsTpvCatalogExampleName(nombre: string): boolean {
+  return /^ejemplo(\s|·|-)/i.test(String(nombre || '').trim());
+}
+
+/** Precio ES: 4,50 o 1.250,00 */
+export function parseEventsTpvCatalogPrice(raw: unknown): number {
+  const s = String(raw ?? '')
+    .trim()
+    .replace(/€/gi, '')
+    .replace(/\s/g, '');
+  if (!s) return 0;
+  const lastComma = s.lastIndexOf(',');
+  const lastDot = s.lastIndexOf('.');
+  let normalized = s;
+  if (lastComma > lastDot) {
+    normalized = s.replace(/\./g, '').replace(',', '.');
+  } else if (lastDot > lastComma) {
+    normalized = s.replace(/,/g, '');
+  } else if (lastComma >= 0) {
+    normalized = s.replace(',', '.');
+  }
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : 0;
+}

@@ -10,7 +10,7 @@ import {
   NOTIFICATIONS_DB,
   ensureDatabase,
   findAccountByUserId,
-  getAllDocuments,
+  findDocuments,
   getCatalogDbName,
   getDeliveryDbName,
   putDocument,
@@ -124,32 +124,51 @@ export function getDeliveryAlertConfig(account) {
   return resolveDeliveryAlertConfig(account, null);
 }
 
-async function fetchDocsOfType(dbName, type) {
+async function fetchDocsOfType(dbName, type, userId) {
   try {
     await ensureDatabase(fakeReq, dbName);
-    const docs = await getAllDocuments(fakeReq, dbName);
+    const uid = String(userId || '').trim();
+    const selector = uid ? { type, user_id: uid } : { type };
+    const docs = await findDocuments(fakeReq, dbName, selector, {
+      pageSize: 500,
+      maxDocs: 5_000,
+    });
     return docs.filter((d) => d?.type === type && !d?.deletedAt);
   } catch { return []; }
 }
 
 async function fetchCatalogInfraDocs(userId) {
   try {
+    const uid = String(userId || '').trim();
+    if (!uid) return [];
     await ensureDatabase(fakeReq, getCatalogDbName());
-    const docs = await getAllDocuments(fakeReq, getCatalogDbName());
-    return docs.filter((d) => d.user_id === userId && !d.deletedAt && (d.type === 'warehouse' || d.type === 'stock_movement'));
+    const [warehouses, movements] = await Promise.all([
+      findDocuments(
+        fakeReq,
+        getCatalogDbName(),
+        { type: 'warehouse', user_id: uid },
+        { pageSize: 200, maxDocs: 500 },
+      ).catch(() => []),
+      findDocuments(
+        fakeReq,
+        getCatalogDbName(),
+        { type: 'stock_movement', user_id: uid },
+        { pageSize: 500, maxDocs: 3_000 },
+      ).catch(() => []),
+    ]);
+    return [...warehouses, ...movements].filter((d) => d && !d.deletedAt);
   } catch { return []; }
 }
 
 async function fetchPointsOfSale(userId) {
-  const raw = await fetchDocsOfType(getDeliveryDbName(), 'point_of_sale').then((d) =>
-    d.filter((p) => p.user_id === userId && !p.deletedAt),
-  );
+  const raw = await fetchDocsOfType(getDeliveryDbName(), 'point_of_sale', userId);
   const wcIds = await listActiveWorkCenterIds(fakeReq);
   return filterPointsOfSaleLinkedToWorkCenters(dedupeActivePointsOfSale(raw), wcIds);
 }
 
 async function fetchDrivers(userId) {
-  return fetchDocsOfType(getDeliveryDbName(), 'driver').then((d) => d.filter((i) => i.user_id === userId && i.active !== false));
+  const drivers = await fetchDocsOfType(getDeliveryDbName(), 'driver', userId);
+  return drivers.filter((i) => i.active !== false);
 }
 
 function todayStart() { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }
@@ -495,11 +514,52 @@ async function reconcileDeliveryAlerts(businessId, userId, activeAlerts) {
 
   try {
     await ensureDatabase(fakeReq, NOTIFICATIONS_DB);
-    const docs = await getAllDocuments(fakeReq, NOTIFICATIONS_DB);
+    const scopeQueries = [];
+    if (businessId) {
+      const bid = String(businessId).replace(/^business:/, '').trim();
+      scopeQueries.push(
+        findDocuments(
+          fakeReq,
+          NOTIFICATIONS_DB,
+          { type: 'notification', businessId: bid },
+          { pageSize: 200, maxDocs: 1_000 },
+        ).catch(() => []),
+        findDocuments(
+          fakeReq,
+          NOTIFICATIONS_DB,
+          { type: 'notification', businessId: `business:${bid}` },
+          { pageSize: 200, maxDocs: 1_000 },
+        ).catch(() => []),
+      );
+    } else if (userId) {
+      scopeQueries.push(
+        findDocuments(
+          fakeReq,
+          NOTIFICATIONS_DB,
+          { type: 'notification', user_id: userId },
+          { pageSize: 200, maxDocs: 1_000 },
+        ).catch(() => []),
+      );
+    }
+    const batches = await Promise.all(scopeQueries);
+    const docs = [];
+    const seen = new Set();
+    for (const batch of batches) {
+      for (const doc of batch || []) {
+        if (doc?._id && !seen.has(doc._id)) {
+          seen.add(doc._id);
+          docs.push(doc);
+        }
+      }
+    }
 
     for (const doc of docs) {
       if (doc.type !== 'notification' || doc.deletedAt || !isDeliveryNotification(doc)) continue;
-      if (businessId && doc.businessId !== businessId) continue;
+      if (businessId && doc.businessId !== businessId && doc.businessId !== `business:${String(businessId).replace(/^business:/, '')}`) {
+        const bare = String(businessId).replace(/^business:/, '');
+        const docBare = String(doc.businessId || '').replace(/^business:/, '');
+        if (docBare !== bare) continue;
+      }
       if (!businessId && doc.user_id !== userId) continue;
 
       const status = doc.status || (doc.read ? 'seen' : 'new');
@@ -621,8 +681,16 @@ async function resolveBusinessIdForDriverSession(sess) {
 // ─── ENGINE LOOP ────────────────────────────────────────────────────────────
 
 async function getAllUserIds() {
-  try { await ensureDatabase(fakeReq, ACCOUNTS_DB); const docs = await getAllDocuments(fakeReq, ACCOUNTS_DB); return [...new Set(docs.filter((d) => d?.type === 'account' && d?.user_id).map((d) => d.user_id))]; }
-  catch { return []; }
+  try {
+    await ensureDatabase(fakeReq, ACCOUNTS_DB);
+    const docs = await findDocuments(
+      fakeReq,
+      ACCOUNTS_DB,
+      { type: 'account' },
+      { pageSize: 500, maxDocs: 10_000, fields: ['_id', 'type', 'user_id', 'deletedAt'] },
+    );
+    return [...new Set(docs.filter((d) => d?.type === 'account' && d?.user_id && !d?.deletedAt).map((d) => d.user_id))];
+  } catch { return []; }
 }
 
 async function runForBusinessScope({
@@ -717,11 +785,11 @@ async function runForUser(userId) {
   if (!account) return 0;
 
   const [allOrders, catItems, catalogInfraDocs, tpvS, drvS, pointsOfSale, drivers, businesses] = await Promise.all([
-    fetchDocsOfType(getDeliveryDbName(), 'delivery_order').then((d) => d.filter((o) => o.user_id === userId)),
-    fetchDocsOfType(getCatalogDbName(), 'catalog_item').then((d) => d.filter((i) => i.user_id === userId && i.active)),
+    fetchDocsOfType(getDeliveryDbName(), 'delivery_order', userId),
+    fetchDocsOfType(getCatalogDbName(), 'catalog_item', userId).then((d) => d.filter((i) => i.active)),
     fetchCatalogInfraDocs(userId),
-    fetchDocsOfType(getDeliveryDbName(), 'tpv_register_session').then((d) => d.filter((s) => s.user_id === userId)),
-    fetchDocsOfType(getDeliveryDbName(), 'driver_cash_session').then((d) => d.filter((s) => s.user_id === userId)),
+    fetchDocsOfType(getDeliveryDbName(), 'tpv_register_session', userId),
+    fetchDocsOfType(getDeliveryDbName(), 'driver_cash_session', userId),
     fetchPointsOfSale(userId),
     fetchDrivers(userId),
     resolveOwnerBusinesses(userId, account),
@@ -765,11 +833,11 @@ export async function getDeliveryAlertSummary(userId, options = {}) {
 
   const filterBiz = bareBusinessId(options.businessId || options.business_id || '');
   const [allOrders, catItems, catalogInfraDocs, tpvS, drvS, pointsOfSale, drivers, businesses] = await Promise.all([
-    fetchDocsOfType(getDeliveryDbName(), 'delivery_order').then((d) => d.filter((o) => o.user_id === userId)),
-    fetchDocsOfType(getCatalogDbName(), 'catalog_item').then((d) => d.filter((i) => i.user_id === userId && i.active)),
+    fetchDocsOfType(getDeliveryDbName(), 'delivery_order', userId),
+    fetchDocsOfType(getCatalogDbName(), 'catalog_item', userId).then((d) => d.filter((i) => i.active)),
     fetchCatalogInfraDocs(userId),
-    fetchDocsOfType(getDeliveryDbName(), 'tpv_register_session').then((d) => d.filter((s) => s.user_id === userId)),
-    fetchDocsOfType(getDeliveryDbName(), 'driver_cash_session').then((d) => d.filter((s) => s.user_id === userId)),
+    fetchDocsOfType(getDeliveryDbName(), 'tpv_register_session', userId),
+    fetchDocsOfType(getDeliveryDbName(), 'driver_cash_session', userId),
     fetchPointsOfSale(userId),
     fetchDrivers(userId),
     resolveOwnerBusinesses(userId, account),
@@ -878,7 +946,7 @@ export async function triggerReactiveAlert(userId, eventType, payload) {
       if ((payload?.action === 'closed' || payload?.action === 'pending_review') && payload?.sessionType === 'driver') {
         const drivers = await fetchDrivers(userId);
         if (canEmitDriverCashAlerts(drivers)) {
-          const ds = await fetchDocsOfType(db, 'driver_cash_session').then((d) => d.filter((s) => s.user_id === userId));
+          const ds = await fetchDocsOfType(db, 'driver_cash_session', userId);
           const sess = ds.find((s) => s._id === payload?.sessionId);
           if (sess && Math.abs(sess.difference || 0) >= 5) {
             const bId = await resolveBusinessIdForDriverSession(sess);

@@ -11,7 +11,8 @@ import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import {
   ensureDatabase,
-  getAllDocuments,
+  ensureIndex,
+  findDocuments,
   getDocument,
   putDocument,
   putDocumentAttachment,
@@ -340,11 +341,29 @@ function sanitizeForClient(verticalName, entityKey, entityCfg, doc) {
   return out;
 }
 
+const verticalTypeUserIndexReady = new Set();
+
+async function ensureVerticalTypeUserIndex(req, dbName) {
+  if (verticalTypeUserIndexReady.has(dbName)) return;
+  const safeDb = String(dbName || '').replace(/[^a-z0-9_$()+/-]+/g, '-');
+  await ensureIndex(req, dbName, ['type', 'user_id'], `idx-${safeDb}-type-user`).catch(() => null);
+  verticalTypeUserIndexReady.add(dbName);
+}
+
 async function listByUser(req, dbName, entityCfg, userId, scope = {}) {
   await ensureDatabase(req, dbName);
-  const docs = await getAllDocuments(req, dbName);
+  await ensureVerticalTypeUserIndex(req, dbName);
   const businessId = normalizeScopeId(scope.businessId);
   const salesPointId = String(scope.salesPointId || '').trim();
+  let docs = [];
+  try {
+    const selector = userId
+      ? { type: entityCfg.type, user_id: userId }
+      : { type: entityCfg.type };
+    docs = await findDocuments(req, dbName, selector, { pageSize: 500, maxDocs: 10_000 });
+  } catch {
+    docs = [];
+  }
   return docs
     .filter(d =>
       d?.type === entityCfg.type
@@ -389,10 +408,11 @@ export function createVerticalRouter(config) {
       const salesPointId = String(req.query.salesPointId || req.query.pointOfSaleId || '').trim();
 
       await ensureDatabase(req, dbName);
-      const docs = await getAllDocuments(req, dbName);
-      const userDocs = docs.filter(
-        (d) => d?.user_id === userId && !d?.deletedAt && matchesScope(d, businessId, salesPointId),
-      );
+      const userDocs = [];
+      for (const entityCfg of Object.values(config.entities)) {
+        const rows = await listByUser(req, dbName, entityCfg, userId, { businessId, salesPointId });
+        userDocs.push(...rows);
+      }
 
       const counts = {};
       for (const [key, entityCfg] of Object.entries(config.entities)) {

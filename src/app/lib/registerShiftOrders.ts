@@ -2,6 +2,11 @@ import { filterDeliveryOrdersRequest, type DeliveryOrder, type TpvRegisterSessio
 import { registerSessionOrderLoadBounds } from './tpvCajaScope';
 import { isBrowserOnline } from './tpvTabletOffline';
 
+/** Tope de pedidos en cache offline (cierre sin red). */
+const SHIFT_ORDERS_CACHE_MAX = 200;
+/** TTL cache local — evita basura eterna en localStorage. */
+const SHIFT_ORDERS_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+
 function shiftOrdersCacheKey(
   userId: string,
   session: Pick<TpvRegisterSession, 'openedAt' | 'closedAt' | 'status' | 'pointOfSaleId' | '_id'>,
@@ -19,7 +24,16 @@ function readShiftOrdersCache(key: string): DeliveryOrder[] | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as { orders?: DeliveryOrder[]; savedAt?: string };
     if (!Array.isArray(parsed?.orders)) return null;
-    return parsed.orders;
+    const savedAt = parsed.savedAt ? Date.parse(parsed.savedAt) : 0;
+    if (savedAt && Number.isFinite(savedAt) && Date.now() - savedAt > SHIFT_ORDERS_CACHE_TTL_MS) {
+      try {
+        window.localStorage.removeItem(key);
+      } catch {
+        /* ignore */
+      }
+      return null;
+    }
+    return parsed.orders.slice(0, SHIFT_ORDERS_CACHE_MAX);
   } catch {
     return null;
   }
@@ -30,7 +44,10 @@ function writeShiftOrdersCache(key: string, orders: DeliveryOrder[]): void {
   try {
     window.localStorage.setItem(
       key,
-      JSON.stringify({ savedAt: new Date().toISOString(), orders }),
+      JSON.stringify({
+        savedAt: new Date().toISOString(),
+        orders: orders.slice(0, SHIFT_ORDERS_CACHE_MAX),
+      }),
     );
   } catch {
     /* quota */

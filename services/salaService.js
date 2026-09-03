@@ -3,7 +3,6 @@ import {
   ensureDatabase,
   getDocument,
   putDocument,
-  getAllDocuments,
   bulkPutDocuments,
   softDeleteDocument,
   findDocuments,
@@ -40,12 +39,9 @@ async function findSalaDocsByType(req, db, type, userId) {
   const docType = String(type || '').trim();
   try {
     const selector = uid ? { type: docType, user_id: uid } : { type: docType };
-    return await findDocuments(req, db, selector, { pageSize: 500, maxDocs: 10_000 });
+    return await findDocuments(req, db, selector, { pageSize: 500, maxDocs: 5_000 });
   } catch {
-    const all = await getAllDocuments(req, db);
-    return all.filter(
-      (doc) => doc?.type === docType && (!uid || doc?.user_id === uid),
-    );
+    return [];
   }
 }
 
@@ -563,35 +559,38 @@ export function sanitizeDiningOrder(doc) {
 
 export async function listDiningOrdersByUser(req, userId, filters = {}) {
   const uid = String(userId || '').trim();
+  const dateFrom = String(filters?.dateFrom || '').trim();
+  const maxDocs = Math.min(Math.max(1, Number(filters?.maxDocs) || 8_000), 50_000);
   const db = getSalaDbName();
   await ensureDatabase(req, db);
   await ensureSalaTypeUserIndex(req, db);
 
-  let docs;
+  const baseSelector = uid
+    ? { type: 'dining_order', user_id: uid }
+    : { type: 'dining_order' };
+  const selector = dateFrom
+    ? { ...baseSelector, createdAt: { $gte: dateFrom } }
+    : baseSelector;
+
+  let docs = [];
   try {
-    docs = uid
-      ? await findDocuments(
-          req,
-          db,
-          { type: 'dining_order', user_id: uid },
-          { pageSize: 500, maxDocs: 100_000 },
-        )
-      : await findDocuments(
-          req,
-          db,
-          { type: 'dining_order' },
-          { pageSize: 500, maxDocs: 100_000 },
-        );
+    docs = await findDocuments(req, db, selector, { pageSize: 500, maxDocs });
   } catch {
-    const all = await getAllDocuments(req, db);
-    docs = all.filter(
-      (doc) => doc?.type === 'dining_order' && (!uid || doc?.user_id === uid),
-    );
+    if (dateFrom) {
+      try {
+        docs = await findDocuments(req, db, baseSelector, { pageSize: 500, maxDocs });
+      } catch {
+        docs = [];
+      }
+    }
   }
 
   let orders = docs.filter(
     (doc) =>
-      doc?.type === 'dining_order' && !doc?.deletedAt && (!uid || doc?.user_id === uid),
+      doc?.type === 'dining_order'
+      && !doc?.deletedAt
+      && (!uid || doc?.user_id === uid)
+      && (!dateFrom || String(doc.createdAt || '') >= dateFrom),
   );
 
   if (filters.status) {

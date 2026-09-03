@@ -35,13 +35,19 @@ export function TpvOfflineBanner() {
       refresh();
       void runSync();
     };
+    const onVisible = () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      refresh();
+    };
     window.addEventListener('online', onOnline);
     window.addEventListener('offline', refresh);
-    const timer = window.setInterval(refresh, 4000);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', refresh);
-      window.clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, [refresh, runSync]);
 

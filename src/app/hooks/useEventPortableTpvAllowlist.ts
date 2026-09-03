@@ -11,18 +11,39 @@ import {
 import { getWorkCenterById } from '../lib/workCentersApi';
 import { loadEventById, resolveEventsUserId } from '../lib/eventsFlow';
 import { eventTpvCatalogAllowlist } from '../lib/eventsPortableTpv';
+import {
+  eventsPdvLoadAllowlist,
+  eventsPdvLoadPriceMap,
+  type EventsPdvLoadLine,
+} from '../lib/eventsPdvLoad';
+
+export type EventPortableTpvScope = {
+  /** null = TPV normal sin filtro. [] = sin productos. */
+  allowlist: string[] | null;
+  /** Precios de la carga del PDV (evento fijo). */
+  priceByItemId: Record<string, number> | null;
+};
 
 /**
- * Si el PDV activo es temporal de un evento, devuelve la allowlist de productos Carta.
- * null = TPV normal (sin filtro).
+ * Scope de carta para TPV de eventos:
+ * - PDV temporal con evento ligado → productos del evento
+ * - PDV fijo/temporal con `eventsTpvLoad` → esa carga
+ * - resto → null (carta completa)
  */
 export function useEventPortableTpvAllowlist(): string[] | null {
+  return useEventPortableTpvScope().allowlist;
+}
+
+export function useEventPortableTpvScope(): EventPortableTpvScope {
   const { user } = useAuth();
   const { currentBusiness, businesses, businessesFetchSettled } = useBusiness();
   const activeStore = useActiveStoreScope();
   const register = useTpvRegisterIfOpen();
 
-  const [allowlist, setAllowlist] = useState<string[] | null>(null);
+  const [scope, setScope] = useState<EventPortableTpvScope>({
+    allowlist: null,
+    priceByItemId: null,
+  });
 
   const pdvId = useMemo(() => {
     const rawBinding = readTpvTabletBinding();
@@ -76,25 +97,39 @@ export function useEventPortableTpvAllowlist(): string[] | null {
 
   useEffect(() => {
     let cancelled = false;
-    setAllowlist(null);
+    setScope({ allowlist: null, priceByItemId: null });
 
     const run = async () => {
       if (!dataUserId || !workCenterId) {
-        if (!cancelled) setAllowlist(null);
+        if (!cancelled) setScope({ allowlist: null, priceByItemId: null });
         return;
       }
       try {
         const wc = await getWorkCenterById(workCenterId);
         const eventId = String(wc?.linkedEventId || '').trim();
-        if (!eventId) {
-          if (!cancelled) setAllowlist(null);
+        if (eventId) {
+          const event = await loadEventById(dataUserId, eventId);
+          if (cancelled) return;
+          setScope({
+            allowlist: eventTpvCatalogAllowlist(event),
+            priceByItemId: null,
+          });
           return;
         }
-        const event = await loadEventById(dataUserId, eventId);
-        if (cancelled) return;
-        setAllowlist(eventTpvCatalogAllowlist(event));
+
+        const load: EventsPdvLoadLine[] | undefined = wc?.eventsTpvLoad;
+        if (load != null) {
+          if (cancelled) return;
+          setScope({
+            allowlist: eventsPdvLoadAllowlist(load),
+            priceByItemId: eventsPdvLoadPriceMap(load),
+          });
+          return;
+        }
+
+        if (!cancelled) setScope({ allowlist: null, priceByItemId: null });
       } catch {
-        if (!cancelled) setAllowlist(null);
+        if (!cancelled) setScope({ allowlist: null, priceByItemId: null });
       }
     };
 
@@ -104,5 +139,5 @@ export function useEventPortableTpvAllowlist(): string[] | null {
     };
   }, [dataUserId, workCenterId, pdvId]);
 
-  return allowlist;
+  return scope;
 }

@@ -93,7 +93,10 @@ export function useRestaurantTpvFloor(
 
   useEffect(() => {
     if (paused) return;
-    const interval = setInterval(() => void reload(), 20000);
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      void reload();
+    }, 30_000);
     return () => clearInterval(interval);
   }, [reload, paused]);
 

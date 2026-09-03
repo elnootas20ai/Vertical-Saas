@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ALL_ALERT_RULE_DEFINITIONS } from '../services/alertRulesCatalog.js';
+import {
+  ALL_ALERT_RULE_DEFINITIONS,
+  isCierreCajaAlertRule,
+  listCierreCajaMobilePushRuleIds,
+} from '../services/alertRulesCatalog.js';
 import {
   MOBILE_PUSH_RULE_IDS,
   CEO_MOBILE_PUSH_RULE_IDS,
@@ -9,22 +13,26 @@ import {
   resolveRuleKey,
 } from '../services/pushAlertPolicy.js';
 
-test('whitelist móvil CEO es pequeña y centrada en dinero/caja/pack gerente', () => {
+test('whitelist móvil = solo cierre (deducido del catálogo Alertas)', () => {
   assert.ok(ALL_ALERT_RULE_DEFINITIONS.length > 60);
   assert.equal(MOBILE_PUSH_RULE_IDS, CEO_MOBILE_PUSH_RULE_IDS);
-  assert.ok(CEO_MOBILE_PUSH_RULE_IDS.size >= 12);
-  assert.ok(CEO_MOBILE_PUSH_RULE_IDS.size <= 40, `demasiadas reglas push CEO: ${CEO_MOBILE_PUSH_RULE_IDS.size}`);
+  const deduced = new Set(listCierreCajaMobilePushRuleIds());
+  assert.deepEqual([...CEO_MOBILE_PUSH_RULE_IDS].sort(), [...deduced].sort());
+  assert.ok(CEO_MOBILE_PUSH_RULE_IDS.has('ceo_daily_digest'), 'falta resumen cierre');
+  assert.ok(CEO_MOBILE_PUSH_RULE_IDS.size >= 1);
+  assert.ok(CEO_MOBILE_PUSH_RULE_IDS.size <= 20, `demasiadas reglas push: ${CEO_MOBILE_PUSH_RULE_IDS.size}`);
 });
 
-test('incluye alertas urgentes carnicería', () => {
-  for (const id of [
-    'butcher_register_pending',
-    'butcher_batch_expired',
-    'butcher_stock_critical',
-    'butcher_waste_high',
-  ]) {
-    assert.ok(CEO_MOBILE_PUSH_RULE_IDS.has(id), `falta ${id}`);
-  }
+test('isCierreCajaAlertRule sigue departamento pdvs + categoría caja', () => {
+  const byId = Object.fromEntries(ALL_ALERT_RULE_DEFINITIONS.map((r) => [r.id, r]));
+  assert.equal(isCierreCajaAlertRule(byId.ceo_daily_digest), true);
+  assert.equal(isCierreCajaAlertRule(byId.delivery_cash_discrepancy), true);
+  assert.equal(isCierreCajaAlertRule(byId.delivery_cash_pending_close), true);
+  assert.equal(isCierreCajaAlertRule(byId.delivery_register_closed_discrepancy), true);
+  assert.equal(isCierreCajaAlertRule(byId.delivery_register_not_opened), false);
+  assert.equal(isCierreCajaAlertRule(byId.register_high_return), false);
+  assert.equal(isCierreCajaAlertRule(byId.delivery_order_cancelled), false);
+  assert.equal(isCierreCajaAlertRule(byId.worker_no_clockin), false);
 });
 
 test('cada regla whitelist existe en el catálogo', () => {
@@ -34,35 +42,29 @@ test('cada regla whitelist existe en el catálogo', () => {
   }
 });
 
-test('incluye críticas y caja / impagos / fichaje clave', () => {
+test('incluye cierre / descuadre caja; no ruido operativo', () => {
   for (const id of [
+    'ceo_daily_digest',
     'delivery_cash_discrepancy',
     'delivery_cash_pending_close',
     'delivery_register_closed_discrepancy',
-    'delivery_order_very_delayed',
-    'payment_overdue',
-    'delivery_unpaid_order',
-    'client_payment_overdue',
-    'delivery_order_cancelled',
-    'worker_no_clockin',
   ]) {
     assert.ok(CEO_MOBILE_PUSH_RULE_IDS.has(id), `falta ${id}`);
   }
+  // Cierre OK es in-app en catálogo; el push unificado es ceo_daily_digest.
   assert.equal(
     CEO_MOBILE_PUSH_RULE_IDS.has('delivery_register_closed_ok'),
     false,
-    'cierre OK no debe ser push urgente',
+    'cierre OK in-app no debe ir solo a push',
   );
-});
-
-test('no incluye ruido operativo típico (pedidos/retrasos/stock/docs)', () => {
   for (const id of [
     'delivery_delayed_order',
-    'delivery_product_low_stock',
-    'lead_new',
-    'sala_slow_kitchen_comanda',
-    'worker_late_clockin',
+    'delivery_order_cancelled',
+    'worker_no_clockin',
+    'payment_overdue',
+    'butcher_stock_critical',
     'document_expired',
+    'user_login_new',
   ]) {
     assert.equal(isMobilePushWhitelisted(id, ''), false, `no debería ir al iPhone: ${id}`);
   }
@@ -70,7 +72,8 @@ test('no incluye ruido operativo típico (pedidos/retrasos/stock/docs)', () => {
 
 test('isCeoUrgentMobilePushRule / isMobilePushWhitelisted', () => {
   assert.equal(isCeoUrgentMobilePushRule('delivery_cash_discrepancy', ''), true);
-  assert.equal(isMobilePushWhitelisted('', 'payment_overdue'), true);
+  assert.equal(isMobilePushWhitelisted('ceo_daily_digest', ''), true);
+  assert.equal(isMobilePushWhitelisted('', 'ceo_daily_digest'), true);
   assert.equal(isMobilePushWhitelisted('user_login_new', ''), false);
   assert.equal(resolveRuleKey('', ''), null);
 });

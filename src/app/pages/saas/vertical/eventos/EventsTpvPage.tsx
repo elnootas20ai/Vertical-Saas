@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Copy, Loader2, Monitor, Plus, RefreshCw } from 'lucide-react';
+import { Copy, Loader2, Monitor, Plus, RefreshCw, Settings2 } from 'lucide-react';
 import { Layout } from '../../../../components/saas/Layout';
 import { EventsPortablePdvModal } from '../../../../components/saas/events/EventsPortablePdvModal';
+import { EventsFixedPdvLoadModal } from '../../../../components/saas/events/EventsFixedPdvLoadModal';
+import { EventsFixedPdvsHubModal } from '../../../../components/saas/events/EventsFixedPdvsHubModal';
 import { useAuth } from '../../../../context/AuthContext';
 import { useBusiness } from '../../../../context/BusinessContext';
 import {
@@ -63,6 +65,10 @@ export function EventsTpvPage() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [createKind, setCreateKind] = useState<EventsPdvKind>('fixed');
+  /** Carga rápida (solo productos) — PDV temporales. */
+  const [loadEdit, setLoadEdit] = useState<{ workCenterId: string; name: string } | null>(null);
+  /** Ajuste completo (día/horario/productos/ruta/equipo) — eventos fijos. */
+  const [fixedAdjustId, setFixedAdjustId] = useState<string | null>(null);
   const selectedId = String(searchParams.get('pdv') || '').trim();
 
   const refresh = useCallback(async () => {
@@ -184,31 +190,53 @@ export function EventsTpvPage() {
         {list.map((tile) => {
           const id = tile.wc._id;
           const active = selectedId === id || selectedId === tile.wc.id;
+          const loadCount = Array.isArray(tile.wc.eventsTpvLoad) ? tile.wc.eventsTpvLoad.length : 0;
           return (
-            <button
-              key={id}
-              type="button"
-              onClick={() => selectTile(id)}
-              className={`aspect-square max-w-[7.5rem] w-full rounded-xl border p-2 flex flex-col items-center justify-center gap-1 text-center transition-colors ${
-                active
-                  ? 'border-[#2563EB] bg-blue-50 dark:bg-blue-950/30'
-                  : 'border-stone-200 bg-white hover:border-stone-300 dark:border-stone-700 dark:bg-stone-900 dark:hover:border-stone-600'
-              }`}
-            >
-              <Monitor
-                className={`w-4 h-4 shrink-0 ${active ? 'text-[#2563EB]' : 'text-stone-400'}`}
-              />
-              <span className="text-xs font-semibold text-stone-900 dark:text-stone-100 line-clamp-2 leading-tight">
-                {tile.wc.name || 'Sin nombre'}
-              </span>
-              {tile.terminalCode ? (
-                <span className="text-[9px] font-mono tracking-wide text-stone-500 tabular-nums">
-                  {tile.terminalCode}
+            <div key={id} className="relative aspect-square max-w-[7.5rem] w-full">
+              <button
+                type="button"
+                onClick={() => selectTile(id)}
+                className={`absolute inset-0 rounded-xl border p-2 flex flex-col items-center justify-center gap-1 text-center transition-colors ${
+                  active
+                    ? 'border-[#2563EB] bg-blue-50 dark:bg-blue-950/30'
+                    : 'border-stone-200 bg-white hover:border-stone-300 dark:border-stone-700 dark:bg-stone-900 dark:hover:border-stone-600'
+                }`}
+              >
+                <Monitor
+                  className={`w-4 h-4 shrink-0 ${active ? 'text-[#2563EB]' : 'text-stone-400'}`}
+                />
+                <span className="text-xs font-semibold text-stone-900 dark:text-stone-100 line-clamp-2 leading-tight px-1">
+                  {tile.wc.name || 'Sin nombre'}
                 </span>
-              ) : (
-                <span className="text-[9px] text-amber-600">Sin código</span>
-              )}
-            </button>
+                {tile.terminalCode ? (
+                  <span className="text-[9px] font-mono tracking-wide text-stone-500 tabular-nums">
+                    {tile.terminalCode}
+                  </span>
+                ) : (
+                  <span className="text-[9px] text-amber-600">Sin código</span>
+                )}
+                {loadCount > 0 ? (
+                  <span className="text-[9px] font-semibold text-[#2563EB]">{loadCount} en carga</span>
+                ) : (
+                  <span className="text-[9px] text-stone-400">Sin carga</span>
+                )}
+              </button>
+              <button
+                type="button"
+                title={tile.kind === 'fixed' ? 'Ajustes del evento' : 'Ajustes de carga'}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (tile.kind === 'fixed') {
+                    setFixedAdjustId(id);
+                  } else {
+                    setLoadEdit({ workCenterId: id, name: tile.wc.name || 'PDV' });
+                  }
+                }}
+                className="absolute top-1 right-1 z-10 flex h-7 w-7 items-center justify-center rounded-lg border border-stone-200 bg-white/95 text-stone-600 shadow-sm hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-900/95 dark:text-stone-300"
+              >
+                <Settings2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
           );
         })}
       </div>
@@ -255,6 +283,23 @@ export function EventsTpvPage() {
                 </p>
               </div>
               <div className="flex flex-wrap gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (selected.kind === 'fixed') {
+                      setFixedAdjustId(selected.wc._id);
+                    } else {
+                      setLoadEdit({
+                        workCenterId: selected.wc._id,
+                        name: selected.wc.name || 'PDV',
+                      });
+                    }
+                  }}
+                  className={VERTIAL_BTN_SECONDARY}
+                >
+                  <Settings2 className="w-4 h-4" />
+                  {selected.kind === 'fixed' ? 'Ajustes' : 'Carga'}
+                </button>
                 <button
                   type="button"
                   onClick={() => void copyCode(selected.terminalCode)}
@@ -335,6 +380,36 @@ export function EventsTpvPage() {
           });
         }}
       />
+
+      {loadEdit && dataUserId ? (
+        <EventsFixedPdvLoadModal
+          open={Boolean(loadEdit)}
+          userId={dataUserId}
+          workCenterId={loadEdit.workCenterId}
+          pdvName={loadEdit.name}
+          businessId={businessId || undefined}
+          onClose={() => setLoadEdit(null)}
+          onSaved={() => {
+            void refresh();
+          }}
+        />
+      ) : null}
+
+      {dataUserId && fixedAdjustId ? (
+        <EventsFixedPdvsHubModal
+          open={Boolean(fixedAdjustId)}
+          userId={dataUserId}
+          businessId={businessId || undefined}
+          business={currentBusiness}
+          accountBusinessCount={accountBusinessCount}
+          tpvPath={scoped('/saas/vertical/eventos/tpv')}
+          initialWorkCenterId={fixedAdjustId}
+          onClose={() => {
+            setFixedAdjustId(null);
+            void refresh();
+          }}
+        />
+      ) : null}
     </Layout>
   );
 }

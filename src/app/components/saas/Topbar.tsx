@@ -75,7 +75,7 @@ function TopbarInner({
   const alertCenterBusinessId = useAlertCenterBusinessId();
   const { unresolved: alertCenterUnresolved, summary: alertSummary } = useAlertCenterSummary(
     usesCeoAlerts ? alertCenterBusinessId : undefined,
-    { pollMs: 60_000 },
+    { pollMs: 120_000 },
   );
   useDeliveryAlertsReviewPrompt({ sendNotif: usesCeoAlerts });
   const { setTheme, resolvedTheme } = useTheme();

@@ -1,53 +1,73 @@
-import type { ComponentType } from 'react';
+import { lazy, type ComponentType, type LazyExoticComponent } from 'react';
 import type { BusinessType } from './businessApi';
-import { EventsDashboard } from '../pages/saas/dashboards/EventsDashboard';
-import { GymDashboard } from '../pages/saas/dashboards/GymDashboard';
-import { ConstructionDashboard } from '../pages/saas/dashboards/ConstructionDashboard';
-import { HotelDashboard } from '../pages/saas/dashboards/HotelDashboard';
-import { ClinicDashboard } from '../pages/saas/dashboards/ClinicDashboard';
-import { ScrapyardDashboard } from '../pages/saas/dashboards/ScrapyardDashboard';
-import { HairSalonDashboard } from '../pages/saas/dashboards/HairSalonDashboard';
-import { LawyerDashboard } from '../pages/saas/dashboards/LawyerDashboard';
-import { AcademyDashboard } from '../pages/saas/dashboards/AcademyDashboard';
-import { RealEstateDashboard } from '../pages/saas/dashboards/RealEstateDashboard';
-import { NightclubDashboard } from '../pages/saas/dashboards/NightclubDashboard';
-import { PharmacyDashboard } from '../pages/saas/dashboards/PharmacyDashboard';
-import { VetDashboard } from '../pages/saas/dashboards/VetDashboard';
-import { CarWashDashboard } from '../pages/saas/dashboards/CarWashDashboard';
-import { TaxiDashboard } from '../pages/saas/dashboards/TaxiDashboard';
-import { SparePartsDashboard } from '../pages/saas/dashboards/SparePartsDashboard';
-import { ButcherDashboard } from '../pages/saas/dashboards/ButcherDashboard';
-import { RestaurantDashboard } from '../verticals/restaurant/RestaurantDashboard';
 
 export type VerticalDashboardProps = { onSelectGeneral?: () => void };
 
-/** Dashboards verticales conectados al home según businessType. */
-export const VERTICAL_DASHBOARD_MAP: Partial<
-  Record<BusinessType, ComponentType<VerticalDashboardProps>>
-> = {
-  restaurant: RestaurantDashboard,
-  butcherShop: ButcherDashboard,
-  events: EventsDashboard,
-  gym: GymDashboard,
-  construction: ConstructionDashboard,
-  hotel: HotelDashboard,
-  clinic: ClinicDashboard,
-  scrapyard: ScrapyardDashboard,
-  hairSalon: HairSalonDashboard,
-  lawyer: LawyerDashboard,
-  academy: AcademyDashboard,
-  realEstate: RealEstateDashboard,
-  nightclub: NightclubDashboard,
-  pharmacy: PharmacyDashboard,
-  vet: VetDashboard,
-  carWash: CarWashDashboard,
-  taxi: TaxiDashboard,
-  spareParts: SparePartsDashboard,
+type VD = LazyExoticComponent<ComponentType<VerticalDashboardProps>>;
+
+function lazyDash(
+  loader: () => Promise<Record<string, ComponentType<VerticalDashboardProps>>>,
+  name: string,
+): VD {
+  return lazy(() =>
+    loader().then((m) => ({
+      default: m[name] as ComponentType<VerticalDashboardProps>,
+    })),
+  );
+}
+
+/** Dashboards verticales: chunk solo al abrir home de esa vertical. */
+export const VERTICAL_DASHBOARD_MAP: Partial<Record<BusinessType, VD>> = {
+  restaurant: lazyDash(
+    () => import('../verticals/restaurant/RestaurantDashboard'),
+    'RestaurantDashboard',
+  ),
+  butcherShop: lazyDash(
+    () => import('../pages/saas/dashboards/ButcherDashboard'),
+    'ButcherDashboard',
+  ),
+  events: lazyDash(() => import('../pages/saas/dashboards/EventsDashboard'), 'EventsDashboard'),
+  gym: lazyDash(() => import('../pages/saas/dashboards/GymDashboard'), 'GymDashboard'),
+  construction: lazyDash(
+    () => import('../pages/saas/dashboards/ConstructionDashboard'),
+    'ConstructionDashboard',
+  ),
+  hotel: lazyDash(() => import('../pages/saas/dashboards/HotelDashboard'), 'HotelDashboard'),
+  clinic: lazyDash(() => import('../pages/saas/dashboards/ClinicDashboard'), 'ClinicDashboard'),
+  scrapyard: lazyDash(
+    () => import('../pages/saas/dashboards/ScrapyardDashboard'),
+    'ScrapyardDashboard',
+  ),
+  hairSalon: lazyDash(
+    () => import('../pages/saas/dashboards/HairSalonDashboard'),
+    'HairSalonDashboard',
+  ),
+  lawyer: lazyDash(() => import('../pages/saas/dashboards/LawyerDashboard'), 'LawyerDashboard'),
+  academy: lazyDash(() => import('../pages/saas/dashboards/AcademyDashboard'), 'AcademyDashboard'),
+  realEstate: lazyDash(
+    () => import('../pages/saas/dashboards/RealEstateDashboard'),
+    'RealEstateDashboard',
+  ),
+  nightclub: lazyDash(
+    () => import('../pages/saas/dashboards/NightclubDashboard'),
+    'NightclubDashboard',
+  ),
+  pharmacy: lazyDash(
+    () => import('../pages/saas/dashboards/PharmacyDashboard'),
+    'PharmacyDashboard',
+  ),
+  vet: lazyDash(() => import('../pages/saas/dashboards/VetDashboard'), 'VetDashboard'),
+  carWash: lazyDash(() => import('../pages/saas/dashboards/CarWashDashboard'), 'CarWashDashboard'),
+  taxi: lazyDash(() => import('../pages/saas/dashboards/TaxiDashboard'), 'TaxiDashboard'),
+  spareParts: lazyDash(
+    () => import('../pages/saas/dashboards/SparePartsDashboard'),
+    'SparePartsDashboard',
+  ),
 };
 
 export function getVerticalDashboard(
   businessType: BusinessType | string | null | undefined,
-): ComponentType<VerticalDashboardProps> | null {
+): VD | null {
   if (!businessType) return null;
   return VERTICAL_DASHBOARD_MAP[businessType as BusinessType] ?? null;
 }

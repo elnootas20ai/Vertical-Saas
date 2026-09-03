@@ -335,7 +335,7 @@ export function RestaurantKitchenBoard({
   }, [soundEnabled]);
 
   useEffect(() => {
-    const iv = setInterval(() => setNow(Date.now()), 10_000);
+    const iv = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(iv);
   }, []);
 
@@ -399,7 +399,10 @@ export function RestaurantKitchenBoard({
 
   useEffect(() => {
     if (!userId || !isRestaurant) return;
-    const iv = setInterval(() => { void loadOrders(); }, 20_000);
+    const iv = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      void loadOrders();
+    }, 30_000);
     return () => clearInterval(iv);
   }, [userId, isRestaurant, loadOrders]);
 

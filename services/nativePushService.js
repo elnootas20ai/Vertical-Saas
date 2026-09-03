@@ -252,7 +252,10 @@ async function sendApnsToTokens(req, userId, tokens, payload) {
   note.badge = payload.badge != null ? payload.badge : 1;
   // No silencioso: tiene que despertar el lock screen
   note.contentAvailable = false;
-  note.mutableContent = false;
+  // mutable-content solo si hay Service Extension; Content Extension usa `category`.
+  note.mutableContent = Boolean(payload.mutableContent);
+  const category = String(payload.category || data.category || '').trim();
+  if (category) note.category = category;
   note.payload = data;
   const collapseId = String(payload.collapseId || data.notificationId || '').slice(0, 64);
   if (collapseId) note.collapseId = collapseId;

@@ -1207,6 +1207,23 @@ function SidebarInner({
   }, [showCompanyDropdown]);
 
   useEffect(() => {
+    if (!showUserMenu) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest('[data-user-menu-root]')) return;
+      setShowUserMenu(false);
+    };
+    const timer = window.setTimeout(() => {
+      document.addEventListener('mousedown', handleClickOutside);
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showUserMenu]);
+
+  useEffect(() => {
     const close = () => setShowCompanyDropdown(false);
     window.addEventListener('vertial:close-company-dropdown', close);
     return () => window.removeEventListener('vertial:close-company-dropdown', close);
@@ -2497,7 +2514,7 @@ function SidebarInner({
 
       {/* User section */}
       <div className="shrink-0 p-4 border-t border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40">
-        <div className="relative">
+        <div className="relative" data-user-menu-root>
           {!isMobile && collapsed ? (
             <button
               onClick={() => setShowUserMenu(!showUserMenu)}

@@ -2,6 +2,10 @@ import { v4 as uuidv4 } from 'uuid';
 import { getApiBase } from './apiBase';
 import { ensureCouchDb } from './ensureCouchDb';
 import type { BusinessHoursConfig } from './settingsApi';
+import type { EventsPdvLoadLine } from './eventsPdvLoad';
+import { normalizeEventsPdvLoad } from './eventsPdvLoad';
+import type { EventsFixedDayPlan } from './eventsFixedDayPlan';
+import { normalizeEventsFixedDayPlans } from './eventsFixedDayPlan';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -80,6 +84,15 @@ export interface WorkCenter {
   eventsPdvKind?: EventsPdvKind;
   /** Evento dueño del PDV temporal (carga TPV = productos de ese evento). */
   linkedEventId?: string;
+  /**
+   * Carga del PDV (fijo o temporal): qué se vende en tablet (producto, cantidad, precio).
+   * Si hay `linkedEventId`, la carga del evento manda; si no, esta.
+   */
+  eventsTpvLoad?: EventsPdvLoadLine[];
+  /**
+   * Planes por día del evento fijo: productos a llevar (qty) + quién trabaja ese día.
+   */
+  eventsFixedDayPlans?: EventsFixedDayPlan[];
   active: boolean;
   deletedAt?: string | null;
   createdAt: string;
@@ -277,6 +290,16 @@ function normalizeWorkCenter(value: unknown): WorkCenter | null {
     linkedEventId: (() => {
       const id = String((doc as { linkedEventId?: string }).linkedEventId || '').trim();
       return id || undefined;
+    })(),
+    eventsTpvLoad: (() => {
+      if (!Object.prototype.hasOwnProperty.call(doc, 'eventsTpvLoad')) return undefined;
+      if ((doc as { eventsTpvLoad?: unknown }).eventsTpvLoad == null) return undefined;
+      return normalizeEventsPdvLoad((doc as { eventsTpvLoad?: unknown }).eventsTpvLoad);
+    })(),
+    eventsFixedDayPlans: (() => {
+      if (!Object.prototype.hasOwnProperty.call(doc, 'eventsFixedDayPlans')) return undefined;
+      if ((doc as { eventsFixedDayPlans?: unknown }).eventsFixedDayPlans == null) return undefined;
+      return normalizeEventsFixedDayPlans((doc as { eventsFixedDayPlans?: unknown }).eventsFixedDayPlans);
     })(),
     active: doc.active !== false,
     deletedAt: (doc as { deletedAt?: string | null }).deletedAt || null,
