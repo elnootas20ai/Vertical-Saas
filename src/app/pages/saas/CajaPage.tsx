@@ -869,8 +869,9 @@ export function CajaPage() {
       const monthStartKey = `${String(selectedDate || '').slice(0, 7)}-01`;
       let dateFrom = localDayBoundsForKey(monthStartKey).from;
       if (deepLink) {
+        // Deep-link a un cierre: mes en curso + margen, no 4 meses de historial.
         const lookback = new Date();
-        lookback.setDate(lookback.getDate() - 120);
+        lookback.setDate(lookback.getDate() - 45);
         dateFrom = lookback.toISOString();
       }
       const { sessions: sessData, driverSessions: driverData } = await listCajaBootstrapRequest(dataUserId, {

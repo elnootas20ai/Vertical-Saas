@@ -673,7 +673,7 @@ export function RestaurantCajaPage() {
       let dateFrom = localDayBoundsForKey(monthStartKey).from;
       if (deepLink) {
         const lookback = new Date();
-        lookback.setDate(lookback.getDate() - 120);
+        lookback.setDate(lookback.getDate() - 45);
         dateFrom = lookback.toISOString();
       }
       const sessData = await listRestaurantRegisterSessions(dataUserId, { businessId, dateFrom });

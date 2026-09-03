@@ -303,14 +303,18 @@ function buildDenominationFromAmount(amount: number): CashDenominationCount {
   return counts;
 }
 
-/** Listado ligero para el gate TPV: abiertas + cierres recientes (reabrir hoy/ayer). */
+/**
+ * Listado ligero para el gate TPV (poll en vivo).
+ * Solo 3 días de historial: las abiertas/pendientes las trae el backend (opsLite)
+ * aunque se abrieran antes. 30 días × cada 30s saturaba Couch en prod.
+ */
 function tpvGateSessionsQueryOpts(businessId?: string): {
   businessId?: string;
   lite: boolean;
   dateFrom: string;
 } {
   const from = new Date();
-  from.setUTCDate(from.getUTCDate() - 30);
+  from.setUTCDate(from.getUTCDate() - 3);
   from.setUTCHours(0, 0, 0, 0);
   const bid = String(businessId || '').trim();
   return {
@@ -6410,7 +6414,8 @@ export function TpvRegisterGate({
         .catch(() => null);
     };
     refreshSessions();
-    const interval = window.setInterval(refreshSessions, 30000);
+    // 45s: suficiente para ver caja abierta/cerrada sin martillar Couch en turnos con muchas tablets.
+    const interval = window.setInterval(refreshSessions, 45_000);
     window.addEventListener('focus', refreshSessions);
     const onVisibility = () => {
       if (document.visibilityState === 'visible') refreshSessions();

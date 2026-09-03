@@ -3533,12 +3533,21 @@ export async function listTpvRegisterSessions(req, res) {
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     const lite = String(req.query.lite || '').trim() === '1'
       || String(req.query.opsLite || '').trim() === '1';
-    const dateFromQ = String(req.query.dateFrom || '').trim();
+    let dateFromQ = String(req.query.dateFrom || '').trim();
+    // Lite (TPV en vivo): no permitir lookbacks absurdos de clientes viejos (30d+).
+    // opsLite ya incluye abiertas + pendientes aunque createdAt sea anterior.
+    if (lite && dateFromQ) {
+      const minFrom = new Date();
+      minFrom.setUTCDate(minFrom.getUTCDate() - 7);
+      minFrom.setUTCHours(0, 0, 0, 0);
+      const floor = minFrom.toISOString();
+      if (dateFromQ < floor) dateFromQ = floor;
+    }
     let sessions = await listTpvRegisterSessionsByUser(req, userId, lite || dateFromQ
       ? {
           ...(lite ? { opsLite: true } : {}),
           ...(dateFromQ ? { dateFrom: dateFromQ } : {}),
-          maxDocs: lite ? 800 : 5_000,
+          maxDocs: lite ? 400 : 5_000,
         }
       : {});
     if (req.callerIsWorker) {
