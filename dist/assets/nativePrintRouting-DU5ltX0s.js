@@ -1,0 +1,1 @@
+import{bg as r}from"./index-DCZ29u-3.js";import{i}from"./printerActiveScope-DhT1pJW1.js";function s(e){return e.connectionType==="network"&&i(e.networkHost)}const t="Configura la impresora WiFi: escribe la IP del ticket SELF-TEST en Ajustes → Empresa → Impresora, o pulsa el icono de impresora en la barra del TPV.";function n(){return r()}export{t as N,s as i,n as s};

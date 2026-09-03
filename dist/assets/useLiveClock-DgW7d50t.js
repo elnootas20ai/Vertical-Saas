@@ -1,0 +1,1 @@
+import{a as t}from"./index-DCZ29u-3.js";function a(e=3e4){const[o,r]=t.useState(()=>Date.now());return t.useEffect(()=>{const s=setInterval(()=>r(Date.now()),e);return()=>clearInterval(s)},[e]),o}export{a as u};
