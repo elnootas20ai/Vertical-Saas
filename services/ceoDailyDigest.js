@@ -26,6 +26,9 @@ import {
   mergeStoreDigestBlocks,
   money,
   shortStoreLabel,
+  shortBrandLabel,
+  brandFoodUnitsLine,
+  attachBrandFoodUnits,
 } from '../shared/caja/ceoDailyDigestFormat.js';
 
 export {
@@ -35,6 +38,9 @@ export {
   formatCeoDailyPushBody,
   mergeStoreDigestBlocks,
   shortStoreLabel,
+  shortBrandLabel,
+  brandFoodUnitsLine,
+  attachBrandFoodUnits,
 };
 
 export const CEO_DAILY_DIGEST_RULE_ID = 'ceo_daily_digest';

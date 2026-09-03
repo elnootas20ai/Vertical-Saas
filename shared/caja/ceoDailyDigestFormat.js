@@ -1,6 +1,19 @@
 /**
  * Formato puro del resumen CEO (push / campana / panel Caja).
  * Sin I/O — usable desde backend y frontend.
+ *
+ * Push cierre Delivery PRO (cualquier tienda):
+ *   TIANA (02/09/26)
+ *   MM 668,28€
+ *   P 19
+ *   BB 122,95€
+ *   BB 4 taco 4
+ *   Tarjeta total 207,60€
+ *   Efectivo total 254,45€
+ *   Tejada 54
+ *   Jordi 28
+ *   Fondo 91,60
+ *   (notas)
  */
 
 export function money(n) {
@@ -14,10 +27,24 @@ export function fmtEs(n) {
   });
 }
 
+/** Entero sin decimales; si no, formato ES. */
+export function fmtPushAmount(n) {
+  const m = money(n);
+  if (Math.abs(m - Math.round(m)) < 0.001) return String(Math.round(m));
+  return fmtEs(m);
+}
+
 export function fmtDayEs(dayKey) {
   const m = String(dayKey || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return dayKey;
   return `${m[3]}/${m[2]}/${m[1]}`;
+}
+
+/** 2026-09-02 → 02/09/26 */
+export function fmtDayShort(dayKey) {
+  const m = String(dayKey || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return '';
+  return `${m[3]}/${m[2]}/${m[1].slice(2)}`;
 }
 
 export function shortStoreLabel(name) {
@@ -25,6 +52,44 @@ export function shortStoreLabel(name) {
   s = s.replace(/^LOCAL\s+/i, '');
   const cut = s.split('·')[0].trim();
   return cut || s || 'Tienda';
+}
+
+/** Modomio → MM / MO; Black Burger → BB */
+export function shortBrandLabel(name) {
+  const s = String(name || '').trim();
+  if (!s) return 'M';
+  const parts = s.split(/[\s/_·-]+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return parts
+      .map((p) => p.charAt(0))
+      .join('')
+      .toUpperCase()
+      .slice(0, 4);
+  }
+  const letters = s.replace(/[^a-zA-ZÀ-ÿ]/g, '');
+  if (letters.length >= 2) {
+    // Modomio → MM (inicial + siguiente mayúscula interna o 2ª letra)
+    const inner = letters.slice(1).match(/[A-ZÀ-Ý]/);
+    if (inner) return `${letters[0]}${inner[0]}`.toUpperCase();
+    return letters.slice(0, 2).toUpperCase();
+  }
+  return (letters.charAt(0) || 'M').toUpperCase();
+}
+
+function foldName(name) {
+  return String(name || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+/** Qué uds de comida cuelga de cada marca (regla facturación típica). */
+export function foodUnitsHintForBrand(brandName) {
+  const f = foldName(brandName);
+  if (/taco/.test(f) && !/burger|hamburg|black/.test(f)) return ['taco'];
+  if (/burger|hamburg|black/.test(f)) return ['burger', 'taco'];
+  if (/pizza|modomio|calzone|modo/.test(f)) return ['pizza'];
+  return null;
 }
 
 function brandEurosFromSession(session) {
@@ -53,8 +118,91 @@ function brandEurosFromSession(session) {
   return rows;
 }
 
+/** Asigna P/B/T de la tienda a cada marca según pista de nombre / hoja. */
+export function attachBrandFoodUnits(brands, storeUnits) {
+  const pizza = Math.max(0, Math.floor(Number(storeUnits?.pizza) || 0));
+  const burger = Math.max(0, Math.floor(Number(storeUnits?.burger) || 0));
+  const taco = Math.max(0, Math.floor(Number(storeUnits?.taco) || 0));
+  const list = Array.isArray(brands) ? brands : [];
+  if (!list.length) return [];
+
+  if (list.length === 1) {
+    return [{ ...list[0], pizza, burger, taco }];
+  }
+
+  const used = { pizza: false, burger: false, taco: false };
+  const out = list.map((br) => {
+    const hint = foodUnitsHintForBrand(br.name);
+    const u = { pizza: 0, burger: 0, taco: 0 };
+    if (hint) {
+      for (const key of hint) {
+        if (key === 'pizza' && !used.pizza) {
+          u.pizza = pizza;
+          used.pizza = true;
+        }
+        if (key === 'burger' && !used.burger) {
+          u.burger = burger;
+          used.burger = true;
+        }
+        if (key === 'taco' && !used.taco) {
+          u.taco = taco;
+          used.taco = true;
+        }
+      }
+    }
+    return { ...br, ...u };
+  });
+
+  // Si alguna ud no se asignó, cuelga en la marca con más €
+  const top = out[0];
+  if (top) {
+    if (!used.pizza && pizza) top.pizza = pizza;
+    if (!used.burger && burger) top.burger = burger;
+    if (!used.taco && taco) top.taco = taco;
+  }
+  return out;
+}
+
 function sumMap(m) {
   return money(Object.values(m || {}).reduce((a, n) => a + (Number(n) || 0), 0));
+}
+
+function sessionDayKeyFromClosed(session) {
+  const raw = session?.closedAt || session?.openedAt || session?.createdAt;
+  if (!raw) return '';
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return '';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Madrid',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d);
+}
+
+/** Salidas agrupadas por persona (workerName o descripción). */
+export function cashOutsByPersonFromSession(session) {
+  const txs = Array.isArray(session?.transactions) ? session.transactions : [];
+  const map = new Map();
+  for (const t of txs) {
+    const type = String(t?.type || '');
+    if (type !== 'cash_out' && type !== 'expense') continue;
+    const amt = money(t.amount);
+    if (amt <= 0) continue;
+    let name = String(t.workerName || '').trim();
+    if (!name) {
+      const d = String(t.description || '').trim();
+      const m = d.match(/^pago\s+trabajador\s*[:\-]?\s*(.+)$/i);
+      name = m ? String(m[1] || '').trim() : d;
+    }
+    if (!name) name = 'Salida';
+    // Primera palabra / apellido corto (Tejada, Jordi…)
+    name = name.split(/\s+/)[0];
+    map.set(name, money((map.get(name) || 0) + amt));
+  }
+  return Array.from(map.entries())
+    .map(([name, amount]) => ({ name, amount }))
+    .sort((a, b) => b.amount - a.amount || a.name.localeCompare(b.name, 'es'));
 }
 
 /**
@@ -89,10 +237,15 @@ export function buildStoreDigestBlock(session) {
   const retirado = money(Math.max(0, counted - enLocal));
   const difference = money(session.difference);
   const notes = String(session.closingNotes || session.notes || '').trim();
+  const brandsRaw = brandEurosFromSession(session);
+  const brands = attachBrandFoodUnits(brandsRaw, { pizza, burger, taco });
+  const cashOuts = cashOutsByPersonFromSession(session);
+  const dayKey = sessionDayKeyFromClosed(session);
 
   return {
     name,
-    brands: brandEurosFromSession(session),
+    dayKey,
+    brands,
     pizza,
     burger,
     taco,
@@ -101,6 +254,7 @@ export function buildStoreDigestBlock(session) {
     cobrado,
     cashIn,
     cashOut,
+    cashOuts,
     enLocal,
     retirado,
     difference,
@@ -116,7 +270,11 @@ export function mergeStoreDigestBlocks(blocks) {
     const key = String(block.name || 'Tienda').toLowerCase();
     const prev = acc.get(key);
     if (!prev) {
-      acc.set(key, { ...block, brands: [...(block.brands || [])] });
+      acc.set(key, {
+        ...block,
+        brands: [...(block.brands || [])],
+        cashOuts: [...(block.cashOuts || [])],
+      });
       continue;
     }
     prev.cobrado = money(prev.cobrado + block.cobrado);
@@ -130,16 +288,30 @@ export function mergeStoreDigestBlocks(blocks) {
     prev.enLocal = block.enLocal;
     prev.retirado = money(prev.retirado + block.retirado);
     prev.difference = money(prev.difference + block.difference);
+    if (block.dayKey) prev.dayKey = block.dayKey;
     if (block.notes) {
       prev.notes = prev.notes ? `${prev.notes} · ${block.notes}` : block.notes;
     }
-    const brandMap = new Map((prev.brands || []).map((b) => [b.name, b]));
+    const brandMap = new Map((prev.brands || []).map((b) => [b.name, { ...b }]));
     for (const br of block.brands || []) {
       const ex = brandMap.get(br.name);
-      if (ex) ex.euros = money(ex.euros + br.euros);
-      else brandMap.set(br.name, { ...br });
+      if (ex) {
+        ex.euros = money(ex.euros + br.euros);
+        ex.pizza = (ex.pizza || 0) + (br.pizza || 0);
+        ex.burger = (ex.burger || 0) + (br.burger || 0);
+        ex.taco = (ex.taco || 0) + (br.taco || 0);
+      } else {
+        brandMap.set(br.name, { ...br });
+      }
     }
     prev.brands = Array.from(brandMap.values()).sort((a, b) => b.euros - a.euros);
+    const outMap = new Map((prev.cashOuts || []).map((c) => [c.name, c.amount]));
+    for (const c of block.cashOuts || []) {
+      outMap.set(c.name, money((outMap.get(c.name) || 0) + c.amount));
+    }
+    prev.cashOuts = Array.from(outMap.entries())
+      .map(([n, amount]) => ({ name: n, amount }))
+      .sort((a, b) => b.amount - a.amount || a.name.localeCompare(b.name, 'es'));
   }
   return Array.from(acc.values());
 }
@@ -158,16 +330,43 @@ export function unitsLine(b) {
   return parts.join(' · ');
 }
 
-function closeStatusSuffix(b) {
+/** Línea de uds por marca: "P 19" o "BB 4 taco 4" */
+export function brandFoodUnitsLine(brand) {
+  const short = shortBrandLabel(brand?.name);
+  const pizza = Math.max(0, Math.floor(Number(brand?.pizza) || 0));
+  const burger = Math.max(0, Math.floor(Number(brand?.burger) || 0));
+  const taco = Math.max(0, Math.floor(Number(brand?.taco) || 0));
+  if (!pizza && !burger && !taco) return '';
+  if (pizza && !burger && !taco) return `P ${pizza}`;
+  if (!pizza && (burger || taco)) {
+    if (burger && taco) return `${short} ${burger} taco ${taco}`;
+    if (burger) return `${short} ${burger}`;
+    return `${short} taco ${taco}`;
+  }
+  // mezcla rara: P + resto
+  const bits = [];
+  if (pizza) bits.push(`P ${pizza}`);
+  if (burger || taco) {
+    if (burger && taco) bits.push(`${short} ${burger} taco ${taco}`);
+    else if (burger) bits.push(`${short} ${burger}`);
+    else bits.push(`${short} taco ${taco}`);
+  }
+  return bits.join(' · ');
+}
+
+function closeStatusLine(b) {
   const diff = money(b?.difference);
   if (Math.abs(diff) >= 0.01) {
     const sign = diff > 0 ? '+' : '';
-    return ` · Descuadre ${sign}${fmtEs(diff)} €`;
+    return `Descuadre ${sign}${fmtEs(diff)}€`;
   }
-  return ' · OK';
+  return '';
 }
 
-/** Push: facturación + marcas + salidas (si hay) + OK/descuadre. Compacto para banner. */
+/**
+ * Push Delivery PRO — parte de cierre (cualquier tienda).
+ * Una línea por dato, como el mensaje operativo del CEO.
+ */
 export function formatCeoDailyPushBody(blocks, { emptyMessage, includeCloseStatus = true } = {}) {
   if (!blocks?.length) {
     return emptyMessage || 'Sin cierres de caja hoy';
@@ -175,87 +374,77 @@ export function formatCeoDailyPushBody(blocks, { emptyMessage, includeCloseStatu
   return blocks
     .map((b) => {
       const lines = [];
-      const units = unitsLine(b);
-      const head = units
-        ? `${b.name} ${units} · ${fmtEs(b.cobrado)} €`
-        : `${b.name} ${fmtEs(b.cobrado)} €`;
-      lines.push(includeCloseStatus ? `${head}${closeStatusSuffix(b)}` : head);
+      const day = fmtDayShort(b.dayKey) || '';
+      lines.push(day ? `${String(b.name || 'Tienda').toUpperCase()} (${day})` : String(b.name || 'Tienda').toUpperCase());
 
       const brands = (b.brands || []).filter((br) => Number(br.euros) > 0);
       if (brands.length) {
-        lines.push(
-          brands
-            .map((br) => `${String(br.name || 'Marca').trim()} ${fmtEs(br.euros)} €`)
-            .join(' · '),
-        );
+        for (const br of brands) {
+          const short = shortBrandLabel(br.name);
+          lines.push(`${short} ${fmtEs(br.euros)}€`);
+          const uLine = brandFoodUnitsLine(br);
+          if (uLine) lines.push(uLine);
+        }
+      } else {
+        const u = unitsLine(b);
+        if (u) lines.push(u);
+        if (Number(b.cobrado) > 0) lines.push(`Total ${fmtEs(b.cobrado)}€`);
       }
 
-      const cashOut = money(b.cashOut);
-      if (cashOut > 0) {
-        lines.push(`Salidas ${fmtEs(cashOut)} €`);
+      lines.push(`Tarjeta total ${fmtEs(b.tarjeta)}€`);
+      lines.push(`Efectivo total ${fmtEs(b.efectivo)}€`);
+
+      const outs = Array.isArray(b.cashOuts) ? b.cashOuts : [];
+      if (outs.length) {
+        for (const o of outs) {
+          lines.push(`${o.name} ${fmtPushAmount(o.amount)}`);
+        }
+      } else if (money(b.cashOut) > 0) {
+        lines.push(`Salidas ${fmtEs(b.cashOut)}€`);
       }
 
-      const notes = String(b.notes || '').trim().replace(/\s+/g, ' ');
+      lines.push(`Fondo ${fmtEs(b.enLocal)}`);
+
+      if (includeCloseStatus) {
+        const status = closeStatusLine(b);
+        if (status) lines.push(status);
+      }
+
+      const notes = String(b.notes || '').trim();
       if (notes) {
-        const clipped = notes.length > 120 ? `${notes.slice(0, 117)}…` : notes;
-        lines.push(`Notas: ${clipped}`);
+        lines.push('');
+        const clipped = notes.length > 280 ? `${notes.slice(0, 277)}…` : notes;
+        lines.push(clipped);
       }
 
       return lines.join('\n');
     })
-    .join('\n');
+    .join('\n\n');
 }
 
-/** Campana larga — líneas claras para móvil */
+/** Campana larga — mismo espíritu PRO, un poco más explícito */
 export function formatCeoDailyCampanaBody(blocks, dayKey, { businessName } = {}) {
-  const header = `Resumen del día · ${fmtDayEs(dayKey)}`;
   if (!blocks?.length) {
+    const header = `Resumen del día · ${fmtDayEs(dayKey)}`;
     const biz = businessName ? ` (${businessName})` : '';
     return `${header}\n\nSin cierres de caja registrados hoy${biz}.`;
   }
 
-  const out = [header];
-  for (const b of blocks) {
-    out.push('');
-    out.push(String(b.name || 'Tienda').toUpperCase());
-    for (const br of b.brands || []) {
-      const brand = String(br.name || '').trim() || 'Marca';
-      out.push(`· ${brand}  ${fmtEs(br.euros)} €`);
-    }
-    const units = unitsLine(b);
-    if (units) out.push(units);
-    out.push(`Cobrado  ${fmtEs(b.cobrado)} €`);
-    out.push(`Tarjeta ${fmtEs(b.tarjeta)} € · Efectivo ${fmtEs(b.efectivo)} €`);
-    out.push(`En local  ${fmtEs(b.enLocal)} €`);
-    if (b.retirado > 0) out.push(`Retirado  ${fmtEs(b.retirado)} €`);
-    if (b.cashIn > 0 || b.cashOut > 0) {
-      const bits = [];
-      if (b.cashIn > 0) bits.push(`Entradas ${fmtEs(b.cashIn)} €`);
-      if (b.cashOut > 0) bits.push(`Salidas ${fmtEs(b.cashOut)} €`);
-      out.push(bits.join(' · '));
-    }
-    if (Math.abs(b.difference) >= 0.01) {
-      const sign = Number(b.difference) > 0 ? '+' : '';
-      out.push(`Descuadre  ${sign}${fmtEs(b.difference)} €`);
-    } else {
-      out.push('Cierre OK · sin descuadre');
-    }
-    const notes = String(b.notes || '').trim();
-    if (notes) out.push(`Notas  ${notes}`);
-  }
-
-  out.push('');
-  out.push('TOTAL EMPRESA');
-  const facturado = money(blocks.reduce((a, b) => a + Number(b.cobrado || 0), 0));
-  out.push(`Facturado  ${fmtEs(facturado)} €`);
-  for (const b of blocks) {
-    out.push(`En local · ${b.name}  ${fmtEs(b.enLocal)} €`);
-  }
-  return out.join('\n').trim();
+  // Misma estructura que el push (el CEO quiere el parte operativo).
+  const withDay = blocks.map((b) => ({
+    ...b,
+    dayKey: b.dayKey || dayKey,
+  }));
+  return formatCeoDailyPushBody(withDay, { includeCloseStatus: true });
 }
 
 /** Vista corta para la lista de la campana (1–3 líneas). */
 export function formatCeoDailyCampanaPreview(blocks) {
   if (!blocks?.length) return 'Sin cierres de caja';
-  return formatCeoDailyPushBody(blocks);
+  const b = blocks[0];
+  const day = fmtDayShort(b.dayKey);
+  const head = day ? `${b.name} (${day})` : b.name;
+  const brands = (b.brands || []).filter((br) => Number(br.euros) > 0).slice(0, 2);
+  const brandBit = brands.map((br) => `${shortBrandLabel(br.name)} ${fmtEs(br.euros)}€`).join(' · ');
+  return [head, brandBit, `Efectivo ${fmtEs(b.efectivo)}€`].filter(Boolean).join('\n');
 }
