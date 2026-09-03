@@ -6,6 +6,7 @@ import {
 import {
   canViewDashboardEbitda,
   canViewDashboardFinanceWidget,
+  canViewDeliveryDashboardExtras,
   getLockedDashboardWidgets,
   getUnlockedDashboardWidgets,
   isDashboardWidgetUnlocked,
@@ -18,6 +19,9 @@ export function useDashboardPlanAccess() {
 
   const planLabel = PLAN_TIER_LABELS[planTier];
   const isBasicPlan = planTier === 'basic';
+  /** Básico o Mediano: dashboard operativo reducido (sin bloque Pro). */
+  const isLimitedDashboard = planTier !== 'pro';
+  const canViewDeliveryExtras = canViewDeliveryDashboardExtras(planTier);
 
   const unlockedWidgets = useMemo(
     () => getUnlockedDashboardWidgets(planTier),
@@ -35,6 +39,8 @@ export function useDashboardPlanAccess() {
     planTier,
     planLabel,
     isBasicPlan,
+    isLimitedDashboard,
+    canViewDeliveryExtras,
     unlockedWidgets,
     lockedWidgets,
     canShowWidget,

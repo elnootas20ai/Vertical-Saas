@@ -20,14 +20,17 @@ export function useTenantEntitlements(options?: {
   pointOfSaleCount?: number;
   commercialBrandCount?: number;
 }): TenantEntitlementAccess {
-  const { subscription, devUnlimitedPdv } = useApp();
+  const { subscription, devUnlimitedPdv, devPlanOverride } = useApp();
   const auth = useAuthOptional();
   const user = auth?.user ?? null;
   const { businesses } = useBusiness();
 
-  const devUnlimited = userCanUseDevPlanOverride(user) && devUnlimitedPdv;
+  const canDev = userCanUseDevPlanOverride(user);
+  const simulatingPlan = Boolean(canDev && devPlanOverride);
+  const devUnlimited = canDev && devUnlimitedPdv;
   const superAdmin = isVertialSuperAdminEmail(user?.email);
-  const bypassLimits = devUnlimited || superAdmin;
+  // Con plan simulado (Mi plan / Plan dev): respetar cupos; no bypass super-admin.
+  const bypassLimits = (devUnlimited || superAdmin) && !simulatingPlan;
   const featurePlanTier = useEffectivePlanTier();
 
   return useMemo(

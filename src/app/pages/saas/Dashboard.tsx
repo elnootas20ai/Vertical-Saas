@@ -583,7 +583,8 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
   const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '');
   const {
     planLabel,
-    isBasicPlan,
+    isLimitedDashboard,
+    canViewDeliveryExtras,
     canShowWidget,
     canViewEbitda,
     canViewFinanceWidget,
@@ -970,6 +971,14 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
       setDeliveryPanelStage((s) => Math.max(s, 1));
       await yieldPaint();
       if (!stillCurrent()) return;
+
+      // Mediano/Básico delivery: solo el resumen de arriba (sin olas pesadas).
+      if (!canViewDeliveryExtras) {
+        setDeliveryHeavyReady(true);
+        setDeliveryWaveBusy(false);
+        return;
+      }
+
       setDeliveryPanelStage((s) => Math.max(s, 2));
 
       // Ola 1 — ventana completa + YoY (marcas / insights MoM).
@@ -1061,7 +1070,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
       setDeliveryOpsPulses((prev) => prev ?? { pulses7d: [], pulsesMonth: [] });
       setDeliveryHeavyReady(true);
     }
-  }, [isDeliveryVertical, authUser, currentBusiness, businesses.length]);
+  }, [isDeliveryVertical, authUser, currentBusiness, businesses.length, canViewDeliveryExtras]);
 
   useEffect(() => {
     void loadDeliveryDashboard();
@@ -1527,6 +1536,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
           >
             <RefreshCw className={`h-3.5 w-3.5 ${serverLoading ? 'animate-spin' : ''}`} />
           </button>
+          {!(isDeliveryVertical && !canViewDeliveryExtras) ? (
           <button
             type="button"
             onClick={() => setShowPersonalize(true)}
@@ -1535,9 +1545,10 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
           >
             <Settings2 className="h-3.5 w-3.5" />
           </button>
+          ) : null}
         </div>
 
-        {isBasicPlan && (
+        {isLimitedDashboard && !isDeliveryVertical && (
           <div className="flex flex-col sm:flex-row sm:items-center gap-3 p-4 rounded-2xl bg-gradient-to-r from-slate-50 to-indigo-50 dark:from-slate-900/60 dark:to-indigo-950/30 border border-slate-200 dark:border-slate-700">
             <div className="flex items-start gap-3 flex-1">
               <Sparkles className="w-5 h-5 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
@@ -1546,8 +1557,8 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                   Dashboard plan {planLabel}
                 </p>
                 <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                  Operativa básica activa. Finanzas, EBITDA, gráficas avanzadas e informes completos desde plan Normal.
-                  {lockedWidgets.length > 0 ? ` · ${lockedWidgets.length} bloques en tu plan` : ''}
+                  Vista operativa. Finanzas, EBITDA, gráficas avanzadas, embudo y fichajes en dashboard van con Pro.
+                  {lockedWidgets.length > 0 ? ` · ${lockedWidgets.length} bloques en Pro` : ''}
                 </p>
               </div>
             </div>
@@ -1559,13 +1570,13 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                 </span>
               }
             >
-              Ver planes
+              Ver plan Pro
             </VertialBillingUpgradeLink>
           </div>
         )}
 
-        {/* Bar/restaurante: facturación 14 días también en vista unificada */}
-        {isRestaurantVertical && financeUserId ? (
+        {/* Bar/restaurante: facturación 14 días — solo Pro (gráficas) */}
+        {isRestaurantVertical && financeUserId && canShowWidget('charts') ? (
           <RestaurantDashboardBillingCharts
             userId={financeUserId}
             businessId={businessId}
@@ -1600,6 +1611,20 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
           />
         ) : null}
 
+        {/* Delivery Mediano/Básico: solo el bloque de arriba + CTA corto */}
+        {isDeliveryVertical && !canViewDeliveryExtras ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 dark:border-stone-700 dark:bg-stone-900/50">
+            <p className="text-xs text-stone-600 dark:text-stone-400">
+              Plan {planLabel}: resumen del día. Marcas, ranking, costes y gráficas en Pro.
+            </p>
+            <VertialBillingUpgradeLink className="text-xs font-semibold text-stone-900 underline-offset-2 hover:underline dark:text-stone-100">
+              Ver Pro
+            </VertialBillingUpgradeLink>
+          </div>
+        ) : null}
+
+        {canViewDeliveryExtras || !isDeliveryVertical ? (
+        <>
         {/* Marcas — skeleton mientras llega la ola 2 */}
         {isDeliveryVertical && deliveryBrandsAwaiting ? (
           <DashboardBrandsSkeleton />
@@ -1688,7 +1713,11 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
             />
           </DashboardLazyPanel>
         ) : null}
+        </>
+        ) : null}
 
+        {(canViewDeliveryExtras || !isDeliveryVertical) ? (
+        <>
         {isRestaurantVertical ? (
           <div style={{ order: getWidgetOrder('quick_access') - 0.5 }}>
             <RestaurantLiveDashboardPanelFromContext />
@@ -2112,6 +2141,9 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
             </DraggableWidget>
           </div>
         )}
+
+        </>
+        ) : null}
 
       </div>
     </Layout>

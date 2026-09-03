@@ -65,10 +65,12 @@ import { WorkerInviteQrModal } from '../../components/saas/WorkerInviteQrModal';
 import { loadInviteWorkCenters } from '../../lib/inviteWorkCenters';
 import type { WorkCenter } from '../../lib/workCentersApi';
 import {
+  applyEffectivePlanToWorkerSeats,
   getWorkerSeatStatusRequest,
   workerSeatBillingWarning,
   type WorkerSeatStatus,
 } from '../../lib/workerSeatLimits';
+import { useEffectivePlanTier } from '../../hooks/useEffectivePlanTier';
 import { VertialBillingUpgradeLink } from '../../components/saas/VertialBillingUpgradeLink';
 import { formatAddonPriceShort } from '../../lib/planAddonCatalog';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
@@ -2937,7 +2939,8 @@ export function Team() {
   } = useAuth();
   const { currentBusiness, businesses } = useBusiness();
   const hrCopy = getHrLocationCopy(currentBusiness?.businessType);
-  const { clients: contextClients, leads: contextLeads } = useApp();
+  const { clients: contextClients, leads: contextLeads, subscription } = useApp();
+  const planTier = useEffectivePlanTier();
   const [searchParams] = useSearchParams();
   const memberIdParam = searchParams.get('memberId');
   const [activeTab, setActiveTab] = useState<TeamTab>(() => {
@@ -3031,7 +3034,9 @@ export function Team() {
       return;
     }
     const seats = await getWorkerSeatStatusRequest(currentBusiness.business_id);
-    setWorkerSeats(seats);
+    setWorkerSeats(
+      applyEffectivePlanToWorkerSeats(seats, planTier, subscription?.extraWorkerSlots),
+    );
   };
 
   const accountUserId = user?.user_id || user?.id || '';
@@ -3047,7 +3052,7 @@ export function Team() {
         .catch(() => {});
     }
     fetchTeamAlerts(currentBusiness.business_id).then(setTeamAlerts).catch(() => {});
-  }, [currentBusiness?.business_id, accountUserId]);
+  }, [currentBusiness?.business_id, accountUserId, planTier, subscription?.extraWorkerSlots]);
 
   useEffect(() => {
     if (!resolvedUserId || !currentBusiness) return;

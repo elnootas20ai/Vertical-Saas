@@ -5,7 +5,6 @@ import {
   PLAN_TIER_LABELS,
   clampExtraPointOfSaleSlots,
   getBasePointOfSaleLimit,
-  subscriptionHasProAccess,
   type SubscriptionPlanTier,
 } from '../lib/pointOfSaleLimits';
 import { useEffectivePlanTier } from './useEffectivePlanTier';
@@ -33,7 +32,8 @@ export function usePointOfSaleAccess(pointOfSaleCount: number): PointOfSaleAcces
   const planTier = useEffectivePlanTier();
   const extraPdv = clampExtraPointOfSaleSlots(subscription.extraPointOfSaleSlots);
   const includedPointOfSaleLimit = getBasePointOfSaleLimit(planTier) + extraPdv;
-  const hasProAccess = planTier === 'pro' || subscriptionHasProAccess(subscription);
+  // Solo el tier efectivo: si Plan (dev) = Mediano, no reabrir Pro por adminProAccess.
+  const hasProAccess = planTier === 'pro';
   const devUnlimitedPdv = userCanUseDevPlanOverride(user) && devUnlimitedPdvState;
   const canCreatePointOfSale = devUnlimitedPdv || pointOfSaleCount < includedPointOfSaleLimit;
 

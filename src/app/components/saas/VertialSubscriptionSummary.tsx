@@ -34,6 +34,9 @@ export interface VertialSubscriptionSummaryProps {
   annualDiscount?: number;
   statusStyle: StatusStyle;
   onChangePlan?: () => void;
+  /** Admin / prueba local: aplicar plan al instante (mismo que atajo del menú). */
+  onApplyPlan?: (planId: 'basic' | 'normal' | 'pro') => void;
+  applyPlans?: Array<{ id: 'basic' | 'normal' | 'pro'; name: string }>;
 }
 
 function formatPrice(plan: PlanDefinition, mode: 'monthly' | 'annual', discount: number) {
@@ -52,6 +55,8 @@ export function VertialSubscriptionSummary({
   annualDiscount = 0.2,
   statusStyle,
   onChangePlan,
+  onApplyPlan,
+  applyPlans,
 }: VertialSubscriptionSummaryProps) {
   const tier = resolvePlanTier(subscription.selectedPlanId || '', subscription.planName || '');
   const planLabel = PLAN_TIER_LABELS[tier] || subscription.planName || activePlan.name;
@@ -70,6 +75,15 @@ export function VertialSubscriptionSummary({
       : user?.paymentSummary?.billingMode === 'annual' || user?.paymentSummary?.billingMode === 'monthly'
         ? user.paymentSummary.billingMode
         : billingMode;
+
+  const quickPlans =
+    applyPlans && applyPlans.length > 0
+      ? applyPlans
+      : ([
+          { id: 'basic' as const, name: 'Básico' },
+          { id: 'normal' as const, name: 'Mediano' },
+          { id: 'pro' as const, name: 'Pro' },
+        ] as const);
 
   const includedItems = [
     {
@@ -143,7 +157,36 @@ export function VertialSubscriptionSummary({
               </p>
             ) : null}
           </div>
-          {onChangePlan ? (
+          {onApplyPlan ? (
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-[220px]">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500 sm:text-right">
+                Cambiar plan (admin)
+              </p>
+              <div className="grid grid-cols-3 gap-1.5">
+                {quickPlans.map((p) => {
+                  const active = tier === p.id;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => onApplyPlan(p.id)}
+                      className={`rounded-xl px-2 py-2.5 text-xs font-bold transition-colors ${
+                        active
+                          ? p.id === 'pro'
+                            ? 'bg-violet-600 text-white'
+                            : p.id === 'normal'
+                              ? 'bg-emerald-600 text-white'
+                              : 'bg-stone-800 text-white'
+                          : 'border-2 border-gray-900 bg-white text-gray-900 hover:bg-gray-50 dark:border-gray-100 dark:bg-gray-900 dark:text-gray-100'
+                      }`}
+                    >
+                      {p.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : onChangePlan ? (
           <button
             type="button"
             onClick={onChangePlan}

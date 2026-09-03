@@ -21,20 +21,25 @@ export interface DashboardWidgetPlanEntry {
 }
 
 /**
- * Plan Básico: operativa mínima (ventas, alertas, accesos).
- * Normal: finanzas, gráficas, CRM, equipo.
- * Pro: bloques avanzados.
+ * Dashboard packing (VERTIAL-PRECIOS-PACKING):
+ * - Básico / Mediano: Dashboard 1 — delivery: solo resumen operativo de arriba
+ * - Pro: marcas avanzadas, gráficas, finanzas, embudo, fichajes, accesos, etc.
  */
 export const DASHBOARD_WIDGET_CATALOG: DashboardWidgetPlanEntry[] = [
   { id: 'kpis_main', label: 'KPIs principales', minPlan: 'basic', basicPreview: true },
-  { id: 'quick_access', label: 'Accesos rápidos', minPlan: 'basic', basicPreview: true },
-  { id: 'alertas', label: 'Alertas', minPlan: 'basic', basicPreview: true },
   { id: 'operations', label: 'Operativa del negocio', minPlan: 'basic', basicPreview: true },
-  { id: 'charts', label: 'Gráficas principales', minPlan: 'normal' },
-  { id: 'quick_finance', label: 'Resumen financiero', minPlan: 'normal' },
-  { id: 'funnel', label: 'Embudo CRM', minPlan: 'normal' },
-  { id: 'clockins', label: 'Fichajes del equipo', minPlan: 'normal' },
+  { id: 'quick_access', label: 'Accesos rápidos', minPlan: 'pro' },
+  { id: 'alertas', label: 'Alertas', minPlan: 'pro' },
+  { id: 'charts', label: 'Gráficas principales', minPlan: 'pro' },
+  { id: 'quick_finance', label: 'Resumen financiero', minPlan: 'pro' },
+  { id: 'funnel', label: 'Embudo CRM', minPlan: 'pro' },
+  { id: 'clockins', label: 'Fichajes del equipo', minPlan: 'pro' },
 ];
+
+/** Delivery Mediano/Básico: solo el bloque superior (PortfolioOpsPulse). */
+export function canViewDeliveryDashboardExtras(planTier: SubscriptionPlanTier): boolean {
+  return planTier === 'pro';
+}
 
 export function isDashboardWidgetUnlocked(
   id: DashboardWidgetId,
@@ -45,14 +50,14 @@ export function isDashboardWidgetUnlocked(
   return planMeetsReportTier(planTier, entry.minPlan, entry.basicPreview);
 }
 
-/** KPI EBITDA en la fila principal — Normal+. */
+/** KPI EBITDA en la fila principal — Pro. */
 export function canViewDashboardEbitda(planTier: SubscriptionPlanTier): boolean {
-  return planTier !== 'basic';
+  return planTier === 'pro';
 }
 
-/** Widget Finanzas (saldo, spark chart) — Normal+. */
+/** Widget Finanzas (saldo, spark chart) — Pro. */
 export function canViewDashboardFinanceWidget(planTier: SubscriptionPlanTier): boolean {
-  return planTier !== 'basic';
+  return planTier === 'pro';
 }
 
 export function getUnlockedDashboardWidgets(planTier: SubscriptionPlanTier): DashboardWidgetPlanEntry[] {

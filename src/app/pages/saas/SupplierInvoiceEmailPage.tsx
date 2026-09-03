@@ -50,6 +50,8 @@ import {
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
 import type { WorkCenter } from '../../lib/workCentersApi';
+import { useEffectivePlanTier } from '../../hooks/useEffectivePlanTier';
+import { VertialBillingUpgradeLink } from '../../components/saas/VertialBillingUpgradeLink';
 
 function scopedActivePdvs(
   workCenters: WorkCenter[],
@@ -161,6 +163,8 @@ function detectProvider(host: string, user: string): MailProvider {
  */
 export function SupplierInvoiceEmailPage() {
   const navigate = useNavigate();
+  const planTier = useEffectivePlanTier();
+  const canUseInvoiceImap = planTier === 'pro';
   const [searchParams, setSearchParams] = useSearchParams();
   const pdvFromUrl = searchParams.get('pdv');
   const openAjustesFromUrl = searchParams.get('ajustes') === '1';
@@ -805,6 +809,37 @@ export function SupplierInvoiceEmailPage() {
 
   const inputClass =
     'mt-1 w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 outline-none focus:ring-2 focus:ring-blue-500/30 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-100';
+
+  if (!canUseInvoiceImap) {
+    return (
+      <Layout
+        title="Correo de facturas"
+        subtitle="Entrada automática de facturas por email"
+      >
+        <div className="mx-auto max-w-lg rounded-2xl border border-stone-200 bg-white p-6 dark:border-stone-700 dark:bg-stone-900">
+          <p className="text-sm font-semibold text-stone-900 dark:text-stone-100">
+            Disponible en plan Pro
+          </p>
+          <p className="mt-2 text-sm text-stone-600 dark:text-stone-300 leading-relaxed">
+            En Mediano las facturas de proveedor se suben o escanean con <strong>OCR</strong> desde Compras.
+            La conexión automática al buzón (IMAP) va incluida en Pro.
+          </p>
+          <div className="mt-5 flex flex-wrap gap-2">
+            <VertialBillingUpgradeLink className={VERTIAL_BTN_PRIMARY}>
+              Ver plan Pro
+            </VertialBillingUpgradeLink>
+            <button
+              type="button"
+              className={VERTIAL_BTN_SECONDARY}
+              onClick={() => navigate('/saas/catalog?tab=invoices')}
+            >
+              Ir a facturas (OCR)
+            </button>
+          </div>
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout

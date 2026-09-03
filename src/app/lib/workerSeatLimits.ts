@@ -8,7 +8,7 @@ import { resolvePlanTier, type SubscriptionPlanTier } from './pointOfSaleLimits'
 
 export const WORKER_SEAT_LIMITS: Record<SubscriptionPlanTier, number> = {
   basic: 2,
-  normal: 6,
+  normal: 4,
   pro: 12,
 };
 
@@ -41,6 +41,29 @@ export function getEffectiveWorkerSeatLimit(
   return getBaseWorkerSeatLimit(tier) + clampExtraWorkerSlots(subscription.extraWorkerSlots);
 }
 
+/**
+ * Ajusta el cupo UI al plan efectivo (p. ej. Mi plan → Mediano).
+ * En Pro no toca el resultado del API (incluye billingExempt / Ilimitado).
+ */
+export function applyEffectivePlanToWorkerSeats(
+  seats: WorkerSeatStatus | null | undefined,
+  planTier: SubscriptionPlanTier,
+  extraWorkerSlots: unknown = 0,
+): WorkerSeatStatus | null {
+  if (!seats) return null;
+  if (planTier === 'pro') return seats;
+  const limit = getBaseWorkerSeatLimit(planTier) + clampExtraWorkerSlots(extraWorkerSlots);
+  const used = Math.max(0, Number(seats.used) || 0);
+  const remaining = Math.max(0, limit - used);
+  return {
+    ...seats,
+    limit,
+    remaining,
+    canInvite: remaining > 0,
+    planTier,
+  };
+}
+
 export type WorkerSeatStatus = {
   used: number;
   limit: number;
@@ -65,8 +88,7 @@ export function workerSeatBillingWarning(seats: Pick<WorkerSeatStatus, 'used' | 
       title: 'Cupo de trabajadores completo',
       body:
         `Llevas ${seats.used} de ${seats.limit} plazas. `
-        + `Si invitas a alguien más, te sube la facturación (${price} por trabajador extra). `
-        + 'Amplía el cupo en Mi plan antes de seguir.',
+        + `El siguiente (el ${seats.limit + 1}º) requiere ampliación de pago (${price}/mes) en Mi plan.`,
     };
   }
   if (seats.remaining === 1) {
@@ -75,7 +97,7 @@ export function workerSeatBillingWarning(seats: Pick<WorkerSeatStatus, 'used' | 
       title: 'Última plaza incluida',
       body:
         `Te queda 1 plaza de ${seats.limit}. `
-        + `El siguiente trabajador (el ${seats.limit + 1}º) subirá tu facturación (${price} extra al mes).`,
+        + `El ${seats.limit + 1}º trabajador se cobra aparte (${price}/mes).`,
     };
   }
   if (seats.remaining <= 3) {

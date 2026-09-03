@@ -94,7 +94,9 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useModalClose } from '../../hooks/useModalClose';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
-import { useApp } from '../../context/AppContext';
+import { useApp, userCanUseDevPlanOverride } from '../../context/AppContext';
+import { usePlanUpgradePrepOptional } from '../../context/PlanUpgradePrepContext';
+import { isProDowngradeBlocked, planTierRank } from '../../lib/planDowngradeGuard';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useTenantEntitlements } from '../../hooks/useTenantEntitlements';
@@ -358,9 +360,14 @@ function formatInputDate(value?: Date | string | null) {
 }
 
 function TabBilling() {
-  const { subscription } = useApp();
+  const { subscription, setDevSubscriptionPlan } = useApp();
+  const planUpgradePrep = usePlanUpgradePrepOptional();
   const { user, updateProfile, refreshCurrentUser } = useAuth();
+  const canApplyPlanLocally = userCanUseDevPlanOverride(user);
   const hideIosInAppBilling = shouldHideInAppSubscriptionPurchaseOnIos();
+  /** Cliente real en Pro: no puede bajar a Mediano/Básico (admin sí simula). */
+  const proDowngradeLocked =
+    !canApplyPlanLocally && planTierRank(subscription.selectedPlanId || 'basic') >= 2;
   const billingSelectionStorageKey = useMemo(
     () => (user?.user_id ? `billing_selection_${user.user_id}` : null),
     [user?.user_id],
@@ -389,6 +396,31 @@ function TabBilling() {
 
   const [ANNUAL_DISCOUNT, setAnnualDiscount] = useState(DEFAULT_ANNUAL_DISCOUNT);
   const [plans, setPlans] = useState(DEFAULT_PLANS.map((p) => ({ ...p })));
+
+  const applyLocalPlan = (planId: 'basic' | 'normal' | 'pro') => {
+    const upgradingToPro =
+      planId === 'pro'
+      && planUpgradePrep
+      && planTierRank(subscription.selectedPlanId || 'basic') < 2;
+    if (upgradingToPro) {
+      planUpgradePrep.applyDevPlanWithPrep(planId);
+      setShowPlanPicker(false);
+      setBillingFeedback('Preparando sistema Pro… Sigue el progreso en pantalla (~2 min).');
+      window.setTimeout(() => setBillingFeedback(null), 6000);
+      return;
+    }
+    if (planUpgradePrep) {
+      planUpgradePrep.applyDevPlanWithPrep(planId);
+    } else {
+      setDevSubscriptionPlan(planId);
+    }
+    setSelectedPlanId(planId);
+    setShowPlanPicker(false);
+    setBillingFeedback(
+      `Plan ${planId === 'normal' ? 'Mediano' : planId === 'pro' ? 'Pro' : 'Básico'} aplicado. Menú y límites actualizados.`,
+    );
+    window.setTimeout(() => setBillingFeedback(null), 5000);
+  };
 
   useEffect(() => {
     getPlanPricingConfig()
@@ -685,6 +717,18 @@ function TabBilling() {
       setBillingFeedback('No hay usuario autenticado.');
       return;
     }
+    if (
+      isProDowngradeBlocked({
+        canSimulatePlans: canApplyPlanLocally,
+        activePlanId: activeSubscriptionPlanId,
+        targetPlanId: selectedPlanId,
+      })
+    ) {
+      setBillingFeedback(
+        'Con plan Pro no se puede bajar a Mediano o Básico desde la app. Contacta con soporte@vertialapp.com.',
+      );
+      return;
+    }
 
     setIsPaying(true);
     setBillingFeedback(null);
@@ -846,20 +890,57 @@ function TabBilling() {
         billingMode={billingMode}
         annualDiscount={ANNUAL_DISCOUNT}
         statusStyle={sc}
-        onChangePlan={hideIosInAppBilling ? undefined : () => setShowPlanPicker(true)}
+        onChangePlan={
+          hideIosInAppBilling || canApplyPlanLocally
+            ? undefined
+            : () => {
+                setShowPlanPicker(true);
+                window.requestAnimationFrame(() => {
+                  document.getElementById('vertial-plan-picker')?.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'start',
+                  });
+                });
+              }
+        }
+        onApplyPlan={
+          canApplyPlanLocally
+            ? (planId) => {
+                applyLocalPlan(planId);
+              }
+            : undefined
+        }
       />
+
+      {billingFeedback && !isIgnorableSessionError(billingFeedback) && (
+        <div
+          className={`rounded-xl border px-4 py-3 text-sm ${
+            billingFeedback.includes('aplicado') ||
+            billingFeedback.includes('correctamente') ||
+            billingFeedback.includes('activada')
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-100'
+              : 'border-stone-200 bg-stone-50 text-stone-800 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100'
+          }`}
+        >
+          {billingFeedback}
+        </div>
+      )}
 
       {!hideIosInAppBilling && <MoneiConnectPanel />}
 
-      {(showPlanPicker || accountBlocked) && !hideIosInAppBilling && (
-      <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
+      {(showPlanPicker || accountBlocked) && !hideIosInAppBilling && !canApplyPlanLocally && (
+      <div id="vertial-plan-picker" className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
           <div>
             <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
               {wantsDifferentPlanThanSubscription ? 'Confirmar cambio de plan' : 'Elige tu plan'}
             </p>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              Selecciona el plan y el ciclo de cobro. Al confirmar irás a la pasarela segura de Vertial.
+              {canApplyPlanLocally
+                ? 'Al elegir un plan se aplica al instante (mismo efecto que Plan en el menú): menú, límites y Mi plan.'
+                : proDowngradeLocked
+                  ? 'Tu plan Pro está activo. Puedes ampliar cupos; bajar a Mediano o Básico no está disponible desde la app.'
+                  : 'Selecciona el plan y el ciclo de cobro. Al confirmar irás a la pasarela segura de Vertial.'}
             </p>
           </div>
           <div className="flex items-center gap-2 self-start">
@@ -919,11 +1000,18 @@ function TabBilling() {
             const savings = getAnnualSavings(plan);
             const isSelected = selectedPlanId === plan.id;
             const isActive = subscription.selectedPlanId === plan.id;
+            const downgradeBlocked = isProDowngradeBlocked({
+              canSimulatePlans: canApplyPlanLocally,
+              activePlanId: activeSubscriptionPlanId,
+              targetPlanId: plan.id,
+            });
             return (
               <div
                 key={plan.id}
                 className={`relative rounded-2xl border-2 p-5 transition-all ${
-                  isSelected
+                  downgradeBlocked
+                    ? 'border-gray-200 dark:border-gray-700 opacity-60'
+                    : isSelected
                     ? 'border-blue-400 bg-blue-50'
                     : plan.highlight
                     ? 'border-gray-300'
@@ -975,16 +1063,36 @@ function TabBilling() {
                     </li>
                   ))}
                 </ul>
+                {downgradeBlocked ? (
+                  <p className="mt-4 text-[11px] text-stone-500 dark:text-stone-400 leading-snug">
+                    Con Pro no se puede bajar de plan desde la app.
+                  </p>
+                ) : null}
                 <button
                   type="button"
-                  onClick={() => setSelectedPlanId(plan.id)}
-                  className={`mt-5 w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors ${
+                  disabled={downgradeBlocked}
+                  onClick={() => {
+                    if (downgradeBlocked) return;
+                    setSelectedPlanId(plan.id);
+                    if (canApplyPlanLocally && (plan.id === 'basic' || plan.id === 'normal' || plan.id === 'pro')) {
+                      applyLocalPlan(plan.id);
+                    }
+                  }}
+                  className={`mt-5 w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                     isSelected
                       ? 'bg-gray-900 text-white'
                       : 'border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:border-gray-400'
                   }`}
                 >
-                  {isSelected ? 'Plan seleccionado' : 'Seleccionar plan'}
+                  {downgradeBlocked
+                    ? 'No disponible'
+                    : canApplyPlanLocally
+                    ? isActive
+                      ? 'Plan activo'
+                      : `Aplicar ${plan.name}`
+                    : isSelected
+                      ? 'Plan seleccionado'
+                      : 'Seleccionar plan'}
                 </button>
               </div>
             );

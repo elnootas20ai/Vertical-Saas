@@ -140,6 +140,7 @@ import {
   WORKER_UNLINKED_HOME_PATH,
 } from '../../lib/workerProfileCompletion';
 import { useApp, userCanUseDevPlanOverride } from '../../context/AppContext';
+import { usePlanUpgradePrepOptional } from '../../context/PlanUpgradePrepContext';
 import { getEffectivePointOfSaleLimit } from '../../lib/pointOfSaleLimits';
 import { getEffectiveBusinessLimit, getEffectiveCommercialBrandLimit } from '../../lib/tenantEntitlements';
 import { useBusiness } from '../../context/BusinessContext';
@@ -755,6 +756,7 @@ function SidebarInner({
     setDevSubscriptionPlan,
     enableDevUnlimitedPdv,
     devUnlimitedPdv,
+    devPlanOverride,
     devExtraPdv,
     devExtraBrands,
     devExtraBusiness,
@@ -762,14 +764,25 @@ function SidebarInner({
     setDevExtraBrandSlots,
     setDevExtraBusinessSlots,
   } = useApp();
+  const planUpgradePrep = usePlanUpgradePrepOptional();
   const { t } = useTranslation();
   const canUseDevPlanSwitcher = userCanUseDevPlanOverride(user);
   const currentDevPlan: 'basic' | 'normal' | 'pro' = (() => {
+    if (devPlanOverride) return devPlanOverride;
     const id = (subscription.selectedPlanId || '').toLowerCase();
     if (id === 'pro') return 'pro';
     if (id === 'normal') return 'normal';
     return 'basic';
   })();
+
+  const applySidebarDevPlan = (id: 'basic' | 'normal' | 'pro') => {
+    if (planUpgradePrep?.isPreparingProUpgrade) return;
+    if (planUpgradePrep) {
+      planUpgradePrep.applyDevPlanWithPrep(id);
+      return;
+    }
+    setDevSubscriptionPlan(id);
+  };
 
   const isWorker = isWorkerAccount(user);
   /** Trabajador operativo = menú worker. Gestor/Encargado invitados gestionan equipo → menú empresa (nóminas, contratos). */
@@ -1207,6 +1220,10 @@ function SidebarInner({
   const eventsNav = useEventsActivationNav();
   const planTier = useEffectivePlanTier();
 
+  // Etiqueta visible: si el SaaS ve Mediano, el menú DEBE filtrarse.
+  const planGateLabel =
+    planTier === 'pro' ? 'Pro' : planTier === 'normal' ? 'Mediano' : 'Básico';
+
   const menuItems: SidebarItem[] = useMemo(() => {
     return menuItemDefs.map((item) => {
       const base: SidebarItem = {
@@ -1560,16 +1577,12 @@ function SidebarInner({
     if (treatAsWorkerNav && WORKER_SIDEBAR_HIDDEN_ITEM_IDS.has(item.id)) {
       return false;
     }
-    // Titular + invitado Admin/Gestor/Encargado: RRHH y shell siempre, sin recorte por plan.
-    if (!treatAsWorkerNav && ['dashboard', 'settings', 'configuracion', 'chat', 'team', 'payroll', 'gestoria', 'commissions', 'hr-requests', 'horarios-vacaciones', 'clockins'].includes(item.id)) {
+    // Titular: solo shell fijo; el resto respeta Plan (dev) / packing.
+    if (!treatAsWorkerNav && ['dashboard', 'settings', 'configuracion', 'billing'].includes(item.id)) {
       return true;
     }
     if (!isSidebarItemUnlockedForPlan(item.id, planTier)) {
       return false;
-    }
-    // Items operativos siempre visibles para todos (chat es transversal).
-    if (item.id === 'chat') {
-      return true;
     }
     // Mapeo item.id → clave de permiso (TEAM_PERMISSION_KEYS). Sin esto, los items
     // operativos de delivery (tpv, tpv-rapido, tpv-locales, caja, sala, delivery-clients)
@@ -2321,8 +2334,12 @@ function SidebarInner({
           <div className={`mb-3 rounded-lg border border-dashed border-violet-300 bg-violet-50/60 px-2 py-1.5 dark:border-violet-700 dark:bg-violet-950/20 ${narrow ? 'mx-0.5' : 'mx-2'}`}>
             <div className="mb-1">
               <span className="text-[9px] font-bold uppercase tracking-wider text-violet-700 dark:text-violet-300">
-                Plan (dev)
+                Mi plan (atajo)
               </span>
+              <p className="text-[9px] text-violet-600/80 dark:text-violet-400/80 leading-tight">
+                SaaS filtrando: <span className="font-bold">{planGateLabel}</span>
+                {devUnlimitedPdv ? ' · Ilimitado' : ''}
+              </p>
             </div>
             <div className="grid grid-cols-3 gap-0.5">
               {([
@@ -2335,7 +2352,8 @@ function SidebarInner({
                   <button
                     key={id}
                     type="button"
-                    onClick={() => setDevSubscriptionPlan(id)}
+                    onClick={() => applySidebarDevPlan(id)}
+                    disabled={Boolean(planUpgradePrep?.isPreparingProUpgrade)}
                     className={`px-1 py-1 rounded text-[10px] font-semibold transition-colors ${
                       isCurrent
                         ? id === 'pro'

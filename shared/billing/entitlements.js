@@ -23,13 +23,13 @@ export const INCLUDED_COMMERCIAL_BRANDS = {
 /** Trabajadores incluidos por plan (sin contar al dueño). Alineado con planCatalog.maxUsers. */
 export const WORKER_SEAT_LIMITS = {
   basic: 2,
-  normal: 6,
+  normal: 4,
   pro: 12,
 };
 
 export const PLAN_TIER_LABELS = {
   basic: 'Básico',
-  normal: 'Normal',
+  normal: 'Mediano',
   pro: 'Pro',
 };
 

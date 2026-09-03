@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 
 import { AppProvider, useApp } from '../context/AppContext';
+import { PlanScopedBusinessProvider } from '../context/PlanScopedBusinessProvider';
+import { PlanUpgradePrepProvider } from '../context/PlanUpgradePrepContext';
 
 import { ActiveStoreScopeProvider } from '../context/ActiveStoreScopeContext';
 import { BusinessScopeUrlSync } from '../components/saas/BusinessScopeUrlSync';
@@ -648,12 +650,16 @@ function SaasRootProviders() {
       <ActiveStoreScopeProvider>
         <GroupProvider>
           <AppProvider>
-            <ScrapyardProvider>
-              <ActivationChecklistProvider>
-                <BusinessScopeUrlSync />
-                <SaasContent />
-              </ActivationChecklistProvider>
-            </ScrapyardProvider>
+            <PlanScopedBusinessProvider>
+              <PlanUpgradePrepProvider>
+                <ScrapyardProvider>
+                  <ActivationChecklistProvider>
+                    <BusinessScopeUrlSync />
+                    <SaasContent />
+                  </ActivationChecklistProvider>
+                </ScrapyardProvider>
+              </PlanUpgradePrepProvider>
+            </PlanScopedBusinessProvider>
           </AppProvider>
         </GroupProvider>
       </ActiveStoreScopeProvider>

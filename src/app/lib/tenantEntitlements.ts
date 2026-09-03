@@ -145,9 +145,11 @@ export function resolveTenantEntitlements(
   const planTier =
     options?.featurePlanTier
     ?? resolvePlanTier(subscription?.selectedPlanId || '', subscription?.planName || '');
+  // Si viene featurePlanTier (p. ej. Plan dev Mediano), ese manda: no reabrir Pro
+  // por adminProAccess del documento de cuenta.
   const hasProAccess =
-    subscriptionHasProAccess(subscription)
-    || planTier === 'pro'
+    planTier === 'pro'
+    || (options?.featurePlanTier == null && subscriptionHasProAccess(subscription))
     || Boolean(options?.devUnlimitedBrands);
   const unlimitedBusinesses = Boolean(options?.devUnlimitedBusinesses);
   const extraBiz = clampExtraBusinessSlots(subscription?.extraBusinessSlots);

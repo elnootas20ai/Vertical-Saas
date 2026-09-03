@@ -662,6 +662,8 @@ export interface AppContextType {
   setDevSubscriptionPlan: (plan: 'basic' | 'normal' | 'pro' | null) => void;
   /** Activa PDV ilimitados en local para pruebas (desactiva simulación de plan). */
   enableDevUnlimitedPdv: () => void;
+  /** Plan simulado en Plan (dev): basic | normal | pro. null = suscripción real / Ilimitado. */
+  devPlanOverride: 'basic' | 'normal' | 'pro' | null;
   /** Sin tope de PDV al crear tiendas (solo simulación local). */
   devUnlimitedPdv: boolean;
   /** Cupos extra de tienda/PDV simulados en local (suman al plan). */
@@ -750,6 +752,7 @@ function getOrCreateContext(): ReturnType<typeof createContext<AppContextType>> 
       subscription: { status: 'trial_active', planName: 'Basic', cancelAtPeriodEnd: false },
       setDevSubscriptionPlan: () => {},
       enableDevUnlimitedPdv: () => {},
+      devPlanOverride: null,
       devUnlimitedPdv: false,
       devExtraPdv: 0,
       devExtraBrands: 0,
@@ -1022,14 +1025,11 @@ export function readDevExtraBusinesses(): number {
 }
 
 export function readDevUnlimitedPdv(): boolean {
-  if (typeof window === 'undefined') return true;
+  if (typeof window === 'undefined') return false;
   try {
-    if (window.localStorage.getItem(DEV_UNLIMITED_PDV_KEY) === '1') return true;
-    // Sin modo ilimitado explícito: limitado solo si simulas Básico/Normal/Pro.
-    if (readDevPlanOverride()) return false;
-    return true;
+    return window.localStorage.getItem(DEV_UNLIMITED_PDV_KEY) === '1';
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -1056,7 +1056,18 @@ function mergeDevOverrides(sub: Subscription): Subscription {
       status: 'subscription_active',
       planName: def.planName,
       selectedPlanId: def.selectedPlanId,
+      // Sin esto, uriel@admin (billingExempt / adminProAccess) sigue viendo Pro
+      // aunque el Plan (dev) diga Básico o Mediano.
+      adminProAccess: false,
+      billingExempt: false,
     };
+    // Simulación limpia del plan base: Mediano/Básico = 1 empresa (sin extras).
+    if (override === 'basic' || override === 'normal') {
+      result = {
+        ...result,
+        extraBusinessSlots: 0,
+      };
+    }
   }
   const devExtraPdv = readDevExtraPdv();
   if (devExtraPdv > 0) {
@@ -1074,8 +1085,13 @@ function mergeDevOverrides(sub: Subscription): Subscription {
       extraCommercialBrandSlots: Math.min(99, serverExtra + devExtraBrands),
     };
   }
+  const overrideAfter = readDevPlanOverride();
   const devExtraBusiness = readDevExtraBusinesses();
-  if (devExtraBusiness > 0) {
+  if (
+    devExtraBusiness > 0
+    && overrideAfter !== 'basic'
+    && overrideAfter !== 'normal'
+  ) {
     const serverExtra = Math.max(0, Math.floor(Number(sub.extraBusinessSlots) || 0));
     result = {
       ...result,
@@ -1344,11 +1360,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [devExtraBrands, setDevExtraBrands] = useState(0);
   const [devExtraBusiness, setDevExtraBusiness] = useState(0);
   const [devUnlimitedPdv, setDevUnlimitedPdv] = useState(false);
+  const [devPlanOverride, setDevPlanOverride] = useState<DevPlan | null>(() => readDevPlanOverride());
 
   useEffect(() => {
     if (!authUser) {
       setUser(null);
       setSubscription(deserializeSubscription(null));
+      setDevPlanOverride(null);
       return;
     }
 
@@ -1362,26 +1380,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const baseSubscription = deserializeSubscription(authUser.subscription, { isWorker });
     const canUseDevPlanOverride = userCanUseDevPlanOverride(authUser);
     if (canUseDevPlanOverride) {
+      // Conservar Plan (dev) / Mi plan simulado: NO forzar Ilimitado ni borrar override.
+      const override = readDevPlanOverride();
+      const unlimited = readDevUnlimitedPdv();
       setDevExtraPdv(readDevExtraPdv());
       setDevExtraBrands(readDevExtraBrands());
       setDevExtraBusiness(readDevExtraBusinesses());
-      try {
-        window.localStorage.setItem(DEV_UNLIMITED_PDV_KEY, '1');
-        window.localStorage.removeItem(DEV_PLAN_OVERRIDE_KEY);
-      } catch {
-        // ignore
-      }
-      setDevUnlimitedPdv(true);
-      setSubscription(baseSubscription);
+      setDevPlanOverride(override);
+      setDevUnlimitedPdv(unlimited);
+      setSubscription(mergeDevOverrides(baseSubscription));
     } else {
+      clearDevPlanLocalStorage();
       setSubscription(baseSubscription);
       setDevExtraPdv(0);
       setDevExtraBrands(0);
       setDevExtraBusiness(0);
       setDevUnlimitedPdv(false);
-    }
-    if (!canUseDevPlanOverride && typeof window !== 'undefined') {
-      clearDevPlanLocalStorage();
+      setDevPlanOverride(null);
     }
   }, [authUser]);
 
@@ -1389,6 +1404,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const base = deserializeSubscription(authUser?.subscription, {
       isWorker: isWorkerAccount(authUser),
     });
+    const override = readDevPlanOverride();
+    setDevPlanOverride(override);
     setSubscription(mergeDevOverrides(base));
     setDevExtraPdv(readDevExtraPdv());
     setDevExtraBrands(readDevExtraBrands());
@@ -1415,12 +1432,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setDevExtraBrands(0);
       setDevExtraBusiness(0);
       setDevUnlimitedPdv(false);
+      setDevPlanOverride(null);
       setSubscription(deserializeSubscription(authUser?.subscription, {
         isWorker: isWorkerAccount(authUser),
       }));
       return;
     }
+    setDevPlanOverride(plan);
     setDevUnlimitedPdv(false);
+    if (plan === 'basic' || plan === 'normal') {
+      try {
+        window.localStorage.removeItem(DEV_EXTRA_BUSINESS_KEY);
+      } catch {
+        // ignore
+      }
+      setDevExtraBusiness(0);
+    }
     refreshDevSubscription();
   }, [authUser, refreshDevSubscription]);
 
@@ -1434,6 +1461,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // ignore
     }
     setDevExtraPdv(0);
+    setDevPlanOverride(null);
     setDevUnlimitedPdv(true);
     setSubscription(deserializeSubscription(authUser?.subscription));
   }, [authUser]);
@@ -2611,6 +2639,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     vehicles, isLoadingVehicles, isLoadingClients, clientsTotalCount, parkingZones, leads, clients, notifications, sales, documents, locations, user, subscription,
     setDevSubscriptionPlan,
     enableDevUnlimitedPdv,
+    devPlanOverride,
     devUnlimitedPdv,
     devExtraPdv,
     devExtraBrands,

@@ -32,6 +32,8 @@ import { filterStockInventoryItems, summarizeCatalogDeleteScope, isStockInventor
 import { DELIVERY_ACTIVE_STORE_CHANGED } from '../../lib/deliveryOpsPdvSelection';
 import { listWarehousesRequest, type Warehouse } from '../../lib/warehouseApi';
 import { useVerticalCatalog } from '../../hooks/useVerticalCatalog';
+import { useEffectivePlanTier } from '../../hooks/useEffectivePlanTier';
+import { VertialBillingUpgradeLink } from '../../components/saas/VertialBillingUpgradeLink';
 import { InventoryPanel } from '../../components/saas/InventoryPanel';
 import { CatalogServiceRulesFields } from '../../components/saas/CatalogServiceRulesFields';
 import {
@@ -4730,6 +4732,9 @@ export function CatalogPage() {
   );
   const { user } = useAuth();
   const { currentBusiness, businessesFetchSettled, businesses } = useBusiness();
+  const planTier = useEffectivePlanTier();
+  /** IMAP / correo automático de facturas: solo Pro. Mediano usa OCR/subida. */
+  const canUseInvoiceImap = planTier === 'pro';
   const activeStore = useActiveStoreScope();
   const scopeBusinessId = resolveBusinessScopeId(currentBusiness);
   const businessId = resolveTpvCatalogBusinessId(scopeBusinessId, businesses);
@@ -5713,9 +5718,9 @@ export function CatalogPage() {
   }, [dataUserId, loadInvoices, loadInvoiceFinanceLinks, reloadInvoiceEmailStatus]);
 
   useEffect(() => {
-    if (!catalogDataReady || !dataUserId) return;
+    if (!canUseInvoiceImap || !catalogDataReady || !dataUserId) return;
     void reloadInvoiceEmailStatus();
-  }, [catalogDataReady, dataUserId, reloadInvoiceEmailStatus]);
+  }, [canUseInvoiceImap, catalogDataReady, dataUserId, reloadInvoiceEmailStatus]);
 
   useEffect(() => {
     if (activeTab === 'invoices' && dataUserId) {
@@ -8517,7 +8522,7 @@ export function CatalogPage() {
         storeWarehouseId={storeWarehouseId}
         toolbarRight={
           <div className="flex flex-wrap items-center gap-2">
-            {invoiceEmailConnectedCount > 0 || syncingEmailInvoices || invoicesHydrating ? (
+            {canUseInvoiceImap && (invoiceEmailConnectedCount > 0 || syncingEmailInvoices || invoicesHydrating) ? (
               <span className="text-[11px] text-teal-700 dark:text-teal-300 font-medium tabular-nums">
                 {invoiceEmailConnectedCount > 0
                   ? `${invoiceEmailConnectedCount} tienda(s) con correo`
@@ -8526,25 +8531,35 @@ export function CatalogPage() {
                 {syncingEmailInvoices ? 'sincronizando…' : invoicesHydrating ? 'actualizando…' : ''}
               </span>
             ) : null}
-            <SaasTabSecondaryButton
-              onClick={() => navigate('/saas/correo-facturas?ajustes=1')}
-              title="Ajustes de correo de facturas"
-            >
-              <Settings2 className="w-3.5 h-3.5" />
-              Ajustes
-            </SaasTabSecondaryButton>
-            <SaasTabSecondaryButton
-              onClick={() => void syncInvoicesFromEmail()}
-              disabled={syncingEmailInvoices || !dataUserId}
-              title="Leer facturas nuevas del correo conectado"
-            >
-              {syncingEmailInvoices ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <RefreshCw className="w-3.5 h-3.5" />
-              )}
-              Sincronizar
-            </SaasTabSecondaryButton>
+            {canUseInvoiceImap ? (
+              <>
+                <SaasTabSecondaryButton
+                  onClick={() => navigate('/saas/correo-facturas?ajustes=1')}
+                  title="Ajustes de correo de facturas"
+                >
+                  <Settings2 className="w-3.5 h-3.5" />
+                  Ajustes
+                </SaasTabSecondaryButton>
+                <SaasTabSecondaryButton
+                  onClick={() => void syncInvoicesFromEmail()}
+                  disabled={syncingEmailInvoices || !dataUserId}
+                  title="Leer facturas nuevas del correo conectado"
+                >
+                  {syncingEmailInvoices ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  )}
+                  Sincronizar
+                </SaasTabSecondaryButton>
+              </>
+            ) : (
+              <VertialBillingUpgradeLink
+                className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-stone-600 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300 dark:hover:bg-stone-800"
+              >
+                Correo IMAP · Pro
+              </VertialBillingUpgradeLink>
+            )}
             <SaasTabSecondaryButton
               onClick={() => openInvoiceOcrFlow()}
               disabled={!dataUserId}
