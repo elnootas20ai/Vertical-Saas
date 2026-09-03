@@ -1488,6 +1488,17 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
     );
   }, [organizerMetaReady, scopedItems, storeIngredients, commercialBrands]);
 
+  /**
+   * Misma lógica progresiva que el resto: no pintar la lista plana de productos
+   * mientras faltan organizadores (marcas/config). Si no, hay un flash de «todos
+   * los artículos» y luego saltan los chips.
+   */
+  const inventoryBootLoading =
+    !organizerMetaReady || (refreshing && scopedItems.length === 0);
+  const inventoryBootDetail = !organizerMetaReady
+    ? 'Cargando organizadores…'
+    : loadDetail || 'Cargando artículos del almacén…';
+
   const warehouseCategoryLabels = useMemo(
     () => listInventoryWarehouseCategoryLabels(scopedItems),
     [scopedItems],
@@ -1890,20 +1901,19 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
               <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
               {syncDetail || 'Sincronizando inventario…'}
             </p>
-          ) : refreshing && scopedItems.length === 0 ? (
+          ) : inventoryBootLoading ? (
             <p className="text-xs text-stone-500 dark:text-stone-400 flex items-center gap-2">
               <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
-              {loadDetail || 'Actualizando almacén…'}
+              {inventoryBootDetail}
             </p>
           ) : null
         }
       >
-        {refreshing && scopedItems.length === 0 ? (
-
+        {inventoryBootLoading ? (
           <div className="px-3 py-6 space-y-3" aria-busy="true" aria-live="polite">
             <div className="flex items-center gap-2 text-sm text-stone-500 dark:text-stone-400">
               <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-              {loadDetail || 'Cargando artículos del almacén…'}
+              {inventoryBootDetail}
             </div>
             <div className="space-y-2">
               {[0, 1, 2, 3, 4].map((i) => (
