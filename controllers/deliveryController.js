@@ -5296,6 +5296,7 @@ export async function getOpsCenter(req, res) {
     if (businessIdQuery) {
       businessPdvs = await listScopedPointsOfSaleForBusiness(req, userId, businessIdQuery, {
         includeInactive: true,
+        skipRematch: true,
       });
     }
 
@@ -5320,9 +5321,9 @@ export async function getOpsCenter(req, res) {
       slotObj = config.activeTimeSlots.find(s => s.id === timeSlot) || null;
     }
 
-    // Ventana corta: ops = hoy + turnos que cruzan medianoche / activos recientes.
-    // 21 días + stock completo saturaba Couch (~15–70 s) y el cliente abortaba a 50 s.
-    const ordersLookbackDays = 14;
+    // Ops: hoy + margen para caja abierta overnight. 14d ≈ 1.4 MB / ~2 s en Pau;
+    // 3d ≈ 0.25 MB / ~0.3 s (mismo KPI del día).
+    const ordersLookbackDays = 3;
     const ordersFrom = (() => {
       const [y, m, d] = String(targetDate).split('-').map(Number);
       if (!y || !m || !d) return undefined;
@@ -5334,7 +5335,7 @@ export async function getOpsCenter(req, res) {
       const [y, m, d] = String(targetDate).split('-').map(Number);
       if (!y || !m || !d) return undefined;
       const dt = new Date(Date.UTC(y, m - 1, d));
-      dt.setUTCDate(dt.getUTCDate() - 60);
+      dt.setUTCDate(dt.getUTCDate() - 14);
       return dt.toISOString();
     })();
 
@@ -5343,16 +5344,16 @@ export async function getOpsCenter(req, res) {
     const catalogItems = [];
 
     const [allOrders, tpvSessions, driverSessions, pointsOfSaleAll] = await Promise.all([
-      listDeliveryOrdersByUser(req, userId, ordersFrom ? { dateFrom: ordersFrom, maxDocs: 4_000 } : { maxDocs: 4_000 }),
+      listDeliveryOrdersByUser(req, userId, ordersFrom ? { dateFrom: ordersFrom, maxDocs: 1_500 } : { maxDocs: 1_500 }),
       listTpvRegisterSessionsByUser(req, userId, {
         opsLite: true,
         ...(sessionsFrom ? { dateFrom: sessionsFrom } : {}),
-        maxDocs: 800,
+        maxDocs: 400,
       }),
       listDriverCashSessionsByUser(req, userId, {
         ...(sessionsFrom ? { dateFrom: sessionsFrom } : {}),
         includeOpen: true,
-        maxDocs: 400,
+        maxDocs: 200,
       }),
       // Si ya tenemos PDVs del negocio, no repetir rematch/_all_docs de centros.
       businessPdvs
@@ -5561,7 +5562,7 @@ export async function getOpsCenter(req, res) {
       activeOrders,
       alerts,
       cashStatus: {
-        openTpvSessions: openTpv.map((s) => sanitizeTpvRegisterSession(s, { slimClosed: true })),
+        openTpvSessions: openTpv.map((s) => sanitizeTpvRegisterSession(s, { slimOps: true })),
         openDriverSessions: openDriverSessions.map(sanitizeDriverCashSession),
         totalCashInRegisters: openTpv.reduce((s, sess) => {
           const txTotal = (sess.transactions || []).filter(t => t.paymentMethod === 'efectivo')

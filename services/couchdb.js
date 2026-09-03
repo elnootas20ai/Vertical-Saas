@@ -7963,11 +7963,11 @@ export async function listScopedPointsOfSaleForBusiness(req, userId, businessId,
   const wcIds = await listWorkCenterIdsForBusiness(req, userId, businessId);
   if (wcIds.size === 0) return [];
   const includeInactive = options.includeInactive === true;
-  const rematched = await rematchOrphanPointOfSaleWorkCenters(
-    req,
-    userId,
-    await listPointsOfSaleByUser(req, userId),
-  );
+  // Ops / lecturas hot: no rematch+put (evita escrituras y ~400ms+ bajo carga).
+  const rawPdvs = await listPointsOfSaleByUser(req, userId);
+  const rematched = options.skipRematch
+    ? rawPdvs
+    : await rematchOrphanPointOfSaleWorkCenters(req, userId, rawPdvs);
   const pdvs = includeInactive
     ? dedupeLinkedPointsOfSale(rematched)
     : dedupeActivePointsOfSale(rematched);
@@ -8292,14 +8292,19 @@ export function buildTpvRegisterSessionDocument(userId, data = {}, existing = nu
 
 /**
  * @param {object} doc
- * @param {{ slimClosed?: boolean }} [opts] slimClosed: en listados, recorta txs de cajas cerradas (payload enorme).
+ * @param {{ slimClosed?: boolean, slimOps?: boolean }} [opts]
+ *   slimClosed: en listados, recorta txs de cajas cerradas (payload enorme).
+ *   slimOps: centro operativo — recorta txs abiertas/cerradas (el cash total ya se calcula en servidor).
  */
 export function sanitizeTpvRegisterSession(doc, opts = {}) {
   if (!doc) return null;
   const status = normalizeTpvRegisterStatus(doc.status);
   let transactions = Array.isArray(doc.transactions) ? doc.transactions : [];
   // Listados CEO/TPV: cajas cerradas no necesitan el historial completo en el JSON inicial.
-  if (opts.slimClosed && status === 'closed' && transactions.length > 40) {
+  if (opts.slimOps) {
+    const cap = status === 'open' ? 25 : 15;
+    if (transactions.length > cap) transactions = transactions.slice(-cap);
+  } else if (opts.slimClosed && status === 'closed' && transactions.length > 40) {
     transactions = transactions.slice(-40);
   }
   return {

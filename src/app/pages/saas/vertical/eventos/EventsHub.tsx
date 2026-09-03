@@ -105,21 +105,39 @@ export function EventsHub() {
     void refresh();
   }, [refresh, businessesFetchSettled, dataUserId]);
 
-  const recent = events.slice(0, 8);
-  const liveEvents = useMemo(
+  /** Vista previa del hub: no listar todo; el resto va en «Ver todas/todos». */
+  const HUB_PREVIEW_LIMIT = 5;
+
+  const liveEventsAll = useMemo(
     () => events.filter((e) => e.estado === 'en_curso'),
     [events],
   );
+  const liveEvents = useMemo(
+    () => liveEventsAll.slice(0, HUB_PREVIEW_LIMIT),
+    [liveEventsAll],
+  );
+
+  /** Contrataciones en pipeline (no finalizadas/canceladas), prioriza en_curso · máx. 5. */
+  const recent = useMemo(() => {
+    const active = events.filter((e) => e.estado !== 'finalizado' && e.estado !== 'cancelado');
+    const enCurso = active.filter((e) => e.estado === 'en_curso');
+    const rest = active.filter((e) => e.estado !== 'en_curso');
+    return [...enCurso, ...rest].slice(0, HUB_PREVIEW_LIMIT);
+  }, [events]);
+
+  /** Solo presupuestos abiertos (borrador / enviado) · máx. 5. */
   const recentQuotes = useMemo(() => {
-    const rows = buildEventQuoteListRows(events, quoteDocs);
-    const order = { borrador: 0, enviado: 1, rechazado: 2, aceptado: 3 } as const;
+    const rows = buildEventQuoteListRows(events, quoteDocs).filter(
+      (r) => r.kind === 'borrador' || r.kind === 'enviado',
+    );
+    const order = { borrador: 0, enviado: 1 } as const;
     return [...rows]
       .sort((a, b) => {
         const byKind = order[a.kind] - order[b.kind];
         if (byKind !== 0) return byKind;
         return String(b.date || '').localeCompare(String(a.date || ''));
       })
-      .slice(0, 8);
+      .slice(0, HUB_PREVIEW_LIMIT);
   }, [events, quoteDocs]);
 
   return (
@@ -140,7 +158,7 @@ export function EventsHub() {
             <section
               className={[
                 'rounded-xl border overflow-hidden transition-all duration-300',
-                liveEvents.length > 0
+                liveEventsAll.length > 0
                   ? 'w-full max-w-xl border-amber-300/80 dark:border-amber-700/60 bg-amber-50/40 dark:bg-amber-950/20'
                   : 'w-56 border-dashed border-gray-200 dark:border-gray-700 bg-white/60 dark:bg-gray-950/40',
               ].join(' ')}
@@ -148,7 +166,7 @@ export function EventsHub() {
               <div
                 className={[
                   'flex items-center justify-between gap-2',
-                  liveEvents.length > 0
+                  liveEventsAll.length > 0
                     ? 'px-3 py-2 border-b border-amber-200/70 dark:border-amber-800/50'
                     : 'px-2.5 py-1.5',
                 ].join(' ')}
@@ -160,9 +178,9 @@ export function EventsHub() {
                   </span>
                   Evento en directo
                 </h2>
-                {liveEvents.length > 0 && (
+                {liveEventsAll.length > 0 && (
                   <span className="text-[10px] font-semibold text-amber-800 dark:text-amber-300">
-                    {liveEvents.length}
+                    {liveEventsAll.length}
                   </span>
                 )}
               </div>
@@ -171,7 +189,7 @@ export function EventsHub() {
                   <Loader2 className="w-3 h-3 animate-spin" />
                   …
                 </div>
-              ) : liveEvents.length === 0 ? (
+              ) : liveEventsAll.length === 0 ? (
                 <p className="px-2.5 pb-2 text-[10px] leading-snug text-gray-500 dark:text-gray-400">
                   Vacío · se amplía al haber eventos en curso
                 </p>
@@ -275,7 +293,7 @@ export function EventsHub() {
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                   {loadFailed
                     ? 'No se pudieron cargar las contrataciones. Pulsa Actualizar.'
-                    : 'Aún no hay contrataciones.'}
+                    : 'No hay contrataciones en curso.'}
                 </p>
                 {!loadFailed && (
                   <button
@@ -401,7 +419,11 @@ export function EventsHub() {
 
         <section className="grid gap-3 sm:grid-cols-3">
           {[
-            { label: 'Contrataciones', path: '/saas/vertical/eventos/contrataciones', hint: 'Pipeline completo por fase' },
+            {
+              label: 'Eventos fijos',
+              path: '/saas/vertical/eventos/tpv',
+              hint: 'PDV fijos: fechas, carga y código TPV',
+            },
             { label: 'Servicios', path: '/saas/events-services', hint: 'Contratación, productos de cobro, espacios y más' },
             { label: 'Ruta de eventos', path: '/saas/vertical/eventos/ruta', hint: 'Eventos, alta y control' },
           ].map((item) => (
