@@ -74,6 +74,8 @@ export function usePaginatedClients(options: UsePaginatedClientsOptions) {
     setIsLoading(true);
     setError(null);
 
+    const timeoutId = window.setTimeout(() => controller.abort(), 28_000);
+
     try {
       const skip = (targetPage - 1) * pageSize;
       const result = await listClientsPageRequest(userId, {
@@ -95,9 +97,17 @@ export function usePaginatedClients(options: UsePaginatedClientsOptions) {
       setClients(result.clients);
       setMeta(result.meta);
     } catch (err) {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) {
+        // Timeout o superseded: si seguimos siendo la petición activa, soltar spinner.
+        if (abortRef.current === controller) {
+          setError('La carga de clientes tardó demasiado. Reintenta.');
+          setIsLoading(false);
+        }
+        return;
+      }
       setError(err instanceof Error ? err.message : 'Error al cargar clientes');
     } finally {
+      window.clearTimeout(timeoutId);
       // Si esta petición fue abortada por otra más nueva, esa otra pone loading=true.
       // Si era la última activa, hay que apagar el spinner (si no, se queda «Cargando…»).
       if (abortRef.current === controller || !abortRef.current) {

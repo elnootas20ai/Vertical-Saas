@@ -4344,7 +4344,12 @@ async function ensureClientsUserTypeIndex(req, dbName) {
   clientsUserIndexReady.add(dbName);
 }
 
-export async function getClientDocumentsForUser(req, userId) {
+/**
+ * @param {{ pageOnlyMaxDocs?: number }} [options]
+ * pageOnlyMaxDocs: primera pintura CRM (p. ej. 20–50) sin esperar ~6k docs.
+ * Calienta la cartera completa en segundo plano.
+ */
+export async function getClientDocumentsForUser(req, userId, options = {}) {
   const uid = String(userId || '').trim();
   if (!uid) return [];
 
@@ -4357,6 +4362,38 @@ export async function getClientDocumentsForUser(req, userId) {
   if (Array.isArray(fromLru) && fromLru.length > 0) {
     writeClientDocumentsCache(uid, fromLru);
     return fromLru;
+  }
+
+  const pageOnlyMax = Math.min(
+    2_000,
+    Math.max(0, Number(options.pageOnlyMaxDocs) || 0),
+  );
+  const usePageOnly = pageOnlyMax > 0;
+
+  // CRM paginado en frío: no engancharse al _find completo (Pau ~6k → spinner eterno).
+  if (usePageOnly) {
+    const db = getClientsDbName();
+    await ensureDatabase(req, db);
+    await ensureClientsUserTypeIndex(req, db);
+    let docs = [];
+    try {
+      docs = await findDocuments(
+        req,
+        db,
+        { type: 'client', user_id: uid },
+        { pageSize: Math.min(500, pageOnlyMax), maxDocs: pageOnlyMax },
+      );
+    } catch {
+      docs = [];
+    }
+    const clients = docs.filter(
+      (doc) => doc?.type === 'client' && !doc?.deletedAt && doc?.user_id === uid,
+    );
+    // Calentar cartera completa sin bloquear la respuesta.
+    if (!clientDocumentsInflight.has(uid)) {
+      void getClientDocumentsForUser(req, uid).catch(() => {});
+    }
+    return clients;
   }
 
   if (clientDocumentsInflight.has(uid)) {
@@ -4411,7 +4448,12 @@ export async function getClientDocumentsForUser(req, userId) {
 }
 
 export async function listClientsByUser(req, userId, options = {}) {
-  const base = await getClientDocumentsForUser(req, userId);
+  const pageOnlyMaxDocs = Number(options.pageOnlyMaxDocs) || 0;
+  const base = await getClientDocumentsForUser(
+    req,
+    userId,
+    pageOnlyMaxDocs > 0 ? { pageOnlyMaxDocs } : {},
+  );
   const bid = normalizeClientBusinessScopeId(options.businessId);
   const scoped = bid
     ? base.filter((doc) => clientMatchesBusinessScope(doc, bid, options))

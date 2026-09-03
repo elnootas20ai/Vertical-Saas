@@ -165,11 +165,29 @@ export async function listClients(req, res) {
     const listOptions = await resolveClientListOptions(req, ownerUserId, businessId);
     const searchParam = typeof req.query.search === 'string' ? req.query.search.trim() : '';
     const query = { ...req.query };
+    const pageLimit = query.limit !== undefined ? Number(query.limit) : NaN;
+    const pageSkip = Math.max(0, Number(query.skip) || 0);
+    // Solo páginas CRM (20…): limit=1 es conteo/warmup TPV y necesita cartera real en meta.total.
+    const wantsPage =
+      Number.isFinite(pageLimit)
+      && pageLimit >= 10
+      && pageLimit <= 500
+      && !searchParam;
     let raw;
+    let progressivePartial = false;
     if (searchParam) {
       // Índice en memoria: no recorrer miles de docs en cada tecla del CRM.
       raw = await searchClientsForList(req, ownerUserId, searchParam, listOptions);
       delete query.search;
+    } else if (wantsPage) {
+      // Primera pintura: solo skip+limit (evita spinner eterno en carteras ~6k).
+      const need = Math.min(2_000, Math.max(pageSkip + pageLimit + 1, pageLimit));
+      raw = await listClientsByUser(req, ownerUserId, {
+        ...listOptions,
+        pageOnlyMaxDocs: need,
+      });
+      // Solo “parcial” si llenamos el tope (aún puede haber más en Couch).
+      progressivePartial = raw.length >= need;
     } else {
       raw = await listClientsByUser(req, ownerUserId, listOptions);
     }
@@ -181,6 +199,14 @@ export async function listClients(req, res) {
     }
     // Paginar/filtrar sobre docs crudos; sanitizar solo la página (miles de clientes).
     const { items: pageDocs, meta } = applyQueryOptions(raw, query);
+    if (progressivePartial) {
+      meta.partial = true;
+      const lim = Number(meta.limit) || pageLimit || 20;
+      if (pageDocs.length >= lim) {
+        meta.hasMore = true;
+        meta.total = Math.max(Number(meta.total) || 0, pageSkip + lim + 1);
+      }
+    }
     let clients = pageDocs.map(sanitizer).filter(Boolean);
     const enrichLiveStats = req.query.liveStats === '1' || req.query.liveStats === 'true';
     if (enrichLiveStats && clients.length > 0) {
