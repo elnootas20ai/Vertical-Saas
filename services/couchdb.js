@@ -479,6 +479,9 @@ export async function findDocuments(req, dbName, selector, options = {}) {
     if (Array.isArray(options.sort) && options.sort.length > 0) {
       body.sort = options.sort;
     }
+    if (Array.isArray(options.fields) && options.fields.length > 0) {
+      body.fields = options.fields;
+    }
 
     const response = await couchRequest(req, `/${encodedDbName}/_find`, {
       method: 'POST',
@@ -6465,6 +6468,7 @@ export function sanitizeDeliveryOrder(doc) {
 export async function listDeliveryOrdersByUser(req, userId, options = {}) {
   const uid = String(userId || '').trim();
   const dateFrom = String(options?.dateFrom || '').trim();
+  const maxDocs = Math.min(Math.max(1, Number(options?.maxDocs) || 100_000), 100_000);
   const db = getDeliveryDbName();
   await ensureDatabase(req, db);
   await ensureDeliveryTypeUserIndex(req, db);
@@ -6479,12 +6483,12 @@ export async function listDeliveryOrdersByUser(req, userId, options = {}) {
   // Mango por type+user_id (+ createdAt si hay ventana): no _all_docs del DB compartido.
   let docs;
   try {
-    docs = await findDocuments(req, db, selector, { pageSize: 500, maxDocs: 100_000 });
+    docs = await findDocuments(req, db, selector, { pageSize: 500, maxDocs });
   } catch {
     if (dateFrom) {
       // Índice compuesto aún no listo: al menos limitamos al titular y filtramos en memoria.
       try {
-        docs = await findDocuments(req, db, baseSelector, { pageSize: 500, maxDocs: 100_000 });
+        docs = await findDocuments(req, db, baseSelector, { pageSize: 500, maxDocs });
       } catch {
         const all = await getDeliveryDatabaseDocumentsInflight(req);
         docs = all.filter(
@@ -7539,7 +7543,23 @@ export async function rematchOrphanPointOfSaleWorkCenters(req, userId, pdvs) {
 
   const wcDb = getWorkCentersDbName();
   await ensureDatabase(req, wcDb);
-  const wcDocs = await getAllDocuments(req, wcDb);
+  // Mango por tipo (+ user): no _all_docs (evita contender con catálogo bajo carga).
+  let wcDocs = [];
+  try {
+    const uid = String(userId || '').trim();
+    wcDocs = await findDocuments(
+      req,
+      wcDb,
+      uid ? { type: 'sales_point', user_id: uid } : { type: 'sales_point' },
+      { pageSize: 200, maxDocs: 2_000 },
+    );
+  } catch {
+    try {
+      wcDocs = await findDocuments(req, wcDb, { type: 'sales_point' }, { pageSize: 200, maxDocs: 2_000 });
+    } catch {
+      wcDocs = await getAllDocuments(req, wcDb).catch(() => []);
+    }
+  }
   const retailWcs = wcDocs.filter(
     (d) =>
       d?.type === 'sales_point' &&
@@ -7669,7 +7689,12 @@ export async function listPointsOfSaleForApi(req, userId, options = {}) {
 export async function listActiveWorkCenterIds(req) {
   const db = getWorkCentersDbName();
   await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
+  let docs = [];
+  try {
+    docs = await findDocuments(req, db, { type: 'sales_point' }, { pageSize: 200, maxDocs: 5_000 });
+  } catch {
+    docs = await getAllDocuments(req, db).catch(() => []);
+  }
   return new Set(
     docs
       .filter((d) => d?.type === 'sales_point' && !d?.deletedAt)
@@ -7878,7 +7903,22 @@ export async function listWorkCenterIdsForBusiness(req, userId, businessId) {
   if (!bid) return new Set();
   const db = getWorkCentersDbName();
   await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
+  let docs = [];
+  try {
+    const uid = String(userId || '').trim();
+    docs = await findDocuments(
+      req,
+      db,
+      uid ? { type: 'sales_point', user_id: uid } : { type: 'sales_point' },
+      { pageSize: 200, maxDocs: 2_000 },
+    );
+  } catch {
+    try {
+      docs = await findDocuments(req, db, { type: 'sales_point' }, { pageSize: 200, maxDocs: 2_000 });
+    } catch {
+      docs = await getAllDocuments(req, db).catch(() => []);
+    }
+  }
   const ids = new Set();
   const legacyRetail = [];
   const owned = await listOwnerBusinessesForUser(req, userId);
@@ -11770,14 +11810,21 @@ export async function listStaffConsumptionsByUser(req, userId) {
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 }
 
-export async function listCatalogItemsByUser(req, userId, { module: filterModule } = {}) {
+export async function listCatalogItemsByUser(req, userId, { module: filterModule, fields, maxDocs: maxDocsOpt } = {}) {
   const uid = String(userId || '').trim();
   const db = getCatalogDbName();
   await ensureDatabase(req, db);
   await ensureCatalogTypeUserIndex(req, db);
 
-  const maxDocs =
-    filterModule === 'stock' ? 12_000 : filterModule === 'catalog' ? 12_000 : 20_000;
+  const maxDocs = Math.min(
+    Math.max(1, Number(maxDocsOpt) || (filterModule === 'stock' ? 12_000 : filterModule === 'catalog' ? 12_000 : 20_000)),
+    20_000,
+  );
+  const findOpts = {
+    pageSize: Math.min(500, maxDocs),
+    maxDocs,
+    ...(Array.isArray(fields) && fields.length > 0 ? { fields } : {}),
+  };
 
   // Mango por type+user_id: no leer el catálogo compartido entero (_all_docs)
   // solo para listar la carta de un titular (aunque tenga 0 productos).
@@ -11802,7 +11849,7 @@ export async function listCatalogItemsByUser(req, userId, { module: filterModule
     } else {
       selector = { type: 'catalog_item' };
     }
-    docs = await findDocuments(req, db, selector, { pageSize: 500, maxDocs });
+    docs = await findDocuments(req, db, selector, findOpts);
   } catch {
     // Nunca caer a _all_docs del catálogo compartido (puede tardar decenas de segundos).
     if (uid) {
@@ -11811,7 +11858,7 @@ export async function listCatalogItemsByUser(req, userId, { module: filterModule
           req,
           db,
           { type: 'catalog_item', user_id: uid },
-          { pageSize: 500, maxDocs },
+          findOpts,
         );
       } catch {
         docs = [];

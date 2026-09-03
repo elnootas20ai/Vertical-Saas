@@ -47,12 +47,15 @@ const DELIVERY_API_TIMEOUT_MS = 50_000;
 const DELIVERY_LIST_TIMEOUT_MS = 90_000;
 
 function deliveryRequestSignal(init?: RequestInit, timeoutMs = DELIVERY_API_TIMEOUT_MS): AbortSignal | undefined {
-  if (init?.signal) return init.signal;
-  if (!(timeoutMs > 0)) return undefined;
-  if (typeof AbortSignal?.timeout === 'function') {
-    return AbortSignal.timeout(timeoutMs);
+  const timeoutSignal =
+    timeoutMs > 0 && typeof AbortSignal?.timeout === 'function'
+      ? AbortSignal.timeout(timeoutMs)
+      : undefined;
+  if (init?.signal && timeoutSignal && typeof AbortSignal?.any === 'function') {
+    return AbortSignal.any([init.signal, timeoutSignal]);
   }
-  return undefined;
+  if (init?.signal) return init.signal;
+  return timeoutSignal;
 }
 
 function deliveryRequestErrorMessage(payload: { error?: unknown; message?: unknown }, fallback: string): string {
@@ -2990,7 +2993,7 @@ function opsCenterCacheKey(userId: string, filters?: OpsCenterFilters): string {
 export async function getOpsCenterRequest(
   userId: string,
   filters?: OpsCenterFilters,
-  options?: { bypassCache?: boolean },
+  options?: { bypassCache?: boolean; signal?: AbortSignal },
 ): Promise<OpsCenterData> {
   const id = normalizeUserId(userId);
   const key = opsCenterCacheKey(id, filters);
@@ -3007,8 +3010,11 @@ export async function getOpsCenterRequest(
   if (filters?.timeSlot) params.set('timeSlot', filters.timeSlot);
   params.set('date', filters?.date || localDateInputValue());
   const qs = params.toString() ? `?${params.toString()}` : '';
+  // Ops-center agrega pedidos+cajas+alertas; en cuentas grandes puede ir >50s si el API está cargado.
   const payload = await request<{ ok: boolean } & OpsCenterData>(
     `/api/delivery/ops-center/${encodeURIComponent(id)}${qs}`,
+    options?.signal ? { signal: options.signal } : undefined,
+    { timeoutMs: DELIVERY_LIST_TIMEOUT_MS },
   );
   opsCenterMemoryCache.set(key, { at: Date.now(), data: payload });
   return payload;

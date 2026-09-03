@@ -1720,6 +1720,7 @@ export function DeliveryOpsCenter() {
   const [lastUp, setLastUp] = useState<Date | null>(null);
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
   const loadSeqRef = useRef(0);
+  const loadAbortRef = useRef<AbortController | null>(null);
 
   /** PDV visibles en Ops: scope global (activos + todos) y luego respuesta API. */
   const opsPdvs = useMemo(() => {
@@ -1964,6 +1965,9 @@ export function DeliveryOpsCenter() {
     }
     const bypassCache = Boolean(opts?.bypassCache);
     if (bypassCache) invalidateOpsCenterCache(authUserId);
+    loadAbortRef.current?.abort();
+    const abortCtrl = new AbortController();
+    loadAbortRef.current = abortCtrl;
     const seq = ++loadSeqRef.current;
     const hadData = hasOpsDataRef.current;
     if (!hadData) setLoading(true);
@@ -1983,6 +1987,7 @@ export function DeliveryOpsCenter() {
         ...(businessId ? { businessId } : {}),
       };
       const pdvsNow = opsPdvsRef.current;
+      const reqOpts = { bypassCache, signal: abortCtrl.signal };
 
       if (isLiveAll && pdvsNow.length > 1) {
         // «Todas»: 1 tienda detrás de otra + merge de KPIs coalescido.
@@ -2015,7 +2020,7 @@ export function DeliveryOpsCenter() {
         };
 
         for (const pdv of pdvsNow) {
-          if (seq !== loadSeqRef.current) return;
+          if (seq !== loadSeqRef.current || abortCtrl.signal.aborted) return;
           try {
             const row = await getOpsCenterRequest(
               authUserId,
@@ -2023,7 +2028,7 @@ export function DeliveryOpsCenter() {
                 ...baseFilters,
                 salesPointId: pdv._id,
               },
-              { bypassCache },
+              reqOpts,
             );
             if (seq !== loadSeqRef.current) return;
             liveAccumRef.current = { ...liveAccumRef.current, [pdv._id]: row };
@@ -2032,6 +2037,7 @@ export function DeliveryOpsCenter() {
             // Ceder el hilo para que la UI no se congele entre tiendas.
             await yieldOpsPaint(16);
           } catch (e) {
+            if (abortCtrl.signal.aborted || seq !== loadSeqRef.current) return;
             console.error('ops-center live pdv error', pdv._id, e);
           }
         }
@@ -2045,7 +2051,7 @@ export function DeliveryOpsCenter() {
           ...baseFilters,
           ...(resolvedOpsPdvId ? { salesPointId: resolvedOpsPdvId } : {}),
         };
-        const r = await getOpsCenterRequest(authUserId, effectiveFilters, { bypassCache });
+        const r = await getOpsCenterRequest(authUserId, effectiveFilters, reqOpts);
         if (seq !== loadSeqRef.current) return;
         setLiveByPdv({});
         liveAccumRef.current = {};
@@ -2054,7 +2060,7 @@ export function DeliveryOpsCenter() {
         setLastUp(new Date());
       }
     } catch (e) {
-      if (seq === loadSeqRef.current) console.error('ops-center error', e);
+      if (seq === loadSeqRef.current && !abortCtrl.signal.aborted) console.error('ops-center error', e);
     } finally {
       if (seq === loadSeqRef.current) {
         clearLiveMergeTimer();

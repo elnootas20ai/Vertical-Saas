@@ -5320,8 +5320,9 @@ export async function getOpsCenter(req, res) {
       slotObj = config.activeTimeSlots.find(s => s.id === timeSlot) || null;
     }
 
-    // Ventana de pedidos: ops solo necesita hoy + activos recientes (no todo el histórico).
-    const ordersLookbackDays = 21;
+    // Ventana corta: ops = hoy + turnos que cruzan medianoche / activos recientes.
+    // 21 días + stock completo saturaba Couch (~15–70 s) y el cliente abortaba a 50 s.
+    const ordersLookbackDays = 14;
     const ordersFrom = (() => {
       const [y, m, d] = String(targetDate).split('-').map(Number);
       if (!y || !m || !d) return undefined;
@@ -5337,15 +5338,26 @@ export async function getOpsCenter(req, res) {
       return dt.toISOString();
     })();
 
+    // No cargar stock aquí: listCatalogItems stock tarda ~7–15 s en cuentas grandes
+    // y satura Couch (ops pasaba de 15 a 70 s). Alertas de stock crítico van por Alert Center.
+    const catalogItems = [];
+
     const [allOrders, tpvSessions, driverSessions, pointsOfSaleAll] = await Promise.all([
-      listDeliveryOrdersByUser(req, userId, ordersFrom ? { dateFrom: ordersFrom } : {}),
+      listDeliveryOrdersByUser(req, userId, ordersFrom ? { dateFrom: ordersFrom, maxDocs: 4_000 } : { maxDocs: 4_000 }),
       listTpvRegisterSessionsByUser(req, userId, {
         opsLite: true,
         ...(sessionsFrom ? { dateFrom: sessionsFrom } : {}),
         maxDocs: 800,
       }),
-      listDriverCashSessionsByUser(req, userId),
-      listScopedPointsOfSaleForUser(req, userId).catch(() => []),
+      listDriverCashSessionsByUser(req, userId, {
+        ...(sessionsFrom ? { dateFrom: sessionsFrom } : {}),
+        includeOpen: true,
+        maxDocs: 400,
+      }),
+      // Si ya tenemos PDVs del negocio, no repetir rematch/_all_docs de centros.
+      businessPdvs
+        ? Promise.resolve(businessPdvs)
+        : listScopedPointsOfSaleForUser(req, userId).catch(() => []),
     ]);
     const pointsOfSale = businessPdvs || pointsOfSaleAll;
     const scopedTpvSessions = scopeTpvSessionsForOps(tpvSessions, salesPointId, businessPdvs);
@@ -5442,9 +5454,6 @@ export async function getOpsCenter(req, res) {
     const delayThreshold = deliveryAlertCfg.delayThresholds?.delivery || config.delayThresholdMinutes || 40;
     const deliveredOnTime = deliveryTimes.filter(t => t <= delayThreshold).length;
     const deliveredLate = deliveryTimes.filter(t => t > delayThreshold).length;
-
-    let catalogItems = [];
-    try { catalogItems = await listCatalogItemsByUser(req, userId, { module: 'stock' }); } catch { /* ignore */ }
 
     const alerts = buildAlerts(
       orders,
