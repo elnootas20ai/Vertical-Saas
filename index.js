@@ -45,6 +45,10 @@ import { reservationRouter } from './routers/reservationRouter.js';
 import { leadsRouter } from './routers/leadsRouter.js';
 import { clientsRouter } from './routers/clientsRouter.js';
 import { bulkRemoveClients } from './controllers/clientsController.js';
+import {
+  getPublicClientPromotion,
+  acceptPublicClientPromotion,
+} from './controllers/clientsController.js';
 import { financeRouter } from './routers/financeRouter.js';
 import { bankReconciliationRouter } from './routers/bankReconciliationRouter.js';
 import { invoicesRouter } from './routers/invoicesRouter.js';
@@ -1135,6 +1139,11 @@ app.use('/api/docs', docsRouter);
 
 // Afiliados — formulario público (sin auth)
 app.use('/api/affiliate', affiliateRouter);
+
+// CRM — aceptación pública de promoción cliente (email → aceptar)
+app.get('/api/public/client-promotions', burstLimiter, getPublicClientPromotion);
+app.post('/api/public/client-promotions/accept', burstLimiter, acceptPublicClientPromotion);
+app.get('/api/public/client-promotions/accept', burstLimiter, acceptPublicClientPromotion);
 
 // Presupuestos — rutas públicas (accept/reject por token) + protegidas (envío)
 app.use('/api/quotes', quoteRouter);

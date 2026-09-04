@@ -811,6 +811,37 @@ export function buildTrialExpiredEmail(email, name, billingUrl) {
   };
 }
 
+export function buildClientPromotionAcceptEmail({
+  clientName = '',
+  promotionName = '',
+  businessName = '',
+  acceptUrl,
+  expiresLabel = '',
+}) {
+  const who = String(clientName || 'cliente').trim() || 'cliente';
+  const promo = String(promotionName || 'promoción').trim() || 'promoción';
+  const biz = String(businessName || '').trim();
+  return {
+    subject: `Confirma tu promoción${biz ? ` · ${biz}` : ''} · Vertial`,
+    html: wrapAccountEmail({
+      bodyHtml: `
+          <h2 style="margin:0 0 16px;color:${EMAIL_BRAND.text};font-size:22px;font-weight:700;">Confirma tu promoción</h2>
+          <p style="color:#52525b;margin:0 0 16px;line-height:1.6;">
+            Hola <strong>${escapeHtml(who)}</strong>, te han asignado la promoción
+            <strong>${escapeHtml(promo)}</strong>${biz ? ` en <strong>${escapeHtml(biz)}</strong>` : ''}.
+          </p>
+          <p style="color:#52525b;margin:0 0 24px;line-height:1.6;">
+            Para que puedan aplicártela en caja, debes aceptarla tú. Así evitamos que alguien la use en tu nombre.
+          </p>
+          ${emailCtaButton(acceptUrl, 'Aceptar promoción')}
+          ${expiresLabel ? `<p style="color:#71717a;font-size:13px;margin:20px 0 0;line-height:1.5;">Este enlace caduca el ${escapeHtml(expiresLabel)}.</p>` : ''}
+          <p style="color:#a1a1aa;font-size:12px;margin:24px 0 0;line-height:1.5;">
+            Si no esperabas este correo, ignóralo. Sin tu aceptación la promoción no se puede usar.
+          </p>`,
+    }),
+  };
+}
+
 export function buildLoginCodeEmail(email, code) {
   const support = getSupportMailto();
   const supportBlock = support

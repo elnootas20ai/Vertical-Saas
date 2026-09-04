@@ -4676,12 +4676,50 @@ export function buildClientPromotionDocument(userId, clientId, data = {}, existi
     estado: normalizePromocionEstado(data.estado),
     usosRestantes: data.usosRestantes != null ? Number(data.usosRestantes) : null,
     descripcion: String(data.descripcion || '').trim(),
-    /** En TPV: pedir email y comprobar que coincide con el del cliente. */
+    /** Si true, el cliente debe aceptar por email antes de usar la promo en TPV. */
     requiereVerificarEmail: Boolean(data.requiereVerificarEmail),
+    ...(Boolean(data.requiereVerificarEmail)
+      ? {
+          emailVerificacionEstado: normalizeEmailVerificacionEstado(
+            data.emailVerificacionEstado,
+            true,
+          ),
+          emailAcceptToken: data.emailAcceptToken != null
+            ? String(data.emailAcceptToken || '') || null
+            : (existing?.emailAcceptToken || null),
+          emailAcceptTokenExpiresAt: data.emailAcceptTokenExpiresAt != null
+            ? String(data.emailAcceptTokenExpiresAt || '') || null
+            : (existing?.emailAcceptTokenExpiresAt || null),
+          emailSentTo: data.emailSentTo != null
+            ? String(data.emailSentTo || '').trim().toLowerCase()
+            : (existing?.emailSentTo || ''),
+          emailSentAt: data.emailSentAt != null
+            ? String(data.emailSentAt || '') || null
+            : (existing?.emailSentAt || null),
+          emailAcceptedAt: data.emailAcceptedAt != null
+            ? String(data.emailAcceptedAt || '') || null
+            : (existing?.emailAcceptedAt || null),
+        }
+      : {
+          emailVerificacionEstado: 'none',
+          emailAcceptToken: null,
+          emailAcceptTokenExpiresAt: null,
+          emailSentTo: '',
+          emailSentAt: null,
+          emailAcceptedAt: null,
+        }),
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     deletedAt: existing?.deletedAt || null,
   };
+}
+
+function normalizeEmailVerificacionEstado(value, requiere) {
+  if (!requiere) return 'none';
+  const allowed = ['pendiente', 'aceptada', 'none'];
+  const v = String(value || '').toLowerCase();
+  if (allowed.includes(v) && v !== 'none') return v;
+  return 'pendiente';
 }
 
 export function sanitizeClientPromotion(promo) {
@@ -4702,9 +4740,42 @@ export function sanitizeClientPromotion(promo) {
     usosRestantes: promo.usosRestantes,
     descripcion: promo.descripcion || '',
     requiereVerificarEmail: Boolean(promo.requiereVerificarEmail),
+    emailVerificacionEstado: promo.requiereVerificarEmail
+      ? (promo.emailVerificacionEstado || 'pendiente')
+      : 'none',
+    emailSentTo: promo.emailSentTo || '',
+    emailSentAt: promo.emailSentAt || null,
+    emailAcceptedAt: promo.emailAcceptedAt || null,
     createdAt: promo.createdAt || new Date().toISOString(),
     updatedAt: promo.updatedAt || promo.createdAt || new Date().toISOString(),
   };
+}
+
+export async function findClientPromotionByAcceptToken(req, token) {
+  const tok = String(token || '').trim();
+  if (!tok) return null;
+  const db = getClientsDbName();
+  await ensureDatabase(req, db);
+  try {
+    const docs = await findDocuments(
+      req,
+      db,
+      { type: 'client_promotion', emailAcceptToken: tok },
+      { pageSize: 10, maxDocs: 50 },
+    );
+    const hit = docs.find((d) => d?.type === 'client_promotion' && !d?.deletedAt && d?.emailAcceptToken === tok);
+    if (hit) return hit;
+  } catch {
+    /* fallback */
+  }
+  try {
+    const all = await getAllDocuments(req, db);
+    return all.find(
+      (d) => d?.type === 'client_promotion' && !d?.deletedAt && d?.emailAcceptToken === tok,
+    ) || null;
+  } catch {
+    return null;
+  }
 }
 
 export async function listClientPromotionsByClient(req, userId, clientId) {

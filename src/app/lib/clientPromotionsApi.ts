@@ -11,8 +11,12 @@ export interface ClientPromotion {
   estado: string;
   usosRestantes: number | null;
   descripcion: string;
-  /** Si true, en TPV hay que confirmar el email del cliente antes de aplicar. */
+  /** Si true, el cliente debe aceptar por email (enlace) antes de usar en TPV. */
   requiereVerificarEmail?: boolean;
+  emailVerificacionEstado?: 'none' | 'pendiente' | 'aceptada' | string;
+  emailSentTo?: string;
+  emailSentAt?: string | null;
+  emailAcceptedAt?: string | null;
   createdAt: string;
 }
 

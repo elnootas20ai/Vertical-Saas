@@ -189,6 +189,10 @@ interface ClientPromotion {
   usosRestantes: number | null;
   descripcion: string;
   requiereVerificarEmail?: boolean;
+  emailVerificacionEstado?: string;
+  emailSentTo?: string;
+  emailSentAt?: string | null;
+  emailAcceptedAt?: string | null;
   createdAt: string;
 }
 
@@ -2328,6 +2332,13 @@ export function ClientDetail() {
     });
     if (promo) {
       setClientPromotions((prev) => [promo, ...prev]);
+      if (promo.requiereVerificarEmail) {
+        window.alert(
+          promo.emailSentTo
+            ? `Promoción creada. Email de aceptación enviado a ${promo.emailSentTo}.`
+            : 'Promoción creada. Pendiente de aceptación por email.',
+        );
+      }
     }
     setShowPromotionForm(false);
     setPromotionForm({
@@ -2344,21 +2355,64 @@ export function ClientDetail() {
 
   const handleTogglePromoEmailVerify = async (promo: ClientPromotion) => {
     if (!client || !dataUserId) return;
+    if (!promo.requiereVerificarEmail && !String(client.email || '').trim()) {
+      window.alert('Añade un email en la ficha del cliente antes de activar la verificación.');
+      return;
+    }
     try {
       const res = await fetch(
         `${getClientApiBase()}/api/clients/${encodeURIComponent(dataUserId)}/${encodeURIComponent(client.id)}/promotions/${encodeURIComponent(promo.id)}`,
         {
           method: 'PUT',
           headers: getClientApiHeaders(),
-          body: JSON.stringify({ promotion: { requiereVerificarEmail: !promo.requiereVerificarEmail } }),
+          body: JSON.stringify({
+            promotion: promo.requiereVerificarEmail
+              ? { requiereVerificarEmail: false }
+              : { requiereVerificarEmail: true },
+          }),
         },
       );
       const data = await res.json();
-      if (data.ok && data.promotion) {
+      if (!res.ok || !data.ok) {
+        window.alert(data.error || 'No se pudo actualizar la verificación');
+        return;
+      }
+      if (data.promotion) {
         setClientPromotions((prev) => prev.map((p) => (p.id === promo.id ? data.promotion : p)));
       }
     } catch {
-      /* ignore */
+      window.alert('Error de conexión al actualizar la promoción');
+    }
+  };
+
+  const handleResendPromoEmail = async (promo: ClientPromotion) => {
+    if (!client || !dataUserId) return;
+    if (!String(client.email || '').trim()) {
+      window.alert('El cliente no tiene email en la ficha.');
+      return;
+    }
+    try {
+      const res = await fetch(
+        `${getClientApiBase()}/api/clients/${encodeURIComponent(dataUserId)}/${encodeURIComponent(client.id)}/promotions/${encodeURIComponent(promo.id)}`,
+        {
+          method: 'PUT',
+          headers: getClientApiHeaders(),
+          body: JSON.stringify({
+            promotion: { requiereVerificarEmail: true, resendEmailVerification: true },
+          }),
+        },
+      );
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        window.alert(data.error || 'No se pudo reenviar el email');
+        return;
+      }
+      if (data.promotion) {
+        setClientPromotions((prev) => prev.map((p) => (p.id === promo.id ? data.promotion : p)));
+      }
+      window.alert(`Email de aceptación enviado a ${data.promotion?.emailSentTo || client.email}`);
+    } catch {
+      window.alert('Error de conexión al reenviar el email');
     }
   };
 
@@ -2442,7 +2496,7 @@ export function ClientDetail() {
               <span>
                 <span className="block text-sm font-semibold text-gray-900 dark:text-gray-100">Verificar por correo</span>
                 <span className="block text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                  En el TPV pedirá el email y solo aplicará si coincide con el del cliente.
+                  Se envía un email al cliente; solo él puede aceptar. Sin aceptación no se aplica en caja.
                 </span>
               </span>
             </label>
@@ -2487,8 +2541,12 @@ export function ClientDetail() {
                       {isExpired && <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase bg-red-100 text-red-600">Expirada</span>}
                       {promo.codigo && <span className="text-xs font-mono bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 px-2 py-0.5 rounded">{promo.codigo}</span>}
                       {promo.requiereVerificarEmail ? (
-                        <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
-                          Verificar email
+                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+                          promo.emailVerificacionEstado === 'aceptada'
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : 'bg-amber-100 text-amber-800'
+                        }`}>
+                          {promo.emailVerificacionEstado === 'aceptada' ? 'Email aceptado' : 'Email pendiente'}
                         </span>
                       ) : null}
                     </div>
@@ -2498,14 +2556,33 @@ export function ClientDetail() {
                       <span>{new Date(promo.fechaInicio).toLocaleDateString('es-ES')} — {new Date(promo.fechaFin).toLocaleDateString('es-ES')}</span>
                     </div>
                     {promo.descripcion && <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">{promo.descripcion}</p>}
+                    {promo.requiereVerificarEmail && promo.emailSentTo ? (
+                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                        Enviado a {promo.emailSentTo}
+                        {promo.emailAcceptedAt
+                          ? ` · aceptada ${new Date(promo.emailAcceptedAt).toLocaleDateString('es-ES')}`
+                          : ''}
+                      </p>
+                    ) : null}
                     {canManagePromos ? (
-                      <button
-                        type="button"
-                        onClick={() => { void handleTogglePromoEmailVerify(promo); }}
-                        className="mt-2 text-xs font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400"
-                      >
-                        {promo.requiereVerificarEmail ? 'Quitar verificación por correo' : 'Activar verificación por correo'}
-                      </button>
+                      <div className="mt-2 flex flex-wrap gap-3">
+                        <button
+                          type="button"
+                          onClick={() => { void handleTogglePromoEmailVerify(promo); }}
+                          className="text-xs font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                        >
+                          {promo.requiereVerificarEmail ? 'Quitar verificación por correo' : 'Activar verificación por correo'}
+                        </button>
+                        {promo.requiereVerificarEmail ? (
+                          <button
+                            type="button"
+                            onClick={() => { void handleResendPromoEmail(promo); }}
+                            className="text-xs font-semibold text-gray-600 hover:text-gray-800 dark:text-gray-400"
+                          >
+                            Reenviar email de aceptación
+                          </button>
+                        ) : null}
+                      </div>
                     ) : null}
                   </div>
                   {canManagePromos && (

@@ -22,6 +22,7 @@ import {
   buildClientPromotionDocument,
   sanitizeClientPromotion,
   listClientPromotionsByClient,
+  findClientPromotionByAcceptToken,
   searchClientsByPhoneWithMeta,
   searchClientsForList,
   listDeliveryOrdersByUser,
@@ -29,6 +30,8 @@ import {
   invalidateClientDocumentsForUser,
   sanitizeClientForTpvSearch,
 } from '../services/couchdb.js';
+import crypto from 'crypto';
+import { sendEmail, buildClientPromotionAcceptEmail } from '../services/email.js';
 import { chunkDocs, resolveBulkImportLimits } from '../services/bulkImportBatch.js';
 import { applyQueryOptions } from '../middleware/queryOptions.js';
 import {
@@ -966,8 +969,27 @@ export async function createClientPromotion(req, res) {
     const client = await ensureClientOwner(req, userId, clientId);
     if (!client) return res.status(404).json({ ok: false, error: 'Cliente no encontrado' });
 
+    const wantsEmail = Boolean(promotion.requiereVerificarEmail);
+    if (wantsEmail) {
+      const email = String(client.email || '').trim();
+      if (!email || !email.includes('@')) {
+        return badRequest(res, 'Para verificar por correo el cliente debe tener un email en la ficha');
+      }
+    }
+
     const db = getClientsDbName();
-    const doc = buildClientPromotionDocument(userId, clientId, promotion);
+    let doc = buildClientPromotionDocument(userId, clientId, promotion);
+    if (wantsEmail) {
+      try {
+        const ver = await issueClientPromotionEmailVerification(req, doc, client, account);
+        doc = { ...doc, ...ver, updatedAt: new Date().toISOString() };
+      } catch (err) {
+        return res.status(502).json({
+          ok: false,
+          error: err?.message || 'No se pudo enviar el email de aceptación',
+        });
+      }
+    }
     const saved = await putDocument(req, db, doc._id, doc);
 
     await logAccountActivity(req, {
@@ -978,7 +1000,12 @@ export async function createClientPromotion(req, res) {
       action: `Creó promoción "${doc.nombre}" para ${client.name}`,
       entityId: doc._id,
       entityLabel: client.name,
-      metadata: { tipo: doc.tipo, codigo: doc.codigo },
+      metadata: {
+        tipo: doc.tipo,
+        codigo: doc.codigo,
+        requiereVerificarEmail: doc.requiereVerificarEmail,
+        emailVerificacionEstado: doc.emailVerificacionEstado,
+      },
     });
 
     return res.status(201).json({ ok: true, promotion: sanitizeClientPromotion({ ...doc, _rev: saved.rev }) });
@@ -997,6 +1024,9 @@ export async function updateClientPromotion(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
+    const client = await ensureClientOwner(req, userId, clientId);
+    if (!client) return res.status(404).json({ ok: false, error: 'Cliente no encontrado' });
+
     const db = getClientsDbName();
     await ensureDatabase(req, db);
     const existing = await getDocument(req, db, promotionId);
@@ -1004,7 +1034,38 @@ export async function updateClientPromotion(req, res) {
       return res.status(404).json({ ok: false, error: 'Promoción no encontrada' });
     }
 
-    const doc = buildClientPromotionDocument(userId, clientId, { ...existing, ...promotion }, existing);
+    const turningOn =
+      promotion.requiereVerificarEmail === true && !existing.requiereVerificarEmail;
+    const resend = promotion.resendEmailVerification === true;
+    const nextRequires = Object.prototype.hasOwnProperty.call(promotion, 'requiereVerificarEmail')
+      ? Boolean(promotion.requiereVerificarEmail)
+      : Boolean(existing.requiereVerificarEmail);
+
+    if ((turningOn || resend) && nextRequires) {
+      const email = String(client.email || '').trim();
+      if (!email || !email.includes('@')) {
+        return badRequest(res, 'Para verificar por correo el cliente debe tener un email en la ficha');
+      }
+    }
+
+    let merged = { ...existing, ...promotion };
+    delete merged.resendEmailVerification;
+    merged.requiereVerificarEmail = nextRequires;
+
+    let doc = buildClientPromotionDocument(userId, clientId, merged, existing);
+
+    if (nextRequires && (turningOn || resend)) {
+      try {
+        const ver = await issueClientPromotionEmailVerification(req, doc, client, account);
+        doc = { ...doc, ...ver, updatedAt: new Date().toISOString() };
+      } catch (err) {
+        return res.status(502).json({
+          ok: false,
+          error: err?.message || 'No se pudo enviar el email de aceptación',
+        });
+      }
+    }
+
     const saved = await putDocument(req, db, doc._id, doc);
 
     await logAccountActivity(req, {
@@ -1015,12 +1076,140 @@ export async function updateClientPromotion(req, res) {
       action: `Actualizó promoción "${doc.nombre}"`,
       entityId: doc._id,
       entityLabel: doc.nombre,
-      metadata: { estado: doc.estado },
+      metadata: {
+        estado: doc.estado,
+        emailVerificacionEstado: doc.emailVerificacionEstado,
+      },
     });
 
     return res.json({ ok: true, promotion: sanitizeClientPromotion({ ...doc, _rev: saved.rev }) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al actualizar promoción' });
+  }
+}
+
+function getAppBaseUrlForPromo() {
+  return String(process.env.APP_URL || process.env.VITE_APP_URL || 'https://vertialapp.com')
+    .trim()
+    .replace(/\/+$/, '');
+}
+
+async function issueClientPromotionEmailVerification(req, promoDoc, client, account) {
+  const email = String(client.email || '').trim().toLowerCase();
+  if (!email || !email.includes('@')) {
+    throw new Error('El cliente no tiene email en la ficha');
+  }
+  const token = `${crypto.randomUUID().replace(/-/g, '')}${crypto.randomBytes(8).toString('hex')}`;
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const acceptUrl = `${getAppBaseUrlForPromo()}/promo/accept?token=${encodeURIComponent(token)}`;
+  const expiresLabel = expiresAt.toLocaleDateString('es-ES', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+  const mail = buildClientPromotionAcceptEmail({
+    clientName: client.name || client.nombre || '',
+    promotionName: promoDoc.nombre || '',
+    businessName: account?.companyName || account?.businessName || '',
+    acceptUrl,
+    expiresLabel,
+  });
+  await sendEmail({
+    to: email,
+    subject: mail.subject,
+    html: mail.html,
+    requireDelivery: true,
+  });
+  return {
+    requiereVerificarEmail: true,
+    emailVerificacionEstado: 'pendiente',
+    emailAcceptToken: token,
+    emailAcceptTokenExpiresAt: expiresAt.toISOString(),
+    emailSentTo: email,
+    emailSentAt: new Date().toISOString(),
+    emailAcceptedAt: null,
+  };
+}
+
+/** Público: vista previa de promo por token de aceptación. */
+export async function getPublicClientPromotion(req, res) {
+  try {
+    const token = String(req.query.token || '').trim();
+    if (!token) return badRequest(res, 'Falta el token');
+    const doc = await findClientPromotionByAcceptToken(req, token);
+    if (!doc) return res.status(404).json({ ok: false, error: 'Enlace no válido o caducado' });
+
+    const expired = doc.emailAcceptTokenExpiresAt
+      && new Date(doc.emailAcceptTokenExpiresAt).getTime() < Date.now();
+    if (expired && doc.emailVerificacionEstado !== 'aceptada') {
+      return res.status(410).json({ ok: false, error: 'Este enlace ha caducado. Pide que te reenvíen la promoción.' });
+    }
+
+    return res.json({
+      ok: true,
+      promotion: {
+        nombre: doc.nombre || '',
+        descripcion: doc.descripcion || '',
+        tipo: doc.tipo || '',
+        descuento: doc.descuento,
+        estado: doc.emailVerificacionEstado || 'pendiente',
+        acceptedAt: doc.emailAcceptedAt || null,
+        expiresAt: doc.emailAcceptTokenExpiresAt || null,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al cargar la promoción' });
+  }
+}
+
+/** Público: el cliente acepta la promoción desde su correo. */
+export async function acceptPublicClientPromotion(req, res) {
+  try {
+    const token = String(req.query.token || req.body?.token || '').trim();
+    if (!token) return badRequest(res, 'Falta el token');
+    const doc = await findClientPromotionByAcceptToken(req, token);
+    if (!doc) return res.status(404).json({ ok: false, error: 'Enlace no válido o caducado' });
+
+    if (doc.emailVerificacionEstado === 'aceptada') {
+      return res.json({
+        ok: true,
+        alreadyProcessed: true,
+        promotion: {
+          nombre: doc.nombre || '',
+          estado: 'aceptada',
+          acceptedAt: doc.emailAcceptedAt || null,
+        },
+      });
+    }
+
+    const expired = doc.emailAcceptTokenExpiresAt
+      && new Date(doc.emailAcceptTokenExpiresAt).getTime() < Date.now();
+    if (expired) {
+      return res.status(410).json({ ok: false, error: 'Este enlace ha caducado. Pide que te reenvíen la promoción.' });
+    }
+
+    const now = new Date().toISOString();
+    const updated = {
+      ...doc,
+      emailVerificacionEstado: 'aceptada',
+      emailAcceptedAt: now,
+      updatedAt: now,
+      // Conservar token para que un segundo clic diga «ya aceptada»
+    };
+    const db = getClientsDbName();
+    const saved = await putDocument(req, db, updated._id, updated);
+
+    return res.json({
+      ok: true,
+      promotion: {
+        nombre: updated.nombre || '',
+        estado: 'aceptada',
+        acceptedAt: now,
+        _rev: saved.rev,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al aceptar la promoción' });
   }
 }
 

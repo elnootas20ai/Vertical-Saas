@@ -1428,8 +1428,6 @@ export function TpvRapidoOrderFlow({
   const [promoCodeManual, setPromoCodeManual] = useState(false);
   const [clientPromos, setClientPromos] = useState<ClientPromotion[]>([]);
   const [selectedClientPromoId, setSelectedClientPromoId] = useState<string>('');
-  /** Email tecleado en caja cuando la promo exige verificación por correo. */
-  const [clientPromoEmailInput, setClientPromoEmailInput] = useState('');
   const [companyPromos, setCompanyPromos] = useState<StoredPromotion[]>(() =>
     typeof window !== 'undefined' ? readStoredPromotions() : [],
   );
@@ -2008,13 +2006,11 @@ export function TpvRapidoOrderFlow({
     return clientPromos.find((p) => p.id === selectedClientPromoId) || null;
   }, [clientPromos, selectedClientPromoId]);
 
+  /** Promo lista: sin verify email, o el cliente ya aceptó el enlace del correo. */
   const clientPromoEmailVerified = useMemo(() => {
     if (!clientPromoSelected?.requiereVerificarEmail) return true;
-    const typed = String(clientPromoEmailInput || '').trim().toLowerCase();
-    const expected = String(selectedClient?.email || '').trim().toLowerCase();
-    if (!typed || !expected) return false;
-    return typed === expected;
-  }, [clientPromoSelected, clientPromoEmailInput, selectedClient?.email]);
+    return String(clientPromoSelected.emailVerificacionEstado || '').toLowerCase() === 'aceptada';
+  }, [clientPromoSelected]);
 
   const compute2x1Discount = useCallback(() => {
     const unitPrices: number[] = [];
@@ -2443,7 +2439,6 @@ export function TpvRapidoOrderFlow({
     setPromoMode('none');
     setClientPromos([]);
     setSelectedClientPromoId('');
-    setClientPromoEmailInput('');
   }, [clearSelection, catalogSections, catalog]);
 
   const exitQuickAttentionToClientSearch = useCallback(() => {
@@ -2517,7 +2512,6 @@ export function TpvRapidoOrderFlow({
       }
       setClientPromos([]);
       setSelectedClientPromoId('');
-      setClientPromoEmailInput('');
       if (userId && !isTpvSyntheticClientId(client.id)) {
         fetchClientPromotionsRequest(userId, client.id)
           .then((promos) => {
@@ -2720,7 +2714,6 @@ export function TpvRapidoOrderFlow({
       setPromoMode('none');
       setClientPromos([]);
       setSelectedClientPromoId('');
-      setClientPromoEmailInput('');
       if (crmClient) {
         setQuickAttentionActive(false);
         handleSelectClient(crmClient);
@@ -4438,7 +4431,6 @@ export function TpvRapidoOrderFlow({
     setPromoMode('none');
     setClientPromos([]);
     setSelectedClientPromoId('');
-    setClientPromoEmailInput('');
     setCreatedOrder(null);
     setTimeout(() => phoneRef.current?.focus(), 150);
   }, [clearSelection, clearResults, catalogSections, catalog, isRestaurantMode, resetRestaurantTicket]);
@@ -6115,7 +6107,6 @@ export function TpvRapidoOrderFlow({
                               value={selectedClientPromoId}
                               onChange={(e) => {
                                 setSelectedClientPromoId(e.target.value);
-                                setClientPromoEmailInput('');
                               }}
                               className={`${INPUT_CLASS} h-9 py-1.5 text-xs min-w-0 flex-1`}
                             >
@@ -6125,7 +6116,11 @@ export function TpvRapidoOrderFlow({
                                 .map((p) => (
                                 <option key={p.id} value={p.id}>
                                   {p.nombre}
-                                  {p.requiereVerificarEmail ? ' · email' : ''}
+                                  {p.requiereVerificarEmail
+                                    ? (String(p.emailVerificacionEstado || '').toLowerCase() === 'aceptada'
+                                      ? ' · email OK'
+                                      : ' · email pendiente')
+                                    : ''}
                                 </option>
                               ))}
                             </select>
@@ -6170,30 +6165,14 @@ export function TpvRapidoOrderFlow({
                           )}
                         </div>
                         {promoMode === 'client' && clientPromoSelected?.requiereVerificarEmail ? (
-                          <div className="mb-2 space-y-1">
-                            <input
-                              type="email"
-                              value={clientPromoEmailInput}
-                              onChange={(e) => setClientPromoEmailInput(e.target.value)}
-                              className={`${INPUT_CLASS} h-9 py-1.5 text-xs`}
-                              placeholder="Email del cliente para verificar"
-                              autoComplete="off"
-                            />
-                            {!String(selectedClient?.email || '').trim() ? (
-                              <p className="text-[10px] text-amber-600 dark:text-amber-400">
-                                Este cliente no tiene email en ficha; no se puede verificar.
-                              </p>
-                            ) : clientPromoEmailInput.trim() && !clientPromoEmailVerified ? (
-                              <p className="text-[10px] text-red-600 dark:text-red-400">
-                                El email no coincide con el del cliente.
-                              </p>
-                            ) : clientPromoEmailVerified ? (
+                          <div className="mb-2">
+                            {clientPromoEmailVerified ? (
                               <p className="text-[10px] text-emerald-600 dark:text-emerald-400">
-                                Email verificado · promo aplicable
+                                Cliente aceptó por email · promo aplicable
                               </p>
                             ) : (
-                              <p className="text-[10px] text-gray-500 dark:text-gray-400">
-                                Introduce el email para aplicar la promoción.
+                              <p className="text-[10px] text-amber-600 dark:text-amber-400">
+                                Pendiente: el cliente debe aceptar el email. Sin eso no se aplica.
                               </p>
                             )}
                           </div>

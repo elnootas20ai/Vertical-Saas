@@ -198,6 +198,7 @@ const WorkOrderStatus = lazyPage(() => import('./pages/public/WorkOrderStatus'),
 const WebStorefront = lazyPage(() => import('./pages/public/WebStorefront'), 'WebStorefront');
 const MesaQrPublicPage = lazyPage(() => import('./pages/public/MesaQrPublicPage'), 'MesaQrPublicPage');
 const QuotePublicResponse = lazyPage(() => import('./pages/public/QuotePublicResponse'), 'QuotePublicResponse');
+const PromoAcceptPublic = lazyPage(() => import('./pages/public/PromoAcceptPublic'), 'PromoAcceptPublic');
 const WebConfig = lazyPage(() => import('./pages/saas/WebConfig'), 'WebConfig');
 const WebOrders = lazyPage(() => import('./pages/saas/WebOrders'), 'WebOrders');
 const DeliveryIntegrations = lazyPage(() => import('./pages/saas/DeliveryIntegrations'), 'DeliveryIntegrations');
@@ -1099,6 +1100,10 @@ export const router = createBrowserRouter([
       {
         path: 'quote/respond',
         Component: QuotePublicResponse,
+      },
+      {
+        path: 'promo/accept',
+        Component: PromoAcceptPublic,
       },
       {
         path: 'legal/:docSlug',
