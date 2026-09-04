@@ -695,7 +695,7 @@ export function quoteLineFromService(service: EventServiceRecord, invitados: num
   };
 }
 
-/** Línea de presupuesto desde producto de Carta TPV (cantidad en unidades). */
+/** Línea de presupuesto desde producto de Servicios → Productos. */
 export function quoteLineFromCatalogItem(
   item: { _id: string; name: string; unitPrice?: number; unit?: string },
   qty = 1,

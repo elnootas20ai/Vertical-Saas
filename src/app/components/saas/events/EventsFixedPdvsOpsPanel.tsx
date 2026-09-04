@@ -68,6 +68,8 @@ type Props = {
   ownerUserId?: string;
   selfUser?: { user_id?: string; fullName?: string; firstName?: string; lastName?: string; email?: string } | null;
   onEditProducts: () => void;
+  /** Alta de catálogo (Servicios → Productos). Si no hay productos, el CTA principal va aquí. */
+  onManageProductCatalog?: () => void;
   onSaved: () => void;
 };
 
@@ -231,6 +233,7 @@ export function EventsFixedPdvsOpsPanel({
   ownerUserId,
   selfUser,
   onEditProducts,
+  onManageProductCatalog,
   onSaved,
 }: Props) {
   const bootDraft = initialFromDraft(workCenter);
@@ -685,7 +688,7 @@ export function EventsFixedPdvsOpsPanel({
               </h3>
             </div>
             <button type="button" onClick={onEditProducts} className={VERTIAL_BTN_SECONDARY}>
-              Carta
+              Ajustar carga
             </button>
           </div>
           <div className="px-3 py-3 space-y-2">
@@ -699,8 +702,12 @@ export function EventsFixedPdvsOpsPanel({
                 <p className="text-sm text-stone-500">
                   No hay productos. Añádelos en Servicios → Productos (bebida, merch, extras…).
                 </p>
-                <button type="button" onClick={onEditProducts} className={`${VERTIAL_BTN_PRIMARY} mt-3 mx-auto`}>
-                  Abrir carta
+                <button
+                  type="button"
+                  onClick={onManageProductCatalog || onEditProducts}
+                  className={`${VERTIAL_BTN_PRIMARY} mt-3 mx-auto`}
+                >
+                  Ir a Servicios → Productos
                 </button>
               </div>
             ) : (

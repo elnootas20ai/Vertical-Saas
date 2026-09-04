@@ -3,6 +3,7 @@
  * productos o servicios, cantidad y precio → carta del TPV tablet.
  */
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Loader2, Plus, Trash2, X } from 'lucide-react';
 import { useModalClose } from '../../../hooks/useModalClose';
@@ -32,6 +33,7 @@ import {
   VERTIAL_SURFACE,
 } from '../../../lib/vertialUiTokens';
 
+const EVENTS_PRODUCTS_PATH = '/saas/events-services?tab=productos';
 const inputClass =
   `w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 ${VERTIAL_FOCUS_RING}`;
 
@@ -55,6 +57,7 @@ export function EventsFixedPdvLoadModal({
   onSaved,
 }: Props) {
   useModalClose(open, onClose);
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [wc, setWc] = useState<WorkCenter | null>(null);
@@ -221,9 +224,21 @@ export function EventsFixedPdvLoadModal({
               </div>
 
               {lines.length === 0 ? (
-                <p className="text-sm text-stone-500 text-center py-6">
-                  Aún no hay carga. Añade productos desde Servicios → Productos.
-                </p>
+                <div className="text-center py-6 space-y-3">
+                  <p className="text-sm text-stone-500">
+                    Aún no hay carga. Añade productos en Servicios → Productos.
+                  </p>
+                  <button
+                    type="button"
+                    className={`${VERTIAL_BTN_PRIMARY} mx-auto`}
+                    onClick={() => {
+                      onClose();
+                      navigate(EVENTS_PRODUCTS_PATH);
+                    }}
+                  >
+                    Ir a Servicios → Productos
+                  </button>
+                </div>
               ) : (
                 <ul className="space-y-2">
                   {lines.map((line) => (

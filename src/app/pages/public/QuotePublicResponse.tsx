@@ -43,6 +43,14 @@ interface PublicQuote {
 
 type ViewState = 'loading' | 'preview' | 'confirming' | 'success' | 'error' | 'already_processed';
 
+/** Caduca al final del día validUntil (fecha local), no a las 00:00 UTC. */
+function isQuoteExpired(validUntil: string | null | undefined): boolean {
+  const day = String(validUntil || '').trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return false;
+  const end = new Date(`${day}T23:59:59.999`);
+  if (Number.isNaN(end.getTime())) return false;
+  return end.getTime() < Date.now();
+}
 
 export function QuotePublicResponse() {
   const [searchParams] = useSearchParams();
@@ -217,7 +225,7 @@ export function QuotePublicResponse() {
 
   // Preview state — show quote + action buttons
   if (quote) {
-    const isExpired = new Date(quote.validUntil) < new Date();
+    const isExpired = isQuoteExpired(quote.validUntil);
     return (
       <div style={styles.wrapper}>
         <div style={styles.card}>

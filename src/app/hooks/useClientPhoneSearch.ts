@@ -37,8 +37,15 @@ function isSyntheticTpvClientId(clientId: string | undefined): boolean {
   return String(clientId || '').startsWith('tpv-');
 }
 
-function cacheKey(userId: string, businessId: string | undefined, query: string, limit: number) {
-  return `${userId}|${businessId || ''}|${limit}|${query}`;
+function cacheKey(
+  userId: string,
+  businessId: string | undefined,
+  query: string,
+  limit: number,
+  includeLegacy: boolean,
+  fallbackAll: boolean,
+) {
+  return `${userId}|${businessId || ''}|${limit}|${includeLegacy ? 1 : 0}|${fallbackAll ? 1 : 0}|${query}`;
 }
 
 function readSearchCache(key: string): Client[] | null {
@@ -96,6 +103,16 @@ export function useClientPhoneSearch(params: {
    * TPV: no pausar la búsqueda aunque haya ficha seleccionada.
    */
   keepSearchingWhileSelected?: boolean;
+  /**
+   * Incluir fichas sin businessId (legacy). Default true (TPV).
+   * Verticales con CRM por empresa (p. ej. eventos): false.
+   */
+  includeLegacy?: boolean;
+  /**
+   * Si no hay resultados en la empresa, buscar en toda la cuenta. Default true (TPV).
+   * Verticales con CRM por empresa: false — sin clientes = lista vacía.
+   */
+  fallbackAll?: boolean;
 }): ClientPhoneSearchResult {
   const {
     userId,
@@ -108,6 +125,8 @@ export function useClientPhoneSearch(params: {
     matchByName = false,
     minQueryLength = 2,
     keepSearchingWhileSelected = false,
+    includeLegacy = true,
+    fallbackAll = true,
   } = params;
   const [results, setResults] = useState<Client[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -147,7 +166,7 @@ export function useClientPhoneSearch(params: {
       return;
     }
 
-    const key = cacheKey(userId, businessId, queryForApi, resultLimit);
+    const key = cacheKey(userId, businessId, queryForApi, resultLimit, includeLegacy, fallbackAll);
     const cached = readSearchCache(key);
     if (cached) {
       requestSeqRef.current += 1;
@@ -172,15 +191,16 @@ export function useClientPhoneSearch(params: {
       const controller = new AbortController();
       abortRef.current = controller;
       try {
-        // Siempre search-by-phone (includeLegacy + fallbackAll): es la ruta TPV que encuentra
-        // fichas legacy. No pasar por GET /api/clients?search= (más lento y sin includeLegacy).
+        // search-by-phone: TPV usa includeLegacy + fallbackAll para fichas legacy.
+        // Verticales con CRM por empresa pueden desactivarlos (sin clientes = vacío).
+        const searchOpts = { includeLegacy, fallbackAll };
         let payload = await searchClientsByPhoneRequest(
           userId,
           queryForApi,
           resultLimit,
           controller.signal,
           businessId,
-          { includeLegacy: true, fallbackAll: true },
+          searchOpts,
         );
 
         const lastRefresh = portfolioRefreshAtByUser.get(userId) || 0;
@@ -198,7 +218,7 @@ export function useClientPhoneSearch(params: {
             resultLimit,
             controller.signal,
             businessId,
-            { includeLegacy: true, fallbackAll: true, refresh: true },
+            { ...searchOpts, refresh: true },
           );
         }
         if (controller.signal.aborted || seq !== requestSeqRef.current) return;
@@ -243,6 +263,8 @@ export function useClientPhoneSearch(params: {
     blocksSearch,
     trimmed,
     matchByName,
+    includeLegacy,
+    fallbackAll,
   ]);
 
   useEffect(() => {

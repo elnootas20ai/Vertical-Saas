@@ -4,9 +4,20 @@
  */
 import { createVerticalApi, type VerticalEntity } from './verticalApiFactory';
 
+/** IVA comida / catering reducido (España). Default al alta de producto. */
+export const EVENTS_TPV_DEFAULT_TAX_RATE = 10;
+
+export const EVENTS_TPV_TAX_OPTIONS = [
+  { value: 10, label: '10% — comida / catering' },
+  { value: 21, label: '21% — general' },
+] as const;
+
 export type EventsTpvProduct = VerticalEntity & {
   nombre: string;
   precio: number;
+  /** % IVA (4 / 10 / 21). Vacío o inválido → 10% comida. */
+  taxRate?: number;
+  iva?: number;
   descripcion?: string;
   activo?: boolean;
   deletedAt?: string | null;
@@ -16,6 +27,18 @@ const api = createVerticalApi<EventsTpvProduct>('events', 'tpv_products');
 
 export function eventsTpvProductsApi() {
   return api;
+}
+
+/** Normaliza % IVA de producto evento (default comida 10%). */
+export function normalizeEventsTpvTaxRate(raw: unknown): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return EVENTS_TPV_DEFAULT_TAX_RATE;
+  const rounded = Math.round(n);
+  if (rounded === 10 || rounded === 21) return rounded;
+  // 4% u otros → comida (10%)
+  if (rounded === 4) return EVENTS_TPV_DEFAULT_TAX_RATE;
+  if (rounded > 0 && rounded <= 100) return rounded;
+  return EVENTS_TPV_DEFAULT_TAX_RATE;
 }
 
 /** Activos, ordenados por nombre — listos para carta / qty del día. */
@@ -41,4 +64,8 @@ export function eventsTpvProductName(p: EventsTpvProduct): string {
 export function eventsTpvProductPrice(p: EventsTpvProduct): number {
   const n = Number(p.precio);
   return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : 0;
+}
+
+export function eventsTpvProductTaxRate(p: EventsTpvProduct): number {
+  return normalizeEventsTpvTaxRate(p.taxRate ?? p.iva);
 }

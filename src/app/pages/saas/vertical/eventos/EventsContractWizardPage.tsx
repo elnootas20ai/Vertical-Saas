@@ -29,8 +29,10 @@ import {
   parsePlanningChecklist,
   serializePlanningChecklist,
 } from '../../../../lib/eventsTypes';
-import { listCatalogItemsRequest, type CatalogItem } from '../../../../lib/deliveryApi';
-import { filterCatalogItemsForBusinessScope } from '../../../../lib/catalogBusinessScope';
+import {
+  listActiveEventsTpvProducts,
+  type EventsTpvProduct,
+} from '../../../../lib/eventsTpvProducts';
 import {
   buildQuoteRulesText,
   loadEventsQuoteSettings,
@@ -103,7 +105,7 @@ export function EventsContractWizardPage() {
   const [advancing, setAdvancing] = useState(false);
   const [venues, setVenues] = useState<Venue[]>([]);
   const [services, setServices] = useState<EventServiceRecord[]>([]);
-  const [catalogProducts, setCatalogProducts] = useState<CatalogItem[]>([]);
+  const [tpvProducts, setTpvProducts] = useState<EventsTpvProduct[]>([]);
   const [productQtyById, setProductQtyById] = useState<Record<string, number>>({});
   const [team, setTeam] = useState<Array<{ id: string; name: string }>>([]);
   const [workers, setWorkers] = useState<EventPlanningWorker[]>([]);
@@ -354,26 +356,9 @@ export function EventsContractWizardPage() {
     void Promise.all([
       venuesApi.list(dataUserId).then(setVenues).catch(() => setVenues([])),
       loadEventServices(dataUserId).then(setServices).catch(() => setServices([])),
-      listCatalogItemsRequest(dataUserId, { module: 'catalog' })
-        .then((items) => {
-          const scoped = filterCatalogItemsForBusinessScope(items, businessId || '', new Set(), {
-            accountBusinessCount: 1,
-            activeBusinessType: 'events',
-          });
-          setCatalogProducts(
-            scoped.filter(
-              (i) =>
-                i.active !== false
-                && i.deletedAt == null
-                && i.module !== 'stock'
-                && Number(i.unitPrice) > 0
-                && String(i.name || '').trim(),
-            ),
-          );
-        })
-        .catch(() => setCatalogProducts([])),
+      listActiveEventsTpvProducts(dataUserId).then(setTpvProducts).catch(() => setTpvProducts([])),
     ]);
-  }, [dataUserId, venuesApi, businessId]);
+  }, [dataUserId, venuesApi]);
 
   useEffect(() => {
     if (!businessId) return;
@@ -564,12 +549,15 @@ export function EventsContractWizardPage() {
     userId: dataUserId || '',
     phone: cliente,
     businessId: businessId || undefined,
-    enabled: step === 'cliente' && Boolean(dataUserId),
+    enabled: step === 'cliente' && Boolean(dataUserId) && Boolean(businessId),
     matchByName: true,
     minQueryLength: 2,
     debounceMs: 300,
     resultLimit: 15,
     keepSearchingWhileSelected: true,
+    // Eventos: CRM solo de esta empresa. Sin clientes → no sugerir cartera de otros verticales.
+    includeLegacy: false,
+    fallbackAll: false,
   });
 
   const crmQuery = cliente.trim();
@@ -631,10 +619,13 @@ export function EventsContractWizardPage() {
   };
 
   const addProductToQuote = (productId: string) => {
-    const hit = catalogProducts.find((p) => p._id === productId);
+    const hit = tpvProducts.find((p) => p._id === productId);
     if (!hit) return;
     const qty = Math.max(1, Math.floor(Number(productQtyById[productId]) || 1));
-    const line = quoteLineFromCatalogItem(hit, qty);
+    const line = quoteLineFromCatalogItem(
+      { _id: hit._id, name: hit.nombre, unitPrice: Number(hit.precio) || 0 },
+      qty,
+    );
     setLineas((prev) => {
       const existing = prev.find((l) => l.catalogItemId === productId);
       if (existing) {
@@ -648,7 +639,7 @@ export function EventsContractWizardPage() {
       const manual = prev.filter((l) => l.concepto.trim());
       return manual.length ? [...manual, line] : [line];
     });
-    toast.success(`${hit.name} × ${qty} añadido`);
+    toast.success(`${hit.nombre} × ${qty} añadido`);
   };
 
   const handleSubmit = async () => {
@@ -979,28 +970,27 @@ export function EventsContractWizardPage() {
           )}
           {step === 'presupuesto' && (
             <>
-              {catalogProducts.length > 0 && (
+              {tpvProducts.length > 0 && (
                 <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/20 p-3 space-y-2">
                   <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-200">
-                    Productos Carta TPV (cantidad)
+                    Productos (Servicios → Productos)
                   </p>
                   <p className="text-[11px] text-gray-500">
                     Elige cuántas unidades llevas / cobras en este evento.{' '}
-                    <Link to="/saas/catalog?tab=catalog" className="text-[var(--v-blue,#2563eb)] font-semibold hover:underline">
-                      Gestionar carta
+                    <Link to="/saas/events-services?tab=productos" className="text-[var(--v-blue,#2563eb)] font-semibold hover:underline">
+                      Gestionar productos
                     </Link>
                   </p>
                   <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                    {catalogProducts.slice(0, 40).map((p) => (
+                    {tpvProducts.slice(0, 40).map((p) => (
                       <div
                         key={p._id}
                         className="flex flex-wrap items-center gap-2 rounded-lg bg-white dark:bg-gray-900 border border-emerald-200/80 dark:border-emerald-800 px-2.5 py-1.5"
                       >
                         <div className="min-w-0 flex-1">
-                          <p className="text-xs font-semibold text-gray-900 dark:text-gray-100 truncate">{p.name}</p>
+                          <p className="text-xs font-semibold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
                           <p className="text-[10px] text-gray-500">
-                            {(Number(p.unitPrice) || 0).toLocaleString('es-ES')} €
-                            {p.category ? ` · ${p.category}` : ''}
+                            {(Number(p.precio) || 0).toLocaleString('es-ES')} €
                           </p>
                         </div>
                         <input
@@ -1014,7 +1004,7 @@ export function EventsContractWizardPage() {
                               [p._id]: Math.max(1, Math.floor(Number(e.target.value) || 1)),
                             }))
                           }
-                          aria-label={`Cantidad de ${p.name}`}
+                          aria-label={`Cantidad de ${p.nombre}`}
                         />
                         <button
                           type="button"
@@ -1029,11 +1019,11 @@ export function EventsContractWizardPage() {
                   </div>
                 </div>
               )}
-              {catalogProducts.length === 0 && (
+              {tpvProducts.length === 0 && (
                 <p className="text-xs text-gray-500">
-                  Sin productos en Carta TPV.{' '}
-                  <Link to="/saas/catalog?tab=catalog" className="text-[var(--v-blue,#2563eb)] font-semibold hover:underline">
-                    Crear productos
+                  Sin productos.{' '}
+                  <Link to="/saas/events-services?tab=productos" className="text-[var(--v-blue,#2563eb)] font-semibold hover:underline">
+                    Crear en Servicios → Productos
                   </Link>
                 </p>
               )}

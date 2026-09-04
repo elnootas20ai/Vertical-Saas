@@ -84,7 +84,8 @@ export async function ensureEventCrmClient(
         8,
         undefined,
         businessId || undefined,
-        { includeLegacy: true, fallbackAll: true },
+        // Solo fichas de esta empresa Eventos; no mezclar delivery/legacy.
+        { includeLegacy: false, fallbackAll: false },
       );
       const phoneDigits = phone.replace(/\D/g, '');
       const hit = (found.clients || []).find((c) => {

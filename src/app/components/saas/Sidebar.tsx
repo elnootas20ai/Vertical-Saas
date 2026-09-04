@@ -680,7 +680,19 @@ const RESTAURANT_SIDEBAR_PATH_OVERRIDES: Record<string, string> = {
   reports: '/saas/vertical/restaurant/informes',
 };
 
-function resolveSidebarItemPath(item: SidebarItem, isRestaurantVertical: boolean): string {
+/** Eventos: Carta = Servicios → Productos (misma fuente que TPV / contratación). */
+const EVENTS_SIDEBAR_PATH_OVERRIDES: Record<string, string> = {
+  'catalog-carta': '/saas/events-services?tab=productos',
+};
+
+function resolveSidebarItemPath(
+  item: SidebarItem,
+  isRestaurantVertical: boolean,
+  isEventsVertical: boolean,
+): string {
+  if (isEventsVertical && EVENTS_SIDEBAR_PATH_OVERRIDES[item.id]) {
+    return EVENTS_SIDEBAR_PATH_OVERRIDES[item.id];
+  }
   if (isRestaurantVertical && RESTAURANT_SIDEBAR_PATH_OVERRIDES[item.id]) {
     return RESTAURANT_SIDEBAR_PATH_OVERRIDES[item.id];
   }
@@ -1265,10 +1277,18 @@ function SidebarInner({
           hasClient: eventsNav.hasClient,
           hasEvent: eventsNav.hasEvent,
         });
-        resolved = !lock.disabled
-          ? base
-          : {
+        const pathOverride = EVENTS_SIDEBAR_PATH_OVERRIDES[item.id];
+        const withPath = pathOverride
+          ? {
               ...base,
+              path: pathOverride,
+              label: item.id === 'catalog-carta' ? 'Productos' : base.label,
+            }
+          : base;
+        resolved = !lock.disabled
+          ? withPath
+          : {
+              ...withPath,
               disabled: true,
               lockTitle: lock.title,
             };
@@ -1536,7 +1556,7 @@ function SidebarInner({
       onMobileClose();
       return;
     }
-    handleNavigate(resolveSidebarItemPath(item, isRestaurantVertical));
+    handleNavigate(resolveSidebarItemPath(item, isRestaurantVertical, isEventsVertical));
   };
 
   const visibleMenuItemsBase = menuItems;
@@ -1726,7 +1746,12 @@ function SidebarInner({
     (item.id === 'cleaning-reports' && (location.pathname.startsWith('/saas/cleaning-reports') || location.pathname.startsWith('/saas/vertical/limpieza/informes'))) ||
     (item.id === 'cleaning-execution' && location.pathname.startsWith('/saas/cleaning-execution')) ||
     (item.id === 'catalog' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'catalog') ||
-    (item.id === 'catalog-carta' && location.pathname.startsWith('/saas/catalog') && ['catalog', 'escandallo', 'tpv-templates'].includes(catalogTab)) ||
+    (item.id === 'catalog-carta' && (
+      (location.pathname.startsWith('/saas/catalog') && ['catalog', 'escandallo', 'tpv-templates'].includes(catalogTab))
+      || (isEventsVertical
+        && location.pathname.startsWith('/saas/events-services')
+        && new URLSearchParams(location.search).get('tab') === 'productos')
+    )) ||
     (item.id === 'catalog-stock' && location.pathname.startsWith('/saas/inventory')) ||
     (item.id === 'catalog-stock-tpv' && location.pathname.startsWith('/saas/catalog') && ['stock', 'ingredientes'].includes(catalogTab)) ||
     (item.id === 'catalog-purchases' && location.pathname.startsWith('/saas/catalog') && ['suppliers', 'purchase-orders', 'albaranes'].includes(catalogTab)) ||
@@ -1768,6 +1793,12 @@ function SidebarInner({
       if (item.id === 'events-pipeline') {
         return location.pathname.startsWith('/saas/vertical/eventos/contrataciones')
           || /^\/saas\/vertical\/eventos\/(?!nueva-contratacion|contrataciones|presupuestos|ruta|tpv|operar)[^/]+$/.test(location.pathname);
+      }
+      if (item.id === 'events-services') {
+        if (!location.pathname.startsWith('/saas/events-services')) return false;
+        // Productos (tab) lo marca Catálogo → Productos; aquí el resto de pestañas.
+        const tab = new URLSearchParams(location.search).get('tab');
+        return tab !== 'productos';
       }
       return location.pathname.startsWith(item.path);
     })()) ||

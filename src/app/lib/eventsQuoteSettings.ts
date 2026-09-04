@@ -24,6 +24,12 @@ export type EventsQuoteSettings = {
   /** data URL de la plantilla propia (PDF/imagen/Office), opcional. */
   customTemplateDataUrl: string;
 
+  /**
+   * Nombre que sale arriba en presupuesto / factura de eventos.
+   * Vacío = nombre de la empresa en Vertial.
+   */
+  documentCompanyName: string;
+
   /** % depósito / anticipo sobre el total. */
   depositPercent: number;
   /** % resto a liquidar (sobre el total). */
@@ -50,6 +56,7 @@ export const DEFAULT_EVENTS_QUOTE_SETTINGS: EventsQuoteSettings = {
   designMode: 'vertial',
   customTemplateFileName: '',
   customTemplateDataUrl: '',
+  documentCompanyName: '',
   depositPercent: 0,
   balancePercent: 0,
   validityDays: 0,
@@ -99,6 +106,7 @@ export function normalizeEventsQuoteSettings(
     designMode,
     customTemplateFileName: String(incoming.customTemplateFileName || '').trim(),
     customTemplateDataUrl: String(incoming.customTemplateDataUrl || ''),
+    documentCompanyName: String(incoming.documentCompanyName || '').trim(),
     depositPercent: clampPercent(incoming.depositPercent),
     balancePercent: clampPercent(incoming.balancePercent),
     validityDays: Math.min(365, Math.max(0, Math.round(Number(incoming.validityDays) || 0))),
@@ -125,6 +133,16 @@ export function loadEventsQuoteSettings(businessId: string): EventsQuoteSettings
 export function saveEventsQuoteSettings(businessId: string, settings: EventsQuoteSettings): void {
   const normalized = normalizeEventsQuoteSettings(settings);
   localStorage.setItem(storageKey(businessId), JSON.stringify(normalized));
+}
+
+/** Nombre en cabecera de presupuesto/factura eventos (plantilla o empresa). */
+export function resolveEventsDocumentCompanyName(
+  businessId: string,
+  fallbackName?: string | null,
+): string {
+  const custom = loadEventsQuoteSettings(businessId).documentCompanyName.trim();
+  if (custom) return custom;
+  return String(fallbackName || '').trim() || 'Empresa';
 }
 
 export function templateLinesToQuoteLines(

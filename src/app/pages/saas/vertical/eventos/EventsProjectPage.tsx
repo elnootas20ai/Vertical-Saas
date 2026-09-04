@@ -47,6 +47,7 @@ import { EventsStagePaymentCard, formatEventPaymentBreakdown } from '../../../..
 import { EventsQuoteSettingsModal } from '../../../../components/saas/events/EventsQuoteSettingsModal';
 import {
   loadEventsQuoteSettings,
+  resolveEventsDocumentCompanyName,
   shouldAutoSendReviewOnFinish,
 } from '../../../../lib/eventsQuoteSettings';
 import { formatMoneyEs, formatQtyEs } from '../../../../lib/formatNumberEs';
@@ -96,19 +97,24 @@ export function EventsProjectPage() {
   const [services, setServices] = useState<EventServiceRecord[]>([]);
   const [showQuoteEditor, setShowQuoteEditor] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [quoteSettingsRev, setQuoteSettingsRev] = useState(0);
   const prevEstadoRef = useRef<string | null>(null);
 
-  const businessIssuer = useMemo(() => ({
-    name: currentBusiness?.name,
-    taxId: currentBusiness?.taxId,
-    address: currentBusiness?.address,
-    phone: currentBusiness?.phone,
-    email: currentBusiness?.email,
-    logo: currentBusiness?.logo,
-    business_id: currentBusiness?.business_id || currentBusiness?.id,
-    businessId: currentBusiness?.business_id || currentBusiness?.id,
-    id: currentBusiness?.id || currentBusiness?.business_id,
-  }), [currentBusiness]);
+  const businessIssuer = useMemo(() => {
+    const bid = String(currentBusiness?.business_id || currentBusiness?.id || businessId || '').trim();
+    const displayName = resolveEventsDocumentCompanyName(bid, currentBusiness?.name);
+    return {
+      name: displayName,
+      taxId: currentBusiness?.taxId,
+      address: currentBusiness?.address,
+      phone: currentBusiness?.phone,
+      email: currentBusiness?.email,
+      logo: currentBusiness?.logo,
+      business_id: currentBusiness?.business_id || currentBusiness?.id,
+      businessId: currentBusiness?.business_id || currentBusiness?.id,
+      id: currentBusiness?.id || currentBusiness?.business_id,
+    };
+  }, [currentBusiness, businessId, quoteSettingsRev]);
 
   const refresh = useCallback(async (opts?: { silent?: boolean }) => {
     if (!dataUserId || !eventId) return;
@@ -296,7 +302,7 @@ export function EventsProjectPage() {
         reviewUrl: settings.reviewUrl,
         message: settings.reviewMessage,
         clientEmail: finished.clientEmail,
-        companyName: currentBusiness?.name || '',
+        companyName: resolveEventsDocumentCompanyName(businessId || '', currentBusiness?.name),
       });
       if (result.alreadySent) return result.event || finished;
       toast.success(`Reseña enviada a ${result.sentTo || finished.clientEmail}`);
@@ -438,6 +444,7 @@ export function EventsProjectPage() {
           open={showSettings}
           businessId={businessId || ''}
           onClose={() => setShowSettings(false)}
+          onSaved={() => setQuoteSettingsRev((n) => n + 1)}
         />
 
         <EventsStageMetrics event={event} />

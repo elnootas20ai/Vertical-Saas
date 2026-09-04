@@ -3,6 +3,7 @@
  * productos (qty), día y quién trabaja.
  */
 import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Loader2, Monitor, X } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
@@ -17,6 +18,8 @@ import {
 import { EventsFixedPdvLoadModal } from './EventsFixedPdvLoadModal';
 import { EventsFixedPdvsOpsPanel } from './EventsFixedPdvsOpsPanel';
 import { VERTIAL_SURFACE } from '../../../lib/vertialUiTokens';
+
+const EVENTS_PRODUCTS_PATH = '/saas/events-services?tab=productos';
 
 type FixedRow = {
   wc: WorkCenter;
@@ -52,6 +55,7 @@ export function EventsFixedPdvsHubModal({
   onClose,
 }: Props) {
   useModalClose(open, onClose);
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<FixedRow[]>([]);
@@ -263,6 +267,10 @@ export function EventsFixedPdvsHubModal({
                     name: selected.wc.name || 'PDV',
                   })
                 }
+                onManageProductCatalog={() => {
+                  onClose();
+                  navigate(EVENTS_PRODUCTS_PATH);
+                }}
                 onSaved={() => void refresh()}
               />
             )}

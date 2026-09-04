@@ -13,7 +13,12 @@ import { v4 as uuidv4 } from 'uuid';
 import logger from '../services/logger.js';
 
 function getQuotesDbName() {
-  return (process.env.VITE_COUCHDB_DB || 'vertial') + '-quotes';
+  const prefix = String(process.env.VITE_COUCHDB_DB || process.env.COUCHDB_DB || 'vertial')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9_$()+/-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `${prefix}-quotes`;
 }
 
 function getRemindersDbName() {

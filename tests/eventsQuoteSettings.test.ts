@@ -16,6 +16,12 @@ describe('eventsQuoteSettings', () => {
     expect(s.annotations).toBe('');
     expect(s.applyLinesOnNew).toBe(false);
     expect(s.designMode).toBe('vertial');
+    expect(s.documentCompanyName).toBe('');
+  });
+
+  it('guarda nombre de cabecera del documento', () => {
+    const s = normalizeEventsQuoteSettings({ documentCompanyName: '  MODOMIOFEST  ' });
+    expect(s.documentCompanyName).toBe('MODOMIOFEST');
   });
 
   it('normaliza líneas y porcentajes', () => {

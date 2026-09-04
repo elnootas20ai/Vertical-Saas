@@ -18,8 +18,20 @@ import { sendPushToUser } from '../services/pushService.js';
 import { sendEmail } from '../services/email.js';
 import logger from '../services/logger.js';
 
+function normalizeDbName(value) {
+  return String(value || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9_$()+/-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
 function getQuotesDbName() {
-  return (process.env.VITE_COUCHDB_DB || 'vertial') + '-quotes';
+  // Misma base que eventsQuoteController (enviar) — si no, aceptar no encuentra el token.
+  const prefix = normalizeDbName(
+    process.env.VITE_COUCHDB_DB || process.env.COUCHDB_DB || 'vertial',
+  );
+  return `${prefix}-quotes`;
 }
 
 function getAppBaseUrl() {

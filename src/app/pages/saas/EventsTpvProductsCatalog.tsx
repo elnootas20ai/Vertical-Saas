@@ -1,5 +1,5 @@
 /**
- * Productos de cobro en evento — catálogo simple (nombre + precio).
+ * Productos de cobro en evento — catálogo simple (nombre + precio + IVA).
  * No es el TPV de delivery/bar: solo alta de productos para cobrar después.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -23,6 +23,12 @@ import {
   parseEventsTpvCatalogPrice,
 } from '../../lib/eventsTpvCatalogExcelTemplate';
 import {
+  EVENTS_TPV_DEFAULT_TAX_RATE,
+  EVENTS_TPV_TAX_OPTIONS,
+  eventsTpvProductTaxRate,
+  normalizeEventsTpvTaxRate,
+} from '../../lib/eventsTpvProducts';
+import {
   VERTIAL_BTN_PRIMARY,
   VERTIAL_BTN_SECONDARY,
   VERTIAL_SURFACE,
@@ -31,6 +37,8 @@ import {
 interface EventTpvProduct extends VerticalEntity {
   nombre: string;
   precio: number;
+  taxRate?: number;
+  iva?: number;
   descripcion: string;
   activo: boolean;
 }
@@ -38,6 +46,7 @@ interface EventTpvProduct extends VerticalEntity {
 type ProductForm = {
   nombre: string;
   precio: number;
+  taxRate: number;
   descripcion: string;
   activo: boolean;
 };
@@ -45,6 +54,7 @@ type ProductForm = {
 const EMPTY: ProductForm = {
   nombre: '',
   precio: 0,
+  taxRate: EVENTS_TPV_DEFAULT_TAX_RATE,
   descripcion: '',
   activo: true,
 };
@@ -110,6 +120,7 @@ export function EventsTpvProductsCatalog() {
     setForm({
       nombre: p.nombre || '',
       precio: Number(p.precio) || 0,
+      taxRate: eventsTpvProductTaxRate(p),
       descripcion: p.descripcion || '',
       activo: p.activo !== false,
     });
@@ -124,9 +135,12 @@ export function EventsTpvProductsCatalog() {
       return;
     }
     const precio = Number(String(precioText).replace(',', '.').trim());
+    const taxRate = normalizeEventsTpvTaxRate(form.taxRate);
     const payload = {
       nombre: form.nombre.trim(),
       precio: Number.isFinite(precio) ? precio : 0,
+      taxRate,
+      iva: taxRate,
       descripcion: form.descripcion.trim(),
       activo: form.activo,
     };
@@ -180,9 +194,14 @@ export function EventsTpvProductsCatalog() {
           ? `Cat: ${entryStr(e, 'category', 'categoria')}`
           : '',
       ].filter(Boolean);
+      const taxRate = normalizeEventsTpvTaxRate(
+        entryStr(e, 'taxRate', 'iva') || EVENTS_TPV_DEFAULT_TAX_RATE,
+      );
       return {
         nombre,
         precio: parseEventsTpvCatalogPrice(entryStr(e, 'price', 'precio')),
+        taxRate,
+        iva: taxRate,
         descripcion: descParts.join(' · '),
         activo: true,
       };
@@ -208,7 +227,7 @@ export function EventsTpvProductsCatalog() {
     <>
       <div className="space-y-4">
         <p className="text-sm text-stone-500 dark:text-stone-400">
-          Productos simples para cobrar en el evento (bebida, merch, extras…). No van al presupuesto de contratación.
+          Productos simples para cobrar en el evento (bebida, merch, extras…). IVA comida por defecto 10%.
         </p>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -238,6 +257,7 @@ export function EventsTpvProductsCatalog() {
               <tr>
                 <th className="px-4 py-3 font-semibold">Nombre</th>
                 <th className="px-4 py-3 font-semibold">Precio</th>
+                <th className="px-4 py-3 font-semibold">IVA</th>
                 <th className="px-4 py-3 font-semibold">Estado</th>
                 <th className="px-4 py-3 font-semibold text-right">Acciones</th>
               </tr>
@@ -245,7 +265,7 @@ export function EventsTpvProductsCatalog() {
             <tbody className="divide-y divide-stone-100 dark:divide-stone-800">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-4 py-10 text-center text-stone-400">
+                  <td colSpan={5} className="px-4 py-10 text-center text-stone-400">
                     Sin productos de cobro. Añade los que venderás en el evento.
                   </td>
                 </tr>
@@ -263,6 +283,9 @@ export function EventsTpvProductsCatalog() {
                         style: 'currency',
                         currency: 'EUR',
                       })}
+                    </td>
+                    <td className="px-4 py-3 tabular-nums text-stone-600 dark:text-stone-300">
+                      {eventsTpvProductTaxRate(p)}%
                     </td>
                     <td className="px-4 py-3">
                       <button
@@ -347,6 +370,26 @@ export function EventsTpvProductsCatalog() {
                 inputMode="decimal"
                 className="w-full min-h-11 rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 text-sm"
               />
+            </label>
+
+            <label className="block space-y-1.5">
+              <span className="text-xs font-semibold text-stone-500">IVA</span>
+              <select
+                value={form.taxRate}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, taxRate: normalizeEventsTpvTaxRate(e.target.value) }))
+                }
+                className="w-full min-h-11 rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 text-sm"
+              >
+                {EVENTS_TPV_TAX_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              <span className="text-[11px] text-stone-400">
+                Comida / catering: 10% por defecto
+              </span>
             </label>
 
             <label className="block space-y-1.5">

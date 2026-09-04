@@ -85,7 +85,9 @@ function QuoteDesignPreview({ settings }: { settings: EventsQuoteSettings }) {
             <p className="text-xs font-bold text-stone-900 dark:text-stone-100">Evento de ejemplo</p>
             <p className="text-[10px] text-stone-500">Cliente · 19/08/2026</p>
           </div>
-          <span className="text-[10px] font-semibold text-stone-400">Vertial</span>
+          <span className="text-[10px] font-semibold text-stone-700 dark:text-stone-200 text-right max-w-[9rem] truncate">
+            {String(settings.documentCompanyName || '').trim() || 'Tu empresa'}
+          </span>
         </div>
         <div className="rounded-lg border border-stone-100 dark:border-stone-800 overflow-hidden text-[10px]">
           <div className="grid grid-cols-[1fr_auto_auto] gap-2 bg-stone-50 dark:bg-stone-900 px-2 py-1 font-semibold text-stone-500">
@@ -237,6 +239,24 @@ export function EventsQuoteSettingsModal({ open, businessId, onClose, onSaved }:
                 Diseño Vertial o tu propia plantilla (PDF / Word / imagen)
               </p>
             </div>
+
+            <label className="block space-y-1">
+              <span className="text-[11px] font-medium text-stone-500">
+                Nombre en cabecera (presupuesto / factura)
+              </span>
+              <input
+                className={inputClass}
+                value={settings.documentCompanyName}
+                onChange={(e) =>
+                  setSettings((s) => ({ ...s, documentCompanyName: e.target.value }))
+                }
+                placeholder="Ej. MODOMIOFEST (vacío = nombre de la empresa)"
+                maxLength={120}
+              />
+              <span className="block text-[10px] text-stone-400">
+                Si lo dejas vacío, se usa el nombre de la empresa en Vertial.
+              </span>
+            </label>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <button

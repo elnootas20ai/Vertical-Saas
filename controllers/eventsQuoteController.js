@@ -511,9 +511,14 @@ export async function sendEventQuoteByEmail(req, res) {
     await ensureDatabase(req, quotesDb);
 
     const now = new Date().toISOString();
+    // Validez del enlace ≠ fecha del evento. Si validUntil = event.fecha, el día del
+    // evento (o con desfase UTC) la UI marca caducado y «Aceptar» no aparece.
+    const plus30 = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const eventDay = String(event.fecha || '').trim().slice(0, 10);
     const validUntil =
-      event.fecha ||
-      new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      eventDay && eventDay > plus30
+        ? eventDay
+        : plus30;
 
     let quote = null;
     const linkedId = String(event.linkedQuoteId || '').trim();
