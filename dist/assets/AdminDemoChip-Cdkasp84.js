@@ -1,1 +1,0 @@
-import{j as r,gG as t}from"./index-B5iuIYc8.js";function m({show:e}){return e?r.jsx("span",{className:"inline-flex items-center px-2 py-0.5 text-[10px] font-semibold rounded-md bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800",children:t}):null}export{m as A};
