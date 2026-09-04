@@ -103,7 +103,7 @@ const EVENTS_ACTIVATION_STEP_DEFS = (
     number: 3,
     label: 'Clientes',
     description: 'Contactos a los que enviarás presupuestos y contratos',
-    route: '/saas/clients',
+    route: '/saas/vertical/eventos/nueva-contratacion',
     icon: 'users',
     subSteps: [
       { id: 'events_first_client', label: 'Primer cliente registrado', completed: flags.hasClient },

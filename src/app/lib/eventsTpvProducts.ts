@@ -15,7 +15,7 @@ export const EVENTS_TPV_TAX_OPTIONS = [
 export type EventsTpvProduct = VerticalEntity & {
   nombre: string;
   precio: number;
-  /** % IVA (4 / 10 / 21). Vacío o inválido → 10% comida. */
+  /** % IVA (0–100). Vacío o inválido → 10% comida. */
   taxRate?: number;
   iva?: number;
   descripcion?: string;
@@ -29,15 +29,16 @@ export function eventsTpvProductsApi() {
   return api;
 }
 
-/** Normaliza % IVA de producto evento (default comida 10%). */
+/** % IVA de producto evento. Vacío/inválido → 10% comida. Acepta cualquier % 0–100. */
 export function normalizeEventsTpvTaxRate(raw: unknown): number {
-  const n = Number(raw);
+  const n =
+    typeof raw === 'string'
+      ? Number(String(raw).trim().replace(',', '.'))
+      : Number(raw);
   if (!Number.isFinite(n) || n < 0) return EVENTS_TPV_DEFAULT_TAX_RATE;
   const rounded = Math.round(n);
-  if (rounded === 10 || rounded === 21) return rounded;
-  // 4% u otros → comida (10%)
-  if (rounded === 4) return EVENTS_TPV_DEFAULT_TAX_RATE;
-  if (rounded > 0 && rounded <= 100) return rounded;
+  if (rounded > 100) return EVENTS_TPV_DEFAULT_TAX_RATE;
+  if (rounded >= 0 && rounded <= 100) return rounded;
   return EVENTS_TPV_DEFAULT_TAX_RATE;
 }
 

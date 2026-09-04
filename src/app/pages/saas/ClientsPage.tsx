@@ -6,6 +6,7 @@ import { useApp } from '../../context/AppContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { salesListPathForBusiness } from '../../lib/compraventaPaths';
 import { isCompraventaBusinessType } from '../../lib/compraventaSetup';
+import { isEventsBusinessType } from '../../lib/deliveryOpsTypes';
 import { usePagination } from '../../hooks/usePagination';
 import { usePaginatedClients } from '../../hooks/usePaginatedClients';
 import { useWorkCenters } from '../../hooks/useWorkCenters';
@@ -1595,6 +1596,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   const isLawyerBusiness = currentBusiness?.businessType === 'lawyer';
   const isCompraventaBusiness = isCompraventaBusinessType(currentBusiness?.businessType);
   const isCleaningBusiness = currentBusiness?.businessType === 'cleaning';
+  const isEventsBusiness = isEventsBusinessType(currentBusiness?.businessType);
   const reManagerRoles = useMemo(
     () => new Set([
       'Admin', 'Gerente', 'GerenteGrupo', 'Administrador', 'Gestor', 'Encargado', 'Superadmin', 'Administración',
@@ -3258,7 +3260,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
           clientTemplateVertical={isHeladeriaBusiness ? 'iceCreamShop' : null}
           canUseSegments={listPlan.canUseSegments}
           canExport={listPlan.canExport}
-          canImportFromBusiness={listPlan.canImportFromBusiness}
+          canImportFromBusiness={listPlan.canImportFromBusiness && !isEventsBusiness}
           hasOtherBusinesses={otherBusinesses.length > 0}
           segmentConditionsCount={segmentConditions.length}
           exportTotalCount={clientsListTotal}

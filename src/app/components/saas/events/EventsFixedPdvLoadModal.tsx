@@ -15,6 +15,7 @@ import {
   eventsTpvProductId,
   eventsTpvProductName,
   eventsTpvProductPrice,
+  eventsTpvProductTaxRate,
   listActiveEventsTpvProducts,
   type EventsTpvProduct,
 } from '../../../lib/eventsTpvProducts';
@@ -32,6 +33,7 @@ import {
   VERTIAL_FOCUS_RING,
   VERTIAL_SURFACE,
 } from '../../../lib/vertialUiTokens';
+import { VertialNumericInput } from '../VertialNumericInput';
 
 const EVENTS_PRODUCTS_PATH = '/saas/events-services?tab=productos';
 const inputClass =
@@ -205,7 +207,7 @@ export function EventsFixedPdvLoadModal({
                         const id = eventsTpvProductId(c);
                         return (
                           <option key={id} value={id}>
-                            {eventsTpvProductName(c)} · {formatMoneyEs(eventsTpvProductPrice(c))} €
+                            {eventsTpvProductName(c)} · {formatMoneyEs(eventsTpvProductPrice(c))} € · IVA {eventsTpvProductTaxRate(c)}%
                           </option>
                         );
                       })
@@ -262,32 +264,22 @@ export function EventsFixedPdvLoadModal({
                       <div className="grid grid-cols-2 gap-2">
                         <label className="space-y-1">
                           <span className="text-[10px] font-medium text-stone-500">Cantidad</span>
-                          <input
-                            type="number"
+                          <VertialNumericInput
+                            mode="int"
                             min={0}
-                            step={1}
                             className={inputClass}
                             value={line.qty}
-                            onChange={(e) =>
-                              patchLine(line.catalogItemId, {
-                                qty: Math.max(0, Math.floor(Number(e.target.value) || 0)),
-                              })
-                            }
+                            onChange={(qty) => patchLine(line.catalogItemId, { qty })}
                           />
                         </label>
                         <label className="space-y-1">
                           <span className="text-[10px] font-medium text-stone-500">Precio (€)</span>
-                          <input
-                            type="number"
+                          <VertialNumericInput
+                            mode="decimal"
                             min={0}
-                            step={0.01}
                             className={inputClass}
                             value={line.unitPrice}
-                            onChange={(e) =>
-                              patchLine(line.catalogItemId, {
-                                unitPrice: Math.max(0, Number(e.target.value) || 0),
-                              })
-                            }
+                            onChange={(unitPrice) => patchLine(line.catalogItemId, { unitPrice })}
                           />
                         </label>
                       </div>

@@ -19,6 +19,7 @@ import {
   saveEventsQuoteSettings,
   type EventsQuoteSettings,
 } from '../../../lib/eventsQuoteSettings';
+import { VertialNumericInput } from '../VertialNumericInput';
 
 const inputClass = `w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 ${VERTIAL_FOCUS_RING}`;
 
@@ -345,47 +346,38 @@ export function EventsQuoteSettingsModal({ open, businessId, onClose, onSaved }:
             <div className="grid grid-cols-2 gap-3">
               <label className="block space-y-1">
                 <span className="text-xs font-medium text-stone-500">% depósito (anticipo)</span>
-                <input
-                  type="number"
+                <VertialNumericInput
+                  mode="int"
                   min={0}
                   max={100}
                   className={inputClass}
-                  value={settings.depositPercent || ''}
+                  value={settings.depositPercent || 0}
                   placeholder="0"
-                  onChange={(e) => setSettings((s) => ({
-                    ...s,
-                    depositPercent: Math.min(100, Math.max(0, Number(e.target.value) || 0)),
-                  }))}
+                  onChange={(depositPercent) => setSettings((s) => ({ ...s, depositPercent }))}
                 />
               </label>
               <label className="block space-y-1">
                 <span className="text-xs font-medium text-stone-500">% resto (total a liquidar)</span>
-                <input
-                  type="number"
+                <VertialNumericInput
+                  mode="int"
                   min={0}
                   max={100}
                   className={inputClass}
-                  value={settings.balancePercent || ''}
+                  value={settings.balancePercent || 0}
                   placeholder="0"
-                  onChange={(e) => setSettings((s) => ({
-                    ...s,
-                    balancePercent: Math.min(100, Math.max(0, Number(e.target.value) || 0)),
-                  }))}
+                  onChange={(balancePercent) => setSettings((s) => ({ ...s, balancePercent }))}
                 />
               </label>
               <label className="block space-y-1 col-span-2 sm:col-span-1">
                 <span className="text-xs font-medium text-stone-500">Validez (días)</span>
-                <input
-                  type="number"
+                <VertialNumericInput
+                  mode="int"
                   min={0}
                   max={365}
                   className={inputClass}
-                  value={settings.validityDays || ''}
+                  value={settings.validityDays || 0}
                   placeholder="0"
-                  onChange={(e) => setSettings((s) => ({
-                    ...s,
-                    validityDays: Math.min(365, Math.max(0, Math.round(Number(e.target.value) || 0))),
-                  }))}
+                  onChange={(validityDays) => setSettings((s) => ({ ...s, validityDays }))}
                 />
               </label>
             </div>

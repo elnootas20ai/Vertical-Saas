@@ -3,13 +3,14 @@ import { Link, useBlocker, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Layout } from '../../../../components/saas/Layout';
 import { NuevoClienteModal } from '../../../../components/saas/NuevoClienteModal';
+import { VertialNumericInput } from '../../../../components/saas/VertialNumericInput';
 import { useAuth } from '../../../../context/AuthContext';
-import { useApp } from '../../../../context/AppContext';
 import { useBusiness } from '../../../../context/BusinessContext';
 import { createVerticalApi, type VerticalEntity } from '../../../../lib/verticalApiFactory';
 import { listUsersRequest } from '../../../../lib/authApi';
 import {
   computeQuoteMoney,
+  EVENTS_QUOTE_IVA_PERCENT,
   createEventDraft,
   loadEventById,
   loadEventServices,
@@ -30,6 +31,7 @@ import {
   serializePlanningChecklist,
 } from '../../../../lib/eventsTypes';
 import {
+  eventsTpvProductTaxRate,
   listActiveEventsTpvProducts,
   type EventsTpvProduct,
 } from '../../../../lib/eventsTpvProducts';
@@ -90,7 +92,6 @@ function emptyLine(): QuoteLine {
 export function EventsContractWizardPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { clients } = useApp();
   const { currentBusiness } = useBusiness();
   const eventsNav = useEventsActivationNav();
   const dataUserId = useMemo(
@@ -111,7 +112,6 @@ export function EventsContractWizardPage() {
   const [workers, setWorkers] = useState<EventPlanningWorker[]>([]);
   const [extraName, setExtraName] = useState('');
   const [showNuevoClienteModal, setShowNuevoClienteModal] = useState(false);
-  const autoOpenedClientModalRef = useRef(false);
 
   const [clientId, setClientId] = useState('');
   const [cliente, setCliente] = useState('');
@@ -409,14 +409,8 @@ export function EventsContractWizardPage() {
       });
   }, [businessId, currentBusiness?.members, currentBusiness?.owner_user_id, user]);
 
-  // Sin clientes: al entrar al asistente, abrir alta de cliente (mismo flujo, primer paso).
-  useEffect(() => {
-    if (eventsNav.loading || !eventsNav.hasPricedService) return;
-    if (autoOpenedClientModalRef.current) return;
-    if (clients.length > 0 || eventsNav.hasClient) return;
-    autoOpenedClientModalRef.current = true;
-    setShowNuevoClienteModal(true);
-  }, [eventsNav.loading, eventsNav.hasPricedService, eventsNav.hasClient, clients.length]);
+  // Sin clientes CRM: el paso Cliente es el alta (formulario en pantalla, sin modal).
+  const needsFirstClient = !eventsNav.loading && !eventsNav.hasClient;
 
   const stepIndex = WIZARD_STEPS.findIndex((s) => s.id === step);
 
@@ -572,17 +566,6 @@ export function EventsContractWizardPage() {
     const phone = [hit.phonePrefix, hit.phone].filter(Boolean).join(' ').trim() || hit.phone || '';
     setClientTelefono(phone);
   }, [markCrmSelected]);
-
-  const onSelectClient = (id: string) => {
-    setClientId(id);
-    if (!id) {
-      clearCrmSelection();
-      return;
-    }
-    const hit = clients.find((c) => c.id === id);
-    if (!hit) return;
-    applyCrmClient(hit);
-  };
 
   const onClienteNameChange = (value: string) => {
     setCliente(value);
@@ -749,9 +732,9 @@ export function EventsContractWizardPage() {
 
   if (eventsNav.loading) {
     return (
-      <Layout>
+      <Layout title="Nueva contratación">
         <div className="flex items-center justify-center py-32">
-          <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
+          <Loader2 className="w-8 h-8 animate-spin text-gray-400" aria-label="Cargando" />
         </div>
       </Layout>
     );
@@ -832,48 +815,56 @@ export function EventsContractWizardPage() {
         <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 p-5 space-y-4">
           {step === 'cliente' && (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Escribe el nombre o teléfono para buscar en el CRM, o crea uno nuevo.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setShowNuevoClienteModal(true)}
-                  className="inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--v-blue,#2563eb)] hover:text-[#1d4ed8]"
-                >
-                  <UserPlus className="w-4 h-4" />
-                  Nuevo cliente
-                </button>
-              </div>
-              {clients.length > 0 && (
-                <select className={inputClass} value={clientId} onChange={(e) => onSelectClient(e.target.value)}>
-                  <option value="">— Cliente de la lista —</option>
-                  {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
+              {needsFirstClient ? (
+                <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-3 py-3 dark:border-blue-900 dark:bg-blue-950/30 space-y-1">
+                  <p className="text-sm font-semibold text-blue-900 dark:text-blue-100 inline-flex items-center gap-1.5">
+                    <UserPlus className="w-4 h-4" />
+                    Nuevo cliente
+                  </p>
+                  <p className="text-xs text-blue-800/80 dark:text-blue-200/80">
+                    Aún no hay clientes en el CRM de Eventos. Crea el primero aquí y continúa la contratación.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Busca en clientes de Eventos, o crea uno nuevo.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setShowNuevoClienteModal(true)}
+                    className="inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--v-blue,#2563eb)] hover:text-[#1d4ed8]"
+                  >
+                    <UserPlus className="w-4 h-4" />
+                    Nuevo cliente
+                  </button>
+                </div>
               )}
               <div className="space-y-2">
                 <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                  {!needsFirstClient ? (
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                  ) : null}
                   <input
-                    className={`${inputClass} pl-9 pr-9`}
-                    placeholder="Nombre o teléfono — busca en CRM *"
+                    className={`${inputClass} ${needsFirstClient ? '' : 'pl-9 pr-9'}`}
+                    placeholder={needsFirstClient ? 'Nombre del cliente *' : 'Nombre o teléfono — busca en CRM *'}
                     value={cliente}
                     onChange={(e) => onClienteNameChange(e.target.value)}
                     autoComplete="off"
                     autoCorrect="off"
                     spellCheck={false}
                   />
-                  {isCrmSearching && (
+                  {!needsFirstClient && isCrmSearching && (
                     <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-gray-400" />
                   )}
-                  {Boolean(clientId) && !isCrmSearching && (
+                  {!needsFirstClient && Boolean(clientId) && !isCrmSearching && (
                     <span
                       className="absolute right-3 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-emerald-500"
                       title="Cliente vinculado al CRM"
                     />
                   )}
                 </div>
-                {showCrmSuggestions && (
+                {!needsFirstClient && showCrmSuggestions && (
                   <div className="overflow-hidden rounded-xl border-2 border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
                     {isCrmSearching && !crmQuerySettled && (
                       <div className="px-3 py-2.5 text-center text-xs text-gray-400">Buscando en el CRM…</div>
@@ -918,6 +909,11 @@ export function EventsContractWizardPage() {
                 <input className={inputClass} placeholder="Email" value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} />
                 <input className={inputClass} placeholder="Teléfono" value={clientTelefono} onChange={(e) => setClientTelefono(e.target.value)} />
               </div>
+              {needsFirstClient ? (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Al pulsar Siguiente se guarda en el CRM de Eventos y sigues con el evento.
+                </p>
+              ) : null}
             </>
           )}
           {step === 'evento' && (
@@ -933,12 +929,12 @@ export function EventsContractWizardPage() {
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
                   Nº de personas
                 </label>
-                <input
-                  type="number"
-                  min={1}
+                <VertialNumericInput
+                  mode="int"
+                  min={0}
                   className={inputClass}
                   value={invitados}
-                  onChange={(e) => setInvitados(Math.max(0, Number(e.target.value) || 0))}
+                  onChange={setInvitados}
                   placeholder="Ej. 80"
                   aria-describedby="eventos-personas-help"
                 />
@@ -990,18 +986,19 @@ export function EventsContractWizardPage() {
                         <div className="min-w-0 flex-1">
                           <p className="text-xs font-semibold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
                           <p className="text-[10px] text-gray-500">
-                            {(Number(p.precio) || 0).toLocaleString('es-ES')} €
+                            {(Number(p.precio) || 0).toLocaleString('es-ES')} € · IVA {eventsTpvProductTaxRate(p)}%
                           </p>
                         </div>
-                        <input
-                          type="number"
+                        <VertialNumericInput
+                          mode="int"
                           min={1}
+                          emptyAs={1}
                           className="w-16 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 px-2 py-1 text-xs tabular-nums"
                           value={productQtyById[p._id] ?? 1}
-                          onChange={(e) =>
+                          onChange={(qty) =>
                             setProductQtyById((prev) => ({
                               ...prev,
-                              [p._id]: Math.max(1, Math.floor(Number(e.target.value) || 1)),
+                              [p._id]: qty,
                             }))
                           }
                           aria-label={`Cantidad de ${p.nombre}`}
@@ -1065,14 +1062,14 @@ export function EventsContractWizardPage() {
               {lineas.map((line) => (
                 <div key={line.id} className="grid grid-cols-12 gap-2">
                   <input className={`${inputClass} col-span-5`} placeholder="Concepto" value={line.concepto} onChange={(e) => patchLine(line.id, { concepto: e.target.value })} />
-                  <input type="number" min={0} className={`${inputClass} col-span-2`} value={line.cantidad} onChange={(e) => patchLine(line.id, { cantidad: Number(e.target.value) })} />
-                  <input type="number" className={`${inputClass} col-span-2`} value={line.precioUnitario} onChange={(e) => patchLine(line.id, { precioUnitario: Number(e.target.value) })} />
+                  <VertialNumericInput mode="int" min={0} className={`${inputClass} col-span-2`} value={line.cantidad} onChange={(cantidad) => patchLine(line.id, { cantidad })} />
+                  <VertialNumericInput mode="decimal" className={`${inputClass} col-span-2`} value={line.precioUnitario} onChange={(precioUnitario) => patchLine(line.id, { precioUnitario })} />
                   <span className="col-span-2 text-sm font-semibold self-center">{line.total} €</span>
                   <button type="button" onClick={() => setLineas((p) => p.filter((l) => l.id !== line.id))} className="col-span-1 text-red-500"><Trash2 className="w-4 h-4" /></button>
                 </div>
               ))}
               <button type="button" onClick={() => setLineas((p) => [...p, emptyLine()])} className="text-sm text-[var(--v-blue,#2563eb)] font-semibold inline-flex items-center gap-1"><Plus className="w-4 h-4" /> Línea</button>
-              <input type="number" className={inputClass} placeholder="Señal €" value={deposito} onChange={(e) => setDeposito(Number(e.target.value) || 0)} />
+              <VertialNumericInput mode="decimal" className={inputClass} placeholder="Señal €" value={deposito} onChange={setDeposito} />
               <textarea
                 className={`${inputClass} min-h-[9rem] resize-y`}
                 rows={6}
@@ -1086,7 +1083,7 @@ export function EventsContractWizardPage() {
                   <span className="tabular-nums">{formatMoneyEs(quoteMoney.subtotal)}</span>
                 </div>
                 <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
-                  <span>IVA (21%)</span>
+                  <span>IVA ({EVENTS_QUOTE_IVA_PERCENT}%)</span>
                   <span className="tabular-nums">{formatMoneyEs(quoteMoney.iva)}</span>
                 </div>
                 <div className="flex justify-between text-base font-bold text-gray-900 dark:text-gray-100 pt-1 border-t border-gray-200 dark:border-gray-700">

@@ -260,7 +260,7 @@ function buildEventQuotePdfData(event: EventRecord, business?: BusinessIssuer | 
       description: l.concepto,
       quantity: l.cantidad,
       unitPrice: l.precioUnitario,
-      taxRate: 21,
+      taxRate: Math.round(EVENTS_QUOTE_IVA_RATE * 100),
     })),
     notes: event.notas || `Presupuesto evento: ${event.nombre}`,
   };
@@ -355,7 +355,7 @@ export async function registerEventDepositPayment(
   let current = ensured.event;
 
   const { number, sequenceNumber } = await getNextInvoiceNumber(userId, 'EVT');
-  // Señal = lo cobrado (presupuesto ya lleva IVA). Base = importe / 1,21.
+  // Señal = lo cobrado (presupuesto ya lleva IVA). Base = importe / (1 + IVA).
   const split = splitGrossWithEventsIva(depositAmount);
   const line = calcInvoiceLine(`Señal — ${current.nombre}`, 1, split.base, 0, Math.round(EVENTS_QUOTE_IVA_RATE * 100));
   const totals = calcInvoiceTotals([line]);

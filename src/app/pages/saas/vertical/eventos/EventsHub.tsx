@@ -287,14 +287,27 @@ export function EventsHub() {
           <button
             type="button"
             onClick={() => navigate(scoped('/saas/vertical/eventos/nueva-contratacion'))}
-            className="inline-flex max-w-full items-center gap-1.5 text-xs text-stone-500 hover:text-[var(--v-blue,#2563eb)] dark:text-stone-400 dark:hover:text-blue-300"
+            className="group flex w-full flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50/90 p-4 text-left shadow-sm transition-colors hover:border-amber-300 hover:bg-amber-50 dark:border-amber-900/60 dark:bg-amber-950/35 dark:hover:border-amber-800 sm:flex-row sm:items-center sm:justify-between"
           >
-            <FilePenLine className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">
-              Borrador: {contractDraft.title}
-              <span className="opacity-70"> · {contractDraft.stepLabel}</span>
-              {' — '}
-              <span className="font-semibold text-[var(--v-blue,#2563eb)] dark:text-blue-300">Continuar</span>
+            <div className="flex min-w-0 items-start gap-3">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">
+                <FilePenLine className="h-5 w-5" strokeWidth={2} />
+              </span>
+              <div className="min-w-0 space-y-1">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-amber-800/80 dark:text-amber-200/80">
+                  Borrador sin terminar
+                </p>
+                <p className="truncate text-base font-bold text-stone-900 dark:text-stone-50">
+                  {contractDraft.title}
+                </p>
+                <p className="inline-flex items-center rounded-lg border border-amber-200/80 bg-white/80 px-2 py-0.5 text-xs font-semibold text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+                  Paso: {contractDraft.stepLabel}
+                </p>
+              </div>
+            </div>
+            <span className={`${VERTIAL_BTN_PRIMARY} shrink-0 self-stretch sm:self-center`}>
+              Continuar
+              <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
             </span>
           </button>
         )}

@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Layout } from '../../components/saas/Layout';
+import { VertialNumericInput } from '../../components/saas/VertialNumericInput';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { createVerticalApi, type VerticalEntity } from '../../lib/verticalApiFactory';
@@ -334,15 +335,15 @@ export function EventsVendors({ embedded = false }: { embedded?: boolean } = {})
               <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Valoración</label>
-                  <input type="number" step="0.1" min="0" max="5" value={form.valoracion} onChange={e => setForm(p => ({ ...p, valoracion: +e.target.value }))} className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                  <VertialNumericInput mode="decimal" min={0} max={5} value={form.valoracion} onChange={(valoracion) => setForm(p => ({ ...p, valoracion }))} className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Eventos</label>
-                  <input type="number" value={form.eventosRealizados} onChange={e => setForm(p => ({ ...p, eventosRealizados: +e.target.value }))} className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                  <VertialNumericInput mode="int" min={0} value={form.eventosRealizados} onChange={(eventosRealizados) => setForm(p => ({ ...p, eventosRealizados }))} className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Tarifa base (€)</label>
-                  <input type="number" value={form.tarifaBase} onChange={e => setForm(p => ({ ...p, tarifaBase: +e.target.value }))} className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                  <VertialNumericInput mode="decimal" min={0} value={form.tarifaBase} onChange={(tarifaBase) => setForm(p => ({ ...p, tarifaBase }))} className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
               </div>
             </div>

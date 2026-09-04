@@ -197,7 +197,7 @@ export function EventsProjectFinancePanel({ event, business, userId, onEventUpda
           <div className="grid sm:grid-cols-3 gap-3 items-end">
             <label className="text-xs text-gray-500">
               Importe
-              <input className={inputClass} type="number" value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)} />
+              <input className={inputClass} type="text" inputMode="decimal" value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)} />
             </label>
             <label className="text-xs text-gray-500">
               Método
@@ -264,7 +264,7 @@ export function EventsProjectFinancePanel({ event, business, userId, onEventUpda
             <div className="grid sm:grid-cols-3 gap-3 items-end">
               <label className="text-xs text-gray-500">
                 Cobro
-                <input className={inputClass} type="number" value={finalAmount} onChange={(e) => setFinalAmount(e.target.value)} />
+                <input className={inputClass} type="text" inputMode="decimal" value={finalAmount} onChange={(e) => setFinalAmount(e.target.value)} />
               </label>
               <label className="text-xs text-gray-500">
                 Método

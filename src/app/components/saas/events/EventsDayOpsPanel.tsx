@@ -37,6 +37,7 @@ import {
   VERTIAL_BTN_SECONDARY,
   VERTIAL_FOCUS_RING,
 } from '../../../lib/vertialUiTokens';
+import { VertialNumericInput } from '../VertialNumericInput';
 
 const inputClass =
   `w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm dark:border-stone-700 dark:bg-stone-950 dark:text-stone-100 ${VERTIAL_FOCUS_RING}`;
@@ -478,12 +479,13 @@ export function EventsDayOpsPanel({ event, userId, catalogProducts, onEventUpdat
                   </span>
                   <ChevronRight className="w-4 h-4 shrink-0 opacity-60" />
                 </button>
-                <input
-                  type="number"
+                <VertialNumericInput
+                  mode="int"
                   min={1}
+                  emptyAs={1}
                   className="w-16 rounded-xl border border-current/20 bg-white/70 px-2 py-2 text-xs tabular-nums dark:bg-black/20"
                   value={line.qty}
-                  onChange={(e) => setCargoQty(line.id, Number(e.target.value))}
+                  onChange={(qty) => setCargoQty(line.id, qty)}
                 />
                 {line.source === 'extra' ? (
                   <button
@@ -511,12 +513,13 @@ export function EventsDayOpsPanel({ event, userId, catalogProducts, onEventUpdat
                 <option key={p._id} value={p._id}>{p.name}</option>
               ))}
             </select>
-            <input
-              type="number"
+            <VertialNumericInput
+              mode="int"
               min={1}
+              emptyAs={1}
               className="w-16 rounded-xl border border-stone-200 bg-white px-2 py-2.5 text-xs tabular-nums dark:border-stone-700 dark:bg-stone-950"
               value={pickQty}
-              onChange={(e) => setPickQty(Math.max(1, Math.floor(Number(e.target.value) || 1)))}
+              onChange={setPickQty}
             />
             <button type="button" onClick={addExtraFromCatalog} className={VERTIAL_BTN_SECONDARY}>
               <Plus className="w-3.5 h-3.5" />

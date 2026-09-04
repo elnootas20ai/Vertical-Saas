@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Precontrato Vertial — Firmar y enviar</title>
+  <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+  <style>
+    :root { --bg:#eef1f5; --blue:#2563eb; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, sans-serif; background: var(--bg); color: #151515; }
+    .top { background: #0f172a; color: #fff; padding: 1rem 1.25rem; text-align: center; }
+    .top h1 { margin: 0 0 .35rem; font-size: 1.15rem; }
+    .top p { margin: 0; opacity: .85; font-size: .9rem; }
+    .tabs { display: flex; gap: .5rem; justify-content: center; padding: 1rem; flex-wrap: wrap; }
+    .tabs button { border: 0; border-radius: 999px; padding: .65rem 1.1rem; font-weight: 700; cursor: pointer; background: #dbe3ef; }
+    .tabs button.active { background: var(--blue); color: #fff; }
+    .panel { display: none; max-width: 860px; margin: 0 auto 2.5rem; background: #fff; border-radius: 14px; padding: 1.25rem 1.4rem 1.6rem; box-shadow: 0 10px 30px rgba(0,0,0,.06); }
+    .panel.active { display: block; }
+    .steps { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: .85rem 1rem; font-size: .92rem; margin-bottom: 1rem; line-height: 1.45; }
+    .steps strong { color: #1d4ed8; }
+    label { display: block; font-size: .85rem; font-weight: 600; margin: .7rem 0 .25rem; }
+    input[type="text"], input[type="file"] { width: 100%; max-width: 420px; padding: .55rem .65rem; border: 1px solid #cbd5e1; border-radius: 8px; font: inherit; }
+    .row { display: flex; flex-wrap: wrap; gap: .75rem; }
+    .row > div { flex: 1; min-width: 140px; }
+    canvas { width: 100%; max-width: 480px; height: 140px; border: 2px solid #2563eb; border-radius: 10px; background: #f8fbff; touch-action: none; cursor: crosshair; display: block; }
+    .actions { display: flex; flex-wrap: wrap; gap: .55rem; margin-top: .7rem; }
+    .actions button { border: 0; border-radius: 10px; padding: .7rem 1rem; font-weight: 700; cursor: pointer; background: #e2e8f0; }
+    .primary { background: var(--blue) !important; color: #fff !important; }
+    .ghost { background: #fff !important; border: 1px solid #cbd5e1; }
+    .msg { margin-top: .8rem; padding: .7rem .85rem; border-radius: 8px; font-size: .9rem; display: none; }
+    .msg.ok { display: block; background: #ecfdf5; color: #065f46; }
+    .msg.err { display: block; background: #fef2f2; color: #991b1b; }
+    .sendbox { margin-top: 1rem; padding: .9rem 1rem; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; font-size: .9rem; line-height: 1.45; }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <h1>Precontrato Vertial</h1>
+    <p>Tú firmas un PDF y se lo envías. Ellos abren el Paso 2 con ese PDF y firman el suyo.</p>
+  </div>
+
+  <div class="tabs">
+    <button type="button" class="active" data-tab="paso1">Paso 1 — Yo firmo (Vertial)</button>
+    <button type="button" data-tab="paso2">Paso 2 — Ellos firman</button>
+  </div>
+
+  <section class="panel active" id="paso1">
+    <div class="steps">
+      <strong>Tú haces esto:</strong> ciudad + fecha → dibujas tu firma → descargas el PDF →
+      se lo mandas por WhatsApp/email. También mándales este HTML y diles que abran <strong>Paso 2</strong>.
+    </div>
+    <div class="row">
+      <div><label>Ciudad</label><input id="ciudad" type="text" placeholder="Ej. Valencia" /></div>
+      <div><label>Día</label><input id="dia" type="text" /></div>
+      <div><label>Mes</label><input id="mes" type="text" /></div>
+      <div><label>Año</label><input id="anio" type="text" /></div>
+    </div>
+    <label>Tu firma (Uriel Arnau Ruiz — Vertial)</label>
+    <canvas id="sigVertial" width="640" height="180"></canvas>
+    <div class="actions">
+      <button type="button" class="ghost" id="clearVertial">Borrar firma</button>
+      <button type="button" class="primary" id="downloadPartial">Descargar mi PDF firmado</button>
+    </div>
+    <div class="msg" id="msg1"></div>
+    <div class="sendbox">
+      <strong>Envíales estos 2 archivos:</strong><br>
+      1. <em>Precontrato_Vertial_FIRMA_URIEEL.pdf</em> (el que descargas)<br>
+      2. <em>Firmar_Precontrato_Vertial.html</em> (este archivo del Escritorio)<br>
+      Y diles: «Abre el HTML → pestaña Paso 2 → sube el PDF → firma → descarga»
+    </div>
+  </section>
+
+  <section class="panel" id="paso2">
+    <div class="steps">
+      <strong>Ellos hacen esto:</strong> suben tu PDF → ponen su nombre y DNI/CIF → firman → descargan el PDF final.
+    </div>
+    <label>PDF recibido de Vertial</label>
+    <input id="pdfIn" type="file" accept="application/pdf,.pdf" />
+    <div class="row">
+      <div><label>Nombre / razón social</label><input id="otraNombre" type="text" placeholder="Nombre completo" /></div>
+      <div><label>DNI / NIE / CIF</label><input id="otraDni" type="text" placeholder="Documento" /></div>
+    </div>
+    <label>Firma de la otra parte</label>
+    <canvas id="sigOtra" width="640" height="180"></canvas>
+    <div class="actions">
+      <button type="button" class="ghost" id="clearOtra">Borrar firma</button>
+      <button type="button" class="primary" id="downloadFinal">Descargar PDF firmado por ambos</button>
+    </div>
+    <div class="msg" id="msg2"></div>
+  </section>
+
+  <script>
+    const { PDFDocument, StandardFonts, rgb } = PDFLib;
+
+    // Fixed signature box positions (same in paso 1 and 2)
+    const BOX = {
+      otraLabelX: 330,
+      otraLabelY: 155,
+      otraImgX: 330,
+      otraImgY: 72,
+      otraImgW: 190,
+      otraImgH: 55,
+      nameLineY: 680, // approx area for "Y de otra parte" - we'll use bottom note instead for reliability
+    };
+
+    document.querySelectorAll(".tabs button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".tabs button").forEach((b) => b.classList.remove("active"));
+        document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
+        btn.classList.add("active");
+        document.getElementById(btn.dataset.tab).classList.add("active");
+      });
+    });
+
+    const now = new Date();
+    const meses = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
+    document.getElementById("dia").value = String(now.getDate());
+    document.getElementById("mes").value = meses[now.getMonth()];
+    document.getElementById("anio").value = String(now.getFullYear());
+
+    function setupPad(id) {
+      const canvas = document.getElementById(id);
+      const ctx = canvas.getContext("2d");
+      let drawing = false, last = null;
+      const pos = (e) => {
+        const r = canvas.getBoundingClientRect();
+        const s = e.touches ? e.touches[0] : e;
+        return { x: (s.clientX - r.left) * (canvas.width / r.width), y: (s.clientY - r.top) * (canvas.height / r.height) };
+      };
+      const start = (e) => { e.preventDefault(); drawing = true; last = pos(e); };
+      const move = (e) => {
+        if (!drawing) return;
+        e.preventDefault();
+        const p = pos(e);
+        ctx.strokeStyle = "#111"; ctx.lineWidth = 2.6; ctx.lineCap = "round"; ctx.lineJoin = "round";
+        ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke(); last = p;
+      };
+      const end = () => { drawing = false; last = null; };
+      ["mousedown","mousemove","mouseup","mouseleave"].forEach((ev, i) => {
+        canvas.addEventListener(ev, [start, move, end, end][i]);
+      });
+      canvas.addEventListener("touchstart", start, { passive: false });
+      canvas.addEventListener("touchmove", move, { passive: false });
+      canvas.addEventListener("touchend", end);
+      return {
+        clear: () => ctx.clearRect(0, 0, canvas.width, canvas.height),
+        isEmpty() {
+          const d = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+          for (let i = 3; i < d.length; i += 4) if (d[i]) return false;
+          return true;
+        },
+        toPng: () => canvas.toDataURL("image/png"),
+      };
+    }
+
+    const padV = setupPad("sigVertial");
+    const padO = setupPad("sigOtra");
+    document.getElementById("clearVertial").onclick = () => padV.clear();
+    document.getElementById("clearOtra").onclick = () => padO.clear();
+
+    function showMsg(id, text, ok) {
+      const el = document.getElementById(id);
+      el.textContent = text;
+      el.className = "msg " + (ok ? "ok" : "err");
+    }
+
+    function pngToBytes(dataUrl) {
+      const b64 = dataUrl.split(",")[1];
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return bytes;
+    }
+
+    function wrapLines(text, font, size, maxW) {
+      const words = text.split(/\s+/);
+      const lines = [];
+      let line = "";
+      for (const w of words) {
+        const t = line ? line + " " + w : w;
+        if (font.widthOfTextAtSize(t, size) > maxW) { if (line) lines.push(line); line = w; }
+        else line = t;
+      }
+      if (line) lines.push(line);
+      return lines;
+    }
+
+    async function buildPartialPdf({ ciudad, dia, mes, anio, sigVertialBytes }) {
+      const pdf = await PDFDocument.create();
+      const page = pdf.addPage([595.28, 841.89]);
+      const font = await pdf.embedFont(StandardFonts.TimesRoman);
+      const bold = await pdf.embedFont(StandardFonts.TimesRomanBold);
+      const italic = await pdf.embedFont(StandardFonts.TimesRomanItalic);
+      const margin = 50;
+      const maxW = 595.28 - margin * 2;
+      let y = 790;
+      const size = 11;
+      const lh = 14.5;
+
+      const center = (t, f, s, gap = 16) => {
+        page.drawText(t, { x: (595.28 - f.widthOfTextAtSize(t, s)) / 2, y, size: s, font: f });
+        y -= gap;
+      };
+      const para = (t, f = font, s = size) => {
+        for (const ln of wrapLines(t, f, s, maxW)) {
+          page.drawText(ln, { x: margin, y, size: s, font: f });
+          y -= lh;
+        }
+        y -= 4;
+      };
+      const paraB = (b, rest) => {
+        const bw = bold.widthOfTextAtSize(b, size);
+        const words = rest.split(/\s+/);
+        let first = "", used = 0;
+        for (const w of words) {
+          const t = first ? first + " " + w : w;
+          if (bw + font.widthOfTextAtSize(t, size) > maxW) break;
+          first = t; used++;
+        }
+        page.drawText(b, { x: margin, y, size, font: bold });
+        if (first) page.drawText(first, { x: margin + bw, y, size, font });
+        y -= lh;
+        const rem = words.slice(used).join(" ");
+        if (rem) para(rem); else y -= 4;
+      };
+
+      center("ACUERDO DE COLABORACION / PRECONTRATO", bold, 13, 14);
+      center("Compromiso de trabajar juntos (no es el contrato definitivo)", italic, 10, 22);
+      para(`En ${ciudad}, a ${dia} de ${mes} de ${anio}.`);
+      center("REUNIDOS", bold, 12, 18);
+      para("De una parte, Vertial, representada por Uriel Arnau Ruiz, con DNI/NIE 48216687Q (en adelante, «Vertial»).");
+      para("Y de otra parte, (datos y firma a completar por la otra parte), (en adelante, «la otra parte»).");
+      para("Ambas partes confirman de buena fe su voluntad de trabajar juntas y firman este acuerdo amistoso.");
+      center("ACUERDOS", bold, 12, 18);
+      paraB("1. Compromiso. ", "Queda confirmado que Vertial y la otra parte tienen intención de colaborar / iniciar una relación laboral o de prestación de servicios.");
+      paraB("2. Este documento NO es el contrato definitivo. ", "Las partes dejan claro que el presente acuerdo es únicamente un precontrato / compromiso previo. No sustituye ni equivale al contrato de trabajo o de prestación de servicios definitivo con Vertial.");
+      paraB("3. Contrato definitivo obligatorio. ", "Para formalizar la contratación con Vertial será necesario firmar, en un momento posterior, un contrato definitivo independiente, que incluirá todo lo que conlleve dicha contratación.");
+      paraB("4. Buena fe. ", "Las partes se comprometen a actuar con transparencia, respeto y colaboración mientras se prepara y firma ese contrato definitivo.");
+      paraB("5. Confidencialidad. ", "La información compartida durante este proceso se tratará con discreción.");
+      paraB("6. Naturaleza amigable. ", "Este documento es un compromiso de intención de trabajar juntos. No genera por sí solo una relación laboral definitiva ni obligaciones económicas entre las partes, salvo lo que ambas pacten en el contrato definitivo con Vertial.");
+      paraB("7. Legislación. ", "Se rige por la legislación española.");
+      para("Y para que así conste, firman este acuerdo de forma amistosa y de común acuerdo, sabiendo que después deberán firmar el contrato definitivo de contratación con Vertial.");
+
+      // Fixed signature area at bottom
+      const sigY = 155;
+      page.drawText("VERTIAL", { x: margin, y: sigY, size: 12, font: bold });
+      page.drawText("Uriel Arnau Ruiz — DNI 48216687Q", { x: margin, y: sigY - 14, size: 9, font });
+      const img = await pdf.embedPng(sigVertialBytes);
+      page.drawImage(img, { x: margin, y: 72, width: 190, height: 55 });
+
+      page.drawText("LA OTRA PARTE", { x: 330, y: sigY, size: 12, font: bold });
+      page.drawText("Pendiente: nombre, DNI/CIF y firma", { x: 330, y: sigY - 14, size: 9, font: italic });
+      page.drawRectangle({ x: 330, y: 72, width: 190, height: 55, borderColor: rgb(0.35, 0.35, 0.35), borderWidth: 1 });
+      page.drawText("Firme aqui en el Paso 2", { x: 355, y: 95, size: 9, font: italic, color: rgb(0.4, 0.4, 0.4) });
+
+      pdf.setTitle("Precontrato Vertial — firmado por Vertial");
+      pdf.setSubject("vertial-partial-v1");
+      return pdf;
+    }
+
+    function downloadBytes(bytes, filename) {
+      const blob = new Blob([bytes], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = filename; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+    }
+
+    document.getElementById("downloadPartial").onclick = async () => {
+      try {
+        if (padV.isEmpty()) return showMsg("msg1", "Dibuja tu firma antes de descargar.", false);
+        const ciudad = document.getElementById("ciudad").value.trim();
+        if (!ciudad) return showMsg("msg1", "Pon la ciudad.", false);
+        const pdf = await buildPartialPdf({
+          ciudad,
+          dia: document.getElementById("dia").value.trim(),
+          mes: document.getElementById("mes").value.trim(),
+          anio: document.getElementById("anio").value.trim(),
+          sigVertialBytes: pngToBytes(padV.toPng()),
+        });
+        downloadBytes(await pdf.save(), "Precontrato_Vertial_FIRMA_URIEEL.pdf");
+        showMsg("msg1", "PDF descargado. Envíales ese PDF + este HTML.", true);
+      } catch (e) {
+        console.error(e);
+        showMsg("msg1", "Error: " + e.message, false);
+      }
+    };
+
+    document.getElementById("downloadFinal").onclick = async () => {
+      try {
+        const file = document.getElementById("pdfIn").files[0];
+        if (!file) return showMsg("msg2", "Selecciona el PDF que te envió Vertial.", false);
+        const nombre = document.getElementById("otraNombre").value.trim();
+        const dni = document.getElementById("otraDni").value.trim();
+        if (!nombre || !dni) return showMsg("msg2", "Rellena nombre y DNI/NIE/CIF.", false);
+        if (padO.isEmpty()) return showMsg("msg2", "Dibuja tu firma.", false);
+
+        const src = await PDFDocument.load(await file.arrayBuffer());
+        const page = src.getPages()[0];
+        const font = await src.embedFont(StandardFonts.TimesRoman);
+        const bold = await src.embedFont(StandardFonts.TimesRomanBold);
+        const sigImg = await src.embedPng(pngToBytes(padO.toPng()));
+
+        // Cover other-party pending box and write their data + signature
+        page.drawRectangle({ x: 325, y: 68, width: 210, height: 100, color: rgb(1, 1, 1) });
+        page.drawText("LA OTRA PARTE", { x: 330, y: 155, size: 12, font: bold });
+        page.drawText(nombre, { x: 330, y: 140, size: 9, font });
+        page.drawText("DNI/NIE/CIF: " + dni, { x: 330, y: 128, size: 9, font });
+        page.drawImage(sigImg, { x: 330, y: 72, width: 190, height: 50 });
+
+        // Clear note at bottom with their identification
+        page.drawRectangle({ x: 45, y: 18, width: 505, height: 22, color: rgb(1, 1, 1) });
+        page.drawText("Otra parte: " + nombre + " · " + dni + " · Firmado junto a Vertial", {
+          x: 50, y: 24, size: 8, font, color: rgb(0.2, 0.2, 0.2),
+        });
+
+        src.setTitle("Precontrato Vertial — firmado por ambas partes");
+        downloadBytes(await src.save(), "Precontrato_Vertial_FIRMADO_AMBOS.pdf");
+        showMsg("msg2", "Listo. PDF final con ambas firmas descargado.", true);
+      } catch (e) {
+        console.error(e);
+        showMsg("msg2", "Error: " + e.message, false);
+      }
+    };
+  </script>
+</body>
+</html>

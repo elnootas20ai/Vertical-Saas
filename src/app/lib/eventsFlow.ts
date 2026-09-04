@@ -51,8 +51,9 @@ export function computeQuoteTotal(lines: QuoteLine[]): number {
   return lines.reduce((sum, line) => sum + (Number(line.total) || 0), 0);
 }
 
-/** IVA al final del presupuesto (líneas = base imponible). */
-export const EVENTS_QUOTE_IVA_RATE = 0.21;
+/** IVA al final del presupuesto (líneas = base imponible). Catering / comida: 10%. */
+export const EVENTS_QUOTE_IVA_RATE = 0.1;
+export const EVENTS_QUOTE_IVA_PERCENT = Math.round(EVENTS_QUOTE_IVA_RATE * 100);
 
 export function computeQuoteMoney(lines: QuoteLine[]): {
   subtotal: number;

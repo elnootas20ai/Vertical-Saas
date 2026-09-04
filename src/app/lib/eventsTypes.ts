@@ -54,11 +54,37 @@ export type EventServiceCategory =
 
 export type EventServiceUnit = 'fijo' | 'por_persona' | 'por_hora';
 
+/** IVA servicios de evento (España). Default al alta: 21% general. */
+export const EVENTS_SERVICE_DEFAULT_TAX_RATE = 21;
+
+export const EVENTS_SERVICE_TAX_OPTIONS = [
+  { value: 10, label: '10% — comida / catering' },
+  { value: 21, label: '21% — servicios / general' },
+] as const;
+
+export function normalizeEventsServiceTaxRate(raw: unknown): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return EVENTS_SERVICE_DEFAULT_TAX_RATE;
+  const rounded = Math.round(n);
+  if (rounded === 10 || rounded === 21) return rounded;
+  if (rounded > 0 && rounded <= 100) return rounded;
+  return EVENTS_SERVICE_DEFAULT_TAX_RATE;
+}
+
+export function eventsServiceTaxRate(
+  s: Pick<{ taxRate?: number; iva?: number }, 'taxRate' | 'iva'> | null | undefined,
+): number {
+  return normalizeEventsServiceTaxRate(s?.taxRate ?? s?.iva);
+}
+
 export interface EventServiceRecord extends VerticalEntity {
   nombre: string;
   categoria: EventServiceCategory;
   precio: number;
   unidad: EventServiceUnit;
+  /** % IVA (10 / 21). Vacío → 21% servicios. */
+  taxRate?: number;
+  iva?: number;
   descripcion?: string;
   activo: boolean;
 }

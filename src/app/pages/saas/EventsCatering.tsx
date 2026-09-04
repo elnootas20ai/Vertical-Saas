@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Layout } from '../../components/saas/Layout';
+import { VertialNumericInput } from '../../components/saas/VertialNumericInput';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { createVerticalApi, type VerticalEntity } from '../../lib/verticalApiFactory';
@@ -415,11 +416,11 @@ export function EventsCatering({ embedded = false }: { embedded?: boolean } = {}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Comensales</label>
-                  <input type="number" value={form.comensales} onChange={e => setForm(p => ({ ...p, comensales: +e.target.value }))} className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                  <VertialNumericInput mode="int" min={0} value={form.comensales} onChange={(comensales) => setForm(p => ({ ...p, comensales }))} className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Precio/persona (€)</label>
-                  <input type="number" value={form.precioPorPersona} onChange={e => setForm(p => ({ ...p, precioPorPersona: +e.target.value }))} className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                  <VertialNumericInput mode="decimal" min={0} value={form.precioPorPersona} onChange={(precioPorPersona) => setForm(p => ({ ...p, precioPorPersona }))} className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
               </div>
               <div>

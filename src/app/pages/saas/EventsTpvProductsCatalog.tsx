@@ -76,6 +76,7 @@ export function EventsTpvProductsCatalog() {
   const [editing, setEditing] = useState<EventTpvProduct | null>(null);
   const [form, setForm] = useState<ProductForm>(EMPTY);
   const [precioText, setPrecioText] = useState('');
+  const [taxText, setTaxText] = useState(String(EVENTS_TPV_DEFAULT_TAX_RATE));
 
   const loadData = useCallback(async () => {
     if (!userId) {
@@ -112,20 +113,29 @@ export function EventsTpvProductsCatalog() {
     setEditing(null);
     setForm(EMPTY);
     setPrecioText('');
+    setTaxText(String(EVENTS_TPV_DEFAULT_TAX_RATE));
     setShowModal(true);
   };
 
   const openEdit = (p: EventTpvProduct) => {
     setEditing(p);
+    const taxRate = eventsTpvProductTaxRate(p);
     setForm({
       nombre: p.nombre || '',
       precio: Number(p.precio) || 0,
-      taxRate: eventsTpvProductTaxRate(p),
+      taxRate,
       descripcion: p.descripcion || '',
       activo: p.activo !== false,
     });
     setPrecioText(p.precio ? String(p.precio).replace('.', ',') : '');
+    setTaxText(String(taxRate));
     setShowModal(true);
+  };
+
+  const applyTaxPreset = (value: number) => {
+    const taxRate = normalizeEventsTpvTaxRate(value);
+    setForm((f) => ({ ...f, taxRate }));
+    setTaxText(String(taxRate));
   };
 
   const handleSave = async () => {
@@ -135,7 +145,9 @@ export function EventsTpvProductsCatalog() {
       return;
     }
     const precio = Number(String(precioText).replace(',', '.').trim());
-    const taxRate = normalizeEventsTpvTaxRate(form.taxRate);
+    const taxRate = normalizeEventsTpvTaxRate(
+      taxText.trim() === '' ? form.taxRate : taxText,
+    );
     const payload = {
       nombre: form.nombre.trim(),
       precio: Number.isFinite(precio) ? precio : 0,
@@ -194,8 +206,9 @@ export function EventsTpvProductsCatalog() {
           ? `Cat: ${entryStr(e, 'category', 'categoria')}`
           : '',
       ].filter(Boolean);
+      const taxRaw = entryStr(e, 'taxRate', 'iva', 'tax');
       const taxRate = normalizeEventsTpvTaxRate(
-        entryStr(e, 'taxRate', 'iva') || EVENTS_TPV_DEFAULT_TAX_RATE,
+        taxRaw === '' ? EVENTS_TPV_DEFAULT_TAX_RATE : taxRaw,
       );
       return {
         nombre,
@@ -247,7 +260,7 @@ export function EventsTpvProductsCatalog() {
             quickAddLabel="Alta rápida"
             quickAddDesc="Formulario de producto"
             importAddLabel="Importar Excel"
-            importAddDesc="Plantilla con nombre, precio y más"
+            importAddDesc="Plantilla Excel: nombre, precio, IVA…"
           />
         </div>
 
@@ -372,25 +385,58 @@ export function EventsTpvProductsCatalog() {
               />
             </label>
 
-            <label className="block space-y-1.5">
-              <span className="text-xs font-semibold text-stone-500">IVA</span>
-              <select
-                value={form.taxRate}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, taxRate: normalizeEventsTpvTaxRate(e.target.value) }))
-                }
-                className="w-full min-h-11 rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 text-sm"
-              >
-                {EVENTS_TPV_TAX_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
+            <div className="block space-y-1.5">
+              <span className="text-xs font-semibold text-stone-500">IVA (%)</span>
+              <div className="flex flex-wrap gap-2">
+                {EVENTS_TPV_TAX_OPTIONS.map((opt) => {
+                  const active = Number(form.taxRate) === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => applyTaxPreset(opt.value)}
+                      className={`min-h-9 rounded-xl border px-3 text-xs font-semibold transition-colors ${
+                        active
+                          ? 'border-[var(--v-blue,#2563eb)] bg-blue-50 text-[var(--v-blue,#2563eb)] dark:bg-blue-950/40 dark:text-blue-300'
+                          : 'border-stone-200 bg-white text-stone-600 hover:border-blue-300 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="relative">
+                <input
+                  value={taxText}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === '' || /^[\d.,]*$/.test(v)) {
+                      setTaxText(v);
+                      const n = Number(String(v).replace(',', '.'));
+                      if (Number.isFinite(n) && n >= 0 && n <= 100) {
+                        setForm((f) => ({ ...f, taxRate: Math.round(n) }));
+                      }
+                    }
+                  }}
+                  onBlur={() => {
+                    const taxRate = normalizeEventsTpvTaxRate(taxText === '' ? form.taxRate : taxText);
+                    setForm((f) => ({ ...f, taxRate }));
+                    setTaxText(String(taxRate));
+                  }}
+                  placeholder="Ej. 4"
+                  inputMode="decimal"
+                  className="w-full min-h-11 rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 pr-10 text-sm tabular-nums"
+                  aria-label="IVA manual en porcentaje"
+                />
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm font-medium text-stone-400">
+                  %
+                </span>
+              </div>
               <span className="text-[11px] text-stone-400">
-                Comida / catering: 10% por defecto
+                Atajos 10% / 21%, o escribe otro (0–100). Por defecto comida 10%.
               </span>
-            </label>
+            </div>
 
             <label className="block space-y-1.5">
               <span className="text-xs font-semibold text-stone-500">Notas (opcional)</span>

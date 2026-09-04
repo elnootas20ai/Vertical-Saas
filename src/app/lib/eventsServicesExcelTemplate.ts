@@ -15,6 +15,7 @@ export const EVENTS_SERVICES_IMPORT_FIELDS: ImportFieldDef[] = [
   { key: 'name', label: 'Nombre', required: true, example: 'Banquete premium' },
   { key: 'category', label: 'Categoría', example: 'Catering' },
   { key: 'price', label: 'Precio', example: '85,00' },
+  { key: 'taxRate', label: 'IVA', example: '21' },
   { key: 'unit', label: 'Unidad', example: 'Por persona' },
   { key: 'description', label: 'Descripción', example: 'Menú de 4 platos' },
 ];
@@ -23,6 +24,7 @@ export const EVENTS_SERVICES_HEADER_ALIASES: Record<string, string[]> = {
   name: ['nombre', 'name', 'servicio', 'concepto'],
   category: ['categoria', 'categoría', 'category', 'tipo'],
   price: ['precio', 'price', 'tarifa', 'importe', 'pvp'],
+  taxRate: ['iva', 'tax', 'taxrate', '% iva', 'tipo iva'],
   unit: ['unidad', 'unit', 'modo', 'tipo precio', 'tipo de precio'],
   description: ['descripcion', 'descripción', 'description', 'notas', 'detalle'],
 };
@@ -104,10 +106,11 @@ function instructionLines(): string[] {
     'HOJA A USAR: «servicios» (la primera).',
     '',
     'COLUMNAS (fila 1 — no las renombres):',
-    '  Nombre* | Categoría | Precio | Unidad | Descripción',
+    '  Nombre* | Categoría | Precio | IVA | Unidad | Descripción',
     '',
     'OBLIGATORIO: Nombre.',
     'Precio en formato ES (85,00 o 1.250,50).',
+    'IVA: 10 (comida/catering) o 21 (servicios / general). Vacío → 21%.',
     '',
     'CATEGORÍAS:',
     `  ${cats}`,
@@ -122,9 +125,9 @@ function instructionLines(): string[] {
 
 function sampleRows(): string[][] {
   return [
-    ['Ejemplo · Banquete premium', 'Catering', '85,00', 'Por persona', 'Menú de 4 platos'],
-    ['Ejemplo · DJ 6 horas', 'Música / DJ', '650,00', 'Precio fijo', 'Equipo de sonido incluido'],
-    ['Ejemplo · Coordinación del día', 'Coordinación', '45,00', 'Por hora', 'Wedding planner in situ'],
+    ['Ejemplo · Banquete premium', 'Catering', '85,00', '10', 'Por persona', 'Menú de 4 platos'],
+    ['Ejemplo · DJ 6 horas', 'Música / DJ', '650,00', '21', 'Precio fijo', 'Equipo de sonido incluido'],
+    ['Ejemplo · Coordinación del día', 'Coordinación', '45,00', '21', 'Por hora', 'Wedding planner in situ'],
   ];
 }
 
@@ -136,6 +139,7 @@ export function buildEventsServicesImportWorkbook(): XLSX.WorkBook {
     { wch: 32 },
     { wch: 16 },
     { wch: 12 },
+    { wch: 8 },
     { wch: 14 },
     { wch: 36 },
   ];

@@ -409,3 +409,15 @@
 .dark .vsaas-nav-icon-active {
   color: #93c5fd !important;
 }
+
+/* Sin flechas en inputs number (Chrome/Safari/Edge + Firefox) */
+input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}

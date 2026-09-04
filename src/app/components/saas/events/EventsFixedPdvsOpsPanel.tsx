@@ -53,6 +53,7 @@ import { updateWorkCenter, type WorkCenter } from '../../../lib/workCentersApi';
 import { notifyDeliveryWorkCentersChanged } from '../../../lib/deliverySetup';
 import { formatDateEs } from '../../../lib/formatDateEs';
 import { ScheduleTimeField } from '../ScheduleTimeField';
+import { VertialNumericInput } from '../VertialNumericInput';
 import {
   VERTIAL_BTN_PRIMARY,
   VERTIAL_BTN_SECONDARY,
@@ -76,7 +77,7 @@ type Props = {
 type StepId = 'dia' | 'horario' | 'productos' | 'ruta' | 'equipo';
 
 const STEPS: { id: StepId; label: string; hint: string }[] = [
-  { id: 'dia', label: 'Día', hint: 'Días que se va (calendario)' },
+  { id: 'dia', label: 'Día', hint: 'Elige un día del evento' },
   { id: 'horario', label: 'Horario', hint: 'Día elegido y duración' },
   { id: 'productos', label: 'Productos', hint: 'Qué se lleva y qty' },
   { id: 'ruta', label: 'Ruta', hint: 'Timeline del día' },
@@ -112,17 +113,17 @@ function initialFromDraft(wc: WorkCenter) {
   return d;
 }
 
-/** Mini mes: marca programados y permite elegir varios días (toggle). */
+/** Mini mes: elige un solo día (los ya programados se marcan). */
 function FixedDayMonthPicker({
   selectedDates,
   focusDate,
   plannedDates,
-  onToggle,
+  onSelect,
 }: {
   selectedDates: Set<string>;
   focusDate: string;
   plannedDates: Set<string>;
-  onToggle: (ymd: string) => void;
+  onSelect: (ymd: string) => void;
 }) {
   const focus = useMemo(() => {
     try {
@@ -188,7 +189,7 @@ function FixedDayMonthPicker({
             <button
               key={ymd}
               type="button"
-              onClick={() => onToggle(ymd)}
+              onClick={() => onSelect(ymd)}
               className={`relative aspect-square rounded-lg text-xs font-semibold tabular-nums transition-colors ${
                 isSelected
                   ? 'bg-[var(--v-blue,#2563eb)] text-white'
@@ -217,9 +218,7 @@ function FixedDayMonthPicker({
       <p className="text-xs font-medium text-stone-600 dark:text-stone-300">
         {selectedSorted.length === 0
           ? 'Ningún día seleccionado'
-          : selectedSorted.length === 1
-            ? `Seleccionado: ${formatDateEs(selectedSorted[0])}`
-            : `${selectedSorted.length} días: ${selectedSorted.map((d) => formatDateEs(d)).join(' · ')}`}
+          : `Seleccionado: ${formatDateEs(selectedSorted[0])}`}
       </p>
     </div>
   );
@@ -240,11 +239,11 @@ export function EventsFixedPdvsOpsPanel({
   const [stepIdx, setStepIdx] = useState(() => bootDraft?.stepIdx ?? 0);
   const [date, setDate] = useState(() => bootDraft?.date || initialDateForWc(workCenter));
   const [selectedDates, setSelectedDates] = useState<Set<string>>(
-    () => new Set(
-      bootDraft?.selectedDates?.length
-        ? bootDraft.selectedDates
-        : [initialDateForWc(workCenter)],
-    ),
+    () => {
+      const fromDraft = bootDraft?.selectedDates?.filter(Boolean) || [];
+      const one = fromDraft[0] || bootDraft?.date || initialDateForWc(workCenter);
+      return new Set(one ? [one] : []);
+    },
   );
   const [startTime, setStartTime] = useState(() => {
     if (bootDraft?.startTime) return bootDraft.startTime;
@@ -333,23 +332,10 @@ export function EventsFixedPdvsOpsPanel({
     };
   }, [selectedDates, date, dataUserId, wcId, workCenter.eventsTpvLoad, workCenter.eventsFixedDayPlans]);
 
-  const toggleDate = (ymd: string) => {
-    setSelectedDates((prev) => {
-      const next = new Set(prev);
-      if (next.has(ymd)) {
-        if (next.size <= 1) {
-          setDate(ymd);
-          return next;
-        }
-        next.delete(ymd);
-        const remain = [...next].sort();
-        setDate(remain[remain.length - 1] || ymd);
-        return next;
-      }
-      next.add(ymd);
-      setDate(ymd);
-      return next;
-    });
+  /** Un solo día a la vez; al terminar el flujo se vuelve a elegir otro. */
+  const selectDate = (ymd: string) => {
+    setSelectedDates(new Set([ymd]));
+    setDate(ymd);
   };
 
   useEffect(() => {
@@ -441,8 +427,8 @@ export function EventsFixedPdvsOpsPanel({
 
   const save = async () => {
     const days = Array.from(selectedDates).filter(Boolean).sort();
-    if (days.length === 0) {
-      toast.error('Elige al menos un día');
+    if (days.length !== 1) {
+      toast.error('Elige un día');
       return;
     }
     if (!startTime || !endTime) {
@@ -451,7 +437,9 @@ export function EventsFixedPdvsOpsPanel({
     }
     setSaving(true);
     try {
-      const base = {
+      const day = days[0];
+      const plan: EventsFixedDayPlan = {
+        date: day,
         lines: lines.map((l) => ({
           catalogItemId: l.catalogItemId,
           name: l.name,
@@ -466,22 +454,23 @@ export function EventsFixedPdvsOpsPanel({
         startTime,
         endTime,
       };
-      let nextPlans = workCenter.eventsFixedDayPlans;
-      for (const d of days) {
-        const plan: EventsFixedDayPlan = { date: d, ...base };
-        nextPlans = upsertEventsFixedDayPlan(nextPlans, plan);
-      }
+      const nextPlans = upsertEventsFixedDayPlan(workCenter.eventsFixedDayPlans, plan);
       await updateWorkCenter({
         ...workCenter,
         eventsFixedDayPlans: nextPlans,
         eventsFixedOpsDraft: null,
       });
       notifyDeliveryWorkCentersChanged(businessId);
-      toast.success(
-        days.length === 1
-          ? 'Día guardado'
-          : `${days.length} días guardados`,
-      );
+      toast.success(`Día ${formatDateEs(day)} guardado · puedes elegir otro`);
+      // Volver al paso Día para programar el siguiente.
+      skipSeedOnceRef.current = true;
+      setStepIdx(0);
+      setSelectedDates(new Set());
+      setStartTime('');
+      setEndTime('');
+      setLines([]);
+      setCrew([]);
+      setRoute(defaultFixedDayRoute());
       onSaved();
     } catch {
       toast.error('No se pudo guardar');
@@ -512,8 +501,8 @@ export function EventsFixedPdvsOpsPanel({
 
   const saveDraft = async (opts?: { silent?: boolean; stepIdx?: number }) => {
     const days = Array.from(selectedDates).filter(Boolean);
-    if (days.length === 0) {
-      toast.error('Elige al menos un día');
+    if (days.length !== 1) {
+      toast.error('Elige un día');
       return;
     }
     setSaving(true);
@@ -536,6 +525,10 @@ export function EventsFixedPdvsOpsPanel({
   const goNext = () => {
     if (isLast) {
       void save();
+      return;
+    }
+    if (step.id === 'dia' && selectedDates.size !== 1) {
+      toast.error('Elige un día');
       return;
     }
     if (step.id === 'horario' && (!startTime || !endTime)) {
@@ -608,7 +601,7 @@ export function EventsFixedPdvsOpsPanel({
           <div className="flex items-center gap-2 px-3 py-2 border-b border-stone-100 dark:border-stone-800 bg-stone-50/80 dark:bg-stone-900/50">
             <CalendarDays className="w-4 h-4 text-stone-400" />
             <h3 className="text-xs font-bold uppercase tracking-wide text-stone-500">
-              Días del evento
+              Día del evento
             </h3>
           </div>
           <div className="px-3 py-3 space-y-3">
@@ -616,10 +609,10 @@ export function EventsFixedPdvsOpsPanel({
               selectedDates={selectedDates}
               focusDate={date}
               plannedDates={plannedDates}
-              onToggle={toggleDate}
+              onSelect={selectDate}
             />
             <p className="text-xs text-stone-500">
-              Toca varios días para marcarlos. Al guardar, el mismo plan (productos, ruta y equipo) se aplica a todos los seleccionados.
+              Elige un solo día. Al terminar y guardar, vuelves aquí para programar otro.
             </p>
           </div>
         </section>
@@ -636,24 +629,17 @@ export function EventsFixedPdvsOpsPanel({
           <div className="px-3 py-3 space-y-4">
             {selectedSorted.length === 0 ? (
               <p className="text-sm text-stone-500">
-                Elige al menos un día en el paso anterior.
+                Elige un día en el paso anterior.
               </p>
             ) : (
               <>
                 <div className="space-y-1.5">
                   <p className="text-[10px] font-bold uppercase tracking-wide text-stone-400">
-                    Día{selectedSorted.length === 1 ? '' : 's'} seleccionado{selectedSorted.length === 1 ? '' : 's'}
+                    Día seleccionado
                   </p>
-                  <ul className="flex flex-wrap gap-1.5">
-                    {selectedSorted.map((d) => (
-                      <li
-                        key={d}
-                        className="rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-2 text-sm font-semibold text-stone-800 dark:text-stone-100"
-                      >
-                        {formatDateEs(d)}
-                      </li>
-                    ))}
-                  </ul>
+                  <p className="rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-2 text-sm font-semibold text-stone-800 dark:text-stone-100 inline-block">
+                    {formatDateEs(selectedSorted[0])}
+                  </p>
                 </div>
                 <div className="flex flex-wrap items-end gap-3">
                   <ScheduleTimeField label="Inicio" value={startTime} onChange={setStartTime} />
@@ -665,7 +651,6 @@ export function EventsFixedPdvsOpsPanel({
                 {durationLabel ? (
                   <p className="text-sm text-stone-600 dark:text-stone-300">
                     Duración: <span className="font-semibold tabular-nums">{durationLabel}</span>
-                    {selectedSorted.length > 1 ? ' · mismo horario en todos los días' : ''}
                   </p>
                 ) : (
                   <p className="text-xs text-stone-500">
@@ -722,12 +707,11 @@ export function EventsFixedPdvsOpsPanel({
                     </span>
                     <label className="flex items-center gap-1.5 shrink-0">
                       <span className="text-[10px] font-semibold uppercase text-stone-400">Qty</span>
-                      <input
-                        type="number"
+                      <VertialNumericInput
+                        mode="int"
                         min={0}
-                        step={1}
                         value={line.qty}
-                        onChange={(e) => setQty(line.catalogItemId, Number(e.target.value))}
+                        onChange={(qty) => setQty(line.catalogItemId, qty)}
                         className="w-16 rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-sm tabular-nums text-right dark:border-stone-700 dark:bg-stone-900"
                       />
                     </label>
@@ -853,11 +837,7 @@ export function EventsFixedPdvsOpsPanel({
         >
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
           {isLast
-            ? (saving
-              ? 'Guardando…'
-              : selectedDates.size > 1
-                ? `Guardar ${selectedDates.size} días`
-                : 'Guardar')
+            ? (saving ? 'Guardando…' : 'Guardar día')
             : 'Siguiente'}
           {!isLast && !saving ? <ChevronRight className="w-4 h-4" /> : null}
         </button>

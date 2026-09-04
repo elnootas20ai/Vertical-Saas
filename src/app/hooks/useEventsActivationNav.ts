@@ -38,9 +38,12 @@ export function useEventsActivationNav() {
 
     setLoading(true);
     try {
+      const clientsPromise = businessId
+        ? listClientsRequest(dataUserId, { businessId }).catch(() => null)
+        : Promise.resolve([]);
       const [services, clients, events] = await Promise.all([
         loadEventServices(dataUserId, false).catch(() => null),
-        listClientsRequest(dataUserId, { businessId }).catch(() => null),
+        clientsPromise,
         loadEvents(dataUserId).catch(() => null),
       ]);
       const activeServices = (services || []).filter((svc) => svc.activo !== false);

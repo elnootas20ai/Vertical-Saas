@@ -1075,7 +1075,8 @@ function SidebarInner({
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => ({
     home: false,
     'worker-main': true,
-    salesPoints: true,
+    /** Cerrado por defecto; delivery/ops lo abre al cargar tiendas. Eventos: plegado hasta entrar en TPV. */
+    salesPoints: false,
     ...Object.fromEntries(sidebarGroupDefs.map((g) => [g.id, false])),
     ...Object.fromEntries(workerSidebarGroupDefs.map((g) => [g.id, false])),
   }));
@@ -1085,6 +1086,16 @@ function SidebarInner({
     if (displayOpsStoreRows.length === 0) return;
     setExpandedGroups((prev) => ({ ...prev, salesPoints: true }));
   }, [usesOpsStoreSidebar, displayOpsStoreRows.length]);
+
+  /** Eventos: al entrar en TPV/operar, abrir el bloque PDV. Fuera queda plegado por defecto. */
+  useEffect(() => {
+    if (!isEventsVertical) return;
+    const onPdvSurface =
+      location.pathname.startsWith('/saas/vertical/eventos/tpv')
+      || location.pathname.startsWith('/saas/vertical/eventos/operar');
+    if (!onPdvSurface) return;
+    setExpandedGroups((prev) => (prev.salesPoints ? prev : { ...prev, salesPoints: true }));
+  }, [isEventsVertical, location.pathname]);
 
   /** Centro de trabajo marcado en sidebar = misma lógica que Topbar (PDV `_id` o `wc:`). */
   const selectedSidebarWorkCenterId = useMemo(() => {
@@ -2226,13 +2237,54 @@ function SidebarInner({
                     >
                       <span className="flex items-center gap-2 flex-1 min-w-0 text-left">
                         {group.icon}
-                        {group.label}
+                        <span className="min-w-0 truncate">{group.label}</span>
+                        {group.id === 'salesPoints' && workCentersSidebarCount > 0 ? (
+                          <span
+                            className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-bold tabular-nums normal-case tracking-normal ${
+                              groupHasActiveItem
+                                ? 'bg-blue-100 text-blue-800 dark:bg-blue-950/50 dark:text-blue-200'
+                                : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                            }`}
+                          >
+                            {workCentersSidebarCount}
+                          </span>
+                        ) : null}
                       </span>
                       <ChevronDown
                         className={`w-4 h-4 shrink-0 ${shouldShowChildren ? 'rotate-180' : 'rotate-0'}`}
                       />
                     </button>
                   )}
+                  {/* Eventos: resumen del PDV activo cuando el bloque está plegado */}
+                  {group.id === 'salesPoints'
+                    && isEventsVertical
+                    && !shouldShowChildren
+                    && !showGroupedAsFlat
+                    && (() => {
+                      const activeSp = group.items.find(
+                        (it) => it.id.startsWith('sp-') && isItemActive(it),
+                      );
+                      if (!activeSp) return null;
+                      return (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedGroups((prev) => ({ ...prev, salesPoints: true }))
+                          }
+                          className="mx-2 mb-1 w-[calc(100%-1rem)] rounded-lg border border-slate-200/80 bg-white px-2.5 py-1.5 text-left dark:border-slate-700 dark:bg-slate-900/60"
+                          title="Ver PDV portátiles"
+                        >
+                          <span className="block truncate text-[12px] font-semibold text-slate-800 dark:text-slate-100">
+                            {activeSp.label}
+                          </span>
+                          {activeSp.terminalCode ? (
+                            <span className="mt-0.5 block truncate font-mono text-[10px] tracking-widest text-slate-500">
+                              {activeSp.terminalCode}
+                            </span>
+                          ) : null}
+                        </button>
+                      );
+                    })()}
 
                   <div className={shouldShowChildren ? undefined : 'hidden'} aria-hidden={!shouldShowChildren}>
                     {sortedItems.map((item) => {
@@ -2247,7 +2299,11 @@ function SidebarInner({
                           type="button"
                           onClick={() => handleMenuItemClick(item)}
                           className={`relative w-full flex items-center transition-colors last:rounded-b-xl ${
-                            isSalesPointSubItem ? 'gap-2 py-1.5' : 'gap-3 py-2.5'
+                            isSalesPointSubItem
+                              ? isEventsVertical
+                                ? 'gap-2 py-1'
+                                : 'gap-2 py-1.5'
+                              : 'gap-3 py-2.5'
                           } ${
                             !isMobile && collapsed
                               ? 'justify-center px-0'
@@ -2281,9 +2337,13 @@ function SidebarInner({
                           {(isMobile || !collapsed) && (
                             <span
                               className={`flex-1 min-w-0 text-left ${
-                                isSalesPointSubItem && (item.subLabel || item.terminalCode)
-                                  ? 'flex flex-col gap-0.5'
-                                  : ''
+                                isSalesPointSubItem
+                                  && isEventsVertical
+                                  && (item.subLabel || item.terminalCode)
+                                  ? 'flex items-center gap-1.5'
+                                  : isSalesPointSubItem && (item.subLabel || item.terminalCode)
+                                    ? 'flex flex-col gap-0.5'
+                                    : ''
                               }`}
                             >
                               <span
@@ -2319,7 +2379,7 @@ function SidebarInner({
                                       () => toast.error('No se pudo copiar'),
                                     );
                                   }}
-                                  className={`inline-flex max-w-full items-center gap-1 rounded px-1 py-0.5 font-mono text-[10px] leading-none tracking-widest transition-colors cursor-pointer ${
+                                  className={`inline-flex max-w-full shrink-0 items-center gap-1 rounded px-1 py-0.5 font-mono text-[10px] leading-none tracking-widest transition-colors cursor-pointer ${
                                     isActive
                                       ? 'bg-blue-100/80 text-blue-800 hover:bg-blue-200/80 dark:bg-blue-900/40 dark:text-blue-200 dark:hover:bg-blue-900/60'
                                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'

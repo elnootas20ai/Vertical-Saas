@@ -5,6 +5,7 @@ import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { useBusiness } from '../../../context/BusinessContext';
 import { NuevoClienteModal } from '../NuevoClienteModal';
+import { VertialNumericInput } from '../VertialNumericInput';
 import { useModalClose } from '../../../hooks/useModalClose';
 import { resolveBusinessScopeId } from '../../../lib/deliverySetup';
 import { resolveBusinessDataUserId } from '../../../lib/tenantUserId';
@@ -13,6 +14,7 @@ import { createVerticalApi, type VerticalEntity } from '../../../lib/verticalApi
 import {
   computeQuoteMoney,
   emptyQuoteLine,
+  EVENTS_QUOTE_IVA_PERCENT,
   parseQuoteAmount,
   parseQuoteLines,
   patchQuoteLine,
@@ -444,12 +446,12 @@ export function EventsEditModal({
                 </label>
                 <label className="space-y-1">
                   <span className="text-xs font-semibold text-gray-500">Nº de personas</span>
-                  <input
+                  <VertialNumericInput
                     className={inputClass}
-                    type="number"
+                    mode="int"
                     min={0}
-                    value={form.invitados || ''}
-                    onChange={(e) => patchForm({ invitados: Number(e.target.value) || 0 })}
+                    value={form.invitados || 0}
+                    onChange={(invitados) => patchForm({ invitados })}
                   />
                 </label>
                 <label className="space-y-1">
@@ -553,7 +555,7 @@ export function EventsEditModal({
             <div className="space-y-0.5 text-sm">
               <div className="flex gap-4 text-gray-500">
                 <span>Base {formatMoneyEs(quoteMoney.subtotal)}</span>
-                <span>IVA 21% {formatMoneyEs(quoteMoney.iva)}</span>
+                <span>IVA {EVENTS_QUOTE_IVA_PERCENT}% {formatMoneyEs(quoteMoney.iva)}</span>
               </div>
               <p className="text-lg font-bold tabular-nums text-gray-900 dark:text-gray-100">{formatMoneyEs(quoteMoney.total)}</p>
             </div>

@@ -389,8 +389,8 @@ export const ACTIVATION_SUBSTEP_GUIDES: Record<string, ActivationSubStepGuide> =
   },
   events_first_client: {
     fieldKey: 'client-add',
-    route: '/saas/clients',
-    clickHint: 'Clientes → alta rápida o importar',
+    route: '/saas/vertical/eventos/nueva-contratacion',
+    clickHint: 'Nueva contratación → alta del primer cliente en el paso Cliente',
   },
   events_first_event: {
     fieldKey: 'events-contract-new',

@@ -1182,19 +1182,24 @@ export function TpvRapidoOrderFlow({
     let cancelled = false;
     void (async () => {
       try {
+        const warmupBusinessId = isEventsBiz ? (businessId || undefined) : undefined;
+        const warmupOpts = isEventsBiz
+          ? { includeLegacy: false, fallbackAll: false }
+          : { includeLegacy: true, fallbackAll: true };
         await listClientsPageRequest(clientSearchUserId, {
           limit: 1,
           skip: 0,
           lite: true,
+          ...(warmupBusinessId ? { businessId: warmupBusinessId, businessType: 'events' } : {}),
         });
         if (cancelled) return;
         await searchClientsByPhoneRequest(
           clientSearchUserId,
           'a',
           1,
+          warmupBusinessId,
           undefined,
-          undefined,
-          { includeLegacy: true, fallbackAll: true },
+          warmupOpts,
         );
       } catch {
         /* ignore */
@@ -1203,7 +1208,7 @@ export function TpvRapidoOrderFlow({
     return () => {
       cancelled = true;
     };
-  }, [clientSearchUserId]);
+  }, [clientSearchUserId, isEventsBiz, businessId]);
 
   /** Evita TPV sobre limpieza/otra vertical: cambia al delivery de la cuenta. */
   const autoSwitchOrderFlowRef = useRef(false);
@@ -1297,8 +1302,8 @@ export function TpvRapidoOrderFlow({
     useClientPhoneSearch({
       userId: clientSearchUserId,
       phone: phoneInput,
-      // Toda la cartera del titular (como el CRM sin filtro raro de otra empresa).
-      businessId: undefined,
+      // Eventos: solo CRM de la empresa activa. Delivery/resto: cartera titular (legacy TPV).
+      businessId: isEventsBiz ? (businessId || undefined) : undefined,
       // Con atención rápida el buscador CRM está apagado del todo.
       enabled: !showCreateForm && !quickAttentionActive,
       matchByName: true,
@@ -1306,6 +1311,8 @@ export function TpvRapidoOrderFlow({
       debounceMs: 220,
       resultLimit: 20,
       keepSearchingWhileSelected: true,
+      includeLegacy: !isEventsBiz,
+      fallbackAll: !isEventsBiz,
     });
 
   // Step 2 - Delivery
@@ -2703,9 +2710,11 @@ export function TpvRapidoOrderFlow({
           searchUid,
           phoneDigits,
           5,
+          isEventsBiz ? (bizId || undefined) : undefined,
           undefined,
-          undefined,
-          { includeLegacy: true, fallbackAll: true },
+          isEventsBiz
+            ? { includeLegacy: false, fallbackAll: false }
+            : { includeLegacy: true, fallbackAll: true },
         );
         const exact = matches.find((c) => clientPhonesMatch(c.phone, phoneDigits));
         if (exact) crmClient = exact;
@@ -2779,6 +2788,7 @@ export function TpvRapidoOrderFlow({
     userId,
     writeBusinessId,
     businessId,
+    isEventsBiz,
     selectedOrderTaker,
     currentBusiness?.branches,
     user?.fullName,

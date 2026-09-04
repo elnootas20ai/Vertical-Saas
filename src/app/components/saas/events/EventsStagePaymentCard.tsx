@@ -239,9 +239,9 @@ export function EventsStagePaymentCard({
         <label className="block space-y-1">
           <span className="text-[11px] font-medium text-stone-500">Importe €</span>
           <input
-            type="number"
+            type="text"
+            inputMode="decimal"
             min={0}
-            step="0.01"
             className={inputClass}
             value={amount}
             onChange={(e) => setAmount(e.target.value)}

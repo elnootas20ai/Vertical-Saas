@@ -8,6 +8,10 @@ import { useModalClose } from '../../hooks/useModalClose';
 import {
   EVENT_SERVICE_CATEGORY_LABELS,
   EVENT_SERVICE_UNIT_LABELS,
+  EVENTS_SERVICE_DEFAULT_TAX_RATE,
+  EVENTS_SERVICE_TAX_OPTIONS,
+  eventsServiceTaxRate,
+  normalizeEventsServiceTaxRate,
   type EventServiceCategory,
   type EventServiceUnit,
 } from '../../lib/eventsTypes';
@@ -41,6 +45,8 @@ interface EventService extends VerticalEntity {
   categoria: EventServiceCategory;
   precio: number;
   unidad: EventServiceUnit;
+  taxRate?: number;
+  iva?: number;
   descripcion: string;
   activo: boolean;
 }
@@ -65,6 +71,8 @@ const EMPTY_FORM: ServiceForm = {
   categoria: 'catering',
   precio: 0,
   unidad: 'fijo',
+  taxRate: EVENTS_SERVICE_DEFAULT_TAX_RATE,
+  iva: EVENTS_SERVICE_DEFAULT_TAX_RATE,
   descripcion: '',
   activo: true,
 };
@@ -178,11 +186,14 @@ function EventsServicesCatalog() {
   };
   const openEdit = (s: EventService) => {
     setEditing(s);
+    const taxRate = eventsServiceTaxRate(s);
     setForm({
       nombre: s.nombre,
       categoria: s.categoria,
       precio: s.precio,
       unidad: s.unidad,
+      taxRate,
+      iva: taxRate,
       descripcion: s.descripcion,
       activo: s.activo,
     });
@@ -207,9 +218,12 @@ function EventsServicesCatalog() {
       return;
     }
     const precio = Number(String(precioText).replace(',', '.').trim());
+    const taxRate = normalizeEventsServiceTaxRate(form.taxRate);
     const payload = {
       ...form,
       precio: Number.isFinite(precio) ? precio : 0,
+      taxRate,
+      iva: taxRate,
     };
     try {
       if (editing) {
@@ -249,6 +263,12 @@ function EventsServicesCatalog() {
         categoria: mapServiceCategory(entryStr(e, 'category', 'categoria') || 'otro'),
         precio: parseEventServicePrice(entryStr(e, 'price', 'precio')),
         unidad: mapServiceUnit(entryStr(e, 'unit', 'unidad') || 'fijo'),
+        taxRate: normalizeEventsServiceTaxRate(
+          entryStr(e, 'taxRate', 'iva') || EVENTS_SERVICE_DEFAULT_TAX_RATE,
+        ),
+        iva: normalizeEventsServiceTaxRate(
+          entryStr(e, 'taxRate', 'iva') || EVENTS_SERVICE_DEFAULT_TAX_RATE,
+        ),
         descripcion: entryStr(e, 'description', 'descripcion'),
         activo: true,
       };
@@ -340,6 +360,7 @@ function EventsServicesCatalog() {
                 <th className="text-left px-4 py-3 font-medium text-gray-500">Servicio</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-500">Categoría</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-500">Precio</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-500">IVA</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-500">Unidad</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-500 hidden md:table-cell">Descripción</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-500">Estado</th>
@@ -349,7 +370,7 @@ function EventsServicesCatalog() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-gray-500">
+                  <td colSpan={8} className="px-4 py-12 text-center text-gray-500">
                     <Loader2 className="w-5 h-5 animate-spin inline-block" />
                   </td>
                 </tr>
@@ -362,6 +383,9 @@ function EventsServicesCatalog() {
                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${cat.bg} ${cat.text}`}>{cat.label}</span>
                     </td>
                     <td className="px-4 py-3 font-semibold text-gray-900 dark:text-gray-100">{fmt(Number(s.precio) || 0)}</td>
+                    <td className="px-4 py-3 tabular-nums text-gray-600 dark:text-gray-300">
+                      {eventsServiceTaxRate(s)}%
+                    </td>
                     <td className="px-4 py-3 text-gray-600 dark:text-gray-300">
                       <span className="inline-flex items-center gap-1"><Tag className="w-3 h-3" />{EVENT_SERVICE_UNIT_LABELS[s.unidad] || s.unidad}</span>
                     </td>
@@ -383,7 +407,7 @@ function EventsServicesCatalog() {
                 );
               })}
               {!loading && filtered.length === 0 && (
-                <tr><td colSpan={7} className="px-4 py-10 text-center text-gray-400">Sin servicios. Crea el catálogo para usarlo en presupuestos.</td></tr>
+                <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-400">Sin servicios. Crea el catálogo para usarlo en presupuestos.</td></tr>
               )}
             </tbody>
           </table>
@@ -430,30 +454,55 @@ function EventsServicesCatalog() {
                   ))}
                 </select>
               </div>
-              <div>
-                <label htmlFor="events-service-precio" className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
-                  Precio
-                </label>
-                <div className="relative">
-                  <input
-                    id="events-service-precio"
-                    name="precio"
-                    type="text"
-                    inputMode="decimal"
-                    value={precioText}
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="events-service-precio" className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+                    Precio
+                  </label>
+                  <div className="relative">
+                    <input
+                      id="events-service-precio"
+                      name="precio"
+                      type="text"
+                      inputMode="decimal"
+                      value={precioText}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        // Solo dígitos y coma/punto (formato ES); vacío permitido para poder escribir.
+                        if (v === '' || /^[\d.,]*$/.test(v)) setPrecioText(v);
+                      }}
+                      onFocus={(e) => e.target.select()}
+                      placeholder="0,00"
+                      autoComplete="off"
+                      className="w-full pl-3 pr-10 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-950 text-sm tabular-nums"
+                    />
+                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm font-medium text-gray-500 dark:text-gray-400">
+                      €
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  <label htmlFor="events-service-iva" className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+                    IVA
+                  </label>
+                  <select
+                    id="events-service-iva"
+                    value={normalizeEventsServiceTaxRate(form.taxRate)}
                     onChange={(e) => {
-                      const v = e.target.value;
-                      // Solo dígitos y coma/punto (formato ES); vacío permitido para poder escribir.
-                      if (v === '' || /^[\d.,]*$/.test(v)) setPrecioText(v);
+                      const taxRate = normalizeEventsServiceTaxRate(e.target.value);
+                      setForm((p) => ({ ...p, taxRate, iva: taxRate }));
                     }}
-                    onFocus={(e) => e.target.select()}
-                    placeholder="0,00"
-                    autoComplete="off"
-                    className="w-full pl-3 pr-10 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-950 text-sm tabular-nums"
-                  />
-                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm font-medium text-gray-500 dark:text-gray-400">
-                    €
-                  </span>
+                    className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-950 text-sm"
+                  >
+                    {EVENTS_SERVICE_TAX_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[11px] text-gray-400">
+                    Servicios: 21% por defecto
+                  </p>
                 </div>
               </div>
               <textarea
