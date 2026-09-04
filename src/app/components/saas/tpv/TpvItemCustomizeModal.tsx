@@ -20,7 +20,6 @@ import {
 import { foldTpvSearchText } from '../../../lib/tpvCatalogNavigation';
 import { useModalClose } from '../../../hooks/useModalClose';
 import { dismissTpvKeyboard, TpvModalRoot } from './TpvModalRoot';
-import { useTpvModalSheetFit } from '../../../hooks/useVisualViewportFit';
 
 type CustomizeTab = 'ingredients' | 'extras' | 'notes';
 
@@ -81,7 +80,6 @@ export function TpvItemCustomizeModal({
   onConfirm,
 }: TpvItemCustomizeModalProps) {
   useModalClose(true, onClose);
-  const sheetFitStyle = useTpvModalSheetFit(true);
 
   const buildYourOwn = isTpvBuildYourOwnCatalogItem(item);
   const halfHalfSelected = Boolean(
@@ -284,8 +282,7 @@ export function TpvItemCustomizeModal({
       {/* Tap fuera = solo bajar teclado; no cancelar la personalización. */}
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={dismissTpvKeyboard} />
       <div
-        className="relative w-full sm:max-w-3xl h-[94dvh] max-h-[94dvh] sm:max-h-[92dvh] min-h-0 overflow-hidden bg-white dark:bg-gray-900 rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col border-2 border-gray-200 dark:border-gray-700 pb-[env(safe-area-inset-bottom)]"
-        style={sheetFitStyle}
+        className="relative w-full sm:max-w-3xl h-[94dvh] sm:h-auto sm:max-h-[92dvh] min-h-0 overflow-hidden bg-white dark:bg-gray-900 rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col border-2 border-gray-200 dark:border-gray-700 pb-[env(safe-area-inset-bottom)]"
         role="dialog"
         aria-modal="true"
         aria-labelledby="tpv-customize-title"
@@ -369,6 +366,16 @@ export function TpvItemCustomizeModal({
                 type="search"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                onFocus={(e) => {
+                  const el = e.currentTarget;
+                  window.setTimeout(() => {
+                    try {
+                      el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                    } catch {
+                      /* ignore */
+                    }
+                  }, 60);
+                }}
                 placeholder={activeTab === 'ingredients' ? 'Buscar ingrediente…' : 'Buscar extra…'}
                 className="w-full pl-11 pr-10 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-base text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:border-emerald-500 outline-none touch-manipulation"
                 autoComplete="off"

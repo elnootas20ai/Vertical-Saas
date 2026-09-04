@@ -40,7 +40,6 @@ import { foldTpvSearchText } from '../../../lib/tpvCatalogNavigation';
 import { useModalClose } from '../../../hooks/useModalClose';
 import { dismissTpvKeyboard, TpvModalRoot } from './TpvModalRoot';
 import { TpvItemCustomizeModal } from './TpvItemCustomizeModal';
-import { useTpvModalSheetFit } from '../../../hooks/useVisualViewportFit';
 
 type PendingMainCustomize = {
   product: CatalogItem;
@@ -145,7 +144,6 @@ export function TpvComboCustomizeModal({
   onConfirm,
 }: TpvComboCustomizeModalProps) {
   useModalClose(true, onClose);
-  const sheetFitStyle = useTpvModalSheetFit(true);
 
   const menuSections = useMemo(
     () => resolveTpvComboMenuSections(item, catalogItems),
@@ -426,8 +424,7 @@ export function TpvComboCustomizeModal({
     <TpvModalRoot>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={dismissTpvKeyboard} />
       <div
-        className="relative flex flex-col w-full sm:max-w-4xl h-[94dvh] max-h-[94dvh] sm:max-h-[92dvh] min-h-0 overflow-hidden bg-white dark:bg-gray-900 rounded-t-2xl sm:rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 pb-[env(safe-area-inset-bottom)]"
-        style={sheetFitStyle}
+        className="relative flex flex-col w-full sm:max-w-4xl h-[94dvh] sm:h-auto sm:max-h-[92dvh] min-h-0 overflow-hidden bg-white dark:bg-gray-900 rounded-t-2xl sm:rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 pb-[env(safe-area-inset-bottom)]"
         role="dialog"
         aria-modal="true"
         aria-labelledby="tpv-combo-title"
@@ -662,6 +659,16 @@ export function TpvComboCustomizeModal({
                               type="search"
                               value={sectionQuery}
                               onChange={(e) => setSectionQuery(e.target.value)}
+                              onFocus={(e) => {
+                                const el = e.currentTarget;
+                                window.setTimeout(() => {
+                                  try {
+                                    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                                  } catch {
+                                    /* ignore */
+                                  }
+                                }, 60);
+                              }}
                               placeholder={`Buscar en ${section.catalogCategory} (${products.length})`}
                               className="w-full rounded-lg border border-gray-200 bg-white py-2 pl-8 pr-3 text-xs text-gray-900 placeholder:text-gray-400 focus:border-emerald-400 focus:outline-none dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
                             />

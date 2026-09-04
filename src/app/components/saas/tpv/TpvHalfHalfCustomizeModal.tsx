@@ -8,7 +8,6 @@ import {
   type HalfHalfPizzaSelection,
 } from '../../../lib/catalogCustomization';
 import { useModalClose } from '../../../hooks/useModalClose';
-import { useTpvModalSheetFit } from '../../../hooks/useVisualViewportFit';
 import { dismissTpvKeyboard, TpvModalRoot } from './TpvModalRoot';
 
 type TpvHalfHalfCustomizeModalProps = {
@@ -33,7 +32,6 @@ export function TpvHalfHalfCustomizeModal({
   onConfirm,
 }: TpvHalfHalfCustomizeModalProps) {
   useModalClose(true, onClose);
-  const sheetFitStyle = useTpvModalSheetFit(true);
 
   const scopeBrandId = useMemo(() => resolveHalfHalfScopeBrandId(item), [item]);
 
@@ -79,8 +77,7 @@ export function TpvHalfHalfCustomizeModal({
     <TpvModalRoot>
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={dismissTpvKeyboard} />
       <div
-        className="relative bg-white dark:bg-gray-900 w-full sm:max-w-lg h-[92dvh] max-h-[92dvh] min-h-0 sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden pb-[env(safe-area-inset-bottom)]"
-        style={sheetFitStyle}
+        className="relative bg-white dark:bg-gray-900 w-full sm:max-w-lg h-[92dvh] sm:h-auto sm:max-h-[92dvh] min-h-0 sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden pb-[env(safe-area-inset-bottom)]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3 p-4 border-b border-gray-200 dark:border-gray-800 shrink-0">
