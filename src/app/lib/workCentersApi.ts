@@ -4,8 +4,8 @@ import { ensureCouchDb } from './ensureCouchDb';
 import type { BusinessHoursConfig } from './settingsApi';
 import type { EventsPdvLoadLine } from './eventsPdvLoad';
 import { normalizeEventsPdvLoad } from './eventsPdvLoad';
-import type { EventsFixedDayPlan } from './eventsFixedDayPlan';
-import { normalizeEventsFixedDayPlans } from './eventsFixedDayPlan';
+import type { EventsFixedDayPlan, EventsFixedOpsDraft } from './eventsFixedDayPlan';
+import { normalizeEventsFixedDayPlans, normalizeEventsFixedOpsDraft } from './eventsFixedDayPlan';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -93,6 +93,11 @@ export interface WorkCenter {
    * Planes por día del evento fijo: productos a llevar (qty) + quién trabaja ese día.
    */
   eventsFixedDayPlans?: EventsFixedDayPlan[];
+  /**
+   * Secuencia ops a medias (día→horario→productos→ruta→equipo).
+   * Si existe, ese evento bloquea abrir otro fijo hasta completar o seguir ese borrador.
+   */
+  eventsFixedOpsDraft?: EventsFixedOpsDraft | null;
   active: boolean;
   deletedAt?: string | null;
   createdAt: string;
@@ -300,6 +305,12 @@ function normalizeWorkCenter(value: unknown): WorkCenter | null {
       if (!Object.prototype.hasOwnProperty.call(doc, 'eventsFixedDayPlans')) return undefined;
       if ((doc as { eventsFixedDayPlans?: unknown }).eventsFixedDayPlans == null) return undefined;
       return normalizeEventsFixedDayPlans((doc as { eventsFixedDayPlans?: unknown }).eventsFixedDayPlans);
+    })(),
+    eventsFixedOpsDraft: (() => {
+      if (!Object.prototype.hasOwnProperty.call(doc, 'eventsFixedOpsDraft')) return undefined;
+      const raw = (doc as { eventsFixedOpsDraft?: unknown }).eventsFixedOpsDraft;
+      if (raw == null) return null;
+      return normalizeEventsFixedOpsDraft(raw);
     })(),
     active: doc.active !== false,
     deletedAt: (doc as { deletedAt?: string | null }).deletedAt || null,

@@ -8,6 +8,7 @@ import { Loader2, Monitor, X } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 import { useModalClose } from '../../../hooks/useModalClose';
 import { filterWorkCentersForBusinessScope } from '../../../lib/deliverySetup';
+import { hasEventsFixedOpsDraft } from '../../../lib/eventsFixedDayPlan';
 import {
   listSalesPoints,
   type EventsPdvKind,
@@ -115,7 +116,9 @@ export function EventsFixedPdvsHubModal({
       setSelectedId(null);
       return;
     }
+    const draftRow = rows.find((r) => hasEventsFixedOpsDraft(r.wc));
     setSelectedId((prev) => {
+      if (draftRow) return draftRow.wc._id;
       if (prev && rows.some((r) => r.wc._id === prev || r.wc.id === prev)) {
         const hit = rows.find((r) => r.wc._id === prev || r.wc.id === prev);
         return hit?.wc._id || prev;
@@ -127,6 +130,17 @@ export function EventsFixedPdvsHubModal({
   if (!open) return null;
 
   const selected = rows.find((r) => r.wc._id === selectedId) || null;
+  const draftLock = rows.find((r) => hasEventsFixedOpsDraft(r.wc)) || null;
+  const lockedToId = draftLock?.wc._id || null;
+  const lockedName = String(draftLock?.wc.name || 'otro evento').trim() || 'otro evento';
+
+  const trySelect = (id: string) => {
+    if (lockedToId && id !== lockedToId) {
+      toast.error(`Estás planificando «${lockedName}». Termina esa secuencia (Guardar al final) antes de abrir otro.`);
+      return;
+    }
+    setSelectedId(id);
+  };
 
   return (
     <>
@@ -143,7 +157,7 @@ export function EventsFixedPdvsHubModal({
                 Eventos fijos
               </h2>
               <p className="text-xs text-stone-500 mt-0.5">
-                Cada evento por pasos: día, horario, productos, ruta y equipo.
+                Cada evento por pasos: día, horario, productos, ruta y equipo. Uno a la vez.
               </p>
             </div>
             <button
@@ -164,17 +178,23 @@ export function EventsFixedPdvsHubModal({
               <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Evento fijo">
                 {rows.map((row) => {
                   const active = selectedId === row.wc._id;
+                  const isDraft = hasEventsFixedOpsDraft(row.wc);
+                  const blocked = Boolean(lockedToId && row.wc._id !== lockedToId);
                   return (
                     <button
                       key={row.wc._id}
                       type="button"
                       role="radio"
                       aria-checked={active}
-                      onClick={() => setSelectedId(row.wc._id)}
+                      aria-disabled={blocked}
+                      disabled={blocked}
+                      onClick={() => trySelect(row.wc._id)}
                       className={`min-h-11 max-w-full px-3 py-2 rounded-xl border-2 text-left transition-colors ${
-                        active
-                          ? 'border-[var(--v-blue,#2563eb)] bg-blue-50 dark:bg-blue-950/40'
-                          : 'border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 hover:border-blue-300'
+                        blocked
+                          ? 'border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-950/40 opacity-50 cursor-not-allowed'
+                          : active
+                            ? 'border-[var(--v-blue,#2563eb)] bg-blue-50 dark:bg-blue-950/40'
+                            : 'border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 hover:border-blue-300'
                       }`}
                     >
                       <span
@@ -188,6 +208,8 @@ export function EventsFixedPdvsHubModal({
                       </span>
                       <span className="block text-[10px] text-stone-500 mt-0.5 truncate">
                         {(() => {
+                          if (isDraft) return 'Borrador · secuencia a medias';
+                          if (blocked) return `Bloqueado · acaba «${lockedName}»`;
                           const planCount = Array.isArray(row.wc.eventsFixedDayPlans)
                             ? row.wc.eventsFixedDayPlans.length
                             : 0;
@@ -230,6 +252,7 @@ export function EventsFixedPdvsHubModal({
               <EventsFixedPdvsOpsPanel
                 key={selected.wc._id}
                 workCenter={selected.wc}
+                dataUserId={userId}
                 businessId={businessId}
                 businessMembers={business?.members || []}
                 ownerUserId={business?.owner_user_id}

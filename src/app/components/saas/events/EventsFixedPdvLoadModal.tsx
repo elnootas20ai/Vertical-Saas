@@ -7,13 +7,16 @@ import { toast } from 'sonner';
 import { Loader2, Plus, Trash2, X } from 'lucide-react';
 import { useModalClose } from '../../../hooks/useModalClose';
 import {
-  listCatalogItemsRequest,
-  type CatalogItem,
-} from '../../../lib/deliveryApi';
-import {
   normalizeEventsPdvLoad,
   type EventsPdvLoadLine,
 } from '../../../lib/eventsPdvLoad';
+import {
+  eventsTpvProductId,
+  eventsTpvProductName,
+  eventsTpvProductPrice,
+  listActiveEventsTpvProducts,
+  type EventsTpvProduct,
+} from '../../../lib/eventsTpvProducts';
 import {
   getWorkCenterById,
   updateWorkCenter,
@@ -55,7 +58,7 @@ export function EventsFixedPdvLoadModal({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [wc, setWc] = useState<WorkCenter | null>(null);
-  const [catalog, setCatalog] = useState<CatalogItem[]>([]);
+  const [catalog, setCatalog] = useState<EventsTpvProduct[]>([]);
   const [lines, setLines] = useState<EventsPdvLoadLine[]>([]);
   const [pickId, setPickId] = useState('');
 
@@ -65,18 +68,15 @@ export function EventsFixedPdvLoadModal({
     setLoading(true);
     void Promise.all([
       getWorkCenterById(workCenterId),
-      listCatalogItemsRequest(userId, 'catalog').catch(() => [] as CatalogItem[]),
+      listActiveEventsTpvProducts(userId),
     ])
       .then(([center, items]) => {
         if (cancelled) return;
         setWc(center);
-        const saleItems = (items || []).filter(
-          (it) => it.active !== false && it.module !== 'stock' && !it.deletedAt,
-        );
-        setCatalog(saleItems);
+        setCatalog(items);
         const load = normalizeEventsPdvLoad(center?.eventsTpvLoad);
         setLines(load);
-        setPickId(saleItems[0]?._id || '');
+        setPickId(items[0] ? eventsTpvProductId(items[0]) : '');
       })
       .catch(() => {
         if (!cancelled) toast.error('No se pudo cargar la carga del PDV');
@@ -91,32 +91,32 @@ export function EventsFixedPdvLoadModal({
 
   const available = useMemo(() => {
     const taken = new Set(lines.map((l) => l.catalogItemId));
-    return catalog.filter((c) => !taken.has(c._id));
+    return catalog.filter((c) => !taken.has(eventsTpvProductId(c)));
   }, [catalog, lines]);
 
   if (!open) return null;
 
   const addLine = () => {
-    const id = String(pickId || available[0]?._id || '').trim();
+    const id = String(pickId || (available[0] ? eventsTpvProductId(available[0]) : '')).trim();
     if (!id) {
-      toast.error('No hay más productos en carta');
+      toast.error('No hay más productos (añádelos en Servicios → Productos)');
       return;
     }
-    const item = catalog.find((c) => c._id === id);
+    const item = catalog.find((c) => eventsTpvProductId(c) === id);
     if (!item) return;
     setLines((prev) =>
       normalizeEventsPdvLoad([
         ...prev,
         {
           catalogItemId: id,
-          name: item.name || id,
+          name: eventsTpvProductName(item),
           qty: 1,
-          unitPrice: Number(item.unitPrice || 0),
+          unitPrice: eventsTpvProductPrice(item),
         },
       ]),
     );
-    const nextAvail = available.filter((c) => c._id !== id);
-    setPickId(nextAvail[0]?._id || '');
+    const nextAvail = available.filter((c) => eventsTpvProductId(c) !== id);
+    setPickId(nextAvail[0] ? eventsTpvProductId(nextAvail[0]) : '');
   };
 
   const patchLine = (catalogItemId: string, patch: Partial<EventsPdvLoadLine>) => {
@@ -165,7 +165,7 @@ export function EventsFixedPdvLoadModal({
               Carga · {titleName}
             </h2>
             <p className="text-xs text-stone-500 mt-0.5">
-              Productos y servicios que saldrán en el TPV de la tablet. Cantidad = lo que llevas; al vender se descuenta del stock del producto.
+              Elige de Servicios → Productos lo que saldrá en el TPV. Cantidad = lo que llevas.
             </p>
           </div>
           <button
@@ -188,7 +188,7 @@ export function EventsFixedPdvLoadModal({
             <>
               <div className="flex flex-wrap gap-2 items-end">
                 <label className="flex-1 min-w-[10rem] space-y-1">
-                  <span className="text-[11px] font-medium text-stone-500">Añadir de la carta</span>
+                  <span className="text-[11px] font-medium text-stone-500">Añadir de Servicios → Productos</span>
                   <select
                     className={inputClass}
                     value={pickId}
@@ -198,11 +198,14 @@ export function EventsFixedPdvLoadModal({
                     {available.length === 0 ? (
                       <option value="">Sin más productos</option>
                     ) : (
-                      available.map((c) => (
-                        <option key={c._id} value={c._id}>
-                          {c.name} · {formatMoneyEs(Number(c.unitPrice || 0))} €
-                        </option>
-                      ))
+                      available.map((c) => {
+                        const id = eventsTpvProductId(c);
+                        return (
+                          <option key={id} value={id}>
+                            {eventsTpvProductName(c)} · {formatMoneyEs(eventsTpvProductPrice(c))} €
+                          </option>
+                        );
+                      })
                     )}
                   </select>
                 </label>
@@ -219,7 +222,7 @@ export function EventsFixedPdvLoadModal({
 
               {lines.length === 0 ? (
                 <p className="text-sm text-stone-500 text-center py-6">
-                  Aún no hay carga. Añade lo que se venderá en este evento fijo.
+                  Aún no hay carga. Añade productos desde Servicios → Productos.
                 </p>
               ) : (
                 <ul className="space-y-2">
