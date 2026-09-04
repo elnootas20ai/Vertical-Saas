@@ -4,11 +4,15 @@ import {
   isRestaurantBusinessType,
   isStrictDeliveryBusinessType,
 } from './deliveryOpsTypes';
+import { isCompraventaBusinessType } from './compraventaSetup';
 import {
   resolveRetailCajaPath,
   resolveRetailCeoTpvPath,
   resolveRetailOpsHomePath,
 } from './retailOpsPaths';
+
+const EVENTS_HOME = '/saas/vertical/eventos';
+const COMPRAVENTA_HOME = '/saas/vertical/compraventa';
 
 function isHeladeriaOpsPath(path: string): boolean {
   return (
@@ -21,9 +25,23 @@ function isEventsPath(path: string): boolean {
   return path.startsWith('/saas/events-') || path.startsWith('/saas/vertical/eventos');
 }
 
+/** Rutas del vertical Comercial / compraventa (concesionario). */
+function isCompraventaPath(path: string): boolean {
+  return (
+    path.startsWith('/saas/vertical/compraventa')
+    || path.startsWith('/saas/vehicles')
+    || path.startsWith('/saas/dealership-workers')
+    || path.startsWith('/saas/reservations')
+    || path === '/saas/sales'
+    || path.startsWith('/saas/sales/')
+    || path === '/saas/pipeline'
+    || path.startsWith('/saas/pipeline/')
+  );
+}
+
 /**
  * Al cambiar de empresa, si la ruta es de otro vertical, ir a la home correcta.
- * Delivery ↔ Bar/restaurante ↔ Heladería ↔ Eventos no se mezclan.
+ * Delivery ↔ Bar/restaurante ↔ Heladería ↔ Eventos ↔ Comercial no se mezclan.
  */
 export function resolvePathAfterBusinessSwitch(
   pathname: string,
@@ -34,6 +52,7 @@ export function resolvePathAfterBusinessSwitch(
   const nextIsDelivery = isStrictDeliveryBusinessType(nextBusinessType);
   const nextIsHeladeria = isIceCreamShopBusinessType(nextBusinessType);
   const nextIsEvents = isEventsBusinessType(nextBusinessType);
+  const nextIsCompraventa = isCompraventaBusinessType(nextBusinessType);
 
   const onRestaurantOps =
     path.startsWith('/saas/restaurant-ops')
@@ -50,6 +69,7 @@ export function resolvePathAfterBusinessSwitch(
   const onHeladeriaOps = isHeladeriaOpsPath(path);
 
   if (onRestaurantOps && !nextIsRestaurant) {
+    if (nextIsEvents) return EVENTS_HOME;
     if (path.includes('/tpv')) return resolveRetailCeoTpvPath(nextBusinessType);
     if (path.startsWith('/saas/caja')) return resolveRetailCajaPath(nextBusinessType);
     if (nextIsDelivery || nextIsHeladeria) return resolveRetailOpsHomePath(nextBusinessType);
@@ -57,6 +77,7 @@ export function resolvePathAfterBusinessSwitch(
   }
 
   if (onDeliveryOps && !nextIsDelivery) {
+    if (nextIsEvents) return EVENTS_HOME;
     if (nextIsRestaurant || nextIsHeladeria) {
       if (path.includes('/tpv')) return resolveRetailCeoTpvPath(nextBusinessType);
       if (path.includes('/caja')) return resolveRetailCajaPath(nextBusinessType);
@@ -66,6 +87,7 @@ export function resolvePathAfterBusinessSwitch(
   }
 
   if (onHeladeriaOps && !nextIsHeladeria) {
+    if (nextIsEvents) return EVENTS_HOME;
     if (nextIsRestaurant || nextIsDelivery) {
       if (path.includes('/tpv')) return resolveRetailCeoTpvPath(nextBusinessType);
       if (path.includes('/caja')) return resolveRetailCajaPath(nextBusinessType);
@@ -74,7 +96,16 @@ export function resolvePathAfterBusinessSwitch(
     return '/saas';
   }
 
+  if (isCompraventaPath(path) && !nextIsCompraventa) {
+    if (nextIsEvents) return EVENTS_HOME;
+    if (nextIsRestaurant || nextIsDelivery || nextIsHeladeria) {
+      return resolveRetailOpsHomePath(nextBusinessType);
+    }
+    return '/saas';
+  }
+
   if (isEventsPath(path) && !nextIsEvents) {
+    if (nextIsCompraventa) return COMPRAVENTA_HOME;
     if (nextIsRestaurant || nextIsDelivery || nextIsHeladeria) {
       return resolveRetailOpsHomePath(nextBusinessType);
     }

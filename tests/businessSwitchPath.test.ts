@@ -37,4 +37,29 @@ describe('resolvePathAfterBusinessSwitch', () => {
       '/saas',
     );
   });
+
+  it('desde Comercial (ROAL) a Eventos (Paunipol) → hub eventos', () => {
+    expect(resolvePathAfterBusinessSwitch('/saas/vertical/compraventa', 'events')).toBe(
+      '/saas/vertical/eventos',
+    );
+    expect(resolvePathAfterBusinessSwitch('/saas/vehicles', 'events')).toBe(
+      '/saas/vertical/eventos',
+    );
+    expect(resolvePathAfterBusinessSwitch('/saas/vertical/compraventa/ventas', 'events')).toBe(
+      '/saas/vertical/eventos',
+    );
+  });
+
+  it('desde Eventos a Comercial → hub compraventa', () => {
+    expect(resolvePathAfterBusinessSwitch('/saas/vertical/eventos', 'carDealership')).toBe(
+      '/saas/vertical/compraventa',
+    );
+    expect(resolvePathAfterBusinessSwitch('/saas/events-services', 'carDealership')).toBe(
+      '/saas/vertical/compraventa',
+    );
+  });
+
+  it('misma vertical Comercial no redirige', () => {
+    expect(resolvePathAfterBusinessSwitch('/saas/vehicles', 'carDealership')).toBeNull();
+  });
 });

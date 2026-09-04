@@ -810,7 +810,7 @@ function SidebarInner({
     ? (currentBusiness.businessType as BusinessType)
     : treatAsWorkerNav
       ? null
-      : 'carDealership';
+      : null;
   const isCompraventa = isCompraventaBusinessType(vertical);
   const isRestaurantVertical = isRestaurantBusinessType(vertical);
   const isHeladeriaVertical = vertical === 'iceCreamShop';
@@ -827,10 +827,10 @@ function SidebarInner({
   const showWorkCentersSidebar =
     usesOpsStoreSidebar || isCompraventa || isEventsVertical || isLawyerVertical;
   const allowedGroups = vertical
-    ? (VERTICAL_GROUPS[vertical] || VERTICAL_GROUPS.carDealership)
+    ? (VERTICAL_GROUPS[vertical] || new Set<string>())
     : new Set<string>();
   const allowedBottom = vertical
-    ? (VERTICAL_BOTTOM_ITEMS[vertical] || VERTICAL_BOTTOM_ITEMS.carDealership)
+    ? (VERTICAL_BOTTOM_ITEMS[vertical] || new Set<string>())
     : new Set<string>();
   const [showCompanyDropdown, setShowCompanyDropdown] = useState(false);
   const [showEventsPortablePdvModal, setShowEventsPortablePdvModal] = useState(false);
