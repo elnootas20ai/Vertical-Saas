@@ -16,7 +16,7 @@ import { useBusiness } from '../../context/BusinessContext';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { resolveTpvClientSearchUserId } from '../../lib/tpvClientSearchUserId';
 import { useClientPhoneSearch, clearClientPhoneSearchCache } from '../../hooks/useClientPhoneSearch';
-import { useVisualViewportFit, useTpvKeyboardFocusScroll, scrollTpvFieldIntoView } from '../../hooks/useVisualViewportFit';
+import { useVisualViewportFit, useTpvKeyboardFocusScroll, TPV_MODAL_CHANGE_EVENT } from '../../hooks/useVisualViewportFit';
 import {
   filterDeliveryOrdersRequest,
   createDeliveryOrderWithCajaStatus,
@@ -1456,6 +1456,23 @@ export function TpvRapidoOrderFlow({
   const [restaurantClientQuery, setRestaurantClientQuery] = useState('');
   const [restaurantStaffConsumptionOpen, setRestaurantStaffConsumptionOpen] = useState(false);
   const actionBusyRef = useRef(false);
+
+  // Congela el resize del chrome TPV mientras hay overlay local (no usa TpvModalRoot).
+  useEffect(() => {
+    if (!quickNamePromptOpen && !restaurantClientPickerOpen) return;
+    try {
+      window.dispatchEvent(new Event(TPV_MODAL_CHANGE_EVENT));
+    } catch {
+      /* ignore */
+    }
+    return () => {
+      try {
+        window.dispatchEvent(new Event(TPV_MODAL_CHANGE_EVENT));
+      } catch {
+        /* ignore */
+      }
+    };
+  }, [quickNamePromptOpen, restaurantClientPickerOpen]);
 
   const tpvErrorMeta = useMemo(
     () => ({
@@ -4517,8 +4534,8 @@ export function TpvRapidoOrderFlow({
         />
       ) : null}
       {restaurantClientPickerOpen ? (
-        <div className="fixed inset-0 z-[120] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4">
-          <div className="flex max-h-[85vh] w-full flex-col rounded-t-2xl bg-white shadow-xl dark:bg-gray-900 sm:max-w-md sm:rounded-2xl">
+        <div className="fixed inset-0 z-[120] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" data-tpv-modal-root="" role="dialog" aria-modal="true">
+          <div className="flex max-h-[85dvh] w-full flex-col rounded-t-2xl bg-white shadow-xl dark:bg-gray-900 sm:max-w-md sm:rounded-2xl">
             <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-800">
               <div>
                 <h3 className="font-bold text-gray-900 dark:text-gray-100">Cliente de la mesa</h3>
@@ -4540,10 +4557,6 @@ export function TpvRapidoOrderFlow({
                   const q = e.target.value;
                   setRestaurantClientQuery(q);
                   setPhoneInput(q);
-                }}
-                onFocus={(e) => {
-                  const el = e.currentTarget;
-                  window.setTimeout(() => scrollTpvFieldIntoView(el), 60);
                 }}
                 placeholder="Nombre o teléfono…"
                 className="w-full rounded-xl border-2 border-gray-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-sky-400 dark:border-gray-700 dark:bg-gray-950"
@@ -6534,8 +6547,8 @@ export function TpvRapidoOrderFlow({
         />
       ) : null}
       {restaurantClientPickerOpen ? (
-        <div className="fixed inset-0 z-[120] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4">
-          <div className="flex max-h-[85vh] w-full flex-col rounded-t-2xl bg-white shadow-xl dark:bg-gray-900 sm:max-w-md sm:rounded-2xl">
+        <div className="fixed inset-0 z-[120] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" data-tpv-modal-root="" role="dialog" aria-modal="true">
+          <div className="flex max-h-[85dvh] w-full flex-col rounded-t-2xl bg-white shadow-xl dark:bg-gray-900 sm:max-w-md sm:rounded-2xl">
             <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-800">
               <div>
                 <h3 className="font-bold text-gray-900 dark:text-gray-100">Cliente de la mesa</h3>
@@ -6557,10 +6570,6 @@ export function TpvRapidoOrderFlow({
                   const q = e.target.value;
                   setRestaurantClientQuery(q);
                   setPhoneInput(q);
-                }}
-                onFocus={(e) => {
-                  const el = e.currentTarget;
-                  window.setTimeout(() => scrollTpvFieldIntoView(el), 60);
                 }}
                 placeholder="Nombre o teléfono…"
                 className="w-full rounded-xl border-2 border-gray-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-sky-400 dark:border-gray-700 dark:bg-gray-950"
@@ -6745,11 +6754,7 @@ export function TpvRapidoOrderFlow({
           role="dialog"
           aria-modal="true"
           aria-labelledby="tpv-quick-name-title"
-          onFocusCapture={(e) => {
-            if (e.target instanceof HTMLElement) {
-              window.setTimeout(() => scrollTpvFieldIntoView(e.target as HTMLElement), 60);
-            }
-          }}
+          data-tpv-modal-root=""
         >
           <button
             type="button"
@@ -6761,12 +6766,7 @@ export function TpvRapidoOrderFlow({
             }}
           />
           <div
-            className="relative w-full max-w-md rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-2xl p-5 sm:p-6 space-y-4 overflow-y-auto overscroll-contain mb-[max(0px,env(safe-area-inset-bottom))]"
-            style={{
-              maxHeight: typeof window !== 'undefined' && window.visualViewport
-                ? `min(520px, ${Math.max(240, Math.round(window.visualViewport.height) - 24)}px)`
-                : 'min(88svh, 520px)',
-            }}
+            className="relative w-full max-w-md rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-2xl p-5 sm:p-6 space-y-4 overflow-y-auto overscroll-contain mb-[max(0px,env(safe-area-inset-bottom))] max-h-[min(88dvh,520px)]"
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">

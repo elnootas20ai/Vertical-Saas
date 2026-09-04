@@ -424,25 +424,13 @@ export function TpvProductPicker({
                 setProductSearch(v);
                 if (v.trim()) onSelectedCategoryChange(null);
               }}
-              onFocus={(e) => {
-                const el = e.currentTarget;
-                window.setTimeout(() => {
-                  try {
-                    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-                  } catch {
-                    /* ignore */
-                  }
-                }, 60);
-              }}
               placeholder={phoneMode ? 'Buscar producto…' : 'Producto, categoría, SKU o código…'}
               autoComplete="off"
               autoCorrect="off"
               spellCheck={false}
               data-1p-ignore
               data-lpignore="true"
-              className={`w-full pl-8 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/80 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 ${
-                productSearch.trim() ? 'pr-10' : 'pr-2.5'
-              } ${compact ? 'h-10 text-sm' : 'h-10 text-sm'}`}
+              className={`w-full pl-8 pr-10 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/80 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 ${compact ? 'h-10 text-sm' : 'h-10 text-sm'}`}
             />
             {productSearch.trim() ? (
               <button
