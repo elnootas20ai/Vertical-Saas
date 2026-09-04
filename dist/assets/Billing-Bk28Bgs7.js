@@ -1,0 +1,1 @@
+import{e as n,k as o,fW as i,a as r,j as c,kl as a}from"./index-S4vKUx2j.js";function l(){const e=n(),{logout:t}=o(),s=i();return r.useEffect(()=>{s||e("/saas/settings/facturacion",{replace:!0})},[e,s]),s?c.jsx(a,{title:"Suscripción no disponible en iOS",onLogout:()=>void t()}):null}export{l as Billing};
