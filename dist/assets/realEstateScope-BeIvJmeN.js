@@ -1,1 +1,0 @@
-import{k as a,aN as r,a as o,aO as i,fb as c}from"./index-S4vKUx2j.js";function l(){const{user:t}=a(),{currentBusiness:s}=r(),n=o.useMemo(()=>i(t,s),[t,s]),e=o.useMemo(()=>c(s),[s]),u=o.useMemo(()=>({businessId:e||void 0,salesPointId:void 0}),[e]);return{userId:n,businessId:e,salesPointId:"",listOptions:u,ready:!!(n&&e)}}export{l as u};
