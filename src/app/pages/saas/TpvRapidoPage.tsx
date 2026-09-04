@@ -1428,6 +1428,8 @@ export function TpvRapidoOrderFlow({
   const [promoCodeManual, setPromoCodeManual] = useState(false);
   const [clientPromos, setClientPromos] = useState<ClientPromotion[]>([]);
   const [selectedClientPromoId, setSelectedClientPromoId] = useState<string>('');
+  /** Email tecleado en caja cuando la promo exige verificación por correo. */
+  const [clientPromoEmailInput, setClientPromoEmailInput] = useState('');
   const [companyPromos, setCompanyPromos] = useState<StoredPromotion[]>(() =>
     typeof window !== 'undefined' ? readStoredPromotions() : [],
   );
@@ -2006,6 +2008,14 @@ export function TpvRapidoOrderFlow({
     return clientPromos.find((p) => p.id === selectedClientPromoId) || null;
   }, [clientPromos, selectedClientPromoId]);
 
+  const clientPromoEmailVerified = useMemo(() => {
+    if (!clientPromoSelected?.requiereVerificarEmail) return true;
+    const typed = String(clientPromoEmailInput || '').trim().toLowerCase();
+    const expected = String(selectedClient?.email || '').trim().toLowerCase();
+    if (!typed || !expected) return false;
+    return typed === expected;
+  }, [clientPromoSelected, clientPromoEmailInput, selectedClient?.email]);
+
   const compute2x1Discount = useCallback(() => {
     const unitPrices: number[] = [];
     for (const ci of cart) {
@@ -2029,14 +2039,31 @@ export function TpvRapidoOrderFlow({
     if (promoMode === 'code') {
       manualDiscount = computePromoDiscount(afterAuto, appliedPromo).discount;
     } else if (promoMode === 'client') {
-      if (clientPromoSelected) {
+      if (clientPromoSelected && clientPromoEmailVerified) {
         const isActive = String(clientPromoSelected.estado || '').toLowerCase() === 'activa';
-        if (isActive) {
+        const startMs = clientPromoSelected.fechaInicio
+          ? new Date(clientPromoSelected.fechaInicio).getTime()
+          : NaN;
+        const endRaw = clientPromoSelected.fechaFin
+          ? new Date(clientPromoSelected.fechaFin)
+          : null;
+        const endMs = endRaw && Number.isFinite(endRaw.getTime())
+          ? endRaw.setHours(23, 59, 59, 999)
+          : NaN;
+        const now = Date.now();
+        const inWindow =
+          (!Number.isFinite(startMs) || now >= startMs) &&
+          (!Number.isFinite(endMs) || now <= endMs);
+        if (isActive && inWindow) {
           const tipo = String(clientPromoSelected.tipo || '').toLowerCase();
           if (tipo === '2x1') {
             manualDiscount = Math.min(afterAuto, compute2x1Discount());
-          } else if (tipo === 'descuento') {
-            const pct = Math.min(100, Math.max(0, Number(clientPromoSelected.descuento || 0)));
+          } else if (tipo === 'descuento' || tipo === 'regalo' || tipo === 'cupon') {
+            const rawPct = Number(clientPromoSelected.descuento);
+            const pct = Math.min(
+              100,
+              Math.max(0, Number.isFinite(rawPct) ? rawPct : tipo === 'regalo' ? 100 : 0),
+            );
             manualDiscount = Math.min(afterAuto, (afterAuto * pct) / 100);
           }
         }
@@ -2051,7 +2078,15 @@ export function TpvRapidoOrderFlow({
       manualDiscount,
       autoPromoNames: autoPromoCalc.applied.map((p) => p.name).filter(Boolean),
     };
-  }, [promoMode, cartTotal, appliedPromo, clientPromoSelected, compute2x1Discount, autoPromoCalc]);
+  }, [
+    promoMode,
+    cartTotal,
+    appliedPromo,
+    clientPromoSelected,
+    clientPromoEmailVerified,
+    compute2x1Discount,
+    autoPromoCalc,
+  ]);
 
   const finalTotal = effectiveCalc.finalTotal;
   /**
@@ -2408,6 +2443,7 @@ export function TpvRapidoOrderFlow({
     setPromoMode('none');
     setClientPromos([]);
     setSelectedClientPromoId('');
+    setClientPromoEmailInput('');
   }, [clearSelection, catalogSections, catalog]);
 
   const exitQuickAttentionToClientSearch = useCallback(() => {
@@ -2481,12 +2517,16 @@ export function TpvRapidoOrderFlow({
       }
       setClientPromos([]);
       setSelectedClientPromoId('');
+      setClientPromoEmailInput('');
       if (userId && !isTpvSyntheticClientId(client.id)) {
         fetchClientPromotionsRequest(userId, client.id)
           .then((promos) => {
             setClientPromos(promos || []);
             const firstActive = (promos || []).find((p) => String(p.estado || '').toLowerCase() === 'activa');
-            if (firstActive) setSelectedClientPromoId(firstActive.id);
+            if (firstActive) {
+              setSelectedClientPromoId(firstActive.id);
+              if (!assigned) setPromoMode('client');
+            }
           })
           .catch(() => {});
       }
@@ -2680,6 +2720,7 @@ export function TpvRapidoOrderFlow({
       setPromoMode('none');
       setClientPromos([]);
       setSelectedClientPromoId('');
+      setClientPromoEmailInput('');
       if (crmClient) {
         setQuickAttentionActive(false);
         handleSelectClient(crmClient);
@@ -4397,6 +4438,7 @@ export function TpvRapidoOrderFlow({
     setPromoMode('none');
     setClientPromos([]);
     setSelectedClientPromoId('');
+    setClientPromoEmailInput('');
     setCreatedOrder(null);
     setTimeout(() => phoneRef.current?.focus(), 150);
   }, [clearSelection, clearResults, catalogSections, catalog, isRestaurantMode, resetRestaurantTicket]);
@@ -6071,13 +6113,19 @@ export function TpvRapidoOrderFlow({
                           {promoMode === 'client' ? (
                             <select
                               value={selectedClientPromoId}
-                              onChange={(e) => setSelectedClientPromoId(e.target.value)}
+                              onChange={(e) => {
+                                setSelectedClientPromoId(e.target.value);
+                                setClientPromoEmailInput('');
+                              }}
                               className={`${INPUT_CLASS} h-9 py-1.5 text-xs min-w-0 flex-1`}
                             >
                               <option value="">Promo cliente…</option>
-                              {clientPromos.map((p) => (
+                              {clientPromos
+                                .filter((p) => String(p.estado || '').toLowerCase() === 'activa')
+                                .map((p) => (
                                 <option key={p.id} value={p.id}>
                                   {p.nombre}
+                                  {p.requiereVerificarEmail ? ' · email' : ''}
                                 </option>
                               ))}
                             </select>
@@ -6121,6 +6169,35 @@ export function TpvRapidoOrderFlow({
                             <p className="text-[10px] text-gray-400 py-2">Sin promoción</p>
                           )}
                         </div>
+                        {promoMode === 'client' && clientPromoSelected?.requiereVerificarEmail ? (
+                          <div className="mb-2 space-y-1">
+                            <input
+                              type="email"
+                              value={clientPromoEmailInput}
+                              onChange={(e) => setClientPromoEmailInput(e.target.value)}
+                              className={`${INPUT_CLASS} h-9 py-1.5 text-xs`}
+                              placeholder="Email del cliente para verificar"
+                              autoComplete="off"
+                            />
+                            {!String(selectedClient?.email || '').trim() ? (
+                              <p className="text-[10px] text-amber-600 dark:text-amber-400">
+                                Este cliente no tiene email en ficha; no se puede verificar.
+                              </p>
+                            ) : clientPromoEmailInput.trim() && !clientPromoEmailVerified ? (
+                              <p className="text-[10px] text-red-600 dark:text-red-400">
+                                El email no coincide con el del cliente.
+                              </p>
+                            ) : clientPromoEmailVerified ? (
+                              <p className="text-[10px] text-emerald-600 dark:text-emerald-400">
+                                Email verificado · promo aplicable
+                              </p>
+                            ) : (
+                              <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                                Introduce el email para aplicar la promoción.
+                              </p>
+                            )}
+                          </div>
+                        ) : null}
                         <div className="flex items-center justify-between text-xs">
                           <span className="text-gray-500 dark:text-gray-400">Subtotal</span>
                           <span className="font-bold tabular-nums">{formatPrice(chargedCartTotal)}</span>

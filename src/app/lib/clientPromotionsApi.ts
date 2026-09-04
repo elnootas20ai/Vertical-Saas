@@ -11,6 +11,8 @@ export interface ClientPromotion {
   estado: string;
   usosRestantes: number | null;
   descripcion: string;
+  /** Si true, en TPV hay que confirmar el email del cliente antes de aplicar. */
+  requiereVerificarEmail?: boolean;
   createdAt: string;
 }
 

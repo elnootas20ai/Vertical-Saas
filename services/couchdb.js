@@ -4647,7 +4647,7 @@ export async function listClientNotesByClient(req, userId, clientId) {
 // ─── CLIENT PROMOTIONS ───────────────────────────────────────────────────────
 
 function normalizePromocionEstado(value) {
-  const allowed = ['activa', 'programada', 'finalizada'];
+  const allowed = ['activa', 'programada', 'finalizada', 'inactiva'];
   return allowed.includes(String(value || '')) ? String(value) : 'activa';
 }
 
@@ -4676,6 +4676,8 @@ export function buildClientPromotionDocument(userId, clientId, data = {}, existi
     estado: normalizePromocionEstado(data.estado),
     usosRestantes: data.usosRestantes != null ? Number(data.usosRestantes) : null,
     descripcion: String(data.descripcion || '').trim(),
+    /** En TPV: pedir email y comprobar que coincide con el del cliente. */
+    requiereVerificarEmail: Boolean(data.requiereVerificarEmail),
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     deletedAt: existing?.deletedAt || null,
@@ -4699,6 +4701,7 @@ export function sanitizeClientPromotion(promo) {
     estado: promo.estado || 'activa',
     usosRestantes: promo.usosRestantes,
     descripcion: promo.descripcion || '',
+    requiereVerificarEmail: Boolean(promo.requiereVerificarEmail),
     createdAt: promo.createdAt || new Date().toISOString(),
     updatedAt: promo.updatedAt || promo.createdAt || new Date().toISOString(),
   };

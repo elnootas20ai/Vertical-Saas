@@ -188,6 +188,7 @@ interface ClientPromotion {
   estado: string;
   usosRestantes: number | null;
   descripcion: string;
+  requiereVerificarEmail?: boolean;
   createdAt: string;
 }
 
@@ -398,6 +399,7 @@ export function ClientDetail() {
     fechaInicio: new Date().toISOString().split('T')[0],
     fechaFin: new Date().toISOString().split('T')[0],
     descripcion: '',
+    requiereVerificarEmail: false,
   });
   const [clientQuotes, setClientQuotes] = useState<ClientQuote[]>([]);
   const [loadingQuotes, setLoadingQuotes] = useState(false);
@@ -2317,17 +2319,47 @@ export function ClientDetail() {
     const promo = await createClientPromotionRequest(dataUserId, client.id, {
       nombre: promotionForm.nombre,
       tipo: promotionForm.tipo,
-      descuento: promotionForm.descuento ? Number(promotionForm.descuento) : null,
+      descuento: promotionForm.descuento ? Number(promotionForm.descuento) : (promotionForm.tipo === 'regalo' ? 100 : null),
       codigo: promotionForm.codigo,
       fechaInicio: promotionForm.fechaInicio,
       fechaFin: promotionForm.fechaFin,
       descripcion: promotionForm.descripcion,
+      requiereVerificarEmail: Boolean(promotionForm.requiereVerificarEmail),
     });
     if (promo) {
       setClientPromotions((prev) => [promo, ...prev]);
     }
     setShowPromotionForm(false);
-    setPromotionForm({ nombre: '', tipo: 'descuento', descuento: '', codigo: '', fechaInicio: new Date().toISOString().split('T')[0], fechaFin: new Date().toISOString().split('T')[0], descripcion: '' });
+    setPromotionForm({
+      nombre: '',
+      tipo: 'descuento',
+      descuento: '',
+      codigo: '',
+      fechaInicio: new Date().toISOString().split('T')[0],
+      fechaFin: new Date().toISOString().split('T')[0],
+      descripcion: '',
+      requiereVerificarEmail: false,
+    });
+  };
+
+  const handleTogglePromoEmailVerify = async (promo: ClientPromotion) => {
+    if (!client || !dataUserId) return;
+    try {
+      const res = await fetch(
+        `${getClientApiBase()}/api/clients/${encodeURIComponent(dataUserId)}/${encodeURIComponent(client.id)}/promotions/${encodeURIComponent(promo.id)}`,
+        {
+          method: 'PUT',
+          headers: getClientApiHeaders(),
+          body: JSON.stringify({ promotion: { requiereVerificarEmail: !promo.requiereVerificarEmail } }),
+        },
+      );
+      const data = await res.json();
+      if (data.ok && data.promotion) {
+        setClientPromotions((prev) => prev.map((p) => (p.id === promo.id ? data.promotion : p)));
+      }
+    } catch {
+      /* ignore */
+    }
   };
 
   const handleTogglePromotion = async (promo: ClientPromotion) => {
@@ -2400,6 +2432,20 @@ export function ClientDetail() {
               </div>
             </div>
             <textarea value={promotionForm.descripcion} onChange={(e) => setPromotionForm((p) => ({ ...p, descripcion: e.target.value }))} placeholder="Descripción" rows={2} className="md:col-span-2 w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none resize-none text-sm" />
+            <label className="md:col-span-2 flex items-start gap-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 px-4 py-3 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={promotionForm.requiereVerificarEmail}
+                onChange={(e) => setPromotionForm((p) => ({ ...p, requiereVerificarEmail: e.target.checked }))}
+                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span>
+                <span className="block text-sm font-semibold text-gray-900 dark:text-gray-100">Verificar por correo</span>
+                <span className="block text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  En el TPV pedirá el email y solo aplicará si coincide con el del cliente.
+                </span>
+              </span>
+            </label>
           </div>
           <div className="flex gap-3">
             <button onClick={() => setShowPromotionForm(false)} className="px-4 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm font-medium text-gray-700 dark:text-gray-300">Cancelar</button>
@@ -2440,6 +2486,11 @@ export function ClientDetail() {
                       </span>
                       {isExpired && <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase bg-red-100 text-red-600">Expirada</span>}
                       {promo.codigo && <span className="text-xs font-mono bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 px-2 py-0.5 rounded">{promo.codigo}</span>}
+                      {promo.requiereVerificarEmail ? (
+                        <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
+                          Verificar email
+                        </span>
+                      ) : null}
                     </div>
                     <div className="flex items-center gap-3 text-xs text-gray-400 dark:text-gray-500 mt-1">
                       <span className="capitalize">{promo.tipo}</span>
@@ -2447,6 +2498,15 @@ export function ClientDetail() {
                       <span>{new Date(promo.fechaInicio).toLocaleDateString('es-ES')} — {new Date(promo.fechaFin).toLocaleDateString('es-ES')}</span>
                     </div>
                     {promo.descripcion && <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">{promo.descripcion}</p>}
+                    {canManagePromos ? (
+                      <button
+                        type="button"
+                        onClick={() => { void handleTogglePromoEmailVerify(promo); }}
+                        className="mt-2 text-xs font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                      >
+                        {promo.requiereVerificarEmail ? 'Quitar verificación por correo' : 'Activar verificación por correo'}
+                      </button>
+                    ) : null}
                   </div>
                   {canManagePromos && (
                   <div className="flex items-center gap-1 flex-shrink-0">
