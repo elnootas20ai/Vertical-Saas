@@ -21,8 +21,9 @@ workflows:
       cocoapods: default
       ios_signing:
         distribution_type: app_store
-        # App + Notification Content Extension (push expandible cierres de caja)
-        bundle_identifier: com.vertial.app,com.vertial.app.NotificationContent
+        # Solo el App ID principal: Codemagic también busca perfiles com.vertial.app.*
+        # (p.ej. NotificationContent). NO poner varios IDs separados por coma.
+        bundle_identifier: com.vertial.app
       vars:
         # WebView embebido (dist/): API absoluta; NO usar CAPACITOR_SERVER_URL
         # (la tablet no es un navegador de vertialapp.com — actualizar UI = nuevo IPA).

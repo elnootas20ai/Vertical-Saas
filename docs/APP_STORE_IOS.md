@@ -215,6 +215,17 @@ Si **Compilar IPA** falla con `Failed to archive` / exit code **65**, casi siemp
 
 Comprueba en [developer.apple.com](https://developer.apple.com/account/resources/identifiers/list) que el App ID `com.vertial.app` tiene **Sign In with Apple** y **Push Notifications** activos.
 
+### Error «No matching profiles found for bundle identifier "com.vertial.app,com.vertial.app.NotificationContent"»
+
+Eso pasa si en `codemagic.yaml` se ponen **varios** bundle IDs separados por coma: Codemagic lo trata como **un solo** identificador inválido. En el YAML solo debe ir `bundle_identifier: com.vertial.app` (las extensiones `com.vertial.app.*` se resuelven solas).
+
+Además, desde la extensión **Notification Content** hace falta:
+
+1. En [Identifiers](https://developer.apple.com/account/resources/identifiers/list) → **+** → App ID → tipo **App** → Bundle ID: `com.vertial.app.NotificationContent` (Explicit). Capacidades: las mínimas de la extensión (sin Sign in with Apple).
+2. En **Profiles** → **+** → **App Store** → selecciona ese App ID → certificado Distribution → genera y descarga (o créalo desde Codemagic).
+3. En Codemagic → **Code signing identities** → **iOS provisioning profiles** → **Fetch profiles** → descarga el perfil **App Store** de `com.vertial.app` **y** el de `com.vertial.app.NotificationContent` (ambos con certificado en verde).
+4. Relanza **iOS Release (TestFlight)** en `main`.
+
 ### Error «Cannot save Signing Certificates without certificate private key»
 
 Ese paso falló porque Codemagic no tiene la variable **`CERTIFICATE_PRIVATE_KEY`**. No hace falta regenerar certificados desde el YAML: basta con **refrescar el provisioning profile** en la UI (pasos de arriba). El workflow ya usa `ios_signing` + `use-profiles`.
