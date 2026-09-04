@@ -659,16 +659,6 @@ export function TpvComboCustomizeModal({
                               type="search"
                               value={sectionQuery}
                               onChange={(e) => setSectionQuery(e.target.value)}
-                              onFocus={(e) => {
-                                const el = e.currentTarget;
-                                window.setTimeout(() => {
-                                  try {
-                                    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-                                  } catch {
-                                    /* ignore */
-                                  }
-                                }, 60);
-                              }}
                               placeholder={`Buscar en ${section.catalogCategory} (${products.length})`}
                               className="w-full rounded-lg border border-gray-200 bg-white py-2 pl-8 pr-3 text-xs text-gray-900 placeholder:text-gray-400 focus:border-emerald-400 focus:outline-none dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
                             />

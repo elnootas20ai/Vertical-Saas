@@ -8,7 +8,6 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { useVisualViewportFit } from '../hooks/useVisualViewportFit';
 
 type TpvChromeContextValue = {
   setSuppressBottomBar: (suppress: boolean) => void;
@@ -46,8 +45,6 @@ export function TpvChromeScope({
   const suppressReasonsRef = useRef<Set<string>>(
     new Set(hideBottomBarUntilShown ? ['scope-default'] : []),
   );
-  /** Teclado en tablet: encoge el 100svh (si no, tapa todo el TPV). */
-  const { style: viewportFitStyle, keyboardOpen } = useVisualViewportFit(insetBottomBar);
   const syncSuppressBottomBar = useCallback(() => {
     const locked = orderFlowLockCountRef.current > 0;
     setSuppressBottomBarState(locked || suppressReasonsRef.current.size > 0);
@@ -95,22 +92,17 @@ export function TpvChromeScope({
     [setSuppressBottomBar, setSuppressBottomBarReason, orderFlowActive, setOrderFlowActive, acquireOrderFlowLock, releaseOrderFlowLock],
   );
 
-  const showBottomBar = Boolean(bottomBar) && !suppressBottomBar && !keyboardOpen;
-
   return (
     <TpvChromeContext.Provider value={value}>
       {insetBottomBar ? (
-        <div
-          className="flex flex-col h-[100svh] min-h-[100svh] max-h-[100svh] overflow-hidden w-full"
-          style={viewportFitStyle}
-        >
+        <div className="flex flex-col h-[100svh] min-h-[100svh] max-h-[100svh] overflow-hidden w-full">
           <div className="flex-1 min-h-0 overflow-hidden flex flex-col">{children}</div>
-          {showBottomBar ? bottomBar : null}
+          {!suppressBottomBar && bottomBar}
         </div>
       ) : (
         <>
           {children}
-          {showBottomBar ? bottomBar : null}
+          {!suppressBottomBar && bottomBar}
         </>
       )}
     </TpvChromeContext.Provider>

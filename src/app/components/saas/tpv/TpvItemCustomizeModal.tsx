@@ -366,16 +366,6 @@ export function TpvItemCustomizeModal({
                 type="search"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                onFocus={(e) => {
-                  const el = e.currentTarget;
-                  window.setTimeout(() => {
-                    try {
-                      el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-                    } catch {
-                      /* ignore */
-                    }
-                  }, 60);
-                }}
                 placeholder={activeTab === 'ingredients' ? 'Buscar ingrediente…' : 'Buscar extra…'}
                 className="w-full pl-11 pr-10 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-base text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:border-emerald-500 outline-none touch-manipulation"
                 autoComplete="off"
