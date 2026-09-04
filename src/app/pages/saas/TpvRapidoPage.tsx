@@ -1150,6 +1150,7 @@ export function TpvRapidoOrderFlow({
     ),
     [currentBusiness, user?.onboarding, registerScope.scopeBusinessId, tabletBinding?.businessId],
   );
+  const isEventsBiz = isEventsBusinessType(currentBusiness?.businessType);
   const userId = registerScope.effectiveDataUserId;
   const businessId = registerScope.scopeBusinessId;
   const tpvCatalogBusinessId = useMemo(
