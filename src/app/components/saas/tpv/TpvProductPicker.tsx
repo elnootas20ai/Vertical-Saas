@@ -424,6 +424,16 @@ export function TpvProductPicker({
                 setProductSearch(v);
                 if (v.trim()) onSelectedCategoryChange(null);
               }}
+              onFocus={(e) => {
+                const el = e.currentTarget;
+                window.setTimeout(() => {
+                  try {
+                    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                  } catch {
+                    /* ignore */
+                  }
+                }, 60);
+              }}
               placeholder={phoneMode ? 'Buscar producto…' : 'Producto, categoría, SKU o código…'}
               autoComplete="off"
               autoCorrect="off"

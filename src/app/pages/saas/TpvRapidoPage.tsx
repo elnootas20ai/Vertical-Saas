@@ -16,6 +16,7 @@ import { useBusiness } from '../../context/BusinessContext';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { resolveTpvClientSearchUserId } from '../../lib/tpvClientSearchUserId';
 import { useClientPhoneSearch, clearClientPhoneSearchCache } from '../../hooks/useClientPhoneSearch';
+import { useVisualViewportFit, useTpvKeyboardFocusScroll, scrollTpvFieldIntoView } from '../../hooks/useVisualViewportFit';
 import {
   filterDeliveryOrdersRequest,
   createDeliveryOrderWithCajaStatus,
@@ -4540,6 +4541,10 @@ export function TpvRapidoOrderFlow({
                   setRestaurantClientQuery(q);
                   setPhoneInput(q);
                 }}
+                onFocus={(e) => {
+                  const el = e.currentTarget;
+                  window.setTimeout(() => scrollTpvFieldIntoView(el), 60);
+                }}
                 placeholder="Nombre o teléfono…"
                 className="w-full rounded-xl border-2 border-gray-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-sky-400 dark:border-gray-700 dark:bg-gray-950"
               />
@@ -6553,6 +6558,10 @@ export function TpvRapidoOrderFlow({
                   setRestaurantClientQuery(q);
                   setPhoneInput(q);
                 }}
+                onFocus={(e) => {
+                  const el = e.currentTarget;
+                  window.setTimeout(() => scrollTpvFieldIntoView(el), 60);
+                }}
                 placeholder="Nombre o teléfono…"
                 className="w-full rounded-xl border-2 border-gray-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-sky-400 dark:border-gray-700 dark:bg-gray-950"
               />
@@ -6732,10 +6741,15 @@ export function TpvRapidoOrderFlow({
       && typeof document !== 'undefined'
       && createPortal(
         <div
-          className="fixed inset-0 z-[220] flex items-center justify-center p-4 sm:p-6"
+          className="fixed inset-0 z-[220] flex items-end sm:items-center justify-center p-3 sm:p-6"
           role="dialog"
           aria-modal="true"
           aria-labelledby="tpv-quick-name-title"
+          onFocusCapture={(e) => {
+            if (e.target instanceof HTMLElement) {
+              window.setTimeout(() => scrollTpvFieldIntoView(e.target as HTMLElement), 60);
+            }
+          }}
         >
           <button
             type="button"
@@ -6746,7 +6760,14 @@ export function TpvRapidoOrderFlow({
               if (!creatingClient) cancelQuickAttentionNamePrompt();
             }}
           />
-          <div className="relative w-full max-w-md rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-2xl p-5 sm:p-6 space-y-4 max-h-[min(88svh,520px)] overflow-y-auto">
+          <div
+            className="relative w-full max-w-md rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-2xl p-5 sm:p-6 space-y-4 overflow-y-auto overscroll-contain mb-[max(0px,env(safe-area-inset-bottom))]"
+            style={{
+              maxHeight: typeof window !== 'undefined' && window.visualViewport
+                ? `min(520px, ${Math.max(240, Math.round(window.visualViewport.height) - 24)}px)`
+                : 'min(88svh, 520px)',
+            }}
+          >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <h3 id="tpv-quick-name-title" className="text-lg font-bold text-gray-900 dark:text-gray-100">
@@ -6896,7 +6917,17 @@ function TpvFullscreenShell({
   hideBack?: boolean;
   compactTop?: boolean;
 }) {
+  const rootRef = useRef<HTMLDivElement>(null);
   const minimalHeader = tabletMode && embedded;
+  /**
+   * Embedded: el fit lo hace TpvChromeScope (100svh). Aquí solo detectamos teclado
+   * para ocultar footer y hacer scroll al campo (cliente, dirección, notas, búsqueda…).
+   * Fixed (no embedded): aplicamos el fit en este shell.
+   */
+  const { style: viewportFitStyle, keyboardOpen } = useVisualViewportFit(tabletMode);
+  useTpvKeyboardFocusScroll(rootRef, tabletMode);
+  const shellStyle = embedded ? undefined : viewportFitStyle;
+  const showFooter = Boolean(footerSlot) && !keyboardOpen;
   const showHeader = (!hideBack || !!topSlot) && !(compactTop && !topSlot);
   const header = showHeader ? (
     <div className={`shrink-0 z-10 bg-white/95 dark:bg-gray-900/95 backdrop-blur border-b border-gray-200 dark:border-gray-800 ${compactTop ? '' : 'pt-[max(0px,env(safe-area-inset-top))]'}`}>
@@ -6929,7 +6960,11 @@ function TpvFullscreenShell({
           : 'overflow-y-auto';
 
     return (
-      <div className="h-full w-full min-h-0 min-w-0 flex flex-col bg-gray-50 dark:bg-gray-950 overflow-hidden">
+      <div
+        ref={rootRef}
+        className="h-full w-full min-h-0 min-w-0 flex flex-col bg-gray-50 dark:bg-gray-950 overflow-hidden"
+        style={shellStyle}
+      >
         {header}
         <div className={`flex-1 min-h-0 min-w-0 w-full ${contentClass}`}>
           <div
@@ -6939,25 +6974,29 @@ function TpvFullscreenShell({
                   ? 'flex-1 min-h-0 flex flex-col h-full px-1 pt-0.5'
                   : 'max-w-[1320px] mx-auto px-2 md:px-3 pt-1.5 flex-1 min-h-0 flex flex-col h-full'
                 : minimalHeader
-                  ? 'px-1 pt-0.5 pb-2'
-                  : 'max-w-[1320px] mx-auto px-2 md:px-3 pt-1.5 pb-2'
+                  ? `px-1 pt-0.5 ${keyboardOpen ? 'pb-3' : 'pb-2'}`
+                  : `max-w-[1320px] mx-auto px-2 md:px-3 pt-1.5 ${keyboardOpen ? 'pb-3' : 'pb-2'}`
             }`}
           >
             {children}
           </div>
         </div>
-        {footerSlot}
+        {showFooter ? footerSlot : null}
       </div>
     );
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-gray-50 dark:bg-gray-950 flex flex-col overflow-hidden">
+    <div
+      ref={rootRef}
+      className="fixed inset-0 z-50 bg-gray-50 dark:bg-gray-950 flex flex-col overflow-hidden"
+      style={shellStyle}
+    >
       {header}
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="max-w-[1320px] mx-auto px-2 md:px-3 pt-2">{children}</div>
       </div>
-      {footerSlot}
+      {showFooter ? footerSlot : null}
     </div>
   );
 }
