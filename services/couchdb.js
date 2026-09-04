@@ -12871,10 +12871,12 @@ export async function listBusinessesByUser(req, userId) {
         { type: 'business', owner_user_id: uid },
         { pageSize: 200, maxDocs: 1_000 },
       ).catch(() => []),
+      // OJO: selector 'members.user_id' + índice JSON falla en CouchDB 3 (0 docs).
+      // $elemMatch sí encuentra invitados (Admin 2ª, etc.).
       findDocuments(
         req,
         BUSINESSES_DB,
-        { type: 'business', 'members.user_id': uid },
+        { type: 'business', members: { $elemMatch: { user_id: uid } } },
         { pageSize: 200, maxDocs: 1_000 },
       ).catch(() => []),
     ]);
