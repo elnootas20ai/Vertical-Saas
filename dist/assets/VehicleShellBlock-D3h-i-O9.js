@@ -1,0 +1,1 @@
+import{j as s}from"./index-C7bT4yce.js";function o({className:e="",children:a,label:r}){return s.jsxs("div",{className:`rounded-2xl border border-gray-200/80 bg-white shadow-sm dark:border-gray-700/80 dark:bg-gray-900 ${e}`,"aria-hidden":!r,children:[r?s.jsx("span",{className:"sr-only",children:r}):null,a]})}export{o as V};

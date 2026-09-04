@@ -1,1 +1,0 @@
-import{d as s,e as r,a as c}from"./index-DCZ29u-3.js";function f(n,i=!0){const e=s(),a=r(),o=c.useRef(!1);c.useEffect(()=>{if(o.current||!i)return;const t=e.state;t!=null&&t.notificationEntityId&&(o.current=!0,n(t.notificationEntityId,t.notificationEntityType),a(e.pathname+e.search,{replace:!0,state:{}}))},[e,a,n,i])}export{f as u};
