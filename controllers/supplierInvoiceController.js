@@ -22,6 +22,7 @@ import {
 import { applyQueryOptions } from '../middleware/queryOptions.js';
 import { testImapConnection } from '../services/imapService.js';
 import { processIncomingEmails, runOcrOnBuffer } from '../services/supplierInvoiceProcessor.js';
+import { isEncryptedSecret, sealImapPassword, revealImapPassword } from '../services/secretAtRest.js';
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
@@ -90,14 +91,26 @@ function publicInvoiceEmailConfig(config = {}) {
 
 function mergeInvoiceEmailConfig(existing = {}, config = {}) {
   const enablingNow = config.enabled === true && existing.enabled !== true;
+  let nextPass = existing.imapPassword;
+  if (config.imapPassword && config.imapPassword !== '••••••••') {
+    // Cifrado en reposo (AES-GCM). Texto plano legado se sella al guardar de nuevo.
+    nextPass = sealImapPassword(String(config.imapPassword).replace(/\s+/g, '').trim());
+  } else if (existing.imapPassword && existing.imapPassword !== '••••••••') {
+    // Migración lazy: si quedó en claro, cifrar al guardar cualquier cambio de config.
+    try {
+      if (!isEncryptedSecret(String(existing.imapPassword))) {
+        nextPass = sealImapPassword(existing.imapPassword);
+      }
+    } catch {
+      /* sin clave de cifrado: dejar como está */
+    }
+  }
   return {
     enabled: config.enabled !== undefined ? Boolean(config.enabled) : existing.enabled,
     imapHost: config.imapHost !== undefined ? String(config.imapHost).trim() : existing.imapHost,
     imapPort: config.imapPort !== undefined ? Number(config.imapPort) : existing.imapPort,
     imapUser: config.imapUser !== undefined ? String(config.imapUser).trim() : existing.imapUser,
-    imapPassword: config.imapPassword && config.imapPassword !== '••••••••'
-      ? String(config.imapPassword).replace(/\s+/g, '').trim()
-      : existing.imapPassword,
+    imapPassword: nextPass,
     imapTls: config.imapTls !== undefined ? Boolean(config.imapTls) : existing.imapTls,
     imapSyncFrom: config.resetSyncFrom
       ? new Date().toISOString()
@@ -754,7 +767,9 @@ export async function updateConfig(req, res) {
         if (!draftPass) draftPass = existingPass;
       }
 
-      const hasImap = Boolean(draftHost && draftUser && draftPass);
+      // existingPass puede ir cifrado; para validar "hay pass" basta no vacío / no máscara
+      const passPresent = Boolean(draftPass && draftPass !== '••••••••');
+      const hasImap = Boolean(draftHost && draftUser && passPresent);
       if (!hasImap && !isImapConfigured({})) {
         return badRequest(res, 'Configura servidor IMAP o las variables SUPPLIER_INVOICE_IMAP_* en el servidor');
       }
@@ -894,7 +909,7 @@ export async function testImap(req, res) {
           host: overrides.host || saved.imapHost,
           port: overrides.port || saved.imapPort || 993,
           user: overrides.user || saved.imapUser,
-          pass: saved.imapPassword || '',
+          pass: revealImapPassword(saved.imapPassword || ''),
           tls: overrides.tls !== undefined ? overrides.tls : saved.imapTls !== false,
         };
       } else {
@@ -904,7 +919,7 @@ export async function testImap(req, res) {
           host: overrides.host || saved.imapHost,
           port: overrides.port || saved.imapPort || 993,
           user: overrides.user || saved.imapUser,
-          pass: saved.imapPassword || '',
+          pass: revealImapPassword(saved.imapPassword || ''),
           tls: overrides.tls !== undefined ? overrides.tls : saved.imapTls !== false,
         };
       }

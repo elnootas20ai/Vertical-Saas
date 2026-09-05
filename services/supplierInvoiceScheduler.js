@@ -3,6 +3,7 @@ import { isImapConfigured } from './imapService.js';
 import { processIncomingEmails, listSupplierInvoiceImapTargets } from './supplierInvoiceProcessor.js';
 import { ACCOUNTS_DB, ensureDatabase, getAllDocuments } from './couchdb.js';
 import { shouldRunBackgroundEngine } from './engineIdleGate.js';
+import { hasImapPasswordStored } from './secretAtRest.js';
 
 const POLL_INTERVAL_MS = Number(process.env.SUPPLIER_INVOICE_POLL_INTERVAL_MS || 300_000);
 const STARTUP_DELAY_MS = 20_000;
@@ -28,8 +29,7 @@ function accountImapReadyForPolling(cfg) {
   if (!cfg?.enabled) return false;
   const host = String(cfg.imapHost || '').trim();
   const user = String(cfg.imapUser || '').trim();
-  const pass = String(cfg.imapPassword || '').trim();
-  return Boolean(host && user && pass);
+  return Boolean(host && user && hasImapPasswordStored(cfg.imapPassword));
 }
 
 async function anyAccountHasEnabledImap() {

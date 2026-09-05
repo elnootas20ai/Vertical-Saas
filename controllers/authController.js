@@ -80,6 +80,7 @@ import {
   saveSession,
   saveResetToken,
   saveLoginOtp,
+  markLoginOtpSent,
   canResendLoginOtp,
   findAccountByLoginOtp,
   clearLoginOtp,
@@ -283,22 +284,33 @@ async function dispatchLoginOtp(req, account) {
   }
 
   const code = String(crypto.randomInt(100000, 1000000));
-  await saveLoginOtp(req, account, code);
+  let saved = await saveLoginOtp(req, account, code);
   const to = resolveLoginOtpDestination(account);
   const accountEmail = String(account?.email || '').trim().toLowerCase();
   const { subject, html } = buildLoginCodeEmail(account.email, code);
 
-  // No bloquear 10–15s al usuario: el código ya está guardado; el SMTP va en segundo plano.
-  void sendEmail({ to, subject, html, requireDelivery: true })
-    .then(() => {
-      logger.info({ tag: 'AUTH_LOGIN_OTP', to, account: accountEmail }, 'OTP enviado');
-    })
-    .catch((err) => {
-      logger.error(
-        { tag: 'AUTH_LOGIN_OTP', to, account: accountEmail, err: err?.message || err },
-        'Fallo envío OTP (código ya generado)',
-      );
-    });
+  try {
+    await sendEmail({ to, subject, html, requireDelivery: true });
+    saved = await markLoginOtpSent(req, saved);
+    logger.info({ tag: 'AUTH_LOGIN_OTP', to, account: accountEmail }, 'OTP enviado');
+  } catch (err) {
+    logger.error(
+      { tag: 'AUTH_LOGIN_OTP', to, account: accountEmail, err: err?.message || err },
+      'Fallo envío OTP',
+    );
+    try {
+      await clearLoginOtp(req, saved);
+    } catch {
+      /* noop: el fallo a reportar es el del email */
+    }
+    return {
+      ok: false,
+      status: 502,
+      code: 'LOGIN_CODE_SEND_FAILED',
+      error: 'No se pudo enviar el código por email. Inténtalo de nuevo en unos segundos.',
+      hint: maskEmailForHint(to),
+    };
+  }
 
   if (process.env.NODE_ENV !== 'production') {
     console.log(`[AUTH_LOGIN_OTP] account=${accountEmail} primary=${to} code=${code}`);

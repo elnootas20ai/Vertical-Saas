@@ -33,6 +33,7 @@ import { nextPurchaseOrderNumber } from './purchaseOrderNumber.js';
 import { resolvePurchaseInvoiceNumber } from './purchaseDocNumber.js';
 import { sanitizeSupplierProductAliases } from '../shared/purchases/supplierProductAlias.js';
 import { normalizeEsTaxPolicy } from '../shared/tax/spainVat.js';
+import { isEncryptedSecret, sealImapPassword } from './secretAtRest.js';
 
 export { clientMatchesBusinessScope };
 
@@ -2051,6 +2052,16 @@ export async function saveLoginOtp(req, account, rawCode) {
     ...account,
     loginOtpHash: hashToken(rawCode),
     loginOtpExpiry: expiry,
+    // Cooldown solo tras envío real (markLoginOtpSent). Si Resend falla, no bloquear reenvío.
+    loginOtpSentAt: null,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+/** Marca envío OTP tras Resend/SMTP OK (activa cooldown de reenvío). */
+export async function markLoginOtpSent(req, account) {
+  return saveAccount(req, {
+    ...account,
     loginOtpSentAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
@@ -2059,6 +2070,10 @@ export async function saveLoginOtp(req, account, rawCode) {
 export function canResendLoginOtp(account) {
   const sentAt = account?.loginOtpSentAt;
   if (!sentAt) return true;
+  const expiryMs = account?.loginOtpExpiry ? new Date(account.loginOtpExpiry).getTime() : 0;
+  const hasValidOtp = Boolean(account?.loginOtpHash) && expiryMs > Date.now();
+  // Sin código válido en cuenta: permitir reenviar aunque el cooldown no haya caducado.
+  if (!hasValidOtp) return true;
   return Date.now() - new Date(sentAt).getTime() >= LOGIN_OTP_RESEND_COOLDOWN_MS;
 }
 
@@ -2072,11 +2087,14 @@ export async function findAccountByLoginOtp(req, email, rawCode) {
 }
 
 export async function clearLoginOtp(req, account) {
-  if (!account?.loginOtpHash) return account;
+  if (!account?.loginOtpHash && !account?.loginOtpSentAt && !account?.loginOtpExpiry) {
+    return account;
+  }
   return saveAccount(req, {
     ...account,
     loginOtpHash: null,
     loginOtpExpiry: null,
+    loginOtpSentAt: null,
     updatedAt: new Date().toISOString(),
   });
 }
@@ -7534,6 +7552,21 @@ export function buildPointOfSaleDocument(userId, data = {}, existing = null) {
       ...supplierInvoiceConfig,
       imapPassword: existing.supplierInvoiceConfig.imapPassword || '',
     };
+  } else if (
+    supplierInvoiceConfig
+    && typeof supplierInvoiceConfig === 'object'
+    && supplierInvoiceConfig.imapPassword
+    && String(supplierInvoiceConfig.imapPassword) !== '••••••••'
+    && !isEncryptedSecret(String(supplierInvoiceConfig.imapPassword))
+  ) {
+    try {
+      supplierInvoiceConfig = {
+        ...supplierInvoiceConfig,
+        imapPassword: sealImapPassword(supplierInvoiceConfig.imapPassword),
+      };
+    } catch {
+      /* sin clave de cifrado: se deja en claro hasta configurar SECRETS_ENCRYPTION_KEY / JWT_SECRET */
+    }
   }
 
   return {

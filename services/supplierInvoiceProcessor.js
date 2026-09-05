@@ -34,6 +34,7 @@ import {
   parseSupplierInvoicePdfBuffer,
   reconstructTextFromPdfItems,
 } from './supplierInvoicePdfParse.js';
+import { hasImapPasswordStored, revealImapPassword } from './secretAtRest.js';
 
 const fakeReq = { headers: {} };
 
@@ -41,8 +42,7 @@ function imapConfigReady(c) {
   if (!c?.enabled) return false;
   const host = String(c.imapHost || '').trim();
   const user = String(c.imapUser || '').trim();
-  const pass = String(c.imapPassword || '').replace(/\s+/g, '').trim();
-  return Boolean(host && user && pass);
+  return Boolean(host && user && hasImapPasswordStored(c.imapPassword));
 }
 
 function overridesFromImapConfig(c, meta = {}) {
@@ -51,7 +51,7 @@ function overridesFromImapConfig(c, meta = {}) {
     host: String(c.imapHost || '').trim(),
     port: Number(c.imapPort || 993),
     user: String(c.imapUser || '').trim(),
-    pass: String(c.imapPassword || '').replace(/\s+/g, '').trim(),
+    pass: revealImapPassword(c.imapPassword),
     tls: c.imapTls !== false,
     sinceUid: Number(c.imapCursorUid || 0) || 0,
     sinceDate: c.imapSyncFrom || null,
