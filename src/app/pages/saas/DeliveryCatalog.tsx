@@ -6678,6 +6678,9 @@ export function CatalogPage() {
     try {
       const result = await loadPurchaseInvoiceStockRequest(dataUserId, invoice._id, {
         force: Boolean(options?.force),
+        warehouseId: storeWarehouseId || invoice.warehouseId || '',
+        salesPointId: String(activeStore.activeSalesPointId || '').trim(),
+        workCenterId: activeWorkCenterId || '',
       });
       setInvoices((prev) => prev.map((i) => (i._id === result.invoice._id ? result.invoice : i)));
       if (result.skipped) {
@@ -9183,6 +9186,9 @@ export function CatalogPage() {
           order={albaranCorroborate.order}
           invoice={albaranCorroborate.invoice}
           existingInvoiceNumbers={scopedInvoices.map((inv) => inv.invoiceNumber)}
+          warehouseId={storeWarehouseId}
+          salesPointId={String(activeStore.activeSalesPointId || '').trim()}
+          workCenterId={activeWorkCenterId || ''}
           onClose={() => setAlbaranCorroborate(null)}
           onDone={({ order, invoice }) => {
             setAlbaranCorroborate(null);

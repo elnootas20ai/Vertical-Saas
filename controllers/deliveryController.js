@@ -2990,12 +2990,28 @@ export async function createPurchaseInvoice(req, res) {
     let reconciled = null;
     try {
       const { reconcilePurchaseInvoiceFromOcr } = await import('../services/ocrPurchasePipeline.js');
-      reconciled = await reconcilePurchaseInvoiceFromOcr(req, userId, { ...doc, _rev: saved.rev }, {
+      let warehouseId = String(invoice.warehouseId || '').trim();
+      if (loadToWarehouse) {
+        try {
+          const { resolvePurchaseReceptionWarehouseId } = await import('../services/storeWarehouseService.js');
+          warehouseId = await resolvePurchaseReceptionWarehouseId(req, userId, {
+            warehouseId,
+            salesPointId: invoice.salesPointId || '',
+            workCenterId: invoice.workCenterId || invoice.costCenterId || '',
+          });
+        } catch {
+          /* keep invoice warehouseId */
+        }
+      }
+      reconciled = await reconcilePurchaseInvoiceFromOcr(req, userId, { ...doc, _rev: saved.rev, warehouseId }, {
         performedBy: account.fullName || userId,
         financeSource: 'invoice',
         entryMethod: doc.entryMethod || 'manual',
         applyStock: loadToWarehouse,
         createFinance: true,
+        warehouseId,
+        salesPointId: invoice.salesPointId || '',
+        workCenterId: invoice.workCenterId || invoice.costCenterId || '',
       });
     } catch (reconcileErr) {
       console.error('[createPurchaseInvoice] reconcile stock/finance:', reconcileErr?.message || reconcileErr);
@@ -3229,6 +3245,18 @@ export async function loadPurchaseInvoiceToStock(req, res) {
     }
 
     const account = await findAccountByUserId(req, userId);
+    let warehouseId = String(req.body?.warehouseId || existing.warehouseId || '').trim();
+    try {
+      const { resolvePurchaseReceptionWarehouseId } = await import('../services/storeWarehouseService.js');
+      warehouseId = await resolvePurchaseReceptionWarehouseId(req, userId, {
+        warehouseId,
+        salesPointId: req.body?.salesPointId || existing.salesPointId || '',
+        workCenterId: req.body?.workCenterId || existing.workCenterId || existing.costCenterId || '',
+      });
+    } catch {
+      /* keep body/invoice warehouseId */
+    }
+
     const { reconcilePurchaseInvoiceFromOcr } = await import('../services/ocrPurchasePipeline.js');
     const reconciled = await reconcilePurchaseInvoiceFromOcr(req, userId, invoiceDoc, {
       performedBy: account?.fullName || userId,
@@ -3236,6 +3264,9 @@ export async function loadPurchaseInvoiceToStock(req, res) {
       createFinance: false,
       financeSource: 'invoice',
       entryMethod: invoiceDoc.entryMethod || 'manual',
+      warehouseId,
+      salesPointId: req.body?.salesPointId || existing.salesPointId || '',
+      workCenterId: req.body?.workCenterId || existing.workCenterId || existing.costCenterId || '',
     });
 
     const db = getCatalogDbName();

@@ -274,7 +274,26 @@ export async function markOrderReceived(req, res) {
 
     if (allReceived || Array.isArray(receivedItems)) {
       const account = await findAccountByUserId(req, userId);
-      const warehouseId = req.body.warehouseId || '';
+      let warehouseId = String(req.body?.warehouseId || '').trim();
+      try {
+        const { resolvePurchaseReceptionWarehouseId } = await import('../services/storeWarehouseService.js');
+        warehouseId = await resolvePurchaseReceptionWarehouseId(req, userId, {
+          warehouseId,
+          salesPointId: req.body?.salesPointId || existing.salesPointId || '',
+          workCenterId: req.body?.workCenterId || existing.workCenterId || '',
+        });
+      } catch (resolveErr) {
+        logger.warn(
+          { tag: 'PO_RECEIVE', err: resolveErr?.message },
+          'No se pudo resolver almacén de recepción',
+        );
+      }
+      if (!warehouseId) {
+        logger.warn(
+          { tag: 'PO_RECEIVE', orderId: existing._id, userId },
+          'Recepción sin warehouseId: el stock no se verá en almacén por tienda',
+        );
+      }
       const prevByCatalog = new Map(
         (existing.items || []).map((it) => [String(it.catalogItemId || ''), Number(it.received || 0)]),
       );
@@ -379,10 +398,11 @@ export async function markOrderReceived(req, res) {
         stockUpdated,
         stockUnits,
         stockFailed,
+        warehouseId: warehouseId || '',
       });
     }
 
-    return res.json({ ok: true, order: sanitizePurchaseOrder({ ...doc, _rev: result.rev }), stockUpdated: 0, stockUnits: 0, stockFailed: 0 });
+    return res.json({ ok: true, order: sanitizePurchaseOrder({ ...doc, _rev: result.rev }), stockUpdated: 0, stockUnits: 0, stockFailed: 0, warehouseId: '' });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al marcar pedido como recibido' });
   }

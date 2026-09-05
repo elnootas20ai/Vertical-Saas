@@ -185,7 +185,14 @@ export async function markOrderReceivedRequest(
   userId: string,
   orderId: string,
   receivedItems?: Array<{ catalogItemId: string; quantity: number; unitCost?: number }>,
-): Promise<{ order: PurchaseOrder; stockUpdated?: number; stockUnits?: number; stockFailed?: number }> {
+  options?: { warehouseId?: string; salesPointId?: string; workCenterId?: string },
+): Promise<{
+  order: PurchaseOrder;
+  stockUpdated?: number;
+  stockUnits?: number;
+  stockFailed?: number;
+  warehouseId?: string;
+}> {
   const id = normalizeUserId(userId);
   const result = await request<{
     ok: boolean;
@@ -193,9 +200,18 @@ export async function markOrderReceivedRequest(
     stockUpdated?: number;
     stockUnits?: number;
     stockFailed?: number;
+    warehouseId?: string;
   }>(
     `/api/purchase-orders/${encodeURIComponent(id)}/${encodeURIComponent(orderId)}/receive`,
-    { method: 'POST', body: JSON.stringify({ receivedItems }) },
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        receivedItems,
+        warehouseId: options?.warehouseId || '',
+        salesPointId: options?.salesPointId || '',
+        workCenterId: options?.workCenterId || '',
+      }),
+    },
   );
   if (!result.order) throw new Error('Respuesta inválida del servidor');
   return result;

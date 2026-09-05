@@ -64,6 +64,9 @@ export function AlbaranCorroborateModal({
   order,
   invoice,
   existingInvoiceNumbers = [],
+  warehouseId = '',
+  salesPointId = '',
+  workCenterId = '',
   onClose,
   onDone,
 }: {
@@ -71,6 +74,10 @@ export function AlbaranCorroborateModal({
   order: PurchaseOrder;
   invoice?: PurchaseInvoice | null;
   existingInvoiceNumbers?: Array<string | undefined | null>;
+  /** Almacén de la tienda activa (imprescindible multi-tienda). */
+  warehouseId?: string;
+  salesPointId?: string;
+  workCenterId?: string;
   onClose: () => void;
   onDone: (result: { order: PurchaseOrder; invoice?: PurchaseInvoice | null }) => void;
 }) {
@@ -334,7 +341,11 @@ export function AlbaranCorroborateModal({
         unitCost: r.receiveUnitCost,
       }));
 
-      const receiveResult = await markOrderReceivedRequest(userId, order._id, receivedItems);
+      const receiveResult = await markOrderReceivedRequest(userId, order._id, receivedItems, {
+        warehouseId,
+        salesPointId,
+        workCenterId,
+      });
       const updatedOrder = receiveResult.order;
       const pendingOrderLines = buildPendingOrderLinesFromCompare(order, rows);
       const incomplete = pendingOrderLines.length > 0;
@@ -350,7 +361,9 @@ export function AlbaranCorroborateModal({
         catalogItemName: r.name,
       }));
 
-      const stockOk = (receiveResult.stockUpdated || 0) > 0 || receivable.every((r) => !r.catalogItemId);
+      // Solo «cargado» si realmente entró stock (no si faltaba catalogItemId).
+      const stockOk = (receiveResult.stockUpdated || 0) > 0;
+      const resolvedWarehouseId = receiveResult.warehouseId || warehouseId || '';
       const receptionNote = incomplete
         ? `Pedido incompleto: pendiente ${pendingOrderLines.map((l) => `${l.name} (${l.pendingQty})`).join(', ')}`
         : '';
@@ -362,10 +375,17 @@ export function AlbaranCorroborateModal({
           linkedPurchaseOrderId: order._id,
           linkedPurchaseOrderNumber: order.orderNumber || '',
           lines: invoiceLines,
+          warehouseId: resolvedWarehouseId || invoice.warehouseId,
+          salesPointId: salesPointId || invoice.salesPointId,
+          workCenterId: workCenterId || invoice.workCenterId,
           ocrStockReceivedAt: stockOk ? new Date().toISOString() : '',
           documentKind: invoice.documentKind || 'albaran',
           pendingOrderLines,
-          flags: { ...invoice.flags, orderIncomplete: incomplete },
+          flags: {
+            ...invoice.flags,
+            orderIncomplete: incomplete,
+            stockPending: !stockOk,
+          },
           notes: mergedNotes || invoice.notes,
         } as PurchaseInvoice);
       } else {
@@ -388,15 +408,20 @@ export function AlbaranCorroborateModal({
           ocrData: invoice?.ocrData,
           ocrImageBase64: invoice?.ocrImageBase64,
           loadToWarehouse: false,
+          warehouseId: resolvedWarehouseId,
+          salesPointId,
+          workCenterId,
           ocrStockReceivedAt: stockOk ? new Date().toISOString() : '',
           pendingOrderLines,
-          flags: { orderIncomplete: incomplete },
+          flags: { orderIncomplete: incomplete, stockPending: !stockOk },
         } as Partial<PurchaseInvoice> & { loadToWarehouse?: boolean });
       }
 
       if (!stockOk) {
         toast.message(
-          'Pedido comprobado, pero el stock no entró. Abre el albarán y pulsa «Cargar al almacén».',
+          resolvedWarehouseId
+            ? 'Pedido comprobado, pero el stock no entró. Abre el albarán y pulsa «Cargar al almacén».'
+            : 'Pedido comprobado, pero no hay almacén de tienda. Elige tienda y pulsa «Cargar al almacén».',
         );
       } else if (incomplete) {
         toast.message(

@@ -139,3 +139,30 @@ export async function resolveWarehouseIdForSalesPoint(req, userId, salesPointId)
   const hit = findWarehouseForSalesPoint(warehouses, pdvId);
   return hit?._id || '';
 }
+
+/**
+ * Almacén destino para recepción de compra / albarán.
+ * Preferido (tienda activa) → PDV → único almacén activo → default.
+ * Con varios almacenes y sin preferido/PDV no adivina (evita meter stock en tienda incorrecta).
+ */
+export async function resolvePurchaseReceptionWarehouseId(
+  req,
+  userId,
+  { warehouseId = '', salesPointId = '', workCenterId = '' } = {},
+) {
+  const preferred = String(warehouseId || '').trim();
+  if (preferred) return preferred;
+
+  const pdvRef = String(salesPointId || workCenterId || '').trim();
+  if (pdvRef) {
+    const fromPdv = await resolveWarehouseIdForSalesPoint(req, userId, pdvRef).catch(() => '');
+    if (fromPdv) return fromPdv;
+  }
+
+  const warehouses = await listWarehousesByUser(req, userId).catch(() => []);
+  const active = (warehouses || []).filter((w) => w && !w.deletedAt && w.active !== false);
+  if (active.length === 1) return String(active[0]._id || '').trim();
+  const def = active.find((w) => w.isDefault);
+  if (def) return String(def._id || '').trim();
+  return '';
+}

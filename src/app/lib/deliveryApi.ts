@@ -523,6 +523,9 @@ export interface PurchaseInvoice {
   businessName?: string;
   workCenterId?: string;
   workCenterName?: string;
+  /** Almacén destino al cargar stock (tienda activa). */
+  warehouseId?: string;
+  salesPointId?: string;
 
   validationStatus: InvoiceValidationStatus;
   validatedAt?: string;
@@ -1107,18 +1110,31 @@ export async function checkPurchaseInvoiceDuplicateRequest(
 export async function loadPurchaseInvoiceStockRequest(
   userId: string,
   invoiceId: string,
-  options?: { force?: boolean },
-): Promise<{ invoice: PurchaseInvoice; skipped?: boolean; forced?: boolean; reconcile?: { stockUpdated?: number; stockUnits?: number } }> {
+  options?: { force?: boolean; warehouseId?: string; salesPointId?: string; workCenterId?: string },
+): Promise<{
+  invoice: PurchaseInvoice;
+  skipped?: boolean;
+  forced?: boolean;
+  reconcile?: { stockUpdated?: number; stockUnits?: number; warehouseId?: string };
+}> {
   const id = normalizeUserId(userId);
   const result = await request<{
     ok: boolean;
     invoice: PurchaseInvoice;
     skipped?: boolean;
     forced?: boolean;
-    reconcile?: { stockUpdated?: number; stockUnits?: number };
+    reconcile?: { stockUpdated?: number; stockUnits?: number; warehouseId?: string };
   }>(
     `/api/delivery/invoices/${encodeURIComponent(id)}/${encodeURIComponent(invoiceId)}/load-stock`,
-    { method: 'POST', body: JSON.stringify({ force: Boolean(options?.force) }) },
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        force: Boolean(options?.force),
+        warehouseId: options?.warehouseId || '',
+        salesPointId: options?.salesPointId || '',
+        workCenterId: options?.workCenterId || '',
+      }),
+    },
   );
   if (!result.invoice) throw new Error('Respuesta inválida del servidor');
   return result;

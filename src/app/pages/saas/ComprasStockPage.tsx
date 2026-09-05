@@ -306,7 +306,14 @@ export function ComprasStockPage() {
           <>
             {activeTab === 'almacenes' && <AlmacenesTab warehouses={warehouses.filter((w) => !q || w.name?.toLowerCase().includes(q))} userId={userId} onReload={load} />}
             {activeTab === 'pedidos' && <PedidosTab orders={orders.filter((o) => !q || o.orderNumber?.toLowerCase().includes(q) || o.supplierName?.toLowerCase().includes(q))} suppliers={suppliers} catalogItems={catalogItems} userId={userId} onReload={load} />}
-            {activeTab === 'recepciones' && <RecepcionesTab orders={orders.filter((o) => ['sent', 'partial', 'pending'].includes(o.status))} userId={userId} onReload={load} />}
+            {activeTab === 'recepciones' && (
+              <RecepcionesTab
+                orders={orders.filter((o) => ['sent', 'partial', 'pending'].includes(o.status))}
+                userId={userId}
+                warehouses={warehouses}
+                onReload={load}
+              />
+            )}
             {activeTab === 'movimientos' && <MovimientosTab movements={movements.filter((m) => !q || m.catalogItemName?.toLowerCase().includes(q) || m.movementType?.toLowerCase().includes(q))} summary={summary} />}
             {activeTab === 'facturacion' && <FacturacionTab invoices={invoices.filter((inv) => !q || inv.invoiceNumber?.toLowerCase().includes(q) || inv.supplierName?.toLowerCase().includes(q))} />}
           </>
@@ -465,10 +472,27 @@ function PedidosTab({ orders, suppliers, catalogItems, userId, onReload }: { ord
 /* ─── TAB: Recepciones ────────────────────────────────────────────────────── */
 /* ═══════════════════════════════════════════════════════════════════════════ */
 
-function RecepcionesTab({ orders, userId, onReload }: { orders: PurchaseOrder[]; userId: string; onReload: () => void }) {
+function RecepcionesTab({
+  orders,
+  userId,
+  warehouses,
+  onReload,
+}: {
+  orders: PurchaseOrder[];
+  userId: string;
+  warehouses: Warehouse[];
+  onReload: () => void;
+}) {
+  const defaultWarehouseId = useMemo(() => {
+    const active = (warehouses || []).filter((w) => w.active !== false && !w.deletedAt);
+    return active.find((w) => w.isDefault)?._id || active[0]?._id || '';
+  }, [warehouses]);
+
   const handleReceive = async (order: PurchaseOrder) => {
     try {
-      await markOrderReceivedRequest(userId, order._id);
+      await markOrderReceivedRequest(userId, order._id, undefined, {
+        warehouseId: defaultWarehouseId,
+      });
       toast.success(`Pedido ${order.orderNumber} recibido`);
       onReload();
     } catch (err: any) { toast.error(err.message); }

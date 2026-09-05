@@ -163,6 +163,19 @@ export async function reconcilePurchaseInvoiceFromOcr(req, userId, invoiceDoc, o
   const now = new Date().toISOString();
   const performedBy = options.performedBy || 'ocr-system';
   const applyStock = options.applyStock === true;
+  let warehouseId = String(options.warehouseId || invoiceDoc.warehouseId || '').trim();
+  if (applyStock && !warehouseId) {
+    try {
+      const { resolvePurchaseReceptionWarehouseId } = await import('./storeWarehouseService.js');
+      warehouseId = await resolvePurchaseReceptionWarehouseId(req, userId, {
+        warehouseId: '',
+        salesPointId: options.salesPointId || invoiceDoc.salesPointId || '',
+        workCenterId: options.workCenterId || invoiceDoc.workCenterId || invoiceDoc.costCenterId || '',
+      });
+    } catch (resolveErr) {
+      logger.warn({ tag: 'OCR-STOCK', err: resolveErr?.message }, 'No se pudo resolver almacén');
+    }
+  }
 
   if (applyStock && invoiceDoc.ocrStockReceivedAt) {
     return {
@@ -172,11 +185,18 @@ export async function reconcilePurchaseInvoiceFromOcr(req, userId, invoiceDoc, o
       reason: 'already_loaded',
       financeMovementId: invoiceDoc.linkedFinanceId || null,
       financeSkipped: true,
+      warehouseId: warehouseId || '',
       ...summarizeCatalogMatches(lines),
     };
   }
 
   if (applyStock) {
+    if (!warehouseId) {
+      logger.warn(
+        { tag: 'OCR-STOCK', invoiceId: invoiceDoc._id, userId },
+        'Carga almacén sin warehouseId: el stock no se verá por tienda',
+      );
+    }
     for (const line of lines) {
       const catalogItemId = String(line.catalogItemId || '').trim();
       const qty = Number(line.quantity || 0);
@@ -192,6 +212,7 @@ export async function reconcilePurchaseInvoiceFromOcr(req, userId, invoiceDoc, o
           movementType: 'purchase_reception',
           quantity: qty,
           unitCost,
+          warehouseId,
           referenceId: invoiceDoc._id,
           referenceType: 'purchase_invoice_ocr',
           notes: `Recepción - ${invoiceDoc.documentKind === 'albaran' ? 'Albarán' : 'Factura'} ${invoiceDoc.invoiceNumber || invoiceDoc._id.slice(-8)}`,
@@ -232,6 +253,7 @@ export async function reconcilePurchaseInvoiceFromOcr(req, userId, invoiceDoc, o
     await putDocument(req, db, invFresh._id, {
       ...invFresh,
       linkedFinanceId: financeResult?.movementId || invFresh.linkedFinanceId || '',
+      warehouseId: warehouseId || invFresh.warehouseId || '',
       ocrStockReceivedAt: stockUpdated > 0 ? now : invFresh.ocrStockReceivedAt || '',
       ocrStockLinesReceived: stockUpdated > 0 ? stockUpdated : (invFresh.ocrStockLinesReceived || 0),
       flags: {
@@ -247,6 +269,7 @@ export async function reconcilePurchaseInvoiceFromOcr(req, userId, invoiceDoc, o
   return {
     stockUpdated,
     stockUnits,
+    warehouseId: warehouseId || '',
     financeMovementId: financeResult?.movementId || null,
     financeSkipped: financeResult?.skipped || false,
     ...matchSummary,

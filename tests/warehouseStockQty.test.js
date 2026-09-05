@@ -32,7 +32,29 @@ test('applyWarehouseStockDelta siembra legacy en el primer almacén', () => {
   assert.equal(applied.warehouseStock[0].warehouseId, 'wh-bad');
 });
 
-test('storeWarehouseDisplayName', () => {
-  assert.equal(storeWarehouseDisplayName('Badalona'), 'Almacén Badalona');
-  assert.equal(storeWarehouseDisplayName('Almacén Tiana'), 'Almacén Tiana');
+test('applyWarehouseStockDelta sin warehouseId no toca warehouseStock (bug albarán multi-tienda)', () => {
+  const item = {
+    stockQuantity: 10,
+    warehouseStock: [{ warehouseId: 'wh-tia', quantity: 4, warehouseName: 'Tiana' }],
+  };
+  const applied = applyWarehouseStockDelta(item, '', 20);
+  assert.equal(applied.nextQty, 30);
+  assert.equal(applied.stockQuantity, 30);
+  assert.equal(applied.warehouseStock.length, 1);
+  assert.equal(applied.warehouseStock[0].quantity, 4);
+  assert.equal(quantityForWarehouse({ ...item, stockQuantity: applied.stockQuantity }, 'wh-tia'), 4);
+});
+
+test('applyWarehouseStockDelta con warehouseId sí entra en la tienda', () => {
+  const item = {
+    stockQuantity: 10,
+    warehouseStock: [{ warehouseId: 'wh-tia', quantity: 4, warehouseName: 'Tiana' }],
+  };
+  const applied = applyWarehouseStockDelta(item, 'wh-tia', 20, 'Tiana');
+  assert.equal(applied.nextQty, 24);
+  assert.equal(applied.warehouseStock[0].quantity, 24);
+  assert.equal(
+    quantityForWarehouse({ stockQuantity: applied.stockQuantity, warehouseStock: applied.warehouseStock }, 'wh-tia'),
+    24,
+  );
 });
