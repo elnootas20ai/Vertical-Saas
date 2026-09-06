@@ -251,6 +251,7 @@ export async function getUberEatsOAuthConfig(req, res) {
 export async function startUberEatsOAuth(req, res) {
   try {
     const businessId = String(req.query.businessId || '').trim();
+    const forceLogin = String(req.query.forceLogin || '').trim() === '1';
     if (!businessId) return badRequest(res, 'Falta businessId');
     if (!(await requireUberBusinessManager(req, res, businessId))) return;
     if (!isUberEatsConfigured()) {
@@ -262,7 +263,7 @@ export async function startUberEatsOAuth(req, res) {
 
     const userId = authUserId(req);
     const state = createUberOAuthState({ businessId, userId });
-    const authorizeUrl = buildUberAuthorizeUrl(state);
+    const authorizeUrl = buildUberAuthorizeUrl(state, { promptLogin: forceLogin });
     const pub = getUberEatsPublicConfig();
 
     return res.json({

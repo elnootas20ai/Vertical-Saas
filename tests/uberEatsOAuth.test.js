@@ -80,6 +80,12 @@ describe('uberEatsOAuth', () => {
     expect(url).not.toContain('eats.order');
   });
 
+  it('can force Uber login when changing the merchant account', () => {
+    const state = createUberOAuthState({ businessId: 'biz-1', userId: 'u-1' });
+    const url = buildUberAuthorizeUrl(state, { promptLogin: true });
+    expect(url).toContain('prompt=login');
+  });
+
   it('blocks certification helpers outside sandbox', () => {
     process.env.UBER_EATS_ENV = 'production';
     expect(() => assertUberEatsSandbox()).toThrow(/sandbox/i);

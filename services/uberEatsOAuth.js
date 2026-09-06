@@ -129,7 +129,7 @@ export function verifyUberOAuthState(state) {
   return payload;
 }
 
-export function buildUberAuthorizeUrl(state) {
+export function buildUberAuthorizeUrl(state, { promptLogin = false } = {}) {
   if (!isUberEatsConfigured()) {
     throw new Error('Uber Eats no configurado (UBER_EATS_CLIENT_ID / UBER_EATS_CLIENT_SECRET)');
   }
@@ -140,6 +140,7 @@ export function buildUberAuthorizeUrl(state) {
     scope: getUberEatsScopes(),
     state: String(state || ''),
   });
+  if (promptLogin) params.set('prompt', 'login');
   return `${getUberEatsAuthorizeBase()}?${params.toString()}`;
 }
 

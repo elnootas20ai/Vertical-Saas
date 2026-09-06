@@ -365,9 +365,9 @@ export async function getUberEatsOAuthConfigRequest() {
   return authRequest<{ ok: boolean } & UberEatsOAuthConfig>('/api/uber-eats/oauth/config');
 }
 
-export async function startUberEatsOAuthRequest(businessId: string) {
+export async function startUberEatsOAuthRequest(businessId: string, forceLogin = false) {
   return authRequest<{ ok: boolean; authorizeUrl: string; redirectUri: string; env: string }>(
-    `/api/uber-eats/oauth/start?businessId=${encodeURIComponent(businessId)}`,
+    `/api/uber-eats/oauth/start?businessId=${encodeURIComponent(businessId)}${forceLogin ? '&forceLogin=1' : ''}`,
   );
 }
 

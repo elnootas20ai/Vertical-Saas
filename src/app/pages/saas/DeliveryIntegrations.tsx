@@ -256,13 +256,13 @@ export function DeliveryIntegrations() {
     }
   };
 
-  const connectUberOAuth = async () => {
+  const connectUberOAuth = async (forceLogin = false) => {
     if (!businessId) return;
     setConnectingUber(true);
     setUberStores([]);
     try {
       try { sessionStorage.removeItem('vertial_uber_oauth_block'); } catch { /* ignore */ }
-      const res = await startUberEatsOAuthRequest(businessId);
+      const res = await startUberEatsOAuthRequest(businessId, forceLogin);
       if (!res.authorizeUrl) throw new Error('Sin URL de autorización');
       window.location.href = res.authorizeUrl;
     } catch (e) {
@@ -430,7 +430,7 @@ export function DeliveryIntegrations() {
   const reconnectUber = async () => {
     // Renovar OAuth no debe borrar Store, PDV, menú ni evidencias.
     // La desconexión completa ya tiene su propio botón explícito.
-    await connectUberOAuth();
+    await connectUberOAuth(true);
   };
 
   const turnUberOn = async () => {
