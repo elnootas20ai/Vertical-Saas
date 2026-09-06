@@ -83,6 +83,46 @@ function boundUberStoreId(uber, requestedStoreId = '') {
   return bound;
 }
 
+/** Un solo PDV activo de la empresa → ese es el de Uber. Sin preferencias por nombre. */
+function soleActivePdv(pdvs) {
+  const active = (Array.isArray(pdvs) ? pdvs : []).filter((pdv) => pdv && pdv.active !== false);
+  return active.length === 1 ? active[0] : null;
+}
+
+async function loadBusinessActivePdvs(req, businessId) {
+  const business = await findBusinessById(req, businessId).catch(() => null);
+  const dataUserId = String(
+    business?.owner_user_id
+    || business?.user_id
+    || businessId,
+  ).trim();
+  const pdvs = (
+    await listScopedPointsOfSaleForBusiness(req, dataUserId, businessId).catch(() => [])
+  ).filter((pdv) => pdv && pdv.active !== false);
+  return { business, dataUserId, pdvs, solePdv: soleActivePdv(pdvs) };
+}
+
+/**
+ * PDV de la integración: el ya guardado (si sigue activo) o el único PDV de la empresa.
+ * Nunca elige por nombre (Tiana / Uber Test / etc.).
+ */
+function resolveUberSalesPointId(uber, pdvs, solePdv) {
+  const saved = String(uber?.salesPointId || '').trim();
+  if (saved && pdvs.some((pdv) => String(pdv._id || '') === saved)) return saved;
+  return String(solePdv?._id || '').trim();
+}
+
+/** Nombre en Vertial = PDV (o empresa), no el merchant name que devuelve Uber. */
+function resolveUberDisplayStoreName({ solePdv, business, requestedName, storeId }) {
+  return String(
+    solePdv?.name
+    || business?.name
+    || requestedName
+    || storeId
+    || '',
+  ).trim();
+}
+
 function authEmail(req) {
   return String(req.authUser?.email || req.user?.email || '').trim();
 }
@@ -261,9 +301,9 @@ export async function completeUberEatsOAuth(req, res) {
     if (!(await requireUberBusinessManager(req, res, businessId))) return;
 
     const tokens = await exchangeUberAuthorizationCode(code);
-    const { current } = await loadUberIntegration(req, businessId);
+    const { current, uber } = await loadUberIntegration(req, businessId);
 
-    const integrations = await saveUberPatch(req, businessId, current, {
+    let integrations = await saveUberPatch(req, businessId, current, {
       enabled: true,
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken || '',
@@ -282,11 +322,59 @@ export async function completeUberEatsOAuth(req, res) {
       logger.warn({ err: errorMsg(err), businessId }, 'Uber OAuth OK pero list stores falló');
     }
 
+    // 1 cuenta Vertial + 1 PDV + 1 tienda Uber → enlazar solo, sin elegir.
+    const { business, pdvs, solePdv } = await loadBusinessActivePdvs(req, businessId);
+    const salesPointId = resolveUberSalesPointId(uber, pdvs, solePdv);
+    if (stores.length === 1 && salesPointId) {
+      const only = stores[0];
+      const storeId = String(only.storeId || '').trim();
+      const storeName = resolveUberDisplayStoreName({
+        solePdv,
+        business,
+        requestedName: only.name,
+        storeId,
+      });
+      let provisionError = '';
+      let posIntegrationEnabled = Boolean(only.integrationEnabled);
+      try {
+        await provisionUberEatsStore({
+          userAccessToken: tokens.accessToken,
+          storeId,
+          partnerStoreId: businessId,
+          businessId,
+        });
+      } catch (provErr) {
+        provisionError = errorMsg(provErr);
+      }
+      try {
+        const posData = await getUberEatsPosData(tokens.accessToken, storeId);
+        posIntegrationEnabled = integrationEnabledFromPosData(posData);
+      } catch {
+        /* keep previous */
+      }
+      const now = new Date().toISOString();
+      const fresh = await getWebConfigByBusinessId(req, businessId);
+      integrations = await saveUberPatch(req, businessId, fresh, {
+        storeId,
+        storeName,
+        salesPointId,
+        posIntegrationEnabled,
+        posDataCheckedAt: now,
+        provisionedAt: posIntegrationEnabled ? now : '',
+        lastProvisionError: provisionError || '',
+      });
+    } else if (salesPointId && !String(uber.salesPointId || '').trim()) {
+      const fresh = await getWebConfigByBusinessId(req, businessId);
+      integrations = await saveUberPatch(req, businessId, fresh, { salesPointId });
+    }
+
     logger.info(
       {
         businessId,
         scope: tokens.scope,
         stores: stores.length,
+        autoLinked: Boolean(integrations?.uber?.storeId),
+        salesPointId: integrations?.uber?.salesPointId || salesPointId || null,
         env: getUberEatsPublicConfig().env,
       },
       'Uber Eats OAuth conectado',
@@ -299,6 +387,7 @@ export async function completeUberEatsOAuth(req, res) {
       expiresAt: tokens.expiresAt || '',
       scope: tokens.scope || '',
       stores,
+      autoLinked: Boolean(integrations?.uber?.storeId),
     });
   } catch (error) {
     logger.error({ error: errorMsg(error) }, 'Uber Eats OAuth callback failed');
@@ -337,7 +426,7 @@ export async function selectUberStoreForBusiness(req, res) {
   try {
     const businessId = String(req.body?.businessId || '').trim();
     const storeId = String(req.body?.storeId || '').trim();
-    const storeName = String(req.body?.storeName || '').trim();
+    const requestedName = String(req.body?.storeName || '').trim();
     if (!businessId) return badRequest(res, 'Falta businessId');
     if (!storeId) {
       return badRequest(res, 'Falta el Store ID de Uber. Cópialo del panel Uber (tienda TEST).');
@@ -381,24 +470,28 @@ export async function selectUberStoreForBusiness(req, res) {
       logger.warn({ businessId, storeId, msg: errorMsg(posErr) }, 'Uber get pos_data after select failed');
     }
 
-    const business = await findBusinessById(req, businessId).catch(() => null);
-    const dataUserId = String(
-      business?.owner_user_id
-      || business?.user_id
-      || businessId,
-    ).trim();
-    const activePdvs = (
-      await listScopedPointsOfSaleForBusiness(req, dataUserId, businessId).catch(() => [])
-    ).filter((pdv) => pdv.active !== false);
-    const salesPointId = String(
-      uber.salesPointId
-      || (activePdvs.length === 1 ? activePdvs[0]._id : ''),
-    ).trim();
+    const { business, pdvs, solePdv } = await loadBusinessActivePdvs(req, businessId);
+    const salesPointId = resolveUberSalesPointId(uber, pdvs, solePdv);
+    if (!salesPointId) {
+      return res.status(400).json({
+        ok: false,
+        error: pdvs.length === 0
+          ? 'Esta empresa no tiene PDV. Crea un punto de venta y vuelve a conectar Uber.'
+          : 'Hay varios PDV en esta empresa: elige cuál recibirá los pedidos Uber.',
+        needsPdvChoice: pdvs.length > 1,
+      });
+    }
+    const storeName = resolveUberDisplayStoreName({
+      solePdv: pdvs.find((p) => String(p._id) === salesPointId) || solePdv,
+      business,
+      requestedName,
+      storeId,
+    });
     const now = new Date().toISOString();
     const integrations = await saveUberPatch(req, businessId, current, {
       enabled: true,
       storeId,
-      storeName: storeName || uber.storeName || storeId,
+      storeName,
       provisionedAt: posIntegrationEnabled ? now : String(uber.provisionedAt || ''),
       posIntegrationEnabled,
       posDataCheckedAt: now,
@@ -408,7 +501,7 @@ export async function selectUberStoreForBusiness(req, res) {
     });
 
     logger.info(
-      { businessId, storeId, posIntegrationEnabled, provisionError: provisionError || null },
+      { businessId, storeId, salesPointId, posIntegrationEnabled, provisionError: provisionError || null },
       'Uber tienda seleccionada',
     );
 
@@ -416,7 +509,8 @@ export async function selectUberStoreForBusiness(req, res) {
       ok: true,
       integrations,
       storeId,
-      storeName: storeName || storeId,
+      storeName,
+      salesPointId,
       provisioned: posIntegrationEnabled,
       needsReconnect: Boolean(provisionError && /scope|not allowed|user_not_allowed/i.test(provisionError)),
       warning: provisionError
@@ -454,19 +548,8 @@ export async function activateUberPosForBusiness(req, res) {
     const posData = await getUberEatsPosData(token, storeId);
     const posIntegrationEnabled = integrationEnabledFromPosData(posData);
     const now = new Date().toISOString();
-    const business = await findBusinessById(req, businessId).catch(() => null);
-    const dataUserId = String(
-      business?.owner_user_id
-      || business?.user_id
-      || businessId,
-    ).trim();
-    const activePdvs = (
-      await listScopedPointsOfSaleForBusiness(req, dataUserId, businessId).catch(() => [])
-    ).filter((pdv) => pdv.active !== false);
-    const salesPointId = String(
-      uber.salesPointId
-      || (activePdvs.length === 1 ? activePdvs[0]._id : ''),
-    ).trim();
+    const { pdvs, solePdv } = await loadBusinessActivePdvs(req, businessId);
+    const salesPointId = resolveUberSalesPointId(uber, pdvs, solePdv);
     const integrations = await saveUberPatch(req, businessId, current, {
       posIntegrationEnabled,
       posDataCheckedAt: now,
@@ -500,7 +583,6 @@ export async function selectUberSalesPointForBusiness(req, res) {
     if (!access) return;
 
     const { current, uber } = await loadUberIntegration(req, businessId);
-    if (!uber.storeId) return badRequest(res, 'Primero vincula una tienda Uber');
     const dataUserId = String(
       access.business?.owner_user_id
       || access.business?.user_id
@@ -516,10 +598,23 @@ export async function selectUberSalesPointForBusiness(req, res) {
         error: 'El PDV no pertenece a esta empresa o está inactivo',
       });
     }
-    const integrations = await saveUberPatch(req, businessId, current, { salesPointId });
+    const patch = {
+      salesPointId,
+      ...(uber.storeId
+        ? {
+          storeName: resolveUberDisplayStoreName({
+            solePdv: selected,
+            business: access.business,
+            requestedName: uber.storeName,
+            storeId: uber.storeId,
+          }),
+        }
+        : {}),
+    };
+    const integrations = await saveUberPatch(req, businessId, current, patch);
     return res.json({
       ok: true,
-      storeId: uber.storeId,
+      storeId: uber.storeId || '',
       salesPointId,
       salesPointName: String(selected.name || ''),
       integrations,

@@ -228,8 +228,10 @@ export function DeliveryIntegrations() {
         if (res.integrations) applyIntegrations(res.integrations);
         if (Array.isArray(res.stores)) setUberStores(res.stores);
         toast.success(
-          res.stores?.length
-            ? 'Cuenta Uber conectada. Elige tu tienda (paso 2).'
+          res.autoLinked
+            ? 'Cuenta Uber conectada con el PDV de esta empresa.'
+            : res.stores?.length
+              ? 'Cuenta Uber conectada. Elige la tienda y el PDV.'
             : 'Cuenta Uber conectada. Si no hay tiendas, pega el Store ID de TEST.',
         );
       } catch (e) {
@@ -426,7 +428,8 @@ export function DeliveryIntegrations() {
   };
 
   const reconnectUber = async () => {
-    await disconnectUber();
+    // Renovar OAuth no debe borrar Store, PDV, menú ni evidencias.
+    // La desconexión completa ya tiene su propio botón explícito.
     await connectUberOAuth();
   };
 
@@ -513,6 +516,11 @@ export function DeliveryIntegrations() {
   );
   const uberMenuPushed = Boolean(integrations.uber?.menuPushedAt);
   const uberOnline = String(integrations.uber?.lastStoreStatus || '').toUpperCase() === 'ONLINE';
+  const businessPdvs = (activeStoreScope?.pointsOfSale || []).filter((pdv) => pdv.active !== false);
+  const soleBusinessPdv = businessPdvs.length === 1 ? businessPdvs[0] : null;
+  const linkedPdvName = businessPdvs.find((pdv) => pdv._id === integrations.uber?.salesPointId)?.name
+    || soleBusinessPdv?.name
+    || '';
 
   const platformCards = [
     { key: 'uber' as const, urlSlug: 'ubereats', devUrl: 'https://developer.uber.com/docs/eats' },
@@ -629,10 +637,13 @@ export function DeliveryIntegrations() {
                   {key === 'uber' ? (
                     <div className="space-y-3">
                       <p className="text-[11px] text-stone-500">
-                        {!uberOauth && 'Conecta Uber. El interruptor de arriba enciende/apaga la tienda.'}
-                        {uberOauth && !uberStoreLinked && 'Elige la tienda TEST. Luego enciende con el interruptor.'}
-                        {uberOauth && uberStoreLinked && !uberOnline && 'Listo para encender: elige PDV y pulsa el interruptor.'}
-                        {uberOnline && 'Recibiendo pedidos sandbox. Apaga con el interruptor cuando quieras.'}
+                        {!uberOauth && 'Conecta Uber. El interruptor enciende/apaga esta cuenta.'}
+                        {uberOauth && !uberStoreLinked && businessPdvs.length === 0 && 'Crea un PDV en esta empresa y vuelve a conectar.'}
+                        {uberOauth && !uberStoreLinked && businessPdvs.length > 1 && 'Hay varios PDV: elige cuál recibe los pedidos Uber.'}
+                        {uberOauth && !uberStoreLinked && soleBusinessPdv && uberStores.length > 1 && 'Hay varias tiendas Uber: elige la de esta cuenta.'}
+                        {uberOauth && !uberStoreLinked && soleBusinessPdv && uberStores.length <= 1 && (loadingStores ? 'Enlazando el PDV de esta cuenta…' : 'Enlazando automáticamente…')}
+                        {uberOauth && uberStoreLinked && !uberOnline && 'Listo. Pulsa el interruptor para poner ONLINE.'}
+                        {uberOnline && 'Recibiendo pedidos. Apaga con el interruptor cuando quieras.'}
                       </p>
 
                       {uberCfg?.configured === false && (
@@ -655,26 +666,20 @@ export function DeliveryIntegrations() {
 
                       {uberOauth && !uberStoreLinked && (
                         <div className="space-y-2.5">
+                          {soleBusinessPdv && (
+                            <p className="text-xs text-stone-700 dark:text-stone-300">
+                              PDV de esta cuenta: <strong>{soleBusinessPdv.name}</strong>
+                            </p>
+                          )}
                           {loadingStores ? (
                             <div className="flex items-center gap-2 text-xs text-stone-500">
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Cargando tiendas…
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Enlazando…
                             </div>
-                          ) : uberStores.length > 0 ? (
+                          ) : uberStores.length > 1 ? (
                             <div className="space-y-1.5">
-                              <div className="flex items-center justify-between gap-2">
-                                <p className="text-xs font-semibold text-stone-800 dark:text-stone-100 flex items-center gap-1.5">
-                                  <Store className="w-3.5 h-3.5" />
-                                  Elige tienda
-                                </p>
-                                <button
-                                  type="button"
-                                  onClick={() => void refreshUberStores()}
-                                  disabled={loadingStores}
-                                  className="text-xs font-semibold text-[var(--v-blue,#2563eb)] hover:underline disabled:opacity-50"
-                                >
-                                  Actualizar
-                                </button>
-                              </div>
+                              <p className="text-xs font-semibold text-stone-800 dark:text-stone-100">
+                                Varias tiendas Uber — elige la de esta cuenta
+                              </p>
                               <ul className="space-y-1.5">
                                 {uberStores.map((store) => {
                                   const busy = selectingStoreId === store.storeId;
@@ -685,9 +690,7 @@ export function DeliveryIntegrations() {
                                     >
                                       <div className="min-w-0">
                                         <p className="text-xs font-semibold text-stone-900 dark:text-stone-100 truncate">{store.name}</p>
-                                        <p className="text-[10px] text-stone-500 truncate">
-                                          {[store.address, store.city].filter(Boolean).join(', ') || store.storeId}
-                                        </p>
+                                        <p className="text-[10px] text-stone-500 truncate font-mono">{store.storeId}</p>
                                       </div>
                                       <button
                                         type="button"
@@ -702,20 +705,20 @@ export function DeliveryIntegrations() {
                                 })}
                               </ul>
                             </div>
-                          ) : (
+                          ) : uberStores.length === 0 && !soleBusinessPdv ? (
+                            <p className="text-xs text-amber-700 dark:text-amber-400">
+                              Esta empresa necesita exactamente un PDV (o elige uno si hay varios).
+                            </p>
+                          ) : uberStores.length === 0 ? (
                             <div className="space-y-2">
+                              <p className="text-xs text-stone-600 dark:text-stone-400">
+                                Uber no listó tiendas. Pega el Store ID de esta cuenta TEST.
+                              </p>
                               <input
                                 type="text"
                                 value={manualStoreId}
                                 onChange={(e) => setManualStoreId(e.target.value)}
-                                placeholder="Store ID de la tienda TEST"
-                                className="w-full px-3 py-2 text-sm border border-stone-200 dark:border-stone-700 rounded-xl bg-white dark:bg-stone-950"
-                              />
-                              <input
-                                type="text"
-                                value={manualStoreName}
-                                onChange={(e) => setManualStoreName(e.target.value)}
-                                placeholder="Nombre (opcional)"
+                                placeholder="Store ID"
                                 className="w-full px-3 py-2 text-sm border border-stone-200 dark:border-stone-700 rounded-xl bg-white dark:bg-stone-950"
                               />
                               <button
@@ -725,9 +728,27 @@ export function DeliveryIntegrations() {
                                 className={VERTIAL_BTN_PRIMARY}
                               >
                                 {linkingManualStore ? <Loader2 className="w-4 h-4 animate-spin" /> : <Store className="w-4 h-4" />}
-                                Usar Store ID
+                                Enlazar Store ID
                               </button>
                             </div>
+                          ) : null}
+                          {businessPdvs.length > 1 && (
+                            <label className="block">
+                              <span className="block text-[10px] font-bold uppercase tracking-wide text-stone-500 mb-1">
+                                PDV de esta cuenta
+                              </span>
+                              <select
+                                value={integrations.uber?.salesPointId || ''}
+                                onChange={(event) => void selectUberPdv(event.target.value)}
+                                disabled={selectingUberPdv}
+                                className="w-full px-2.5 py-2 text-xs rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-950"
+                              >
+                                <option value="">Selecciona el PDV</option>
+                                {businessPdvs.map((pdv) => (
+                                  <option key={pdv._id} value={pdv._id}>{pdv.name}</option>
+                                ))}
+                              </select>
+                            </label>
                           )}
                           <button
                             type="button"
@@ -743,9 +764,9 @@ export function DeliveryIntegrations() {
                       {uberOauth && uberStoreLinked && (
                         <div className="space-y-2.5">
                           <p className="text-xs text-stone-700 dark:text-stone-300">
-                            Tienda: <strong>{integrations.uber.storeName || integrations.uber.storeId}</strong>
+                            Cuenta: <strong>{linkedPdvName || integrations.uber.storeName || 'PDV'}</strong>
                           </p>
-                          {(activeStoreScope?.pointsOfSale || []).length > 0 && (
+                          {businessPdvs.length > 1 ? (
                             <label className="block">
                               <span className="block text-[10px] font-bold uppercase tracking-wide text-stone-500 mb-1">
                                 PDV de pedidos
@@ -757,19 +778,19 @@ export function DeliveryIntegrations() {
                                 className="w-full px-2.5 py-2 text-xs rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-950"
                               >
                                 <option value="">Selecciona un PDV</option>
-                                {(activeStoreScope?.pointsOfSale || [])
-                                  .filter((pdv) => pdv.active !== false)
-                                  .map((pdv) => (
-                                    <option key={pdv._id} value={pdv._id}>
-                                      {pdv.name}
-                                    </option>
-                                  ))}
+                                {businessPdvs.map((pdv) => (
+                                  <option key={pdv._id} value={pdv._id}>{pdv.name}</option>
+                                ))}
                               </select>
                             </label>
+                          ) : (
+                            <p className="text-[11px] text-stone-500">
+                              PDV: {linkedPdvName || 'el de esta empresa'}
+                            </p>
                           )}
-                          {!uberPdvReady && (
+                          {!uberPdvReady && businessPdvs.length > 1 && (
                             <p className="text-[11px] text-amber-700 dark:text-amber-400">
-                              Selecciona el PDV antes de encender.
+                              Elige el PDV de esta cuenta antes de encender.
                             </p>
                           )}
                           {!uberPosReady && (

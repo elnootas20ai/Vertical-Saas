@@ -379,6 +379,7 @@ export async function completeUberEatsOAuthRequest(code: string, state: string) 
     expiresAt?: string;
     scope?: string;
     stores?: UberEatsStoreOption[];
+    autoLinked?: boolean;
     error?: string;
   }>('/api/uber-eats/oauth/callback', {
     method: 'POST',
