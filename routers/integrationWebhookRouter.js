@@ -8,7 +8,9 @@ import {
   putDocument,
   listDeliveryOrdersByUser,
   getWebConfigByBusinessId,
+  findBusinessById,
   findDocuments,
+  listScopedPointsOfSaleForBusiness,
 } from '../services/couchdb.js';
 import { broadcastToUser, broadcastToBusiness } from '../services/sseService.js';
 import {
@@ -16,7 +18,7 @@ import {
   parseUberWebhookEvent,
   verifyUberWebhookSignature,
 } from '../services/uberEatsWebhook.js';
-import { isUberEatsConfigured } from '../services/uberEatsOAuth.js';
+import { isUberEatsSandbox } from '../services/uberEatsOAuth.js';
 import { getUberEatsAppAccessToken } from '../services/uberEatsApi.js';
 import { autoAcceptUberOrderAfterIngest } from '../services/uberEatsOrderSync.js';
 import { pushUberMenuFromCatalog } from '../services/uberEatsMenu.js';
@@ -50,11 +52,39 @@ async function findUberOauthBusiness(req, storeId = '') {
     return Boolean(uber?.oauth || uber?.accessToken) && !d.deletedAt;
   });
   if (!withOauth.length) return null;
-  if (storeId) {
-    const match = withOauth.find((d) => String(d.integrations?.uber?.storeId || '') === storeId);
-    if (match) return match;
+  if (!storeId) return null;
+  const match = withOauth.find((d) => String(d.integrations?.uber?.storeId || '') === storeId);
+  // Nunca enrutar un evento de una store desconocida al primer negocio OAuth:
+  // mezclaría pedidos entre empresas.
+  return match || null;
+}
+
+async function saveUberRuntimePatch(req, config, patch) {
+  if (!config?.business_id) return null;
+  try {
+    const current = await getWebConfigByBusinessId(req, config.business_id);
+    if (!current) return null;
+    const nextIntegrations = {
+      ...(current.integrations || {}),
+      uber: {
+        ...(current.integrations?.uber || {}),
+        ...patch,
+        runtimeUpdatedAt: new Date().toISOString(),
+      },
+    };
+    const doc = buildWebConfigDocument(
+      config.business_id,
+      { integrations: nextIntegrations },
+      current,
+    );
+    return await putDocument(req, getWebDbName(), doc._id, doc);
+  } catch (error) {
+    logger.warn(
+      { businessId: config.business_id, error: error?.message || String(error) },
+      'Uber webhook: no se pudo guardar evidencia runtime',
+    );
+    return null;
   }
-  return withOauth[0];
 }
 
 function validateWebhookToken(integrations, platform, providedToken) {
@@ -220,14 +250,9 @@ async function handleUberPrimaryWebhook(req, res) {
   const rawBody = typeof req.rawBody === 'string' ? req.rawBody : JSON.stringify(req.body || {});
   const signature = req.headers['x-uber-signature'] || req.headers['X-Uber-Signature'];
 
-  // Si viene firma, validarla. Sin firma (probe del portal) aceptamos si Uber está configurado.
-  if (signature) {
-    if (!verifyUberWebhookSignature(rawBody, signature)) {
-      logger.warn({ hasSecret: isUberEatsConfigured() }, 'Uber webhook: firma inválida');
-      return res.status(401).end();
-    }
-  } else if (!isUberEatsConfigured()) {
-    return res.status(503).end();
+  if (!signature || !verifyUberWebhookSignature(rawBody, signature)) {
+    logger.warn({ hasSignature: Boolean(signature) }, 'Uber webhook: firma ausente o inválida');
+    return res.status(401).end();
   }
 
   const event = parseUberWebhookEvent(req.body || {});
@@ -247,8 +272,23 @@ async function handleUberPrimaryWebhook(req, res) {
           'Uber webhook recibido',
         );
 
+        const cfg = await findUberOauthBusiness(req, event.storeId);
+        if (!event.storeId) {
+          logger.warn(
+            { eventType: event.eventType, eventId: event.eventId },
+            'Uber webhook rechazado tras ACK: evento sin storeId',
+          );
+          return;
+        }
+        if (cfg?.business_id) {
+          await saveUberRuntimePatch(req, cfg, {
+            lastWebhookAt: new Date().toISOString(),
+            lastWebhookType: event.eventType,
+            lastWebhookEventId: event.eventId,
+          });
+        }
+
         if (event.eventType === 'store.provisioned' && event.storeId) {
-          const cfg = await findUberOauthBusiness(req, event.storeId);
           if (cfg?.business_id) {
             const current = await getWebConfigByBusinessId(req, cfg.business_id);
             const prevUber = current?.integrations?.uber || {};
@@ -270,7 +310,6 @@ async function handleUberPrimaryWebhook(req, res) {
         }
 
         if (event.eventType === 'store.deprovisioned' && event.storeId) {
-          const cfg = await findUberOauthBusiness(req, event.storeId);
           if (cfg?.business_id) {
             const current = await getWebConfigByBusinessId(req, cfg.business_id);
             const prevUber = current?.integrations?.uber || {};
@@ -293,7 +332,6 @@ async function handleUberPrimaryWebhook(req, res) {
         }
 
         if (event.eventType === 'store.menu_refresh_request') {
-          const cfg = await findUberOauthBusiness(req, event.storeId);
           const storeId = event.storeId || String(cfg?.integrations?.uber?.storeId || '');
           if (cfg?.business_id && storeId) {
             try {
@@ -325,7 +363,6 @@ async function handleUberPrimaryWebhook(req, res) {
           return;
         }
 
-        const cfg = await findUberOauthBusiness(req, event.storeId);
         if (!cfg?.business_id) {
           logger.warn({ storeId: event.storeId }, 'Uber webhook: no hay negocio OAuth conectado');
           return;
@@ -357,11 +394,47 @@ async function handleUberPrimaryWebhook(req, res) {
         }
 
         const businessId = cfg.business_id;
-        const orderData = mapUberEatsToOrder({ ...orderPayload, id: orderPayload.id || event.orderId });
+        const business = await findBusinessById(req, businessId).catch(() => null);
+        const dataUserId = String(
+          business?.owner_user_id
+          || business?.user_id
+          || businessId,
+        ).trim();
+        const pdvs = await listScopedPointsOfSaleForBusiness(
+          req,
+          dataUserId,
+          businessId,
+        ).catch(() => []);
+        const activePdvs = pdvs.filter((pdv) => pdv.active !== false);
+        const configuredPdvId = String(cfg.integrations?.uber?.salesPointId || '').trim();
+        const primaryPdv = configuredPdvId
+          ? activePdvs.find((pdv) => String(pdv._id || '') === configuredPdvId)
+          : (activePdvs.length === 1 ? activePdvs[0] : null);
+        if (!primaryPdv) {
+          logger.error(
+            {
+              businessId,
+              storeId: event.storeId,
+              configuredPdvId,
+              activePdvCount: activePdvs.length,
+            },
+            'Uber webhook: falta asociación inequívoca store → PDV',
+          );
+          await saveUberRuntimePatch(req, cfg, {
+            lastOrderStatus: 'blocked_missing_sales_point_mapping',
+          });
+          return;
+        }
+        const orderData = {
+          ...mapUberEatsToOrder({ ...orderPayload, id: orderPayload.id || event.orderId }),
+          business_id: businessId,
+          salesPointId: String(primaryPdv?._id || ''),
+          salesPointName: String(primaryPdv?.name || ''),
+        };
         if (!orderData.externalOrderId) orderData.externalOrderId = event.orderId;
 
         if (orderData.externalOrderId) {
-          const isDup = await checkDuplicateExternalOrder(req, businessId, orderData.externalOrderId);
+          const isDup = await checkDuplicateExternalOrder(req, dataUserId, orderData.externalOrderId);
           if (isDup) {
             logger.info({ orderId: orderData.externalOrderId }, 'Uber webhook: pedido ya existía');
             return;
@@ -370,10 +443,15 @@ async function handleUberPrimaryWebhook(req, res) {
 
         const db = getDeliveryDbName();
         await ensureDatabase(req, db);
-        const doc = buildDeliveryOrderDocument(businessId, orderData);
+        const doc = buildDeliveryOrderDocument(dataUserId, orderData);
         const saved = await putDocument(req, db, doc._id, doc);
         const sanitized = sanitizeDeliveryOrder({ ...doc, _rev: saved.rev });
-        broadcastToUser(businessId, 'delivery_order_created', sanitized);
+        await saveUberRuntimePatch(req, cfg, {
+          lastOrderAt: new Date().toISOString(),
+          lastOrderId: orderData.externalOrderId,
+          lastOrderStatus: 'received',
+        });
+        broadcastToUser(dataUserId, 'delivery_order_created', sanitized);
         try {
           broadcastToBusiness(businessId, 'delivery:order_created', { order: sanitized, userId: businessId });
         } catch { /* ignore */ }
@@ -381,6 +459,15 @@ async function handleUberPrimaryWebhook(req, res) {
           { businessId, orderId: doc._id, externalOrderId: orderData.externalOrderId },
           'Uber webhook: pedido creado en Vertial',
         );
+
+        // En certificación necesitamos demostrar aceptar Y denegar desde el TPV.
+        // Producción conserva la autoaceptación para cumplir SLA.
+        if (isUberEatsSandbox()) {
+          await saveUberRuntimePatch(req, cfg, {
+            lastOrderStatus: 'pending_manual_decision',
+          });
+          return;
+        }
 
         const acceptResult = await autoAcceptUberOrderAfterIngest({
           orderId: orderData.externalOrderId,
@@ -396,7 +483,12 @@ async function handleUberPrimaryWebhook(req, res) {
             };
             const acceptedSaved = await putDocument(req, db, acceptedDoc._id, acceptedDoc);
             const acceptedSanitized = sanitizeDeliveryOrder({ ...acceptedDoc, _rev: acceptedSaved.rev });
-            broadcastToUser(businessId, 'delivery_order_updated', acceptedSanitized);
+            await saveUberRuntimePatch(req, cfg, {
+              lastOrderAcceptedAt: new Date().toISOString(),
+              lastOrderId: orderData.externalOrderId,
+              lastOrderStatus: 'accepted',
+            });
+            broadcastToUser(dataUserId, 'delivery_order_updated', acceptedSanitized);
             broadcastToBusiness(businessId, 'delivery:order_updated', {
               order: acceptedSanitized,
               userId: businessId,

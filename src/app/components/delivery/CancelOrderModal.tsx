@@ -17,7 +17,7 @@ interface Props {
   onClose: () => void;
   loading?: boolean;
   /** Textos para eliminar en lugar de cancelar (misma acción en backend). */
-  mode?: 'cancel' | 'delete';
+  mode?: 'cancel' | 'delete' | 'deny';
 }
 
 export function CancelOrderModal({ order, onConfirm, onClose, loading, mode = 'cancel' }: Props) {
@@ -26,6 +26,7 @@ export function CancelOrderModal({ order, onConfirm, onClose, loading, mode = 'c
   const finalReason = selectedPreset === 'otro' ? reason : (selectedPreset || reason);
   const isValid = finalReason.trim().length >= 4;
   const isDelete = mode === 'delete';
+  const isDeny = mode === 'deny';
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
@@ -38,7 +39,7 @@ export function CancelOrderModal({ order, onConfirm, onClose, loading, mode = 'c
             </div>
             <div>
               <h3 className="font-bold text-gray-900 dark:text-gray-100">
-                {isDelete ? 'Eliminar pedido' : 'Cancelar pedido'}
+                {isDeny ? 'Denegar pedido Uber' : isDelete ? 'Eliminar pedido' : 'Cancelar pedido'}
               </h3>
               <p className="text-sm text-gray-500">#{order.orderNumber} — {order.customerName}</p>
             </div>
@@ -52,7 +53,7 @@ export function CancelOrderModal({ order, onConfirm, onClose, loading, mode = 'c
           </div>
 
           <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
-            {isDelete ? 'Motivo de eliminación *' : 'Motivo de cancelación *'}
+            {isDeny ? 'Motivo de denegación *' : isDelete ? 'Motivo de eliminación *' : 'Motivo de cancelación *'}
           </label>
           <div className="flex flex-wrap gap-2 mb-3">
             {PRESET_REASONS.map((preset) => (
@@ -86,8 +87,8 @@ export function CancelOrderModal({ order, onConfirm, onClose, loading, mode = 'c
           <button onClick={() => isValid && onConfirm(finalReason.trim())} disabled={!isValid || loading}
             className="flex-1 py-2.5 bg-red-600 text-white rounded-xl font-semibold text-sm hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
             {loading
-              ? (isDelete ? 'Eliminando...' : 'Cancelando...')
-              : (isDelete ? 'Eliminar pedido' : 'Cancelar pedido')}
+              ? (isDeny ? 'Denegando…' : isDelete ? 'Eliminando...' : 'Cancelando...')
+              : (isDeny ? 'Denegar pedido' : isDelete ? 'Eliminar pedido' : 'Cancelar pedido')}
           </button>
         </div>
       </div>

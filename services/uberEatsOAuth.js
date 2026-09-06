@@ -17,6 +17,18 @@ export function getUberEatsEnv() {
   return raw === 'production' || raw === 'prod' ? 'production' : 'sandbox';
 }
 
+export function isUberEatsSandbox() {
+  return getUberEatsEnv() === 'sandbox';
+}
+
+/** Certificación: nunca permitir que una prueba termine en los dominios live. */
+export function assertUberEatsSandbox() {
+  if (!isUberEatsSandbox()) {
+    throw new Error('Prueba Uber bloqueada: el servidor no está en entorno sandbox');
+  }
+  return true;
+}
+
 export function getUberEatsClientId() {
   return env('UBER_EATS_CLIENT_ID');
 }
@@ -26,9 +38,13 @@ export function getUberEatsClientSecret() {
 }
 
 export function getUberEatsScopes() {
-  // Usuario (authorization_code): provisioning + listar tiendas.
-  // Pedidos usan client_credentials (eats.order) aparte — ver uberEatsStores.js.
-  return env('UBER_EATS_SCOPES', 'eats.pos_provisioning');
+  // Usuario (authorization_code): provisioning + store (GET/POST pos_data exige eats.store).
+  // Pedidos usan client_credentials (eats.order) aparte — ver uberEatsApi.js.
+  // Nota: eats.pos_provisioning NO es válido en client_credentials (solo user OAuth).
+  return env(
+    'UBER_EATS_SCOPES',
+    'eats.pos_provisioning eats.store',
+  );
 }
 
 /**
@@ -69,6 +85,7 @@ export function getUberEatsPublicConfig() {
   return {
     configured: isUberEatsConfigured(),
     env: getUberEatsEnv(),
+    sandbox: isUberEatsSandbox(),
     redirectUri: getUberEatsRedirectUri(),
     scopes: getUberEatsScopes(),
     clientIdPreview: getUberEatsClientId()

@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import {
+  assertUberEatsSandbox,
   buildUberAuthorizeUrl,
   createUberOAuthState,
   getUberEatsPublicConfig,
@@ -58,6 +59,19 @@ describe('uberEatsOAuth', () => {
     expect(url).toContain('client_id=test-client-id');
     expect(url).toContain('eats.pos_provisioning');
     expect(url).toContain(encodeURIComponent(state));
+  });
+
+  it('requests provisioning and store scopes by default', () => {
+    delete process.env.UBER_EATS_SCOPES;
+    const state = createUberOAuthState({ businessId: 'biz-1', userId: 'u-1' });
+    const url = buildUberAuthorizeUrl(state);
+    expect(url).toContain('eats.pos_provisioning');
+    expect(url).toContain('eats.store');
+  });
+
+  it('blocks certification helpers outside sandbox', () => {
+    process.env.UBER_EATS_ENV = 'production';
+    expect(() => assertUberEatsSandbox()).toThrow(/sandbox/i);
   });
 
   it('roundtrips oauth state', () => {

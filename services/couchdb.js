@@ -6566,6 +6566,8 @@ export function buildDeliveryOrderDocument(userId, data = {}, existing = null) {
 
     assignedDriver: String(data.assignedDriver || ''),
     estimatedDelivery: String(data.estimatedDelivery || ''),
+    estimatedDeliveryMinutes: data.estimatedDeliveryMinutes ?? existing?.estimatedDeliveryMinutes ?? null,
+    estimatedArrivalAt: String(data.estimatedArrivalAt || existing?.estimatedArrivalAt || ''),
     deliveredAt: newStatus === 'entregado' && !existing?.deliveredAt
       ? now
       : String(data.deliveredAt || existing?.deliveredAt || ''),
@@ -6589,6 +6591,11 @@ export function buildDeliveryOrderDocument(userId, data = {}, existing = null) {
 
     externalOrderId: String(data.externalOrderId || existing?.externalOrderId || ''),
     uberAcceptedAt: String(data.uberAcceptedAt || existing?.uberAcceptedAt || ''),
+    uberPickupTime: Number(data.uberPickupTime ?? existing?.uberPickupTime ?? 0) || null,
+    uberPrepMinutes: Number(data.uberPrepMinutes ?? existing?.uberPrepMinutes ?? 0) || null,
+    uberReadyAt: String(data.uberReadyAt || existing?.uberReadyAt || ''),
+    uberDeniedAt: String(data.uberDeniedAt || existing?.uberDeniedAt || ''),
+    uberCancelledAt: String(data.uberCancelledAt || existing?.uberCancelledAt || ''),
 
     incidentNotes: String(data.incidentNotes || existing?.incidentNotes || ''),
     incidentType: String(data.incidentType || existing?.incidentType || ''),
@@ -6686,6 +6693,11 @@ export function sanitizeDeliveryOrder(doc) {
 
     externalOrderId: doc.externalOrderId || '',
     uberAcceptedAt: doc.uberAcceptedAt || '',
+    uberPickupTime: Number(doc.uberPickupTime || 0) || null,
+    uberPrepMinutes: Number(doc.uberPrepMinutes || 0) || null,
+    uberReadyAt: doc.uberReadyAt || '',
+    uberDeniedAt: doc.uberDeniedAt || '',
+    uberCancelledAt: doc.uberCancelledAt || '',
 
     incidentNotes: doc.incidentNotes || '',
     incidentType: doc.incidentType || '',
@@ -13319,10 +13331,23 @@ function sanitizeIntegrationEntry(entry) {
       env: '',
       storeId: '',
       storeName: '',
+      salesPointId: '',
       provisionedAt: '',
       menuPushedAt: '',
       menuItemCount: 0,
       lastStoreStatus: '',
+      posIntegrationEnabled: false,
+      posDataCheckedAt: '',
+      lastWebhookAt: '',
+      lastWebhookType: '',
+      lastOrderAt: '',
+      lastOrderAcceptedAt: '',
+      lastOrderReadyAt: '',
+      lastOrderDeniedAt: '',
+      lastOrderCancelledAt: '',
+      lastOrderStatus: '',
+      lastMenuItemUpdatedAt: '',
+      lastMenuItemSuspendedAt: '',
     };
   }
   const hasOauth = Boolean(entry.oauth || entry.accessToken);
@@ -13336,10 +13361,23 @@ function sanitizeIntegrationEntry(entry) {
     env: String(entry.env || ''),
     storeId: String(entry.storeId || ''),
     storeName: String(entry.storeName || ''),
+    salesPointId: String(entry.salesPointId || ''),
     provisionedAt: String(entry.provisionedAt || ''),
     menuPushedAt: String(entry.menuPushedAt || ''),
     menuItemCount: Number(entry.menuItemCount || 0),
     lastStoreStatus: String(entry.lastStoreStatus || ''),
+    posIntegrationEnabled: Boolean(entry.posIntegrationEnabled),
+    posDataCheckedAt: String(entry.posDataCheckedAt || ''),
+    lastWebhookAt: String(entry.lastWebhookAt || ''),
+    lastWebhookType: String(entry.lastWebhookType || ''),
+    lastOrderAt: String(entry.lastOrderAt || ''),
+    lastOrderAcceptedAt: String(entry.lastOrderAcceptedAt || ''),
+    lastOrderReadyAt: String(entry.lastOrderReadyAt || ''),
+    lastOrderDeniedAt: String(entry.lastOrderDeniedAt || ''),
+    lastOrderCancelledAt: String(entry.lastOrderCancelledAt || ''),
+    lastOrderStatus: String(entry.lastOrderStatus || ''),
+    lastMenuItemUpdatedAt: String(entry.lastMenuItemUpdatedAt || ''),
+    lastMenuItemSuspendedAt: String(entry.lastMenuItemSuspendedAt || ''),
   };
 }
 

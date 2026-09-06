@@ -1,5 +1,9 @@
 import logger from './logger.js';
-import { listCatalogItemsByUser } from './couchdb.js';
+import {
+  findBusinessById,
+  listCatalogItemsByUser,
+  listOwnerBusinessesForUser,
+} from './couchdb.js';
 import {
   getUberEatsAppAccessToken,
   updateUberEatsMenuItem,
@@ -116,7 +120,19 @@ export async function pushUberMenuFromCatalog(req, {
 }) {
   if (!businessId) throw new Error('Falta businessId');
   if (!storeId) throw new Error('Falta storeId');
-  const items = await listCatalogItemsByUser(req, businessId, { module: 'catalog' });
+  const business = await findBusinessById(req, businessId).catch(() => null);
+  const catalogOwnerId = String(
+    business?.owner_user_id || business?.user_id || businessId || '',
+  ).trim();
+  const ownerBusinesses = await listOwnerBusinessesForUser(req, catalogOwnerId).catch(() => []);
+  const ownerHasMultipleBusinesses = ownerBusinesses.filter((entry) => !entry.deletedAt).length > 1;
+  const ownerItems = await listCatalogItemsByUser(req, catalogOwnerId, { module: 'catalog' });
+  const items = ownerItems.filter((item) => {
+    const itemBusinessId = String(item.business_id || item.businessId || '').trim();
+    if (itemBusinessId) return itemBusinessId === businessId;
+    // Catálogo legacy sin business_id solo es inequívoco con una única empresa.
+    return !ownerHasMultipleBusinesses;
+  });
   const menu = buildUberMenuFromCatalogItems(items, { storeName: storeName || 'Menu Vertial' });
   if (!menu.items.length) {
     throw new Error('No hay productos de catálogo activos para subir a Uber Eats');
@@ -124,7 +140,7 @@ export async function pushUberMenuFromCatalog(req, {
   const { accessToken } = await getUberEatsAppAccessToken();
   await uploadUberEatsMenu(accessToken, storeId, menu);
   logger.info(
-    { businessId, storeId, items: menu.items.length, categories: menu.categories.length },
+    { businessId, catalogOwnerId, storeId, items: menu.items.length, categories: menu.categories.length },
     'Uber menu uploaded from Vertial catalog',
   );
   return {

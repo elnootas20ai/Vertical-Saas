@@ -2,14 +2,20 @@ import {
   getWebDbName,
   ensureDatabase,
   getWebConfigByBusinessId,
+  getDeliveryDbName,
+  findBusinessById,
+  listScopedPointsOfSaleForBusiness,
+  listDeliveryOrdersByUser,
   buildWebConfigDocument,
   putDocument,
+  sanitizeDeliveryOrder,
   sanitizeDeliveryIntegrations,
 } from '../services/couchdb.js';
 import {
   buildUberAuthorizeUrl,
   createUberOAuthState,
   exchangeUberAuthorizationCode,
+  assertUberEatsSandbox,
   getUberEatsPublicConfig,
   isUberEatsConfigured,
   verifyUberOAuthState,
@@ -23,13 +29,22 @@ import {
   getUberDeliveryStore,
 } from '../services/uberEatsStores.js';
 import {
+  acceptUberOrder,
+  cancelUberOrder,
+  denyUberOrder,
   getUberEatsAppAccessToken,
   getUberStoreStatus,
+  markUberOrderReady,
   setUberStoreStatus,
 } from '../services/uberEatsApi.js';
-import { pushUberMenuFromCatalog } from '../services/uberEatsMenu.js';
-import { assertBusinessTeamAccess } from '../services/businessAccess.js';
+import { pushUberMenuFromCatalog, setUberMenuItemSuspension } from '../services/uberEatsMenu.js';
+import {
+  assertBusinessTeamAccess,
+  assertBusinessTeamManage,
+  canManageBusinessTeam,
+} from '../services/businessAccess.js';
 import { isVertialSuperAdminEmail } from '../utils/superAdmin.js';
+import { broadcastToBusiness, broadcastToUser } from '../services/sseService.js';
 import logger from '../services/logger.js';
 
 function badRequest(res, error) {
@@ -38,6 +53,34 @@ function badRequest(res, error) {
 
 function errorMsg(error) {
   return error?.message || String(error || 'Error');
+}
+
+function integrationEnabledFromPosData(posData) {
+  return Boolean(
+    posData?.integration_enabled
+    ?? posData?.pos_integration_enabled
+    ?? false
+  );
+}
+
+function certCheck(key, label, ok, detail = '', at = '') {
+  return {
+    key,
+    label,
+    status: ok ? 'ok' : 'pending',
+    detail: String(detail || ''),
+    at: String(at || ''),
+  };
+}
+
+function boundUberStoreId(uber, requestedStoreId = '') {
+  const bound = String(uber?.storeId || '').trim();
+  const requested = String(requestedStoreId || '').trim();
+  if (!bound) throw new Error('Falta una tienda Uber vinculada');
+  if (requested && requested !== bound) {
+    throw new Error('El Store ID no pertenece a la integración Uber de esta empresa');
+  }
+  return bound;
 }
 
 function authEmail(req) {
@@ -61,6 +104,16 @@ function requireUberOperator(req, res) {
 async function requireUberBusinessAccess(req, res, businessId) {
   if (!requireUberOperator(req, res)) return null;
   const access = await assertBusinessTeamAccess(req, businessId);
+  if (!access.ok) {
+    res.status(access.status || 403).json({ ok: false, error: access.error || 'No autorizado' });
+    return null;
+  }
+  return access;
+}
+
+async function requireUberBusinessManager(req, res, businessId) {
+  if (!requireUberOperator(req, res)) return null;
+  const access = await assertBusinessTeamManage(req, businessId);
   if (!access.ok) {
     res.status(access.status || 403).json({ ok: false, error: access.error || 'No autorizado' });
     return null;
@@ -113,11 +166,24 @@ async function wipeUberIntegration(req, businessId, current) {
       connectedAt: '',
       storeId: '',
       storeName: '',
+      salesPointId: '',
       provisionedAt: '',
       menuPushedAt: '',
       menuItemCount: 0,
       lastStoreStatus: '',
       lastStoreStatusAt: '',
+      posIntegrationEnabled: false,
+      posDataCheckedAt: '',
+      lastWebhookAt: '',
+      lastWebhookType: '',
+      lastOrderAt: '',
+      lastOrderAcceptedAt: '',
+      lastOrderReadyAt: '',
+      lastOrderDeniedAt: '',
+      lastOrderCancelledAt: '',
+      lastOrderStatus: '',
+      lastMenuItemUpdatedAt: '',
+      lastMenuItemSuspendedAt: '',
       env: String(prevIntegrations.uber?.env || getUberEatsPublicConfig().env || 'sandbox'),
       disconnectedAt: new Date().toISOString(),
     },
@@ -146,7 +212,7 @@ export async function startUberEatsOAuth(req, res) {
   try {
     const businessId = String(req.query.businessId || '').trim();
     if (!businessId) return badRequest(res, 'Falta businessId');
-    if (!(await requireUberBusinessAccess(req, res, businessId))) return;
+    if (!(await requireUberBusinessManager(req, res, businessId))) return;
     if (!isUberEatsConfigured()) {
       return res.status(503).json({
         ok: false,
@@ -192,7 +258,7 @@ export async function completeUberEatsOAuth(req, res) {
     if (payload.userId && userId && payload.userId !== userId) {
       return res.status(403).json({ ok: false, error: 'El inicio de OAuth fue de otra sesión' });
     }
-    if (!(await requireUberBusinessAccess(req, res, businessId))) return;
+    if (!(await requireUberBusinessManager(req, res, businessId))) return;
 
     const tokens = await exchangeUberAuthorizationCode(code);
     const { current } = await loadUberIntegration(req, businessId);
@@ -276,7 +342,7 @@ export async function selectUberStoreForBusiness(req, res) {
     if (!storeId) {
       return badRequest(res, 'Falta el Store ID de Uber. Cópialo del panel Uber (tienda TEST).');
     }
-    if (!(await requireUberBusinessAccess(req, res, businessId))) return;
+    if (!(await requireUberBusinessManager(req, res, businessId))) return;
 
     const { current, uber } = await loadUberIntegration(req, businessId);
     const token = String(uber.accessToken || '').trim();
@@ -305,11 +371,38 @@ export async function selectUberStoreForBusiness(req, res) {
       });
     }
 
+    const posData = await getUberEatsPosData(token, storeId);
+    const posIntegrationEnabled = integrationEnabledFromPosData(posData);
+    if (!posIntegrationEnabled) {
+      return res.status(409).json({
+        ok: false,
+        error: 'Uber respondió al alta, pero pos_data sigue con integration_enabled=false.',
+        storeId,
+        posData,
+      });
+    }
+
+    const business = await findBusinessById(req, businessId).catch(() => null);
+    const dataUserId = String(
+      business?.owner_user_id
+      || business?.user_id
+      || businessId,
+    ).trim();
+    const activePdvs = (
+      await listScopedPointsOfSaleForBusiness(req, dataUserId, businessId).catch(() => [])
+    ).filter((pdv) => pdv.active !== false);
+    const salesPointId = String(
+      uber.salesPointId
+      || (activePdvs.length === 1 ? activePdvs[0]._id : ''),
+    ).trim();
     const integrations = await saveUberPatch(req, businessId, current, {
       enabled: true,
       storeId,
       storeName: storeName || uber.storeName || storeId,
       provisionedAt: new Date().toISOString(),
+      posIntegrationEnabled,
+      posDataCheckedAt: new Date().toISOString(),
+      salesPointId,
       oauth: true,
     });
 
@@ -328,6 +421,104 @@ export async function selectUberStoreForBusiness(req, res) {
   }
 }
 
+/** POST /api/uber-eats/pos-data/activate { businessId } */
+export async function activateUberPosForBusiness(req, res) {
+  try {
+    assertUberEatsSandbox();
+    const businessId = String(req.body?.businessId || '').trim();
+    if (!businessId) return badRequest(res, 'Falta businessId');
+    if (!(await requireUberBusinessManager(req, res, businessId))) return;
+
+    const { current, uber } = await loadUberIntegration(req, businessId);
+    const token = String(uber.accessToken || '').trim();
+    const storeId = String(uber.storeId || '').trim();
+    if (!token) return badRequest(res, 'Reconecta Uber OAuth antes de activar el POS');
+    if (!storeId) return badRequest(res, 'Falta una tienda Uber vinculada');
+
+    await provisionUberEatsStore({
+      userAccessToken: token,
+      storeId,
+      partnerStoreId: businessId,
+      businessId,
+    });
+    const posData = await getUberEatsPosData(token, storeId);
+    const posIntegrationEnabled = integrationEnabledFromPosData(posData);
+    const now = new Date().toISOString();
+    const business = await findBusinessById(req, businessId).catch(() => null);
+    const dataUserId = String(
+      business?.owner_user_id
+      || business?.user_id
+      || businessId,
+    ).trim();
+    const activePdvs = (
+      await listScopedPointsOfSaleForBusiness(req, dataUserId, businessId).catch(() => [])
+    ).filter((pdv) => pdv.active !== false);
+    const salesPointId = String(
+      uber.salesPointId
+      || (activePdvs.length === 1 ? activePdvs[0]._id : ''),
+    ).trim();
+    const integrations = await saveUberPatch(req, businessId, current, {
+      posIntegrationEnabled,
+      posDataCheckedAt: now,
+      salesPointId,
+      ...(posIntegrationEnabled ? { provisionedAt: now } : {}),
+    });
+    if (!posIntegrationEnabled) {
+      return res.status(409).json({
+        ok: false,
+        error: 'Uber todavía devuelve integration_enabled=false',
+        storeId,
+        posData,
+        integrations,
+      });
+    }
+    return res.json({ ok: true, storeId, posData, integrations });
+  } catch (error) {
+    logger.warn({ error: errorMsg(error) }, 'Uber activate POS failed');
+    return res.status(500).json({ ok: false, error: errorMsg(error) });
+  }
+}
+
+/** POST /api/uber-eats/store/pdv { businessId, salesPointId } */
+export async function selectUberSalesPointForBusiness(req, res) {
+  try {
+    const businessId = String(req.body?.businessId || '').trim();
+    const salesPointId = String(req.body?.salesPointId || '').trim();
+    if (!businessId) return badRequest(res, 'Falta businessId');
+    if (!salesPointId) return badRequest(res, 'Falta salesPointId');
+    const access = await requireUberBusinessManager(req, res, businessId);
+    if (!access) return;
+
+    const { current, uber } = await loadUberIntegration(req, businessId);
+    if (!uber.storeId) return badRequest(res, 'Primero vincula una tienda Uber');
+    const dataUserId = String(
+      access.business?.owner_user_id
+      || access.business?.user_id
+      || businessId,
+    ).trim();
+    const pdvs = await listScopedPointsOfSaleForBusiness(req, dataUserId, businessId);
+    const selected = pdvs.find(
+      (pdv) => pdv.active !== false && String(pdv._id || '') === salesPointId,
+    );
+    if (!selected) {
+      return res.status(403).json({
+        ok: false,
+        error: 'El PDV no pertenece a esta empresa o está inactivo',
+      });
+    }
+    const integrations = await saveUberPatch(req, businessId, current, { salesPointId });
+    return res.json({
+      ok: true,
+      storeId: uber.storeId,
+      salesPointId,
+      salesPointName: String(selected.name || ''),
+      integrations,
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: errorMsg(error) });
+  }
+}
+
 /** GET /api/uber-eats/pos-data?businessId=&storeId= */
 export async function getUberPosDataForBusiness(req, res) {
   try {
@@ -336,14 +527,17 @@ export async function getUberPosDataForBusiness(req, res) {
     if (!businessId) return badRequest(res, 'Falta businessId');
     if (!(await requireUberBusinessAccess(req, res, businessId))) return;
 
-    const { uber } = await loadUberIntegration(req, businessId);
+    const { current, uber } = await loadUberIntegration(req, businessId);
     const token = String(uber.accessToken || '').trim();
-    const sid = storeId || String(uber.storeId || '').trim();
+    const sid = boundUberStoreId(uber, storeId);
     if (!token) return badRequest(res, 'Conecta Uber OAuth antes');
-    if (!sid) return badRequest(res, 'Falta storeId (elige tienda)');
 
     const posData = await getUberEatsPosData(token, sid);
-    return res.json({ ok: true, storeId: sid, posData });
+    const integrations = await saveUberPatch(req, businessId, current, {
+      posIntegrationEnabled: integrationEnabledFromPosData(posData),
+      posDataCheckedAt: new Date().toISOString(),
+    });
+    return res.json({ ok: true, storeId: sid, posData, integrations });
   } catch (error) {
     return res.status(500).json({ ok: false, error: errorMsg(error) });
   }
@@ -356,20 +550,22 @@ export async function patchUberPosDataForBusiness(req, res) {
     const storeId = String(req.body?.storeId || '').trim();
     const patch = req.body?.patch && typeof req.body.patch === 'object' ? req.body.patch : {};
     if (!businessId) return badRequest(res, 'Falta businessId');
-    if (!(await requireUberBusinessAccess(req, res, businessId))) return;
+    if (!(await requireUberBusinessManager(req, res, businessId))) return;
 
     const { current, uber } = await loadUberIntegration(req, businessId);
     const token = String(uber.accessToken || '').trim();
-    const sid = storeId || String(uber.storeId || '').trim();
+    const sid = boundUberStoreId(uber, storeId);
     if (!token) return badRequest(res, 'Conecta Uber OAuth antes');
-    if (!sid) return badRequest(res, 'Falta storeId');
 
     await patchUberEatsPosData(token, sid, patch);
+    const posData = await getUberEatsPosData(token, sid);
     const integrations = await saveUberPatch(req, businessId, current, {
       storeId: sid,
       posDataPatchedAt: new Date().toISOString(),
+      posIntegrationEnabled: integrationEnabledFromPosData(posData),
+      posDataCheckedAt: new Date().toISOString(),
     });
-    return res.json({ ok: true, storeId: sid, integrations });
+    return res.json({ ok: true, storeId: sid, posData, integrations });
   } catch (error) {
     return res.status(500).json({ ok: false, error: errorMsg(error) });
   }
@@ -397,8 +593,7 @@ export async function getUberDeliveryStoreForBusiness(req, res) {
     if (!businessId) return badRequest(res, 'Falta businessId');
     if (!(await requireUberBusinessAccess(req, res, businessId))) return;
     const { uber } = await loadUberIntegration(req, businessId);
-    const sid = storeId || String(uber.storeId || '').trim();
-    if (!sid) return badRequest(res, 'Falta storeId');
+    const sid = boundUberStoreId(uber, storeId);
     const { accessToken } = await getUberEatsAppAccessToken();
     const data = await getUberDeliveryStore(accessToken, sid);
     return res.json({ ok: true, storeId: sid, data });
@@ -415,8 +610,7 @@ export async function getUberStoreStatusForBusiness(req, res) {
     if (!businessId) return badRequest(res, 'Falta businessId');
     if (!(await requireUberBusinessAccess(req, res, businessId))) return;
     const { uber } = await loadUberIntegration(req, businessId);
-    const sid = storeId || String(uber.storeId || '').trim();
-    if (!sid) return badRequest(res, 'Falta storeId');
+    const sid = boundUberStoreId(uber, storeId);
     const { accessToken } = await getUberEatsAppAccessToken();
     const status = await getUberStoreStatus(accessToken, sid);
     return res.json({ ok: true, storeId: sid, status });
@@ -434,11 +628,13 @@ export async function setUberStoreStatusForBusiness(req, res) {
     const reason = String(req.body?.reason || 'Updated by Vertial').trim();
     const pausedUntil = String(req.body?.pausedUntil || '').trim();
     if (!businessId) return badRequest(res, 'Falta businessId');
-    if (!(await requireUberBusinessAccess(req, res, businessId))) return;
+    if (!(await requireUberBusinessManager(req, res, businessId))) return;
 
     const { current, uber } = await loadUberIntegration(req, businessId);
-    const sid = storeId || String(uber.storeId || '').trim();
-    if (!sid) return badRequest(res, 'Falta storeId (elige tienda Uber)');
+    const sid = boundUberStoreId(uber, storeId);
+    if (String(status || '').toUpperCase() === 'ONLINE' && !uber.salesPointId) {
+      return badRequest(res, 'Selecciona el PDV que recibirá los pedidos antes de poner Uber ONLINE');
+    }
 
     const { accessToken } = await getUberEatsAppAccessToken();
     const result = await setUberStoreStatus(accessToken, sid, { status, reason, pausedUntil });
@@ -460,11 +656,10 @@ export async function pushUberMenuForBusiness(req, res) {
     const businessId = String(req.body?.businessId || '').trim();
     const storeId = String(req.body?.storeId || '').trim();
     if (!businessId) return badRequest(res, 'Falta businessId');
-    if (!(await requireUberBusinessAccess(req, res, businessId))) return;
+    if (!(await requireUberBusinessManager(req, res, businessId))) return;
 
     const { current, uber } = await loadUberIntegration(req, businessId);
-    const sid = storeId || String(uber.storeId || '').trim();
-    if (!sid) return badRequest(res, 'Falta storeId (elige tienda Uber)');
+    const sid = boundUberStoreId(uber, storeId);
 
     const result = await pushUberMenuFromCatalog(req, {
       businessId,
@@ -483,12 +678,180 @@ export async function pushUberMenuForBusiness(req, res) {
   }
 }
 
+/** POST /api/uber-eats/menu/item { businessId, itemId, suspended } */
+export async function updateUberMenuItemForBusiness(req, res) {
+  try {
+    assertUberEatsSandbox();
+    const businessId = String(req.body?.businessId || '').trim();
+    const itemId = String(req.body?.itemId || '').trim();
+    const suspended = Boolean(req.body?.suspended);
+    if (!businessId) return badRequest(res, 'Falta businessId');
+    if (!itemId) return badRequest(res, 'Falta itemId');
+    if (!(await requireUberBusinessManager(req, res, businessId))) return;
+
+    const { current, uber } = await loadUberIntegration(req, businessId);
+    const storeId = String(uber.storeId || '').trim();
+    if (!storeId) return badRequest(res, 'Falta una tienda Uber vinculada');
+
+    await setUberMenuItemSuspension(storeId, itemId, suspended);
+    const now = new Date().toISOString();
+    const integrations = await saveUberPatch(req, businessId, current, {
+      lastMenuItemUpdatedAt: now,
+      ...(suspended ? { lastMenuItemSuspendedAt: now } : {}),
+    });
+    return res.json({ ok: true, storeId, itemId, suspended, integrations });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: errorMsg(error) });
+  }
+}
+
+/** POST /api/uber-eats/order/action { businessId, orderDocId, action } */
+export async function actUberOrderForBusiness(req, res) {
+  try {
+    assertUberEatsSandbox();
+    const businessId = String(req.body?.businessId || '').trim();
+    const orderDocId = String(req.body?.orderDocId || '').trim();
+    const action = String(req.body?.action || '').trim().toLowerCase();
+    const allowed = ['accept', 'deny', 'cancel', 'ready'];
+    if (!businessId) return badRequest(res, 'Falta businessId');
+    if (!orderDocId) return badRequest(res, 'Falta orderDocId');
+    if (!allowed.includes(action)) return badRequest(res, 'Acción Uber no válida');
+    const access = await requireUberBusinessAccess(req, res, businessId);
+    if (!access) return;
+
+    const business = access.business;
+    const dataUserId = String(
+      business?.owner_user_id
+      || business?.user_id
+      || businessId,
+    ).trim();
+    const orders = await listDeliveryOrdersByUser(req, dataUserId, { maxDocs: 500 });
+    const order = orders.find(
+      (candidate) => candidate._id === orderDocId
+        && !candidate.deletedAt
+        && String(candidate.business_id || candidate.businessId || '') === businessId,
+    );
+    if (!order) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
+    if (!canManageBusinessTeam(business, access.userId)) {
+      const member = (business?.members || []).find(
+        (entry) => String(entry?.user_id || '') === String(access.userId || ''),
+      );
+      const assignedRef = String(
+        req.authUser?.employment?.salesPointId
+        || req.user?.employment?.salesPointId
+        || member?.salesPointId
+        || member?.employment?.salesPointId
+        || '',
+      ).replace(/^wc:/, '').trim();
+      const pdvs = await listScopedPointsOfSaleForBusiness(req, dataUserId, businessId);
+      const orderPdv = pdvs.find(
+        (pdv) => String(pdv._id || '') === String(order.salesPointId || ''),
+      );
+      const allowedRefs = new Set([
+        String(order.salesPointId || '').trim(),
+        String(orderPdv?.workCenterId || '').replace(/^wc:/, '').trim(),
+      ].filter(Boolean));
+      if (!assignedRef || !allowedRefs.has(assignedRef)) {
+        return res.status(403).json({
+          ok: false,
+          error: 'No tienes permiso para actuar sobre pedidos de este PDV',
+        });
+      }
+    }
+    if (String(order.channel || '').toLowerCase() !== 'ubereats') {
+      return badRequest(res, 'El pedido no pertenece a Uber Eats');
+    }
+    const externalOrderId = String(order.externalOrderId || '').trim();
+    if (!externalOrderId) return badRequest(res, 'El pedido no tiene order ID de Uber');
+
+    const { accessToken } = await getUberEatsAppAccessToken();
+    const now = new Date().toISOString();
+    const patch = {};
+    if (action === 'accept') {
+      const requestedPrepMinutes = Number(req.body?.prepMinutes);
+      const prepMinutes = Number.isFinite(requestedPrepMinutes)
+        ? Math.min(180, Math.max(5, Math.round(requestedPrepMinutes)))
+        : 20;
+      const pickupTime = Math.floor(Date.now() / 1000) + (prepMinutes * 60);
+      await acceptUberOrder(accessToken, externalOrderId, {
+        externalReferenceId: order.orderNumber || order._id,
+        pickupTime,
+      });
+      patch.uberAcceptedAt = now;
+      patch.uberPickupTime = pickupTime;
+      patch.uberPrepMinutes = prepMinutes;
+      patch.estimatedDeliveryMinutes = prepMinutes;
+      patch.estimatedArrivalAt = new Date(pickupTime * 1000).toISOString();
+      patch.status = 'cocina';
+    } else if (action === 'deny') {
+      await denyUberOrder(accessToken, externalOrderId, {
+        explanation: String(req.body?.reason || 'Denied in Vertial sandbox'),
+      });
+      patch.uberDeniedAt = now;
+      patch.status = 'cancelled';
+      patch.cancelledAt = now;
+      patch.cancelReason = String(req.body?.reason || 'Denegado en Uber Eats');
+    } else if (action === 'cancel') {
+      await cancelUberOrder(accessToken, externalOrderId, {
+        details: String(req.body?.reason || 'Cancelled in Vertial sandbox'),
+      });
+      patch.uberCancelledAt = now;
+      patch.status = 'cancelled';
+      patch.cancelledAt = now;
+      patch.cancelReason = String(req.body?.reason || 'Cancelado en Uber Eats');
+    } else {
+      await markUberOrderReady(accessToken, externalOrderId);
+      patch.uberReadyAt = now;
+    }
+
+    const doc = {
+      ...order,
+      ...patch,
+      stageHistory: [
+        ...(Array.isArray(order.stageHistory) ? order.stageHistory : []),
+        {
+          status: String(patch.status || order.status || 'nuevo'),
+          date: now,
+          user: authEmail(req) || authUserId(req) || 'Vertial',
+          notes: `Uber sandbox: ${action}`,
+        },
+      ],
+      updatedAt: now,
+    };
+    const saved = await putDocument(req, getDeliveryDbName(), doc._id, doc);
+    const sanitized = sanitizeDeliveryOrder({ ...doc, _rev: saved.rev });
+
+    const { current } = await loadUberIntegration(req, businessId);
+    const evidenceField = {
+      accept: 'lastOrderAcceptedAt',
+      deny: 'lastOrderDeniedAt',
+      cancel: 'lastOrderCancelledAt',
+      ready: 'lastOrderReadyAt',
+    }[action];
+    await saveUberPatch(req, businessId, current, {
+      [evidenceField]: now,
+      lastOrderAt: now,
+      lastOrderStatus: action,
+    });
+
+    broadcastToUser(dataUserId, 'delivery_order_updated', sanitized);
+    broadcastToBusiness(businessId, 'delivery:order_updated', {
+      order: sanitized,
+      userId: businessId,
+    });
+    return res.json({ ok: true, action, order: sanitized });
+  } catch (error) {
+    logger.error({ error: errorMsg(error) }, 'Uber sandbox order action failed');
+    return res.status(500).json({ ok: false, error: errorMsg(error) });
+  }
+}
+
 /** POST /api/uber-eats/disconnect { businessId } — limpia OAuth/tokens de ESTA empresa. */
 export async function disconnectUberEatsForBusiness(req, res) {
   try {
     const businessId = String(req.body?.businessId || '').trim();
     if (!businessId) return badRequest(res, 'Falta businessId');
-    if (!(await requireUberBusinessAccess(req, res, businessId))) return;
+    if (!(await requireUberBusinessManager(req, res, businessId))) return;
 
     const { current } = await loadUberIntegration(req, businessId);
     const integrations = await wipeUberIntegration(req, businessId, current);
@@ -507,6 +870,71 @@ export async function getUberCertStatus(req, res) {
     if (!(await requireUberBusinessAccess(req, res, businessId))) return;
     const { uber } = await loadUberIntegration(req, businessId);
     const pub = getUberEatsPublicConfig();
+    let posData = null;
+    let liveStoreStatus = null;
+    let liveError = '';
+    if (pub.sandbox && pub.configured && uber.storeId) {
+      const errors = [];
+      try {
+        posData = await getUberEatsPosData(
+          String(uber.accessToken || '').trim(),
+          uber.storeId,
+        );
+      } catch (error) {
+        errors.push(`pos_data: ${errorMsg(error)}`);
+      }
+      try {
+        const { accessToken } = await getUberEatsAppAccessToken();
+        liveStoreStatus = await getUberStoreStatus(accessToken, uber.storeId);
+      } catch (error) {
+        errors.push(`store status: ${errorMsg(error)}`);
+      }
+      liveError = errors.join(' · ');
+    }
+    const posEnabled = posData ? integrationEnabledFromPosData(posData) : false;
+    const storeStatus = String(
+      liveStoreStatus?.status
+      || liveStoreStatus?.online_status
+      || '',
+    ).toUpperCase();
+    let uberOrders = [];
+    try {
+      const business = await findBusinessById(req, businessId).catch(() => null);
+      const dataUserId = String(
+        business?.owner_user_id
+        || business?.user_id
+        || businessId,
+      ).trim();
+      const orders = await listDeliveryOrdersByUser(req, dataUserId, { maxDocs: 500 });
+      uberOrders = orders.filter(
+        (order) => String(order.channel || '').toLowerCase() === 'ubereats'
+          && String(order.business_id || order.businessId || '') === businessId,
+      );
+    } catch {
+      uberOrders = [];
+    }
+    const acceptedEvidence = uberOrders.find((order) => order.uberAcceptedAt)?.uberAcceptedAt || '';
+    const deniedEvidence = uberOrders.find((order) => order.uberDeniedAt)?.uberDeniedAt || '';
+    const cancelledEvidence = uberOrders.find((order) => order.uberCancelledAt)?.uberCancelledAt || '';
+    const readyEvidence = uberOrders.find((order) => order.uberReadyAt)?.uberReadyAt || '';
+    const checks = [
+      certCheck('sandbox', 'Entorno sandbox', pub.sandbox, pub.env),
+      certCheck('oauth', 'OAuth conectado', Boolean(uber.oauth || uber.accessToken), uber.scope, uber.connectedAt),
+      certCheck('store', 'Tienda vinculada', Boolean(uber.storeId), uber.storeName || uber.storeId),
+      certCheck('sales_point', 'Store asociada a un PDV', Boolean(uber.salesPointId), uber.salesPointId),
+      certCheck('pos_data', 'Integración POS activa', posEnabled, liveError || (posEnabled ? 'integration_enabled=true' : 'integration_enabled=false'), uber.posDataCheckedAt || uber.provisionedAt),
+      certCheck('menu', 'Menú subido', Boolean(uber.menuPushedAt), `${Number(uber.menuItemCount || 0)} productos`, uber.menuPushedAt),
+      certCheck('item_update', 'Producto actualizado', Boolean(uber.lastMenuItemUpdatedAt), '', uber.lastMenuItemUpdatedAt),
+      certCheck('out_of_stock', 'Producto sin stock', Boolean(uber.lastMenuItemSuspendedAt), '', uber.lastMenuItemSuspendedAt),
+      certCheck('store_status', 'Estado de tienda comprobado', Boolean(storeStatus), storeStatus, uber.lastStoreStatusAt),
+      certCheck('webhook', 'Webhook recibido', Boolean(uber.lastWebhookAt), uber.lastWebhookType, uber.lastWebhookAt),
+      certCheck('order_received', 'Pedido recibido', Boolean(uber.lastOrderAt), uber.lastOrderStatus, uber.lastOrderAt),
+      certCheck('order_accepted', 'Pedido aceptado', Boolean(uber.lastOrderAcceptedAt || acceptedEvidence), '', uber.lastOrderAcceptedAt || acceptedEvidence),
+      certCheck('order_denied', 'Pedido denegado', Boolean(uber.lastOrderDeniedAt || deniedEvidence), '', uber.lastOrderDeniedAt || deniedEvidence),
+      certCheck('order_cancelled', 'Pedido cancelado', Boolean(uber.lastOrderCancelledAt || cancelledEvidence), '', uber.lastOrderCancelledAt || cancelledEvidence),
+      certCheck('order_ready', 'Pedido listo', Boolean(uber.lastOrderReadyAt || readyEvidence), '', uber.lastOrderReadyAt || readyEvidence),
+    ];
+    const completed = checks.filter((check) => check.status === 'ok').length;
     return res.json({
       ok: true,
       configured: pub.configured,
@@ -518,6 +946,15 @@ export async function getUberCertStatus(req, res) {
       menuPushedAt: String(uber.menuPushedAt || ''),
       menuItemCount: Number(uber.menuItemCount || 0),
       lastStoreStatus: String(uber.lastStoreStatus || ''),
+      posIntegrationEnabled: posEnabled,
+      liveStoreStatus: storeStatus,
+      liveError,
+      checks,
+      progress: {
+        completed,
+        total: checks.length,
+        percent: Math.round((completed / checks.length) * 100),
+      },
       primaryWebhookUrl: 'https://vertialapp.com/api/delivery-webhooks/ubereats',
       checklistImplemented: [
         'GET /v1/eats/stores',

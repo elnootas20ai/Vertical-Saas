@@ -791,11 +791,30 @@ export async function updateDeliveryOrder(req, res) {
     if (doc.status !== existing.status) {
       triggerReactiveAlert(userId, 'order_status_changed', { orderId: doc._id, newStatus: doc.status, previousStatus: existing.status }).catch(() => null);
       setImmediate(() => {
-        void syncUberOrderLifecycle({
-          order: sanitized,
-          previousStatus: existing.status,
-          action: 'status',
-        });
+        void (async () => {
+          const result = await syncUberOrderLifecycle({
+            order: sanitized,
+            previousStatus: existing.status,
+            action: 'status',
+          });
+          if (!Array.isArray(result?.actions) || !result.actions.length) return;
+          const now = new Date().toISOString();
+          const latest = await getDocument(req, db, doc._id).catch(() => null);
+          if (!latest) return;
+          const evidenceDoc = {
+            ...latest,
+            ...(result.actions.includes('accept') ? { uberAcceptedAt: now } : {}),
+            ...(result.actions.includes('ready') ? { uberReadyAt: now } : {}),
+          };
+          try {
+            await putDocument(req, db, evidenceDoc._id, evidenceDoc);
+          } catch (err) {
+            logger.warn(
+              { err: err?.message, orderId: doc._id, actions: result.actions },
+              'No se pudo guardar evidencia Uber del cambio de estado',
+            );
+          }
+        })();
       });
     }
     return res.json({ ok: true, order: sanitized, cajaRegistration });
@@ -986,12 +1005,26 @@ export async function cancelDeliveryOrder(req, res) {
           newStatus: 'cancelled',
           previousStatus: existing.status,
         }).catch(() => null);
-        void syncUberOrderLifecycle({
+        const uberResult = await syncUberOrderLifecycle({
           order: sanitized,
           previousStatus: existing.status,
           action: 'cancel',
           cancelReason: trimmedReason,
         });
+        if (uberResult?.ok) {
+          try {
+            const latest = await getDocument(req, db, orderRev._id);
+            await putDocument(req, db, latest._id, {
+              ...latest,
+              uberCancelledAt: new Date().toISOString(),
+            });
+          } catch (err) {
+            logger.warn(
+              { err: err?.message, orderId: orderRev._id },
+              'No se pudo guardar evidencia de cancelación Uber',
+            );
+          }
+        }
         await appendTpvIncidentForOrderCancel(req, {
           userId,
           order: sanitized,

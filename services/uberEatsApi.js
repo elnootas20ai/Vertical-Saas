@@ -23,6 +23,30 @@ function apiBase() {
   return getUberEatsApiBase();
 }
 
+function safeUberOrderResourceHref(resourceHref, orderId) {
+  const raw = String(resourceHref || '').trim();
+  if (!raw) return '';
+  try {
+    const candidate = new URL(raw);
+    const base = new URL(apiBase());
+    if (candidate.origin !== base.origin) return '';
+    const path = candidate.pathname;
+    const allowed = (
+      /^\/v2\/eats\/order\/[^/]+$/.test(path)
+      || /^\/v1\/eats\/orders\/[^/]+$/.test(path)
+      || /^\/v1\/delivery\/order\/[^/]+$/.test(path)
+    );
+    if (!allowed) return '';
+    if (orderId) {
+      const hrefOrderId = decodeURIComponent(path.split('/').filter(Boolean).at(-1) || '');
+      if (hrefOrderId !== String(orderId)) return '';
+    }
+    return candidate.toString();
+  } catch {
+    return '';
+  }
+}
+
 async function parseJsonResponse(response) {
   const text = await response.text();
   let data = {};
@@ -329,7 +353,8 @@ export async function updateUberEatsMenuItem(accessToken, storeId, itemId, patch
 export async function fetchUberOrderDetails({ accessToken, resourceHref, orderId }) {
   if (!accessToken) throw new Error('Sin accessToken Uber');
   const candidates = [];
-  if (resourceHref) candidates.push(resourceHref);
+  const safeResourceHref = safeUberOrderResourceHref(resourceHref, orderId);
+  if (safeResourceHref) candidates.push(safeResourceHref);
   if (orderId) {
     candidates.push(`${apiBase()}/v2/eats/order/${encodeURIComponent(orderId)}`);
     candidates.push(`${apiBase()}/v1/eats/orders/${encodeURIComponent(orderId)}`);

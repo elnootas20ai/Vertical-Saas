@@ -70,9 +70,11 @@ import {
 import { registerSplitPaymentsRequest } from '../../../lib/tpvSplitPaymentApi';
 import { TpvRapidoOrderFlow } from '../TpvRapidoPage';
 import { listClientsPageRequest } from '../../../lib/crmApi';
+import { actUberEatsOrderRequest } from '../../../lib/webApi';
 import { isTpvOpsVerticalPending } from '../../../lib/deliveryOpsTypes';
 import { WorkerTpvStaffConsumption } from './WorkerTpvStaffConsumption';
 import { CancelOrderModal } from '../../../components/delivery/CancelOrderModal';
+import { UberAcceptTimeModal } from '../../../components/delivery/UberAcceptTimeModal';
 import {
   ChefHat,
   Package,
@@ -266,6 +268,13 @@ function tabletNextStatus(order: DeliveryOrder): DeliveryOrderStatus | undefined
 }
 
 function tabletNextLabel(order: DeliveryOrder): string | undefined {
+  if (
+    String(order.channel || '').toLowerCase() === 'ubereats'
+    && !order.uberAcceptedAt
+    && !order.uberDeniedAt
+  ) {
+    return 'Aceptar';
+  }
   if (order.deliveryType === 'recogida') {
     if (order.status === 'nuevo' || order.status === 'cocina' || order.status === 'listo' || order.status === 'en_reparto') {
       return 'Entregar';
@@ -476,6 +485,12 @@ function OrderCard({
               </span>
             ) : null}
             <OrderChannelBadge channel={order.channel} compact={compact} />
+            {order.uberPrepMinutes ? (
+              <span className="inline-flex items-center gap-0.5 px-1 py-px rounded text-[9px] font-bold bg-green-100 text-green-800 dark:bg-green-950/50 dark:text-green-200">
+                <Clock className="w-3 h-3" />
+                {order.uberPrepMinutes} min
+              </span>
+            ) : null}
             {isUrgent && (
               <span className={`px-1 py-px bg-red-100 text-red-700 font-bold rounded ${compact ? 'text-[9px]' : 'text-[9px]'}`}>!</span>
             )}
@@ -1362,6 +1377,7 @@ export function WorkerTpvDelivery({
   /** Evita doble toque en el modal de cobro (antes de que React pinte loading). */
   const paymentConfirmLockRef = useRef<string | null>(null);
   const [deleteOrder, setDeleteOrder] = useState<DeliveryOrder | null>(null);
+  const [uberAcceptOrder, setUberAcceptOrder] = useState<DeliveryOrder | null>(null);
   const [staffConsumptionEnabled, setStaffConsumptionEnabled] = useState(true);
 
   const tabletBinding = useMemo(() => readTpvTabletBinding(), []);
@@ -1648,6 +1664,15 @@ export function WorkerTpvDelivery({
     paymentMethod?: DeliveryPaymentMethod,
     cash?: { amountReceived: number; changeGiven: number },
   ) => {
+    const pendingUber = String(order.channel || '').toLowerCase() === 'ubereats'
+      && !order.uberAcceptedAt
+      && !order.uberDeniedAt;
+    if (pendingUber) {
+      setUberAcceptOrder(order);
+      setSelectedOrder(null);
+      return;
+    }
+
     const next = tabletNextStatus(order);
     if (!next || !userId) return;
 
@@ -1847,6 +1872,34 @@ export function WorkerTpvDelivery({
     register,
   ]);
 
+  const confirmUberAccept = useCallback(async (prepMinutes: number) => {
+    if (!uberAcceptOrder || !businessId) return;
+    const target = uberAcceptOrder;
+    if (!isBrowserOnline()) {
+      toast.error('Necesitas conexión para aceptar el pedido en Uber');
+      return;
+    }
+    if (!beginAdvancing(target._id)) return;
+    try {
+      const result = await actUberEatsOrderRequest(
+        businessId,
+        target._id,
+        'accept',
+        '',
+        prepMinutes,
+      );
+      setOrders((prev) => prev.map((item) => (
+        item._id === result.order._id ? result.order : item
+      )));
+      setUberAcceptOrder(null);
+      toast.success(`Pedido aceptado · listo en ${prepMinutes} min`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo aceptar en Uber');
+    } finally {
+      endAdvancing(target._id);
+    }
+  }, [uberAcceptOrder, businessId, beginAdvancing, endAdvancing]);
+
   const markOrderPaid = useCallback(
     async (
       order: DeliveryOrder,
@@ -2015,6 +2068,14 @@ export function WorkerTpvDelivery({
     if (!beginAdvancing(target._id)) return;
 
     const trimmed = String(reason || '').trim();
+    const pendingUber = String(target.channel || '').toLowerCase() === 'ubereats'
+      && !target.uberAcceptedAt
+      && !target.uberDeniedAt;
+    if (pendingUber && (!businessId || !isBrowserOnline())) {
+      toast.error('Necesitas conexión para denegar el pedido en Uber');
+      endAdvancing(target._id);
+      return;
+    }
     const now = new Date().toISOString();
     const optimistic: DeliveryOrder = {
       ...target,
@@ -2056,11 +2117,11 @@ export function WorkerTpvDelivery({
     }
 
     try {
-      const { order: updated, cajaRegistration } = await cancelDeliveryOrderRequest(
-        userId,
-        target._id,
-        trimmed,
-      );
+      const result = pendingUber
+        ? await actUberEatsOrderRequest(businessId, target._id, 'deny', trimmed)
+        : await cancelDeliveryOrderRequest(userId, target._id, trimmed);
+      const updated = result.order;
+      const cajaRegistration = 'cajaRegistration' in result ? result.cajaRegistration : undefined;
       setOrders((prev) => prev.map((o) => (o._id === updated._id ? updated : o)));
       if (cajaRegistration?.status === 'registered') {
         toast.success(`Pedido #${target.orderNumber} eliminado · restado de caja`);
@@ -2084,6 +2145,7 @@ export function WorkerTpvDelivery({
     }
   }, [
     userId,
+    businessId,
     deleteOrder,
     selectedOrder,
     deliveryCompleteOrder,
@@ -2794,11 +2856,25 @@ export function WorkerTpvDelivery({
         />
       )}
 
+      {uberAcceptOrder && (
+        <UberAcceptTimeModal
+          order={uberAcceptOrder}
+          loading={advancingIds.has(uberAcceptOrder._id)}
+          onConfirm={(minutes) => void confirmUberAccept(minutes)}
+          onClose={() => setUberAcceptOrder(null)}
+        />
+      )}
+
       {/* Eliminar con motivo obligatorio */}
       {deleteOrder && (
         <CancelOrderModal
           order={deleteOrder}
-          mode="delete"
+          mode={
+            String(deleteOrder.channel || '').toLowerCase() === 'ubereats'
+              && !deleteOrder.uberAcceptedAt
+              ? 'deny'
+              : 'delete'
+          }
           onConfirm={handleDeleteOrder}
           onClose={() => setDeleteOrder(null)}
           loading={advancingIds.has(deleteOrder._id)}

@@ -278,10 +278,23 @@ export interface DeliveryIntegrationEntry {
   env?: string;
   storeId?: string;
   storeName?: string;
+  salesPointId?: string;
   provisionedAt?: string;
   menuPushedAt?: string;
   menuItemCount?: number;
   lastStoreStatus?: string;
+  posIntegrationEnabled?: boolean;
+  posDataCheckedAt?: string;
+  lastWebhookAt?: string;
+  lastWebhookType?: string;
+  lastOrderAt?: string;
+  lastOrderAcceptedAt?: string;
+  lastOrderReadyAt?: string;
+  lastOrderDeniedAt?: string;
+  lastOrderCancelledAt?: string;
+  lastOrderStatus?: string;
+  lastMenuItemUpdatedAt?: string;
+  lastMenuItemSuspendedAt?: string;
 }
 
 export interface UberEatsStoreOption {
@@ -302,9 +315,37 @@ export interface DeliveryIntegrations {
 export interface UberEatsOAuthConfig {
   configured: boolean;
   env: string;
+  sandbox?: boolean;
   redirectUri: string;
   scopes: string;
   clientIdPreview?: string;
+}
+
+export interface UberCertCheck {
+  key: string;
+  label: string;
+  status: 'ok' | 'pending';
+  detail: string;
+  at: string;
+}
+
+export interface UberCertStatus {
+  ok: boolean;
+  configured: boolean;
+  env: string;
+  oauthConnected: boolean;
+  storeId: string;
+  storeName: string;
+  provisionedAt: string;
+  menuPushedAt: string;
+  menuItemCount: number;
+  lastStoreStatus: string;
+  posIntegrationEnabled: boolean;
+  liveStoreStatus: string;
+  liveError: string;
+  primaryWebhookUrl: string;
+  checks: UberCertCheck[];
+  progress: { completed: number; total: number; percent: number };
 }
 
 export async function getDeliveryIntegrationsRequest(businessId: string) {
@@ -369,6 +410,32 @@ export async function selectUberEatsStoreRequest(businessId: string, storeId: st
   });
 }
 
+export async function selectUberEatsSalesPointRequest(businessId: string, salesPointId: string) {
+  return authRequest<{
+    ok: boolean;
+    storeId: string;
+    salesPointId: string;
+    salesPointName: string;
+    integrations?: DeliveryIntegrations;
+  }>('/api/uber-eats/store/pdv', {
+    method: 'POST',
+    body: JSON.stringify({ businessId, salesPointId }),
+  });
+}
+
+export async function activateUberEatsPosRequest(businessId: string) {
+  return authRequest<{
+    ok: boolean;
+    storeId?: string;
+    posData?: Record<string, unknown>;
+    integrations?: DeliveryIntegrations;
+    error?: string;
+  }>('/api/uber-eats/pos-data/activate', {
+    method: 'POST',
+    body: JSON.stringify({ businessId }),
+  });
+}
+
 export async function pushUberEatsMenuRequest(businessId: string, storeId?: string) {
   return authRequest<{
     ok: boolean;
@@ -415,5 +482,44 @@ export async function disconnectUberEatsRequest(businessId: string) {
   }>('/api/uber-eats/disconnect', {
     method: 'POST',
     body: JSON.stringify({ businessId }),
+  });
+}
+
+export async function getUberCertStatusRequest(businessId: string) {
+  return authRequest<UberCertStatus>(
+    `/api/uber-eats/cert-status?businessId=${encodeURIComponent(businessId)}`,
+  );
+}
+
+export async function updateUberEatsMenuItemRequest(
+  businessId: string,
+  itemId: string,
+  suspended: boolean,
+) {
+  return authRequest<{
+    ok: boolean;
+    itemId: string;
+    suspended: boolean;
+    integrations?: DeliveryIntegrations;
+  }>('/api/uber-eats/menu/item', {
+    method: 'POST',
+    body: JSON.stringify({ businessId, itemId, suspended }),
+  });
+}
+
+export async function actUberEatsOrderRequest(
+  businessId: string,
+  orderDocId: string,
+  action: 'accept' | 'deny' | 'cancel' | 'ready',
+  reason = '',
+  prepMinutes?: number,
+) {
+  return authRequest<{
+    ok: boolean;
+    action: string;
+    order: import('./deliveryApi').DeliveryOrder;
+  }>('/api/uber-eats/order/action', {
+    method: 'POST',
+    body: JSON.stringify({ businessId, orderDocId, action, reason, prepMinutes }),
   });
 }

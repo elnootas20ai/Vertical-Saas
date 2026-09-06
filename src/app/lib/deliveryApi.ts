@@ -225,6 +225,12 @@ export interface DeliveryOrder {
   reopenedBy: string;
 
   externalOrderId: string;
+  uberAcceptedAt?: string;
+  uberPickupTime?: number | null;
+  uberPrepMinutes?: number | null;
+  uberReadyAt?: string;
+  uberDeniedAt?: string;
+  uberCancelledAt?: string;
 
   deliveryAddressId: string;
 
