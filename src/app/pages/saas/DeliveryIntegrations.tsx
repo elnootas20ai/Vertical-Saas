@@ -17,6 +17,7 @@ import {
   startUberEatsOAuthRequest,
   pushUberEatsMenuRequest,
   setUberEatsStoreStatusRequest,
+  disconnectUberEatsRequest,
   type DeliveryIntegrations,
   type UberEatsOAuthConfig,
   type UberEatsStoreOption,
@@ -51,6 +52,7 @@ export function DeliveryIntegrations() {
   const [selectingStoreId, setSelectingStoreId] = useState<string | null>(null);
   const [pushingMenu, setPushingMenu] = useState(false);
   const [settingUberStatus, setSettingUberStatus] = useState(false);
+  const [disconnectingUber, setDisconnectingUber] = useState(false);
   const [showTokens, setShowTokens] = useState<Record<string, boolean>>({});
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [uberCfg, setUberCfg] = useState<UberEatsOAuthConfig | null>(null);
@@ -97,7 +99,10 @@ export function DeliveryIntegrations() {
   }, [businessId, applyIntegrations]);
 
   const refreshUberStores = useCallback(async () => {
-    if (!businessId || !integrations.uber?.oauth) return;
+    if (!businessId || !integrations.uber?.oauth) {
+      setUberStores([]);
+      return;
+    }
     setLoadingStores(true);
     try {
       const res = await listUberEatsStoresRequest(businessId);
@@ -112,6 +117,11 @@ export function DeliveryIntegrations() {
   useEffect(() => {
     void loadIntegrations();
   }, [loadIntegrations]);
+
+  // Al cambiar de empresa Vertial: no arrastrar tiendas Uber de la anterior.
+  useEffect(() => {
+    setUberStores([]);
+  }, [businessId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -246,6 +256,21 @@ export function DeliveryIntegrations() {
     }
   };
 
+  const disconnectUber = async () => {
+    if (!businessId) return;
+    setDisconnectingUber(true);
+    try {
+      const res = await disconnectUberEatsRequest(businessId);
+      if (res.integrations) applyIntegrations(res.integrations);
+      setUberStores([]);
+      toast.success('Uber desconectado de esta empresa Vertial');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo desconectar Uber');
+    } finally {
+      setDisconnectingUber(false);
+    }
+  };
+
   const toggleEnabled = (key: keyof DeliveryIntegrations) => {
     setIntegrations((prev) => {
       const current = prev[key] ?? DEFAULT_DELIVERY_INTEGRATIONS[key];
@@ -350,19 +375,31 @@ export function DeliveryIntegrations() {
                         {uberReady
                           ? `Pedidos de ${integrations.uber.storeName || 'tu tienda Uber'} llegarán a Vertial.`
                           : uberOauth
-                            ? 'Cuenta conectada. Elige el local que quieres vincular.'
-                            : 'Inicia sesión con la cuenta Uber del restaurante y elige la tienda.'}
+                            ? 'Cuenta Uber conectada. La lista de abajo son tiendas de ESA cuenta Uber (no de Vertial). Elige solo una de TEST.'
+                            : 'Inicia sesión con la cuenta Uber del restaurante de prueba (no la del local en vivo).'}
                       </p>
 
-                      <button
-                        type="button"
-                        onClick={() => void connectUberOAuth()}
-                        disabled={!businessId || connectingUber || uberCfg?.configured === false}
-                        className={VERTIAL_BTN_PRIMARY}
-                      >
-                        {connectingUber ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
-                        {uberOauth ? 'Cambiar cuenta Uber' : 'Conectar con Uber'}
-                      </button>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void connectUberOAuth()}
+                          disabled={!businessId || connectingUber || uberCfg?.configured === false}
+                          className={VERTIAL_BTN_PRIMARY}
+                        >
+                          {connectingUber ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
+                          {uberOauth ? 'Cambiar cuenta Uber' : 'Conectar con Uber'}
+                        </button>
+                        {uberOauth && (
+                          <button
+                            type="button"
+                            onClick={() => void disconnectUber()}
+                            disabled={disconnectingUber}
+                            className="px-3 py-2 rounded-xl text-xs font-semibold border border-stone-300 dark:border-stone-600 text-stone-700 dark:text-stone-200 disabled:opacity-50"
+                          >
+                            {disconnectingUber ? 'Desconectando…' : 'Desconectar Uber'}
+                          </button>
+                        )}
+                      </div>
 
                       {uberCfg?.configured === false && (
                         <p className="text-xs text-amber-700 dark:text-amber-400">
@@ -375,7 +412,7 @@ export function DeliveryIntegrations() {
                           <div className="flex items-center justify-between gap-2">
                             <p className="text-xs font-semibold text-stone-800 dark:text-stone-100 flex items-center gap-1.5">
                               <Store className="w-3.5 h-3.5" />
-                              Tu tienda
+                              Tiendas de tu login Uber
                             </p>
                             <button
                               type="button"

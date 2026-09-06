@@ -13,6 +13,7 @@ import {
   selectUberStoreForBusiness,
   setUberStoreStatusForBusiness,
   startUberEatsOAuth,
+  disconnectUberEatsForBusiness,
 } from '../controllers/uberEatsController.js';
 
 const uberEatsRouter = Router();
@@ -29,6 +30,7 @@ uberEatsRouter.get('/delivery-store', getUberDeliveryStoreForBusiness);
 uberEatsRouter.get('/store-status', getUberStoreStatusForBusiness);
 uberEatsRouter.post('/store-status', setUberStoreStatusForBusiness);
 uberEatsRouter.post('/menu/push', pushUberMenuForBusiness);
+uberEatsRouter.post('/disconnect', disconnectUberEatsForBusiness);
 uberEatsRouter.get('/cert-status', getUberCertStatus);
 
 export { uberEatsRouter };

@@ -402,3 +402,15 @@ export async function setUberEatsStoreStatusRequest(
     }),
   });
 }
+
+export async function disconnectUberEatsRequest(businessId: string) {
+  return authRequest<{
+    ok: boolean;
+    disconnected?: boolean;
+    integrations?: DeliveryIntegrations;
+    error?: string;
+  }>('/api/uber-eats/disconnect', {
+    method: 'POST',
+    body: JSON.stringify({ businessId }),
+  });
+}

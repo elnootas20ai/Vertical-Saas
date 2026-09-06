@@ -19,6 +19,7 @@ import {
 } from '../services/couchdb.js';
 import { computeVolumeDiscount } from '../shared/volumeDiscount.js';
 import { calculateShippingRates } from '../services/shippingService.js';
+import { assertBusinessTeamAccess } from '../services/businessAccess.js';
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
@@ -305,6 +306,8 @@ export async function getDeliveryIntegrations(req, res) {
   try {
     const { businessId } = req.params;
     if (!businessId) return badRequest(res, 'Falta businessId');
+    const access = await assertBusinessTeamAccess(req, businessId);
+    if (!access.ok) return res.status(access.status || 403).json({ ok: false, error: access.error });
 
     const config = await getWebConfigByBusinessId(req, businessId);
     return res.json({ ok: true, integrations: sanitizeDeliveryIntegrations(config) });
@@ -319,6 +322,8 @@ export async function saveDeliveryIntegrations(req, res) {
     const { integrations } = req.body || {};
     if (!businessId) return badRequest(res, 'Falta businessId');
     if (!integrations || typeof integrations !== 'object') return badRequest(res, 'Falta el objeto integrations');
+    const access = await assertBusinessTeamAccess(req, businessId);
+    if (!access.ok) return res.status(access.status || 403).json({ ok: false, error: access.error });
 
     const db = getWebDbName();
     await ensureDatabase(req, db);

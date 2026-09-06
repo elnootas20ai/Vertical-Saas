@@ -28,6 +28,7 @@ import {
   setUberStoreStatus,
 } from '../services/uberEatsApi.js';
 import { pushUberMenuFromCatalog } from '../services/uberEatsMenu.js';
+import { assertBusinessTeamAccess } from '../services/businessAccess.js';
 import { isVertialSuperAdminEmail } from '../utils/superAdmin.js';
 import logger from '../services/logger.js';
 
@@ -54,6 +55,17 @@ function requireUberOperator(req, res) {
     return false;
   }
   return true;
+}
+
+/** Impide leer/escribir integraciones Uber de otra empresa. */
+async function requireUberBusinessAccess(req, res, businessId) {
+  if (!requireUberOperator(req, res)) return null;
+  const access = await assertBusinessTeamAccess(req, businessId);
+  if (!access.ok) {
+    res.status(access.status || 403).json({ ok: false, error: access.error || 'No autorizado' });
+    return null;
+  }
+  return access;
 }
 
 async function loadUberIntegration(req, businessId) {
@@ -99,10 +111,9 @@ export async function getUberEatsOAuthConfig(req, res) {
 /** GET /api/uber-eats/oauth/start?businessId= */
 export async function startUberEatsOAuth(req, res) {
   try {
-    if (!requireUberOperator(req, res)) return;
-
     const businessId = String(req.query.businessId || '').trim();
     if (!businessId) return badRequest(res, 'Falta businessId');
+    if (!(await requireUberBusinessAccess(req, res, businessId))) return;
     if (!isUberEatsConfigured()) {
       return res.status(503).json({
         ok: false,
@@ -148,6 +159,7 @@ export async function completeUberEatsOAuth(req, res) {
     if (payload.userId && userId && payload.userId !== userId) {
       return res.status(403).json({ ok: false, error: 'El inicio de OAuth fue de otra sesión' });
     }
+    if (!(await requireUberBusinessAccess(req, res, businessId))) return;
 
     const tokens = await exchangeUberAuthorizationCode(code);
     const { current } = await loadUberIntegration(req, businessId);
@@ -193,9 +205,9 @@ export async function completeUberEatsOAuth(req, res) {
 /** GET /api/uber-eats/stores?businessId= */
 export async function listUberStoresForBusiness(req, res) {
   try {
-    if (!requireUberOperator(req, res)) return;
     const businessId = String(req.query.businessId || '').trim();
     if (!businessId) return badRequest(res, 'Falta businessId');
+    if (!(await requireUberBusinessAccess(req, res, businessId))) return;
 
     const { uber } = await loadUberIntegration(req, businessId);
     const token = String(uber.accessToken || '').trim();
@@ -219,12 +231,12 @@ export async function listUberStoresForBusiness(req, res) {
 /** POST /api/uber-eats/stores/select { businessId, storeId, storeName? } */
 export async function selectUberStoreForBusiness(req, res) {
   try {
-    if (!requireUberOperator(req, res)) return;
     const businessId = String(req.body?.businessId || '').trim();
     const storeId = String(req.body?.storeId || '').trim();
     const storeName = String(req.body?.storeName || '').trim();
     if (!businessId) return badRequest(res, 'Falta businessId');
     if (!storeId) return badRequest(res, 'Falta storeId');
+    if (!(await requireUberBusinessAccess(req, res, businessId))) return;
 
     const { current, uber } = await loadUberIntegration(req, businessId);
     const token = String(uber.accessToken || '').trim();
@@ -265,10 +277,10 @@ export async function selectUberStoreForBusiness(req, res) {
 /** GET /api/uber-eats/pos-data?businessId=&storeId= */
 export async function getUberPosDataForBusiness(req, res) {
   try {
-    if (!requireUberOperator(req, res)) return;
     const businessId = String(req.query.businessId || '').trim();
     const storeId = String(req.query.storeId || '').trim();
     if (!businessId) return badRequest(res, 'Falta businessId');
+    if (!(await requireUberBusinessAccess(req, res, businessId))) return;
 
     const { uber } = await loadUberIntegration(req, businessId);
     const token = String(uber.accessToken || '').trim();
@@ -286,11 +298,11 @@ export async function getUberPosDataForBusiness(req, res) {
 /** PATCH /api/uber-eats/pos-data { businessId, storeId?, patch } */
 export async function patchUberPosDataForBusiness(req, res) {
   try {
-    if (!requireUberOperator(req, res)) return;
     const businessId = String(req.body?.businessId || '').trim();
     const storeId = String(req.body?.storeId || '').trim();
     const patch = req.body?.patch && typeof req.body.patch === 'object' ? req.body.patch : {};
     if (!businessId) return badRequest(res, 'Falta businessId');
+    if (!(await requireUberBusinessAccess(req, res, businessId))) return;
 
     const { current, uber } = await loadUberIntegration(req, businessId);
     const token = String(uber.accessToken || '').trim();
@@ -312,9 +324,9 @@ export async function patchUberPosDataForBusiness(req, res) {
 /** GET /api/uber-eats/delivery-stores?businessId= */
 export async function listUberDeliveryStoresForBusiness(req, res) {
   try {
-    if (!requireUberOperator(req, res)) return;
     const businessId = String(req.query.businessId || '').trim();
     if (!businessId) return badRequest(res, 'Falta businessId');
+    if (!(await requireUberBusinessAccess(req, res, businessId))) return;
     const { accessToken } = await getUberEatsAppAccessToken();
     const data = await listUberDeliveryStores(accessToken);
     return res.json({ ok: true, data });
@@ -326,10 +338,10 @@ export async function listUberDeliveryStoresForBusiness(req, res) {
 /** GET /api/uber-eats/delivery-store?businessId=&storeId= */
 export async function getUberDeliveryStoreForBusiness(req, res) {
   try {
-    if (!requireUberOperator(req, res)) return;
     const businessId = String(req.query.businessId || '').trim();
     const storeId = String(req.query.storeId || '').trim();
     if (!businessId) return badRequest(res, 'Falta businessId');
+    if (!(await requireUberBusinessAccess(req, res, businessId))) return;
     const { uber } = await loadUberIntegration(req, businessId);
     const sid = storeId || String(uber.storeId || '').trim();
     if (!sid) return badRequest(res, 'Falta storeId');
@@ -344,10 +356,10 @@ export async function getUberDeliveryStoreForBusiness(req, res) {
 /** GET /api/uber-eats/store-status?businessId=&storeId= */
 export async function getUberStoreStatusForBusiness(req, res) {
   try {
-    if (!requireUberOperator(req, res)) return;
     const businessId = String(req.query.businessId || '').trim();
     const storeId = String(req.query.storeId || '').trim();
     if (!businessId) return badRequest(res, 'Falta businessId');
+    if (!(await requireUberBusinessAccess(req, res, businessId))) return;
     const { uber } = await loadUberIntegration(req, businessId);
     const sid = storeId || String(uber.storeId || '').trim();
     if (!sid) return badRequest(res, 'Falta storeId');
@@ -362,13 +374,13 @@ export async function getUberStoreStatusForBusiness(req, res) {
 /** POST /api/uber-eats/store-status { businessId, storeId?, status, reason?, pausedUntil? } */
 export async function setUberStoreStatusForBusiness(req, res) {
   try {
-    if (!requireUberOperator(req, res)) return;
     const businessId = String(req.body?.businessId || '').trim();
     const storeId = String(req.body?.storeId || '').trim();
     const status = String(req.body?.status || 'ONLINE').trim();
     const reason = String(req.body?.reason || 'Updated by Vertial').trim();
     const pausedUntil = String(req.body?.pausedUntil || '').trim();
     if (!businessId) return badRequest(res, 'Falta businessId');
+    if (!(await requireUberBusinessAccess(req, res, businessId))) return;
 
     const { current, uber } = await loadUberIntegration(req, businessId);
     const sid = storeId || String(uber.storeId || '').trim();
@@ -391,10 +403,10 @@ export async function setUberStoreStatusForBusiness(req, res) {
 /** POST /api/uber-eats/menu/push { businessId, storeId? } */
 export async function pushUberMenuForBusiness(req, res) {
   try {
-    if (!requireUberOperator(req, res)) return;
     const businessId = String(req.body?.businessId || '').trim();
     const storeId = String(req.body?.storeId || '').trim();
     if (!businessId) return badRequest(res, 'Falta businessId');
+    if (!(await requireUberBusinessAccess(req, res, businessId))) return;
 
     const { current, uber } = await loadUberIntegration(req, businessId);
     const sid = storeId || String(uber.storeId || '').trim();
@@ -417,12 +429,45 @@ export async function pushUberMenuForBusiness(req, res) {
   }
 }
 
+/** POST /api/uber-eats/disconnect { businessId } — limpia OAuth/tokens de ESTA empresa. */
+export async function disconnectUberEatsForBusiness(req, res) {
+  try {
+    const businessId = String(req.body?.businessId || '').trim();
+    if (!businessId) return badRequest(res, 'Falta businessId');
+    if (!(await requireUberBusinessAccess(req, res, businessId))) return;
+
+    const { current } = await loadUberIntegration(req, businessId);
+    const integrations = await saveUberPatch(req, businessId, current, {
+      enabled: false,
+      oauth: false,
+      accessToken: '',
+      refreshToken: '',
+      tokenType: '',
+      scope: '',
+      expiresAt: '',
+      connectedAt: '',
+      storeId: '',
+      storeName: '',
+      provisionedAt: '',
+      menuPushedAt: '',
+      menuItemCount: 0,
+      lastStoreStatus: '',
+      lastStoreStatusAt: '',
+      disconnectedAt: new Date().toISOString(),
+    });
+    logger.info({ businessId }, 'Uber Eats desconectado de la empresa');
+    return res.json({ ok: true, integrations, disconnected: true });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: errorMsg(error) });
+  }
+}
+
 /** GET /api/uber-eats/cert-status?businessId= — checklist GTS */
 export async function getUberCertStatus(req, res) {
   try {
-    if (!requireUberOperator(req, res)) return;
     const businessId = String(req.query.businessId || '').trim();
     if (!businessId) return badRequest(res, 'Falta businessId');
+    if (!(await requireUberBusinessAccess(req, res, businessId))) return;
     const { uber } = await loadUberIntegration(req, businessId);
     const pub = getUberEatsPublicConfig();
     return res.json({
