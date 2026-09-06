@@ -56,14 +56,14 @@ describe('Uber Eats sandbox API contract', () => {
       businessId: 'business-test',
     });
 
-    expect(fetchMock.mock.calls[0][0]).toBe(
+    const requestUrl = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(`${requestUrl.origin}${requestUrl.pathname}`).toBe(
       'https://test-api.uber.com/v1/eats/stores/store-test/pos_data',
     );
     expect(fetchMock.mock.calls[0][1]?.method).toBe('POST');
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
-      is_order_manager: true,
-      integrator_store_id: 'business-test',
-    });
+    expect(requestUrl.searchParams.get('is_order_manager')).toBe('true');
+    expect(requestUrl.searchParams.get('integrator_store_id')).toBe('business-test');
+    expect(fetchMock.mock.calls[0][1]?.body).toBeUndefined();
   });
 
   it('never sends the Uber bearer token to a webhook-controlled host', async () => {

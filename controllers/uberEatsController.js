@@ -347,7 +347,8 @@ export async function completeUberEatsOAuth(req, res) {
         provisionError = errorMsg(provErr);
       }
       try {
-        const posData = await getUberEatsPosData(tokens.accessToken, storeId);
+        const { accessToken: appAccessToken } = await getUberEatsAppAccessToken();
+        const posData = await getUberEatsPosData(appAccessToken, storeId);
         posIntegrationEnabled = integrationEnabledFromPosData(posData);
       } catch {
         /* keep previous */
@@ -463,7 +464,8 @@ export async function selectUberStoreForBusiness(req, res) {
     }
 
     try {
-      const posData = await getUberEatsPosData(token, storeId);
+      const { accessToken: appAccessToken } = await getUberEatsAppAccessToken();
+      const posData = await getUberEatsPosData(appAccessToken, storeId);
       posIntegrationEnabled = integrationEnabledFromPosData(posData);
     } catch (posErr) {
       if (!provisionError) provisionError = errorMsg(posErr);
@@ -545,7 +547,8 @@ export async function activateUberPosForBusiness(req, res) {
       partnerStoreId: businessId,
       businessId,
     });
-    const posData = await getUberEatsPosData(token, storeId);
+    const { accessToken: appAccessToken } = await getUberEatsAppAccessToken();
+    const posData = await getUberEatsPosData(appAccessToken, storeId);
     const posIntegrationEnabled = integrationEnabledFromPosData(posData);
     const now = new Date().toISOString();
     const { pdvs, solePdv } = await loadBusinessActivePdvs(req, businessId);
@@ -633,11 +636,10 @@ export async function getUberPosDataForBusiness(req, res) {
     if (!(await requireUberBusinessAccess(req, res, businessId))) return;
 
     const { current, uber } = await loadUberIntegration(req, businessId);
-    const token = String(uber.accessToken || '').trim();
     const sid = boundUberStoreId(uber, storeId);
-    if (!token) return badRequest(res, 'Conecta Uber OAuth antes');
 
-    const posData = await getUberEatsPosData(token, sid);
+    const { accessToken } = await getUberEatsAppAccessToken();
+    const posData = await getUberEatsPosData(accessToken, sid);
     const integrations = await saveUberPatch(req, businessId, current, {
       posIntegrationEnabled: integrationEnabledFromPosData(posData),
       posDataCheckedAt: new Date().toISOString(),
@@ -658,12 +660,11 @@ export async function patchUberPosDataForBusiness(req, res) {
     if (!(await requireUberBusinessManager(req, res, businessId))) return;
 
     const { current, uber } = await loadUberIntegration(req, businessId);
-    const token = String(uber.accessToken || '').trim();
     const sid = boundUberStoreId(uber, storeId);
-    if (!token) return badRequest(res, 'Conecta Uber OAuth antes');
 
-    await patchUberEatsPosData(token, sid, patch);
-    const posData = await getUberEatsPosData(token, sid);
+    const { accessToken } = await getUberEatsAppAccessToken();
+    await patchUberEatsPosData(accessToken, sid, patch);
+    const posData = await getUberEatsPosData(accessToken, sid);
     const integrations = await saveUberPatch(req, businessId, current, {
       storeId: sid,
       posDataPatchedAt: new Date().toISOString(),
@@ -982,10 +983,8 @@ export async function getUberCertStatus(req, res) {
     if (pub.sandbox && pub.configured && uber.storeId) {
       const errors = [];
       try {
-        posData = await getUberEatsPosData(
-          String(uber.accessToken || '').trim(),
-          uber.storeId,
-        );
+        const { accessToken } = await getUberEatsAppAccessToken();
+        posData = await getUberEatsPosData(accessToken, uber.storeId);
       } catch (error) {
         errors.push(`pos_data: ${errorMsg(error)}`);
       }

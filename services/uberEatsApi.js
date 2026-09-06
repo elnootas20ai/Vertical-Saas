@@ -218,19 +218,18 @@ export async function provisionUberEatsStore({
 }) {
   if (!userAccessToken) throw new Error('Falta access token de usuario Uber');
   if (!storeId) throw new Error('Falta storeId');
-  const payload = {
+  const params = new URLSearchParams({
     is_order_manager: true,
     integrator_store_id: String(partnerStoreId || businessId || storeId),
     store_configuration_data: JSON.stringify({
       vertialBusinessId: String(businessId || ''),
       partner: 'vertial',
     }),
-  };
+  });
   await uberFetch({
     method: 'POST',
-    path: `/v1/eats/stores/${encodeURIComponent(storeId)}/pos_data`,
+    path: `/v1/eats/stores/${encodeURIComponent(storeId)}/pos_data?${params.toString()}`,
     accessToken: userAccessToken,
-    body: payload,
     okStatuses: [200, 204],
     label: 'Uber provision store',
   });
