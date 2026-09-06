@@ -279,6 +279,9 @@ export interface DeliveryIntegrationEntry {
   storeId?: string;
   storeName?: string;
   provisionedAt?: string;
+  menuPushedAt?: string;
+  menuItemCount?: number;
+  lastStoreStatus?: string;
 }
 
 export interface UberEatsStoreOption {

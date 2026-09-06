@@ -13320,6 +13320,9 @@ function sanitizeIntegrationEntry(entry) {
       storeId: '',
       storeName: '',
       provisionedAt: '',
+      menuPushedAt: '',
+      menuItemCount: 0,
+      lastStoreStatus: '',
     };
   }
   const hasOauth = Boolean(entry.oauth || entry.accessToken);
@@ -13334,6 +13337,9 @@ function sanitizeIntegrationEntry(entry) {
     storeId: String(entry.storeId || ''),
     storeName: String(entry.storeName || ''),
     provisionedAt: String(entry.provisionedAt || ''),
+    menuPushedAt: String(entry.menuPushedAt || ''),
+    menuItemCount: Number(entry.menuItemCount || 0),
+    lastStoreStatus: String(entry.lastStoreStatus || ''),
   };
 }
 

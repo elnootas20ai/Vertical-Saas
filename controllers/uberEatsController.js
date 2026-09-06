@@ -5,6 +5,8 @@ import {
   buildWebConfigDocument,
   putDocument,
   sanitizeDeliveryIntegrations,
+  findDocuments,
+  BUSINESSES_DB,
 } from '../services/couchdb.js';
 import {
   buildUberAuthorizeUrl,
@@ -94,6 +96,113 @@ async function saveUberPatch(req, businessId, current, uberPatch) {
   return sanitizeDeliveryIntegrations({ ...doc, _rev: saved.rev });
 }
 
+/** Limpia por completo OAuth/tokens Uber de ESTA empresa (Vertial manda, no el navegador). */
+async function wipeUberIntegration(req, businessId, current) {
+  const db = getWebDbName();
+  await ensureDatabase(req, db);
+  const prevIntegrations = current?.integrations || {};
+  const nextIntegrations = {
+    ...prevIntegrations,
+    uber: {
+      enabled: false,
+      token: '',
+      oauth: false,
+      accessToken: '',
+      refreshToken: '',
+      tokenType: '',
+      scope: '',
+      expiresAt: '',
+      connectedAt: '',
+      storeId: '',
+      storeName: '',
+      provisionedAt: '',
+      menuPushedAt: '',
+      menuItemCount: 0,
+      lastStoreStatus: '',
+      lastStoreStatusAt: '',
+      env: String(prevIntegrations.uber?.env || getUberEatsPublicConfig().env || 'sandbox'),
+      disconnectedAt: new Date().toISOString(),
+    },
+  };
+  const doc = buildWebConfigDocument(businessId, { integrations: nextIntegrations }, current);
+  const saved = await putDocument(req, db, doc._id, doc);
+  return sanitizeDeliveryIntegrations({ ...doc, _rev: saved.rev });
+}
+
+/**
+ * Tiendas Uber ya vinculadas a OTRO negocio Vertial.
+ * Una cuenta nueva no puede “heredar” Modomio/Tiana de Pau.
+ */
+async function getUberStoreIdsClaimedByOtherBusinesses(req, excludeBusinessId) {
+  const db = getWebDbName();
+  await ensureDatabase(req, db);
+  const claimed = new Map();
+  try {
+    const docs = await findDocuments(
+      req,
+      db,
+      {
+        type: 'web_config',
+        'integrations.uber.storeId': { $gt: '' },
+      },
+      { pageSize: 200, maxDocs: 5_000 },
+    );
+    for (const doc of docs || []) {
+      const bid = String(doc.business_id || doc.businessId || '').trim();
+      if (!bid || bid === excludeBusinessId) continue;
+      const sid = String(doc.integrations?.uber?.storeId || '').trim();
+      if (!sid) continue;
+      claimed.set(sid, {
+        businessId: bid,
+        storeName: String(doc.integrations?.uber?.storeName || ''),
+      });
+    }
+  } catch (err) {
+    logger.warn({ err: errorMsg(err) }, 'No se pudieron listar tiendas Uber ya reclamadas');
+  }
+  return claimed;
+}
+
+/** Nombres de otros negocios Vertial (para no mostrar sus tiendas Uber en cuentas nuevas). */
+async function getOtherBusinessNameNeedles(req, excludeBusinessId) {
+  const needles = [];
+  try {
+    await ensureDatabase(req, BUSINESSES_DB);
+    const docs = await findDocuments(
+      req,
+      BUSINESSES_DB,
+      { type: 'business' },
+      { pageSize: 200, maxDocs: 5_000 },
+    );
+    for (const doc of docs || []) {
+      const bid = String(doc.id || doc._id || '').replace(/^business:/, '').trim();
+      if (!bid || bid === excludeBusinessId) continue;
+      const name = String(doc.name || doc.businessName || doc.tradeName || '').trim().toLowerCase();
+      if (name.length >= 4) needles.push(name);
+    }
+  } catch (err) {
+    logger.warn({ err: errorMsg(err) }, 'No se pudieron listar nombres de negocio para filtro Uber');
+  }
+  return needles;
+}
+
+function storeMatchesForeignBusiness(store, needles) {
+  const label = String(store?.name || store?.title || store?.storeName || '').trim().toLowerCase();
+  if (!label || !needles?.length) return false;
+  // Solo si el nombre de la tienda Uber contiene el nombre de otro negocio Vertial.
+  return needles.some((n) => label.includes(n));
+}
+
+function filterStoresOwnedByThisVertialBusiness(stores, claimed, foreignNameNeedles) {
+  const list = Array.isArray(stores) ? stores : [];
+  return list.filter((s) => {
+    const id = String(s?.id || s?.store_id || s?.storeId || '').trim();
+    if (id && claimed?.has(id)) return false;
+    if (storeMatchesForeignBusiness(s, foreignNameNeedles)) return false;
+    return true;
+  });
+}
+
 export async function getUberEatsOAuthConfig(req, res) {
   try {
     if (!requireUberOperator(req, res)) return;
@@ -119,6 +228,13 @@ export async function startUberEatsOAuth(req, res) {
         ok: false,
         error: 'Uber Eats no configurado en el servidor (UBER_EATS_CLIENT_ID / SECRET).',
       });
+    }
+
+    // Antes de Conectar: Vertial borra cualquier OAuth viejo de ESTA empresa.
+    const { current } = await loadUberIntegration(req, businessId);
+    if (current?.integrations?.uber?.oauth || current?.integrations?.uber?.accessToken) {
+      await wipeUberIntegration(req, businessId, current);
+      logger.info({ businessId }, 'Uber OAuth limpiado al iniciar Conectar');
     }
 
     const userId = authUserId(req);
@@ -183,8 +299,19 @@ export async function completeUberEatsOAuth(req, res) {
       logger.warn({ err: errorMsg(err), businessId }, 'Uber OAuth OK pero list stores falló');
     }
 
+    const claimed = await getUberStoreIdsClaimedByOtherBusinesses(req, businessId);
+    const foreignNames = await getOtherBusinessNameNeedles(req, businessId);
+    const availableStores = filterStoresOwnedByThisVertialBusiness(stores, claimed, foreignNames);
+    const hiddenClaimed = Math.max(0, (stores?.length || 0) - availableStores.length);
+
     logger.info(
-      { businessId, scope: tokens.scope, stores: stores.length, env: getUberEatsPublicConfig().env },
+      {
+        businessId,
+        scope: tokens.scope,
+        stores: availableStores.length,
+        hiddenClaimed,
+        env: getUberEatsPublicConfig().env,
+      },
       'Uber Eats OAuth conectado',
     );
 
@@ -194,7 +321,8 @@ export async function completeUberEatsOAuth(req, res) {
       connected: true,
       expiresAt: tokens.expiresAt || '',
       scope: tokens.scope || '',
-      stores,
+      stores: availableStores,
+      hiddenClaimedStores: hiddenClaimed,
     });
   } catch (error) {
     logger.error({ error: errorMsg(error) }, 'Uber Eats OAuth callback failed');
@@ -216,12 +344,16 @@ export async function listUberStoresForBusiness(req, res) {
     }
 
     const stores = await listUberEatsStores(token);
+    const claimed = await getUberStoreIdsClaimedByOtherBusinesses(req, businessId);
+    const foreignNames = await getOtherBusinessNameNeedles(req, businessId);
+    const availableStores = filterStoresOwnedByThisVertialBusiness(stores, claimed, foreignNames);
     return res.json({
       ok: true,
-      stores,
+      stores: availableStores,
       selectedStoreId: String(uber.storeId || ''),
       selectedStoreName: String(uber.storeName || ''),
       provisionedAt: String(uber.provisionedAt || ''),
+      hiddenClaimedStores: Math.max(0, (stores?.length || 0) - availableStores.length),
     });
   } catch (error) {
     return res.status(500).json({ ok: false, error: errorMsg(error) });
@@ -235,26 +367,58 @@ export async function selectUberStoreForBusiness(req, res) {
     const storeId = String(req.body?.storeId || '').trim();
     const storeName = String(req.body?.storeName || '').trim();
     if (!businessId) return badRequest(res, 'Falta businessId');
-    if (!storeId) return badRequest(res, 'Falta storeId');
+    if (!storeId) {
+      return badRequest(res, 'Falta el Store ID de Uber. Cópialo del panel Uber (tienda TEST).');
+    }
     if (!(await requireUberBusinessAccess(req, res, businessId))) return;
 
     const { current, uber } = await loadUberIntegration(req, businessId);
     const token = String(uber.accessToken || '').trim();
     if (!token) {
-      return res.status(400).json({ ok: false, error: 'Conecta Uber OAuth antes de vincular la tienda' });
+      return res.status(400).json({
+        ok: false,
+        error: 'Primero conecta Uber (paso 1). Luego pega el Store ID o elige una tienda.',
+      });
     }
 
-    await provisionUberEatsStore({
-      userAccessToken: token,
-      storeId,
-      partnerStoreId: businessId,
-      businessId,
-    });
+    const claimed = await getUberStoreIdsClaimedByOtherBusinesses(req, businessId);
+    if (claimed.has(storeId)) {
+      const other = claimed.get(storeId);
+      return res.status(409).json({
+        ok: false,
+        error: `Esa tienda Uber ya está vinculada a otro negocio Vertial${other?.storeName ? ` (${other.storeName})` : ''}.`,
+      });
+    }
+    const foreignNames = await getOtherBusinessNameNeedles(req, businessId);
+    if (storeMatchesForeignBusiness({ name: storeName || storeId }, foreignNames)) {
+      return res.status(409).json({
+        ok: false,
+        error: 'Esa tienda Uber pertenece a otro negocio Vertial. No se puede vincular aquí.',
+      });
+    }
+
+    try {
+      await provisionUberEatsStore({
+        userAccessToken: token,
+        storeId,
+        partnerStoreId: businessId,
+        businessId,
+      });
+    } catch (provErr) {
+      const msg = errorMsg(provErr);
+      logger.warn({ businessId, storeId, msg }, 'Uber provision store failed');
+      return res.status(400).json({
+        ok: false,
+        error: msg.includes('404') || /not found/i.test(msg)
+          ? 'Store ID no encontrado en Uber. Revisa que sea de la cuenta TEST correcta.'
+          : `No se pudo vincular la tienda: ${msg}`,
+      });
+    }
 
     const integrations = await saveUberPatch(req, businessId, current, {
       enabled: true,
       storeId,
-      storeName: storeName || uber.storeName || '',
+      storeName: storeName || uber.storeName || storeId,
       provisionedAt: new Date().toISOString(),
       oauth: true,
     });
@@ -265,7 +429,7 @@ export async function selectUberStoreForBusiness(req, res) {
       ok: true,
       integrations,
       storeId,
-      storeName: storeName || '',
+      storeName: storeName || storeId,
       provisioned: true,
     });
   } catch (error) {
@@ -437,36 +601,7 @@ export async function disconnectUberEatsForBusiness(req, res) {
     if (!(await requireUberBusinessAccess(req, res, businessId))) return;
 
     const { current } = await loadUberIntegration(req, businessId);
-    const db = getWebDbName();
-    await ensureDatabase(req, db);
-    const prevIntegrations = current?.integrations || {};
-    // Sustituir el bloque uber entero (no merge) para que no queden accessToken viejos.
-    const nextIntegrations = {
-      ...prevIntegrations,
-      uber: {
-        enabled: false,
-        token: '',
-        oauth: false,
-        accessToken: '',
-        refreshToken: '',
-        tokenType: '',
-        scope: '',
-        expiresAt: '',
-        connectedAt: '',
-        storeId: '',
-        storeName: '',
-        provisionedAt: '',
-        menuPushedAt: '',
-        menuItemCount: 0,
-        lastStoreStatus: '',
-        lastStoreStatusAt: '',
-        env: String(prevIntegrations.uber?.env || getUberEatsPublicConfig().env || 'sandbox'),
-        disconnectedAt: new Date().toISOString(),
-      },
-    };
-    const doc = buildWebConfigDocument(businessId, { integrations: nextIntegrations }, current);
-    const saved = await putDocument(req, db, doc._id, doc);
-    const integrations = sanitizeDeliveryIntegrations({ ...doc, _rev: saved.rev });
+    const integrations = await wipeUberIntegration(req, businessId, current);
     logger.info({ businessId }, 'Uber Eats desconectado de la empresa');
     return res.json({ ok: true, integrations, disconnected: true });
   } catch (error) {
