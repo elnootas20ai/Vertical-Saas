@@ -393,7 +393,7 @@ export function DeliveryIntegrations() {
                             </p>
                           )}
 
-                          {uberStoreLinked && canSeeTechSetup && (
+                          {uberStoreLinked && (
                             <div className="flex flex-wrap gap-2">
                               <button
                                 type="button"
