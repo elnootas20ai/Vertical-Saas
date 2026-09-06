@@ -349,6 +349,14 @@ export function DeliveryIntegrations() {
               </span>
             )}
           </p>
+          {businessId && currentBusiness?.name && (
+            <p className="mt-1 text-[11px] text-stone-600 dark:text-stone-400">
+              Empresa Vertial: <strong>{currentBusiness.name}</strong>
+              {integrations.uber?.oauth
+                ? ' · Uber OAuth: conectado (lista de tiendas = cuenta Uber, no Vertial)'
+                : ' · Uber OAuth: sin conectar'}
+            </p>
+          )}
           {!businessId && !loading && (
             <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-400">
               Selecciona un negocio activo para conectar.

@@ -56,6 +56,19 @@ registerRoute(
   new NetworkOnly(),
 );
 
+// Integraciones Uber/delivery: nunca cachear (si no, Desconectar parece no funcionar).
+registerRoute(
+  ({ url }) => {
+    if (!url.pathname.startsWith('/api/')) return false;
+    return (
+      url.pathname.startsWith('/api/uber-eats')
+      || url.pathname.startsWith('/api/web/integrations')
+      || url.pathname.startsWith('/api/delivery-webhooks')
+    );
+  },
+  new NetworkOnly(),
+);
+
 // Verticales CRUD (inmobiliaria, etc.): nunca cachear — un 304/vacío rompe el sidebar.
 registerRoute(
   ({ url }) => {
