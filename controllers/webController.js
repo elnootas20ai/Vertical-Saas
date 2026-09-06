@@ -331,10 +331,30 @@ export async function saveDeliveryIntegrations(req, res) {
     const prev = current?.integrations || {};
 
     // Preservar campos OAuth internos al guardar token/enabled desde la UI.
+    // Si el cliente manda oauth:false (p. ej. tras desconectar), NO reinyectar tokens viejos.
     const merged = {};
     for (const key of ['uber', 'globo', 'justead', 'flipdish']) {
       const incoming = integrations[key] && typeof integrations[key] === 'object' ? integrations[key] : {};
       const existing = prev[key] && typeof prev[key] === 'object' ? prev[key] : {};
+      const wipeOauth = incoming.oauth === false || incoming.disconnected === true;
+      if (wipeOauth && key === 'uber') {
+        merged[key] = {
+          enabled: Boolean(incoming.enabled),
+          token: String(incoming.token ?? ''),
+          oauth: false,
+          accessToken: '',
+          refreshToken: '',
+          tokenType: '',
+          scope: '',
+          expiresAt: '',
+          connectedAt: '',
+          storeId: '',
+          storeName: '',
+          provisionedAt: '',
+          disconnectedAt: new Date().toISOString(),
+        };
+        continue;
+      }
       merged[key] = {
         ...existing,
         enabled: Boolean(incoming.enabled),

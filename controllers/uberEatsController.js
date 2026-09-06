@@ -437,24 +437,36 @@ export async function disconnectUberEatsForBusiness(req, res) {
     if (!(await requireUberBusinessAccess(req, res, businessId))) return;
 
     const { current } = await loadUberIntegration(req, businessId);
-    const integrations = await saveUberPatch(req, businessId, current, {
-      enabled: false,
-      oauth: false,
-      accessToken: '',
-      refreshToken: '',
-      tokenType: '',
-      scope: '',
-      expiresAt: '',
-      connectedAt: '',
-      storeId: '',
-      storeName: '',
-      provisionedAt: '',
-      menuPushedAt: '',
-      menuItemCount: 0,
-      lastStoreStatus: '',
-      lastStoreStatusAt: '',
-      disconnectedAt: new Date().toISOString(),
-    });
+    const db = getWebDbName();
+    await ensureDatabase(req, db);
+    const prevIntegrations = current?.integrations || {};
+    // Sustituir el bloque uber entero (no merge) para que no queden accessToken viejos.
+    const nextIntegrations = {
+      ...prevIntegrations,
+      uber: {
+        enabled: false,
+        token: '',
+        oauth: false,
+        accessToken: '',
+        refreshToken: '',
+        tokenType: '',
+        scope: '',
+        expiresAt: '',
+        connectedAt: '',
+        storeId: '',
+        storeName: '',
+        provisionedAt: '',
+        menuPushedAt: '',
+        menuItemCount: 0,
+        lastStoreStatus: '',
+        lastStoreStatusAt: '',
+        env: String(prevIntegrations.uber?.env || getUberEatsPublicConfig().env || 'sandbox'),
+        disconnectedAt: new Date().toISOString(),
+      },
+    };
+    const doc = buildWebConfigDocument(businessId, { integrations: nextIntegrations }, current);
+    const saved = await putDocument(req, db, doc._id, doc);
+    const integrations = sanitizeDeliveryIntegrations({ ...doc, _rev: saved.rev });
     logger.info({ businessId }, 'Uber Eats desconectado de la empresa');
     return res.json({ ok: true, integrations, disconnected: true });
   } catch (error) {

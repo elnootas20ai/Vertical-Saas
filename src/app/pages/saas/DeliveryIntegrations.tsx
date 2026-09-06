@@ -161,9 +161,24 @@ export function DeliveryIntegrations() {
       return;
     }
     if (!code || !state) return;
+
+    // Si el usuario acaba de desconectar, no rearmar OAuth con ?code= viejo en la URL.
+    try {
+      if (sessionStorage.getItem('vertial_uber_oauth_block') === '1') {
+        sessionStorage.removeItem('vertial_uber_oauth_block');
+        setSearchParams({}, { replace: true });
+        return;
+      }
+    } catch { /* ignore */ }
+
     const key = `${code}:${state}`;
-    if (oauthHandledRef.current === key) return;
+    if (oauthHandledRef.current === key) {
+      setSearchParams({}, { replace: true });
+      return;
+    }
     oauthHandledRef.current = key;
+    // Limpiar URL YA para que un F5 / atrás no vuelva a conectar solo.
+    setSearchParams({}, { replace: true });
 
     void (async () => {
       setConnectingUber(true);
@@ -173,14 +188,13 @@ export function DeliveryIntegrations() {
         if (Array.isArray(res.stores)) setUberStores(res.stores);
         toast.success(
           res.stores?.length
-            ? 'Uber conectado. Elige tu tienda abajo.'
+            ? 'Uber conectado. Elige tu tienda de TEST abajo (no el local en vivo).'
             : 'Uber conectado. Si no ves tiendas, revisa la cuenta del restaurante.',
         );
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'No se pudo completar la conexión con Uber');
       } finally {
         setConnectingUber(false);
-        setSearchParams({}, { replace: true });
       }
     })();
   }, [businessId, searchParams, setSearchParams, applyIntegrations]);
@@ -203,6 +217,7 @@ export function DeliveryIntegrations() {
     if (!businessId) return;
     setConnectingUber(true);
     try {
+      try { sessionStorage.removeItem('vertial_uber_oauth_block'); } catch { /* ignore */ }
       const res = await startUberEatsOAuthRequest(businessId);
       if (!res.authorizeUrl) throw new Error('Sin URL de autorización');
       window.location.href = res.authorizeUrl;
@@ -257,15 +272,38 @@ export function DeliveryIntegrations() {
   };
 
   const disconnectUber = async () => {
-    if (!businessId) return;
+    if (!businessId) {
+      toast.error('No hay empresa activa');
+      return;
+    }
     setDisconnectingUber(true);
+    // UI primero: quitar Modomio de pantalla aunque el servidor tarde.
+    setUberStores([]);
+    applyIntegrations({
+      ...integrations,
+      uber: {
+        ...integrations.uber,
+        enabled: false,
+        oauth: false,
+        connectedAt: '',
+        expiresAt: '',
+        storeId: '',
+        storeName: '',
+        provisionedAt: '',
+      },
+    });
     try {
+      try { sessionStorage.setItem('vertial_uber_oauth_block', '1'); } catch { /* ignore */ }
+      setSearchParams({}, { replace: true });
+      oauthHandledRef.current = null;
       const res = await disconnectUberEatsRequest(businessId);
       if (res.integrations) applyIntegrations(res.integrations);
       setUberStores([]);
-      toast.success('Uber desconectado de esta empresa Vertial');
+      toast.success('Uber desconectado');
+      await loadIntegrations();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'No se pudo desconectar Uber');
+      await loadIntegrations();
     } finally {
       setDisconnectingUber(false);
     }
