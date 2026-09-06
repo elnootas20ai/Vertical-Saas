@@ -29,6 +29,7 @@ import {
   type UberCertStatus,
 } from '../../lib/webApi';
 import { Layout } from '../../components/saas/Layout';
+import { ConfirmDestroyModal } from '../../components/saas/ConfirmDestroyModal';
 import {
   DEFAULT_DELIVERY_INTEGRATIONS,
   AGGREGATOR_PLATFORMS,
@@ -60,6 +61,7 @@ export function DeliveryIntegrations() {
   const [pushingMenu, setPushingMenu] = useState(false);
   const [settingUberStatus, setSettingUberStatus] = useState(false);
   const [disconnectingUber, setDisconnectingUber] = useState(false);
+  const [showDisconnectUberConfirm, setShowDisconnectUberConfirm] = useState(false);
   const [showTokens, setShowTokens] = useState<Record<string, boolean>>({});
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [uberCfg, setUberCfg] = useState<UberEatsOAuthConfig | null>(null);
@@ -419,6 +421,7 @@ export function DeliveryIntegrations() {
       setUberStores([]);
       setManualStoreId('');
       setManualStoreName('');
+      setShowDisconnectUberConfirm(false);
       toast.success('Uber apagado / desconectado');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'No se pudo desconectar en el servidor (ya está limpio en pantalla)');
@@ -516,6 +519,7 @@ export function DeliveryIntegrations() {
   );
   const uberMenuPushed = Boolean(integrations.uber?.menuPushedAt);
   const uberOnline = String(integrations.uber?.lastStoreStatus || '').toUpperCase() === 'ONLINE';
+  const uberReceivingOrders = uberOnline && uberPosReady;
   const businessPdvs = (activeStoreScope?.pointsOfSale || []).filter((pdv) => pdv.active !== false);
   const soleBusinessPdv = businessPdvs.length === 1 ? businessPdvs[0] : null;
   const linkedPdvName = businessPdvs.find((pdv) => pdv._id === integrations.uber?.salesPointId)?.name
@@ -582,13 +586,19 @@ export function DeliveryIntegrations() {
                             </span>
                           )}
                           <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
-                            uberOnline
+                            uberReceivingOrders
                               ? 'text-emerald-700 bg-emerald-50 dark:bg-emerald-900/30'
+                              : uberOnline && !uberPosReady
+                                ? 'text-amber-700 bg-amber-50 dark:bg-amber-900/30'
                               : uberOauth
                                 ? 'text-amber-700 bg-amber-50 dark:bg-amber-900/30'
                                 : 'text-stone-500 bg-stone-100 dark:bg-stone-800'
                           }`}>
-                            {uberOnline ? 'ONLINE' : uberOauth ? 'Conectada · pausa' : 'Apagada'}
+                            {uberReceivingOrders
+                              ? 'ONLINE'
+                              : uberOnline && !uberPosReady
+                                ? 'POS pendiente'
+                                : uberOauth ? 'Conectada · pausa' : 'Apagada'}
                           </span>
                         </>
                       ) : (
@@ -602,7 +612,7 @@ export function DeliveryIntegrations() {
                     {key === 'uber' ? (
                       <button
                         type="button"
-                        onClick={() => void (uberOnline ? turnUberOff() : turnUberOn())}
+                        onClick={() => void (uberReceivingOrders ? turnUberOff() : turnUberOn())}
                         disabled={
                           disconnectingUber
                           || settingUberStatus
@@ -612,11 +622,11 @@ export function DeliveryIntegrations() {
                           || (!uberOauth && uberCfg?.configured === false)
                         }
                         className="text-stone-500 hover:text-stone-700 dark:hover:text-stone-300 transition-colors shrink-0 disabled:opacity-40"
-                        title={uberOnline ? 'Apagar (pausar)' : 'Encender Uber'}
+                        title={uberReceivingOrders ? 'Pausar pedidos Uber' : 'Activar pedidos Uber'}
                       >
                         {settingUberStatus || activatingUberPos || pushingMenu || connectingUber
                           ? <Loader2 className="w-7 h-7 animate-spin text-[var(--v-blue,#2563eb)]" />
-                          : uberOnline
+                          : uberReceivingOrders
                             ? <ToggleRight className="w-7 h-7 text-emerald-500" />
                             : <ToggleLeft className="w-7 h-7" />}
                       </button>
@@ -642,8 +652,9 @@ export function DeliveryIntegrations() {
                         {uberOauth && !uberStoreLinked && businessPdvs.length > 1 && 'Hay varios PDV: elige cuál recibe los pedidos Uber.'}
                         {uberOauth && !uberStoreLinked && soleBusinessPdv && uberStores.length > 1 && 'Hay varias tiendas Uber: elige la de esta cuenta.'}
                         {uberOauth && !uberStoreLinked && soleBusinessPdv && uberStores.length <= 1 && (loadingStores ? 'Enlazando el PDV de esta cuenta…' : 'Enlazando automáticamente…')}
-                        {uberOauth && uberStoreLinked && !uberOnline && 'Listo. Pulsa el interruptor para poner ONLINE.'}
-                        {uberOnline && 'Recibiendo pedidos. Apaga con el interruptor cuando quieras.'}
+                        {uberOauth && uberStoreLinked && !uberPosReady && 'Cuenta conectada. Pulsa el interruptor para activar el POS y recibir pedidos.'}
+                        {uberOauth && uberStoreLinked && uberPosReady && !uberOnline && 'Todo conectado. Pulsa el interruptor para recibir pedidos.'}
+                        {uberReceivingOrders && 'Recibiendo pedidos. Pausa con el interruptor cuando quieras.'}
                       </p>
 
                       {uberCfg?.configured === false && (
@@ -752,11 +763,11 @@ export function DeliveryIntegrations() {
                           )}
                           <button
                             type="button"
-                            onClick={() => void disconnectUber()}
+                            onClick={() => setShowDisconnectUberConfirm(true)}
                             disabled={disconnectingUber}
                             className="text-xs font-semibold text-stone-500 hover:underline disabled:opacity-50"
                           >
-                            {disconnectingUber ? 'Desconectando…' : 'Desconectar'}
+                            Desvincular esta cuenta
                           </button>
                         </div>
                       )}
@@ -814,14 +825,6 @@ export function DeliveryIntegrations() {
                               className={VERTIAL_BTN_SECONDARY}
                             >
                               Reconectar Uber
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void disconnectUber()}
-                              disabled={disconnectingUber}
-                              className={`${VERTIAL_BTN_DANGER} text-xs`}
-                            >
-                              {disconnectingUber ? 'Desconectando…' : 'Desconectar'}
                             </button>
                           </div>
                         </div>
@@ -1019,6 +1022,22 @@ export function DeliveryIntegrations() {
                             </div>
                           )}
 
+                          {key === 'uber' && uberOauth && (
+                            <div className="border-t border-stone-200 dark:border-stone-700 pt-3">
+                              <button
+                                type="button"
+                                onClick={() => setShowDisconnectUberConfirm(true)}
+                                disabled={disconnectingUber}
+                                className={`${VERTIAL_BTN_DANGER} text-xs`}
+                              >
+                                {disconnectingUber ? 'Desvinculando…' : 'Desvincular cuenta Uber'}
+                              </button>
+                              <p className="mt-1.5 text-[10px] text-stone-500">
+                                Solo para cambiar de comercio. El interruptor superior pausa los pedidos sin borrar la conexión.
+                              </p>
+                            </div>
+                          )}
+
                           <div>
                             <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-400 mb-1">
                               Token secreto
@@ -1078,6 +1097,20 @@ export function DeliveryIntegrations() {
           </button>
         </div>
       </div>
+      <ConfirmDestroyModal
+        isOpen={showDisconnectUberConfirm}
+        onClose={() => {
+          if (!disconnectingUber) setShowDisconnectUberConfirm(false);
+        }}
+        onConfirm={disconnectUber}
+        title="Desvincular cuenta Uber"
+        description="Esto elimina la conexión OAuth, la tienda y el PDV asociados. Para dejar de recibir pedidos usa el interruptor, no desvincules la cuenta."
+        itemName="DESCONECTAR"
+        confirmLabel="Escribe DESCONECTAR para confirmar"
+        destructiveLabel="Desvincular Uber"
+        isDeleting={disconnectingUber}
+        caseInsensitive
+      />
     </Layout>
   );
 }
