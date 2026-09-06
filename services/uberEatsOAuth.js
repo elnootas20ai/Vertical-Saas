@@ -111,9 +111,6 @@ export function buildUberAuthorizeUrl(state) {
     response_type: 'code',
     scope: getUberEatsScopes(),
     state: String(state || ''),
-    // Vertial manda: cada Conectar exige login Uber fresco (no reutilizar sesión de otro merchant).
-    prompt: 'login',
-    max_age: '0',
   });
   return `${getUberEatsAuthorizeBase()}?${params.toString()}`;
 }

@@ -58,8 +58,6 @@ describe('uberEatsOAuth', () => {
     expect(url).toContain('client_id=test-client-id');
     expect(url).toContain('eats.pos_provisioning');
     expect(url).toContain(encodeURIComponent(state));
-    expect(url).toContain('prompt=login');
-    expect(url).toContain('max_age=0');
   });
 
   it('roundtrips oauth state', () => {

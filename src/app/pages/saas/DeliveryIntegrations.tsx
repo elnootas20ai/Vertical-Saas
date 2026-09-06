@@ -467,7 +467,7 @@ export function DeliveryIntegrations() {
                       {uberStep === 0 && (
                         <div className="space-y-2">
                           <p className="text-xs text-stone-600 dark:text-stone-400">
-                            Al conectar, Vertial abre el login de Uber para esta empresa. No se arrastran tiendas de otros clientes.
+                            Conecta Uber con la cuenta del restaurante. Luego eliges la tienda.
                           </p>
                           <button
                             type="button"
@@ -485,7 +485,7 @@ export function DeliveryIntegrations() {
                       {uberStep === 1 && (
                         <div className="space-y-2.5">
                           <p className="text-xs text-stone-600 dark:text-stone-400">
-                            Solo aparecen tiendas disponibles para este negocio Vertial.
+                            Elige la tienda que te lista Uber para esta conexión.
                           </p>
 
                           {loadingStores ? (

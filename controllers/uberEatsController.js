@@ -154,13 +154,6 @@ export async function startUberEatsOAuth(req, res) {
       });
     }
 
-    // Antes de Conectar: Vertial borra cualquier OAuth viejo de ESTA empresa.
-    const { current } = await loadUberIntegration(req, businessId);
-    if (current?.integrations?.uber?.oauth || current?.integrations?.uber?.accessToken) {
-      await wipeUberIntegration(req, businessId, current);
-      logger.info({ businessId }, 'Uber OAuth limpiado al iniciar Conectar');
-    }
-
     const userId = authUserId(req);
     const state = createUberOAuthState({ businessId, userId });
     const authorizeUrl = buildUberAuthorizeUrl(state);
