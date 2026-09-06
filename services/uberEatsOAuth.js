@@ -37,14 +37,23 @@ export function getUberEatsClientSecret() {
   return env('UBER_EATS_CLIENT_SECRET');
 }
 
+/** Scopes solo válidos en authorization_code (login del restaurante). */
+const UBER_USER_OAUTH_SCOPES = new Set(['eats.pos_provisioning', 'offline_access']);
+
+/**
+ * Scopes del OAuth de usuario (authorization_code).
+ * Uber rechaza invalid_scope si mezclas grant types: eats.store / eats.order
+ * van solo en client_credentials (ver getUberEatsAppAccessToken).
+ */
 export function getUberEatsScopes() {
-  // Usuario (authorization_code): provisioning + store (GET/POST pos_data exige eats.store).
-  // Pedidos usan client_credentials (eats.order) aparte — ver uberEatsApi.js.
-  // Nota: eats.pos_provisioning NO es válido en client_credentials (solo user OAuth).
-  const raw = env('UBER_EATS_SCOPES', 'eats.pos_provisioning eats.store');
-  const parts = raw.split(/\s+/).map((s) => s.trim()).filter(Boolean);
-  for (const required of ['eats.pos_provisioning', 'eats.store']) {
-    if (!parts.includes(required)) parts.push(required);
+  const raw = env('UBER_EATS_SCOPES', 'eats.pos_provisioning');
+  const parts = raw
+    .split(/\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .filter((s) => UBER_USER_OAUTH_SCOPES.has(s));
+  if (!parts.includes('eats.pos_provisioning')) {
+    parts.unshift('eats.pos_provisioning');
   }
   return parts.join(' ');
 }

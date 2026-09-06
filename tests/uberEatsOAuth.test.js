@@ -61,20 +61,23 @@ describe('uberEatsOAuth', () => {
     expect(url).toContain(encodeURIComponent(state));
   });
 
-  it('requests provisioning and store scopes by default', () => {
+  it('requests only eats.pos_provisioning by default (user OAuth)', () => {
     delete process.env.UBER_EATS_SCOPES;
     const state = createUberOAuthState({ businessId: 'biz-1', userId: 'u-1' });
     const url = buildUberAuthorizeUrl(state);
     expect(url).toContain('eats.pos_provisioning');
-    expect(url).toContain('eats.store');
+    expect(url).not.toContain('eats.store');
+    expect(url).not.toContain('eats.order');
   });
 
-  it('always adds eats.store even if env only has provisioning', () => {
-    process.env.UBER_EATS_SCOPES = 'eats.pos_provisioning';
+  it('strips client_credentials scopes from user OAuth (avoid invalid_scope)', () => {
+    process.env.UBER_EATS_SCOPES = 'eats.pos_provisioning eats.store eats.order offline_access';
     const state = createUberOAuthState({ businessId: 'biz-1', userId: 'u-1' });
     const url = buildUberAuthorizeUrl(state);
     expect(url).toContain('eats.pos_provisioning');
-    expect(url).toContain('eats.store');
+    expect(url).toContain('offline_access');
+    expect(url).not.toContain('eats.store');
+    expect(url).not.toContain('eats.order');
   });
 
   it('blocks certification helpers outside sandbox', () => {

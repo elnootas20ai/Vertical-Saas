@@ -353,6 +353,8 @@ export async function selectUberStoreForBusiness(req, res) {
       });
     }
 
+    let provisionError = '';
+    let posIntegrationEnabled = false;
     try {
       await provisionUberEatsStore({
         userAccessToken: token,
@@ -361,25 +363,22 @@ export async function selectUberStoreForBusiness(req, res) {
         businessId,
       });
     } catch (provErr) {
-      const msg = errorMsg(provErr);
-      logger.warn({ businessId, storeId, msg }, 'Uber provision store failed');
-      return res.status(400).json({
-        ok: false,
-        error: msg.includes('404') || /not found/i.test(msg)
-          ? 'Store ID no encontrado en Uber. Revisa que sea de la cuenta TEST correcta.'
-          : `No se pudo vincular la tienda: ${msg}`,
-      });
+      provisionError = errorMsg(provErr);
+      logger.warn({ businessId, storeId, msg: provisionError }, 'Uber provision store failed');
+      if (provisionError.includes('404') || /not found/i.test(provisionError)) {
+        return res.status(400).json({
+          ok: false,
+          error: 'Store ID no encontrado en Uber. Revisa que sea de la cuenta TEST correcta.',
+        });
+      }
     }
 
-    const posData = await getUberEatsPosData(token, storeId);
-    const posIntegrationEnabled = integrationEnabledFromPosData(posData);
-    if (!posIntegrationEnabled) {
-      return res.status(409).json({
-        ok: false,
-        error: 'Uber respondió al alta, pero pos_data sigue con integration_enabled=false.',
-        storeId,
-        posData,
-      });
+    try {
+      const posData = await getUberEatsPosData(token, storeId);
+      posIntegrationEnabled = integrationEnabledFromPosData(posData);
+    } catch (posErr) {
+      if (!provisionError) provisionError = errorMsg(posErr);
+      logger.warn({ businessId, storeId, msg: errorMsg(posErr) }, 'Uber get pos_data after select failed');
     }
 
     const business = await findBusinessById(req, businessId).catch(() => null);
@@ -395,25 +394,36 @@ export async function selectUberStoreForBusiness(req, res) {
       uber.salesPointId
       || (activePdvs.length === 1 ? activePdvs[0]._id : ''),
     ).trim();
+    const now = new Date().toISOString();
     const integrations = await saveUberPatch(req, businessId, current, {
       enabled: true,
       storeId,
       storeName: storeName || uber.storeName || storeId,
-      provisionedAt: new Date().toISOString(),
+      provisionedAt: posIntegrationEnabled ? now : String(uber.provisionedAt || ''),
       posIntegrationEnabled,
-      posDataCheckedAt: new Date().toISOString(),
+      posDataCheckedAt: now,
       salesPointId,
       oauth: true,
+      lastProvisionError: provisionError || '',
     });
 
-    logger.info({ businessId, storeId }, 'Uber tienda provisionada como order manager');
+    logger.info(
+      { businessId, storeId, posIntegrationEnabled, provisionError: provisionError || null },
+      'Uber tienda seleccionada',
+    );
 
     return res.json({
       ok: true,
       integrations,
       storeId,
       storeName: storeName || storeId,
-      provisioned: true,
+      provisioned: posIntegrationEnabled,
+      needsReconnect: Boolean(provisionError && /scope|not allowed|user_not_allowed/i.test(provisionError)),
+      warning: provisionError
+        ? ( /scope|not allowed|user_not_allowed/i.test(provisionError)
+          ? 'Tienda guardada. Activa POS con Encender (provisioning). Si falla, reconecta Uber.'
+          : `Tienda guardada, pero Uber respondió: ${provisionError}`)
+        : undefined,
     });
   } catch (error) {
     logger.error({ error: errorMsg(error) }, 'Uber select store failed');
@@ -851,7 +861,8 @@ export async function disconnectUberEatsForBusiness(req, res) {
   try {
     const businessId = String(req.body?.businessId || '').trim();
     if (!businessId) return badRequest(res, 'Falta businessId');
-    if (!(await requireUberBusinessManager(req, res, businessId))) return;
+    // Dueño o gestor; si falla el rol, al menos el dueño de la sesión con acceso al negocio puede cortar la integración.
+    if (!(await requireUberBusinessAccess(req, res, businessId))) return;
 
     const { current } = await loadUberIntegration(req, businessId);
     const integrations = await wipeUberIntegration(req, businessId, current);

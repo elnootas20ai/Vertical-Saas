@@ -36,7 +36,7 @@ import {
 } from '../../lib/deliveryIntegrationsUi';
 import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import { isVertialSuperAdminEmail } from '../../lib/superAdmin';
-import { VERTIAL_BTN_PRIMARY, VERTIAL_SURFACE } from '../../lib/vertialUiTokens';
+import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY, VERTIAL_BTN_DANGER, VERTIAL_SURFACE } from '../../lib/vertialUiTokens';
 
 const UBER_PRIMARY_WEBHOOK = 'https://vertialapp.com/api/delivery-webhooks/ubereats';
 
@@ -397,19 +397,15 @@ export function DeliveryIntegrations() {
       return;
     }
     setDisconnectingUber(true);
-    // UI primero: quitar Modomio de pantalla aunque el servidor tarde.
     setUberStores([]);
+    setUberCert(null);
     applyIntegrations({
       ...integrations,
       uber: {
-        ...integrations.uber,
+        ...DEFAULT_DELIVERY_INTEGRATIONS.uber,
         enabled: false,
         oauth: false,
-        connectedAt: '',
-        expiresAt: '',
-        storeId: '',
-        storeName: '',
-        provisionedAt: '',
+        env: integrations.uber?.env || uberCfg?.env || 'sandbox',
       },
     });
     try {
@@ -421,17 +417,83 @@ export function DeliveryIntegrations() {
       setUberStores([]);
       setManualStoreId('');
       setManualStoreName('');
-      toast.success('Uber desconectado');
-      await loadIntegrations();
+      toast.success('Uber apagado / desconectado');
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'No se pudo desconectar Uber');
-      await loadIntegrations();
+      toast.error(e instanceof Error ? e.message : 'No se pudo desconectar en el servidor (ya está limpio en pantalla)');
     } finally {
       setDisconnectingUber(false);
     }
   };
 
+  const reconnectUber = async () => {
+    await disconnectUber();
+    await connectUberOAuth();
+  };
+
+  const turnUberOn = async () => {
+    if (!businessId) return;
+    const uber = integrations.uber;
+    if (!uber?.oauth) {
+      await connectUberOAuth();
+      return;
+    }
+    if (!uber.storeId) {
+      toast.error('Elige primero la tienda Uber');
+      return;
+    }
+    if (!uber.salesPointId) {
+      toast.error('Elige el PDV que recibirá los pedidos');
+      return;
+    }
+    setSettingUberStatus(true);
+    try {
+      const posOk = Boolean(uberCert?.posIntegrationEnabled || uber.posIntegrationEnabled);
+      if (!posOk) {
+        const pos = await activateUberEatsPosRequest(businessId);
+        if (pos.integrations) applyIntegrations(pos.integrations);
+      }
+      if (!uber.menuPushedAt) {
+        const menu = await pushUberEatsMenuRequest(businessId);
+        if (menu.integrations) applyIntegrations(menu.integrations);
+      }
+      const res = await setUberEatsStoreStatusRequest(businessId, 'ONLINE', {
+        reason: 'Opened by Vertial',
+      });
+      if (res.integrations) applyIntegrations(res.integrations);
+      toast.success('Uber ONLINE');
+      await loadUberCert();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'No se pudo encender Uber';
+      toast.error(
+        /scope|not allowed|user_not_allowed|eats\.store/i.test(msg)
+          ? 'Faltan permisos. Pulsa Reconectar Uber y vuelve a intentar.'
+          : msg,
+      );
+      await loadUberCert();
+    } finally {
+      setSettingUberStatus(false);
+    }
+  };
+
+  const turnUberOff = async () => {
+    if (!businessId) return;
+    setSettingUberStatus(true);
+    try {
+      const res = await setUberEatsStoreStatusRequest(businessId, 'PAUSED', {
+        reason: 'Paused by Vertial',
+      });
+      if (res.integrations) applyIntegrations(res.integrations);
+      toast.success('Uber en pausa');
+      await loadUberCert();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo pausar Uber');
+    } finally {
+      setSettingUberStatus(false);
+    }
+  };
+
   const toggleEnabled = (key: keyof DeliveryIntegrations) => {
+    if (key === 'uber') return;
     setIntegrations((prev) => {
       const current = prev[key] ?? DEFAULT_DELIVERY_INTEGRATIONS[key];
       return {
@@ -451,14 +513,6 @@ export function DeliveryIntegrations() {
   );
   const uberMenuPushed = Boolean(integrations.uber?.menuPushedAt);
   const uberOnline = String(integrations.uber?.lastStoreStatus || '').toUpperCase() === 'ONLINE';
-  /** 0 sin conectar · 1 elige tienda · 2 menú/ONLINE · 3 listo */
-  const uberStep = !uberOauth
-    ? 0
-    : !uberStoreLinked
-      ? 1
-      : !uberPdvReady || !uberPosReady || !uberMenuPushed || !uberOnline
-        ? 2
-        : 3;
 
   const platformCards = [
     { key: 'uber' as const, urlSlug: 'ubereats', devUrl: 'https://developer.uber.com/docs/eats' },
@@ -519,23 +573,15 @@ export function DeliveryIntegrations() {
                               SANDBOX
                             </span>
                           )}
-                          {uberStep === 3 ? (
-                            <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 dark:bg-emerald-900/30 px-1.5 py-0.5 rounded-full">
-                              Conectada
-                            </span>
-                          ) : uberStep === 2 ? (
-                            <span className="text-[10px] font-medium text-amber-700 bg-amber-50 dark:bg-amber-900/30 px-1.5 py-0.5 rounded-full">
-                              Paso 3 · Menú
-                            </span>
-                          ) : uberStep === 1 ? (
-                            <span className="text-[10px] font-medium text-amber-700 bg-amber-50 dark:bg-amber-900/30 px-1.5 py-0.5 rounded-full">
-                              Paso 2 · Tienda
-                            </span>
-                          ) : (
-                            <span className="text-[10px] font-medium text-stone-500 bg-stone-100 dark:bg-stone-800 px-1.5 py-0.5 rounded-full">
-                              Paso 1 · Conectar
-                            </span>
-                          )}
+                          <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
+                            uberOnline
+                              ? 'text-emerald-700 bg-emerald-50 dark:bg-emerald-900/30'
+                              : uberOauth
+                                ? 'text-amber-700 bg-amber-50 dark:bg-amber-900/30'
+                                : 'text-stone-500 bg-stone-100 dark:bg-stone-800'
+                          }`}>
+                            {uberOnline ? 'ONLINE' : uberOauth ? 'Conectada · pausa' : 'Apagada'}
+                          </span>
                         </>
                       ) : (
                         entry.enabled && (
@@ -545,25 +591,48 @@ export function DeliveryIntegrations() {
                         )
                       )}
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => toggleEnabled(key)}
-                      className="text-stone-500 hover:text-stone-700 dark:hover:text-stone-300 transition-colors shrink-0"
-                      title={entry.enabled ? 'Desactivar' : 'Activar'}
-                    >
-                      {entry.enabled
-                        ? <ToggleRight className="w-7 h-7 text-emerald-500" />
-                        : <ToggleLeft className="w-7 h-7" />}
-                    </button>
+                    {key === 'uber' ? (
+                      <button
+                        type="button"
+                        onClick={() => void (uberOnline ? turnUberOff() : turnUberOn())}
+                        disabled={
+                          disconnectingUber
+                          || settingUberStatus
+                          || activatingUberPos
+                          || pushingMenu
+                          || connectingUber
+                          || (!uberOauth && uberCfg?.configured === false)
+                        }
+                        className="text-stone-500 hover:text-stone-700 dark:hover:text-stone-300 transition-colors shrink-0 disabled:opacity-40"
+                        title={uberOnline ? 'Apagar (pausar)' : 'Encender Uber'}
+                      >
+                        {settingUberStatus || activatingUberPos || pushingMenu || connectingUber
+                          ? <Loader2 className="w-7 h-7 animate-spin text-[var(--v-blue,#2563eb)]" />
+                          : uberOnline
+                            ? <ToggleRight className="w-7 h-7 text-emerald-500" />
+                            : <ToggleLeft className="w-7 h-7" />}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => toggleEnabled(key)}
+                        className="text-stone-500 hover:text-stone-700 dark:hover:text-stone-300 transition-colors shrink-0"
+                        title={entry.enabled ? 'Desactivar' : 'Activar'}
+                      >
+                        {entry.enabled
+                          ? <ToggleRight className="w-7 h-7 text-emerald-500" />
+                          : <ToggleLeft className="w-7 h-7" />}
+                      </button>
+                    )}
                   </div>
 
                   {key === 'uber' ? (
                     <div className="space-y-3">
                       <p className="text-[11px] text-stone-500">
-                        {uberStep === 0 && 'Paso 1 de 3 · Conecta la cuenta Uber de esta empresa.'}
-                        {uberStep === 1 && 'Paso 2 de 3 · Elige o pega la tienda TEST de este negocio.'}
-                        {uberStep === 2 && 'Paso 3 de 3 · Activa POS, sube el menú y pon la tienda ONLINE.'}
-                        {uberStep === 3 && 'Uber listo: los pedidos llegarán a Vertial.'}
+                        {!uberOauth && 'Conecta Uber. El interruptor de arriba enciende/apaga la tienda.'}
+                        {uberOauth && !uberStoreLinked && 'Elige la tienda TEST. Luego enciende con el interruptor.'}
+                        {uberOauth && uberStoreLinked && !uberOnline && 'Listo para encender: elige PDV y pulsa el interruptor.'}
+                        {uberOnline && 'Recibiendo pedidos sandbox. Apaga con el interruptor cuando quieras.'}
                       </p>
 
                       {uberCfg?.configured === false && (
@@ -572,54 +641,20 @@ export function DeliveryIntegrations() {
                         </p>
                       )}
 
-                      {uberStoreLinked && (activeStoreScope?.pointsOfSale || []).length > 0 && (
-                        <label className="block rounded-xl border border-stone-200 dark:border-stone-700 p-2.5 bg-white dark:bg-stone-950">
-                          <span className="block text-[10px] font-bold uppercase tracking-wide text-stone-500 mb-1">
-                            PDV que recibirá los pedidos Uber
-                          </span>
-                          <select
-                            value={integrations.uber?.salesPointId || ''}
-                            onChange={(event) => void selectUberPdv(event.target.value)}
-                            disabled={selectingUberPdv}
-                            className="w-full px-2.5 py-2 text-xs rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100"
-                          >
-                            <option value="">Selecciona un PDV</option>
-                            {(activeStoreScope?.pointsOfSale || [])
-                              .filter((pdv) => pdv.active !== false)
-                              .map((pdv) => (
-                                <option key={pdv._id} value={pdv._id}>
-                                  {pdv.name}
-                                </option>
-                              ))}
-                          </select>
-                        </label>
+                      {!uberOauth && (
+                        <button
+                          type="button"
+                          onClick={() => void connectUberOAuth()}
+                          disabled={!businessId || connectingUber || uberCfg?.configured === false}
+                          className={VERTIAL_BTN_PRIMARY}
+                        >
+                          {connectingUber ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
+                          Conectar Uber
+                        </button>
                       )}
 
-                      {/* Estado 0: solo Conectar */}
-                      {uberStep === 0 && (
-                        <div className="space-y-2">
-                          <p className="text-xs text-stone-600 dark:text-stone-400">
-                            Conecta Uber con la cuenta del restaurante. Luego eliges la tienda.
-                          </p>
-                          <button
-                            type="button"
-                            onClick={() => void connectUberOAuth()}
-                            disabled={!businessId || connectingUber || uberCfg?.configured === false}
-                            className={VERTIAL_BTN_PRIMARY}
-                          >
-                            {connectingUber ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
-                            Conectar con Uber
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Estado 1: lista o Store ID manual */}
-                      {uberStep === 1 && (
+                      {uberOauth && !uberStoreLinked && (
                         <div className="space-y-2.5">
-                          <p className="text-xs text-stone-600 dark:text-stone-400">
-                            Elige la tienda que te lista Uber para esta conexión.
-                          </p>
-
                           {loadingStores ? (
                             <div className="flex items-center gap-2 text-xs text-stone-500">
                               <Loader2 className="w-3.5 h-3.5 animate-spin" /> Cargando tiendas…
@@ -658,9 +693,9 @@ export function DeliveryIntegrations() {
                                         type="button"
                                         disabled={busy || linkingManualStore}
                                         onClick={() => void selectStore(store)}
-                                        className="shrink-0 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-[var(--v-blue,#2563eb)] text-white hover:bg-[#1d4ed8] disabled:opacity-50"
+                                        className="shrink-0 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-[var(--v-blue,#2563eb)] text-white disabled:opacity-50"
                                       >
-                                        {busy ? '…' : 'Vincular'}
+                                        {busy ? '…' : 'Usar'}
                                       </button>
                                     </li>
                                   );
@@ -668,34 +703,21 @@ export function DeliveryIntegrations() {
                               </ul>
                             </div>
                           ) : (
-                            <div className="space-y-2 rounded-xl border border-dashed border-stone-300 dark:border-stone-600 p-3 bg-stone-50/60 dark:bg-stone-900/30">
-                              <p className="text-xs text-stone-700 dark:text-stone-300">
-                                No hay tiendas Uber disponibles para este negocio. Pega el <strong>Store ID</strong> de tu tienda TEST del panel Uber.
-                              </p>
-                              <div>
-                                <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-400 mb-1">
-                                  Store ID
-                                </label>
-                                <input
-                                  type="text"
-                                  value={manualStoreId}
-                                  onChange={(e) => setManualStoreId(e.target.value)}
-                                  placeholder="p. ej. abc123-…"
-                                  className="w-full px-3 py-2 text-sm border border-stone-200 dark:border-stone-700 rounded-xl bg-white dark:bg-stone-950 text-stone-900 dark:text-white placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-400 mb-1">
-                                  Nombre (opcional)
-                                </label>
-                                <input
-                                  type="text"
-                                  value={manualStoreName}
-                                  onChange={(e) => setManualStoreName(e.target.value)}
-                                  placeholder="Nombre de la tienda TEST"
-                                  className="w-full px-3 py-2 text-sm border border-stone-200 dark:border-stone-700 rounded-xl bg-white dark:bg-stone-950 text-stone-900 dark:text-white placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                                />
-                              </div>
+                            <div className="space-y-2">
+                              <input
+                                type="text"
+                                value={manualStoreId}
+                                onChange={(e) => setManualStoreId(e.target.value)}
+                                placeholder="Store ID de la tienda TEST"
+                                className="w-full px-3 py-2 text-sm border border-stone-200 dark:border-stone-700 rounded-xl bg-white dark:bg-stone-950"
+                              />
+                              <input
+                                type="text"
+                                value={manualStoreName}
+                                onChange={(e) => setManualStoreName(e.target.value)}
+                                placeholder="Nombre (opcional)"
+                                className="w-full px-3 py-2 text-sm border border-stone-200 dark:border-stone-700 rounded-xl bg-white dark:bg-stone-950"
+                              />
                               <button
                                 type="button"
                                 onClick={() => void linkManualStore()}
@@ -703,133 +725,84 @@ export function DeliveryIntegrations() {
                                 className={VERTIAL_BTN_PRIMARY}
                               >
                                 {linkingManualStore ? <Loader2 className="w-4 h-4 animate-spin" /> : <Store className="w-4 h-4" />}
-                                Usar este Store ID
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => void refreshUberStores()}
-                                disabled={loadingStores}
-                                className="text-xs font-semibold text-[var(--v-blue,#2563eb)] hover:underline disabled:opacity-50"
-                              >
-                                Volver a buscar tiendas
+                                Usar Store ID
                               </button>
                             </div>
                           )}
-
                           <button
                             type="button"
                             onClick={() => void disconnectUber()}
                             disabled={disconnectingUber}
-                            className="text-xs font-semibold text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 underline-offset-2 hover:underline disabled:opacity-50"
+                            className="text-xs font-semibold text-stone-500 hover:underline disabled:opacity-50"
                           >
-                            {disconnectingUber ? 'Desconectando…' : 'Desconectar y empezar de nuevo'}
+                            {disconnectingUber ? 'Desconectando…' : 'Desconectar'}
                           </button>
                         </div>
                       )}
 
-                      {/* Estado 2: menú + ONLINE */}
-                      {uberStep === 2 && (
+                      {uberOauth && uberStoreLinked && (
                         <div className="space-y-2.5">
-                          <p className="text-xs text-emerald-700 dark:text-emerald-400">
+                          <p className="text-xs text-stone-700 dark:text-stone-300">
                             Tienda: <strong>{integrations.uber.storeName || integrations.uber.storeId}</strong>
                           </p>
-                          <p className="text-[10px] font-mono text-stone-500 break-all">
-                            Store ID: {integrations.uber.storeId}
-                          </p>
-                          <div className="flex flex-wrap gap-2">
-                            {!uberPosReady && (
-                              <button
-                                type="button"
-                                onClick={() => void activateUberPos()}
-                                disabled={activatingUberPos}
-                                className={VERTIAL_BTN_PRIMARY}
+                          {(activeStoreScope?.pointsOfSale || []).length > 0 && (
+                            <label className="block">
+                              <span className="block text-[10px] font-bold uppercase tracking-wide text-stone-500 mb-1">
+                                PDV de pedidos
+                              </span>
+                              <select
+                                value={integrations.uber?.salesPointId || ''}
+                                onChange={(event) => void selectUberPdv(event.target.value)}
+                                disabled={selectingUberPdv}
+                                className="w-full px-2.5 py-2 text-xs rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-950"
                               >
-                                {activatingUberPos ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                                Activar integración POS
-                              </button>
-                            )}
+                                <option value="">Selecciona un PDV</option>
+                                {(activeStoreScope?.pointsOfSale || [])
+                                  .filter((pdv) => pdv.active !== false)
+                                  .map((pdv) => (
+                                    <option key={pdv._id} value={pdv._id}>
+                                      {pdv.name}
+                                    </option>
+                                  ))}
+                              </select>
+                            </label>
+                          )}
+                          {!uberPdvReady && (
+                            <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                              Selecciona el PDV antes de encender.
+                            </p>
+                          )}
+                          {!uberPosReady && (
+                            <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                              Si al encender falla el POS, pulsa Reconectar y luego el interruptor.
+                            </p>
+                          )}
+                          <div className="flex flex-wrap gap-2">
                             <button
                               type="button"
                               onClick={() => void pushUberMenu()}
                               disabled={pushingMenu || !uberPosReady}
-                              className={VERTIAL_BTN_PRIMARY}
-                              title={!uberPosReady ? 'Activa primero la integración POS' : undefined}
-                            >
-                              {pushingMenu ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                              {uberMenuPushed ? 'Volver a subir menú' : 'Subir menú a Uber'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void setUberOnline(true)}
-                              disabled={settingUberStatus || !uberMenuPushed || !uberPosReady || !uberPdvReady}
-                              className="px-3 py-2 rounded-xl text-xs font-semibold bg-emerald-600 text-white disabled:opacity-50"
-                              title={!uberMenuPushed ? 'Sube el menú antes' : undefined}
-                            >
-                              {settingUberStatus ? '…' : 'Poner ONLINE'}
-                            </button>
-                          </div>
-                          {!uberPosReady && (
-                            <p className="text-[11px] text-amber-700 dark:text-amber-400">
-                              Falta `pos_data`: Uber todavía no entrega pedidos al POS.
-                            </p>
-                          )}
-                          {!uberPdvReady && (
-                            <p className="text-[11px] text-amber-700 dark:text-amber-400">
-                              Selecciona el PDV que recibirá los pedidos antes de poner Uber ONLINE.
-                            </p>
-                          )}
-                          {uberPosReady && !uberMenuPushed && (
-                            <p className="text-[11px] text-stone-500">Sube el menú; después ONLINE.</p>
-                          )}
-                          {uberMenuPushed && !uberOnline && (
-                            <p className="text-[11px] text-stone-500">Menú listo. Pulsa ONLINE para recibir pedidos de prueba.</p>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => void disconnectUber()}
-                            disabled={disconnectingUber}
-                            className="text-xs font-semibold text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 underline-offset-2 hover:underline disabled:opacity-50"
-                          >
-                            {disconnectingUber ? 'Desconectando…' : 'Desconectar Uber'}
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Estado 3: listo */}
-                      {uberStep === 3 && (
-                        <div className="space-y-2.5">
-                          <p className="text-xs text-stone-600 dark:text-stone-400">
-                            Pedidos de <strong>{integrations.uber.storeName || 'tu tienda Uber'}</strong> llegarán a Vertial.
-                          </p>
-                          <p className="text-[10px] font-mono text-stone-500 break-all">
-                            Store ID: {integrations.uber.storeId}
-                          </p>
-                          <div className="flex flex-wrap gap-2">
-                            <button
-                              type="button"
-                              onClick={() => void pushUberMenu()}
-                              disabled={pushingMenu}
-                              className="px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-stone-300 dark:border-stone-600 text-stone-700 dark:text-stone-200 disabled:opacity-50"
+                              className={VERTIAL_BTN_SECONDARY}
                             >
                               {pushingMenu ? 'Subiendo…' : 'Actualizar menú'}
                             </button>
                             <button
                               type="button"
-                              onClick={() => void setUberOnline(false)}
-                              disabled={settingUberStatus}
-                              className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-amber-600 text-white disabled:opacity-50"
+                              onClick={() => void reconnectUber()}
+                              disabled={disconnectingUber || connectingUber}
+                              className={VERTIAL_BTN_SECONDARY}
                             >
-                              Pausar
+                              Reconectar Uber
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void disconnectUber()}
+                              disabled={disconnectingUber}
+                              className={`${VERTIAL_BTN_DANGER} text-xs`}
+                            >
+                              {disconnectingUber ? 'Desconectando…' : 'Desconectar'}
                             </button>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => void disconnectUber()}
-                            disabled={disconnectingUber}
-                            className="text-xs font-semibold text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 underline-offset-2 hover:underline disabled:opacity-50"
-                          >
-                            {disconnectingUber ? 'Desconectando…' : 'Desconectar Uber'}
-                          </button>
                         </div>
                       )}
                     </div>
