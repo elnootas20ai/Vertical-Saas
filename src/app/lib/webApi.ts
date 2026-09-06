@@ -365,3 +365,40 @@ export async function selectUberEatsStoreRequest(businessId: string, storeId: st
     body: JSON.stringify({ businessId, storeId, storeName: storeName || '' }),
   });
 }
+
+export async function pushUberEatsMenuRequest(businessId: string, storeId?: string) {
+  return authRequest<{
+    ok: boolean;
+    itemCount?: number;
+    categoryCount?: number;
+    storeId?: string;
+    integrations?: DeliveryIntegrations;
+    error?: string;
+  }>('/api/uber-eats/menu/push', {
+    method: 'POST',
+    body: JSON.stringify({ businessId, storeId: storeId || '' }),
+  });
+}
+
+export async function setUberEatsStoreStatusRequest(
+  businessId: string,
+  status: 'ONLINE' | 'PAUSED',
+  opts?: { storeId?: string; reason?: string; pausedUntil?: string },
+) {
+  return authRequest<{
+    ok: boolean;
+    status?: string;
+    storeId?: string;
+    integrations?: DeliveryIntegrations;
+    error?: string;
+  }>('/api/uber-eats/store-status', {
+    method: 'POST',
+    body: JSON.stringify({
+      businessId,
+      status,
+      storeId: opts?.storeId || '',
+      reason: opts?.reason || '',
+      pausedUntil: opts?.pausedUntil || '',
+    }),
+  });
+}

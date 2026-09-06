@@ -15,6 +15,8 @@ import {
   saveDeliveryIntegrationsRequest,
   selectUberEatsStoreRequest,
   startUberEatsOAuthRequest,
+  pushUberEatsMenuRequest,
+  setUberEatsStoreStatusRequest,
   type DeliveryIntegrations,
   type UberEatsOAuthConfig,
   type UberEatsStoreOption,
@@ -47,6 +49,8 @@ export function DeliveryIntegrations() {
   const [connectingUber, setConnectingUber] = useState(false);
   const [loadingStores, setLoadingStores] = useState(false);
   const [selectingStoreId, setSelectingStoreId] = useState<string | null>(null);
+  const [pushingMenu, setPushingMenu] = useState(false);
+  const [settingUberStatus, setSettingUberStatus] = useState(false);
   const [showTokens, setShowTokens] = useState<Record<string, boolean>>({});
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [uberCfg, setUberCfg] = useState<UberEatsOAuthConfig | null>(null);
@@ -212,6 +216,36 @@ export function DeliveryIntegrations() {
     }
   };
 
+  const pushUberMenu = async () => {
+    if (!businessId) return;
+    setPushingMenu(true);
+    try {
+      const res = await pushUberEatsMenuRequest(businessId);
+      if (res.integrations) applyIntegrations(res.integrations);
+      toast.success(`Menú Uber subido (${res.itemCount || 0} productos)`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo subir el menú');
+    } finally {
+      setPushingMenu(false);
+    }
+  };
+
+  const setUberOnline = async (online: boolean) => {
+    if (!businessId) return;
+    setSettingUberStatus(true);
+    try {
+      const res = await setUberEatsStoreStatusRequest(businessId, online ? 'ONLINE' : 'PAUSED', {
+        reason: online ? 'Opened by Vertial' : 'Paused by Vertial',
+      });
+      if (res.integrations) applyIntegrations(res.integrations);
+      toast.success(online ? 'Tienda Uber ONLINE' : 'Tienda Uber en pausa');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo cambiar el estado Uber');
+    } finally {
+      setSettingUberStatus(false);
+    }
+  };
+
   const toggleEnabled = (key: keyof DeliveryIntegrations) => {
     setIntegrations((prev) => {
       const current = prev[key] ?? DEFAULT_DELIVERY_INTEGRATIONS[key];
@@ -357,6 +391,35 @@ export function DeliveryIntegrations() {
                             <p className="text-xs text-emerald-700 dark:text-emerald-400">
                               Vinculada: <strong>{integrations.uber.storeName || integrations.uber.storeId}</strong>
                             </p>
+                          )}
+
+                          {uberStoreLinked && canSeeTechSetup && (
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => void pushUberMenu()}
+                                disabled={pushingMenu}
+                                className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-stone-900 text-white disabled:opacity-50"
+                              >
+                                {pushingMenu ? 'Subiendo menú…' : 'Subir menú a Uber'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void setUberOnline(true)}
+                                disabled={settingUberStatus}
+                                className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-emerald-600 text-white disabled:opacity-50"
+                              >
+                                ONLINE
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void setUberOnline(false)}
+                                disabled={settingUberStatus}
+                                className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-amber-600 text-white disabled:opacity-50"
+                              >
+                                Pausar
+                              </button>
+                            </div>
                           )}
 
                           {loadingStores ? (

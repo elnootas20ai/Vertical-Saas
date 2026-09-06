@@ -1,6 +1,7 @@
 import crypto from 'crypto';
-import logger from './logger.js';
-import { getUberEatsClientSecret, getUberEatsApiBase } from './uberEatsOAuth.js';
+import { getUberEatsClientSecret } from './uberEatsOAuth.js';
+
+export { fetchUberOrderDetails } from './uberEatsApi.js';
 
 /**
  * Verifica X-Uber-Signature (HMAC-SHA256 hex lowercase del body crudo + client secret).
@@ -28,34 +29,4 @@ export function parseUberWebhookEvent(body) {
   const resourceHref = String(body?.resource_href || '').trim();
   const eventId = String(body?.event_id || '').trim();
   return { eventType, orderId, storeId, resourceHref, eventId };
-}
-
-/** GET pedido completo (después del notification). */
-export async function fetchUberOrderDetails({ accessToken, resourceHref, orderId }) {
-  const url =
-    resourceHref ||
-    (orderId ? `${getUberEatsApiBase()}/v1/eats/orders/${encodeURIComponent(orderId)}` : '');
-  if (!url) throw new Error('Sin resource_href / order_id');
-  if (!accessToken) throw new Error('Sin accessToken Uber');
-
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: 'application/json',
-    },
-  });
-  const text = await response.text();
-  let data = {};
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch {
-    data = { raw: text };
-  }
-  if (!response.ok) {
-    const msg = data.message || data.error || text || `HTTP ${response.status}`;
-    logger.warn({ status: response.status, msg, orderId }, 'Uber get order failed');
-    throw new Error(`Uber get order: ${msg}`);
-  }
-  return data;
 }

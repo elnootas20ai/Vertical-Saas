@@ -151,6 +151,7 @@ import { notifyManagersOrderCancelled, appendTpvIncidentForOrderCancel } from '.
 import { notifyTpvRegisterClosed } from '../services/tpvRegisterCloseNotifications.js';
 import { getApprovedVacationBlockingWork } from '../services/vacationClockinGate.js';
 import logger from '../services/logger.js';
+import { syncUberOrderLifecycle } from '../services/uberEatsOrderSync.js';
 import { tryAutoIssueForDeliveryOrder } from '../services/verifactuIssueService.js';
 import {
   deliveryOrderMatchesClient,
@@ -789,6 +790,13 @@ export async function updateDeliveryOrder(req, res) {
     syncClientAfterDeliveryOrder(req, userId, { ...doc, _rev: saved.rev }).catch(() => null);
     if (doc.status !== existing.status) {
       triggerReactiveAlert(userId, 'order_status_changed', { orderId: doc._id, newStatus: doc.status, previousStatus: existing.status }).catch(() => null);
+      setImmediate(() => {
+        void syncUberOrderLifecycle({
+          order: sanitized,
+          previousStatus: existing.status,
+          action: 'status',
+        });
+      });
     }
     return res.json({ ok: true, order: sanitized, cajaRegistration });
   } catch (error) {
@@ -978,6 +986,12 @@ export async function cancelDeliveryOrder(req, res) {
           newStatus: 'cancelled',
           previousStatus: existing.status,
         }).catch(() => null);
+        void syncUberOrderLifecycle({
+          order: sanitized,
+          previousStatus: existing.status,
+          action: 'cancel',
+          cancelReason: trimmedReason,
+        });
         await appendTpvIncidentForOrderCancel(req, {
           userId,
           order: sanitized,
@@ -2346,6 +2360,10 @@ export async function bulkApplyStaffPrices(req, res) {
           ? Number(configExisting?.staffConsumption?.defaultDiscountPercent || 0)
           : pct,
         eligibleCategories: nextEligible,
+        excludedCatalogItemIds: Array.isArray(configExisting?.staffConsumption?.excludedCatalogItemIds)
+          ? configExisting.staffConsumption.excludedCatalogItemIds
+          : [],
+        workerDiscounts: configExisting?.staffConsumption?.workerDiscounts || {},
       },
     }, configExisting);
     const configSaved = await putDocument(req, deliveryDb, configDoc._id, configDoc);
@@ -4999,7 +5017,7 @@ export async function createStaffConsumption(req, res) {
       return badRequest(res, 'Este producto está desactivado para consumo de equipo');
     }
 
-    const unitPrice = resolveStaffUnitPrice(catalogItem, staffCfg);
+    const unitPrice = resolveStaffUnitPrice(catalogItem, staffCfg, workerId);
     const publicUnitPrice = Number(catalogItem.unitPrice || 0);
     const recordedBy = String(req.callerUserId || account.user_id || '');
     const recordedByName = String(account.fullName || account.firstName || 'Trabajador');
@@ -5029,27 +5047,30 @@ export async function createStaffConsumption(req, res) {
 
     let cajaRegistration = { status: 'nothing_to_register' };
     if (paymentMode === 'cash_now') {
-      try {
-        const session = await registerStaffConsumptionInTpvSession(req, userId, {
-          pdvId: salesPointId,
-          consumptionDoc: consumption,
-          paymentMethod,
-          registeredBy: recordedByName,
-        });
-        if (session) {
-          cajaRegistration = { status: 'registered', session };
-        } else {
+      const cashAmount = Math.round(Number(consumption.total || 0) * 100) / 100;
+      if (cashAmount > 0) {
+        try {
+          const session = await registerStaffConsumptionInTpvSession(req, userId, {
+            pdvId: salesPointId,
+            consumptionDoc: consumption,
+            paymentMethod,
+            registeredBy: recordedByName,
+          });
+          if (session) {
+            cajaRegistration = { status: 'registered', session };
+          } else {
+            cajaRegistration = {
+              status: 'no_open_session',
+              message: 'Consumo registrado, pero no hay caja abierta en esta tienda.',
+            };
+          }
+        } catch (regErr) {
+          console.error('[STAFF_CONSUMPTION] Error registrando en caja:', regErr?.message);
           cajaRegistration = {
-            status: 'no_open_session',
-            message: 'Consumo registrado, pero no hay caja abierta en esta tienda.',
+            status: 'error',
+            message: regErr?.message || 'No se pudo registrar el consumo en caja.',
           };
         }
-      } catch (regErr) {
-        console.error('[STAFF_CONSUMPTION] Error registrando en caja:', regErr?.message);
-        cajaRegistration = {
-          status: 'error',
-          message: regErr?.message || 'No se pudo registrar el consumo en caja.',
-        };
       }
     }
 

@@ -17,6 +17,9 @@ import {
   verifyUberWebhookSignature,
 } from '../services/uberEatsWebhook.js';
 import { isUberEatsConfigured } from '../services/uberEatsOAuth.js';
+import { getUberEatsAppAccessToken } from '../services/uberEatsApi.js';
+import { autoAcceptUberOrderAfterIngest } from '../services/uberEatsOrderSync.js';
+import { pushUberMenuFromCatalog } from '../services/uberEatsMenu.js';
 import logger from '../services/logger.js';
 
 const webhookRouter = Router();
@@ -245,13 +248,18 @@ async function handleUberPrimaryWebhook(req, res) {
         );
 
         if (event.eventType === 'store.provisioned' && event.storeId) {
-          const cfg = await findUberOauthBusiness(req);
+          const cfg = await findUberOauthBusiness(req, event.storeId);
           if (cfg?.business_id) {
             const current = await getWebConfigByBusinessId(req, cfg.business_id);
             const prevUber = current?.integrations?.uber || {};
             const next = {
               ...(current?.integrations || {}),
-              uber: { ...prevUber, storeId: event.storeId, enabled: true },
+              uber: {
+                ...prevUber,
+                storeId: event.storeId,
+                enabled: true,
+                provisionedAt: prevUber.provisionedAt || new Date().toISOString(),
+              },
             };
             const { buildWebConfigDocument } = await import('../services/couchdb.js');
             const doc = buildWebConfigDocument(cfg.business_id, { integrations: next }, current);
@@ -261,7 +269,59 @@ async function handleUberPrimaryWebhook(req, res) {
           return;
         }
 
+        if (event.eventType === 'store.deprovisioned' && event.storeId) {
+          const cfg = await findUberOauthBusiness(req, event.storeId);
+          if (cfg?.business_id) {
+            const current = await getWebConfigByBusinessId(req, cfg.business_id);
+            const prevUber = current?.integrations?.uber || {};
+            if (String(prevUber.storeId || '') === event.storeId) {
+              const next = {
+                ...(current?.integrations || {}),
+                uber: {
+                  ...prevUber,
+                  enabled: false,
+                  deprovisionedAt: new Date().toISOString(),
+                },
+              };
+              const { buildWebConfigDocument } = await import('../services/couchdb.js');
+              const doc = buildWebConfigDocument(cfg.business_id, { integrations: next }, current);
+              await putDocument(req, getWebDbName(), doc._id, doc);
+              logger.info({ businessId: cfg.business_id, storeId: event.storeId }, 'Uber store.deprovisioned');
+            }
+          }
+          return;
+        }
+
+        if (event.eventType === 'store.menu_refresh_request') {
+          const cfg = await findUberOauthBusiness(req, event.storeId);
+          const storeId = event.storeId || String(cfg?.integrations?.uber?.storeId || '');
+          if (cfg?.business_id && storeId) {
+            try {
+              await pushUberMenuFromCatalog(req, {
+                businessId: cfg.business_id,
+                storeId,
+                storeName: String(cfg.integrations?.uber?.storeName || ''),
+              });
+            } catch (err) {
+              logger.warn(
+                { err: err?.message || String(err), businessId: cfg.business_id, storeId },
+                'Uber menu_refresh_request: upload falló',
+              );
+            }
+          }
+          return;
+        }
+
+        if (event.eventType === 'store.status.changed') {
+          logger.info(
+            { storeId: event.storeId, eventId: event.eventId, meta: req.body?.meta },
+            'Uber store.status.changed',
+          );
+          return;
+        }
+
         if (event.eventType !== 'orders.notification' && event.eventType !== 'orders.scheduled.notification') {
+          logger.info({ eventType: event.eventType }, 'Uber webhook: evento ACK sin handler específico');
           return;
         }
 
@@ -270,9 +330,17 @@ async function handleUberPrimaryWebhook(req, res) {
           logger.warn({ storeId: event.storeId }, 'Uber webhook: no hay negocio OAuth conectado');
           return;
         }
-        const bearer = String(cfg.integrations?.uber?.accessToken || '').trim();
+
+        let bearer = '';
+        try {
+          const appTok = await getUberEatsAppAccessToken();
+          bearer = String(appTok.accessToken || '');
+        } catch (err) {
+          logger.warn({ err: err?.message }, 'Uber webhook: app token falló, intento user token');
+          bearer = String(cfg.integrations?.uber?.accessToken || '').trim();
+        }
         if (!bearer) {
-          logger.warn({ businessId: cfg.business_id }, 'Uber webhook: sin accessToken OAuth (¿faltan scopes eats.order?)');
+          logger.warn({ businessId: cfg.business_id }, 'Uber webhook: sin token app ni OAuth');
           return;
         }
 
@@ -313,6 +381,30 @@ async function handleUberPrimaryWebhook(req, res) {
           { businessId, orderId: doc._id, externalOrderId: orderData.externalOrderId },
           'Uber webhook: pedido creado en Vertial',
         );
+
+        const acceptResult = await autoAcceptUberOrderAfterIngest({
+          orderId: orderData.externalOrderId,
+          externalReferenceId: doc.orderNumber || doc._id,
+        });
+        if (acceptResult?.ok) {
+          try {
+            const acceptedDoc = {
+              ...doc,
+              _rev: saved.rev,
+              uberAcceptedAt: new Date().toISOString(),
+              status: doc.status === 'nuevo' ? 'cocina' : doc.status,
+            };
+            const acceptedSaved = await putDocument(req, db, acceptedDoc._id, acceptedDoc);
+            const acceptedSanitized = sanitizeDeliveryOrder({ ...acceptedDoc, _rev: acceptedSaved.rev });
+            broadcastToUser(businessId, 'delivery_order_updated', acceptedSanitized);
+            broadcastToBusiness(businessId, 'delivery:order_updated', {
+              order: acceptedSanitized,
+              userId: businessId,
+            });
+          } catch (err) {
+            logger.warn({ err: err?.message }, 'Uber webhook: no se pudo marcar uberAcceptedAt');
+          }
+        }
       } catch (error) {
         logger.error({ error: error?.message || String(error) }, 'Uber webhook: error post-ACK');
       }

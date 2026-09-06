@@ -17,7 +17,17 @@ import {
 import {
   listUberEatsStores,
   provisionUberEatsStore,
+  getUberEatsPosData,
+  patchUberEatsPosData,
+  listUberDeliveryStores,
+  getUberDeliveryStore,
 } from '../services/uberEatsStores.js';
+import {
+  getUberEatsAppAccessToken,
+  getUberStoreStatus,
+  setUberStoreStatus,
+} from '../services/uberEatsApi.js';
+import { pushUberMenuFromCatalog } from '../services/uberEatsMenu.js';
 import { isVertialSuperAdminEmail } from '../utils/superAdmin.js';
 import logger from '../services/logger.js';
 
@@ -248,6 +258,203 @@ export async function selectUberStoreForBusiness(req, res) {
     });
   } catch (error) {
     logger.error({ error: errorMsg(error) }, 'Uber select store failed');
+    return res.status(500).json({ ok: false, error: errorMsg(error) });
+  }
+}
+
+/** GET /api/uber-eats/pos-data?businessId=&storeId= */
+export async function getUberPosDataForBusiness(req, res) {
+  try {
+    if (!requireUberOperator(req, res)) return;
+    const businessId = String(req.query.businessId || '').trim();
+    const storeId = String(req.query.storeId || '').trim();
+    if (!businessId) return badRequest(res, 'Falta businessId');
+
+    const { uber } = await loadUberIntegration(req, businessId);
+    const token = String(uber.accessToken || '').trim();
+    const sid = storeId || String(uber.storeId || '').trim();
+    if (!token) return badRequest(res, 'Conecta Uber OAuth antes');
+    if (!sid) return badRequest(res, 'Falta storeId (elige tienda)');
+
+    const posData = await getUberEatsPosData(token, sid);
+    return res.json({ ok: true, storeId: sid, posData });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: errorMsg(error) });
+  }
+}
+
+/** PATCH /api/uber-eats/pos-data { businessId, storeId?, patch } */
+export async function patchUberPosDataForBusiness(req, res) {
+  try {
+    if (!requireUberOperator(req, res)) return;
+    const businessId = String(req.body?.businessId || '').trim();
+    const storeId = String(req.body?.storeId || '').trim();
+    const patch = req.body?.patch && typeof req.body.patch === 'object' ? req.body.patch : {};
+    if (!businessId) return badRequest(res, 'Falta businessId');
+
+    const { current, uber } = await loadUberIntegration(req, businessId);
+    const token = String(uber.accessToken || '').trim();
+    const sid = storeId || String(uber.storeId || '').trim();
+    if (!token) return badRequest(res, 'Conecta Uber OAuth antes');
+    if (!sid) return badRequest(res, 'Falta storeId');
+
+    await patchUberEatsPosData(token, sid, patch);
+    const integrations = await saveUberPatch(req, businessId, current, {
+      storeId: sid,
+      posDataPatchedAt: new Date().toISOString(),
+    });
+    return res.json({ ok: true, storeId: sid, integrations });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: errorMsg(error) });
+  }
+}
+
+/** GET /api/uber-eats/delivery-stores?businessId= */
+export async function listUberDeliveryStoresForBusiness(req, res) {
+  try {
+    if (!requireUberOperator(req, res)) return;
+    const businessId = String(req.query.businessId || '').trim();
+    if (!businessId) return badRequest(res, 'Falta businessId');
+    const { accessToken } = await getUberEatsAppAccessToken();
+    const data = await listUberDeliveryStores(accessToken);
+    return res.json({ ok: true, data });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: errorMsg(error) });
+  }
+}
+
+/** GET /api/uber-eats/delivery-store?businessId=&storeId= */
+export async function getUberDeliveryStoreForBusiness(req, res) {
+  try {
+    if (!requireUberOperator(req, res)) return;
+    const businessId = String(req.query.businessId || '').trim();
+    const storeId = String(req.query.storeId || '').trim();
+    if (!businessId) return badRequest(res, 'Falta businessId');
+    const { uber } = await loadUberIntegration(req, businessId);
+    const sid = storeId || String(uber.storeId || '').trim();
+    if (!sid) return badRequest(res, 'Falta storeId');
+    const { accessToken } = await getUberEatsAppAccessToken();
+    const data = await getUberDeliveryStore(accessToken, sid);
+    return res.json({ ok: true, storeId: sid, data });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: errorMsg(error) });
+  }
+}
+
+/** GET /api/uber-eats/store-status?businessId=&storeId= */
+export async function getUberStoreStatusForBusiness(req, res) {
+  try {
+    if (!requireUberOperator(req, res)) return;
+    const businessId = String(req.query.businessId || '').trim();
+    const storeId = String(req.query.storeId || '').trim();
+    if (!businessId) return badRequest(res, 'Falta businessId');
+    const { uber } = await loadUberIntegration(req, businessId);
+    const sid = storeId || String(uber.storeId || '').trim();
+    if (!sid) return badRequest(res, 'Falta storeId');
+    const { accessToken } = await getUberEatsAppAccessToken();
+    const status = await getUberStoreStatus(accessToken, sid);
+    return res.json({ ok: true, storeId: sid, status });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: errorMsg(error) });
+  }
+}
+
+/** POST /api/uber-eats/store-status { businessId, storeId?, status, reason?, pausedUntil? } */
+export async function setUberStoreStatusForBusiness(req, res) {
+  try {
+    if (!requireUberOperator(req, res)) return;
+    const businessId = String(req.body?.businessId || '').trim();
+    const storeId = String(req.body?.storeId || '').trim();
+    const status = String(req.body?.status || 'ONLINE').trim();
+    const reason = String(req.body?.reason || 'Updated by Vertial').trim();
+    const pausedUntil = String(req.body?.pausedUntil || '').trim();
+    if (!businessId) return badRequest(res, 'Falta businessId');
+
+    const { current, uber } = await loadUberIntegration(req, businessId);
+    const sid = storeId || String(uber.storeId || '').trim();
+    if (!sid) return badRequest(res, 'Falta storeId (elige tienda Uber)');
+
+    const { accessToken } = await getUberEatsAppAccessToken();
+    const result = await setUberStoreStatus(accessToken, sid, { status, reason, pausedUntil });
+    const integrations = await saveUberPatch(req, businessId, current, {
+      storeId: sid,
+      lastStoreStatus: result.status,
+      lastStoreStatusAt: new Date().toISOString(),
+    });
+    return res.json({ ok: true, ...result, storeId: sid, integrations });
+  } catch (error) {
+    logger.error({ error: errorMsg(error) }, 'Uber set store status failed');
+    return res.status(500).json({ ok: false, error: errorMsg(error) });
+  }
+}
+
+/** POST /api/uber-eats/menu/push { businessId, storeId? } */
+export async function pushUberMenuForBusiness(req, res) {
+  try {
+    if (!requireUberOperator(req, res)) return;
+    const businessId = String(req.body?.businessId || '').trim();
+    const storeId = String(req.body?.storeId || '').trim();
+    if (!businessId) return badRequest(res, 'Falta businessId');
+
+    const { current, uber } = await loadUberIntegration(req, businessId);
+    const sid = storeId || String(uber.storeId || '').trim();
+    if (!sid) return badRequest(res, 'Falta storeId (elige tienda Uber)');
+
+    const result = await pushUberMenuFromCatalog(req, {
+      businessId,
+      storeId: sid,
+      storeName: String(uber.storeName || ''),
+    });
+    const integrations = await saveUberPatch(req, businessId, current, {
+      storeId: sid,
+      menuPushedAt: new Date().toISOString(),
+      menuItemCount: result.itemCount,
+    });
+    return res.json({ ok: true, ...result, integrations });
+  } catch (error) {
+    logger.error({ error: errorMsg(error) }, 'Uber menu push failed');
+    return res.status(500).json({ ok: false, error: errorMsg(error) });
+  }
+}
+
+/** GET /api/uber-eats/cert-status?businessId= — checklist GTS */
+export async function getUberCertStatus(req, res) {
+  try {
+    if (!requireUberOperator(req, res)) return;
+    const businessId = String(req.query.businessId || '').trim();
+    if (!businessId) return badRequest(res, 'Falta businessId');
+    const { uber } = await loadUberIntegration(req, businessId);
+    const pub = getUberEatsPublicConfig();
+    return res.json({
+      ok: true,
+      configured: pub.configured,
+      env: pub.env,
+      oauthConnected: Boolean(uber.oauth || uber.accessToken),
+      storeId: String(uber.storeId || ''),
+      storeName: String(uber.storeName || ''),
+      provisionedAt: String(uber.provisionedAt || ''),
+      menuPushedAt: String(uber.menuPushedAt || ''),
+      menuItemCount: Number(uber.menuItemCount || 0),
+      lastStoreStatus: String(uber.lastStoreStatus || ''),
+      primaryWebhookUrl: 'https://vertialapp.com/api/delivery-webhooks/ubereats',
+      checklistImplemented: [
+        'GET /v1/eats/stores',
+        'GET /v1/delivery/stores',
+        'GET /v1/delivery/store/{id}',
+        'GET/POST/PATCH /v1/eats/stores/{id}/pos_data',
+        'webhooks store.provisioned / store.deprovisioned',
+        'PUT /v2/eats/stores/{id}/menus',
+        'webhook store.menu_refresh_request',
+        'POST menu item update / OOS',
+        'POST/GET store status',
+        'webhook store.status.changed',
+        'GET order v2/v1 + delivery',
+        'webhook orders.notification (+ auto-accept)',
+        'accept / deny / cancel / ready',
+        'webhook ACK HTTP 200 empty',
+      ],
+    });
+  } catch (error) {
     return res.status(500).json({ ok: false, error: errorMsg(error) });
   }
 }

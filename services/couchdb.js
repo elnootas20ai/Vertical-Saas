@@ -6588,6 +6588,7 @@ export function buildDeliveryOrderDocument(userId, data = {}, existing = null) {
     reopenedBy: String(data.reopenedBy || existing?.reopenedBy || ''),
 
     externalOrderId: String(data.externalOrderId || existing?.externalOrderId || ''),
+    uberAcceptedAt: String(data.uberAcceptedAt || existing?.uberAcceptedAt || ''),
 
     incidentNotes: String(data.incidentNotes || existing?.incidentNotes || ''),
     incidentType: String(data.incidentType || existing?.incidentType || ''),
@@ -6684,6 +6685,7 @@ export function sanitizeDeliveryOrder(doc) {
     reopenedBy: doc.reopenedBy || '',
 
     externalOrderId: doc.externalOrderId || '',
+    uberAcceptedAt: doc.uberAcceptedAt || '',
 
     incidentNotes: doc.incidentNotes || '',
     incidentType: doc.incidentType || '',
@@ -6761,6 +6763,7 @@ const DEFAULT_DELIVERY_CONFIG = {
     defaultDiscountPercent: 0,
     eligibleCategories: [],
     excludedCatalogItemIds: [],
+    workerDiscounts: {},
   },
   tpvDeliveryFee: 0,
 };
@@ -7041,6 +7044,19 @@ function sanitizeInventorySyncExcludedKeys(raw) {
   return out;
 }
 
+function sanitizeStaffWorkerDiscounts(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const workerId = String(key || '').trim().replace(/^account:/, '');
+    if (!workerId) continue;
+    const pct = Number(value);
+    if (!Number.isFinite(pct)) continue;
+    out[workerId] = Math.max(0, Math.min(100, Math.round(pct * 100) / 100));
+  }
+  return out;
+}
+
 export function sanitizeStaffConsumptionConfig(raw) {
   const base = { ...DEFAULT_DELIVERY_CONFIG.staffConsumption, ...(raw && typeof raw === 'object' ? raw : {}) };
   const validModes = ['staff_price_field', 'percent_discount', 'same_as_public'];
@@ -7057,11 +7073,21 @@ export function sanitizeStaffConsumptionConfig(raw) {
     excludedCatalogItemIds: Array.isArray(base.excludedCatalogItemIds)
       ? [...new Set(base.excludedCatalogItemIds.map((id) => String(id || '').trim()).filter(Boolean))]
       : [],
+    workerDiscounts: sanitizeStaffWorkerDiscounts(base.workerDiscounts),
   };
 }
 
-export function resolveStaffUnitPrice(catalogItem, staffConsumptionConfig) {
+export function resolveStaffUnitPrice(catalogItem, staffConsumptionConfig, workerId) {
   const publicPrice = Number(catalogItem?.unitPrice || 0);
+  const cfg = sanitizeStaffConsumptionConfig(staffConsumptionConfig);
+  const wid = String(workerId || '').trim().replace(/^account:/, '');
+  // Trato especial del CEO: descuento % propio sobre precio público.
+  if (wid && Object.prototype.hasOwnProperty.call(cfg.workerDiscounts, wid)) {
+    const pct = Number(cfg.workerDiscounts[wid]);
+    if (Number.isFinite(pct)) {
+      return Math.round(publicPrice * (1 - pct / 100) * 100) / 100;
+    }
+  }
   // Precio empleado explícito en el producto manda (TPV + cobro en caja).
   const rawStaff = catalogItem?.staffPrice;
   if (rawStaff !== undefined && rawStaff !== null && rawStaff !== '') {
@@ -7070,7 +7096,6 @@ export function resolveStaffUnitPrice(catalogItem, staffConsumptionConfig) {
       return Math.round(staffPrice * 100) / 100;
     }
   }
-  const cfg = sanitizeStaffConsumptionConfig(staffConsumptionConfig);
   if (cfg.pricingMode === 'same_as_public') return Math.round(publicPrice * 100) / 100;
   if (cfg.pricingMode === 'percent_discount') {
     const pct = Number(cfg.defaultDiscountPercent || 0);
