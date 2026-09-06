@@ -41,10 +41,12 @@ export function getUberEatsScopes() {
   // Usuario (authorization_code): provisioning + store (GET/POST pos_data exige eats.store).
   // Pedidos usan client_credentials (eats.order) aparte — ver uberEatsApi.js.
   // Nota: eats.pos_provisioning NO es válido en client_credentials (solo user OAuth).
-  return env(
-    'UBER_EATS_SCOPES',
-    'eats.pos_provisioning eats.store',
-  );
+  const raw = env('UBER_EATS_SCOPES', 'eats.pos_provisioning eats.store');
+  const parts = raw.split(/\s+/).map((s) => s.trim()).filter(Boolean);
+  for (const required of ['eats.pos_provisioning', 'eats.store']) {
+    if (!parts.includes(required)) parts.push(required);
+  }
+  return parts.join(' ');
 }
 
 /**

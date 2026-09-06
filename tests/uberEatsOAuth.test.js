@@ -69,6 +69,14 @@ describe('uberEatsOAuth', () => {
     expect(url).toContain('eats.store');
   });
 
+  it('always adds eats.store even if env only has provisioning', () => {
+    process.env.UBER_EATS_SCOPES = 'eats.pos_provisioning';
+    const state = createUberOAuthState({ businessId: 'biz-1', userId: 'u-1' });
+    const url = buildUberAuthorizeUrl(state);
+    expect(url).toContain('eats.pos_provisioning');
+    expect(url).toContain('eats.store');
+  });
+
   it('blocks certification helpers outside sandbox', () => {
     process.env.UBER_EATS_ENV = 'production';
     expect(() => assertUberEatsSandbox()).toThrow(/sandbox/i);

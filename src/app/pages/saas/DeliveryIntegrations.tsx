@@ -138,7 +138,12 @@ export function DeliveryIntegrations() {
     }
     setLoadingUberCert(true);
     try {
-      setUberCert(await getUberCertStatusRequest(businessId));
+      const status = await getUberCertStatusRequest(businessId);
+      setUberCert(
+        status && Array.isArray(status.checks) && status.progress
+          ? status
+          : null,
+      );
     } catch {
       setUberCert(null);
     } finally {
@@ -567,19 +572,19 @@ export function DeliveryIntegrations() {
                         </p>
                       )}
 
-                      {uberStoreLinked && activeStoreScope.pointsOfSale.length > 0 && (
+                      {uberStoreLinked && (activeStoreScope?.pointsOfSale || []).length > 0 && (
                         <label className="block rounded-xl border border-stone-200 dark:border-stone-700 p-2.5 bg-white dark:bg-stone-950">
                           <span className="block text-[10px] font-bold uppercase tracking-wide text-stone-500 mb-1">
                             PDV que recibirá los pedidos Uber
                           </span>
                           <select
-                            value={integrations.uber.salesPointId || ''}
+                            value={integrations.uber?.salesPointId || ''}
                             onChange={(event) => void selectUberPdv(event.target.value)}
                             disabled={selectingUberPdv}
                             className="w-full px-2.5 py-2 text-xs rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100"
                           >
                             <option value="">Selecciona un PDV</option>
-                            {activeStoreScope.pointsOfSale
+                            {(activeStoreScope?.pointsOfSale || [])
                               .filter((pdv) => pdv.active !== false)
                               .map((pdv) => (
                                 <option key={pdv._id} value={pdv._id}>
@@ -848,7 +853,7 @@ export function DeliveryIntegrations() {
                           <p className="text-[10px] text-stone-500 mt-0.5">
                             {loadingUberCert
                               ? 'Comprobando sandbox…'
-                              : uberCert
+                              : uberCert?.progress
                                 ? `${uberCert.progress.completed}/${uberCert.progress.total} pruebas verificadas`
                                 : 'Sin datos de comprobación'}
                           </p>
@@ -939,7 +944,7 @@ export function DeliveryIntegrations() {
                             >
                               {loadingUberCert ? 'Comprobando…' : 'Volver a comprobar'}
                             </button>
-                            {uberCert && (
+                            {Array.isArray(uberCert?.checks) && uberCert.checks.length > 0 && (
                               <button
                                 type="button"
                                 onClick={() => void copyText(
