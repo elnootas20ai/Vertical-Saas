@@ -230,10 +230,8 @@ export function DeliveryIntegrations() {
         if (res.integrations) applyIntegrations(res.integrations);
         if (Array.isArray(res.stores)) setUberStores(res.stores);
         toast.success(
-          res.autoLinked
-            ? 'Cuenta Uber conectada con el PDV de esta empresa.'
-            : res.stores?.length
-              ? 'Cuenta Uber conectada. Elige la tienda y el PDV.'
+          res.storeSelectionRequired || res.stores?.length
+            ? 'Cuenta Uber conectada. Elige ahora la tienda que devuelve Uber.'
             : 'Cuenta Uber conectada. Si no hay tiendas, pega el Store ID de TEST.',
         );
       } catch (e) {
@@ -443,6 +441,10 @@ export function DeliveryIntegrations() {
       await connectUberOAuth();
       return;
     }
+    if (uber.storeSelectionRequired) {
+      toast.error('Elige primero una de las tiendas devueltas por Uber');
+      return;
+    }
     if (!uber.storeId) {
       toast.error('Elige primero la tienda Uber');
       return;
@@ -512,6 +514,7 @@ export function DeliveryIntegrations() {
   const activeCount = AGGREGATOR_PLATFORMS.filter((p) => integrations[p.integrationKey]?.enabled).length;
   const uberOauth = Boolean(integrations.uber?.oauth);
   const uberStoreLinked = Boolean(integrations.uber?.storeId);
+  const uberStoreSelectionRequired = Boolean(integrations.uber?.storeSelectionRequired);
   const uberPdvReady = Boolean(integrations.uber?.salesPointId);
   const uberPosReady = Boolean(
     uberCert?.posIntegrationEnabled
@@ -586,7 +589,9 @@ export function DeliveryIntegrations() {
                             </span>
                           )}
                           <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
-                            uberReceivingOrders
+                            uberStoreSelectionRequired
+                              ? 'text-blue-700 bg-blue-50 dark:bg-blue-950/40 dark:text-blue-300'
+                              : uberReceivingOrders
                               ? 'text-emerald-700 bg-emerald-50 dark:bg-emerald-900/30'
                               : uberOnline && !uberPosReady
                                 ? 'text-amber-700 bg-amber-50 dark:bg-amber-900/30'
@@ -594,7 +599,9 @@ export function DeliveryIntegrations() {
                                 ? 'text-amber-700 bg-amber-50 dark:bg-amber-900/30'
                                 : 'text-stone-500 bg-stone-100 dark:bg-stone-800'
                           }`}>
-                            {uberReceivingOrders
+                            {uberStoreSelectionRequired
+                              ? 'Elige tienda'
+                              : uberReceivingOrders
                               ? 'ONLINE'
                               : uberOnline && !uberPosReady
                                 ? 'POS pendiente'
@@ -648,13 +655,14 @@ export function DeliveryIntegrations() {
                     <div className="space-y-3">
                       <p className="text-[11px] text-stone-500">
                         {!uberOauth && 'Conecta Uber. El interruptor enciende/apaga esta cuenta.'}
-                        {uberOauth && !uberStoreLinked && businessPdvs.length === 0 && 'Crea un PDV en esta empresa y vuelve a conectar.'}
-                        {uberOauth && !uberStoreLinked && businessPdvs.length > 1 && 'Hay varios PDV: elige cuál recibe los pedidos Uber.'}
-                        {uberOauth && !uberStoreLinked && soleBusinessPdv && uberStores.length > 1 && 'Hay varias tiendas Uber: elige la de esta cuenta.'}
-                        {uberOauth && !uberStoreLinked && soleBusinessPdv && uberStores.length <= 1 && (loadingStores ? 'Enlazando el PDV de esta cuenta…' : 'Enlazando automáticamente…')}
-                        {uberOauth && uberStoreLinked && !uberPosReady && 'Cuenta conectada. Pulsa el interruptor para activar el POS y recibir pedidos.'}
-                        {uberOauth && uberStoreLinked && uberPosReady && !uberOnline && 'Todo conectado. Pulsa el interruptor para recibir pedidos.'}
-                        {uberReceivingOrders && 'Recibiendo pedidos. Pausa con el interruptor cuando quieras.'}
+                        {uberOauth && uberStoreSelectionRequired && 'Cuenta conectada. Elige debajo la tienda que quieres asociar.'}
+                        {uberOauth && !uberStoreSelectionRequired && !uberStoreLinked && businessPdvs.length === 0 && 'Crea un PDV en esta empresa y vuelve a conectar.'}
+                        {uberOauth && !uberStoreSelectionRequired && !uberStoreLinked && businessPdvs.length > 1 && 'Hay varios PDV: elige cuál recibe los pedidos Uber.'}
+                        {uberOauth && !uberStoreSelectionRequired && !uberStoreLinked && soleBusinessPdv && uberStores.length > 1 && 'Hay varias tiendas Uber: elige la de esta cuenta.'}
+                        {uberOauth && !uberStoreSelectionRequired && !uberStoreLinked && soleBusinessPdv && uberStores.length <= 1 && (loadingStores ? 'Cargando tiendas de Uber…' : 'Elige la tienda de esta cuenta.')}
+                        {uberOauth && !uberStoreSelectionRequired && uberStoreLinked && !uberPosReady && 'Cuenta y tienda conectadas. Pulsa el interruptor para activar el POS.'}
+                        {uberOauth && !uberStoreSelectionRequired && uberStoreLinked && uberPosReady && !uberOnline && 'Todo conectado. Pulsa el interruptor para recibir pedidos.'}
+                        {!uberStoreSelectionRequired && uberReceivingOrders && 'Recibiendo pedidos. Pausa con el interruptor cuando quieras.'}
                       </p>
 
                       {uberCfg?.configured === false && (
@@ -675,7 +683,7 @@ export function DeliveryIntegrations() {
                         </button>
                       )}
 
-                      {uberOauth && !uberStoreLinked && (
+                      {uberOauth && (!uberStoreLinked || uberStoreSelectionRequired) && (
                         <div className="space-y-2.5">
                           {soleBusinessPdv && (
                             <p className="text-xs text-stone-700 dark:text-stone-300">
@@ -686,10 +694,12 @@ export function DeliveryIntegrations() {
                             <div className="flex items-center gap-2 text-xs text-stone-500">
                               <Loader2 className="w-3.5 h-3.5 animate-spin" /> Enlazando…
                             </div>
-                          ) : uberStores.length > 1 ? (
+                          ) : uberStores.length > 0 ? (
                             <div className="space-y-1.5">
                               <p className="text-xs font-semibold text-stone-800 dark:text-stone-100">
-                                Varias tiendas Uber — elige la de esta cuenta
+                                {uberStores.length === 1
+                                  ? 'Tienda devuelta por Uber'
+                                  : 'Tiendas devueltas por Uber — elige una'}
                               </p>
                               <ul className="space-y-1.5">
                                 {uberStores.map((store) => {
@@ -772,7 +782,7 @@ export function DeliveryIntegrations() {
                         </div>
                       )}
 
-                      {uberOauth && uberStoreLinked && (
+                      {uberOauth && uberStoreLinked && !uberStoreSelectionRequired && (
                         <div className="space-y-2.5">
                           <p className="text-xs text-stone-700 dark:text-stone-300">
                             Cuenta: <strong>{linkedPdvName || integrations.uber.storeName || 'PDV'}</strong>

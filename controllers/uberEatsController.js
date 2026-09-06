@@ -206,6 +206,7 @@ async function wipeUberIntegration(req, businessId, current) {
       connectedAt: '',
       storeId: '',
       storeName: '',
+      storeSelectionRequired: false,
       salesPointId: '',
       provisionedAt: '',
       menuPushedAt: '',
@@ -314,6 +315,7 @@ export async function completeUberEatsOAuth(req, res) {
       connectedAt: new Date().toISOString(),
       oauth: true,
       env: getUberEatsPublicConfig().env,
+      storeSelectionRequired: true,
     });
 
     let stores = [];
@@ -323,51 +325,14 @@ export async function completeUberEatsOAuth(req, res) {
       logger.warn({ err: errorMsg(err), businessId }, 'Uber OAuth OK pero list stores falló');
     }
 
-    // 1 cuenta Vertial + 1 PDV + 1 tienda Uber → enlazar solo, sin elegir.
-    const { business, pdvs, solePdv } = await loadBusinessActivePdvs(req, businessId);
+    // OAuth solo conecta la cuenta. La tienda que devuelve Uber se elige después.
+    const { pdvs, solePdv } = await loadBusinessActivePdvs(req, businessId);
     const salesPointId = resolveUberSalesPointId(uber, pdvs, solePdv);
-    if (stores.length === 1 && salesPointId) {
-      const only = stores[0];
-      const storeId = String(only.storeId || '').trim();
-      const storeName = resolveUberDisplayStoreName({
-        solePdv,
-        business,
-        requestedName: only.name,
-        storeId,
-      });
-      let provisionError = '';
-      let posIntegrationEnabled = Boolean(only.integrationEnabled);
-      try {
-        await provisionUberEatsStore({
-          userAccessToken: tokens.accessToken,
-          storeId,
-          partnerStoreId: businessId,
-          businessId,
-        });
-      } catch (provErr) {
-        provisionError = errorMsg(provErr);
-      }
-      try {
-        const { accessToken: appAccessToken } = await getUberEatsAppAccessToken();
-        const posData = await getUberEatsPosData(appAccessToken, storeId);
-        posIntegrationEnabled = integrationEnabledFromPosData(posData);
-      } catch {
-        /* keep previous */
-      }
-      const now = new Date().toISOString();
+    if (salesPointId && !String(uber.salesPointId || '').trim()) {
       const fresh = await getWebConfigByBusinessId(req, businessId);
       integrations = await saveUberPatch(req, businessId, fresh, {
-        storeId,
-        storeName,
         salesPointId,
-        posIntegrationEnabled,
-        posDataCheckedAt: now,
-        provisionedAt: posIntegrationEnabled ? now : '',
-        lastProvisionError: provisionError || '',
       });
-    } else if (salesPointId && !String(uber.salesPointId || '').trim()) {
-      const fresh = await getWebConfigByBusinessId(req, businessId);
-      integrations = await saveUberPatch(req, businessId, fresh, { salesPointId });
     }
 
     logger.info(
@@ -375,7 +340,7 @@ export async function completeUberEatsOAuth(req, res) {
         businessId,
         scope: tokens.scope,
         stores: stores.length,
-        autoLinked: Boolean(integrations?.uber?.storeId),
+        storeSelectionRequired: true,
         salesPointId: integrations?.uber?.salesPointId || salesPointId || null,
         env: getUberEatsPublicConfig().env,
       },
@@ -389,7 +354,8 @@ export async function completeUberEatsOAuth(req, res) {
       expiresAt: tokens.expiresAt || '',
       scope: tokens.scope || '',
       stores,
-      autoLinked: Boolean(integrations?.uber?.storeId),
+      autoLinked: false,
+      storeSelectionRequired: true,
     });
   } catch (error) {
     logger.error({ error: errorMsg(error) }, 'Uber Eats OAuth callback failed');
@@ -491,16 +457,30 @@ export async function selectUberStoreForBusiness(req, res) {
       storeId,
     });
     const now = new Date().toISOString();
+    const storeChanged = String(uber.storeId || '').trim() !== storeId;
     const integrations = await saveUberPatch(req, businessId, current, {
       enabled: true,
       storeId,
       storeName,
-      provisionedAt: posIntegrationEnabled ? now : String(uber.provisionedAt || ''),
+      storeSelectionRequired: false,
+      provisionedAt: posIntegrationEnabled ? now : (storeChanged ? '' : String(uber.provisionedAt || '')),
       posIntegrationEnabled,
       posDataCheckedAt: now,
       salesPointId,
       oauth: true,
       lastProvisionError: provisionError || '',
+      ...(storeChanged ? {
+        menuPushedAt: '',
+        menuItemCount: 0,
+        lastStoreStatus: '',
+        lastStoreStatusAt: '',
+        lastWebhookAt: '',
+        lastWebhookType: '',
+        lastOrderAt: '',
+        lastOrderStatus: '',
+        lastMenuItemUpdatedAt: '',
+        lastMenuItemSuspendedAt: '',
+      } : {}),
     });
 
     logger.info(

@@ -278,6 +278,7 @@ export interface DeliveryIntegrationEntry {
   env?: string;
   storeId?: string;
   storeName?: string;
+  storeSelectionRequired?: boolean;
   salesPointId?: string;
   provisionedAt?: string;
   menuPushedAt?: string;
@@ -380,6 +381,7 @@ export async function completeUberEatsOAuthRequest(code: string, state: string) 
     scope?: string;
     stores?: UberEatsStoreOption[];
     autoLinked?: boolean;
+    storeSelectionRequired?: boolean;
     error?: string;
   }>('/api/uber-eats/oauth/callback', {
     method: 'POST',
