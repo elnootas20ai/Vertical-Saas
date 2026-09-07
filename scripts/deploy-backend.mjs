@@ -56,9 +56,23 @@ cd ${sq(repo)}
 
 echo "[deploy:backend] HEAD antes: $(git rev-parse --short HEAD) $(git log -1 --pretty=%s)"
 echo "[deploy:backend] git fetch + reset --hard origin (servidor = repo remoto)"
+# Nginx sirve dist/ desde este mismo checkout. Un reset backend no debe sustituir
+# el frontend publicado por el dist antiguo que pueda existir en Git.
+DIST_BACKUP=""
+if [ -d dist ]; then
+  DIST_BACKUP=$(mktemp -d)
+  cp -a dist/. "$DIST_BACKUP/"
+fi
 git fetch origin
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 git reset --hard "origin/$BRANCH"
+if [ -n "$DIST_BACKUP" ]; then
+  rm -rf dist
+  mkdir -p dist
+  cp -a "$DIST_BACKUP/." dist/
+  rm -rf "$DIST_BACKUP"
+  echo "[deploy:backend] dist/ preservado (frontend sin cambios)"
+fi
 echo "[deploy:backend] HEAD ahora: $(git rev-parse --short HEAD) $(git log -1 --pretty=%s)"
 
 MODE="${forcedMode}"
