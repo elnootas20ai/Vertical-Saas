@@ -3,6 +3,7 @@ import {
   getWebDbName,
   ensureDatabase,
   getDeliveryDbName,
+  buildWebConfigDocument,
   buildDeliveryOrderDocument,
   sanitizeDeliveryOrder,
   putDocument,
@@ -30,6 +31,7 @@ import {
   saveUberStoreBinding,
 } from '../services/uberStoreBindings.js';
 import {
+  getUberSandboxOrder,
   hasProcessedUberEvent,
   recordProcessedUberEvent,
   saveUberSandboxOrder,
@@ -409,6 +411,34 @@ async function handleUberPrimaryWebhook(req, res) {
           return;
         }
 
+        if (event.eventType === 'orders.cancel' || event.eventType === 'orders.failure') {
+          if (isUberEatsSandbox() && cfg?.business_id && event.orderId) {
+            const existingOrder = await getUberSandboxOrder(
+              req,
+              cfg.business_id,
+              event.orderId,
+            );
+            if (existingOrder) {
+              const cancelledAt = new Date().toISOString();
+              await saveUberSandboxOrder(req, {
+                ...existingOrder,
+                businessId: cfg.business_id,
+                externalOrderId: event.orderId,
+                status: 'cancelled',
+                cancelledAt,
+              });
+              await saveUberRuntimePatch(req, cfg, {
+                lastOrderAt: cancelledAt,
+                lastOrderCancelledAt: cancelledAt,
+                lastOrderId: event.orderId,
+                lastOrderStatus: 'cancelled_by_uber',
+              });
+            }
+          }
+          await markEventProcessed();
+          return;
+        }
+
         if (event.eventType !== 'orders.notification' && event.eventType !== 'orders.scheduled.notification') {
           logger.info({ eventType: event.eventType }, 'Uber webhook: evento ACK sin handler específico');
           await markEventProcessed();
@@ -519,6 +549,9 @@ async function handleUberPrimaryWebhook(req, res) {
             totalAmount: orderData.items.reduce((sum, item) => sum + Number(item.total || 0), 0),
             status: 'received',
             scheduledFor,
+            canAdjustReadyTime: typeof orderPayload?.can_adjust_ready_for_pickup_time === 'boolean'
+              ? orderPayload.can_adjust_ready_for_pickup_time
+              : null,
           });
           await saveUberRuntimePatch(req, cfg, {
             lastOrderAt: new Date().toISOString(),

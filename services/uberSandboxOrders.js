@@ -62,6 +62,8 @@ export function sanitizeUberSandboxOrder(doc) {
     deniedAt: clean(doc.deniedAt),
     readyAt: clean(doc.readyAt),
     cancelledAt: clean(doc.cancelledAt),
+    readyTimeUpdatedAt: clean(doc.readyTimeUpdatedAt),
+    canAdjustReadyTime: typeof doc.canAdjustReadyTime === 'boolean' ? doc.canAdjustReadyTime : null,
     prepMinutes: Number(doc.prepMinutes || 0),
     pickupTime: Number(doc.pickupTime || 0),
     lastError: clean(doc.lastError),
@@ -171,6 +173,10 @@ export async function saveUberSandboxOrder(req, data) {
     deniedAt: clean(data.deniedAt ?? existing?.deniedAt),
     readyAt: clean(data.readyAt ?? existing?.readyAt),
     cancelledAt: clean(data.cancelledAt ?? existing?.cancelledAt),
+    readyTimeUpdatedAt: clean(data.readyTimeUpdatedAt ?? existing?.readyTimeUpdatedAt),
+    canAdjustReadyTime: typeof data.canAdjustReadyTime === 'boolean'
+      ? data.canAdjustReadyTime
+      : (typeof existing?.canAdjustReadyTime === 'boolean' ? existing.canAdjustReadyTime : null),
     prepMinutes: Number(data.prepMinutes ?? existing?.prepMinutes ?? 0),
     pickupTime: Number(data.pickupTime ?? existing?.pickupTime ?? 0),
     lastError: clean(data.lastError ?? existing?.lastError),

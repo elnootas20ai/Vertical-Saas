@@ -357,11 +357,9 @@ export function UberStoreBindingsPanel({
                 </div>
                 {binding.brandId && binding.salesPointId && (
                   <div className="mt-2 flex flex-wrap gap-1.5 border-t border-stone-100 pt-2 dark:border-stone-800">
-                    {!binding.posIntegrationEnabled && (
-                      <button type="button" onClick={() => void runStoreAction(binding, 'pos')} disabled={busy} className={`${VERTIAL_BTN_PRIMARY} px-3 text-xs`}>
-                        Activar POS
-                      </button>
-                    )}
+                    <button type="button" onClick={() => void runStoreAction(binding, 'pos')} disabled={busy} className={`${VERTIAL_BTN_PRIMARY} px-3 text-xs`}>
+                      {binding.posIntegrationEnabled ? 'Verificar / reactivar POS' : 'Activar POS'}
+                    </button>
                     <button type="button" onClick={() => void runStoreAction(binding, 'menu')} disabled={busy || !binding.posIntegrationEnabled} className={`${VERTIAL_BTN_SECONDARY} px-3 text-xs`}>
                       {binding.menuPushedAt ? 'Republicar catálogo' : 'Publicar catálogo'}
                     </button>

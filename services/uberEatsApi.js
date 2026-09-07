@@ -121,6 +121,18 @@ export function clearUberEatsAppTokenCache() {
   cachedAppToken = null;
 }
 
+/**
+ * En sandbox Uber puede devolver integration_enabled=true aunque la app todavía
+ * no sea el order manager. Si expone pos_integration_enabled, ese es el estado
+ * que permite aceptar/denegar pedidos; solo usamos el campo general como legacy.
+ */
+export function isUberPosOrderManagerEnabled(posData) {
+  if (Object.prototype.hasOwnProperty.call(posData || {}, 'pos_integration_enabled')) {
+    return posData?.pos_integration_enabled === true;
+  }
+  return posData?.integration_enabled === true;
+}
+
 async function uberFetch({
   method = 'GET',
   path,
@@ -145,9 +157,16 @@ async function uberFetch({
   if (!okStatuses.includes(response.status) && !response.ok) {
     const msg = data.message || data.error || data.error_description || text || `HTTP ${response.status}`;
     logger.warn({ status: response.status, msg, path, method }, `${label} failed`);
-    throw new Error(`${label}: ${msg}`);
+    const error = new Error(`${label}: ${msg}`);
+    error.status = response.status;
+    error.uberData = data;
+    throw error;
   }
   return { status: response.status, data, text };
+}
+
+function shouldTryDeliveryFallback(error) {
+  return [404, 405].includes(Number(error?.status));
 }
 
 // ─── Stores / Onboarding ─────────────────────────────────────────────────────
@@ -167,7 +186,7 @@ export async function listUberEatsStores(userAccessToken) {
     name: String(s.name || s.store_name || 'Tienda'),
     address: String(s.location?.address || s.address || ''),
     city: String(s.location?.city || ''),
-    integrationEnabled: Boolean(s.pos_data?.integration_enabled ?? s.pos_data?.pos_integration_enabled),
+    integrationEnabled: isUberPosOrderManagerEnabled(s.pos_data),
   })).filter((s) => s.storeId);
 }
 
@@ -230,6 +249,9 @@ export async function provisionUberEatsStore({
     method: 'POST',
     path: `/v1/eats/stores/${encodeURIComponent(storeId)}/pos_data?${params.toString()}`,
     accessToken: userAccessToken,
+    // Aunque figure como deprecated, el propio ejemplo oficial de Uber sigue
+    // enviándolo y el sandbox lo usa para completar la nominación POS.
+    body: { pos_integration_enabled: true },
     okStatuses: [200, 204],
     label: 'Uber provision store',
   });
@@ -407,6 +429,7 @@ export async function acceptUberOrder(accessToken, orderId, {
     });
     return { ok: true, api: 'eats' };
   } catch (eatsErr) {
+    if (!shouldTryDeliveryFallback(eatsErr)) throw eatsErr;
     await uberFetch({
       method: 'POST',
       path: `/v1/delivery/order/${encodeURIComponent(orderId)}/accept`,
@@ -441,6 +464,7 @@ export async function denyUberOrder(accessToken, orderId, {
     });
     return { ok: true, api: 'eats' };
   } catch (eatsErr) {
+    if (!shouldTryDeliveryFallback(eatsErr)) throw eatsErr;
     await uberFetch({
       method: 'POST',
       path: `/v1/delivery/order/${encodeURIComponent(orderId)}/deny`,
@@ -471,6 +495,7 @@ export async function cancelUberOrder(accessToken, orderId, {
     });
     return { ok: true, api: 'eats' };
   } catch (eatsErr) {
+    if (!shouldTryDeliveryFallback(eatsErr)) throw eatsErr;
     await uberFetch({
       method: 'POST',
       path: `/v1/delivery/order/${encodeURIComponent(orderId)}/cancel`,
@@ -495,4 +520,24 @@ export async function markUberOrderReady(accessToken, orderId) {
     label: 'Uber mark order ready',
   });
   return { ok: true };
+}
+
+/** POST /v1/delivery/order/{id}/update-ready-time */
+export async function updateUberOrderReadyTime(accessToken, orderId, readyForPickupTime) {
+  if (!orderId) throw new Error('Falta orderId');
+  const date = readyForPickupTime instanceof Date
+    ? readyForPickupTime
+    : new Date(readyForPickupTime);
+  if (Number.isNaN(date.getTime()) || date.getTime() <= Date.now()) {
+    throw new Error('La nueva hora de recogida debe ser futura');
+  }
+  await uberFetch({
+    method: 'POST',
+    path: `/v1/delivery/order/${encodeURIComponent(orderId)}/update-ready-time`,
+    accessToken,
+    body: { ready_for_pickup_time: date.toISOString() },
+    okStatuses: [200, 204],
+    label: 'Uber update order ready time',
+  });
+  return { ok: true, readyForPickupTime: date.toISOString() };
 }

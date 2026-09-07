@@ -362,6 +362,8 @@ export interface UberSandboxOrder {
   deniedAt: string;
   readyAt: string;
   cancelledAt: string;
+  readyTimeUpdatedAt: string;
+  canAdjustReadyTime: boolean | null;
   prepMinutes: number;
   pickupTime: number;
   lastError: string;
@@ -525,7 +527,7 @@ export async function listUberSandboxOrdersRequest(businessId: string) {
 export async function actUberSandboxOrderRequest(
   businessId: string,
   externalOrderId: string,
-  action: 'accept' | 'deny' | 'ready' | 'cancel',
+  action: 'accept' | 'update_time' | 'deny' | 'ready' | 'cancel',
   opts?: { reason?: string; prepMinutes?: number },
 ) {
   return authRequest<{ ok: boolean; action: string; order: UberSandboxOrder; repeated?: boolean }>(

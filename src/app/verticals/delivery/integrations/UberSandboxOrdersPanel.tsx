@@ -71,7 +71,7 @@ export function UberSandboxOrdersPanel({ businessId, onEvidenceChanged }: Props)
 
   const act = async (
     order: UberSandboxOrder,
-    action: 'accept' | 'deny' | 'ready' | 'cancel',
+    action: 'accept' | 'update_time' | 'deny' | 'ready' | 'cancel',
   ) => {
     const reason = action === 'deny'
       ? 'Denegado desde pruebas Vertial'
@@ -86,7 +86,9 @@ export function UberSandboxOrdersPanel({ businessId, onEvidenceChanged }: Props)
         action,
         {
           reason,
-          prepMinutes: action === 'accept' ? (prepById[order.id] || 20) : undefined,
+          prepMinutes: action === 'accept' || action === 'update_time'
+            ? (prepById[order.id] || order.prepMinutes || 20)
+            : undefined,
         },
       );
       setOrders((current) => current.map((entry) => (
@@ -94,6 +96,7 @@ export function UberSandboxOrdersPanel({ businessId, onEvidenceChanged }: Props)
       )));
       toast.success({
         accept: 'Pedido aceptado en Uber',
+        update_time: 'Tiempo actualizado en Uber',
         deny: 'Pedido denegado en Uber',
         ready: 'Uber avisado: pedido listo',
         cancel: 'Pedido cancelado en Uber',
@@ -122,6 +125,8 @@ export function UberSandboxOrdersPanel({ businessId, onEvidenceChanged }: Props)
         deniedAt: order.deniedAt,
         readyAt: order.readyAt,
         cancelledAt: order.cancelledAt,
+        readyTimeUpdatedAt: order.readyTimeUpdatedAt,
+        prepMinutes: order.prepMinutes,
       })),
     };
     try {
@@ -233,6 +238,24 @@ export function UberSandboxOrdersPanel({ businessId, onEvidenceChanged }: Props)
                     )}
                     {order.status === 'accepted' && (
                       <>
+                        <select
+                          value={prepById[order.id] || order.prepMinutes || 20}
+                          onChange={(event) => setPrepById((current) => ({ ...current, [order.id]: Number(event.target.value) }))}
+                          className="min-h-11 rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-xs dark:border-stone-700 dark:bg-stone-950"
+                          aria-label="Nuevo tiempo de preparación"
+                          disabled={busy || order.canAdjustReadyTime === false}
+                        >
+                          {[5, 10, 15, 20, 30, 45, 60].map((minutes) => <option key={minutes} value={minutes}>{minutes} min</option>)}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => void act(order, 'update_time')}
+                          disabled={busy || order.canAdjustReadyTime === false}
+                          className={`${VERTIAL_BTN_SECONDARY} px-3 text-xs`}
+                          title={order.canAdjustReadyTime === false ? 'Uber no permite cambiar el tiempo de este pedido' : undefined}
+                        >
+                          Cambiar tiempo
+                        </button>
                         <button type="button" onClick={() => void act(order, 'ready')} disabled={busy} className={`${VERTIAL_BTN_PRIMARY} px-3 text-xs`}>Marcar listo</button>
                         <button type="button" onClick={() => setPendingDanger({ order, action: 'cancel' })} disabled={busy} className={`${VERTIAL_BTN_DANGER} px-3 text-xs`}>Cancelar</button>
                       </>

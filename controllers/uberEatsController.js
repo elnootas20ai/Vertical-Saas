@@ -36,8 +36,10 @@ import {
   denyUberOrder,
   getUberEatsAppAccessToken,
   getUberStoreStatus,
+  isUberPosOrderManagerEnabled,
   markUberOrderReady,
   setUberStoreStatus,
+  updateUberOrderReadyTime,
 } from '../services/uberEatsApi.js';
 import { pushUberMenuFromCatalog, setUberMenuItemSuspension } from '../services/uberEatsMenu.js';
 import {
@@ -71,11 +73,7 @@ function errorMsg(error) {
 }
 
 function integrationEnabledFromPosData(posData) {
-  return Boolean(
-    posData?.integration_enabled
-    ?? posData?.pos_integration_enabled
-    ?? false
-  );
+  return isUberPosOrderManagerEnabled(posData);
 }
 
 function certCheck(key, label, ok, detail = '', at = '') {
@@ -437,7 +435,25 @@ export async function listUberBindingsForBusiness(req, res) {
     if (!businessId) return badRequest(res, 'Falta businessId');
     if (!(await requireUberBusinessAccess(req, res, businessId))) return;
     const { uber } = await loadUberIntegration(req, businessId);
-    const bindings = await loadUberBindings(req, businessId, uber);
+    let bindings = await loadUberBindings(req, businessId, uber);
+    if (isUberEatsSandbox() && bindings.length) {
+      try {
+        const { accessToken } = await getUberEatsAppAccessToken();
+        bindings = await Promise.all(bindings.map(async (binding) => {
+          try {
+            const posData = await getUberEatsPosData(accessToken, binding.storeId);
+            return {
+              ...binding,
+              posIntegrationEnabled: integrationEnabledFromPosData(posData),
+            };
+          } catch {
+            return binding;
+          }
+        }));
+      } catch {
+        // La pantalla sigue disponible con el último estado persistido.
+      }
+    }
     return res.json({ ok: true, bindings });
   } catch (error) {
     return res.status(500).json({ ok: false, error: errorMsg(error) });
@@ -756,8 +772,14 @@ export async function activateUberPosForBusiness(req, res) {
       businessId,
     });
     const { accessToken: appAccessToken } = await getUberEatsAppAccessToken();
-    const posData = await getUberEatsPosData(appAccessToken, storeId);
-    const posIntegrationEnabled = integrationEnabledFromPosData(posData);
+    let posData = await getUberEatsPosData(appAccessToken, storeId);
+    let posIntegrationEnabled = integrationEnabledFromPosData(posData);
+    // La nominación como order manager puede tardar unos segundos en reflejarse.
+    for (let attempt = 0; !posIntegrationEnabled && attempt < 2; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 750));
+      posData = await getUberEatsPosData(appAccessToken, storeId);
+      posIntegrationEnabled = integrationEnabledFromPosData(posData);
+    }
     const now = new Date().toISOString();
     const salesPointId = binding.salesPointId;
     await saveUberStoreBinding(req, {
@@ -778,7 +800,7 @@ export async function activateUberPosForBusiness(req, res) {
     if (!posIntegrationEnabled) {
       return res.status(409).json({
         ok: false,
-        error: 'Uber todavía devuelve integration_enabled=false',
+        error: 'Uber todavía devuelve pos_integration_enabled=false: Vertial aún no es el gestor de pedidos',
         storeId,
         posData,
         integrations,
@@ -1238,13 +1260,19 @@ export async function actUberSandboxOrderForBusiness(req, res) {
     const action = String(req.body?.action || '').trim().toLowerCase();
     const reason = String(req.body?.reason || '').trim();
     if (!businessId || !externalOrderId) return badRequest(res, 'Falta empresa u order ID');
-    if (!['accept', 'deny', 'ready', 'cancel'].includes(action)) {
+    if (!['accept', 'update_time', 'deny', 'ready', 'cancel'].includes(action)) {
       return badRequest(res, 'Acción sandbox no válida');
     }
     if (!(await requireUberBusinessManager(req, res, businessId))) return;
     const order = await getUberSandboxOrder(req, businessId, externalOrderId);
     if (!order) return res.status(404).json({ ok: false, error: 'Pedido sandbox no encontrado' });
-    const binding = await getUberStoreBinding(req, 'sandbox', order.storeId);
+    const { uber: currentUber } = await loadUberIntegration(req, businessId);
+    const persistedBinding = await getUberStoreBinding(req, 'sandbox', order.storeId);
+    const binding = persistedBinding || (
+      String(currentUber.storeId || '') === order.storeId
+        ? legacyUberBinding(businessId, currentUber)
+        : null
+    );
     if (!binding || binding.businessId !== businessId) {
       return res.status(409).json({ ok: false, error: 'El pedido no tiene un binding Uber válido' });
     }
@@ -1262,40 +1290,80 @@ export async function actUberSandboxOrderForBusiness(req, res) {
     if ((action === 'ready' || action === 'cancel') && !order.acceptedAt) {
       return res.status(409).json({ ok: false, error: 'Acepta primero el pedido' });
     }
+    if (action === 'update_time' && !order.acceptedAt) {
+      return res.status(409).json({ ok: false, error: 'Acepta primero el pedido' });
+    }
+    if (action === 'update_time' && order.readyAt) {
+      return res.status(409).json({ ok: false, error: 'El pedido ya está listo; no se puede cambiar el tiempo' });
+    }
+    if (action === 'update_time' && order.canAdjustReadyTime === false) {
+      return res.status(409).json({ ok: false, error: 'Uber no permite cambiar el tiempo de este pedido' });
+    }
 
-    const { accessToken } = await getUberEatsAppAccessToken();
     const now = new Date().toISOString();
     const patch = { lastError: '' };
-    if (action === 'accept') {
-      const prepMinutes = Math.min(
-        180,
-        Math.max(5, Number(req.body?.prepMinutes) || binding.defaultPrepMinutes || 20),
-      );
-      const pickupTime = Math.floor(Date.now() / 1000) + prepMinutes * 60;
-      await acceptUberOrder(accessToken, externalOrderId, {
-        externalReferenceId: order.orderNumber || order.id,
-        pickupTime,
-      });
-      Object.assign(patch, {
-        status: 'accepted',
-        acceptedAt: now,
-        prepMinutes,
-        pickupTime,
-      });
-    } else if (action === 'deny') {
-      await denyUberOrder(accessToken, externalOrderId, {
-        explanation: reason || 'Denegado desde pruebas Vertial',
-      });
-      Object.assign(patch, { status: 'denied', deniedAt: now });
-    } else if (action === 'ready') {
-      await markUberOrderReady(accessToken, externalOrderId);
-      Object.assign(patch, { status: 'ready', readyAt: now });
-    } else {
-      await cancelUberOrder(accessToken, externalOrderId, {
-        reason: 'OTHER',
-        details: reason || 'Cancelado desde pruebas Vertial',
-      });
-      Object.assign(patch, { status: 'cancelled', cancelledAt: now });
+    try {
+      const { accessToken } = await getUberEatsAppAccessToken();
+      const livePosData = await getUberEatsPosData(accessToken, order.storeId);
+      if (!integrationEnabledFromPosData(livePosData)) {
+        const posError = new Error(
+          'Vertial aún no es el gestor POS de esta tienda. Activa el POS antes de gestionar pedidos.',
+        );
+        posError.status = 409;
+        throw posError;
+      }
+      if (action === 'accept') {
+        const prepMinutes = Math.min(
+          180,
+          Math.max(5, Math.round(Number(req.body?.prepMinutes) || binding.defaultPrepMinutes || 20)),
+        );
+        const pickupTime = Math.floor(Date.now() / 1000) + prepMinutes * 60;
+        await acceptUberOrder(accessToken, externalOrderId, {
+          externalReferenceId: order.orderNumber || order.id,
+          pickupTime,
+        });
+        Object.assign(patch, {
+          status: 'accepted',
+          acceptedAt: now,
+          prepMinutes,
+          pickupTime,
+        });
+      } else if (action === 'update_time') {
+        const prepMinutes = Math.min(
+          180,
+          Math.max(5, Math.round(Number(req.body?.prepMinutes) || order.prepMinutes || 20)),
+        );
+        const readyForPickup = new Date(Date.now() + prepMinutes * 60_000);
+        await updateUberOrderReadyTime(accessToken, externalOrderId, readyForPickup);
+        Object.assign(patch, {
+          prepMinutes,
+          pickupTime: Math.floor(readyForPickup.getTime() / 1000),
+          readyTimeUpdatedAt: now,
+        });
+      } else if (action === 'deny') {
+        await denyUberOrder(accessToken, externalOrderId, {
+          explanation: reason || 'Denegado desde pruebas Vertial',
+          code: 'CAPACITY',
+        });
+        Object.assign(patch, { status: 'denied', deniedAt: now });
+      } else if (action === 'ready') {
+        await markUberOrderReady(accessToken, externalOrderId);
+        Object.assign(patch, { status: 'ready', readyAt: now });
+      } else {
+        await cancelUberOrder(accessToken, externalOrderId, {
+          reason: 'OTHER',
+          details: reason || 'Cancelado desde pruebas Vertial',
+        });
+        Object.assign(patch, { status: 'cancelled', cancelledAt: now });
+      }
+    } catch (apiError) {
+      await saveUberSandboxOrder(req, {
+        ...order,
+        businessId,
+        externalOrderId,
+        lastError: errorMsg(apiError),
+      }).catch(() => null);
+      throw apiError;
     }
 
     const savedOrder = await saveUberSandboxOrder(req, {
@@ -1313,6 +1381,7 @@ export async function actUberSandboxOrderForBusiness(req, res) {
         deny: 'lastOrderDeniedAt',
         cancel: 'lastOrderCancelledAt',
         ready: 'lastOrderReadyAt',
+        update_time: 'lastOrderReadyTimeUpdatedAt',
       }[action]]: now,
       lastOrderAt: now,
       lastOrderStatus: action,
@@ -1323,6 +1392,7 @@ export async function actUberSandboxOrderForBusiness(req, res) {
       deny: 'lastOrderDeniedAt',
       cancel: 'lastOrderCancelledAt',
       ready: 'lastOrderReadyAt',
+      update_time: 'lastOrderReadyTimeUpdatedAt',
     }[action];
     await saveUberPatch(req, businessId, current, {
       [evidenceField]: now,
@@ -1333,7 +1403,9 @@ export async function actUberSandboxOrderForBusiness(req, res) {
     return res.json({ ok: true, action, order: savedOrder });
   } catch (error) {
     logger.error({ error: errorMsg(error) }, 'Uber sandbox console action failed');
-    return res.status(500).json({ ok: false, error: errorMsg(error) });
+    const upstreamStatus = Number(error?.status);
+    const responseStatus = upstreamStatus >= 400 && upstreamStatus < 500 ? upstreamStatus : 502;
+    return res.status(responseStatus).json({ ok: false, error: errorMsg(error) });
   }
 }
 
