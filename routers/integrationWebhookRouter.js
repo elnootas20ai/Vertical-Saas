@@ -18,11 +18,20 @@ import {
   parseUberWebhookEvent,
   verifyUberWebhookSignature,
 } from '../services/uberEatsWebhook.js';
-import { isUberEatsSandbox } from '../services/uberEatsOAuth.js';
+import { getUberEatsEnv, isUberEatsSandbox } from '../services/uberEatsOAuth.js';
 import { getUberEatsAppAccessToken } from '../services/uberEatsApi.js';
 import { autoAcceptUberOrderAfterIngest } from '../services/uberEatsOrderSync.js';
 import { pushUberMenuFromCatalog } from '../services/uberEatsMenu.js';
 import logger from '../services/logger.js';
+import {
+  getUberStoreBinding,
+  saveUberStoreBinding,
+} from '../services/uberStoreBindings.js';
+import {
+  hasProcessedUberEvent,
+  recordProcessedUberEvent,
+  saveUberSandboxOrder,
+} from '../services/uberSandboxOrders.js';
 
 const webhookRouter = Router();
 
@@ -39,6 +48,12 @@ async function getIntegrationConfig(req, businessId) {
 
 /** Negocio Vertial con Uber OAuth (opcionalmente filtrado por store_id Uber). */
 async function findUberOauthBusiness(req, storeId = '') {
+  if (!storeId) return null;
+  const binding = await getUberStoreBinding(req, getUberEatsEnv(), storeId);
+  if (binding?.businessId) {
+    const config = await getWebConfigByBusinessId(req, binding.businessId);
+    if (config && !config.deletedAt) return { ...config, __uberBinding: binding };
+  }
   const db = getWebDbName();
   await ensureDatabase(req, db);
   let docs = [];
@@ -52,7 +67,6 @@ async function findUberOauthBusiness(req, storeId = '') {
     return Boolean(uber?.oauth || uber?.accessToken) && !d.deletedAt;
   });
   if (!withOauth.length) return null;
-  if (!storeId) return null;
   const match = withOauth.find((d) => String(d.integrations?.uber?.storeId || '') === storeId);
   // Nunca enrutar un evento de una store desconocida al primer negocio OAuth:
   // mezclaría pedidos entre empresas.
@@ -280,12 +294,33 @@ async function handleUberPrimaryWebhook(req, res) {
           );
           return;
         }
+        if (event.eventId && await hasProcessedUberEvent(req, getUberEatsEnv(), event.eventId)) {
+          logger.info({ eventId: event.eventId, storeId: event.storeId }, 'Uber webhook duplicado omitido');
+          return;
+        }
+        const binding = cfg?.__uberBinding || null;
+        const markEventProcessed = () => recordProcessedUberEvent(req, {
+          environment: getUberEatsEnv(),
+          eventId: event.eventId,
+          eventType: event.eventType,
+          storeId: event.storeId,
+          businessId: cfg?.business_id || '',
+        });
         if (cfg?.business_id) {
           await saveUberRuntimePatch(req, cfg, {
             lastWebhookAt: new Date().toISOString(),
             lastWebhookType: event.eventType,
             lastWebhookEventId: event.eventId,
           });
+          if (binding) {
+            await saveUberStoreBinding(req, {
+              ...binding,
+              businessId: binding.businessId,
+              environment: binding.environment,
+              lastWebhookAt: new Date().toISOString(),
+              lastWebhookType: event.eventType,
+            });
+          }
         }
 
         if (event.eventType === 'store.provisioned' && event.storeId) {
@@ -306,6 +341,7 @@ async function handleUberPrimaryWebhook(req, res) {
             await putDocument(req, getWebDbName(), doc._id, doc);
             logger.info({ businessId: cfg.business_id, storeId: event.storeId }, 'Uber store.provisioned guardado');
           }
+          await markEventProcessed();
           return;
         }
 
@@ -328,6 +364,7 @@ async function handleUberPrimaryWebhook(req, res) {
               logger.info({ businessId: cfg.business_id, storeId: event.storeId }, 'Uber store.deprovisioned');
             }
           }
+          await markEventProcessed();
           return;
         }
 
@@ -338,7 +375,8 @@ async function handleUberPrimaryWebhook(req, res) {
               await pushUberMenuFromCatalog(req, {
                 businessId: cfg.business_id,
                 storeId,
-                storeName: String(cfg.integrations?.uber?.storeName || ''),
+                storeName: String(binding?.storeName || cfg.integrations?.uber?.storeName || ''),
+                brandId: String(binding?.brandId || ''),
               });
             } catch (err) {
               logger.warn(
@@ -347,6 +385,7 @@ async function handleUberPrimaryWebhook(req, res) {
               );
             }
           }
+          await markEventProcessed();
           return;
         }
 
@@ -355,11 +394,13 @@ async function handleUberPrimaryWebhook(req, res) {
             { storeId: event.storeId, eventId: event.eventId, meta: req.body?.meta },
             'Uber store.status.changed',
           );
+          await markEventProcessed();
           return;
         }
 
         if (event.eventType !== 'orders.notification' && event.eventType !== 'orders.scheduled.notification') {
           logger.info({ eventType: event.eventType }, 'Uber webhook: evento ACK sin handler específico');
+          await markEventProcessed();
           return;
         }
 
@@ -406,7 +447,9 @@ async function handleUberPrimaryWebhook(req, res) {
           businessId,
         ).catch(() => []);
         const activePdvs = pdvs.filter((pdv) => pdv.active !== false);
-        const configuredPdvId = String(cfg.integrations?.uber?.salesPointId || '').trim();
+        const configuredPdvId = String(
+          binding?.salesPointId || cfg.integrations?.uber?.salesPointId || '',
+        ).trim();
         const primaryPdv = configuredPdvId
           ? activePdvs.find((pdv) => String(pdv._id || '') === configuredPdvId)
           : (activePdvs.length === 1 ? activePdvs[0] : null);
@@ -431,12 +474,69 @@ async function handleUberPrimaryWebhook(req, res) {
           salesPointId: String(primaryPdv?._id || ''),
           salesPointName: String(primaryPdv?.name || ''),
         };
+        const bindingBrandId = String(binding?.brandId || '').trim();
+        if (bindingBrandId) {
+          orderData.items = orderData.items.map((item) => ({
+            ...item,
+            brandIds: [bindingBrandId],
+          }));
+        }
         if (!orderData.externalOrderId) orderData.externalOrderId = event.orderId;
+
+        if (isUberEatsSandbox()) {
+          const scheduledFor = String(
+            orderPayload?.scheduled_for
+            || orderPayload?.scheduled_time
+            || orderPayload?.order_manager_closes_at
+            || '',
+          );
+          const sandboxOrder = await saveUberSandboxOrder(req, {
+            businessId,
+            environment: 'sandbox',
+            bindingId: binding?.id || '',
+            storeId: event.storeId,
+            storeName: binding?.storeName || cfg.integrations?.uber?.storeName || '',
+            brandId: bindingBrandId,
+            brandName: binding?.brandName || '',
+            salesPointId: String(primaryPdv?._id || ''),
+            salesPointName: String(primaryPdv?.name || ''),
+            externalOrderId: orderData.externalOrderId,
+            orderNumber: String(orderPayload?.display_id || orderPayload?.id || event.orderId),
+            customerName: orderData.customerName,
+            deliveryType: orderData.deliveryType,
+            items: orderData.items,
+            totalAmount: orderData.items.reduce((sum, item) => sum + Number(item.total || 0), 0),
+            status: 'received',
+            scheduledFor,
+          });
+          await saveUberRuntimePatch(req, cfg, {
+            lastOrderAt: new Date().toISOString(),
+            lastOrderId: orderData.externalOrderId,
+            lastOrderStatus: 'pending_manual_decision',
+          });
+          if (binding) {
+            await saveUberStoreBinding(req, {
+              ...binding,
+              businessId,
+              environment: binding.environment,
+              lastOrderAt: new Date().toISOString(),
+              lastOrderStatus: 'pending_manual_decision',
+            });
+          }
+          broadcastToBusiness(businessId, 'uber:sandbox_order_created', { order: sandboxOrder });
+          await markEventProcessed();
+          logger.info(
+            { businessId, storeId: event.storeId, orderId: orderData.externalOrderId },
+            'Uber sandbox: pedido aislado de TPV y Caja',
+          );
+          return;
+        }
 
         if (orderData.externalOrderId) {
           const isDup = await checkDuplicateExternalOrder(req, dataUserId, orderData.externalOrderId);
           if (isDup) {
             logger.info({ orderId: orderData.externalOrderId }, 'Uber webhook: pedido ya existía');
+            await markEventProcessed();
             return;
           }
         }
@@ -460,15 +560,7 @@ async function handleUberPrimaryWebhook(req, res) {
           'Uber webhook: pedido creado en Vertial',
         );
 
-        // En certificación necesitamos demostrar aceptar Y denegar desde el TPV.
-        // Producción conserva la autoaceptación para cumplir SLA.
-        if (isUberEatsSandbox()) {
-          await saveUberRuntimePatch(req, cfg, {
-            lastOrderStatus: 'pending_manual_decision',
-          });
-          return;
-        }
-
+        // Sandbox se desvía antes a la consola aislada. Producción conserva autoaceptación.
         const acceptResult = await autoAcceptUberOrderAfterIngest({
           orderId: orderData.externalOrderId,
           externalReferenceId: doc.orderNumber || doc._id,
@@ -497,6 +589,7 @@ async function handleUberPrimaryWebhook(req, res) {
             logger.warn({ err: err?.message }, 'Uber webhook: no se pudo marcar uberAcceptedAt');
           }
         }
+        await markEventProcessed();
       } catch (error) {
         logger.error({ error: error?.message || String(error) }, 'Uber webhook: error post-ACK');
       }

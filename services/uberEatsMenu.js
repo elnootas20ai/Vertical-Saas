@@ -46,6 +46,17 @@ function uberPriceForItem(item) {
   return moneyCents(item.unitPrice);
 }
 
+export function filterUberCatalogItemsForBrand(items = [], brandId = '') {
+  const selectedBrandId = String(brandId || '').trim();
+  if (!selectedBrandId) return Array.isArray(items) ? items : [];
+  return (Array.isArray(items) ? items : []).filter((item) => {
+    const itemBrandIds = Array.isArray(item?.brandIds)
+      ? item.brandIds.map((id) => String(id || '').trim()).filter(Boolean)
+      : [];
+    return itemBrandIds.length === 0 || itemBrandIds.includes(selectedBrandId);
+  });
+}
+
 /**
  * Construye MenuConfiguration v2 a partir del catálogo Vertial.
  */
@@ -117,6 +128,7 @@ export async function pushUberMenuFromCatalog(req, {
   businessId,
   storeId,
   storeName = '',
+  brandId = '',
 }) {
   if (!businessId) throw new Error('Falta businessId');
   if (!storeId) throw new Error('Falta storeId');
@@ -127,12 +139,16 @@ export async function pushUberMenuFromCatalog(req, {
   const ownerBusinesses = await listOwnerBusinessesForUser(req, catalogOwnerId).catch(() => []);
   const ownerHasMultipleBusinesses = ownerBusinesses.filter((entry) => !entry.deletedAt).length > 1;
   const ownerItems = await listCatalogItemsByUser(req, catalogOwnerId, { module: 'catalog' });
-  const items = ownerItems.filter((item) => {
+  const selectedBrandId = String(brandId || '').trim();
+  const businessItems = ownerItems.filter((item) => {
     const itemBusinessId = String(item.business_id || item.businessId || '').trim();
-    if (itemBusinessId) return itemBusinessId === businessId;
-    // Catálogo legacy sin business_id solo es inequívoco con una única empresa.
-    return !ownerHasMultipleBusinesses;
+    const inBusiness = itemBusinessId
+      ? itemBusinessId === businessId
+      : !ownerHasMultipleBusinesses;
+    return inBusiness;
   });
+  // Catálogo sin marca mantiene la semántica Vertial de producto compartido.
+  const items = filterUberCatalogItemsForBrand(businessItems, selectedBrandId);
   const menu = buildUberMenuFromCatalogItems(items, { storeName: storeName || 'Menu Vertial' });
   if (!menu.items.length) {
     throw new Error('No hay productos de catálogo activos para subir a Uber Eats');
@@ -140,7 +156,14 @@ export async function pushUberMenuFromCatalog(req, {
   const { accessToken } = await getUberEatsAppAccessToken();
   await uploadUberEatsMenu(accessToken, storeId, menu);
   logger.info(
-    { businessId, catalogOwnerId, storeId, items: menu.items.length, categories: menu.categories.length },
+    {
+      businessId,
+      catalogOwnerId,
+      storeId,
+      brandId: selectedBrandId || null,
+      items: menu.items.length,
+      categories: menu.categories.length,
+    },
     'Uber menu uploaded from Vertial catalog',
   );
   return {

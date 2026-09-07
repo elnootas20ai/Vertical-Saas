@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  Plug, Save, Loader2, Eye, EyeOff, ToggleLeft, ToggleRight, ExternalLink, Copy, Check, Link2, Store, ChevronDown,
+  Plug, Save, Loader2, Eye, EyeOff, ExternalLink, Copy, Check, Link2, Store, ChevronDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
@@ -34,12 +34,28 @@ import {
   DEFAULT_DELIVERY_INTEGRATIONS,
   AGGREGATOR_PLATFORMS,
   normalizeDeliveryIntegrations,
+  resolveAggregatorIntegrationKey,
+  type AggregatorIntegrationKey,
 } from '../../lib/deliveryIntegrationsUi';
+import {
+  IntegrationPlatformSummaryBar,
+  UberSandboxOrdersPanel,
+  UberStoreBindingsPanel,
+  type IntegrationPlatformSummary,
+} from '../../verticals/delivery';
 import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import { isVertialSuperAdminEmail } from '../../lib/superAdmin';
 import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY, VERTIAL_BTN_DANGER, VERTIAL_SURFACE } from '../../lib/vertialUiTokens';
 
 const UBER_PRIMARY_WEBHOOK = 'https://vertialapp.com/api/delivery-webhooks/ubereats';
+const UBER_OAUTH_REDIRECT_PATH = '/saas/vertical/delivery/integraciones';
+const UBER_ORDER_CHECK_KEYS = new Set([
+  'order_received',
+  'order_accepted',
+  'order_denied',
+  'order_cancelled',
+  'order_ready',
+]);
 
 export function DeliveryIntegrations() {
   const { user } = useAuth();
@@ -50,6 +66,11 @@ export function DeliveryIntegrations() {
   const pageTitle = isRestaurant ? 'Integradores' : 'Integraciones';
   const canSeeTechSetup = isVertialSuperAdminEmail(user?.email);
   const [searchParams, setSearchParams] = useSearchParams();
+  const platformParam = searchParams.get('platform');
+  const activePlatform = useMemo(
+    () => (platformParam ? resolveAggregatorIntegrationKey(platformParam) : null),
+    [platformParam],
+  );
   const oauthHandledRef = useRef<string | null>(null);
 
   const [integrations, setIntegrations] = useState<DeliveryIntegrations>(DEFAULT_DELIVERY_INTEGRATIONS);
@@ -77,8 +98,27 @@ export function DeliveryIntegrations() {
   const [uberCert, setUberCert] = useState<UberCertStatus | null>(null);
   const [uberTestItemId, setUberTestItemId] = useState('');
   const [updatingUberItem, setUpdatingUberItem] = useState(false);
+  const [uberPanelTab, setUberPanelTab] = useState<'configuration' | 'sandbox'>('configuration');
 
   const apiBase = useMemo(() => getApiBase(), []);
+  const selectPlatform = useCallback((platform: AggregatorIntegrationKey) => {
+    const next = new URLSearchParams(searchParams);
+    next.set('platform', platform);
+    next.delete('code');
+    next.delete('state');
+    next.delete('error');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  const clearUberOAuthParams = useCallback(() => {
+    const next = new URLSearchParams(searchParams);
+    next.set('platform', 'uber');
+    next.delete('code');
+    next.delete('state');
+    next.delete('error');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
   const buildWebhookUrl = useCallback(
     (urlSlug: string): string => `${apiBase}/api/delivery-webhooks/${urlSlug}/${businessId}`,
     [apiBase, businessId],
@@ -200,7 +240,7 @@ export function DeliveryIntegrations() {
     const err = searchParams.get('error');
     if (err) {
       toast.error(`No se pudo conectar Uber: ${err}`);
-      setSearchParams({}, { replace: true });
+      clearUberOAuthParams();
       return;
     }
     if (!code || !state) return;
@@ -209,19 +249,19 @@ export function DeliveryIntegrations() {
     try {
       if (sessionStorage.getItem('vertial_uber_oauth_block') === '1') {
         sessionStorage.removeItem('vertial_uber_oauth_block');
-        setSearchParams({}, { replace: true });
+        clearUberOAuthParams();
         return;
       }
     } catch { /* ignore */ }
 
     const key = `${code}:${state}`;
     if (oauthHandledRef.current === key) {
-      setSearchParams({}, { replace: true });
+      clearUberOAuthParams();
       return;
     }
     oauthHandledRef.current = key;
     // Limpiar URL YA para que un F5 / atrás no vuelva a conectar solo.
-    setSearchParams({}, { replace: true });
+    clearUberOAuthParams();
 
     void (async () => {
       setConnectingUber(true);
@@ -240,7 +280,7 @@ export function DeliveryIntegrations() {
         setConnectingUber(false);
       }
     })();
-  }, [businessId, searchParams, setSearchParams, applyIntegrations]);
+  }, [businessId, searchParams, clearUberOAuthParams, applyIntegrations]);
 
   const saveIntegrations = async () => {
     if (!businessId) return;
@@ -262,7 +302,8 @@ export function DeliveryIntegrations() {
     setUberStores([]);
     try {
       try { sessionStorage.removeItem('vertial_uber_oauth_block'); } catch { /* ignore */ }
-      const res = await startUberEatsOAuthRequest(businessId, forceLogin);
+      const redirectUri = `${window.location.origin}${UBER_OAUTH_REDIRECT_PATH}`;
+      const res = await startUberEatsOAuthRequest(businessId, forceLogin, redirectUri);
       if (!res.authorizeUrl) throw new Error('Sin URL de autorización');
       window.location.href = res.authorizeUrl;
     } catch (e) {
@@ -412,7 +453,7 @@ export function DeliveryIntegrations() {
     });
     try {
       try { sessionStorage.setItem('vertial_uber_oauth_block', '1'); } catch { /* ignore */ }
-      setSearchParams({}, { replace: true });
+      clearUberOAuthParams();
       oauthHandledRef.current = null;
       const res = await disconnectUberEatsRequest(businessId);
       if (res.integrations) applyIntegrations(res.integrations);
@@ -500,15 +541,26 @@ export function DeliveryIntegrations() {
     }
   };
 
-  const toggleEnabled = (key: keyof DeliveryIntegrations) => {
-    if (key === 'uber') return;
-    setIntegrations((prev) => {
-      const current = prev[key] ?? DEFAULT_DELIVERY_INTEGRATIONS[key];
-      return {
-        ...normalizeDeliveryIntegrations(prev),
-        [key]: { ...current, enabled: !current.enabled },
-      };
-    });
+  const toggleEnabled = async (key: Exclude<AggregatorIntegrationKey, 'uber'>) => {
+    if (!businessId || saving) return;
+    const previous = normalizeDeliveryIntegrations(integrations);
+    const current = previous[key] ?? DEFAULT_DELIVERY_INTEGRATIONS[key];
+    const next = {
+      ...previous,
+      [key]: { ...current, enabled: !current.enabled },
+    };
+    setIntegrations(next);
+    setSaving(true);
+    try {
+      const res = await saveDeliveryIntegrationsRequest(businessId, next);
+      if (res.integrations) applyIntegrations(res.integrations);
+      toast.success(`${AGGREGATOR_PLATFORMS.find((item) => item.integrationKey === key)?.label || key} ${next[key].enabled ? 'activado' : 'desactivado'}`);
+    } catch {
+      setIntegrations(previous);
+      toast.error('No se pudo guardar el cambio');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const activeCount = AGGREGATOR_PLATFORMS.filter((p) => integrations[p.integrationKey]?.enabled).length;
@@ -538,6 +590,70 @@ export function DeliveryIntegrations() {
     const def = AGGREGATOR_PLATFORMS.find((p) => p.integrationKey === key)!;
     return { key, urlSlug, devUrl, ...def };
   });
+
+  const platformSummaries: IntegrationPlatformSummary[] = platformCards.map(({ key, label, colorClass }) => {
+    const entry = integrations[key] ?? DEFAULT_DELIVERY_INTEGRATIONS[key];
+    if (key === 'uber') {
+      const status = uberStoreSelectionRequired
+        ? 'Elige tienda'
+        : uberReceivingOrders
+          ? 'ONLINE'
+          : uberOnline && !uberPosReady
+            ? 'POS pendiente'
+            : uberOauth
+              ? 'Conectada · pausa'
+              : 'Sin conectar';
+      const statusTone = uberStoreSelectionRequired
+        ? 'info'
+        : uberReceivingOrders
+          ? 'active'
+          : uberOauth
+            ? 'warning'
+            : 'inactive';
+      return {
+        key,
+        label,
+        badgeClass: colorClass,
+        status,
+        statusTone,
+        storeLabel: uberStoreSelectionRequired
+          ? 'Selecciona una tienda Uber'
+          : integrations.uber?.storeName || linkedPdvName || 'Sin tienda vinculada',
+        enabled: uberReceivingOrders,
+        busy: settingUberStatus || activatingUberPos || pushingMenu || connectingUber,
+        disabled: disconnectingUber || (!uberOauth && uberCfg?.configured === false),
+        toggleTitle: uberReceivingOrders ? 'Pausar pedidos Uber' : 'Activar pedidos Uber',
+      };
+    }
+
+    const configured = Boolean(entry.token);
+    return {
+      key,
+      label,
+      badgeClass: colorClass,
+      status: entry.enabled ? (configured ? 'Activa' : 'Config. pendiente') : 'Apagada',
+      statusTone: entry.enabled ? (configured ? 'active' : 'warning') : 'inactive',
+      storeLabel: entry.storeName
+        || (key === 'flipdish'
+          ? (configured ? 'Entrada web configurada' : 'Entrada web sin configurar')
+          : (configured ? 'Webhook configurado' : 'Sin tienda vinculada')),
+      enabled: entry.enabled,
+      busy: saving,
+      disabled: !businessId,
+      toggleTitle: entry.enabled ? `Apagar ${label}` : `Encender ${label}`,
+    };
+  });
+  const uberBaseChecks = (uberCert?.checks || []).filter((check) => !UBER_ORDER_CHECK_KEYS.has(check.key));
+  const uberOrderChecks = (uberCert?.checks || []).filter((check) => UBER_ORDER_CHECK_KEYS.has(check.key));
+  const uberBaseCompleted = uberBaseChecks.filter((check) => check.status === 'ok').length;
+
+  const togglePlatform = (platform: AggregatorIntegrationKey) => {
+    if (platform === 'uber') {
+      void (uberReceivingOrders ? turnUberOff() : turnUberOn());
+      return;
+    }
+    void toggleEnabled(platform);
+  };
 
   return (
     <Layout backTo="/saas/delivery-ops" title={pageTitle}>
@@ -572,87 +688,83 @@ export function DeliveryIntegrations() {
             <Loader2 className="w-7 h-7 animate-spin text-stone-400" />
           </div>
         ) : (
-          <div className="space-y-3">
-            {platformCards.map(({ key, urlSlug, label, colorClass, accentClass, devUrl }) => {
+          <>
+            <IntegrationPlatformSummaryBar
+              platforms={platformSummaries}
+              activePlatform={activePlatform}
+              onSelect={selectPlatform}
+              onToggle={togglePlatform}
+            />
+            {!activePlatform && (
+              <div className={`${VERTIAL_SURFACE} p-4 text-center`}>
+                <p className="text-xs font-semibold text-stone-800 dark:text-stone-200">
+                  Elige Configurar en una integración
+                </p>
+                <p className="mt-1 text-[11px] text-stone-500">
+                  El interruptor solo enciende o apaga; no cambia de pantalla.
+                </p>
+              </div>
+            )}
+            <div className="space-y-3">
+            {platformCards
+              .filter(({ key }) => key === activePlatform)
+              .map(({ key, urlSlug, label, accentClass, devUrl }) => {
               const entry = integrations[key] ?? DEFAULT_DELIVERY_INTEGRATIONS[key];
 
               return (
                 <div key={key} className={`${VERTIAL_SURFACE} border ${accentClass} p-3.5 space-y-2.5`}>
                   <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2 flex-wrap min-w-0">
-                      <span className={`px-2 py-0.5 rounded-lg text-[11px] font-bold ${colorClass}`}>{label}</span>
-                      {key === 'uber' ? (
-                        <>
-                          {uberCfg?.env === 'sandbox' && (
-                            <span className="text-[10px] font-bold text-blue-700 bg-blue-50 dark:bg-blue-950/40 dark:text-blue-300 px-1.5 py-0.5 rounded-full">
-                              SANDBOX
-                            </span>
-                          )}
-                          <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
-                            uberStoreSelectionRequired
-                              ? 'text-blue-700 bg-blue-50 dark:bg-blue-950/40 dark:text-blue-300'
-                              : uberReceivingOrders
-                              ? 'text-emerald-700 bg-emerald-50 dark:bg-emerald-900/30'
-                              : uberOnline && !uberPosReady
-                                ? 'text-amber-700 bg-amber-50 dark:bg-amber-900/30'
-                              : uberOauth
-                                ? 'text-amber-700 bg-amber-50 dark:bg-amber-900/30'
-                                : 'text-stone-500 bg-stone-100 dark:bg-stone-800'
-                          }`}>
-                            {uberStoreSelectionRequired
-                              ? 'Elige tienda'
-                              : uberReceivingOrders
-                              ? 'ONLINE'
-                              : uberOnline && !uberPosReady
-                                ? 'POS pendiente'
-                                : uberOauth ? 'Conectada · pausa' : 'Apagada'}
-                          </span>
-                        </>
-                      ) : (
-                        entry.enabled && (
-                          <span className="text-[10px] font-medium text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 px-1.5 py-0.5 rounded-full">
-                            Activa
-                          </span>
-                        )
-                      )}
+                    <div className="min-w-0">
+                      <h2 className="text-sm font-bold text-stone-900 dark:text-stone-100">
+                        Configuración de {label}
+                      </h2>
+                      <p className="mt-0.5 text-[10px] text-stone-500">
+                        Los cambios afectan solo a {currentBusiness?.name || 'esta empresa'}.
+                      </p>
                     </div>
-                    {key === 'uber' ? (
-                      <button
-                        type="button"
-                        onClick={() => void (uberReceivingOrders ? turnUberOff() : turnUberOn())}
-                        disabled={
-                          disconnectingUber
-                          || settingUberStatus
-                          || activatingUberPos
-                          || pushingMenu
-                          || connectingUber
-                          || (!uberOauth && uberCfg?.configured === false)
-                        }
-                        className="text-stone-500 hover:text-stone-700 dark:hover:text-stone-300 transition-colors shrink-0 disabled:opacity-40"
-                        title={uberReceivingOrders ? 'Pausar pedidos Uber' : 'Activar pedidos Uber'}
-                      >
-                        {settingUberStatus || activatingUberPos || pushingMenu || connectingUber
-                          ? <Loader2 className="w-7 h-7 animate-spin text-[var(--v-blue,#2563eb)]" />
-                          : uberReceivingOrders
-                            ? <ToggleRight className="w-7 h-7 text-emerald-500" />
-                            : <ToggleLeft className="w-7 h-7" />}
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => toggleEnabled(key)}
-                        className="text-stone-500 hover:text-stone-700 dark:hover:text-stone-300 transition-colors shrink-0"
-                        title={entry.enabled ? 'Desactivar' : 'Activar'}
-                      >
-                        {entry.enabled
-                          ? <ToggleRight className="w-7 h-7 text-emerald-500" />
-                          : <ToggleLeft className="w-7 h-7" />}
-                      </button>
+                    {key === 'uber' && uberCfg?.env === 'sandbox' && (
+                      <span className="shrink-0 rounded-full bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
+                        SANDBOX
+                      </span>
                     )}
                   </div>
 
-                  {key === 'uber' ? (
+                  {key === 'uber' && canSeeTechSetup && uberCfg?.env === 'sandbox' && (
+                    <div className="grid grid-cols-2 rounded-xl bg-stone-100 p-1 dark:bg-stone-900">
+                      <button
+                        type="button"
+                        onClick={() => setUberPanelTab('configuration')}
+                        className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${
+                          uberPanelTab === 'configuration'
+                            ? 'bg-white text-stone-900 shadow-sm dark:bg-stone-950 dark:text-stone-100'
+                            : 'text-stone-500'
+                        }`}
+                      >
+                        Configuración
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setUberPanelTab('sandbox')}
+                        className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${
+                          uberPanelTab === 'sandbox'
+                            ? 'bg-white text-blue-700 shadow-sm dark:bg-stone-950 dark:text-blue-300'
+                            : 'text-stone-500'
+                        }`}
+                      >
+                        Pruebas Uber
+                      </button>
+                    </div>
+                  )}
+
+                  {key === 'uber' && uberPanelTab === 'configuration' ? (
                     <div className="space-y-3">
+                      <section className="space-y-3 rounded-xl border border-stone-200 bg-stone-50/70 p-3 dark:border-stone-800 dark:bg-stone-900/40">
+                      <div>
+                        <h3 className="text-xs font-bold text-stone-900 dark:text-stone-100">Conexión y tienda</h3>
+                        <p className="mt-0.5 text-[10px] text-stone-500">
+                          Cuenta OAuth, tienda Uber y PDV receptor de esta empresa.
+                        </p>
+                      </div>
                       <p className="text-[11px] text-stone-500">
                         {!uberOauth && 'Conecta Uber. El interruptor enciende/apaga esta cuenta.'}
                         {uberOauth && uberStoreSelectionRequired && 'Cuenta conectada. Elige debajo la tienda que quieres asociar.'}
@@ -822,14 +934,6 @@ export function DeliveryIntegrations() {
                           <div className="flex flex-wrap gap-2">
                             <button
                               type="button"
-                              onClick={() => void pushUberMenu()}
-                              disabled={pushingMenu || !uberPosReady}
-                              className={VERTIAL_BTN_SECONDARY}
-                            >
-                              {pushingMenu ? 'Subiendo…' : 'Actualizar menú'}
-                            </button>
-                            <button
-                              type="button"
                               onClick={() => void reconnectUber()}
                               disabled={disconnectingUber || connectingUber}
                               className={VERTIAL_BTN_SECONDARY}
@@ -839,14 +943,71 @@ export function DeliveryIntegrations() {
                           </div>
                         </div>
                       )}
+                      </section>
+
+                      {uberOauth && uberStoreLinked && !uberStoreSelectionRequired && (
+                        <section className="space-y-3 rounded-xl border border-stone-200 bg-stone-50/70 p-3 dark:border-stone-800 dark:bg-stone-900/40">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <h3 className="text-xs font-bold text-stone-900 dark:text-stone-100">Catálogo Uber</h3>
+                              <p className="mt-0.5 text-[10px] text-stone-500">
+                                Vertial es el catálogo maestro. La publicación es manual durante las pruebas.
+                              </p>
+                            </div>
+                            <span className="shrink-0 rounded-full bg-stone-100 px-2 py-1 text-[9px] font-bold text-stone-600 dark:bg-stone-800 dark:text-stone-300">
+                              MANUAL
+                            </span>
+                          </div>
+                          <div className="rounded-lg border border-stone-200 bg-white px-2.5 py-2 text-[10px] text-stone-600 dark:border-stone-800 dark:bg-stone-950 dark:text-stone-300">
+                            {uberMenuPushed
+                              ? `Última publicación: ${new Date(String(integrations.uber?.menuPushedAt)).toLocaleString('es-ES')} · ${Number(integrations.uber?.menuItemCount || 0)} productos`
+                              : 'El menú todavía no se ha publicado desde Vertial.'}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void pushUberMenu()}
+                            disabled={pushingMenu || !uberPosReady}
+                            className={VERTIAL_BTN_SECONDARY}
+                          >
+                            {pushingMenu ? 'Publicando…' : 'Publicar catálogo Uber'}
+                          </button>
+                        </section>
+                      )}
+
+                      {uberOauth && (
+                        <UberStoreBindingsPanel
+                          businessId={businessId}
+                          stores={uberStores}
+                          pdvs={businessPdvs}
+                          onIntegrations={applyIntegrations}
+                        />
+                      )}
                     </div>
+                  ) : key === 'uber' ? (
+                    <UberSandboxOrdersPanel
+                      businessId={businessId}
+                      onEvidenceChanged={() => void loadUberCert()}
+                    />
                   ) : (
-                    <p className="text-xs text-stone-600 dark:text-stone-400">
-                      Activa la plataforma cuando Vertial te lo indique. Los pedidos llegarán solos.
-                    </p>
+                    <div className="space-y-2.5">
+                      <section className="rounded-xl border border-stone-200 bg-stone-50/70 p-3 dark:border-stone-800 dark:bg-stone-900/40">
+                        <h3 className="text-xs font-bold text-stone-900 dark:text-stone-100">Conexión</h3>
+                        <p className="mt-1 text-[11px] text-stone-500">
+                          {entry.token
+                            ? 'Entrada webhook configurada para esta empresa.'
+                            : 'Pendiente de configurar la conexión de esta plataforma.'}
+                        </p>
+                      </section>
+                      <section className="rounded-xl border border-stone-200 bg-stone-50/70 p-3 dark:border-stone-800 dark:bg-stone-900/40">
+                        <h3 className="text-xs font-bold text-stone-900 dark:text-stone-100">Tiendas, marcas y catálogo</h3>
+                        <p className="mt-1 text-[11px] text-stone-500">
+                          Preparado para conectar cuando dispongamos del contrato API real de {label}. No se simulan sincronizaciones.
+                        </p>
+                      </section>
+                    </div>
                   )}
 
-                  {key === 'uber' && uberOauth && (
+                  {key === 'uber' && uberPanelTab === 'configuration' && uberOauth && (
                     <section className="rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50/80 dark:bg-stone-900/40 overflow-hidden">
                       <button
                         type="button"
@@ -860,8 +1021,8 @@ export function DeliveryIntegrations() {
                           <p className="text-[10px] text-stone-500 mt-0.5">
                             {loadingUberCert
                               ? 'Comprobando sandbox…'
-                              : uberCert?.progress
-                                ? `${uberCert.progress.completed}/${uberCert.progress.total} pruebas verificadas`
+                              : uberBaseChecks.length > 0
+                                ? `${uberBaseCompleted}/${uberBaseChecks.length} pruebas de la base verificadas`
                                 : 'Sin datos de comprobación'}
                           </p>
                         </div>
@@ -874,8 +1035,11 @@ export function DeliveryIntegrations() {
                               Uber: {uberCert.liveError}
                             </p>
                           )}
+                          <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-stone-500">
+                            Base Uber · tiendas, POS, menú y estado
+                          </p>
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                            {(uberCert?.checks || []).map((check) => (
+                            {uberBaseChecks.map((check) => (
                               <div
                                 key={check.key}
                                 className="flex items-start gap-2 rounded-lg bg-white dark:bg-stone-950 border border-stone-100 dark:border-stone-800 px-2 py-1.5"
@@ -900,6 +1064,35 @@ export function DeliveryIntegrations() {
                               </div>
                             ))}
                           </div>
+                          {uberOrderChecks.length > 0 && (
+                            <div className="mt-2.5 rounded-lg border border-dashed border-stone-200 p-2 dark:border-stone-700">
+                              <p className="text-[10px] font-bold text-stone-700 dark:text-stone-300">
+                                Pedidos TPV · fase posterior
+                              </p>
+                              <p className="mt-0.5 text-[9px] text-stone-500">
+                                Recibir, aceptar, denegar, cancelar, tiempos y listo se completarán después de cerrar esta base.
+                              </p>
+                              <div className="mt-1.5 grid grid-cols-1 gap-1.5 opacity-70 sm:grid-cols-2">
+                                {uberOrderChecks.map((check) => (
+                                  <div
+                                    key={check.key}
+                                    className="flex items-start gap-2 rounded-lg border border-stone-100 bg-white px-2 py-1.5 dark:border-stone-800 dark:bg-stone-950"
+                                  >
+                                    <span className={`mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full ${
+                                      check.status === 'ok'
+                                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
+                                        : 'bg-stone-100 text-stone-400 dark:bg-stone-800'
+                                    }`}>
+                                      {check.status === 'ok' ? <Check className="h-3 w-3" /> : '·'}
+                                    </span>
+                                    <p className="text-[11px] font-semibold text-stone-700 dark:text-stone-300">
+                                      {check.label}
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                           {uberCfg?.env === 'sandbox' && uberMenuPushed && (
                             <div className="mt-2 rounded-lg border border-blue-100 dark:border-blue-900 bg-blue-50/60 dark:bg-blue-950/20 p-2">
                               <p className="text-[10px] font-bold text-blue-800 dark:text-blue-300">
@@ -972,7 +1165,7 @@ export function DeliveryIntegrations() {
                     </section>
                   )}
 
-                  {canSeeTechSetup && (
+                  {canSeeTechSetup && (key !== 'uber' || uberPanelTab === 'configuration') && (
                     <div className="border-t border-stone-100 dark:border-stone-800 pt-2">
                       <button
                         type="button"
@@ -1092,7 +1285,8 @@ export function DeliveryIntegrations() {
                 </div>
               );
             })}
-          </div>
+            </div>
+          </>
         )}
 
         <div className="flex justify-end pt-2">

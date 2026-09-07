@@ -7,6 +7,7 @@ import {
   getAggregatorCajaPlatforms,
   getClosingAggregatorPlatforms,
   DEFAULT_DELIVERY_INTEGRATIONS,
+  resolveAggregatorIntegrationKey,
   sumAggregatorCash,
   sumAggregatorCard,
   sumClosingBrandTotals,
@@ -14,6 +15,13 @@ import {
 } from '../src/app/lib/deliveryIntegrationsUi.ts';
 
 describe('deliveryIntegrationsUi', () => {
+  it('resolves integration tabs and defaults invalid values to Uber', () => {
+    expect(resolveAggregatorIntegrationKey('globo')).toBe('globo');
+    expect(resolveAggregatorIntegrationKey('flipdish')).toBe('flipdish');
+    expect(resolveAggregatorIntegrationKey('unknown')).toBe('uber');
+    expect(resolveAggregatorIntegrationKey(null)).toBe('uber');
+  });
+
   it('returns only enabled integrations', () => {
     const active = getActiveAggregatorPlatforms({
       ...DEFAULT_DELIVERY_INTEGRATIONS,

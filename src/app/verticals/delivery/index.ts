@@ -50,6 +50,13 @@ export {
   type DeliveryTpvSurface,
 } from './DeliveryTpvSurfaceToggle';
 export { useDeliverySalaMapReady } from './useDeliverySalaMapReady';
+export {
+  IntegrationPlatformSummaryBar,
+  type IntegrationPlatformSummary,
+  type IntegrationStatusTone,
+} from './integrations/IntegrationPlatformSummaryBar';
+export { UberStoreBindingsPanel } from './integrations/UberStoreBindingsPanel';
+export { UberSandboxOrdersPanel } from './integrations/UberSandboxOrdersPanel';
 
 export { DeliverySoldProductMarginPanel } from './DeliverySoldProductMarginPanel';
 export {

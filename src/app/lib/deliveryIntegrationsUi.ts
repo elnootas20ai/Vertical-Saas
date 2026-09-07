@@ -55,7 +55,14 @@ export const DEFAULT_DELIVERY_INTEGRATIONS: DeliveryIntegrations = {
   flipdish: { enabled: false, token: '' },
 };
 
-const INTEGRATION_KEYS = ['uber', 'globo', 'justead', 'flipdish'] as const;
+export const INTEGRATION_KEYS = ['uber', 'globo', 'justead', 'flipdish'] as const;
+
+export function resolveAggregatorIntegrationKey(raw: string | null | undefined): AggregatorIntegrationKey {
+  const value = String(raw || '').trim().toLowerCase();
+  return (INTEGRATION_KEYS as readonly string[]).includes(value)
+    ? value as AggregatorIntegrationKey
+    : 'uber';
+}
 
 /** Fusiona respuesta API (parcial o null) con defaults para que la UI nunca lea `undefined`. */
 export function normalizeDeliveryIntegrations(

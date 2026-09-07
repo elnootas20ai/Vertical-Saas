@@ -306,6 +306,58 @@ export interface UberEatsStoreOption {
   integrationEnabled?: boolean;
 }
 
+export interface UberStoreBinding {
+  id: string;
+  environment: string;
+  businessId: string;
+  storeId: string;
+  storeName: string;
+  brandId: string;
+  brandName: string;
+  salesPointId: string;
+  salesPointName: string;
+  workCenterId: string;
+  active: boolean;
+  primary: boolean;
+  defaultPrepMinutes: number;
+  posIntegrationEnabled: boolean;
+  provisionedAt: string;
+  menuPushedAt: string;
+  menuItemCount: number;
+  lastStoreStatus: string;
+  lastStoreStatusAt: string;
+}
+
+export interface UberSandboxOrder {
+  id: string;
+  businessId: string;
+  environment: string;
+  bindingId: string;
+  storeId: string;
+  storeName: string;
+  brandId: string;
+  brandName: string;
+  salesPointId: string;
+  salesPointName: string;
+  externalOrderId: string;
+  orderNumber: string;
+  customerName: string;
+  deliveryType: 'domicilio' | 'recogida';
+  items: Array<{ id: string; name: string; quantity: number; unitPrice: number; total: number }>;
+  totalAmount: number;
+  status: 'received' | 'accepted' | 'denied' | 'ready' | 'cancelled';
+  scheduledFor: string;
+  receivedAt: string;
+  acceptedAt: string;
+  deniedAt: string;
+  readyAt: string;
+  cancelledAt: string;
+  prepMinutes: number;
+  pickupTime: number;
+  lastError: string;
+  updatedAt: string;
+}
+
 export interface DeliveryIntegrations {
   uber: DeliveryIntegrationEntry;
   globo: DeliveryIntegrationEntry;
@@ -320,6 +372,8 @@ export interface UberEatsOAuthConfig {
   redirectUri: string;
   scopes: string;
   clientIdPreview?: string;
+  isSuperAdmin?: boolean;
+  primaryWebhookUrl?: string;
 }
 
 export interface UberCertCheck {
@@ -366,9 +420,16 @@ export async function getUberEatsOAuthConfigRequest() {
   return authRequest<{ ok: boolean } & UberEatsOAuthConfig>('/api/uber-eats/oauth/config');
 }
 
-export async function startUberEatsOAuthRequest(businessId: string, forceLogin = false) {
+export async function startUberEatsOAuthRequest(
+  businessId: string,
+  forceLogin = false,
+  redirectUri = '',
+) {
+  const redirectParam = redirectUri
+    ? `&redirectUri=${encodeURIComponent(redirectUri)}`
+    : '';
   return authRequest<{ ok: boolean; authorizeUrl: string; redirectUri: string; env: string }>(
-    `/api/uber-eats/oauth/start?businessId=${encodeURIComponent(businessId)}${forceLogin ? '&forceLogin=1' : ''}`,
+    `/api/uber-eats/oauth/start?businessId=${encodeURIComponent(businessId)}${forceLogin ? '&forceLogin=1' : ''}${redirectParam}`,
   );
 }
 
@@ -399,6 +460,65 @@ export async function listUberEatsStoresRequest(businessId: string) {
   }>(`/api/uber-eats/stores?businessId=${encodeURIComponent(businessId)}`);
 }
 
+export async function listUberBindingsRequest(businessId: string) {
+  return authRequest<{ ok: boolean; bindings: UberStoreBinding[] }>(
+    `/api/uber-eats/bindings?businessId=${encodeURIComponent(businessId)}`,
+  );
+}
+
+export async function saveUberBindingRequest(
+  businessId: string,
+  data: {
+    storeId: string;
+    storeName?: string;
+    brandId: string;
+    salesPointId: string;
+    defaultPrepMinutes?: number;
+    primary?: boolean;
+  },
+) {
+  return authRequest<{
+    ok: boolean;
+    binding: UberStoreBinding;
+    integrations?: DeliveryIntegrations;
+  }>('/api/uber-eats/bindings/save', {
+    method: 'POST',
+    body: JSON.stringify({ businessId, ...data }),
+  });
+}
+
+export async function deleteUberBindingRequest(businessId: string, storeId: string) {
+  return authRequest<{
+    ok: boolean;
+    bindings: UberStoreBinding[];
+    integrations?: DeliveryIntegrations;
+  }>('/api/uber-eats/bindings', {
+    method: 'DELETE',
+    body: JSON.stringify({ businessId, storeId }),
+  });
+}
+
+export async function listUberSandboxOrdersRequest(businessId: string) {
+  return authRequest<{ ok: boolean; orders: UberSandboxOrder[] }>(
+    `/api/uber-eats/sandbox-orders?businessId=${encodeURIComponent(businessId)}`,
+  );
+}
+
+export async function actUberSandboxOrderRequest(
+  businessId: string,
+  externalOrderId: string,
+  action: 'accept' | 'deny' | 'ready' | 'cancel',
+  opts?: { reason?: string; prepMinutes?: number },
+) {
+  return authRequest<{ ok: boolean; action: string; order: UberSandboxOrder; repeated?: boolean }>(
+    '/api/uber-eats/sandbox-orders/action',
+    {
+      method: 'POST',
+      body: JSON.stringify({ businessId, externalOrderId, action, ...opts }),
+    },
+  );
+}
+
 export async function selectUberEatsStoreRequest(businessId: string, storeId: string, storeName?: string) {
   return authRequest<{
     ok: boolean;
@@ -426,7 +546,7 @@ export async function selectUberEatsSalesPointRequest(businessId: string, salesP
   });
 }
 
-export async function activateUberEatsPosRequest(businessId: string) {
+export async function activateUberEatsPosRequest(businessId: string, storeId?: string) {
   return authRequest<{
     ok: boolean;
     storeId?: string;
@@ -435,7 +555,7 @@ export async function activateUberEatsPosRequest(businessId: string) {
     error?: string;
   }>('/api/uber-eats/pos-data/activate', {
     method: 'POST',
-    body: JSON.stringify({ businessId }),
+    body: JSON.stringify({ businessId, storeId: storeId || '' }),
   });
 }
 

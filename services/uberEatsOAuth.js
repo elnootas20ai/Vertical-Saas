@@ -70,6 +70,41 @@ export function getUberEatsRedirectUri() {
   return `${appUrl}${UBER_EATS_REDIRECT_PATH}`;
 }
 
+/**
+ * Mantiene separado el retorno OAuth local del de producción.
+ * Producción solo acepta su URI configurada; desarrollo permite el Vite local.
+ */
+export function resolveUberEatsRedirectUri(requestedRedirectUri = '') {
+  const configured = getUberEatsRedirectUri();
+  const requested = String(requestedRedirectUri || '').trim();
+  if (!requested) return configured;
+
+  let target;
+  let expected;
+  try {
+    target = new URL(requested);
+    expected = new URL(configured);
+  } catch {
+    throw new Error('Redirect URI de Uber inválida');
+  }
+
+  const normalizedTarget = target.toString().replace(/\/$/, '');
+  const normalizedExpected = expected.toString().replace(/\/$/, '');
+  if (normalizedTarget === normalizedExpected) return normalizedExpected;
+
+  const localHost = target.hostname === 'localhost' || target.hostname === '127.0.0.1';
+  const localDev = process.env.NODE_ENV !== 'production'
+    && target.protocol === 'http:'
+    && localHost
+    && target.port === '3015'
+    && target.pathname === UBER_EATS_REDIRECT_PATH
+    && !target.search
+    && !target.hash;
+  if (localDev) return normalizedTarget;
+
+  throw new Error('Redirect URI de Uber no permitida para este entorno');
+}
+
 export function getUberEatsAuthorizeBase() {
   return getUberEatsEnv() === 'production'
     ? 'https://login.uber.com/oauth/v2/authorize'
@@ -105,12 +140,13 @@ export function getUberEatsPublicConfig() {
   };
 }
 
-export function createUberOAuthState({ businessId, userId }) {
+export function createUberOAuthState({ businessId, userId, redirectUri = '' }) {
   return jwt.sign(
     {
       purpose: 'uber_eats_oauth',
       businessId: String(businessId || ''),
       userId: String(userId || ''),
+      redirectUri: resolveUberEatsRedirectUri(redirectUri),
       nonce: crypto.randomBytes(8).toString('hex'),
     },
     JWT_SECRET,
@@ -129,13 +165,14 @@ export function verifyUberOAuthState(state) {
   return payload;
 }
 
-export function buildUberAuthorizeUrl(state, { promptLogin = false } = {}) {
+export function buildUberAuthorizeUrl(state, { promptLogin = false, redirectUri = '' } = {}) {
   if (!isUberEatsConfigured()) {
     throw new Error('Uber Eats no configurado (UBER_EATS_CLIENT_ID / UBER_EATS_CLIENT_SECRET)');
   }
+  const resolvedRedirectUri = resolveUberEatsRedirectUri(redirectUri);
   const params = new URLSearchParams({
     client_id: getUberEatsClientId(),
-    redirect_uri: getUberEatsRedirectUri(),
+    redirect_uri: resolvedRedirectUri,
     response_type: 'code',
     scope: getUberEatsScopes(),
     state: String(state || ''),
@@ -147,15 +184,16 @@ export function buildUberAuthorizeUrl(state, { promptLogin = false } = {}) {
 /**
  * Intercambia authorization_code por access_token (sandbox/prod).
  */
-export async function exchangeUberAuthorizationCode(code) {
+export async function exchangeUberAuthorizationCode(code, { redirectUri = '' } = {}) {
   if (!isUberEatsConfigured()) {
     throw new Error('Uber Eats no configurado (UBER_EATS_CLIENT_ID / UBER_EATS_CLIENT_SECRET)');
   }
+  const resolvedRedirectUri = resolveUberEatsRedirectUri(redirectUri);
   const body = new URLSearchParams({
     client_id: getUberEatsClientId(),
     client_secret: getUberEatsClientSecret(),
     grant_type: 'authorization_code',
-    redirect_uri: getUberEatsRedirectUri(),
+    redirect_uri: resolvedRedirectUri,
     code: String(code || ''),
   });
 

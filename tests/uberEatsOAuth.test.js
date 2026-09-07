@@ -5,6 +5,7 @@ import {
   createUberOAuthState,
   getUberEatsPublicConfig,
   isUberEatsConfigured,
+  resolveUberEatsRedirectUri,
   verifyUberOAuthState,
 } from '../services/uberEatsOAuth.js';
 
@@ -19,6 +20,7 @@ describe('uberEatsOAuth', () => {
       'UBER_EATS_REDIRECT_URI',
       'UBER_EATS_SCOPES',
       'APP_URL',
+      'NODE_ENV',
     ]) {
       prev[key] = process.env[key];
     }
@@ -27,6 +29,7 @@ describe('uberEatsOAuth', () => {
     process.env.UBER_EATS_ENV = 'sandbox';
     process.env.UBER_EATS_REDIRECT_URI = 'https://vertialapp.com/saas/vertical/delivery/integraciones';
     process.env.UBER_EATS_SCOPES = 'eats.pos_provisioning';
+    process.env.NODE_ENV = 'test';
     delete process.env.APP_URL;
   });
 
@@ -84,6 +87,23 @@ describe('uberEatsOAuth', () => {
     const state = createUberOAuthState({ businessId: 'biz-1', userId: 'u-1' });
     const url = buildUberAuthorizeUrl(state, { promptLogin: true });
     expect(url).toContain('prompt=login');
+  });
+
+  it('keeps a local OAuth flow on localhost during development', () => {
+    const redirectUri = 'http://localhost:3015/saas/vertical/delivery/integraciones';
+    const state = createUberOAuthState({ businessId: 'biz-local', userId: 'u-local', redirectUri });
+    const payload = verifyUberOAuthState(state);
+    const url = buildUberAuthorizeUrl(state, { redirectUri });
+
+    expect(payload.redirectUri).toBe(redirectUri);
+    expect(url).toContain(encodeURIComponent(redirectUri));
+  });
+
+  it('rejects localhost redirects in production', () => {
+    process.env.NODE_ENV = 'production';
+    expect(() => resolveUberEatsRedirectUri(
+      'http://localhost:3015/saas/vertical/delivery/integraciones',
+    )).toThrow(/no permitida/i);
   });
 
   it('blocks certification helpers outside sandbox', () => {

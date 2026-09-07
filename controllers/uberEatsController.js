@@ -6,6 +6,7 @@ import {
   findBusinessById,
   listScopedPointsOfSaleForBusiness,
   listDeliveryOrdersByUser,
+  listBrandsByBusiness,
   buildWebConfigDocument,
   putDocument,
   sanitizeDeliveryOrder,
@@ -18,6 +19,7 @@ import {
   assertUberEatsSandbox,
   getUberEatsPublicConfig,
   isUberEatsConfigured,
+  resolveUberEatsRedirectUri,
   verifyUberOAuthState,
 } from '../services/uberEatsOAuth.js';
 import {
@@ -46,6 +48,19 @@ import {
 import { isVertialSuperAdminEmail } from '../utils/superAdmin.js';
 import { broadcastToBusiness, broadcastToUser } from '../services/sseService.js';
 import logger from '../services/logger.js';
+import {
+  deleteUberStoreBinding,
+  getUberStoreBinding,
+  legacyUberBinding,
+  listUberStoreBindings,
+  saveUberStoreBinding,
+  uberIntegratorStoreId,
+} from '../services/uberStoreBindings.js';
+import {
+  getUberSandboxOrder,
+  listUberSandboxOrders,
+  saveUberSandboxOrder,
+} from '../services/uberSandboxOrders.js';
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
@@ -71,16 +86,6 @@ function certCheck(key, label, ok, detail = '', at = '') {
     detail: String(detail || ''),
     at: String(at || ''),
   };
-}
-
-function boundUberStoreId(uber, requestedStoreId = '') {
-  const bound = String(uber?.storeId || '').trim();
-  const requested = String(requestedStoreId || '').trim();
-  if (!bound) throw new Error('Falta una tienda Uber vinculada');
-  if (requested && requested !== bound) {
-    throw new Error('El Store ID no pertenece a la integración Uber de esta empresa');
-  }
-  return bound;
 }
 
 /** Un solo PDV activo de la empresa → ese es el de Uber. Sin preferencias por nombre. */
@@ -187,6 +192,37 @@ async function saveUberPatch(req, businessId, current, uberPatch) {
   return sanitizeDeliveryIntegrations({ ...doc, _rev: saved.rev });
 }
 
+async function loadUberBindings(req, businessId, uber) {
+  const environment = String(uber?.env || getUberEatsPublicConfig().env || 'sandbox');
+  const bindings = await listUberStoreBindings(req, businessId, environment);
+  if (bindings.length) return bindings;
+  const legacy = legacyUberBinding(uber, businessId);
+  return legacy ? [legacy] : [];
+}
+
+async function requireUberBinding(req, businessId, uber, requestedStoreId = '') {
+  const bindings = await loadUberBindings(req, businessId, uber);
+  const requested = String(requestedStoreId || '').trim();
+  const binding = requested
+    ? bindings.find((entry) => entry.storeId === requested)
+    : bindings.find((entry) => entry.primary) || (bindings.length === 1 ? bindings[0] : null);
+  if (!binding) {
+    throw new Error(requested
+      ? 'La tienda Uber no pertenece a esta empresa'
+      : 'Elige la tienda Uber sobre la que quieres actuar');
+  }
+  return binding;
+}
+
+function requireSandboxAdmin(req, res) {
+  assertUberEatsSandbox();
+  if (!isVertialSuperAdminEmail(authEmail(req))) {
+    res.status(403).json({ ok: false, error: 'Las pruebas Uber solo están disponibles para Vertial' });
+    return false;
+  }
+  return true;
+}
+
 /** Limpia por completo OAuth/tokens Uber de ESTA empresa (Vertial manda, no el navegador). */
 async function wipeUberIntegration(req, businessId, current) {
   const db = getWebDbName();
@@ -253,6 +289,7 @@ export async function startUberEatsOAuth(req, res) {
   try {
     const businessId = String(req.query.businessId || '').trim();
     const forceLogin = String(req.query.forceLogin || '').trim() === '1';
+    const redirectUri = resolveUberEatsRedirectUri(req.query.redirectUri);
     if (!businessId) return badRequest(res, 'Falta businessId');
     if (!(await requireUberBusinessManager(req, res, businessId))) return;
     if (!isUberEatsConfigured()) {
@@ -263,14 +300,17 @@ export async function startUberEatsOAuth(req, res) {
     }
 
     const userId = authUserId(req);
-    const state = createUberOAuthState({ businessId, userId });
-    const authorizeUrl = buildUberAuthorizeUrl(state, { promptLogin: forceLogin });
+    const state = createUberOAuthState({ businessId, userId, redirectUri });
+    const authorizeUrl = buildUberAuthorizeUrl(state, {
+      promptLogin: forceLogin,
+      redirectUri,
+    });
     const pub = getUberEatsPublicConfig();
 
     return res.json({
       ok: true,
       authorizeUrl,
-      redirectUri: pub.redirectUri,
+      redirectUri,
       env: pub.env,
     });
   } catch (error) {
@@ -302,7 +342,8 @@ export async function completeUberEatsOAuth(req, res) {
     }
     if (!(await requireUberBusinessManager(req, res, businessId))) return;
 
-    const tokens = await exchangeUberAuthorizationCode(code);
+    const redirectUri = resolveUberEatsRedirectUri(payload.redirectUri);
+    const tokens = await exchangeUberAuthorizationCode(code, { redirectUri });
     const { current, uber } = await loadUberIntegration(req, businessId);
 
     let integrations = await saveUberPatch(req, businessId, current, {
@@ -389,6 +430,146 @@ export async function listUberStoresForBusiness(req, res) {
   }
 }
 
+/** GET /api/uber-eats/bindings?businessId= */
+export async function listUberBindingsForBusiness(req, res) {
+  try {
+    const businessId = String(req.query.businessId || '').trim();
+    if (!businessId) return badRequest(res, 'Falta businessId');
+    if (!(await requireUberBusinessAccess(req, res, businessId))) return;
+    const { uber } = await loadUberIntegration(req, businessId);
+    const bindings = await loadUberBindings(req, businessId, uber);
+    return res.json({ ok: true, bindings });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: errorMsg(error) });
+  }
+}
+
+/** POST /api/uber-eats/bindings/save */
+export async function saveUberBindingForBusiness(req, res) {
+  try {
+    const businessId = String(req.body?.businessId || '').trim();
+    const storeId = String(req.body?.storeId || '').trim();
+    const brandId = String(req.body?.brandId || '').trim();
+    const salesPointId = String(req.body?.salesPointId || '').trim();
+    if (!businessId) return badRequest(res, 'Falta businessId');
+    if (!storeId) return badRequest(res, 'Falta Store ID de Uber');
+    if (!brandId) return badRequest(res, 'Elige la marca Vertial');
+    if (!salesPointId) return badRequest(res, 'Elige el PDV');
+    const access = await requireUberBusinessManager(req, res, businessId);
+    if (!access) return;
+
+    const { current, uber } = await loadUberIntegration(req, businessId);
+    if (!uber.oauth && !uber.accessToken) {
+      return badRequest(res, 'Conecta primero la cuenta Uber');
+    }
+    const { pdvs } = await loadBusinessActivePdvs(req, businessId);
+    const pdv = pdvs.find((entry) => String(entry._id || '') === salesPointId);
+    if (!pdv) return res.status(403).json({ ok: false, error: 'El PDV no pertenece a esta empresa' });
+
+    const brands = await listBrandsByBusiness(req, businessId);
+    const brand = brands.find(
+      (entry) => !entry.deletedAt && entry.active !== false && String(entry._id || '') === brandId,
+    );
+    if (!brand) return res.status(403).json({ ok: false, error: 'La marca no pertenece a esta empresa' });
+    const workCenterId = String(pdv.workCenterId || '').replace(/^wc:/, '').trim();
+    const brandStores = Array.isArray(brand.salesPointIds)
+      ? brand.salesPointIds.map((id) => String(id || '').replace(/^wc:/, '').trim()).filter(Boolean)
+      : [];
+    if (brandStores.length && (!workCenterId || !brandStores.includes(workCenterId))) {
+      return badRequest(res, 'La marca no está disponible en el centro asociado a este PDV');
+    }
+
+    const environment = String(uber.env || getUberEatsPublicConfig().env || 'sandbox');
+    const previousBindings = await listUberStoreBindings(req, businessId, environment);
+    const primary = Boolean(
+      req.body?.primary
+      || previousBindings.length === 0
+      || String(uber.storeId || '') === storeId,
+    );
+    const binding = await saveUberStoreBinding(req, {
+      environment,
+      businessId,
+      storeId,
+      storeName: String(req.body?.storeName || '').trim() || storeId,
+      brandId,
+      brandName: String(brand.name || ''),
+      salesPointId,
+      salesPointName: String(pdv.name || ''),
+      workCenterId,
+      primary,
+      defaultPrepMinutes: req.body?.defaultPrepMinutes,
+      posIntegrationEnabled: String(uber.storeId || '') === storeId
+        ? Boolean(uber.posIntegrationEnabled)
+        : undefined,
+      provisionedAt: String(uber.storeId || '') === storeId ? uber.provisionedAt : undefined,
+      menuPushedAt: String(uber.storeId || '') === storeId ? uber.menuPushedAt : undefined,
+      menuItemCount: String(uber.storeId || '') === storeId ? uber.menuItemCount : undefined,
+      lastStoreStatus: String(uber.storeId || '') === storeId ? uber.lastStoreStatus : undefined,
+    });
+    if (primary) {
+      for (const previous of previousBindings) {
+        if (previous.storeId !== storeId && previous.primary) {
+          await saveUberStoreBinding(req, {
+            ...previous,
+            businessId,
+            environment,
+            primary: false,
+          });
+        }
+      }
+    }
+
+    let integrations = sanitizeDeliveryIntegrations(current);
+    if (primary) {
+      integrations = await saveUberPatch(req, businessId, current, {
+        storeId: binding.storeId,
+        storeName: binding.storeName,
+        salesPointId: binding.salesPointId,
+        storeSelectionRequired: false,
+      });
+    }
+    return res.json({ ok: true, binding, integrations });
+  } catch (error) {
+    return res.status(Number(error?.status) || 500).json({ ok: false, error: errorMsg(error) });
+  }
+}
+
+/** DELETE /api/uber-eats/bindings */
+export async function deleteUberBindingForBusiness(req, res) {
+  try {
+    const businessId = String(req.body?.businessId || '').trim();
+    const storeId = String(req.body?.storeId || '').trim();
+    if (!businessId || !storeId) return badRequest(res, 'Falta businessId o Store ID');
+    if (!(await requireUberBusinessManager(req, res, businessId))) return;
+    const { current, uber } = await loadUberIntegration(req, businessId);
+    const environment = String(uber.env || getUberEatsPublicConfig().env || 'sandbox');
+    await deleteUberStoreBinding(req, environment, storeId, businessId);
+    let remaining = await listUberStoreBindings(req, businessId, environment);
+    let nextPrimary = remaining.find((entry) => entry.primary) || remaining[0] || null;
+    if (nextPrimary && !nextPrimary.primary) {
+      nextPrimary = await saveUberStoreBinding(req, {
+        ...nextPrimary,
+        businessId,
+        environment,
+        primary: true,
+      });
+      remaining = await listUberStoreBindings(req, businessId, environment);
+    }
+    const integrations = String(uber.storeId || '') === storeId
+      ? await saveUberPatch(req, businessId, current, {
+        storeId: nextPrimary?.storeId || '',
+        storeName: nextPrimary?.storeName || '',
+        salesPointId: nextPrimary?.salesPointId || '',
+        posIntegrationEnabled: Boolean(nextPrimary?.posIntegrationEnabled),
+        storeSelectionRequired: false,
+      })
+      : sanitizeDeliveryIntegrations(current);
+    return res.json({ ok: true, bindings: remaining, integrations });
+  } catch (error) {
+    return res.status(Number(error?.status) || 500).json({ ok: false, error: errorMsg(error) });
+  }
+}
+
 /** POST /api/uber-eats/stores/select { businessId, storeId, storeName? } */
 export async function selectUberStoreForBusiness(req, res) {
   try {
@@ -416,7 +597,7 @@ export async function selectUberStoreForBusiness(req, res) {
       await provisionUberEatsStore({
         userAccessToken: token,
         storeId,
-        partnerStoreId: businessId,
+        partnerStoreId: uberIntegratorStoreId(businessId, storeId),
         businessId,
       });
     } catch (provErr) {
@@ -482,6 +663,20 @@ export async function selectUberStoreForBusiness(req, res) {
         lastMenuItemSuspendedAt: '',
       } : {}),
     });
+    await saveUberStoreBinding(req, {
+      environment: String(uber.env || getUberEatsPublicConfig().env || 'sandbox'),
+      businessId,
+      storeId,
+      storeName,
+      salesPointId,
+      salesPointName: String(pdvs.find((pdv) => String(pdv._id || '') === salesPointId)?.name || ''),
+      workCenterId: String(
+        pdvs.find((pdv) => String(pdv._id || '') === salesPointId)?.workCenterId || '',
+      ).replace(/^wc:/, ''),
+      primary: true,
+      posIntegrationEnabled,
+      provisionedAt: posIntegrationEnabled ? now : '',
+    });
 
     logger.info(
       { businessId, storeId, salesPointId, posIntegrationEnabled, provisionError: provisionError || null },
@@ -513,33 +708,43 @@ export async function activateUberPosForBusiness(req, res) {
   try {
     assertUberEatsSandbox();
     const businessId = String(req.body?.businessId || '').trim();
+    const requestedStoreId = String(req.body?.storeId || '').trim();
     if (!businessId) return badRequest(res, 'Falta businessId');
     if (!(await requireUberBusinessManager(req, res, businessId))) return;
 
     const { current, uber } = await loadUberIntegration(req, businessId);
     const token = String(uber.accessToken || '').trim();
-    const storeId = String(uber.storeId || '').trim();
+    const binding = await requireUberBinding(req, businessId, uber, requestedStoreId);
+    const storeId = binding.storeId;
     if (!token) return badRequest(res, 'Reconecta Uber OAuth antes de activar el POS');
     if (!storeId) return badRequest(res, 'Falta una tienda Uber vinculada');
 
     await provisionUberEatsStore({
       userAccessToken: token,
       storeId,
-      partnerStoreId: businessId,
+      partnerStoreId: uberIntegratorStoreId(businessId, storeId),
       businessId,
     });
     const { accessToken: appAccessToken } = await getUberEatsAppAccessToken();
     const posData = await getUberEatsPosData(appAccessToken, storeId);
     const posIntegrationEnabled = integrationEnabledFromPosData(posData);
     const now = new Date().toISOString();
-    const { pdvs, solePdv } = await loadBusinessActivePdvs(req, businessId);
-    const salesPointId = resolveUberSalesPointId(uber, pdvs, solePdv);
-    const integrations = await saveUberPatch(req, businessId, current, {
+    const salesPointId = binding.salesPointId;
+    await saveUberStoreBinding(req, {
+      ...binding,
+      businessId,
+      environment: binding.environment,
       posIntegrationEnabled,
-      posDataCheckedAt: now,
-      salesPointId,
-      ...(posIntegrationEnabled ? { provisionedAt: now } : {}),
+      provisionedAt: posIntegrationEnabled ? now : binding.provisionedAt,
     });
+    const integrations = binding.primary
+      ? await saveUberPatch(req, businessId, current, {
+        posIntegrationEnabled,
+        posDataCheckedAt: now,
+        salesPointId,
+        ...(posIntegrationEnabled ? { provisionedAt: now } : {}),
+      })
+      : sanitizeDeliveryIntegrations(current);
     if (!posIntegrationEnabled) {
       return res.status(409).json({
         ok: false,
@@ -617,14 +822,25 @@ export async function getUberPosDataForBusiness(req, res) {
     if (!(await requireUberBusinessAccess(req, res, businessId))) return;
 
     const { current, uber } = await loadUberIntegration(req, businessId);
-    const sid = boundUberStoreId(uber, storeId);
+    const binding = await requireUberBinding(req, businessId, uber, storeId);
+    const sid = binding.storeId;
 
     const { accessToken } = await getUberEatsAppAccessToken();
     const posData = await getUberEatsPosData(accessToken, sid);
-    const integrations = await saveUberPatch(req, businessId, current, {
-      posIntegrationEnabled: integrationEnabledFromPosData(posData),
-      posDataCheckedAt: new Date().toISOString(),
+    const posIntegrationEnabled = integrationEnabledFromPosData(posData);
+    const posDataCheckedAt = new Date().toISOString();
+    await saveUberStoreBinding(req, {
+      ...binding,
+      businessId,
+      environment: binding.environment,
+      posIntegrationEnabled,
     });
+    const integrations = binding.primary
+      ? await saveUberPatch(req, businessId, current, {
+        posIntegrationEnabled,
+        posDataCheckedAt,
+      })
+      : sanitizeDeliveryIntegrations(current);
     return res.json({ ok: true, storeId: sid, posData, integrations });
   } catch (error) {
     return res.status(500).json({ ok: false, error: errorMsg(error) });
@@ -641,17 +857,28 @@ export async function patchUberPosDataForBusiness(req, res) {
     if (!(await requireUberBusinessManager(req, res, businessId))) return;
 
     const { current, uber } = await loadUberIntegration(req, businessId);
-    const sid = boundUberStoreId(uber, storeId);
+    const binding = await requireUberBinding(req, businessId, uber, storeId);
+    const sid = binding.storeId;
 
     const { accessToken } = await getUberEatsAppAccessToken();
     await patchUberEatsPosData(accessToken, sid, patch);
     const posData = await getUberEatsPosData(accessToken, sid);
-    const integrations = await saveUberPatch(req, businessId, current, {
-      storeId: sid,
-      posDataPatchedAt: new Date().toISOString(),
-      posIntegrationEnabled: integrationEnabledFromPosData(posData),
-      posDataCheckedAt: new Date().toISOString(),
+    const posIntegrationEnabled = integrationEnabledFromPosData(posData);
+    const checkedAt = new Date().toISOString();
+    await saveUberStoreBinding(req, {
+      ...binding,
+      businessId,
+      environment: binding.environment,
+      posIntegrationEnabled,
     });
+    const integrations = binding.primary
+      ? await saveUberPatch(req, businessId, current, {
+        storeId: sid,
+        posDataPatchedAt: new Date().toISOString(),
+        posIntegrationEnabled,
+        posDataCheckedAt: checkedAt,
+      })
+      : sanitizeDeliveryIntegrations(current);
     return res.json({ ok: true, storeId: sid, posData, integrations });
   } catch (error) {
     return res.status(500).json({ ok: false, error: errorMsg(error) });
@@ -680,7 +907,7 @@ export async function getUberDeliveryStoreForBusiness(req, res) {
     if (!businessId) return badRequest(res, 'Falta businessId');
     if (!(await requireUberBusinessAccess(req, res, businessId))) return;
     const { uber } = await loadUberIntegration(req, businessId);
-    const sid = boundUberStoreId(uber, storeId);
+    const sid = (await requireUberBinding(req, businessId, uber, storeId)).storeId;
     const { accessToken } = await getUberEatsAppAccessToken();
     const data = await getUberDeliveryStore(accessToken, sid);
     return res.json({ ok: true, storeId: sid, data });
@@ -697,7 +924,7 @@ export async function getUberStoreStatusForBusiness(req, res) {
     if (!businessId) return badRequest(res, 'Falta businessId');
     if (!(await requireUberBusinessAccess(req, res, businessId))) return;
     const { uber } = await loadUberIntegration(req, businessId);
-    const sid = boundUberStoreId(uber, storeId);
+    const sid = (await requireUberBinding(req, businessId, uber, storeId)).storeId;
     const { accessToken } = await getUberEatsAppAccessToken();
     const status = await getUberStoreStatus(accessToken, sid);
     return res.json({ ok: true, storeId: sid, status });
@@ -718,18 +945,30 @@ export async function setUberStoreStatusForBusiness(req, res) {
     if (!(await requireUberBusinessManager(req, res, businessId))) return;
 
     const { current, uber } = await loadUberIntegration(req, businessId);
-    const sid = boundUberStoreId(uber, storeId);
-    if (String(status || '').toUpperCase() === 'ONLINE' && !uber.salesPointId) {
+    const binding = await requireUberBinding(req, businessId, uber, storeId);
+    const sid = binding.storeId;
+    if (String(status || '').toUpperCase() === 'ONLINE' && !binding.salesPointId) {
       return badRequest(res, 'Selecciona el PDV que recibirá los pedidos antes de poner Uber ONLINE');
     }
 
     const { accessToken } = await getUberEatsAppAccessToken();
     const result = await setUberStoreStatus(accessToken, sid, { status, reason, pausedUntil });
-    const integrations = await saveUberPatch(req, businessId, current, {
+    const statusAt = new Date().toISOString();
+    await saveUberStoreBinding(req, {
+      ...binding,
+      businessId,
+      environment: binding.environment,
+      lastStoreStatus: result.status,
+      lastStoreStatusAt: statusAt,
+    });
+    const runtimePatch = {
       storeId: sid,
       lastStoreStatus: result.status,
-      lastStoreStatusAt: new Date().toISOString(),
-    });
+      lastStoreStatusAt: statusAt,
+    };
+    const integrations = binding.primary
+      ? await saveUberPatch(req, businessId, current, runtimePatch)
+      : sanitizeDeliveryIntegrations(current);
     return res.json({ ok: true, ...result, storeId: sid, integrations });
   } catch (error) {
     logger.error({ error: errorMsg(error) }, 'Uber set store status failed');
@@ -746,18 +985,31 @@ export async function pushUberMenuForBusiness(req, res) {
     if (!(await requireUberBusinessManager(req, res, businessId))) return;
 
     const { current, uber } = await loadUberIntegration(req, businessId);
-    const sid = boundUberStoreId(uber, storeId);
+    const binding = await requireUberBinding(req, businessId, uber, storeId);
+    const sid = binding.storeId;
 
     const result = await pushUberMenuFromCatalog(req, {
       businessId,
       storeId: sid,
-      storeName: String(uber.storeName || ''),
+      storeName: binding.storeName || String(uber.storeName || ''),
+      brandId: binding.brandId,
     });
-    const integrations = await saveUberPatch(req, businessId, current, {
-      storeId: sid,
-      menuPushedAt: new Date().toISOString(),
+    const menuPushedAt = new Date().toISOString();
+    await saveUberStoreBinding(req, {
+      ...binding,
+      businessId,
+      environment: binding.environment,
+      menuPushedAt,
       menuItemCount: result.itemCount,
     });
+    const menuRuntimePatch = {
+      storeId: sid,
+      menuPushedAt,
+      menuItemCount: result.itemCount,
+    };
+    const integrations = binding.primary
+      ? await saveUberPatch(req, businessId, current, menuRuntimePatch)
+      : sanitizeDeliveryIntegrations(current);
     return res.json({ ok: true, ...result, integrations });
   } catch (error) {
     logger.error({ error: errorMsg(error) }, 'Uber menu push failed');
@@ -933,6 +1185,128 @@ export async function actUberOrderForBusiness(req, res) {
   }
 }
 
+/** GET /api/uber-eats/sandbox-orders?businessId= */
+export async function listUberSandboxOrdersForBusiness(req, res) {
+  try {
+    if (!requireSandboxAdmin(req, res)) return;
+    const businessId = String(req.query.businessId || '').trim();
+    if (!businessId) return badRequest(res, 'Falta businessId');
+    if (!(await requireUberBusinessAccess(req, res, businessId))) return;
+    const orders = await listUberSandboxOrders(req, businessId, 'sandbox');
+    return res.json({ ok: true, orders });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: errorMsg(error) });
+  }
+}
+
+/** POST /api/uber-eats/sandbox-orders/action */
+export async function actUberSandboxOrderForBusiness(req, res) {
+  try {
+    if (!requireSandboxAdmin(req, res)) return;
+    const businessId = String(req.body?.businessId || '').trim();
+    const externalOrderId = String(req.body?.externalOrderId || '').trim();
+    const action = String(req.body?.action || '').trim().toLowerCase();
+    const reason = String(req.body?.reason || '').trim();
+    if (!businessId || !externalOrderId) return badRequest(res, 'Falta empresa u order ID');
+    if (!['accept', 'deny', 'ready', 'cancel'].includes(action)) {
+      return badRequest(res, 'Acción sandbox no válida');
+    }
+    if (!(await requireUberBusinessManager(req, res, businessId))) return;
+    const order = await getUberSandboxOrder(req, businessId, externalOrderId);
+    if (!order) return res.status(404).json({ ok: false, error: 'Pedido sandbox no encontrado' });
+    const binding = await getUberStoreBinding(req, 'sandbox', order.storeId);
+    if (!binding || binding.businessId !== businessId) {
+      return res.status(409).json({ ok: false, error: 'El pedido no tiene un binding Uber válido' });
+    }
+
+    const idempotentAt = {
+      accept: order.acceptedAt,
+      deny: order.deniedAt,
+      ready: order.readyAt,
+      cancel: order.cancelledAt,
+    }[action];
+    if (idempotentAt) return res.json({ ok: true, action, order, repeated: true });
+    if (action === 'deny' && order.acceptedAt) {
+      return res.status(409).json({ ok: false, error: 'El pedido ya fue aceptado; debes cancelarlo' });
+    }
+    if ((action === 'ready' || action === 'cancel') && !order.acceptedAt) {
+      return res.status(409).json({ ok: false, error: 'Acepta primero el pedido' });
+    }
+
+    const { accessToken } = await getUberEatsAppAccessToken();
+    const now = new Date().toISOString();
+    const patch = { lastError: '' };
+    if (action === 'accept') {
+      const prepMinutes = Math.min(
+        180,
+        Math.max(5, Number(req.body?.prepMinutes) || binding.defaultPrepMinutes || 20),
+      );
+      const pickupTime = Math.floor(Date.now() / 1000) + prepMinutes * 60;
+      await acceptUberOrder(accessToken, externalOrderId, {
+        externalReferenceId: order.orderNumber || order.id,
+        pickupTime,
+      });
+      Object.assign(patch, {
+        status: 'accepted',
+        acceptedAt: now,
+        prepMinutes,
+        pickupTime,
+      });
+    } else if (action === 'deny') {
+      await denyUberOrder(accessToken, externalOrderId, {
+        explanation: reason || 'Denegado desde pruebas Vertial',
+      });
+      Object.assign(patch, { status: 'denied', deniedAt: now });
+    } else if (action === 'ready') {
+      await markUberOrderReady(accessToken, externalOrderId);
+      Object.assign(patch, { status: 'ready', readyAt: now });
+    } else {
+      await cancelUberOrder(accessToken, externalOrderId, {
+        reason: 'OTHER',
+        details: reason || 'Cancelado desde pruebas Vertial',
+      });
+      Object.assign(patch, { status: 'cancelled', cancelledAt: now });
+    }
+
+    const savedOrder = await saveUberSandboxOrder(req, {
+      ...order,
+      ...patch,
+      businessId,
+      externalOrderId,
+    });
+    await saveUberStoreBinding(req, {
+      ...binding,
+      businessId,
+      environment: 'sandbox',
+      [{
+        accept: 'lastOrderAcceptedAt',
+        deny: 'lastOrderDeniedAt',
+        cancel: 'lastOrderCancelledAt',
+        ready: 'lastOrderReadyAt',
+      }[action]]: now,
+      lastOrderAt: now,
+      lastOrderStatus: action,
+    });
+    const { current } = await loadUberIntegration(req, businessId);
+    const evidenceField = {
+      accept: 'lastOrderAcceptedAt',
+      deny: 'lastOrderDeniedAt',
+      cancel: 'lastOrderCancelledAt',
+      ready: 'lastOrderReadyAt',
+    }[action];
+    await saveUberPatch(req, businessId, current, {
+      [evidenceField]: now,
+      lastOrderAt: now,
+      lastOrderStatus: action,
+    });
+    broadcastToBusiness(businessId, 'uber:sandbox_order_updated', { order: savedOrder });
+    return res.json({ ok: true, action, order: savedOrder });
+  } catch (error) {
+    logger.error({ error: errorMsg(error) }, 'Uber sandbox console action failed');
+    return res.status(500).json({ ok: false, error: errorMsg(error) });
+  }
+}
+
 /** POST /api/uber-eats/disconnect { businessId } — limpia OAuth/tokens de ESTA empresa. */
 export async function disconnectUberEatsForBusiness(req, res) {
   try {
@@ -941,7 +1315,12 @@ export async function disconnectUberEatsForBusiness(req, res) {
     // Dueño o gestor; si falla el rol, al menos el dueño de la sesión con acceso al negocio puede cortar la integración.
     if (!(await requireUberBusinessAccess(req, res, businessId))) return;
 
-    const { current } = await loadUberIntegration(req, businessId);
+    const { current, uber } = await loadUberIntegration(req, businessId);
+    const environment = String(uber.env || getUberEatsPublicConfig().env || 'sandbox');
+    const bindings = await listUberStoreBindings(req, businessId, environment);
+    for (const binding of bindings) {
+      await deleteUberStoreBinding(req, environment, binding.storeId, businessId);
+    }
     const integrations = await wipeUberIntegration(req, businessId, current);
     logger.info({ businessId }, 'Uber Eats desconectado de la empresa');
     return res.json({ ok: true, integrations, disconnected: true });
