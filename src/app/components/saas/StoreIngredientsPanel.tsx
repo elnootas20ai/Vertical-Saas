@@ -631,12 +631,30 @@ type LinkedProductRow = {
   quantity: number | null;
   unit: string | null;
   lineCost: number | null;
+  /** Precio de venta del producto en carta. */
+  salePrice: number | null;
+  categoryOrganizerId: string | null;
 };
+
+function catalogItemSalePrice(item: CatalogItem | undefined): number | null {
+  if (!item) return null;
+  const n = Number(item.unitPrice);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+function catalogItemCategoryOrganizerId(item: CatalogItem | undefined): string | null {
+  if (!item) return null;
+  const label = normalizeImportCategory(String(item.category || '').trim());
+  if (!label || isWarehouseImportCategory(label) || isImportComboCategory(label)) return null;
+  return catalogCategoryOrganizerId(label) || null;
+}
 
 function listProductsLinkedToIngredient(
   catalogItems: CatalogItem[],
   ing: StoreIngredient,
+  options?: { focusCategoryId?: string },
 ): LinkedProductRow[] {
+  const focusCategoryId = String(options?.focusCategoryId || '').trim();
   const byId = new Map<
     string,
     {
@@ -646,9 +664,13 @@ function listProductsLinkedToIngredient(
       quantity: number | null;
       unit: string | null;
       lineCost: number | null;
+      salePrice: number | null;
+      categoryOrganizerId: string | null;
     }
   >();
+  const catalogById = new Map(catalogItems.map((item) => [item._id, item]));
   for (const p of catalogItemsUsingIngredient(catalogItems, ing.name)) {
+    const full = catalogById.get(p._id);
     byId.set(p._id, {
       name: p.name,
       carta: true,
@@ -656,6 +678,8 @@ function listProductsLinkedToIngredient(
       quantity: null,
       unit: null,
       lineCost: null,
+      salePrice: catalogItemSalePrice(full),
+      categoryOrganizerId: catalogItemCategoryOrganizerId(full),
     });
   }
   const needle = ingredientNameFold(ing.name);
@@ -682,6 +706,8 @@ function listProductsLinkedToIngredient(
       prev.quantity = Number.isFinite(qty) && qty > 0 ? qty : prev.quantity;
       prev.unit = unit || prev.unit;
       prev.lineCost = lineCost ?? prev.lineCost;
+      if (prev.salePrice == null) prev.salePrice = catalogItemSalePrice(item);
+      if (!prev.categoryOrganizerId) prev.categoryOrganizerId = catalogItemCategoryOrganizerId(item);
     } else {
       byId.set(item._id, {
         name: item.name,
@@ -690,6 +716,8 @@ function listProductsLinkedToIngredient(
         quantity: Number.isFinite(qty) && qty > 0 ? qty : null,
         unit,
         lineCost,
+        salePrice: catalogItemSalePrice(item),
+        categoryOrganizerId: catalogItemCategoryOrganizerId(item),
       });
     }
   }
@@ -704,7 +732,13 @@ function listProductsLinkedToIngredient(
       quantity: v.quantity,
       unit: v.unit,
       lineCost: v.lineCost,
+      salePrice: v.salePrice,
+      categoryOrganizerId: v.categoryOrganizerId,
     }))
+    .filter((row) => {
+      if (!focusCategoryId || focusCategoryId === INGREDIENT_UNCATEGORIZED_ID) return true;
+      return row.categoryOrganizerId === focusCategoryId;
+    })
     .sort((a, b) => a.name.localeCompare(b.name, 'es'));
 }
 
@@ -713,6 +747,9 @@ function EditIngredientDetailModal({
   ingredient,
   catalogItems,
   defaultExtraPrice,
+  initialTab = 'datos',
+  focusCategoryId,
+  focusCategoryLabel,
   onUpdate,
   onFlags,
   onCost,
@@ -724,6 +761,9 @@ function EditIngredientDetailModal({
   ingredient: StoreIngredient;
   catalogItems: CatalogItem[];
   defaultExtraPrice?: number | null;
+  initialTab?: EditIngredientTab;
+  focusCategoryId?: string;
+  focusCategoryLabel?: string;
   onUpdate: (draft: IngredientDraft) => boolean | Promise<boolean>;
   onFlags: (patch: Partial<{ chargeExtra: boolean; allowRemove: boolean }>) => void;
   onCost: (value: number) => void;
@@ -732,13 +772,13 @@ function EditIngredientDetailModal({
   onRemove: () => void;
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<EditIngredientTab>('datos');
+  const [tab, setTab] = useState<EditIngredientTab>(initialTab);
   const [draft, setDraft] = useState(() => itemToDraft(ingredient));
 
   useEffect(() => {
     setDraft(itemToDraft(ingredient));
-    setTab('datos');
-  }, [ingredient.id]);
+    setTab(initialTab);
+  }, [ingredient.id, initialTab]);
 
   useEffect(() => {
     setDraft(itemToDraft(ingredient));
@@ -754,8 +794,11 @@ function EditIngredientDetailModal({
 
   const flags = readStoreIngredientTpvFlags(ingredient);
   const linked = useMemo(
-    () => listProductsLinkedToIngredient(catalogItems, ingredient),
-    [catalogItems, ingredient],
+    () =>
+      listProductsLinkedToIngredient(catalogItems, ingredient, {
+        focusCategoryId,
+      }),
+    [catalogItems, ingredient, focusCategoryId],
   );
   const hasInventory = useMemo(
     () => catalogInventoryItemsForIngredient(catalogItems, ingredient.name).length > 0,
@@ -977,28 +1020,32 @@ function EditIngredientDetailModal({
               <div className="rounded-xl border border-stone-200 bg-stone-50/80 px-3 py-2.5 dark:border-stone-700 dark:bg-stone-950/40">
                 <p className="text-sm font-semibold text-stone-800 dark:text-stone-100">
                   Dónde se usa este ingrediente
+                  {focusCategoryLabel ? ` · ${focusCategoryLabel}` : ''}
                 </p>
                 <p className="mt-0.5 text-[11px] text-stone-500">
-                  Consumo por venta según el escandallo de cada producto. La receta se edita en el
-                  producto, no aquí.
+                  Precio de venta del plato, consumo según escandallo y coste del ingrediente en
+                  cada uno. La receta se edita en el producto, no aquí.
                 </p>
               </div>
               {linked.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-stone-200 bg-stone-50/80 px-4 py-8 text-center dark:border-stone-700 dark:bg-stone-950/40">
                   <ShoppingBag className="mx-auto h-8 w-8 text-stone-300" />
                   <p className="mt-2 text-sm font-semibold text-stone-700 dark:text-stone-200">
-                    Aún no está en ningún producto
+                    {focusCategoryLabel
+                      ? `No aparece en productos de «${focusCategoryLabel}»`
+                      : 'Aún no está en ningún producto'}
                   </p>
                   <p className="mt-1 text-xs text-stone-500">
                     Añádelo en la ficha del producto o en Escandallo.
                   </p>
                 </div>
               ) : (
-                <div className="overflow-hidden rounded-2xl border border-stone-200 dark:border-stone-700">
-                  <table className="w-full text-sm">
+                <div className="overflow-x-auto overflow-hidden rounded-2xl border border-stone-200 dark:border-stone-700">
+                  <table className="w-full min-w-[520px] text-sm">
                     <thead className="bg-stone-50 text-[10px] font-bold uppercase tracking-wide text-stone-400 dark:bg-stone-950/60">
                       <tr>
                         <th className="px-3 py-2 text-left">Producto</th>
+                        <th className="px-3 py-2 text-right">Precio</th>
                         <th className="px-3 py-2 text-right">Consume</th>
                         <th className="px-3 py-2 text-right">Coste</th>
                         <th className="px-3 py-2 text-right">Vía</th>
@@ -1009,6 +1056,9 @@ function EditIngredientDetailModal({
                         <tr key={p._id} className="bg-white dark:bg-stone-900">
                           <td className="px-3 py-2.5 font-medium text-stone-900 dark:text-stone-100">
                             {p.name}
+                          </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-[var(--v-blue,#2563eb)]">
+                            {p.salePrice != null ? formatMoneyEs(p.salePrice) : '—'}
                           </td>
                           <td className="px-3 py-2.5 text-right tabular-nums text-stone-700 dark:text-stone-200">
                             {p.quantity != null && p.unit
@@ -1139,6 +1189,7 @@ export function StoreIngredientsPanel({
   const [newDraft, setNewDraft] = useState<IngredientDraft>(() => emptyDraft());
   const [defaultExtraPrice, setDefaultExtraPrice] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingOpenTab, setEditingOpenTab] = useState<EditIngredientTab>('datos');
   const [expandedPreview, setExpandedPreview] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -1210,8 +1261,25 @@ export function StoreIngredientsPanel({
     [items, editingId],
   );
 
+  const openIngredientDetail = useCallback(
+    (id: string, tab: EditIngredientTab = 'datos') => {
+      setEditingOpenTab(tab);
+      setEditingId(id);
+    },
+    [],
+  );
+
+  const closeIngredientDetail = useCallback(() => {
+    setEditingId(null);
+    setEditingOpenTab('datos');
+  }, []);
+
+  const activeCategoryLabel =
+    categoryGroups.find((g) => g.id === categoryFilter)?.label || '';
+
   const startCreateIngredient = () => {
     setEditingId(null);
+    setEditingOpenTab('datos');
     setNewDraft(emptyDraft());
     setCreating(true);
   };
@@ -1830,9 +1898,15 @@ export function StoreIngredientsPanel({
                           const hasInventory =
                             catalogInventoryItemsForIngredient(catalogItems, ing.name).length > 0;
                           const usageCount = catalogItemsUsingIngredient(catalogItems, ing.name).length;
+                          const openTab: EditIngredientTab = categoryFilter ? 'productos' : 'datos';
                           return (
                             <li key={ing.id} className="px-3 py-2.5">
-                              <div className="flex items-center justify-between gap-2">
+                              <button
+                                type="button"
+                                onClick={() => openIngredientDetail(ing.id, openTab)}
+                                className="flex w-full items-center justify-between gap-2 text-left rounded-lg -mx-1 px-1 py-0.5 hover:bg-stone-50 dark:hover:bg-stone-800/60"
+                                title="Ver ficha del ingrediente"
+                              >
                                 <div className="flex items-center gap-2 min-w-0 flex-1">
                                   <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
                                     {ing.name}
@@ -1847,11 +1921,15 @@ export function StoreIngredientsPanel({
                                     {usageCount > 0 ? `${usageCount} prod.` : ''}
                                   </span>
                                 </div>
-                                <div className="flex items-center gap-0.5 shrink-0">
+                                <div
+                                  className="flex items-center gap-0.5 shrink-0"
+                                  onClick={(e) => e.stopPropagation()}
+                                  onKeyDown={(e) => e.stopPropagation()}
+                                >
                                   {!isSub ? (
                                     <button
                                       type="button"
-                                      onClick={() => setEditingId(ing.id)}
+                                      onClick={() => openIngredientDetail(ing.id, openTab)}
                                       className="p-2 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
                                       title="Editar"
                                     >
@@ -1867,7 +1945,7 @@ export function StoreIngredientsPanel({
                                     <Trash2 className="w-4 h-4" />
                                   </button>
                                 </div>
-                              </div>
+                              </button>
                               {isSub ? (
                                 <p className="mt-1.5 text-[11px] text-stone-500 dark:text-stone-400 leading-snug">
                                   {recipeLines.map((l) => `${l.name} ${l.quantity}${l.unit}`).join(' · ')}
@@ -1876,7 +1954,10 @@ export function StoreIngredientsPanel({
                                     : ''}
                                 </p>
                               ) : (
-                              <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                              <div
+                                className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1.5"
+                                onClick={(e) => e.stopPropagation()}
+                              >
                                 <IngredientCostCell
                                   ingredient={ing}
                                   onCommit={(value) => updateIngredientBaseCost(ing.id, value)}
@@ -1961,14 +2042,25 @@ export function StoreIngredientsPanel({
                               const hasInventory =
                                 catalogInventoryItemsForIngredient(catalogItems, ing.name).length > 0;
                               const usageCount = catalogItemsUsingIngredient(catalogItems, ing.name).length;
+                              const openTab: EditIngredientTab = categoryFilter ? 'productos' : 'datos';
                               return (
                                 <tr
                                   key={ing.id}
-                                  className="hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors"
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={() => openIngredientDetail(ing.id, openTab)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                      e.preventDefault();
+                                      openIngredientDetail(ing.id, openTab);
+                                    }
+                                  }}
+                                  className="hover:bg-blue-50/50 dark:hover:bg-blue-950/20 transition-colors cursor-pointer"
+                                  title="Ver ficha: productos, precio y coste"
                                 >
                                   <td className="px-4 py-2">
                                     <div className="flex items-center gap-2 min-w-0">
-                                      <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                                      <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate group-hover:text-[var(--v-blue,#2563eb)]">
                                         {ing.name}
                                       </span>
                                       {hasInventory ? (
@@ -1992,7 +2084,10 @@ export function StoreIngredientsPanel({
                                     </>
                                   ) : (
                                     <>
-                                  <td className="px-4 py-2 text-right">
+                                  <td
+                                    className="px-4 py-2 text-right"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
                                     <div className="inline-flex items-center justify-end gap-1.5">
                                       <IngredientCostCell
                                         ingredient={ing}
@@ -2003,7 +2098,10 @@ export function StoreIngredientsPanel({
                                       </span>
                                     </div>
                                   </td>
-                                  <td className="px-4 py-2 text-center">
+                                  <td
+                                    className="px-4 py-2 text-center"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
                                     <InlineToggle
                                       checked={flags.chargeExtra}
                                       onChange={(checked) =>
@@ -2011,7 +2109,10 @@ export function StoreIngredientsPanel({
                                       }
                                     />
                                   </td>
-                                  <td className="px-4 py-2 text-right">
+                                  <td
+                                    className="px-4 py-2 text-right"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
                                     {flags.chargeExtra ? (
                                       <IngredientExtraPriceCell
                                         ingredient={ing}
@@ -2022,7 +2123,10 @@ export function StoreIngredientsPanel({
                                       <span className="text-[11px] text-gray-400">—</span>
                                     )}
                                   </td>
-                                  <td className="px-4 py-2 text-center">
+                                  <td
+                                    className="px-4 py-2 text-center"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
                                     <InlineToggle
                                       checked={flags.allowRemove}
                                       onChange={(checked) =>
@@ -2032,17 +2136,20 @@ export function StoreIngredientsPanel({
                                   </td>
                                     </>
                                   )}
-                                  <td className="px-4 py-2 text-right text-xs text-gray-500 dark:text-gray-400 tabular-nums">
+                                  <td className="px-4 py-2 text-right text-xs font-semibold tabular-nums text-[var(--v-blue,#2563eb)]">
                                     {usageCount > 0 ? `${usageCount} prod.` : '—'}
                                   </td>
-                                  <td className="px-4 py-2">
+                                  <td
+                                    className="px-4 py-2"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
                                     <div className="flex items-center justify-end gap-0.5">
                                       {!isSub ? (
                                       <button
                                         type="button"
-                                        onClick={() => setEditingId(ing.id)}
+                                        onClick={() => openIngredientDetail(ing.id, openTab)}
                                         className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-gray-700"
-                                        title="Editar"
+                                        title="Abrir ficha"
                                       >
                                         <Pencil className="w-4 h-4" />
                                       </button>
@@ -2136,16 +2243,23 @@ export function StoreIngredientsPanel({
           ingredient={editingIngredient}
           catalogItems={catalogItems}
           defaultExtraPrice={defaultExtraPriceNum}
+          initialTab={editingOpenTab}
+          focusCategoryId={
+            categoryFilter && categoryFilter !== INGREDIENT_UNCATEGORIZED_ID
+              ? categoryFilter
+              : undefined
+          }
+          focusCategoryLabel={activeCategoryLabel || undefined}
           onUpdate={(draft) => updateItem(editingIngredient.id, draft)}
           onFlags={(patch) => updateIngredientTpvFlags(editingIngredient.id, patch)}
           onCost={(value) => updateIngredientBaseCost(editingIngredient.id, value)}
           onUnit={(unit) => updateIngredientUnit(editingIngredient.id, unit)}
           onExtraPrice={(value) => updateIngredientExtraPrice(editingIngredient.id, value)}
           onRemove={() => {
-            setEditingId(null);
+            closeIngredientDetail();
             void removeItem(editingIngredient.id);
           }}
-          onClose={() => setEditingId(null)}
+          onClose={closeIngredientDetail}
         />
       ) : null}
 
