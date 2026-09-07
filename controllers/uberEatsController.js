@@ -176,19 +176,28 @@ async function loadUberIntegration(req, businessId) {
 async function saveUberPatch(req, businessId, current, uberPatch) {
   const db = getWebDbName();
   await ensureDatabase(req, db);
-  const prevIntegrations = current?.integrations || {};
-  const prevUber = prevIntegrations.uber || {};
-  const nextIntegrations = {
-    ...prevIntegrations,
-    uber: {
-      ...prevUber,
-      ...uberPatch,
-      token: String(uberPatch.token !== undefined ? uberPatch.token : prevUber.token || ''),
-    },
-  };
-  const doc = buildWebConfigDocument(businessId, { integrations: nextIntegrations }, current);
-  const saved = await putDocument(req, db, doc._id, doc);
-  return sanitizeDeliveryIntegrations({ ...doc, _rev: saved.rev });
+  let latest = current;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const prevIntegrations = latest?.integrations || {};
+    const prevUber = prevIntegrations.uber || {};
+    const nextIntegrations = {
+      ...prevIntegrations,
+      uber: {
+        ...prevUber,
+        ...uberPatch,
+        token: String(uberPatch.token !== undefined ? uberPatch.token : prevUber.token || ''),
+      },
+    };
+    const doc = buildWebConfigDocument(businessId, { integrations: nextIntegrations }, latest);
+    try {
+      const saved = await putDocument(req, db, doc._id, doc);
+      return sanitizeDeliveryIntegrations({ ...doc, _rev: saved.rev });
+    } catch (error) {
+      if (attempt >= 3 || !/conflict|409/i.test(error?.message || '')) throw error;
+      latest = await getWebConfigByBusinessId(req, businessId);
+    }
+  }
+  throw new Error('No se pudo guardar la configuración Uber tras varios reintentos');
 }
 
 async function loadUberBindings(req, businessId, uber) {
@@ -1271,7 +1280,7 @@ export async function actUberSandboxOrderForBusiness(req, res) {
     const persistedBinding = await getUberStoreBinding(req, 'sandbox', order.storeId);
     const binding = persistedBinding || (
       String(currentUber.storeId || '') === order.storeId
-        ? legacyUberBinding(businessId, currentUber)
+        ? legacyUberBinding(currentUber, businessId)
         : null
     );
     if (!binding || binding.businessId !== businessId) {

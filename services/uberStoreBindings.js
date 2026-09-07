@@ -106,7 +106,7 @@ export async function listUberStoreBindings(req, businessId, environment = '') {
       || a.storeName.localeCompare(b.storeName, 'es'));
 }
 
-export async function saveUberStoreBinding(req, data) {
+export async function saveUberStoreBinding(req, data, conflictAttempt = 0) {
   const environment = clean(data.environment).toLowerCase() || 'sandbox';
   const businessId = clean(data.businessId);
   const storeId = clean(data.storeId);
@@ -173,8 +173,21 @@ export async function saveUberStoreBinding(req, data) {
     createdAt: existing?.createdAt || now,
     updatedAt: now,
   };
-  const saved = await putDocument(req, db, id, doc);
-  return sanitizeUberStoreBinding({ ...doc, _rev: saved.rev });
+  try {
+    const saved = await putDocument(req, db, id, doc);
+    return sanitizeUberStoreBinding({ ...doc, _rev: saved.rev });
+  } catch (error) {
+    if (conflictAttempt < 3 && /conflict|409/i.test(error?.message || '')) {
+      const before = sanitizeUberStoreBinding(existing);
+      const retryData = { environment, businessId, storeId };
+      for (const [key, value] of Object.entries(data)) {
+        if (['id', 'environment', 'businessId', 'storeId'].includes(key)) continue;
+        if (!Object.is(value, before?.[key])) retryData[key] = value;
+      }
+      return saveUberStoreBinding(req, retryData, conflictAttempt + 1);
+    }
+    throw error;
+  }
 }
 
 export async function deleteUberStoreBinding(req, environment, storeId, businessId) {

@@ -83,30 +83,35 @@ async function findUberOauthBusiness(req, storeId = '') {
 
 async function saveUberRuntimePatch(req, config, patch) {
   if (!config?.business_id) return null;
-  try {
-    const current = await getWebConfigByBusinessId(req, config.business_id);
-    if (!current) return null;
-    const nextIntegrations = {
-      ...(current.integrations || {}),
-      uber: {
-        ...(current.integrations?.uber || {}),
-        ...patch,
-        runtimeUpdatedAt: new Date().toISOString(),
-      },
-    };
-    const doc = buildWebConfigDocument(
-      config.business_id,
-      { integrations: nextIntegrations },
-      current,
-    );
-    return await putDocument(req, getWebDbName(), doc._id, doc);
-  } catch (error) {
-    logger.warn(
-      { businessId: config.business_id, error: error?.message || String(error) },
-      'Uber webhook: no se pudo guardar evidencia runtime',
-    );
-    return null;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      const current = await getWebConfigByBusinessId(req, config.business_id);
+      if (!current) return null;
+      const nextIntegrations = {
+        ...(current.integrations || {}),
+        uber: {
+          ...(current.integrations?.uber || {}),
+          ...patch,
+          runtimeUpdatedAt: new Date().toISOString(),
+        },
+      };
+      const doc = buildWebConfigDocument(
+        config.business_id,
+        { integrations: nextIntegrations },
+        current,
+      );
+      return await putDocument(req, getWebDbName(), doc._id, doc);
+    } catch (error) {
+      const isRetryable = /conflict|409/i.test(error?.message || '');
+      if (isRetryable && attempt < 3) continue;
+      logger.warn(
+        { businessId: config.business_id, error: error?.message || String(error) },
+        'Uber webhook: no se pudo guardar evidencia runtime',
+      );
+      return null;
+    }
   }
+  return null;
 }
 
 function validateWebhookToken(integrations, platform, providedToken) {
@@ -370,26 +375,18 @@ async function handleUberPrimaryWebhook(req, res) {
                 'Uber store.provisioned: no se pudo verificar pos_data',
               );
             }
-            const current = await getWebConfigByBusinessId(req, cfg.business_id);
-            const prevUber = current?.integrations?.uber || {};
             const now = new Date().toISOString();
-            const next = {
-              ...(current?.integrations || {}),
-              uber: {
-                ...prevUber,
-                storeId: event.storeId,
-                enabled: true,
-                posIntegrationEnabled,
-                posDataCheckedAt: now,
-                ...(posIntegrationEnabled ? { provisionedAt: prevUber.provisionedAt || now } : {}),
-                ...(menuResult ? {
-                  menuPushedAt: now,
-                  menuItemCount: Number(menuResult.itemCount || 0),
-                } : {}),
-              },
-            };
-            const doc = buildWebConfigDocument(cfg.business_id, { integrations: next }, current);
-            await putDocument(req, getWebDbName(), doc._id, doc);
+            await saveUberRuntimePatch(req, cfg, {
+              storeId: event.storeId,
+              enabled: true,
+              posIntegrationEnabled,
+              posDataCheckedAt: now,
+              ...(posIntegrationEnabled ? { provisionedAt: now } : {}),
+              ...(menuResult ? {
+                menuPushedAt: now,
+                menuItemCount: Number(menuResult.itemCount || 0),
+              } : {}),
+            });
             if (binding) {
               await saveUberStoreBinding(req, {
                 ...binding,
