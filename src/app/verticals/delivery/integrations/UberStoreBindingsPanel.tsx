@@ -94,7 +94,7 @@ export function UberStoreBindingsPanel({
   const save = async (storeId: string, storeName: string, draft: BindingDraft) => {
     if (!draft.brandId || !draft.salesPointId) {
       toast.error('Elige marca y PDV');
-      return;
+      return false;
     }
     setBusyId(storeId);
     try {
@@ -108,8 +108,10 @@ export function UberStoreBindingsPanel({
       if (result.integrations) onIntegrations?.(result.integrations);
       toast.success('Tienda Uber asociada');
       await load();
+      return true;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'No se pudo guardar la asociación');
+      return false;
     } finally {
       setBusyId('');
     }
@@ -178,6 +180,68 @@ export function UberStoreBindingsPanel({
           Cada tienda Uber publica una marca y entrega sus pedidos a un PDV concreto.
         </p>
       </div>
+
+      {availableStores.length > 0 && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3 dark:border-blue-900 dark:bg-blue-950/20">
+          <p className="text-xs font-bold text-blue-900 dark:text-blue-200">
+            {bindings.length === 0 ? 'Vincular la primera tienda Uber' : 'Vincular otra tienda Uber'}
+          </p>
+          <p className="mt-0.5 text-[10px] text-blue-700 dark:text-blue-300">
+            Elige los tres datos y guarda una sola vez.
+          </p>
+          <div className="mt-2 grid gap-2 sm:grid-cols-3">
+            <label>
+              <span className="mb-1 block text-[9px] font-bold uppercase text-stone-500">Tienda Uber</span>
+              <select value={newStoreId} onChange={(event) => setNewStoreId(event.target.value)} className="w-full rounded-xl border border-blue-200 bg-white px-3 py-2.5 text-xs dark:border-blue-800 dark:bg-stone-950">
+                <option value="">Selecciona tienda</option>
+                {availableStores.map((store) => (
+                  <option key={store.storeId} value={store.storeId}>
+                    {store.name} · {store.storeId.slice(0, 8)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span className="mb-1 block text-[9px] font-bold uppercase text-stone-500">Marca Vertial</span>
+              <select value={newBrandId} onChange={(event) => setNewBrandId(event.target.value)} className="w-full rounded-xl border border-blue-200 bg-white px-3 py-2.5 text-xs dark:border-blue-800 dark:bg-stone-950">
+                <option value="">Selecciona marca</option>
+                {brands.map((brand) => <option key={brand._id} value={brand._id}>{brand.name}</option>)}
+              </select>
+            </label>
+            <label>
+              <span className="mb-1 block text-[9px] font-bold uppercase text-stone-500">PDV receptor</span>
+              <select value={newPdvId} onChange={(event) => setNewPdvId(event.target.value)} className="w-full rounded-xl border border-blue-200 bg-white px-3 py-2.5 text-xs dark:border-blue-800 dark:bg-stone-950">
+                <option value="">Selecciona PDV</option>
+                {pdvs.filter((pdv) => pdv.active !== false).map((pdv) => <option key={pdv._id} value={pdv._id}>{pdv.name}</option>)}
+              </select>
+            </label>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const store = availableStores.find((entry) => entry.storeId === newStoreId);
+              if (!store) {
+                toast.error('Elige la tienda Uber');
+                return;
+              }
+              void save(store.storeId, store.name, {
+                brandId: newBrandId,
+                salesPointId: newPdvId,
+                defaultPrepMinutes: 20,
+              }).then((saved) => {
+                if (!saved) return;
+                setNewStoreId('');
+                setNewBrandId('');
+                setNewPdvId('');
+              });
+            }}
+            disabled={Boolean(busyId) || !newStoreId || !newBrandId || !newPdvId}
+            className={`${VERTIAL_BTN_PRIMARY} mt-3 px-3 text-xs`}
+          >
+            <Plus className="h-3.5 w-3.5" /> Vincular tienda
+          </button>
+        </div>
+      )}
 
       {bindings.length === 0 ? (
         <p className="rounded-lg border border-dashed border-stone-300 px-3 py-4 text-center text-[11px] text-stone-500 dark:border-stone-700">
@@ -315,48 +379,6 @@ export function UberStoreBindingsPanel({
         </div>
       )}
 
-      {availableStores.length > 0 && (
-        <div className="rounded-xl border border-dashed border-blue-200 bg-blue-50/50 p-2.5 dark:border-blue-900 dark:bg-blue-950/20">
-          <p className="text-[10px] font-bold text-blue-800 dark:text-blue-300">Vincular otra tienda Uber</p>
-          <div className="mt-2 grid gap-2 sm:grid-cols-3">
-            <select value={newStoreId} onChange={(event) => setNewStoreId(event.target.value)} className="rounded-xl border border-blue-200 bg-white px-3 py-2.5 text-xs dark:border-blue-800 dark:bg-stone-950">
-              <option value="">Tienda Uber</option>
-              {availableStores.map((store) => <option key={store.storeId} value={store.storeId}>{store.name}</option>)}
-            </select>
-            <select value={newBrandId} onChange={(event) => setNewBrandId(event.target.value)} className="rounded-xl border border-blue-200 bg-white px-3 py-2.5 text-xs dark:border-blue-800 dark:bg-stone-950">
-              <option value="">Marca Vertial</option>
-              {brands.map((brand) => <option key={brand._id} value={brand._id}>{brand.name}</option>)}
-            </select>
-            <select value={newPdvId} onChange={(event) => setNewPdvId(event.target.value)} className="rounded-xl border border-blue-200 bg-white px-3 py-2.5 text-xs dark:border-blue-800 dark:bg-stone-950">
-              <option value="">PDV receptor</option>
-              {pdvs.filter((pdv) => pdv.active !== false).map((pdv) => <option key={pdv._id} value={pdv._id}>{pdv.name}</option>)}
-            </select>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              const store = availableStores.find((entry) => entry.storeId === newStoreId);
-              if (!store) {
-                toast.error('Elige la tienda Uber');
-                return;
-              }
-              void save(store.storeId, store.name, {
-                brandId: newBrandId,
-                salesPointId: newPdvId,
-                defaultPrepMinutes: 20,
-              }).then(() => {
-                setNewStoreId('');
-                setNewBrandId('');
-                setNewPdvId('');
-              });
-            }}
-            disabled={Boolean(busyId)}
-            className={`${VERTIAL_BTN_PRIMARY} mt-2 px-3 text-xs`}
-          >
-            <Plus className="h-3.5 w-3.5" /> Vincular tienda
-          </button>
-        </div>
-      )}
     </section>
     <ConfirmDestroyModal
       isOpen={Boolean(pendingDelete)}

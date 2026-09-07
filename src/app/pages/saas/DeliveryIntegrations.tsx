@@ -767,11 +767,7 @@ export function DeliveryIntegrations() {
                       </div>
                       <p className="text-[11px] text-stone-500">
                         {!uberOauth && 'Conecta Uber. El interruptor enciende/apaga esta cuenta.'}
-                        {uberOauth && uberStoreSelectionRequired && 'Cuenta conectada. Elige debajo la tienda que quieres asociar.'}
-                        {uberOauth && !uberStoreSelectionRequired && !uberStoreLinked && businessPdvs.length === 0 && 'Crea un PDV en esta empresa y vuelve a conectar.'}
-                        {uberOauth && !uberStoreSelectionRequired && !uberStoreLinked && businessPdvs.length > 1 && 'Hay varios PDV: elige cuál recibe los pedidos Uber.'}
-                        {uberOauth && !uberStoreSelectionRequired && !uberStoreLinked && soleBusinessPdv && uberStores.length > 1 && 'Hay varias tiendas Uber: elige la de esta cuenta.'}
-                        {uberOauth && !uberStoreSelectionRequired && !uberStoreLinked && soleBusinessPdv && uberStores.length <= 1 && (loadingStores ? 'Cargando tiendas de Uber…' : 'Elige la tienda de esta cuenta.')}
+                        {uberOauth && !uberStoreLinked && 'Cuenta conectada. Vincula debajo la tienda Uber, su marca y su PDV en un único paso.'}
                         {uberOauth && !uberStoreSelectionRequired && uberStoreLinked && !uberPosReady && 'Cuenta y tienda conectadas. Pulsa el interruptor para activar el POS.'}
                         {uberOauth && !uberStoreSelectionRequired && uberStoreLinked && uberPosReady && !uberOnline && 'Todo conectado. Pulsa el interruptor para recibir pedidos.'}
                         {!uberStoreSelectionRequired && uberReceivingOrders && 'Recibiendo pedidos. Pausa con el interruptor cuando quieras.'}
@@ -795,7 +791,43 @@ export function DeliveryIntegrations() {
                         </button>
                       )}
 
-                      {uberOauth && (!uberStoreLinked || uberStoreSelectionRequired) && (
+                      {uberOauth && (
+                        <div className="space-y-2 rounded-xl border border-stone-200 bg-white p-3 dark:border-stone-800 dark:bg-stone-950">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-xs font-bold text-stone-900 dark:text-stone-100">
+                                Cuenta Uber conectada
+                              </p>
+                              <p className="mt-0.5 text-[10px] text-stone-500">
+                                {loadingStores
+                                  ? 'Consultando tiendas disponibles…'
+                                  : `${uberStores.length} tienda${uberStores.length === 1 ? '' : 's'} disponible${uberStores.length === 1 ? '' : 's'}`}
+                              </p>
+                            </div>
+                            {loadingStores && <Loader2 className="h-4 w-4 animate-spin text-blue-600" />}
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => void reconnectUber()}
+                              disabled={disconnectingUber || connectingUber}
+                              className={VERTIAL_BTN_SECONDARY}
+                            >
+                              Reconectar con otra cuenta
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setShowDisconnectUberConfirm(true)}
+                              disabled={disconnectingUber}
+                              className={VERTIAL_BTN_DANGER}
+                            >
+                              Desvincular cuenta
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {false && uberOauth && (!uberStoreLinked || uberStoreSelectionRequired) && (
                         <div className="space-y-2.5">
                           {soleBusinessPdv && (
                             <p className="text-xs text-stone-700 dark:text-stone-300">
@@ -894,7 +926,7 @@ export function DeliveryIntegrations() {
                         </div>
                       )}
 
-                      {uberOauth && uberStoreLinked && !uberStoreSelectionRequired && (
+                      {false && uberOauth && uberStoreLinked && !uberStoreSelectionRequired && (
                         <div className="space-y-2.5">
                           <p className="text-xs text-stone-700 dark:text-stone-300">
                             Cuenta: <strong>{linkedPdvName || integrations.uber.storeName || 'PDV'}</strong>
@@ -945,6 +977,15 @@ export function DeliveryIntegrations() {
                       )}
                       </section>
 
+                      {uberOauth && (
+                        <UberStoreBindingsPanel
+                          businessId={businessId}
+                          stores={uberStores}
+                          pdvs={businessPdvs}
+                          onIntegrations={applyIntegrations}
+                        />
+                      )}
+
                       {uberOauth && uberStoreLinked && !uberStoreSelectionRequired && (
                         <section className="space-y-3 rounded-xl border border-stone-200 bg-stone-50/70 p-3 dark:border-stone-800 dark:bg-stone-900/40">
                           <div className="flex items-start justify-between gap-3">
@@ -974,14 +1015,6 @@ export function DeliveryIntegrations() {
                         </section>
                       )}
 
-                      {uberOauth && (
-                        <UberStoreBindingsPanel
-                          businessId={businessId}
-                          stores={uberStores}
-                          pdvs={businessPdvs}
-                          onIntegrations={applyIntegrations}
-                        />
-                      )}
                     </div>
                   ) : key === 'uber' ? (
                     <UberSandboxOrdersPanel
