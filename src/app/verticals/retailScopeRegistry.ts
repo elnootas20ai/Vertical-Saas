@@ -132,10 +132,13 @@ export function filterRetailWorkCentersForScope(
   }
 
   if (kind === 'restaurant') {
-    return filterRestaurantRetailWorkCenters(
-      pickRestaurantFloorRetail(workCenters),
-      business,
-      ctx.businesses,
+    // Misma dedupe que delivery: evita 2× «bodegeta» (uno Sin PDV) en el sidebar.
+    return dedupeRetailWorkCentersForBusiness(
+      filterRestaurantRetailWorkCenters(
+        pickRestaurantFloorRetail(workCenters),
+        business,
+        ctx.businesses,
+      ),
     );
   }
 

@@ -584,7 +584,8 @@ export function ProductCostingModal({
     // Solo comida: los envases se editan al crear/editar producto y se conservan al guardar.
     foodRecipeLines(readProductRecipeLines(product)).map((line) => ({
       storeIngredientId: line.storeIngredientId || '',
-      quantity: String(line.quantity),
+      quantity: line.quantityText
+        || String(line.quantity).replace('.', ','),
       unit: line.unit,
     })),
   );
@@ -613,6 +614,7 @@ export function ProductCostingModal({
         storeIngredientId: line.storeIngredientId,
         name: ing.name,
         quantity,
+        quantityText: String(line.quantity || '').trim() || undefined,
         unit: line.unit.trim() || 'ud',
       });
     }

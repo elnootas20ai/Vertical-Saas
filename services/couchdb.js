@@ -12412,6 +12412,8 @@ export function buildPurchaseInvoiceDocument(userId, data = {}, existing = null)
     paidAt: String(data.paidAt || existing?.paidAt || ''),
     linkedPurchaseOrderId: data.linkedPurchaseOrderId || existing?.linkedPurchaseOrderId || '',
     linkedPurchaseOrderNumber: data.linkedPurchaseOrderNumber || existing?.linkedPurchaseOrderNumber || '',
+    linkedAlbaranId: String(data.linkedAlbaranId || existing?.linkedAlbaranId || '').trim(),
+    linkedAlbaranNumber: String(data.linkedAlbaranNumber || existing?.linkedAlbaranNumber || '').trim(),
     costCenterId: data.costCenterId || data.workCenterId || existing?.costCenterId || existing?.workCenterId || '',
     costCenterName: data.costCenterName || data.workCenterName || existing?.costCenterName || existing?.workCenterName || '',
     businessId: String(data.businessId || data.business_id || existing?.businessId || existing?.business_id || '').trim(),
@@ -12500,6 +12502,8 @@ export function sanitizePurchaseInvoice(doc, options = {}) {
     paidAt: doc.paidAt || '',
     linkedPurchaseOrderId: doc.linkedPurchaseOrderId || '',
     linkedPurchaseOrderNumber: doc.linkedPurchaseOrderNumber || '',
+    linkedAlbaranId: doc.linkedAlbaranId || '',
+    linkedAlbaranNumber: doc.linkedAlbaranNumber || '',
     linkedFinanceId: doc.linkedFinanceId || '',
     costCenterId: doc.costCenterId || '',
     costCenterName: doc.costCenterName || '',
@@ -12642,16 +12646,24 @@ export function normalizePurchaseInvoiceNumber(value) {
 
 /**
  * Busca factura/albarán ya metido por código.
- * Criterio principal: mismo nº de factura (normalizado). Si ambos tienen proveedor, debe coincidir.
+ * Criterio principal: mismo nº (normalizado). Si ambos tienen proveedor, debe coincidir.
+ * Si options.documentKind está definido, solo cuenta como duplicado el mismo kind
+ * (una factura no choca con un albarán del mismo número).
  */
 export async function findDuplicatePurchaseInvoice(req, userId, invoiceNumber, supplierId, total, options = {}) {
   const normalized = normalizePurchaseInvoiceNumber(invoiceNumber);
   if (!normalized) return null;
   const excludeId = String(options.excludeId || '').trim();
+  const wantKind = String(options.documentKind || '').trim();
   const invoices = await listPurchaseInvoicesByUser(req, userId);
   return invoices.find((inv) => {
     if (excludeId && inv._id === excludeId) return false;
-    const invNum = normalizePurchaseInvoiceNumber(inv.invoiceNumber);
+    if (wantKind) {
+      const invKind = String(inv.documentKind || inv.ocrData?.documentType || 'factura_proveedor').trim();
+      if (invKind !== wantKind) return false;
+    }
+    const invNum = normalizePurchaseInvoiceNumber(inv.invoiceNumber)
+      || normalizePurchaseInvoiceNumber(inv.ocrData?.documentNumber || '');
     if (!invNum || invNum !== normalized) return false;
     const wantSupplier = String(supplierId || '').trim();
     const haveSupplier = String(inv.supplierId || '').trim();
@@ -12662,6 +12674,81 @@ export async function findDuplicatePurchaseInvoice(req, userId, invoiceNumber, s
     }
     return true;
   }) || null;
+}
+
+function isAlbaranPurchaseDoc(inv) {
+  const kind = String(inv?.documentKind || inv?.ocrData?.documentType || '').trim();
+  return kind === 'albaran';
+}
+
+function purchaseDocMatchesCode(inv, code) {
+  const needle = normalizePurchaseInvoiceNumber(code);
+  if (!needle) return false;
+  return (
+    normalizePurchaseInvoiceNumber(inv?.invoiceNumber) === needle
+    || normalizePurchaseInvoiceNumber(inv?.ocrData?.documentNumber || '') === needle
+    || normalizePurchaseInvoiceNumber(inv?.linkedAlbaranNumber || '') === needle
+  );
+}
+
+/** Extrae posibles nº de albarán mencionados en texto OCR/notas. */
+export function extractAlbaranRefsFromText(raw) {
+  const text = String(raw || '');
+  if (!text.trim()) return [];
+  const out = [];
+  const re =
+    /(?:albar[aá]n|alb\.?)\s*(?:n[ºo°.]?\s*|num(?:ero)?\.?\s*|n[uú]mero\s*)?([A-Z0-9][A-Z0-9./-]{1,24})/gi;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const code = String(m[1] || '').trim();
+    if (code && !out.includes(code)) out.push(code);
+  }
+  return out;
+}
+
+/**
+ * Enlaza una factura OCR con un albarán existente (mismo proveedor + código).
+ * Prioridad: refs en notas/OCR → mismo nº documento → albarán reciente del proveedor sin factura.
+ */
+export async function findMatchingAlbaranForInvoice(req, userId, opts = {}) {
+  const supplierId = String(opts.supplierId || '').trim();
+  const invoiceNumber = String(opts.invoiceNumber || '').trim();
+  const notesBlob = [
+    opts.notes,
+    opts.ocrNotes,
+    opts.ocrData?.notes,
+    opts.ocrData?.rawText,
+  ]
+    .map((x) => String(x || '').trim())
+    .filter(Boolean)
+    .join('\n');
+  const invoices = await listPurchaseInvoicesByUser(req, userId);
+  const albaranes = invoices.filter(isAlbaranPurchaseDoc);
+  if (albaranes.length === 0) return null;
+
+  const sameSupplier = (inv) => {
+    if (!supplierId) return true;
+    const sid = String(inv.supplierId || '').trim();
+    return !sid || sid === supplierId;
+  };
+
+  const candidates = [];
+  for (const code of extractAlbaranRefsFromText(notesBlob)) {
+    const hit = albaranes.find((inv) => sameSupplier(inv) && purchaseDocMatchesCode(inv, code));
+    if (hit) candidates.push({ inv: hit, rank: 1 });
+  }
+  if (invoiceNumber) {
+    const hit = albaranes.find((inv) => sameSupplier(inv) && purchaseDocMatchesCode(inv, invoiceNumber));
+    if (hit) candidates.push({ inv: hit, rank: 2 });
+  }
+  if (supplierId && candidates.length === 0) {
+    const recent = albaranes
+      .filter((inv) => String(inv.supplierId || '').trim() === supplierId)
+      .sort((a, b) => String(b.date || b.createdAt || '').localeCompare(String(a.date || a.createdAt || '')));
+    if (recent.length === 1) candidates.push({ inv: recent[0], rank: 3 });
+  }
+  candidates.sort((a, b) => a.rank - b.rank);
+  return candidates[0]?.inv || null;
 }
 
 export async function findPurchaseInvoiceByEmailId(req, userId, messageId) {

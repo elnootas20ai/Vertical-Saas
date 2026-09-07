@@ -167,6 +167,35 @@ export function buildAlbaranCompareRows(
   return rows;
 }
 
+/**
+ * Filas de comprobación cuando no hay pedido: solo líneas del albarán.
+ * Todas entran como recibibles (sin comparación pedido↔doc).
+ */
+export function buildAlbaranRowsFromInvoiceOnly(
+  invoice: Pick<PurchaseInvoice, 'lines'> | null | undefined,
+): AlbaranCompareRow[] {
+  const lines = Array.isArray(invoice?.lines) ? invoice!.lines : [];
+  return lines.map((line) => {
+    const name = String(line.itemName || line.catalogItemName || '').trim() || 'Línea';
+    const qty = Number(line.quantity) || 0;
+    const unit = Number(line.unitPrice) || 0;
+    const hasCatalog = Boolean(String(line.catalogItemId || '').trim());
+    return {
+      catalogItemId: String(line.catalogItemId || ''),
+      name,
+      sku: '',
+      orderedQty: 0,
+      orderedUnitCost: 0,
+      invoiceQty: qty,
+      invoiceUnitCost: unit,
+      status: hasCatalog ? 'ok' : 'extra_invoice',
+      receiveQty: qty > 0 ? qty : 0,
+      receiveUnitCost: unit,
+      excluded: qty <= 0.001,
+    };
+  });
+}
+
 /** Cantidad pendiente de recibir de una línea de pedido. */
 export function pendingOrderQty(item: Pick<PurchaseOrderItem, 'quantity' | 'received'>): number {
   const orderedQty = Number(item.quantity) || 0;
@@ -212,8 +241,13 @@ export function toggleCompareRowExcluded(
   );
 }
 
-export function isCompareRowReceivable(row: AlbaranCompareRow): boolean {
-  return Boolean(row.catalogItemId) && !row.excluded && row.receiveQty > 0 && row.status !== 'extra_invoice';
+export function isCompareRowReceivable(
+  row: AlbaranCompareRow,
+  opts?: { allowExtras?: boolean },
+): boolean {
+  if (!row.catalogItemId || row.excluded || row.receiveQty <= 0) return false;
+  if (row.status === 'extra_invoice' && !opts?.allowExtras) return false;
+  return true;
 }
 
 export type PendingOrderLine = {

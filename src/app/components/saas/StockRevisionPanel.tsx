@@ -10,13 +10,32 @@ import type { Warehouse } from '../../lib/warehouseApi';
 import {
   completeStockCountRequest,
   createStockCountRequest,
+  getStockRevisionListRequest,
   listStockCountsRequest,
   updateCountLineRequest,
   type StockCount,
 } from '../../lib/stockCountApi';
 import type { StockPurchaseList } from '../../lib/stockPurchaseListApi';
-import { countDiscrepancies, formatStockTime, isSameLocalDay } from '../../lib/stockRevisionUtils';
+import {
+  countDiscrepancies,
+  formatStockTime,
+  groupRevisionEntriesByOrganizer,
+  isSameLocalDay,
+} from '../../lib/stockRevisionUtils';
+import type { TpvClockedInWorker } from '../../lib/tpvClockedInWorkers';
+import type { CatalogItem } from '../../lib/deliveryApi';
+import { getDeliveryConfigRequest } from '../../lib/deliveryApi';
+import { listBrandsRequest } from '../../lib/brandsApi';
+import { commercialLineBrands } from '../../lib/deliveryCatalogImportLogic';
+import {
+  unifyStoreIngredientsFromConfig,
+  normalizeStoreIngredients,
+  type StoreIngredient,
+} from '../../lib/catalogCustomization';
+import type { InventoryCommercialBrand } from '../../lib/inventoryUtils';
 import { StockPurchaseListPreview } from './StockPurchaseListPreview';
+import { ClockedInWorkerBubbles } from './ClockedInWorkerBubbles';
+import { useTpvRegisterIfOpen } from './TpvRegisterGate';
 
 export type StockRevisionRole = 'manager' | 'worker';
 
@@ -26,6 +45,7 @@ type CompletionReport = {
   count: StockCount;
   adjustmentsCreated: number;
   purchaseList?: StockPurchaseList;
+  purchaseOrdersCreated?: number;
 };
 
 export interface StockRevisionPanelProps {
@@ -35,6 +55,10 @@ export interface StockRevisionPanelProps {
   warehouses: Warehouse[];
   stockedCount: number;
   role?: StockRevisionRole;
+  /** Catálogo de almacén para agrupar por organizador. */
+  catalogItems?: CatalogItem[];
+  storeIngredients?: StoreIngredient[];
+  commercialBrands?: InventoryCommercialBrand[];
   onRevisionCompleted?: () => void;
   onActiveCountChange?: (count: StockCount | null) => void;
   /** Si el padre ya cargó la revisión activa, evita peticiones duplicadas a stock-counts */
@@ -282,6 +306,13 @@ function RevisionReportModal({
             </div>
           </div>
 
+          {(report.purchaseOrdersCreated ?? 0) > 0 && (
+            <p className="text-sm text-emerald-700 dark:text-emerald-400 flex items-center gap-2 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50/60 dark:bg-emerald-950/20 px-3 py-2">
+              <ShoppingCart className="w-4 h-4" />
+              Se crearon {report.purchaseOrdersCreated} pedido(s) borrador a proveedores.
+            </p>
+          )}
+
           {diffs.length > 0 ? (
             <div>
               <p className="text-xs font-semibold uppercase text-gray-500 mb-2">Desvíos</p>
@@ -345,6 +376,9 @@ export function StockRevisionPanel({
   warehouses,
   stockedCount,
   role = 'manager',
+  catalogItems: catalogItemsProp,
+  storeIngredients: storeIngredientsProp,
+  commercialBrands: commercialBrandsProp,
   onRevisionCompleted,
   onActiveCountChange,
   controlledActiveCount,
@@ -353,7 +387,9 @@ export function StockRevisionPanel({
 }: StockRevisionPanelProps) {
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
+  const register = useTpvRegisterIfOpen();
   const actorUserId = String(user?.user_id || user?.id || '').trim();
+  const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '').trim();
   void role; // abierto para todos; se mantiene la prop por compatibilidad
 
   const [activeCount, setActiveCount] = useState<StockCount | null>(null);
@@ -367,7 +403,57 @@ export function StockRevisionPanel({
   const [revisionFilter, setRevisionFilter] = useState<RevisionFilter>('pending');
   const [revisionSearch, setRevisionSearch] = useState('');
   const [completionReport, setCompletionReport] = useState<CompletionReport | null>(null);
+  const [selectedCounterId, setSelectedCounterId] = useState('');
+  const [localStoreIngredients, setLocalStoreIngredients] = useState<StoreIngredient[]>([]);
+  const [localCommercialBrands, setLocalCommercialBrands] = useState<InventoryCommercialBrand[]>([]);
   const autoEnsureKeyRef = useRef('');
+
+  const storeIngredients = storeIngredientsProp ?? localStoreIngredients;
+  const commercialBrands = commercialBrandsProp ?? localCommercialBrands;
+  const catalogItems = catalogItemsProp || [];
+
+  useEffect(() => {
+    if (storeIngredientsProp && commercialBrandsProp) return;
+    let cancelled = false;
+    (async () => {
+      if (!businessId) {
+        setLocalCommercialBrands([]);
+        setLocalStoreIngredients([]);
+        return;
+      }
+      try {
+        const [brandList, cfg] = await Promise.all([
+          listBrandsRequest(businessId).catch(() => []),
+          userId ? getDeliveryConfigRequest(userId).catch(() => null) : Promise.resolve(null),
+        ]);
+        if (cancelled) return;
+        const commercial = commercialLineBrands(brandList);
+        setLocalCommercialBrands(
+          commercial.map((b) => ({
+            _id: b._id,
+            name: b.name,
+            deliveryLineKind: b.deliveryLineKind,
+            primaryColor: String(b.primaryColor || '').trim() || undefined,
+          })),
+        );
+        if (cfg) {
+          setLocalStoreIngredients(
+            normalizeStoreIngredients(
+              unifyStoreIngredientsFromConfig(cfg, commercial.map((b) => b._id)),
+            ),
+          );
+        } else {
+          setLocalStoreIngredients([]);
+        }
+      } catch {
+        if (!cancelled) {
+          setLocalCommercialBrands([]);
+          setLocalStoreIngredients([]);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [businessId, userId, storeIngredientsProp, commercialBrandsProp]);
 
   const teamMembers = useMemo(
     () => (currentBusiness?.members || []).map((m) => ({
@@ -377,17 +463,55 @@ export function StockRevisionPanel({
     [currentBusiness?.members],
   );
 
+  const counterWorkers = useMemo<TpvClockedInWorker[]>(() => {
+    const clocked = register?.clockedInWorkers || [];
+    if (clocked.length > 0) return clocked;
+    return teamMembers
+      .filter((m) => m.user_id)
+      .map((m) => ({
+        id: m.user_id,
+        name: m.fullName || m.user_id,
+        status: 'active' as const,
+      }));
+  }, [register?.clockedInWorkers, teamMembers]);
+
+  useEffect(() => {
+    if (selectedCounterId) return;
+    if (actorUserId && counterWorkers.some((w) => w.id === actorUserId || w.id === actorUserId.replace(/^account:/, ''))) {
+      setSelectedCounterId(actorUserId.replace(/^account:/, ''));
+      return;
+    }
+    if (counterWorkers.length === 1) setSelectedCounterId(counterWorkers[0].id);
+  }, [selectedCounterId, actorUserId, counterWorkers]);
+
+  const resolveCounterId = useCallback(() => {
+    const id = String(selectedCounterId || '').trim();
+    if (id) return id;
+    return actorUserId || '';
+  }, [selectedCounterId, actorUserId]);
+
+  const requireCounter = useCallback(() => {
+    const id = resolveCounterId();
+    if (!id) {
+      toast.error('Elige el trabajador que hace el stock');
+      return null;
+    }
+    return id;
+  }, [resolveCounterId]);
+
   const resolveUserName = useCallback((uid: string) => {
     if (!uid) return '—';
     const normalized = uid.replace(/^account:/, '');
     const member = teamMembers.find((m) => m.user_id === normalized || m.user_id === uid);
     if (member?.fullName) return member.fullName;
+    const worker = counterWorkers.find((w) => w.id === normalized || w.id === uid);
+    if (worker?.name) return worker.name;
     if (actorUserId && (actorUserId === normalized || actorUserId === uid)) {
       return user?.fullName || 'Tú';
     }
     if (/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(normalized)) return 'Miembro del equipo';
     return uid;
-  }, [teamMembers, actorUserId, user?.fullName]);
+  }, [teamMembers, counterWorkers, actorUserId, user?.fullName]);
 
   const defaultWarehouse = useMemo(() => {
     const active = warehouses.filter((w) => w.active);
@@ -473,19 +597,32 @@ export function StockRevisionPanel({
 
   const ensureTodayRevision = useCallback(async (opts?: { silent?: boolean }) => {
     if (!userId) return null;
-    if (stockedCount === 0) {
-      if (!opts?.silent) toast.error('Carga el stock inicial antes de hacer una revisión');
-      return null;
-    }
+    const counterId = opts?.silent
+      ? (resolveCounterId() || actorUserId)
+      : requireCounter();
+    if (!counterId) return null;
     const wh = warehouses.find((w) => w._id === warehouseId) || defaultWarehouse;
     setStartingCount(true);
     try {
       const name = `Revisión ${new Date().toLocaleDateString('es-ES')} — ${wh?.name || storeLabel}`;
+      let catalogItemIds: string[] = [];
+      try {
+        const list = await getStockRevisionListRequest(userId, wh?._id || warehouseId || '');
+        catalogItemIds = list.catalogItemIds || [];
+      } catch {
+        catalogItemIds = [];
+      }
+      if (stockedCount === 0 && catalogItemIds.length === 0) {
+        if (!opts?.silent) toast.error('Carga el stock inicial antes de hacer una revisión');
+        return null;
+      }
       const count = await createStockCountRequest(userId, {
         name,
-        countType: 'full',
+        countType: catalogItemIds.length > 0 ? 'partial' : 'full',
         warehouseId: wh?._id || '',
         warehouseName: wh?.name || storeLabel,
+        catalogItemIds: catalogItemIds.length > 0 ? catalogItemIds : undefined,
+        startedBy: counterId || actorUserId || undefined,
       });
       syncActiveCount(count);
       setRevisionFilter('pending');
@@ -500,13 +637,14 @@ export function StockRevisionPanel({
     } finally {
       setStartingCount(false);
     }
-  }, [userId, stockedCount, warehouses, warehouseId, defaultWarehouse, storeLabel, syncActiveCount]);
+  }, [userId, stockedCount, warehouses, warehouseId, defaultWarehouse, storeLabel, syncActiveCount, requireCounter, resolveCounterId, actorUserId]);
 
   // Revisión del día: se activa sola (trabajador o encargado), sin permiso previo.
   // Tras cerrar la de hoy no se vuelve a crear sola hasta mañana (o hasta pulsar el botón).
   useEffect(() => {
     if (resolvedLoading || startingCount || resolvedActiveCount) return;
     if (!userId || stockedCount === 0) return;
+    if (!resolveCounterId() && counterWorkers.length > 0) return;
     const wh = warehouseId || storeWarehouseId || 'default';
     const key = `${userId}:${wh}:${new Date().toLocaleDateString('es-ES')}`;
     if (autoEnsureKeyRef.current === key) return;
@@ -523,17 +661,21 @@ export function StockRevisionPanel({
     warehouseId,
     storeWarehouseId,
     ensureTodayRevision,
+    resolveCounterId,
+    counterWorkers.length,
   ]);
 
   const markLineOk = async (lineIdx: number) => {
     if (!resolvedActiveCount || !userId) return;
+    const counterId = requireCounter();
+    if (!counterId) return;
     const line = resolvedActiveCount.lines[lineIdx];
     if (!line) return;
     setLineBusy(lineIdx);
     try {
       const updated = await updateCountLineRequest(userId, resolvedActiveCount._id, lineIdx, {
         countedStock: line.theoreticalStock,
-        countedBy: actorUserId || undefined,
+        countedBy: counterId,
       });
       syncActiveCount(updated);
       scrollToNextPendingLine(updated, lineIdx);
@@ -546,6 +688,8 @@ export function StockRevisionPanel({
 
   const submitMismatch = async (lineIdx: number) => {
     if (!resolvedActiveCount || !userId) return;
+    const counterId = requireCounter();
+    if (!counterId) return;
     const qty = Number(mismatchQty.replace(',', '.'));
     if (!Number.isFinite(qty) || qty < 0) {
       toast.error('Cantidad no válida');
@@ -555,7 +699,7 @@ export function StockRevisionPanel({
     try {
       const updated = await updateCountLineRequest(userId, resolvedActiveCount._id, lineIdx, {
         countedStock: qty,
-        countedBy: actorUserId || undefined,
+        countedBy: counterId,
       });
       syncActiveCount(updated);
       setMismatchIdx(null);
@@ -570,6 +714,8 @@ export function StockRevisionPanel({
 
   const stepCounted = async (lineIdx: number, delta: 1 | -1) => {
     if (!resolvedActiveCount || !userId) return;
+    const counterId = requireCounter();
+    if (!counterId) return;
     const line = resolvedActiveCount.lines[lineIdx];
     if (!line) return;
     if (mismatchIdx === lineIdx) {
@@ -583,7 +729,7 @@ export function StockRevisionPanel({
     try {
       const updated = await updateCountLineRequest(userId, resolvedActiveCount._id, lineIdx, {
         countedStock: next,
-        countedBy: actorUserId || undefined,
+        countedBy: counterId,
       });
       syncActiveCount(updated);
     } catch (err) {
@@ -595,13 +741,18 @@ export function StockRevisionPanel({
 
   const handleCompleteRevision = async () => {
     if (!resolvedActiveCount || !userId) return;
+    const counterId = requireCounter();
+    if (!counterId) return;
     setCompletingCount(true);
     try {
-      const result = await completeStockCountRequest(userId, resolvedActiveCount._id);
+      const result = await completeStockCountRequest(userId, resolvedActiveCount._id, {
+        completedBy: counterId,
+      });
       setCompletionReport({
         count: result.stockCount,
         adjustmentsCreated: result.adjustmentsCreated ?? 0,
         purchaseList: result.purchaseList,
+        purchaseOrdersCreated: result.purchaseOrdersCreated ?? 0,
       });
       syncActiveCount(null);
       // Bloquear auto-crear otra del mismo día; el botón manual sí permite otra.
@@ -611,12 +762,15 @@ export function StockRevisionPanel({
       onRevisionCompleted?.();
       const adj = result.adjustmentsCreated ?? 0;
       const diffs = countDiscrepancies(result.stockCount);
+      const orders = result.purchaseOrdersCreated ?? 0;
       toast.success(
-        adj > 0
-          ? `Revisión cerrada. ${adj} ajuste(s), ${diffs} desvío(s).`
-          : diffs > 0
-            ? `Revisión cerrada. ${diffs} desvío(s).`
-            : 'Revisión cerrada. Todo cuadra.',
+        orders > 0
+          ? `Revisión cerrada. ${orders} pedido(s) a proveedor creados.`
+          : adj > 0
+            ? `Revisión cerrada. ${adj} ajuste(s), ${diffs} desvío(s).`
+            : diffs > 0
+              ? `Revisión cerrada. ${diffs} desvío(s).`
+              : 'Revisión cerrada. Todo cuadra.',
       );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'No se pudo cerrar la revisión');
@@ -642,6 +796,11 @@ export function StockRevisionPanel({
         return line.catalogItemName?.toLowerCase().includes(search) || line.sku?.toLowerCase().includes(search);
       });
   }, [resolvedActiveCount, revisionFilter, revisionSearch]);
+
+  const revisionGroups = useMemo(
+    () => groupRevisionEntriesByOrganizer(revisionEntries, catalogItems, storeIngredients, commercialBrands),
+    [revisionEntries, catalogItems, storeIngredients, commercialBrands],
+  );
 
   const reviewedCount = resolvedActiveCount?.lines.filter((l) => l.countedStock !== null).length ?? 0;
   const totalReviewLines = resolvedActiveCount?.lines.length ?? 0;
@@ -686,10 +845,22 @@ export function StockRevisionPanel({
               </select>
             </div>
           )}
+          {counterWorkers.length > 0 && (
+            <div className="mb-4 max-w-md mx-auto text-left">
+              <ClockedInWorkerBubbles
+                workers={counterWorkers}
+                selectedId={selectedCounterId}
+                onSelect={setSelectedCounterId}
+                loading={Boolean(register?.clockedInWorkersLoading)}
+                label="Quién hace el stock"
+                emptyHint="Ficha a un trabajador o elige quién hace el stock"
+              />
+            </div>
+          )}
           <button
             type="button"
             onClick={() => void ensureTodayRevision()}
-            disabled={startingCount || stockedCount === 0}
+            disabled={startingCount || stockedCount === 0 || (counterWorkers.length > 0 && !selectedCounterId)}
             className="inline-flex items-center gap-2 min-h-[52px] touch-manipulation px-6 py-3 bg-emerald-600 text-white rounded-xl text-base font-semibold hover:bg-emerald-700 disabled:opacity-60"
           >
             {startingCount ? <Loader2 className="w-5 h-5 animate-spin" /> : <ClipboardCheck className="w-5 h-5" />}
@@ -731,6 +902,19 @@ export function StockRevisionPanel({
           <span className="text-sm font-semibold text-gray-600 dark:text-gray-300">{progressPct}%</span>
         </div>
       </div>
+
+      {counterWorkers.length > 0 && (
+        <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-3">
+          <ClockedInWorkerBubbles
+            workers={counterWorkers}
+            selectedId={selectedCounterId}
+            onSelect={setSelectedCounterId}
+            loading={Boolean(register?.clockedInWorkersLoading)}
+            label="Quién hace el stock"
+            emptyHint="Elige el trabajador que hace el stock"
+          />
+        </div>
+      )}
 
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
@@ -778,27 +962,39 @@ export function StockRevisionPanel({
           )}
         </div>
       ) : (
-        <div className="space-y-3 max-h-[min(70vh,720px)] overflow-y-auto overscroll-contain pr-1 -mr-1">
-          {revisionEntries.map(({ line, lineIdx }) => (
-            <RevisionLineCard
-              key={`${line.catalogItemId}-${lineIdx}`}
-              line={line}
-              lineIdx={lineIdx}
-              isBusy={lineBusy === lineIdx}
-              isMismatchOpen={mismatchIdx === lineIdx}
-              mismatchQty={mismatchQty}
-              onMarkOk={markLineOk}
-              onOpenMismatch={(idx) => {
-                const lineItem = resolvedActiveCount?.lines[idx];
-                setMismatchIdx(idx);
-                setMismatchQty(String(lineItem?.theoreticalStock ?? 0));
-              }}
-              onCloseMismatch={() => { setMismatchIdx(null); setMismatchQty(''); }}
-              onMismatchQtyChange={setMismatchQty}
-              onSubmitMismatch={submitMismatch}
-              onStepCounted={stepCounted}
-              resolveUserName={resolveUserName}
-            />
+        <div className="space-y-5 max-h-[min(70vh,720px)] overflow-y-auto overscroll-contain pr-1 -mr-1">
+          {revisionGroups.map((group) => (
+            <div key={group.organizerId} className="space-y-3">
+              {revisionGroups.length > 1 && (
+                <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 px-0.5 sticky top-0 z-[1] bg-gray-50/90 dark:bg-gray-950/90 py-1 backdrop-blur-sm">
+                  {group.organizerLabel}
+                  <span className="ml-1.5 font-semibold normal-case tracking-normal">
+                    ({group.entries.length})
+                  </span>
+                </p>
+              )}
+              {group.entries.map(({ line, lineIdx }) => (
+                <RevisionLineCard
+                  key={`${line.catalogItemId}-${lineIdx}`}
+                  line={line}
+                  lineIdx={lineIdx}
+                  isBusy={lineBusy === lineIdx}
+                  isMismatchOpen={mismatchIdx === lineIdx}
+                  mismatchQty={mismatchQty}
+                  onMarkOk={markLineOk}
+                  onOpenMismatch={(idx) => {
+                    const lineItem = resolvedActiveCount?.lines[idx];
+                    setMismatchIdx(idx);
+                    setMismatchQty(String(lineItem?.theoreticalStock ?? 0));
+                  }}
+                  onCloseMismatch={() => { setMismatchIdx(null); setMismatchQty(''); }}
+                  onMismatchQtyChange={setMismatchQty}
+                  onSubmitMismatch={submitMismatch}
+                  onStepCounted={stepCounted}
+                  resolveUserName={resolveUserName}
+                />
+              ))}
+            </div>
           ))}
         </div>
       )}

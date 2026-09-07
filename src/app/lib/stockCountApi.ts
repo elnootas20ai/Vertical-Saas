@@ -70,6 +70,7 @@ export interface StockCount {
   status: CountStatus;
   countType: CountType;
   filterCategories: string[];
+  catalogItemIds?: string[];
   lines: StockCountLine[];
   totalTheoreticalValue: number;
   totalCountedValue: number;
@@ -84,6 +85,14 @@ export interface StockCount {
   updatedAt: string;
 }
 
+export interface StockRevisionList {
+  _id: string;
+  _rev?: string;
+  warehouseId: string;
+  catalogItemIds: string[];
+  updatedAt: string | null;
+}
+
 // ─── Stock Counts API ─────────────────────────────────────────────────────────
 
 export async function listStockCountsRequest(userId: string): Promise<StockCount[]> {
@@ -96,7 +105,15 @@ export async function listStockCountsRequest(userId: string): Promise<StockCount
 
 export async function createStockCountRequest(
   userId: string,
-  data: { name: string; warehouseId?: string; warehouseName?: string; countType?: CountType; filterCategories?: string[] },
+  data: {
+    name: string;
+    warehouseId?: string;
+    warehouseName?: string;
+    countType?: CountType;
+    filterCategories?: string[];
+    catalogItemIds?: string[];
+    startedBy?: string;
+  },
 ): Promise<StockCount> {
   const id = normalizeUserId(userId);
   const result = await request<{ ok: boolean; stockCount: StockCount }>(
@@ -105,6 +122,31 @@ export async function createStockCountRequest(
   );
   if (!result.stockCount) throw new Error('Respuesta invalida del servidor');
   return result.stockCount;
+}
+
+export async function getStockRevisionListRequest(
+  userId: string,
+  warehouseId?: string,
+): Promise<StockRevisionList> {
+  const id = normalizeUserId(userId);
+  const qs = warehouseId ? `?warehouseId=${encodeURIComponent(warehouseId)}` : '';
+  const result = await request<{ ok: boolean; revisionList: StockRevisionList }>(
+    `/api/stock-counts/${encodeURIComponent(id)}/revision-list${qs}`,
+  );
+  return result.revisionList || { _id: '', warehouseId: warehouseId || '', catalogItemIds: [], updatedAt: null };
+}
+
+export async function putStockRevisionListRequest(
+  userId: string,
+  data: { warehouseId?: string; catalogItemIds: string[] },
+): Promise<StockRevisionList> {
+  const id = normalizeUserId(userId);
+  const result = await request<{ ok: boolean; revisionList: StockRevisionList }>(
+    `/api/stock-counts/${encodeURIComponent(id)}/revision-list`,
+    { method: 'PUT', body: JSON.stringify(data) },
+  );
+  if (!result.revisionList) throw new Error('Respuesta invalida del servidor');
+  return result.revisionList;
 }
 
 export async function getStockCountRequest(userId: string, countId: string): Promise<StockCount> {
@@ -134,22 +176,30 @@ export async function updateCountLineRequest(
 export async function completeStockCountRequest(
   userId: string,
   countId: string,
-): Promise<{ adjustmentsCreated: number; stockCount: StockCount; purchaseList?: StockPurchaseList }> {
+  data?: { completedBy?: string },
+): Promise<{
+  adjustmentsCreated: number;
+  stockCount: StockCount;
+  purchaseList?: StockPurchaseList;
+  purchaseOrdersCreated?: number;
+}> {
   const id = normalizeUserId(userId);
   const result = await request<{
     ok: boolean;
     adjustmentsCreated?: number;
     stockCount: StockCount;
     purchaseList?: StockPurchaseList;
+    purchaseOrdersCreated?: number;
   }>(
     `/api/stock-counts/${encodeURIComponent(id)}/${encodeURIComponent(countId)}/complete`,
-    { method: 'POST' },
+    { method: 'POST', body: JSON.stringify(data || {}) },
   );
   if (!result.stockCount) throw new Error('Respuesta invalida del servidor');
   return {
     adjustmentsCreated: result.adjustmentsCreated ?? 0,
     stockCount: result.stockCount,
     purchaseList: result.purchaseList,
+    purchaseOrdersCreated: result.purchaseOrdersCreated ?? 0,
   };
 }
 

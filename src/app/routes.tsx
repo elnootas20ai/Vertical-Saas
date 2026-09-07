@@ -103,6 +103,7 @@ import { RequireWorkerPermission } from './components/saas/RequireWorkerPermissi
 
 
 import { AuthRouteLoading } from './components/AuthRouteLoading';
+import { VertialLoadingState } from './components/VertialLoadingState';
 import { ProtectedRoute } from './components/ProtectedRoute';
 
 /** Lazy page helper — named export → default for React.lazy */
@@ -451,20 +452,9 @@ const VertialPitchDeckLazy = lazy(() =>
   import('./pages/VertialPitchDeck').then((m) => ({ default: m.VertialPitchDeck })),
 );
 
-function RouteChunkFallback({ label }: { label: string }) {
-  return (
-    <div className="flex min-h-[40vh] items-center justify-center px-4">
-      <div className="flex flex-col items-center gap-3">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-gray-300 border-t-[var(--v-blue,#2563eb)] dark:border-gray-600 dark:border-t-blue-400" />
-        <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{label}</p>
-      </div>
-    </div>
-  );
-}
-
 function DeliveryOpsCenterRoute() {
   return (
-    <Suspense fallback={<RouteChunkFallback label="Cargando operativa…" />}>
+    <Suspense fallback={<VertialLoadingState label="Cargando operativa…" />}>
       <DeliveryOpsCenterLazy />
     </Suspense>
   );
@@ -472,7 +462,7 @@ function DeliveryOpsCenterRoute() {
 
 function PresentacionRoute() {
   return (
-    <Suspense fallback={<RouteChunkFallback label="Cargando presentación…" />}>
+    <Suspense fallback={<VertialLoadingState label="Cargando presentación…" />}>
       <VertialPitchDeckLazy />
     </Suspense>
   );

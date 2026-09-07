@@ -54,7 +54,15 @@ function workCentersStrictlyForBusiness(workCenters: WorkCenter[], businessId: s
     .filter((wc) => !isTemporaryEventWorkCenter(wc));
 }
 
-function dedupeRetailWorkCentersForBusiness(workCenters: WorkCenter[]): WorkCenter[] {
+function dedupeRetailWorkCentersForBusiness(
+  workCenters: WorkCenter[],
+  options?: { preferredWorkCenterIds?: Iterable<string> },
+): WorkCenter[] {
+  const preferred = new Set(
+    [...(options?.preferredWorkCenterIds || [])]
+      .map((id) => String(id || '').trim())
+      .filter(Boolean),
+  );
   const isRetail = (wc: WorkCenter) =>
     wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen';
   const retail: WorkCenter[] = [];
@@ -74,6 +82,12 @@ function dedupeRetailWorkCentersForBusiness(workCenters: WorkCenter[]): WorkCent
     const prev = byKey.get(key);
     if (!prev) {
       byKey.set(key, wc);
+      continue;
+    }
+    const prevPreferred = preferred.has(String(prev._id || '').trim());
+    const nextPreferred = preferred.has(String(wc._id || '').trim());
+    if (prevPreferred !== nextPreferred) {
+      byKey.set(key, nextPreferred ? wc : prev);
       continue;
     }
     // Preferir el doc con horario; si empatan, el más reciente (updatedAt).
@@ -155,15 +169,19 @@ export function sanitizeRetailScopeSnapshot(
   if (!bid) return { retailWorkCenters: [], allPointsOfSale: [] };
 
   const input = snapshot.retailWorkCenters.filter((wc) => !wc.deletedAt);
+  const preferredIds = (snapshot.allPointsOfSale || [])
+    .map((p) => String(p.workCenterId || '').trim())
+    .filter(Boolean);
   let retail: WorkCenter[];
   if (options?.accountBusinessCount !== undefined || options?.includeTemporaryEventPdvs) {
     retail = dedupeRetailWorkCentersForBusiness(
       filterWorkCentersForBusinessScope(input, bid, options),
+      { preferredWorkCenterIds: preferredIds },
     ).filter(isRetailWorkCenter);
   } else {
-    retail = dedupeRetailWorkCentersForBusiness(workCentersStrictlyForBusiness(input, bid)).filter(
-      isRetailWorkCenter,
-    );
+    retail = dedupeRetailWorkCentersForBusiness(workCentersStrictlyForBusiness(input, bid), {
+      preferredWorkCenterIds: preferredIds,
+    }).filter(isRetailWorkCenter);
   }
 
   const allPointsOfSale = dedupePointsOfSale(

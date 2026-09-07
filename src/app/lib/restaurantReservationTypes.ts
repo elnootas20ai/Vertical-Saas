@@ -158,7 +158,8 @@ export interface ReservationAutomationSettings {
 
 export const DEFAULT_AUTOMATION: ReservationAutomationSettings = {
   delayAfterMinutes: 15,
-  noShowAfterMinutes: 30,
+  /** Minutos *adicionales* tras el retraso (total desde la hora = delay + noShow). */
+  noShowAfterMinutes: 15,
   enabled: true,
 };
 
@@ -203,10 +204,23 @@ export function formatReservationSeatPlace(
   return 'Sin mesa';
 }
 
+/** yyyy-mm-dd estable aunque la API traiga ISO largo. */
+export function reservationDateKey(value: string | null | undefined): string {
+  const raw = String(value || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+  return '';
+}
+
 export function reservationDateTime(date: string, time: string): Date {
-  const [h, m] = (time || '00:00').split(':').map(Number);
-  const d = new Date(`${date}T00:00:00`);
-  d.setHours(h || 0, m || 0, 0, 0);
+  const day = reservationDateKey(date);
+  const rawTime = String(time || '').trim();
+  const match = rawTime.match(/^(\d{1,2}):(\d{2})/);
+  const h = match ? Number(match[1]) : NaN;
+  const m = match ? Number(match[2]) : NaN;
+  if (!day || !Number.isFinite(h) || !Number.isFinite(m)) return new Date(NaN);
+  const d = new Date(`${day}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return d;
+  d.setHours(h, m, 0, 0);
   return d;
 }
 

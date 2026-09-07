@@ -462,7 +462,10 @@ export function RestaurantSalaTpvShell({ tabletMode = false }: Props) {
   }
 
   const tabletNav = tabletMode ? (
-    <RestaurantTabletBottomNav active="mesas" />
+    <RestaurantTabletBottomNav
+      active={stockOpen ? 'stock' : 'mesas'}
+      onCloseStock={stockOpen ? () => setStockOpen(false) : undefined}
+    />
   ) : null;
 
   return (

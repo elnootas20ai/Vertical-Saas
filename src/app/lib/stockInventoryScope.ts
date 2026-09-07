@@ -9,23 +9,22 @@ const STOCK_CATEGORIES = new Set([
 ]);
 
 /**
- * Artículos que van en inventario (almacén): ingredientes, bebidas a granel, envases…
- * No incluye platos de carta (pizzas, hamburguesas) — stockCategory finished_product.
- * Bebidas de carta con isStockItem sí entran (p. ej. Coca-Cola).
+ * Artículos de inventario (almacén).
+ * isStockItem / module stock mandan (también platos o pizzas si controlan stock).
+ * Sin eso, finished_product de carta pura queda fuera del almacén genérico.
  */
 export function isStockInventoryItem(item: CatalogItem | null | undefined): boolean {
   if (!item || item.active === false || item.deletedAt) return false;
   if (item.itemType && item.itemType !== 'product') return false;
 
-  // Producto hecho / plato de carta: fuera del almacén (antes de isStockItem).
-  if (item.stockCategory === 'finished_product') return false;
-
   if (item.isStockItem === true) return true;
   if (item.module === 'stock') return true;
 
+  // Plato/carta sin control de stock: fuera del almacén.
+  if (item.stockCategory === 'finished_product') return false;
+
   if (item.stockCategory && STOCK_CATEGORIES.has(item.stockCategory)) return true;
 
-  // Productos de carta (module catalog) sin flag de inventario → no van al almacén
   if (item.module === 'catalog') return false;
 
   return false;
@@ -33,6 +32,32 @@ export function isStockInventoryItem(item: CatalogItem | null | undefined): bool
 
 export function filterStockInventoryItems(items: CatalogItem[]): CatalogItem[] {
   return items.filter(isStockInventoryItem);
+}
+
+/** Comprable a proveedor (pedido / albarán). */
+export function isSupplierPurchasableItem(item: CatalogItem | null | undefined): boolean {
+  if (!item || item.active === false || item.deletedAt) return false;
+  if (item.itemType && item.itemType !== 'product') return false;
+  if (String(item.supplierId || '').trim()) return true;
+  if (String(item.supplierName || '').trim()) return true;
+  if (item.autoReorder === true) return true;
+  return false;
+}
+
+/**
+ * Qué puede salir en «Qué revisar» / pase de lista TPV:
+ * almacén + control de stock + comprables a proveedor (aunque sea plato/pizza).
+ */
+export function isStockRevisionItem(item: CatalogItem | null | undefined): boolean {
+  if (!item || item.active === false || item.deletedAt) return false;
+  if (item.itemType && item.itemType !== 'product') return false;
+  if (isStockInventoryItem(item)) return true;
+  if (isSupplierPurchasableItem(item)) return true;
+  return false;
+}
+
+export function filterStockRevisionItems(items: CatalogItem[]): CatalogItem[] {
+  return (items || []).filter(isStockRevisionItem);
 }
 
 /** Resumen para borrado de Carta: cuántos también afectan al almacén. */

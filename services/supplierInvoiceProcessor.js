@@ -11,6 +11,7 @@ import {
   sanitizePurchaseInvoice,
   listSuppliersByUser,
   findDuplicatePurchaseInvoice,
+  findMatchingAlbaranForInvoice,
   listPurchaseInvoicesByUser,
   assignPurchaseInvoiceNumber,
   buildNotificationDocument,
@@ -817,10 +818,17 @@ async function processSingleEmail(userId, email, scope = {}) {
       documentKind: ocrData?.documentType || 'factura_proveedor',
       ocrData,
     });
+    const docKind =
+      String(ocrData?.documentType || '').trim() === 'albaran' ? 'albaran' : 'factura_proveedor';
     let duplicateResult = null;
     if (invoiceNumber) {
       duplicateResult = await findDuplicatePurchaseInvoice(
-        fakeReq, userId, invoiceNumber, matchResult.supplier?._id || '', ocrData?.total,
+        fakeReq,
+        userId,
+        invoiceNumber,
+        matchResult.supplier?._id || '',
+        ocrData?.total,
+        { documentKind: docKind },
       );
     }
 
@@ -834,6 +842,7 @@ async function processSingleEmail(userId, email, scope = {}) {
           invoiceNumber,
           supplierName: duplicateResult.supplierName || matchResult.supplier?.name || '',
           total: duplicateResult.total,
+          documentKind: docKind,
         },
       });
       result.skippedDuplicate = true;
@@ -854,9 +863,38 @@ async function processSingleEmail(userId, email, scope = {}) {
         )
       : [];
 
+    let linkedAlbaranId = '';
+    let linkedAlbaranNumber = '';
+    let linkedPurchaseOrderId = '';
+    let linkedPurchaseOrderNumber = '';
+    if (docKind !== 'albaran') {
+      try {
+        const matchedAlb = await findMatchingAlbaranForInvoice(fakeReq, userId, {
+          supplierId: matchResult.supplier?._id || '',
+          invoiceNumber,
+          notes: ocrData?.notes || '',
+          ocrData,
+        });
+        if (matchedAlb) {
+          linkedAlbaranId = matchedAlb._id;
+          linkedAlbaranNumber = String(
+            matchedAlb.invoiceNumber || matchedAlb.ocrData?.documentNumber || '',
+          ).trim();
+          linkedPurchaseOrderId = String(matchedAlb.linkedPurchaseOrderId || '').trim();
+          linkedPurchaseOrderNumber = String(matchedAlb.linkedPurchaseOrderNumber || '').trim();
+        }
+      } catch (linkErr) {
+        logger.warn(
+          { tag: 'SINV_PROC', err: linkErr?.message },
+          'No se pudo enlazar albarán a factura de correo',
+        );
+      }
+    }
+
     const invoiceData = {
       ...baseData,
       invoiceNumber: invoiceNumber || '',
+      documentKind: docKind,
       supplierId: matchResult.supplier?._id || '',
       supplierName: matchResult.supplier?.name || ocrData?.emitter || '',
       supplierCif: matchResult.supplier?.cif || ocrData?.emitterCIF || '',
@@ -870,6 +908,10 @@ async function processSingleEmail(userId, email, scope = {}) {
       subtotal: Number(ocrData?.subtotal ?? 0) || undefined,
       taxAmount: Number(ocrData?.taxAmount ?? 0) || undefined,
       total: Number(ocrData?.total ?? 0) || undefined,
+      linkedAlbaranId,
+      linkedAlbaranNumber,
+      linkedPurchaseOrderId,
+      linkedPurchaseOrderNumber,
       ...proposal,
       ocrData,
       ocrConfidence: ocrData?.confidenceScore ? (ocrData.confidenceScore >= 70 ? 'high' : 'low') : '',
@@ -909,11 +951,11 @@ async function processSingleEmail(userId, email, scope = {}) {
 
     if (!ocrFailed) {
       try {
-        // Correo: registra finanzas, stock pendiente hasta «Cargar al almacén»
+        // Albarán: recepción (stock al comprobar). Factura: finanzas; stock pendiente hasta cargar.
         await reconcilePurchaseInvoiceFromOcr(fakeReq, userId, { ...doc, _rev: saved.rev }, {
           performedBy: 'email-ocr',
           applyStock: false,
-          createFinance: true,
+          createFinance: docKind !== 'albaran',
         });
       } catch (reconcileErr) {
         logger.warn({ tag: 'SINV_PROC', invoiceId: doc._id, err: reconcileErr.message }, 'Reconciliación stock/finanzas falló');
@@ -942,13 +984,44 @@ async function processSingleEmail(userId, email, scope = {}) {
     if (fnameKey) doneFilenames.add(fnameKey);
 
     if (!matchResult.matched) {
-      result.alerts.push({ type: 'unknown_supplier', data: { invoiceId: doc._id, from: email.from, emitter: ocrData?.emitter, cif: ocrData?.emitterCIF } });
+      result.alerts.push({
+        type: 'unknown_supplier',
+        data: {
+          invoiceId: doc._id,
+          from: email.from,
+          emitter: ocrData?.emitter,
+          cif: ocrData?.emitterCIF,
+          documentKind: docKind,
+        },
+      });
     }
     if (ocrFailed) {
-      result.alerts.push({ type: 'ocr_failed', data: { invoiceId: doc._id, from: email.from, filename: attachment.filename } });
+      result.alerts.push({
+        type: 'ocr_failed',
+        data: {
+          invoiceId: doc._id,
+          from: email.from,
+          filename: attachment.filename,
+          documentKind: docKind,
+        },
+      });
     }
     if (priceVarianceHit) {
-      result.alerts.push({ type: 'price_variance', data: { invoiceId: doc._id, supplierName: doc.supplierName || '' } });
+      result.alerts.push({
+        type: 'price_variance',
+        data: { invoiceId: doc._id, supplierName: doc.supplierName || '', documentKind: docKind },
+      });
+    }
+    if (docKind === 'albaran' && !ocrFailed) {
+      result.alerts.push({
+        type: 'albaran_received',
+        data: {
+          invoiceId: doc._id,
+          invoiceNumber: invoiceNumber || doc.invoiceNumber || '',
+          supplierName: doc.supplierName || matchResult.supplier?.name || '',
+          documentKind: 'albaran',
+        },
+      });
     }
   }
 
@@ -1066,7 +1139,22 @@ async function processIncomingEmailsForTarget(userId, resolvedImap) {
       summary.allAlerts.push(...result.alerts);
 
       for (const alert of result.alerts) {
-        if (alert.type === 'duplicate') {
+        const alertDocKind = String(alert.data?.documentKind || '').trim();
+        const isAlbAlert = alertDocKind === 'albaran' || alert.type === 'albaran_received';
+        const tabRoute = isAlbAlert
+          ? `/saas/catalog?tab=albaranes&invoiceId=${alert.data.invoiceId || ''}`
+          : `/saas/catalog?tab=invoices&invoiceId=${alert.data.invoiceId || ''}`;
+        if (alert.type === 'albaran_received') {
+          await emitRealtimeAlert(userId, {
+            title: 'Albarán recibido por correo',
+            message: `Albarán ${alert.data.invoiceNumber || ''} de ${alert.data.supplierName || 'proveedor'} listo en «por comprobar».`,
+            level: 'info',
+            invoiceId: alert.data.invoiceId,
+            route: tabRoute,
+            metadata: alert.data,
+            alertType: 'albaran_received',
+          });
+        } else if (alert.type === 'duplicate') {
           const dupKey = String(alert.data.invoiceNumber || alert.data.invoiceId || '');
           if (dupKey && summary._dupAlerted?.has(dupKey)) continue;
           if (!summary._dupAlerted) summary._dupAlerted = new Set();
@@ -1074,11 +1162,11 @@ async function processIncomingEmailsForTarget(userId, resolvedImap) {
           summary.duplicates = (summary.duplicates || 0) + 1;
           const totalLabel = Number(alert.data.total || 0).toFixed(2);
           await emitRealtimeAlert(userId, {
-            title: 'Posible factura duplicada',
-            message: `La factura ${alert.data.invoiceNumber} de ${alert.data.supplierName || 'proveedor'} por ${totalLabel}€ podría estar duplicada.`,
+            title: isAlbAlert ? 'Posible albarán duplicado' : 'Posible factura duplicada',
+            message: `${isAlbAlert ? 'El albarán' : 'La factura'} ${alert.data.invoiceNumber} de ${alert.data.supplierName || 'proveedor'} por ${totalLabel}€ podría estar duplicado.`,
             level: 'warning',
             invoiceId: alert.data.invoiceId,
-            route: `/saas/catalog?tab=invoices&invoiceId=${alert.data.invoiceId}`,
+            route: tabRoute,
             metadata: alert.data,
             alertType: 'duplicate',
           });
@@ -1087,20 +1175,20 @@ async function processIncomingEmailsForTarget(userId, resolvedImap) {
         } else if (alert.type === 'unknown_supplier') {
           await emitRealtimeAlert(userId, {
             title: 'Proveedor no identificado',
-            message: `Factura desde ${alert.data.from} — no se encontró proveedor registrado${alert.data.cif ? ` con CIF ${alert.data.cif}` : ''}.`,
+            message: `Documento desde ${alert.data.from} — no se encontró proveedor registrado${alert.data.cif ? ` con CIF ${alert.data.cif}` : ''}.`,
             level: 'warning',
             invoiceId: alert.data.invoiceId,
-            route: `/saas/catalog?tab=invoices&invoiceId=${alert.data.invoiceId}`,
+            route: tabRoute,
             metadata: alert.data,
             alertType: 'unknown_supplier',
           });
         } else if (alert.type === 'ocr_failed') {
           await emitRealtimeAlert(userId, {
-            title: 'Error al leer factura automáticamente',
+            title: isAlbAlert ? 'Error al leer albarán automáticamente' : 'Error al leer factura automáticamente',
             message: `No se pudo extraer datos de ${alert.data.filename} (email de ${alert.data.from}). Requiere revisión manual.`,
             level: 'warning',
             invoiceId: alert.data.invoiceId,
-            route: `/saas/catalog?tab=invoices&invoiceId=${alert.data.invoiceId}`,
+            route: tabRoute,
             metadata: alert.data,
             alertType: 'ocr_failed',
           });

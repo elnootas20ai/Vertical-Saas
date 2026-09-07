@@ -2,8 +2,6 @@ import { Outlet, useLocation, useNavigate, Navigate } from 'react-router';
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
-import { Loader2 } from 'lucide-react';
-
 import '../../styles/vertial-saas.css';
 
 import { AppProvider, useApp } from '../context/AppContext';
@@ -13,6 +11,7 @@ import { PlanUpgradePrepProvider } from '../context/PlanUpgradePrepContext';
 import { ActiveStoreScopeProvider } from '../context/ActiveStoreScopeContext';
 import { BusinessScopeUrlSync } from '../components/saas/BusinessScopeUrlSync';
 import { SaasAppShell } from '../components/saas/Layout';
+import { VertialLoadingState } from '../components/VertialLoadingState';
 
 import { useBusinessOptional } from '../context/BusinessContext';
 
@@ -558,11 +557,7 @@ function SaasContent() {
     isInitializing
     || (!chromeLessSaas && ((!skipBusinessLoadGate && isInitialBusinessLoad) || isAutoCreating))
   ) {
-    return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-gray-400" aria-label="Cargando" />
-      </div>
-    );
+    return <VertialLoadingState variant="fullscreen" />;
   }
 
 
@@ -591,11 +586,7 @@ function SaasContent() {
     (!businessesFetchSettled || isLoadingBusinesses) &&
     !chromeLessSaas
   ) {
-    return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-gray-400" aria-label="Preparando espacio de trabajo" />
-      </div>
-    );
+    return <VertialLoadingState label="Preparando espacio de trabajo…" variant="fullscreen" />;
   }
 
   if (businesses.length === 0 && !isUserAccount && !isLinkedWorker && businessesFetchSettled) {
@@ -607,11 +598,7 @@ function SaasContent() {
       );
     }
     if (isAutoCreating || autoCreateAttempted.current) {
-      return (
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
-          <Loader2 className="w-8 h-8 animate-spin text-gray-400" aria-label="Preparando tu empresa" />
-        </div>
-      );
+      return <VertialLoadingState label="Preparando tu empresa…" variant="fullscreen" />;
     }
     return <Navigate to="/auth/gate" replace />;
   }

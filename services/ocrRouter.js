@@ -17,6 +17,7 @@ import {
   findOcrLogByHash,
   findOcrLogByFingerprint,
   findDuplicatePurchaseInvoice,
+  findMatchingAlbaranForInvoice,
   assignPurchaseInvoiceNumber,
   sanitizeOcrLog,
   sanitizeOcrProposal,
@@ -51,10 +52,13 @@ export async function checkDuplicate(sourceHash, ocrData, userId) {
     }
   }
 
-  // Mismo código de factura/albarán ya registrado en compras
+  // Mismo código de factura/albarán ya registrado en compras (mismo documentKind)
   const invoiceNumber = String(ocrData?.documentNumber || '').trim();
   if (invoiceNumber && userId) {
-    const dupInv = await findDuplicatePurchaseInvoice(fakeReq, userId, invoiceNumber, '', null);
+    const docKind = String(ocrData?.documentType || 'factura_proveedor').trim();
+    const dupInv = await findDuplicatePurchaseInvoice(fakeReq, userId, invoiceNumber, '', null, {
+      documentKind: docKind === 'albaran' ? 'albaran' : 'factura_proveedor',
+    });
     if (dupInv) {
       result.isDuplicate = true;
       result.duplicateType = 'invoice_number';
@@ -212,7 +216,14 @@ export async function executeProposal(proposal, userId) {
         ocrData: proposal.ocrData,
       });
       if (invoiceNumber && !proposal.forceDuplicate) {
-        const dupInv = await findDuplicatePurchaseInvoice(fakeReq, userId, invoiceNumber, fields.supplierId || '', null);
+        const dupInv = await findDuplicatePurchaseInvoice(
+          fakeReq,
+          userId,
+          invoiceNumber,
+          fields.supplierId || '',
+          null,
+          { documentKind: docKind },
+        );
         if (dupInv) {
           const err = new Error(`Factura duplicada: ya existe el código ${dupInv.invoiceNumber}`);
           err.code = 'DUPLICATE_INVOICE';
@@ -222,10 +233,63 @@ export async function executeProposal(proposal, userId) {
       }
       const loadToWarehouse = fields.loadToWarehouse === true
         || String(fields.loadToWarehouse || '').toLowerCase() === 'true';
+
+      let linkedAlbaranId = String(fields.linkedAlbaranId || '').trim();
+      let linkedAlbaranNumber = String(fields.linkedAlbaranNumber || '').trim();
+      let linkedPurchaseOrderId = String(fields.linkedPurchaseOrderId || '').trim();
+      let linkedPurchaseOrderNumber = String(fields.linkedPurchaseOrderNumber || '').trim();
+
+      // Factura OCR: enlazar albarán del mismo proveedor (código en OCR o mismo nº).
+      if (docKind !== 'albaran' && !linkedAlbaranId) {
+        try {
+          const matchedAlb = await findMatchingAlbaranForInvoice(fakeReq, userId, {
+            supplierId: fields.supplierId || '',
+            invoiceNumber,
+            notes: fields.notes || '',
+            ocrData: proposal.ocrData,
+          });
+          if (matchedAlb) {
+            linkedAlbaranId = matchedAlb._id;
+            linkedAlbaranNumber = String(
+              matchedAlb.invoiceNumber || matchedAlb.ocrData?.documentNumber || '',
+            ).trim();
+            if (!linkedPurchaseOrderId && matchedAlb.linkedPurchaseOrderId) {
+              linkedPurchaseOrderId = String(matchedAlb.linkedPurchaseOrderId).trim();
+              linkedPurchaseOrderNumber = String(
+                matchedAlb.linkedPurchaseOrderNumber || '',
+              ).trim();
+            }
+            // Si OCR no trajo proveedor, heredar el del albarán.
+            if (!fields.supplierId && matchedAlb.supplierId) {
+              fields.supplierId = matchedAlb.supplierId;
+              fields.supplierName = matchedAlb.supplierName || fields.supplierName || '';
+            }
+            logger.info(
+              {
+                tag: 'OCR-ALBARAN-LINK',
+                albaranId: linkedAlbaranId,
+                albaranNumber: linkedAlbaranNumber,
+                supplierId: fields.supplierId || '',
+              },
+              'Factura OCR enlazada a albarán',
+            );
+          }
+        } catch (linkErr) {
+          logger.warn(
+            { tag: 'OCR-ALBARAN-LINK', err: linkErr?.message },
+            'No se pudo enlazar albarán a la factura OCR',
+          );
+        }
+      }
+
       createdDoc = buildPurchaseInvoiceDocument(userId, {
         ...fields,
         invoiceNumber,
         documentKind: docKind,
+        linkedAlbaranId,
+        linkedAlbaranNumber,
+        linkedPurchaseOrderId,
+        linkedPurchaseOrderNumber,
         entryMethod: 'ocr',
         ocrData: proposal.ocrData,
         ocrImageBase64: proposal.sourceImageBase64 || '',

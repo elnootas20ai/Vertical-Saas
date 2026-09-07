@@ -39,6 +39,7 @@ import {
   formatRemainingTime,
   matchesFilterStatus,
   parseHistory,
+  reservationDateKey,
   type ReservationAutomationSettings,
   type ReservationFilterStatus,
   type ReservationFormData,
@@ -109,13 +110,6 @@ function toLocalIsoDate(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
-}
-
-/** Clave estable yyyy-mm-dd (API a veces trae ISO largo). */
-function reservationDateKey(value: string | null | undefined): string {
-  const raw = String(value || '').trim();
-  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
-  return '';
 }
 
 function addDays(dateStr: string, days: number): string {
@@ -280,28 +274,30 @@ export function RestaurantReservationsPage() {
     return () => clearInterval(interval);
   }, [loadData]);
 
-  // Persist automation status changes
+  // Persist automation status changes (solo sobre el estado real en BD, nunca el overlay)
   useEffect(() => {
     if (!userId || !automation.enabled) return;
     const tick = async () => {
       const withRules = applyAutomationRules(reservations, automation);
-      for (let i = 0; i < withRules.length; i++) {
-        const next = withRules[i];
-        const prev = reservations[i];
-        if (prev && next.status !== prev.status && (next.status === 'delayed' || next.status === 'no_show')) {
-          try {
-            const history = JSON.stringify([
-              {
-                action: next.status === 'delayed' ? 'Retraso automático' : 'No presentado automático',
-                userId: 'system',
-                userName: 'Sistema',
-                at: new Date().toISOString(),
-              },
-              ...parseHistory(prev.history),
-            ]);
-            await reservationsCrudApi.update(userId, prev._id, { status: next.status, history });
-          } catch { /* ignore */ }
-        }
+      const byId = new Map(reservations.map((r) => [r._id, r]));
+      for (const next of withRules) {
+        const prev = byId.get(next._id);
+        if (!prev) continue;
+        if (next.status === prev.status) continue;
+        if (next.status !== 'delayed' && next.status !== 'no_show') continue;
+        if (!['pending', 'confirmed', 'delayed'].includes(prev.status)) continue;
+        try {
+          const history = JSON.stringify([
+            {
+              action: next.status === 'delayed' ? 'Retraso automático' : 'No presentado automático',
+              userId: 'system',
+              userName: 'Sistema',
+              at: new Date().toISOString(),
+            },
+            ...parseHistory(prev.history),
+          ]);
+          await reservationsCrudApi.update(userId, prev._id, { status: next.status, history });
+        } catch { /* ignore */ }
       }
     };
     const id = setInterval(() => void tick(), 60_000);
@@ -312,6 +308,12 @@ export function RestaurantReservationsPage() {
     () => applyAutomationRules(reservations, automation),
     [reservations, automation],
   );
+
+  /** Estado real en BD (acciones / edición). El listado puede mostrar overlay de automatización. */
+  const selectedRaw = useMemo(() => {
+    if (!selected) return null;
+    return reservations.find((r) => r._id === selected._id) || selected;
+  }, [selected, reservations]);
 
   const dayReservations = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -333,15 +335,15 @@ export function RestaurantReservationsPage() {
 
   const countsByDate = useMemo(() => {
     const map: Record<string, number> = {};
-    for (const r of displayReservations) {
+    // Contar sobre estado real en BD (el overlay de no_show no debe vaciar el día).
+    for (const r of reservations) {
       const key = reservationDateKey(r.date);
       if (!key) continue;
-      if (ACTIVE_STATUSES.includes(r.status as ReservationStatus) || r.status === 'confirmed') {
-        map[key] = (map[key] || 0) + 1;
-      }
+      if (r.status === 'cancelled') continue;
+      map[key] = (map[key] || 0) + 1;
     }
     return map;
-  }, [displayReservations]);
+  }, [reservations]);
 
   const week = useMemo(() => weekDays(selectedDate), [selectedDate]);
 
@@ -469,25 +471,28 @@ export function RestaurantReservationsPage() {
   }, [searchParams]);
 
   const openEdit = (item: RestaurantReservation) => {
-    const day = reservationDateKey(item.date) || selectedDate || todayLocalIso();
-    setEditing(item);
+    // Siempre editar el documento real, no el status del overlay de automatización.
+    const raw = reservations.find((r) => r._id === item._id) || item;
+    const day = reservationDateKey(raw.date) || selectedDate || todayLocalIso();
+    setEditing(raw);
     setForm({
-      guestName: item.guestName,
-      phone: item.phone,
-      email: item.email,
-      clientId: item.clientId || '',
+      guestName: raw.guestName,
+      phone: raw.phone,
+      email: raw.email,
+      clientId: raw.clientId || '',
       date: day,
-      time: item.time,
-      partySize: item.partySize,
-      preferredZone: item.preferredZone,
-      tableId: item.tableId,
-      tableName: item.tableName,
-      tableNumber: item.tableNumber,
-      notes: item.notes,
-      status: item.status,
+      time: raw.time,
+      partySize: raw.partySize,
+      preferredZone: raw.preferredZone,
+      tableId: raw.tableId,
+      tableName: raw.tableName,
+      tableNumber: raw.tableNumber,
+      tableIds: raw.tableIds || [],
+      notes: raw.notes,
+      status: raw.status,
     });
     setClientLookup('');
-    setClientEditing(!item.clientId);
+    setClientEditing(!raw.clientId);
     clearSelection();
     clearResults();
     setShowModal(true);
@@ -499,7 +504,11 @@ export function RestaurantReservationsPage() {
       toast.error('Completa nombre, fecha y hora');
       return;
     }
-    const payload = { ...form, date: dateIso };
+    // En edición no enviar status: solo cambia por botones de acción / automatización.
+    const { status: _status, ...formFields } = form;
+    const payload = editing
+      ? { ...formFields, date: dateIso }
+      : { ...form, date: dateIso, status: 'pending' as ReservationStatus };
     setSaving(true);
     try {
       if (editing) {
@@ -885,8 +894,8 @@ export function RestaurantReservationsPage() {
                           </Link>
                         ) : null}
                       </div>
-                      <span className={`mt-1 inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_CFG[selected.status]?.bg} ${STATUS_CFG[selected.status]?.text}`}>
-                        {STATUS_CFG[selected.status]?.label}
+                      <span className={`mt-1 inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_CFG[(selectedRaw || selected).status]?.bg} ${STATUS_CFG[(selectedRaw || selected).status]?.text}`}>
+                        {STATUS_CFG[(selectedRaw || selected).status]?.label}
                       </span>
                     </div>
                     <button type="button" onClick={() => setSelected(null)} className="text-gray-400 hover:text-gray-600">
@@ -966,24 +975,34 @@ export function RestaurantReservationsPage() {
                   </div>
                 </div>
 
-                {/* Actions */}
+                {/* Actions — siempre sobre el estado real en BD (selectedRaw), no el overlay */}
                 <div className="shrink-0 space-y-2 border-t border-gray-100 p-4 dark:border-gray-800">
                   <div className="grid grid-cols-2 gap-2">
-                    {selected.status === 'pending' && (
+                    {selectedRaw?.status === 'pending' && (
                       <button
                         type="button"
                         disabled={saving}
-                        onClick={() => void runAction(() => confirmReservation(userId, selected, actor), 'Reserva confirmada')}
+                        onClick={() => void runAction(() => confirmReservation(userId, selectedRaw, actor), 'Reserva confirmada')}
                         className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-blue-600 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
                       >
                         <Check className="h-3.5 w-3.5" />Confirmar
                       </button>
                     )}
-                    {['pending', 'confirmed', 'arrived', 'delayed'].includes(selected.status) && (
+                    {selectedRaw && ['no_show', 'delayed'].includes(selectedRaw.status) && (
                       <button
                         type="button"
                         disabled={saving}
-                        onClick={() => void handleSeat(selected)}
+                        onClick={() => void runAction(() => confirmReservation(userId, selectedRaw, actor), 'Reserva reactivada')}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-blue-600 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        <Check className="h-3.5 w-3.5" />Reactivar
+                      </button>
+                    )}
+                    {selectedRaw && ['pending', 'confirmed', 'arrived', 'delayed', 'no_show'].includes(selectedRaw.status) && (
+                      <button
+                        type="button"
+                        disabled={saving}
+                        onClick={() => void handleSeat(selectedRaw)}
                         className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
                       >
                         <UserCheck className="h-3.5 w-3.5" />Sentar
@@ -992,7 +1011,7 @@ export function RestaurantReservationsPage() {
                     <button
                       type="button"
                       disabled={saving}
-                      onClick={() => openEdit(selected)}
+                      onClick={() => openEdit(selectedRaw || selected)}
                       className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-gray-200 py-2 text-xs font-medium dark:border-gray-700"
                     >
                       <Edit2 className="h-3.5 w-3.5" />Editar
@@ -1003,34 +1022,34 @@ export function RestaurantReservationsPage() {
                       onClick={() => setShowAssignModal(true)}
                       className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-gray-200 py-2 text-xs font-medium dark:border-gray-700"
                     >
-                      <Armchair className="h-3.5 w-3.5" />{selected.tableId ? 'Cambiar mesa' : 'Asignar mesa'}
+                      <Armchair className="h-3.5 w-3.5" />{(selectedRaw || selected).tableId ? 'Cambiar mesa' : 'Asignar mesa'}
                     </button>
                     <button
                       type="button"
                       disabled={saving}
                       onClick={() => void runAction(
-                        () => duplicateReservation(userId, selected, actor, tables, reservations, clientScope),
+                        () => duplicateReservation(userId, selectedRaw || selected, actor, tables, reservations, clientScope),
                         'Reserva duplicada',
                       )}
                       className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-gray-200 py-2 text-xs font-medium dark:border-gray-700"
                     >
                       <Copy className="h-3.5 w-3.5" />Duplicar
                     </button>
-                    {!['cancelled', 'finished', 'seated'].includes(selected.status) && (
+                    {selectedRaw && !['cancelled', 'finished', 'seated'].includes(selectedRaw.status) && (
                       <button
                         type="button"
                         disabled={saving}
-                        onClick={() => void runAction(() => cancelReservation(userId, selected, actor), 'Reserva cancelada')}
+                        onClick={() => void runAction(() => cancelReservation(userId, selectedRaw, actor), 'Reserva cancelada')}
                         className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-red-200 py-2 text-xs font-medium text-red-600 dark:border-red-900"
                       >
                         Cancelar
                       </button>
                     )}
-                    {selected.status === 'seated' && (
+                    {selectedRaw?.status === 'seated' && (
                       <button
                         type="button"
                         disabled={saving}
-                        onClick={() => void runAction(() => finalizeReservation(userId, selected, actor), 'Reserva finalizada')}
+                        onClick={() => void runAction(() => finalizeReservation(userId, selectedRaw, actor), 'Reserva finalizada')}
                         className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-gray-200 py-2 text-xs font-medium dark:border-gray-700"
                       >
                         Finalizar
@@ -1041,7 +1060,7 @@ export function RestaurantReservationsPage() {
                       disabled={saving}
                       onClick={() => {
                         if (!window.confirm('¿Eliminar esta reserva permanentemente?')) return;
-                        void runAction(async () => { await deleteReservation(userId, selected); setSelected(null); }, 'Reserva eliminada');
+                        void runAction(async () => { await deleteReservation(userId, selectedRaw || selected); setSelected(null); }, 'Reserva eliminada');
                       }}
                       className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-red-200 py-2 text-xs font-medium text-red-600 dark:border-red-900"
                     >
@@ -1282,8 +1301,8 @@ export function RestaurantReservationsPage() {
                 value={form.notes}
                 onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))}
                 placeholder="Observaciones (alergias, silla infantil…)"
-                rows={3}
-                className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm dark:border-gray-700 dark:bg-gray-800"
+                rows={2}
+                className="w-full rounded-xl border border-gray-200 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800"
               />
             </div>
             <div className="mt-5 flex justify-end gap-2">
@@ -1369,19 +1388,19 @@ export function RestaurantReservationsPage() {
                 />
               </div>
               <div>
-                <label className="mb-1 block text-gray-500">Marcar no presentado tras (minutos más)</label>
+                <label className="mb-1 block text-gray-500">Marcar no presentado tras (minutos más de retraso)</label>
                 <input
                   type="number"
-                  min={10}
+                  min={5}
                   value={automation.noShowAfterMinutes}
-                  onChange={(e) => setAutomation((a) => ({ ...a, noShowAfterMinutes: parseInt(e.target.value, 10) || 30 }))}
+                  onChange={(e) => setAutomation((a) => ({ ...a, noShowAfterMinutes: parseInt(e.target.value, 10) || 15 }))}
                   className="w-full rounded-xl border px-3 py-2 dark:border-gray-700 dark:bg-gray-800"
                 />
               </div>
             </div>
             <div className="mt-4 flex items-start gap-2 rounded-xl bg-amber-50 p-3 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
               <AlertCircle className="h-4 w-4 shrink-0" />
-              Si llega la hora de la reserva verás una alerta visual. Tras el tiempo configurado cambiará a Retraso y luego a No presentado.
+              Solo después de la hora de la reserva: primero Retraso, y tras esos minutos más, No presentado. Nunca antes de la hora.
             </div>
             <button
               type="button"

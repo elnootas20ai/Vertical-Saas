@@ -29,6 +29,7 @@ import { resolveRetailOpsHomePath } from '../../lib/retailOpsPaths';
 import { salesListPathForBusiness } from '../../lib/compraventaPaths';
 import { sortByBusinessUsage } from '../../lib/businessUsageOrder';
 import { Mail, X, ArrowLeft } from 'lucide-react';
+import { VertialLoadingState } from '../VertialLoadingState';
 import {
   dismissBannerForRestOfLocalDay,
   isBannerDismissedForLocalToday,
@@ -350,8 +351,10 @@ function SaasAppShellInner({ children }: { children: ReactNode }) {
             <DeliveryOpsReturnStrip />
             <WorkerProfileCompletionBanner />
             <ActivationPageCoach />
-            {children}
-            {isDashboard ? <DashboardReservedBlankSlots /> : null}
+            <React.Suspense fallback={<VertialLoadingState label="Cargando módulo…" />}>
+              {children}
+              {isDashboard ? <DashboardReservedBlankSlots /> : null}
+            </React.Suspense>
           </ErrorBoundary>
         </main>
       </div>

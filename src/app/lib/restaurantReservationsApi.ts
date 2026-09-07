@@ -8,6 +8,7 @@ import {
 import {
   ACTIVE_STATUSES,
   parseHistory,
+  reservationDateKey,
   reservationDateTime,
   reservationTableIds,
   serializeHistory,
@@ -317,13 +318,42 @@ export async function updateReservation(
     if (!clientId) clientId = reservation.clientId || '';
   }
 
+  // El estado solo cambia por acciones (confirmar / sentar / cancelar / automatización),
+  // salvo al reprogramar: si estaba delayed/no_show, se recalcula con la nueva fecha/hora.
+  const { status: _ignoredStatus, ...formWithoutStatus } = form;
+  const scheduleStatus = statusAfterScheduleChange(
+    reservation,
+    nextDate,
+    nextTime,
+  );
+  const statusPatch =
+    scheduleStatus && scheduleStatus !== reservation.status
+      ? {
+          status: scheduleStatus,
+        }
+      : {};
+
+  const historyWithSchedule =
+    statusPatch.status
+      ? appendHistory(
+          { ...reservation, history },
+          {
+            action: 'Reprogramación',
+            userId: actor.userId,
+            userName: actor.userName,
+            details: `Estado → ${statusPatch.status} (nueva hora ${nextTime})`,
+          },
+        )
+      : history;
+
   const item = await api.update(
     userId,
     reservation._id,
     {
-      ...form,
+      ...formWithoutStatus,
+      ...statusPatch,
       clientId,
-      history,
+      history: historyWithSchedule,
       ...(form.tableIds !== undefined || form.tableId !== undefined
         ? {
             tableId: selection.tableId,
@@ -353,8 +383,9 @@ export async function confirmReservation(
   reservation: RestaurantReservation,
   actor: { userId: string; userName: string },
 ): Promise<RestaurantReservation> {
+  const fromInactive = reservation.status === 'no_show' || reservation.status === 'delayed';
   const history = appendHistory(reservation, {
-    action: 'Confirmación',
+    action: fromInactive ? 'Reactivación' : 'Confirmación',
     userId: actor.userId,
     userName: actor.userName,
   });
@@ -631,21 +662,76 @@ export function getUpcomingReservationsForTable(
 export function applyAutomationRules(
   reservations: RestaurantReservation[],
   settings: { delayAfterMinutes: number; noShowAfterMinutes: number; enabled: boolean },
+  nowMs: number = Date.now(),
 ): RestaurantReservation[] {
   if (!settings.enabled) return reservations;
-  const now = Date.now();
   return reservations.map((r) => {
-    if (!['pending', 'confirmed', 'delayed'].includes(r.status)) return r;
-    const start = reservationDateTime(r.date, r.time).getTime();
-    const minutesLate = (now - start) / 60_000;
-    if (minutesLate >= settings.noShowAfterMinutes) {
-      return { ...r, status: 'no_show' as ReservationStatus };
-    }
-    if (minutesLate >= settings.delayAfterMinutes) {
-      return { ...r, status: 'delayed' as ReservationStatus };
-    }
-    return r;
+    const next = automationStatusForReservation(r, settings, nowMs);
+    return next === r.status ? r : { ...r, status: next };
   });
+}
+
+/**
+ * Estado que corresponde a una reserva según reloj y umbrales.
+ * - Antes de la hora → no toca (se mantiene pending/confirmed/delayed).
+ * - Tras delay → delayed.
+ * - Tras delay + extra → no_show.
+ * seated / finished / cancelled / arrived no se automatizan.
+ */
+export function automationStatusForReservation(
+  reservation: Pick<RestaurantReservation, 'date' | 'time' | 'status'>,
+  settings: { delayAfterMinutes: number; noShowAfterMinutes: number; enabled: boolean },
+  nowMs: number = Date.now(),
+): ReservationStatus {
+  const current = reservation.status as ReservationStatus;
+  if (!settings.enabled) return current;
+  if (!['pending', 'confirmed', 'delayed'].includes(current)) return current;
+
+  const start = reservationDateTime(reservation.date, reservation.time).getTime();
+  if (!Number.isFinite(start)) return current;
+
+  const minutesLate = (nowMs - start) / 60_000;
+  if (minutesLate < 0) return current;
+
+  const delayAfter = Math.max(0, Number(settings.delayAfterMinutes) || 0);
+  const noShowExtra = Math.max(0, Number(settings.noShowAfterMinutes) || 0);
+  const noShowAfter = delayAfter + noShowExtra;
+
+  if (minutesLate >= noShowAfter) return 'no_show';
+  if (minutesLate >= delayAfter) return 'delayed';
+  return current === 'delayed' ? 'confirmed' : current;
+}
+
+/**
+ * Si se cambia fecha/hora y el estado era delayed/no_show, recalcular según el nuevo hueco
+ * (no dejar una reserva futura atrapada en «No presentado»).
+ */
+export function statusAfterScheduleChange(
+  reservation: Pick<RestaurantReservation, 'date' | 'time' | 'status' | 'history'>,
+  nextDate: string,
+  nextTime: string,
+  settings: { delayAfterMinutes: number; noShowAfterMinutes: number; enabled: boolean } = {
+    delayAfterMinutes: 15,
+    noShowAfterMinutes: 15,
+    enabled: true,
+  },
+  nowMs: number = Date.now(),
+): ReservationStatus | undefined {
+  const dateChanged = reservationDateKey(reservation.date) !== reservationDateKey(nextDate);
+  const timeChanged = String(reservation.time || '').trim() !== String(nextTime || '').trim();
+  if (!dateChanged && !timeChanged) return undefined;
+
+  const current = reservation.status as ReservationStatus;
+  if (current !== 'delayed' && current !== 'no_show') return undefined;
+
+  const hist = parseHistory(reservation.history);
+  const wasConfirmed = hist.some((h) => /confirmaci[oó]n|reactivaci[oó]n/i.test(String(h.action || '')));
+  const base: ReservationStatus = wasConfirmed ? 'confirmed' : 'pending';
+  return automationStatusForReservation(
+    { date: nextDate, time: nextTime, status: base },
+    settings,
+    nowMs,
+  );
 }
 
 export { api as reservationsCrudApi };

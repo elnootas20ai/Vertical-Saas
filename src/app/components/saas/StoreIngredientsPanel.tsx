@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { toast } from 'sonner';
 import {
+  ArrowLeft,
   Loader2,
   Plus,
   Trash2,
@@ -39,9 +39,14 @@ import { CatalogCoreLoadingState } from './CatalogCoreLoadingState';
 import { normalizeTenantUserId } from '../../lib/tenantUserId';
 import { listBrandsRequest, type Brand } from '../../lib/brandsApi';
 import {
+  catalogCategoryOrganizerId,
   commercialLineBrands,
+  isImportComboCategory,
+  isWarehouseImportCategory,
+  normalizeImportCategory,
 } from '../../lib/deliveryCatalogImportLogic';
 import { sortBrandsForDisplay } from '../../lib/brandUtils';
+import type { InventoryOrganizerGroup } from '../../lib/inventoryUtils';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { normalizeBusinessScopeId, notifyDeliveryCatalogChanged, notifyDeliveryConfigChanged } from '../../lib/deliverySetup';
@@ -56,11 +61,79 @@ import {
 } from './SaasTabWorkspace';
 import { CatalogTabShell } from './CatalogTabShell';
 import { CreateIngredientRecipeModal } from './CreateIngredientRecipeModal';
+import { InventoryTypeFilterRow } from './InventoryTypeFilterRow';
 
 type SortMode = 'name-asc' | 'name-desc' | 'extra-first';
 
 /** Filas visibles por grupo antes del «mostrar más»: evita listas infinitas. */
 const GROUP_PREVIEW_ROWS = 15;
+
+const INGREDIENT_UNCATEGORIZED_ID = '__sin_categoria__';
+
+function emptyOrganizerStats(total: number): Pick<
+  InventoryOrganizerGroup,
+  'ok' | 'low' | 'out' | 'negative' | 'total'
+> {
+  return { ok: total, low: 0, out: 0, negative: 0, total };
+}
+
+/** Categorías de carta donde aparece el ingrediente (productos que lo listan). */
+function cartaCategoriesForIngredient(
+  catalogItems: CatalogItem[],
+  ingredientName: string,
+): Array<{ id: string; label: string }> {
+  const used = catalogItemsUsingIngredient(catalogItems, ingredientName);
+  if (used.length === 0) return [];
+  const byId = new Map(catalogItems.map((item) => [item._id, item]));
+  const out = new Map<string, string>();
+  for (const ref of used) {
+    const item = byId.get(ref._id);
+    const label = normalizeImportCategory(String(item?.category || '').trim());
+    if (!label || isWarehouseImportCategory(label) || isImportComboCategory(label)) continue;
+    const id = catalogCategoryOrganizerId(label);
+    if (!id) continue;
+    if (!out.has(id)) out.set(id, label);
+  }
+  return [...out.entries()].map(([id, label]) => ({ id, label }));
+}
+
+function buildIngredientCategoryGroups(
+  ingredients: StoreIngredient[],
+  catalogItems: CatalogItem[],
+): InventoryOrganizerGroup[] {
+  const buckets = new Map<string, { label: string; ids: Set<string> }>();
+  const uncategorized = new Set<string>();
+
+  for (const ing of ingredients) {
+    const cats = cartaCategoriesForIngredient(catalogItems, ing.name);
+    if (cats.length === 0) {
+      uncategorized.add(ing.id);
+      continue;
+    }
+    for (const cat of cats) {
+      const bucket = buckets.get(cat.id) || { label: cat.label, ids: new Set<string>() };
+      bucket.ids.add(ing.id);
+      buckets.set(cat.id, bucket);
+    }
+  }
+
+  const groups: InventoryOrganizerGroup[] = [...buckets.entries()]
+    .map(([id, bucket]) => ({
+      id,
+      label: bucket.label,
+      ...emptyOrganizerStats(bucket.ids.size),
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label, 'es'));
+
+  if (uncategorized.size > 0) {
+    groups.push({
+      id: INGREDIENT_UNCATEGORIZED_ID,
+      label: 'Sin categoría',
+      ...emptyOrganizerStats(uncategorized.size),
+    });
+  }
+  return groups;
+}
 
 /** Mismo gesto que Inventario → Añadir: un CTA con menú de 2 acciones. */
 function IngredientsNewMenu({
@@ -185,6 +258,26 @@ function InlineToggle({
 }
 
 /** Celda de coste editable: escribe y sal del campo (o Enter) para aplicar. */
+function formatMoneyDraftEs(value: number): string {
+  if (!Number.isFinite(value) || value < 0) return '';
+  return value.toLocaleString('es-ES', {
+    useGrouping: false,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function parseMoneyDraftEs(raw: string): number | null {
+  const text = String(raw || '')
+    .trim()
+    .replace(/\s/g, '')
+    .replace(',', '.');
+  if (text === '' || text === '.') return null;
+  const n = Number(text);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(n * 100) / 100;
+}
+
 function IngredientCostCell({
   ingredient,
   onCommit,
@@ -192,22 +285,29 @@ function IngredientCostCell({
   ingredient: StoreIngredient;
   onCommit: (value: number) => void;
 }) {
-  const [draft, setDraft] = useState(ingredient.baseCost != null ? String(ingredient.baseCost) : '');
+  const [draft, setDraft] = useState(
+    ingredient.baseCost != null ? formatMoneyDraftEs(ingredient.baseCost) : '',
+  );
 
   useEffect(() => {
-    setDraft(ingredient.baseCost != null ? String(ingredient.baseCost) : '');
+    setDraft(ingredient.baseCost != null ? formatMoneyDraftEs(ingredient.baseCost) : '');
   }, [ingredient.id, ingredient.baseCost]);
 
   const commit = () => {
-    const raw = draft.trim().replace(',', '.');
-    const n = raw === '' ? 0 : Number(raw);
-    if (!Number.isFinite(n) || n < 0) {
-      setDraft(ingredient.baseCost != null ? String(ingredient.baseCost) : '');
+    const raw = draft.trim();
+    if (raw === '') {
+      setDraft(ingredient.baseCost != null ? formatMoneyDraftEs(ingredient.baseCost) : '');
       return;
     }
-    const rounded = Math.round(n * 100) / 100;
-    setDraft(String(rounded));
-    if (rounded !== (ingredient.baseCost ?? 0)) onCommit(rounded);
+    const rounded = parseMoneyDraftEs(raw);
+    if (rounded == null) {
+      setDraft(ingredient.baseCost != null ? formatMoneyDraftEs(ingredient.baseCost) : '');
+      return;
+    }
+    // Conserva ceros finales tipados (1,50 / 2,00), no String(1.5) → «1.5».
+    setDraft(formatMoneyDraftEs(rounded));
+    const prev = ingredient.baseCost;
+    if (prev == null || rounded !== prev) onCommit(rounded);
   };
 
   return (
@@ -241,33 +341,32 @@ function IngredientExtraPriceCell({
   onCommit: (value: number | null) => void;
 }) {
   const own = normalizeTpvDefaultExtraPrice(ingredient.extraPrice);
-  const [draft, setDraft] = useState(own != null ? String(own) : '');
+  const [draft, setDraft] = useState(own != null ? formatMoneyDraftEs(own) : '');
 
   useEffect(() => {
     const next = normalizeTpvDefaultExtraPrice(ingredient.extraPrice);
-    setDraft(next != null ? String(next) : '');
+    setDraft(next != null ? formatMoneyDraftEs(next) : '');
   }, [ingredient.id, ingredient.extraPrice]);
 
   const commit = () => {
-    const raw = draft.trim().replace(',', '.');
+    const raw = draft.trim();
     if (raw === '') {
       setDraft('');
       if (own != null) onCommit(null);
       return;
     }
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < 0) {
-      setDraft(own != null ? String(own) : '');
+    const rounded = parseMoneyDraftEs(raw);
+    if (rounded == null) {
+      setDraft(own != null ? formatMoneyDraftEs(own) : '');
       return;
     }
-    const rounded = Math.round(n * 100) / 100;
-    setDraft(String(rounded));
+    setDraft(formatMoneyDraftEs(rounded));
     if (rounded !== own) onCommit(rounded);
   };
 
   const placeholder =
     fallbackPrice != null && Number.isFinite(fallbackPrice)
-      ? String(fallbackPrice)
+      ? formatMoneyDraftEs(fallbackPrice)
       : '0,00';
 
   return (
@@ -359,7 +458,14 @@ function itemToDraft(ing: StoreIngredient): IngredientDraft {
     name: ing.name,
     chargeExtra: flags.chargeExtra,
     allowRemove: flags.allowRemove,
-    extraPrice: price != null ? String(price) : '',
+    extraPrice:
+      price != null
+        ? price.toLocaleString('es-ES', {
+            useGrouping: false,
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })
+        : '',
   };
 }
 
@@ -1039,6 +1145,7 @@ export function StoreIngredientsPanel({
   const [showRecipeModal, setShowRecipeModal] = useState(false);
   const [listSearch, setListSearch] = useState('');
   const [listSection, setListSection] = useState<'ingredients' | 'subrecipes'>('ingredients');
+  const [categoryFilter, setCategoryFilter] = useState('');
 
   const commitItems = useCallback((updater: StoreIngredient[] | ((prev: StoreIngredient[]) => StoreIngredient[])) => {
     setItems((prev) => {
@@ -1066,13 +1173,37 @@ export function StoreIngredientsPanel({
     [ingredientItems],
   );
 
+  const categoryGroups = useMemo(() => {
+    const source = listSection === 'subrecipes' ? subrecipeItems : ingredientItems;
+    return buildIngredientCategoryGroups(source, catalogItems);
+  }, [listSection, ingredientItems, subrecipeItems, catalogItems]);
+
+  const showCategoryGrid =
+    !listSearch.trim() && !categoryFilter && categoryGroups.length > 0;
+
   const visibleIngredients = useMemo(() => {
     const source = listSection === 'subrecipes' ? subrecipeItems : ingredientItems;
     const sorted = sortIngredientList(source, 'name-asc');
     const q = ingredientNameFold(listSearch);
-    if (!q) return sorted;
-    return sorted.filter((ing) => ingredientNameFold(ing.name).includes(q));
-  }, [ingredientItems, subrecipeItems, listSection, listSearch]);
+    let list = q
+      ? sorted.filter((ing) => ingredientNameFold(ing.name).includes(q))
+      : sorted;
+    if (!q && categoryFilter) {
+      list = list.filter((ing) => {
+        const cats = cartaCategoriesForIngredient(catalogItems, ing.name);
+        if (categoryFilter === INGREDIENT_UNCATEGORIZED_ID) return cats.length === 0;
+        return cats.some((c) => c.id === categoryFilter);
+      });
+    }
+    return list;
+  }, [
+    ingredientItems,
+    subrecipeItems,
+    listSection,
+    listSearch,
+    categoryFilter,
+    catalogItems,
+  ]);
 
   const editingIngredient = useMemo(
     () => (editingId ? items.find((i) => i.id === editingId) ?? null : null),
@@ -1521,6 +1652,7 @@ export function StoreIngredientsPanel({
                 setListSection('ingredients');
                 setExpandedPreview(false);
                 setListSearch('');
+                setCategoryFilter('');
               }}
               className={`inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg px-3 text-sm font-semibold transition-colors ${
                 listSection === 'ingredients'
@@ -1547,6 +1679,7 @@ export function StoreIngredientsPanel({
                 setListSection('subrecipes');
                 setExpandedPreview(false);
                 setListSearch('');
+                setCategoryFilter('');
               }}
               className={`inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg px-3 text-sm font-semibold transition-colors ${
                 listSection === 'subrecipes'
@@ -1576,13 +1709,14 @@ export function StoreIngredientsPanel({
                 onChange={(v) => {
                   setListSearch(v);
                   setExpandedPreview(false);
+                  if (v.trim()) setCategoryFilter('');
                 }}
                 placeholder={
                   listSection === 'subrecipes' ? 'Buscar subreceta…' : 'Buscar ingrediente…'
                 }
                 className="relative w-full sm:flex-1"
               />
-              {listSection === 'ingredients' && bulkTpvTargets.length > 0 ? (
+              {listSection === 'ingredients' && bulkTpvTargets.length > 0 && !showCategoryGrid ? (
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
                   <button
                     type="button"
@@ -1630,11 +1764,23 @@ export function StoreIngredientsPanel({
                   : 'Añádelos a mano con «Nuevo» o importa la carta Excel (columna de ingredientes).'
               }
             />
+          ) : showCategoryGrid ? (
+            <InventoryTypeFilterRow
+              groups={categoryGroups}
+              onSelect={(id) => {
+                setCategoryFilter(id);
+                setExpandedPreview(false);
+              }}
+            />
           ) : visibleIngredients.length === 0 ? (
             <SaasTabEmpty
               icon={<Package className="w-10 h-10" />}
               title="Sin resultados"
-              description="Prueba otro nombre en el buscador."
+              description={
+                listSearch.trim()
+                  ? 'Prueba otro nombre en el buscador.'
+                  : 'No hay ingredientes en esta categoría.'
+              }
             />
           ) : (
                 (() => {
@@ -1642,7 +1788,39 @@ export function StoreIngredientsPanel({
                     ? visibleIngredients
                     : visibleIngredients.slice(0, GROUP_PREVIEW_ROWS);
                   const hiddenCount = visibleIngredients.length - rows.length;
+                  const activeCategoryLabel =
+                    categoryGroups.find((g) => g.id === categoryFilter)?.label || '';
                   return (
+                    <>
+                      {!listSearch.trim() && categoryFilter ? (
+                        <div className="flex items-center gap-2 min-w-0">
+                          <SaasTabSecondaryButton
+                            type="button"
+                            onClick={() => {
+                              setCategoryFilter('');
+                              setExpandedPreview(false);
+                            }}
+                            title="Retroceder a categorías"
+                            className="shrink-0 !border-[var(--v-blue,#2563eb)] !text-[var(--v-blue,#2563eb)] hover:!bg-blue-50 dark:hover:!bg-blue-950/40"
+                          >
+                            <ArrowLeft className="w-4 h-4" />
+                            Retroceder
+                          </SaasTabSecondaryButton>
+                          <span className="text-stone-300 dark:text-stone-600" aria-hidden>
+                            /
+                          </span>
+                          <p className="truncate text-sm font-semibold text-stone-900 dark:text-stone-100">
+                            {activeCategoryLabel || 'Categoría'}
+                          </p>
+                          <span className="shrink-0 text-xs tabular-nums text-stone-400">
+                            {visibleIngredients.length}
+                          </span>
+                        </div>
+                      ) : listSearch.trim() ? (
+                        <p className="text-xs font-semibold text-stone-500">
+                          Resultados de «{listSearch.trim()}»
+                        </p>
+                      ) : null}
                     <section className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden">
                       <ul className="md:hidden divide-y divide-gray-100 dark:divide-gray-800">
                         {rows.map((ing) => {
@@ -1895,6 +2073,7 @@ export function StoreIngredientsPanel({
                         </button>
                       ) : null}
                     </section>
+                    </>
                   );
                 })()
               )}

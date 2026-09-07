@@ -63,6 +63,9 @@ export function buildStockCountDocument(userId, data = {}, existing = null) {
     status: VALID_COUNT_STATUSES.includes(data.status) ? data.status : (existing?.status || 'draft'),
     countType: VALID_COUNT_TYPES.includes(data.countType) ? data.countType : (existing?.countType || 'full'),
     filterCategories: Array.isArray(data.filterCategories) ? data.filterCategories : (existing?.filterCategories || []),
+    catalogItemIds: Array.isArray(data.catalogItemIds)
+      ? data.catalogItemIds.map((id) => String(id || '').trim()).filter(Boolean)
+      : (Array.isArray(existing?.catalogItemIds) ? existing.catalogItemIds : []),
     lines,
     totalTheoreticalValue: Math.round(totalTheoreticalValue * 100) / 100,
     totalCountedValue: Math.round(totalCountedValue * 100) / 100,
@@ -92,6 +95,7 @@ export function sanitizeStockCount(doc) {
     status: doc.status || 'draft',
     countType: doc.countType || 'full',
     filterCategories: Array.isArray(doc.filterCategories) ? doc.filterCategories : [],
+    catalogItemIds: Array.isArray(doc.catalogItemIds) ? doc.catalogItemIds : [],
     lines: Array.isArray(doc.lines) ? doc.lines : [],
     totalTheoreticalValue: Number(doc.totalTheoreticalValue || 0),
     totalCountedValue: Number(doc.totalCountedValue || 0),

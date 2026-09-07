@@ -25,6 +25,12 @@ import {
 } from '../services/stockPurchaseListService.js';
 import { quantityForWarehouse } from '../shared/stock/warehouseStockQty.js';
 
+function isActiveProduct(item) {
+  if (!item || item.active === false || item.deletedAt) return false;
+  if (item.itemType && item.itemType !== 'product') return false;
+  return true;
+}
+
 async function applyCountAdjustments(req, userId, existing) {
   const lines = existing.lines || [];
   let adjustmentCount = 0;
@@ -178,16 +184,38 @@ export async function createStockCount(req, res) {
 
     const catalogItems = await listCatalogItemsByUser(req, userId);
     const warehouseId = String(stockCount.warehouseId || '').trim();
-    let itemsToCount = filterStockInventoryItems(catalogItems).filter(
-      (item) => quantityForWarehouse(item, warehouseId) > 0,
-    );
+    const catalogItemIds = Array.isArray(stockCount.catalogItemIds)
+      ? [...new Set(stockCount.catalogItemIds.map((id) => String(id || '').trim()).filter(Boolean))]
+      : [];
 
-    if (stockCount.countType === 'partial' && Array.isArray(stockCount.filterCategories) && stockCount.filterCategories.length > 0) {
-      itemsToCount = itemsToCount.filter(item => stockCount.filterCategories.includes(item.stockCategory || 'other'));
+    let itemsToCount;
+
+    if (catalogItemIds.length > 0) {
+      // Lista predefinida del dueño: respetar lo marcado (incl. comprables a proveedor / platos con stock).
+      const idSet = new Set(catalogItemIds);
+      itemsToCount = (catalogItems || []).filter(
+        (item) =>
+          isActiveProduct(item) &&
+          (idSet.has(String(item._id || '')) || idSet.has(String(item.id || ''))),
+      );
+    } else {
+      itemsToCount = filterStockInventoryItems(catalogItems).filter(
+        (item) => quantityForWarehouse(item, warehouseId) > 0,
+      );
+      if (stockCount.countType === 'partial' && Array.isArray(stockCount.filterCategories) && stockCount.filterCategories.length > 0) {
+        itemsToCount = itemsToCount.filter((item) =>
+          stockCount.filterCategories.includes(item.stockCategory || 'other'),
+        );
+      }
     }
 
     if (itemsToCount.length === 0) {
-      return badRequest(res, 'No hay productos con stock cargado para revisar. Carga el stock inicial primero.');
+      return badRequest(
+        res,
+        catalogItemIds.length > 0
+          ? 'Ningún producto de la lista de revisión está disponible.'
+          : 'No hay productos con stock cargado para revisar. Carga el stock inicial primero.',
+      );
     }
 
     const lines = itemsToCount.map(item => ({
@@ -208,12 +236,15 @@ export async function createStockCount(req, res) {
     const db = getCatalogDbName();
     await ensureDatabase(req, db);
 
+    const startedBy = String(stockCount.startedBy || userId).trim() || userId;
     const doc = buildStockCountDocument(userId, {
       ...stockCount,
+      catalogItemIds,
+      countType: catalogItemIds.length > 0 ? 'partial' : (stockCount.countType || 'full'),
       lines,
       status: 'draft',
       startedAt: new Date().toISOString(),
-      startedBy: userId,
+      startedBy,
     });
     const saved = await putDocument(req, db, doc._id, doc);
 
@@ -299,12 +330,13 @@ export async function completeStockCount(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
+    const completedBy = String(req.body?.completedBy || userId).trim() || userId;
     const db = getCatalogDbName();
     let doc = buildStockCountDocument(userId, {
       ...existing,
       status: 'completed',
       completedAt: new Date().toISOString(),
-      completedBy: userId,
+      completedBy,
     }, existing);
 
     let adjustmentCount = 0;
@@ -323,11 +355,26 @@ export async function completeStockCount(req, res) {
     const purchaseList = buildPurchaseListFromStockCount(sanitized, catalogItems);
     await notifyStockPurchaseListReady(req, account, sanitized, catalogItems).catch(() => null);
 
+    let purchaseOrdersCreated = 0;
+    let purchaseOrders = [];
+    try {
+      const orderResult = await createPurchaseOrdersFromStockList(req, userId, countId, sanitized, {
+        onlyWithSupplier: true,
+      });
+      purchaseOrdersCreated = Number(orderResult?.created || 0);
+      purchaseOrders = Array.isArray(orderResult?.orders) ? orderResult.orders : [];
+    } catch {
+      purchaseOrdersCreated = 0;
+      purchaseOrders = [];
+    }
+
     return res.json({
       ok: true,
       adjustmentsCreated: adjustmentCount,
       stockCount: sanitized,
       purchaseList,
+      purchaseOrdersCreated,
+      purchaseOrders,
     });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Error al completar inventario' });
@@ -396,5 +443,86 @@ export async function generateAdjustments(req, res) {
     });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Error al generar ajustes' });
+  }
+}
+
+function revisionListDocId(userId, warehouseId) {
+  const wh = String(warehouseId || 'default').trim() || 'default';
+  return `stock_revision_list:${userId}:${wh}`;
+}
+
+export async function getStockRevisionList(req, res) {
+  try {
+    const { userId } = req.params;
+    const warehouseId = String(req.query?.warehouseId || '').trim();
+    if (!userId) return badRequest(res, 'Falta userId');
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    const db = getCatalogDbName();
+    await ensureDatabase(req, db);
+    const docId = revisionListDocId(userId, warehouseId);
+    const doc = await getDocument(req, db, docId).catch(() => null);
+    const catalogItemIds = Array.isArray(doc?.catalogItemIds)
+      ? doc.catalogItemIds.map((id) => String(id || '').trim()).filter(Boolean)
+      : [];
+
+    return res.json({
+      ok: true,
+      revisionList: {
+        _id: docId,
+        warehouseId,
+        catalogItemIds,
+        updatedAt: doc?.updatedAt || null,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Error al leer lista de revisión' });
+  }
+}
+
+export async function putStockRevisionList(req, res) {
+  try {
+    const { userId } = req.params;
+    const warehouseId = String(req.body?.warehouseId || '').trim();
+    const catalogItemIds = Array.isArray(req.body?.catalogItemIds)
+      ? [...new Set(req.body.catalogItemIds.map((id) => String(id || '').trim()).filter(Boolean))]
+      : [];
+
+    if (!userId) return badRequest(res, 'Falta userId');
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    const db = getCatalogDbName();
+    await ensureDatabase(req, db);
+    const docId = revisionListDocId(userId, warehouseId);
+    const existing = await getDocument(req, db, docId).catch(() => null);
+    const now = new Date().toISOString();
+    const doc = {
+      _id: docId,
+      _rev: existing?._rev,
+      type: 'stock_revision_list',
+      user_id: userId,
+      warehouseId,
+      catalogItemIds,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+    };
+    const saved = await putDocument(req, db, docId, doc);
+
+    return res.json({
+      ok: true,
+      revisionList: {
+        _id: docId,
+        _rev: saved.rev,
+        warehouseId,
+        catalogItemIds,
+        updatedAt: now,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Error al guardar lista de revisión' });
   }
 }

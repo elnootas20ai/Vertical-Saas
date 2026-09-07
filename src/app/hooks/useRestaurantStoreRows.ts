@@ -55,8 +55,18 @@ export function useRestaurantStoreRows(enabled: boolean) {
   ]);
 
   const scopedPdvs = useMemo(
-    () => filterPointsOfSaleForWorkCenters(activeStore.allPointsOfSale, scopedRetail),
-    [activeStore.allPointsOfSale, scopedRetail],
+    () =>
+      filterPointsOfSaleForWorkCenters(activeStore.allPointsOfSale, scopedRetail, {
+        businessId: businessId || undefined,
+        accountBusinessCount: businessesFetchSettled ? businesses.length : undefined,
+      }),
+    [
+      activeStore.allPointsOfSale,
+      scopedRetail,
+      businessId,
+      businessesFetchSettled,
+      businesses.length,
+    ],
   );
 
   const rowsFromScope = useMemo(
@@ -142,7 +152,10 @@ export function useRestaurantStoreRows(enabled: boolean) {
           business: biz,
           businesses: bizList,
         });
-        const pdvs = filterPointsOfSaleForWorkCenters(rawPdvs, retail);
+        const pdvs = filterPointsOfSaleForWorkCenters(rawPdvs, retail, {
+          businessId,
+          accountBusinessCount: bizList.length || 1,
+        });
         const rows = buildDeliverySidebarStoreRows(retail, pdvs);
         if (rows.length > 0) {
           stableRowsRef.current = rows;

@@ -453,7 +453,9 @@ export interface OcrData {
   documentType: string | null;
   documentTypeLabel: string | null;
   emitter: string | null;
+  emitterCIF?: string | null;
   receiver: string | null;
+  receiverCIF?: string | null;
   date: string | null;
   documentNumber: string | null;
   subtotal: number | null;
@@ -463,6 +465,8 @@ export interface OcrData {
   currency: string | null;
   lines: { description: string; quantity: number | null; unitPrice: number | null; total: number | null }[];
   notes: string | null;
+  bankAccount?: string | null;
+  paymentTerms?: string | null;
 }
 
 export type InvoiceValidationStatus = 'pending_validation' | 'validated' | 'paid' | 'pending_payment';
@@ -476,6 +480,7 @@ export interface PurchaseInvoice {
   user_id: string;
   supplierId: string;
   supplierName: string;
+  supplierCif?: string;
   date: string;
   dueDate: string;
   status: string;
@@ -488,6 +493,9 @@ export interface PurchaseInvoice {
   paidAt: string;
   linkedPurchaseOrderId?: string;
   linkedPurchaseOrderNumber?: string;
+  /** Albarán del que proviene esta factura (mismo proveedor / recepción). */
+  linkedAlbaranId?: string;
+  linkedAlbaranNumber?: string;
   costCenterId?: string;
   costCenterName?: string;
   ocrData?: OcrData;
@@ -1476,6 +1484,62 @@ export type DeliverySidebarStoreRow = {
   needsPdv: boolean;
 };
 
+function normalizeSidebarStoreNameKey(value: string | null | undefined): string {
+  return String(value || '').trim().toLowerCase();
+}
+
+function readPointOfSaleBusinessId(p: PointOfSale): string {
+  return String(
+    (p as PointOfSale & { business_id?: string }).business_id || p.businessId || '',
+  )
+    .replace(/^business:/, '')
+    .trim();
+}
+
+function readWorkCenterBusinessIdLoose(wc: WorkCenter): string {
+  return String(
+    (wc as WorkCenter & { business_id?: string }).businessId ||
+      (wc as WorkCenter & { business_id?: string }).business_id ||
+      '',
+  )
+    .replace(/^business:/, '')
+    .trim();
+}
+
+/**
+ * Colapsa duplicados mismo nombre (bodegeta×2, etc.): se queda el que ya tiene PDV.
+ * Evita «Sin PDV» fantasma junto al local bueno en el sidebar admin.
+ */
+export function collapseSidebarStoreRowsByName(
+  rows: DeliverySidebarStoreRow[],
+): DeliverySidebarStoreRow[] {
+  const byKey = new Map<string, DeliverySidebarStoreRow>();
+  for (const row of rows) {
+    const nameKey = normalizeSidebarStoreNameKey(row.title);
+    const key = nameKey || String(row.workCenterId || row.rowId || '').trim();
+    if (!key) continue;
+    const prev = byKey.get(key);
+    if (!prev) {
+      byKey.set(key, row);
+      continue;
+    }
+    const prevOk = Boolean(prev.pdvId) && !prev.needsPdv;
+    const nextOk = Boolean(row.pdvId) && !row.needsPdv;
+    if (prevOk !== nextOk) {
+      byKey.set(key, nextOk ? row : prev);
+      continue;
+    }
+    if (Boolean(prev.inactive) !== Boolean(row.inactive)) {
+      byKey.set(key, row.inactive ? prev : row);
+      continue;
+    }
+    byKey.set(key, row);
+  }
+  return [...byKey.values()].sort((a, b) =>
+    String(a.title || '').localeCompare(String(b.title || ''), 'es'),
+  );
+}
+
 /** Una fila por centro retail: con PDV enlazado o solo centro (pendiente de PDV). */
 export function buildDeliverySidebarStoreRows(
   workCenters: WorkCenter[],
@@ -1501,6 +1565,34 @@ export function buildDeliverySidebarStoreRows(
         ? p
         : prev;
     pdvByWc.set(wcId, newer);
+  }
+
+  // Rematch suave (solo UI): PDV de la empresa con mismo nombre si el workCenterId está muerto/vacío.
+  // No escribe en Couch — el rematch real sigue en API / Ajustes / TPV.
+  const usedPdvIds = new Set(
+    [...pdvByWc.values()].map((p) => String(p._id || '').trim()).filter(Boolean),
+  );
+  for (const wc of retail) {
+    const wcId = String(wc._id || '').trim();
+    if (!wcId || pdvByWc.has(wcId)) continue;
+    const nameKey = normalizeSidebarStoreNameKey(wc.name);
+    if (!nameKey) continue;
+    const wcBid = readWorkCenterBusinessIdLoose(wc);
+    const match = pointsOfSale.find((p) => {
+      const pid = String(p._id || '').trim();
+      if (!pid || usedPdvIds.has(pid)) return false;
+      if (p.active === false) return false;
+      if (normalizeSidebarStoreNameKey(p.name) !== nameKey) return false;
+      const pBid = readPointOfSaleBusinessId(p);
+      if (wcBid && pBid && pBid !== wcBid) return false;
+      const pWc = String(p.workCenterId || '').trim();
+      // No robar un PDV ya enlazado a otro centro vivo de esta lista.
+      if (pWc && wcIds.has(pWc) && pWc !== wcId) return false;
+      return true;
+    });
+    if (!match) continue;
+    pdvByWc.set(wcId, match);
+    usedPdvIds.add(String(match._id || '').trim());
   }
 
   const rows: DeliverySidebarStoreRow[] = retail.map((wc) => {
@@ -1529,7 +1621,7 @@ export function buildDeliverySidebarStoreRows(
     };
   });
 
-  return rows;
+  return collapseSidebarStoreRowsByName(rows);
 }
 
 /** Códigos PDV: lógica en `shared/naming/` (una sola fuente; ver `shared/naming/README.md`). */

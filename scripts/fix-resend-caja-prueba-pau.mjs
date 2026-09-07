@@ -1,6 +1,5 @@
 /**
- * Reenvía a Pau Royo los 2 cierres de hoy (Badalona + Tiana) marcados PRUEBA.
- * Campana + push. No toca cajas.
+ * Reenvía a Pau Royo cierres marcados TEST (campana + push). No toca cajas.
  *
  * Uso (en contenedor app):
  *   node scripts/fix-resend-caja-prueba-pau.mjs --apply
@@ -18,9 +17,10 @@ import {
 const APPLY = process.argv.includes('--apply');
 const PAU = '13e49ef6-183a-4afa-a17b-7730917fe685';
 const BUSINESS_ID = 'ed846f31-aee7-4568-ac03-fa25ff3ad773';
+/** Cierres 6 sep 2026 (ayer respecto al pedido de TEST). */
 const SESSION_IDS = [
-  'tpvreg-3eee0869-56e1-4d5c-84b3-b1aec4f5f808', // Badalona
-  'tpvreg-43c5fa0f-2635-4b3f-9fa3-bf00b3552307', // Tiana
+  'tpvreg-9b3266de-63b5-4759-af88-46723f673f9c', // Badalona
+  'tpvreg-6764a3ab-171e-4d0f-a87a-0cbd7d377132', // Tiana
 ];
 
 async function main() {
@@ -44,10 +44,10 @@ async function main() {
     const baseTitle = hasDiscrepancy
       ? `Cierre con descuadre · ${store}`
       : `Cierre OK · ${store}`;
-    const title = `PRUEBA · ${baseTitle}`;
+    const title = `TEST · ${baseTitle}`;
     const bodyRaw = formatCeoDailyPushBody([block]);
-    const body = `PRUEBA\n${bodyRaw}`;
-    const dedupKey = `ceo-close-digest-prueba:${sessionId}:${stamp}`;
+    const body = `TEST\n${bodyRaw}`;
+    const dedupKey = `ceo-close-digest-test:${sessionId}:${stamp}`;
     const route = '/saas/vertical/delivery/caja';
 
     const plan = {
@@ -78,7 +78,7 @@ async function main() {
         ruleId: 'ceo_daily_digest',
         dayKey: block.dayKey,
         storeLabel: store,
-        prueba: true,
+        test: true,
         originalSessionId: sessionId,
       },
     });
@@ -99,7 +99,7 @@ async function main() {
           title,
           category: 'VERTIAL_EXPANDABLE',
         },
-        collapseId: `prueba-${sessionId}`.slice(0, 64),
+        collapseId: `test-${sessionId}`.slice(0, 64),
       },
       {
         ruleId: 'ceo_daily_digest',

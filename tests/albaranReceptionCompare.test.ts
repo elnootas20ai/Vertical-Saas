@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   applyManualAlbaranQty,
   buildAlbaranCompareRows,
+  buildAlbaranRowsFromInvoiceOnly,
   buildPendingOrderLinesFromCompare,
   buildReplenishPurchaseOrderPayload,
   invoiceIsAlbaran,
   isAlbaranInvoiceIncomplete,
+  isCompareRowReceivable,
   isPurchaseOrderWaitingAlbaran,
   nameMatchScore,
   summarizeCompareIssues,
@@ -246,5 +248,38 @@ describe('albaranReceptionCompare', () => {
   it('nameMatchScore reconoce nombres parecidos', () => {
     expect(nameMatchScore('Tomate triturado 5kg', 'Tomate triturado')).toBeGreaterThan(0.3);
     expect(nameMatchScore('Mozzarella', 'Aceite')).toBeLessThan(0.3);
+  });
+
+  it('buildAlbaranRowsFromInvoiceOnly arma filas sin pedido', () => {
+    const rows = buildAlbaranRowsFromInvoiceOnly({
+      lines: [
+        { id: '1', itemName: 'Harina', quantity: 10, unitPrice: 1.2, total: 12, catalogItemId: 'c1' },
+        { id: '2', itemName: 'Aceite suelto', quantity: 2, unitPrice: 4, total: 8 },
+      ],
+    });
+    expect(rows).toHaveLength(2);
+    expect(rows[0].status).toBe('ok');
+    expect(rows[0].receiveQty).toBe(10);
+    expect(rows[0].orderedQty).toBe(0);
+    expect(rows[1].status).toBe('extra_invoice');
+    expect(rows[1].excluded).toBe(false);
+  });
+
+  it('isCompareRowReceivable permite extras en modo suelto', () => {
+    const row = {
+      catalogItemId: 'c1',
+      name: 'Harina',
+      sku: '',
+      orderedQty: 0,
+      orderedUnitCost: 0,
+      invoiceQty: 3,
+      invoiceUnitCost: 1,
+      status: 'extra_invoice' as const,
+      receiveQty: 3,
+      receiveUnitCost: 1,
+      excluded: false,
+    };
+    expect(isCompareRowReceivable(row)).toBe(false);
+    expect(isCompareRowReceivable(row, { allowExtras: true })).toBe(true);
   });
 });

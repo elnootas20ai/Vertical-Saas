@@ -290,10 +290,18 @@ export function filterWorkCentersForBusinessScope(
 }
 
 /**
- * Una tienda retail por nombre dentro de la misma empresa (evita 3× «prueba2» en el menú).
- * Se conserva la más antigua (la original).
+ * Una tienda retail por nombre dentro de la misma empresa (evita 3× «prueba2» / «bodegeta» en el menú).
+ * Preferencia: centro con PDV enlazado → más antiguo (original).
  */
-export function dedupeRetailWorkCentersForBusiness(workCenters: WorkCenter[]): WorkCenter[] {
+export function dedupeRetailWorkCentersForBusiness(
+  workCenters: WorkCenter[],
+  options?: { preferredWorkCenterIds?: Iterable<string> },
+): WorkCenter[] {
+  const preferred = new Set(
+    [...(options?.preferredWorkCenterIds || [])]
+      .map((id) => String(id || '').trim())
+      .filter(Boolean),
+  );
   const isRetail = (wc: WorkCenter) =>
     wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen';
   const retail: WorkCenter[] = [];
@@ -313,6 +321,12 @@ export function dedupeRetailWorkCentersForBusiness(workCenters: WorkCenter[]): W
     const prev = byKey.get(key);
     if (!prev) {
       byKey.set(key, wc);
+      continue;
+    }
+    const prevPreferred = preferred.has(String(prev._id || '').trim());
+    const nextPreferred = preferred.has(String(wc._id || '').trim());
+    if (prevPreferred !== nextPreferred) {
+      byKey.set(key, nextPreferred ? wc : prev);
       continue;
     }
     const ta = new Date(prev.createdAt || 0).getTime();

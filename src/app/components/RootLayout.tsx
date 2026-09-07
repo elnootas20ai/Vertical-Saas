@@ -3,17 +3,7 @@ import { Outlet, useLocation } from 'react-router';
 import { ScrollRestoration } from 'react-router-dom';
 import { CookieConsentBanner } from './CookieConsentBanner';
 import { shouldHideCookieConsentBannerOnIos } from '../lib/appStoreCompliance';
-
-function RouteChunkFallback() {
-  return (
-    <div className="flex min-h-[40vh] items-center justify-center px-4">
-      <div className="flex flex-col items-center gap-3">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-gray-300 border-t-[var(--v-blue,#2563eb)] dark:border-gray-600 dark:border-t-blue-400" />
-        <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Cargando…</p>
-      </div>
-    </div>
-  );
-}
+import { VertialLoadingState } from './VertialLoadingState';
 
 function pathNeedsFullI18n(pathname: string) {
   if (pathname === '/' || pathname === '') return false;
@@ -73,8 +63,8 @@ export function RootLayout() {
     <>
       {/* Necesario para que navigate(..., { preventScrollReset: true }) evite subir el scroll al cambiar de ruta */}
       <ScrollRestoration />
-      <Suspense fallback={<RouteChunkFallback />}>
-        {i18nReady ? <Outlet /> : <RouteChunkFallback />}
+      <Suspense fallback={<VertialLoadingState variant="fullscreen" />}>
+        {i18nReady ? <Outlet /> : <VertialLoadingState variant="fullscreen" />}
       </Suspense>
       {!isStandaloneMechanicView && !hideCookieBanner && <CookieConsentBanner />}
     </>

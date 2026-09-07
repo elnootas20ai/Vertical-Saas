@@ -34,7 +34,7 @@ import { listWarehousesRequest, type Warehouse } from '../../lib/warehouseApi';
 import { useVerticalCatalog } from '../../hooks/useVerticalCatalog';
 import { useEffectivePlanTier } from '../../hooks/useEffectivePlanTier';
 import { VertialBillingUpgradeLink } from '../../components/saas/VertialBillingUpgradeLink';
-import { InventoryPanel } from '../../components/saas/InventoryPanel';
+import { StockTabPanel } from '../../components/saas/StockTabPanel';
 import { CatalogServiceRulesFields } from '../../components/saas/CatalogServiceRulesFields';
 import {
   brandIdsForCatalogServiceSave,
@@ -78,7 +78,7 @@ import { PurchaseOrdersPage } from './PurchaseOrdersPage';
 import { EscandalloPanel } from './CostingPage';
 import { AlbaranCorroborateModal } from '../../components/saas/AlbaranCorroborateModal';
 import { AlbaranEsperaList } from '../../components/saas/AlbaranEsperaList';
-import { purchaseInvoiceFromAlbaranOcr } from '../../lib/albaranOcrDraft';
+import { purchaseInvoiceFromAlbaranOcr, purchaseInvoiceFromStandaloneAlbaranOcr } from '../../lib/albaranOcrDraft';
 import { scanDocument } from '../../lib/ocrApi';
 import { downscaleImageFileToBase64, fileToRawBase64 } from '../../lib/ocrImagePrepare';
 import {
@@ -250,6 +250,7 @@ import {
   normalizeTpvDefaultExtraPrice,
   inferTpvDefaultExtraPrice,
   normalizeStoreIngredients,
+  normalizeStoreIngredientUnit,
   withStoreIngredientTpvFlags,
   resolveBrandTpvCategoryKeys,
   type StoreIngredient,
@@ -573,16 +574,24 @@ function CreateCatalogItemModal({
       setRecipePicks(
         existingRecipe
           .filter((line) => line.storeIngredientId)
-          .map((line) => ({
-            storeIngredientId: String(line.storeIngredientId),
-            name: line.name,
-            quantity: line.quantity,
-            unit: line.unit || 'ud',
-            tpvRemovable:
-              removableNames.size === 0
-                ? true
-                : removableNames.has(line.name.toLowerCase()),
-          })),
+          .map((line) => {
+            const storeId = String(line.storeIngredientId);
+            const fromWarehouse = storeIngredients.find((ing) => ing.id === storeId);
+            return {
+              storeIngredientId: storeId,
+              name: line.name,
+              quantity: line.quantity,
+              ...(line.quantityText ? { quantityText: line.quantityText } : {}),
+              unit: normalizeStoreIngredientUnit(
+                fromWarehouse?.unit || line.unit,
+                'ud',
+              ),
+              tpvRemovable:
+                removableNames.size === 0
+                  ? true
+                  : removableNames.has(line.name.toLowerCase()),
+            };
+          }),
       );
       setPackagingPicks(
         existingRecipe
@@ -591,6 +600,7 @@ function CreateCatalogItemModal({
             catalogItemId: String(line.catalogItemId),
             name: line.name,
             quantity: line.quantity,
+            ...(line.quantityText ? { quantityText: line.quantityText } : {}),
             unit: line.unit || 'ud',
           })),
       );
@@ -616,9 +626,9 @@ function CreateCatalogItemModal({
           return '';
         })(),
         staffPrice: editItem.staffPrice != null && editItem.staffPrice > 0 ? String(editItem.staffPrice) : '',
-        costPrice: Number.isFinite(cost) && cost > 0 ? String(cost) : '',
-        stockQuantity: String(editItem.stockQuantity || ''),
-        minStock: String(editItem.minStock || ''),
+        costPrice: Number.isFinite(cost) && cost >= 0 ? String(cost) : '',
+        stockQuantity: editItem.stockQuantity == null ? '' : String(editItem.stockQuantity),
+        minStock: editItem.minStock == null ? '' : String(editItem.minStock),
         image: editItem.image || '',
         allergens: editItem.allergens || [],
         notes: editItem.notes || '',
@@ -736,6 +746,85 @@ function CreateCatalogItemModal({
     Object.keys(modalBrandIngredientSelection).length > 0
       ? modalBrandIngredientSelection
       : brandIngredientSelection;
+
+  // Receta ↔ almacén: la unidad del pick sigue la del ingrediente maestro.
+  useEffect(() => {
+    if (!isOpen || recipePicks.length === 0 || effectiveStoreIngredients.length === 0) return;
+    setRecipePicks((prev) => {
+      let changed = false;
+      const next = prev.map((pick) => {
+        const ing = effectiveStoreIngredients.find((row) => row.id === pick.storeIngredientId);
+        if (!ing) return pick;
+        const warehouseUnit = normalizeStoreIngredientUnit(ing.unit, '');
+        if (!warehouseUnit) return pick;
+        if (normalizeStoreIngredientUnit(pick.unit, '') === warehouseUnit) return pick;
+        changed = true;
+        return { ...pick, unit: warehouseUnit };
+      });
+      return changed ? next : prev;
+    });
+  }, [isOpen, effectiveStoreIngredients, recipePicks.length]);
+
+  const persistRecipeIngredientUnit = useCallback(
+    (storeIngredientId: string, unit: string) => {
+      const nextUnit = normalizeStoreIngredientUnit(unit, 'ud');
+      if (!storeIngredientId || !nextUnit) return;
+
+      setModalStoreIngredients((prev) => {
+        const base = prev.length > 0 ? prev : storeIngredients;
+        return normalizeStoreIngredients(
+          base.map((ing) => (ing.id === storeIngredientId ? { ...ing, unit: nextUnit } : ing)),
+        );
+      });
+      setRecipePicks((prev) =>
+        prev.map((pick) =>
+          pick.storeIngredientId === storeIngredientId ? { ...pick, unit: nextUnit } : pick,
+        ),
+      );
+
+      if (!dataUserId) return;
+      void (async () => {
+        try {
+          const cfg = await getDeliveryConfigRequest(dataUserId);
+          const lineBrandIds = commercialLineBrands(brands).map((b) => b._id);
+          const current = unifyStoreIngredientsFromConfig(cfg, lineBrandIds);
+          const nextRows = normalizeStoreIngredients(
+            current.map((ing) =>
+              ing.id === storeIngredientId ? { ...ing, unit: nextUnit } : ing,
+            ),
+          );
+          await updateDeliveryConfigRequest(dataUserId, {
+            _id: cfg?._id || `dlvconf-${normalizeTenantUserId(dataUserId)}`,
+            _rev: cfg?._rev,
+            storeIngredients: nextRows,
+          } as Parameters<typeof updateDeliveryConfigRequest>[1]);
+          await syncInventoryCatalogFromSources(dataUserId, {
+            businessType: isRestaurantCatalog ? 'restaurant' : 'delivery',
+            businessId: businessId || undefined,
+            storeIngredients: nextRows,
+            brands: commercialLineBrands(brands).map((b) => ({
+              _id: b._id,
+              deliveryLineKind: b.deliveryLineKind,
+            })),
+            inventorySyncExcludedKeys: Array.isArray(cfg?.inventorySyncExcludedKeys)
+              ? cfg.inventorySyncExcludedKeys
+              : undefined,
+          }).catch(() => null);
+          notifyDeliveryConfigChanged();
+          setModalStoreIngredients(nextRows);
+        } catch {
+          toast.error('No se pudo guardar la unidad en almacén');
+        }
+      })();
+    },
+    [
+      brands,
+      businessId,
+      dataUserId,
+      isRestaurantCatalog,
+      storeIngredients,
+    ],
+  );
 
   useEffect(() => {
     if (!isOpen) return;
@@ -1957,7 +2046,7 @@ function CreateCatalogItemModal({
       parts.size > 0 ? [...parts] : ['pizzas', 'hamburguesas'];
 
     const flags = opts.flags ?? { chargeExtra: false, allowRemove: true };
-    const unit = String(opts.unit || 'kg').trim().toLowerCase() || 'kg';
+    const unit = normalizeStoreIngredientUnit(opts.unit, 'ud');
     let created = withStoreIngredientTpvFlags(
       {
         id: `ing-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -2063,7 +2152,7 @@ function CreateCatalogItemModal({
       return await persistLinkedStoreIngredient({
         name: input.name,
         baseCost: input.baseCost,
-        unit: input.unit || 'kg',
+        unit: normalizeStoreIngredientUnit(input.unit, 'ud'),
         flags: { chargeExtra: false, allowRemove: false },
         successToast: `«${input.name.trim()}» creado: escandallo + almacén`,
       });
@@ -2356,6 +2445,7 @@ function CreateCatalogItemModal({
           compact
           onCreateIngredient={createRecipeLinkedIngredient}
           creatingIngredient={creatingRecipeIngredient}
+          onIngredientUnitChange={persistRecipeIngredientUnit}
         />
         {!isRestaurantCatalog ? (
           <CatalogProductPackagingPicker
@@ -3594,6 +3684,7 @@ function CreateInvoiceModal({
   const [loadingAlbaran, setLoadingAlbaran] = useState(false);
   const [form, setForm] = useState({
     albaranNumber: '',
+    invoiceNumber: '',
     supplierName: '',
     supplierId: '',
     date: '',
@@ -3605,6 +3696,8 @@ function CreateInvoiceModal({
     { itemName: '', quantity: '', unitPrice: '' },
   ]);
   const [linkedAlbaranId, setLinkedAlbaranId] = useState('');
+  const [linkedPurchaseOrderId, setLinkedPurchaseOrderId] = useState('');
+  const [linkedPurchaseOrderNumber, setLinkedPurchaseOrderNumber] = useState('');
   /** Totales guardados del doc (OCR/lista) por si las líneas van vacías. */
   const [storedTotals, setStoredTotals] = useState<{
     subtotal: number;
@@ -3618,8 +3711,12 @@ function CreateInvoiceModal({
         ? purchaseOrders.find((o) => o._id === editItem.linkedPurchaseOrderId) || null
         : null;
       const ocrDue = (editItem.ocrData as { dueDate?: string | null } | undefined)?.dueDate;
+      const isAlb = isAlbaranInvoice(editItem);
       setForm({
-        albaranNumber: invoiceDisplayNumber(editItem),
+        albaranNumber: isAlb
+          ? invoiceDisplayNumber(editItem)
+          : String(editItem.linkedAlbaranNumber || '').trim(),
+        invoiceNumber: isAlb ? '' : invoiceDisplayNumber(editItem),
         supplierName: editItem.supplierName || editItem.ocrData?.emitter || '',
         supplierId: editItem.supplierId || '',
         date: invoiceDateToInputValue(editItem.date || editItem.ocrData?.date || editItem.sourceEmailDate),
@@ -3629,10 +3726,13 @@ function CreateInvoiceModal({
       });
       setLines(invoiceFormLinesFromDoc(editItem, linked));
       setStoredTotals(invoiceStoredTotalsFromDoc(editItem));
-      setLinkedAlbaranId(editItem._id || '');
+      setLinkedAlbaranId(isAlb ? '' : String(editItem.linkedAlbaranId || '').trim());
+      setLinkedPurchaseOrderId(String(editItem.linkedPurchaseOrderId || '').trim());
+      setLinkedPurchaseOrderNumber(String(editItem.linkedPurchaseOrderNumber || linked?.orderNumber || '').trim());
     } else {
       setForm({
         albaranNumber: '',
+        invoiceNumber: '',
         supplierName: '',
         supplierId: '',
         date: '',
@@ -3643,6 +3743,8 @@ function CreateInvoiceModal({
       setLines([{ itemName: '', quantity: '', unitPrice: '' }]);
       setStoredTotals(null);
       setLinkedAlbaranId('');
+      setLinkedPurchaseOrderId('');
+      setLinkedPurchaseOrderNumber('');
     }
   }, [editItem, isOpen, purchaseOrders]);
   useModalClose(isOpen, onClose);
@@ -3654,18 +3756,26 @@ function CreateInvoiceModal({
       ? purchaseOrders.find((o) => o._id === inv.linkedPurchaseOrderId) || null
       : null;
     const ocrDue = (inv.ocrData as { dueDate?: string | null } | undefined)?.dueDate;
-    setForm({
-      albaranNumber: invoiceDisplayNumber(inv),
+    const albNumber = invoiceDisplayNumber(inv);
+    setForm((f) => ({
+      ...f,
+      albaranNumber: albNumber,
+      // Conserva nº de factura si el usuario ya lo escribió; si no, deja vacío para rellenar.
+      invoiceNumber: f.invoiceNumber.trim() || '',
       supplierName: inv.supplierName || inv.ocrData?.emitter || '',
       supplierId: inv.supplierId || '',
-      date: invoiceDateToInputValue(inv.date || inv.ocrData?.date || inv.sourceEmailDate),
-      dueDate: invoiceDateToInputValue(inv.dueDate || ocrDue),
+      date: invoiceDateToInputValue(inv.date || inv.ocrData?.date || inv.sourceEmailDate) || f.date,
+      dueDate: invoiceDateToInputValue(inv.dueDate || ocrDue) || f.dueDate,
       taxRate: String(inv.taxRate ?? inv.ocrData?.taxRate ?? 21),
       notes: inv.notes || inv.ocrData?.notes || '',
-    });
+    }));
     setLines(invoiceFormLinesFromDoc(inv, linked));
     setStoredTotals(invoiceStoredTotalsFromDoc(inv));
     setLinkedAlbaranId(inv._id);
+    setLinkedPurchaseOrderId(String(inv.linkedPurchaseOrderId || '').trim());
+    setLinkedPurchaseOrderNumber(
+      String(inv.linkedPurchaseOrderNumber || linked?.orderNumber || '').trim(),
+    );
   };
 
   const handleLoadAlbaran = async () => {
@@ -3678,33 +3788,43 @@ function CreateInvoiceModal({
     try {
       const fresh = onReloadInvoices ? await onReloadInvoices() : undefined;
       const pool = Array.isArray(fresh) && fresh.length ? fresh : invoices;
-      if (editItem && invoiceMatchesCode(editItem, code)) {
-        const self = pool.find((inv) => inv._id === editItem._id) || editItem;
-        applyAlbaranToForm(self);
-        onSelectExisting?.(self);
-        toast.success('Datos del documento actualizados');
-        return;
-      }
+      const supplierHint = String(form.supplierId || '').trim();
+
+      const matchAlbaran = (preferSupplier: boolean) =>
+        pool.find((inv) => {
+          if (!isAlbaranInvoice(inv)) return false;
+          if (!invoiceMatchesCode(inv, code)) return false;
+          if (editItem && inv._id === editItem._id) return false;
+          if (preferSupplier && supplierHint) {
+            return String(inv.supplierId || '').trim() === supplierHint;
+          }
+          return true;
+        });
+
       const match =
-        pool.find(
-          (inv) =>
-            isAlbaranInvoice(inv) &&
-            invoiceMatchesCode(inv, code) &&
-            (!editItem || inv._id !== editItem._id),
-        ) ||
+        matchAlbaran(true) ||
+        matchAlbaran(false) ||
         pool.find(
           (inv) =>
             invoiceMatchesCode(inv, code) &&
             (!editItem || inv._id !== editItem._id),
         );
+
       if (!match) {
-        toast.error('No hay ningún albarán/factura con ese número. Revisa el código o la pestaña Albarán.');
+        toast.error('No hay ningún albarán con ese número. Revisa el código o la pestaña Albarán.');
         return;
       }
+      if (!isAlbaranInvoice(match)) {
+        toast.error('Ese código es una factura, no un albarán. Usa el nº del albarán de recepción.');
+        return;
+      }
+      if (supplierHint && match.supplierId && match.supplierId !== supplierHint) {
+        toast.warning('El albarán es de otro proveedor; se actualizó el proveedor al del albarán.');
+      }
       applyAlbaranToForm(match);
-      onSelectExisting?.(match);
+      // Importante: NO llamar onSelectExisting — eso convertía la alta en «editar albarán».
       toast.success(
-        `Albarán ${match.invoiceNumber || code} cargado · proveedor, líneas e importes actualizados`,
+        `Albarán ${match.invoiceNumber || code} cargado · proveedor, líneas e importes listos para la factura`,
       );
     } finally {
       setLoadingAlbaran(false);
@@ -3757,17 +3877,20 @@ function CreateInvoiceModal({
   const supplierInList = Boolean(
     form.supplierId && suppliers.some((s) => s._id === form.supplierId),
   );
-  const linkedOrder = editItem?.linkedPurchaseOrderId
-    ? purchaseOrders.find((o) => o._id === editItem.linkedPurchaseOrderId) || null
-    : null;
-  const albaranPendingLines =
-    editItem && isAlbaranInvoice(editItem)
-      ? resolveAlbaranPendingLines(editItem, linkedOrder)
-      : [];
-  const albaranIncomplete =
-    editItem && isAlbaranInvoice(editItem)
-      ? isAlbaranInvoiceIncomplete(editItem, linkedOrder)
-      : false;
+  const linkedOrder = linkedPurchaseOrderId
+    ? purchaseOrders.find((o) => o._id === linkedPurchaseOrderId) || null
+    : editItem?.linkedPurchaseOrderId
+      ? purchaseOrders.find((o) => o._id === editItem.linkedPurchaseOrderId) || null
+      : null;
+  const sourceAlbaranForPending = linkedAlbaranId
+    ? invoices.find((i) => i._id === linkedAlbaranId) || null
+    : editItem && isAlbaranInvoice(editItem)
+      ? editItem
+      : null;
+  const albaranPendingLines = sourceAlbaranForPending
+    ? resolveAlbaranPendingLines(sourceAlbaranForPending, linkedOrder)
+    : [];
+  const albaranIncomplete = Boolean(sourceAlbaranForPending) && albaranPendingLines.length > 0;
 
   const handleSelectSupplier = (supplierId: string) => {
     const supplier = suppliers.find((s) => s._id === supplierId);
@@ -3780,8 +3903,18 @@ function CreateInvoiceModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.albaranNumber.trim()) {
-      toast.error('Indica el número de albarán');
+    const creating = !editItem || isAlbaranInvoice(editItem);
+    const invoiceNumber = (
+      creating
+        ? form.invoiceNumber.trim() || form.albaranNumber.trim()
+        : form.invoiceNumber.trim() || form.albaranNumber.trim()
+    );
+    if (creating && !form.albaranNumber.trim() && !linkedAlbaranId) {
+      toast.error('Indica el número de albarán y pulsa Cargar albarán');
+      return;
+    }
+    if (!invoiceNumber) {
+      toast.error(creating ? 'Indica el número de factura' : 'Indica el número de documento');
       return;
     }
     if (!form.supplierName.trim()) {
@@ -3800,9 +3933,10 @@ function CreateInvoiceModal({
     }
     setSubmitting(true);
     try {
+      const base = creating ? {} : { ...editItem };
       await onCreate({
-        ...editItem,
-        invoiceNumber: form.albaranNumber.trim(),
+        ...base,
+        invoiceNumber,
         supplierName: form.supplierName,
         supplierId: form.supplierId,
         date: form.date || new Date().toISOString().slice(0, 10),
@@ -3813,8 +3947,17 @@ function CreateInvoiceModal({
         taxAmount,
         total,
         notes: form.notes,
-        status: editItem?.status || 'pending',
-        documentKind: editItem?.documentKind || (linkedAlbaranId ? 'factura_proveedor' : editItem?.documentKind),
+        status: creating ? 'pending' : editItem?.status || 'pending',
+        documentKind: 'factura_proveedor',
+        linkedAlbaranId: linkedAlbaranId || (creating ? '' : editItem?.linkedAlbaranId || ''),
+        linkedAlbaranNumber:
+          form.albaranNumber.trim() ||
+          (creating ? '' : editItem?.linkedAlbaranNumber || ''),
+        linkedPurchaseOrderId:
+          linkedPurchaseOrderId || (creating ? '' : editItem?.linkedPurchaseOrderId || ''),
+        linkedPurchaseOrderNumber:
+          linkedPurchaseOrderNumber ||
+          (creating ? '' : editItem?.linkedPurchaseOrderNumber || ''),
       });
     } finally {
       setSubmitting(false);
@@ -3827,12 +3970,12 @@ function CreateInvoiceModal({
         <div className="flex items-center justify-between p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700">
           <div>
             <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-              {editItem ? 'Editar factura' : 'Nueva factura de compra'}
+              {editItem && !isAlbaranInvoice(editItem) ? 'Editar factura' : 'Nueva factura de compra'}
             </h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-              {editItem
+              {editItem && !isAlbaranInvoice(editItem)
                 ? 'Modifica los datos de la factura'
-                : 'Pon el nº de albarán arriba y carga para rellenar proveedor, líneas e importes'}
+                : 'Carga el albarán (mismo proveedor) y pon el nº de factura del proveedor'}
             </p>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors">
@@ -3902,39 +4045,54 @@ function CreateInvoiceModal({
             </div>
           ) : null}
 
-          <div className="rounded-xl border-2 border-gray-900/10 dark:border-gray-100/10 bg-gray-50 dark:bg-gray-900/40 p-3 sm:p-4">
-            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-              {editItem ? 'Nº documento *' : 'Nº Albarán *'}
-            </label>
-            <div className="flex flex-col sm:flex-row gap-2">
-              <input
-                className="w-full flex-1 px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-mono"
-                placeholder={editItem ? 'Ej. FAC-2026-014' : 'Ej. ALB-2026-014'}
-                value={form.albaranNumber}
-                onChange={(e) => setForm((f) => ({ ...f, albaranNumber: e.target.value }))}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    void handleLoadAlbaran();
-                  }
-                }}
-                autoFocus={!editItem}
-              />
-              <button
-                type="button"
-                onClick={() => void handleLoadAlbaran()}
-                disabled={loadingAlbaran || !form.albaranNumber.trim()}
-                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gray-900 hover:bg-black text-white text-sm font-semibold disabled:opacity-50 disabled:cursor-wait shrink-0"
-              >
-                {loadingAlbaran ? <Loader2 className="w-4 h-4 animate-spin" /> : <PackageCheck className="w-4 h-4" />}
-                {editItem ? 'Recargar datos' : 'Cargar albarán'}
-              </button>
+          <div className="rounded-xl border-2 border-gray-900/10 dark:border-gray-100/10 bg-gray-50 dark:bg-gray-900/40 p-3 sm:p-4 space-y-3">
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
+                Nº Albarán *
+              </label>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  className="w-full flex-1 px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-mono"
+                  placeholder="Ej. ALB-2026-014"
+                  value={form.albaranNumber}
+                  onChange={(e) => setForm((f) => ({ ...f, albaranNumber: e.target.value }))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      void handleLoadAlbaran();
+                    }
+                  }}
+                  autoFocus={!editItem}
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleLoadAlbaran()}
+                  disabled={loadingAlbaran || !form.albaranNumber.trim()}
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gray-900 hover:bg-black text-white text-sm font-semibold disabled:opacity-50 disabled:cursor-wait shrink-0"
+                >
+                  {loadingAlbaran ? <Loader2 className="w-4 h-4 animate-spin" /> : <PackageCheck className="w-4 h-4" />}
+                  Cargar albarán
+                </button>
+              </div>
+              <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                {linkedAlbaranId
+                  ? `Enlazado al albarán · proveedor, líneas e importes cargados${
+                      linkedPurchaseOrderNumber ? ` · pedido ${linkedPurchaseOrderNumber}` : ''
+                    }`
+                  : 'Busca por código (prioriza el proveedor seleccionado) y rellena la factura sin pisar el albarán.'}
+              </p>
             </div>
-            <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-              {editItem
-                ? 'Vuelve a leer proveedor, fechas, IVA, líneas y totales del documento guardado.'
-                : 'Al cargar, se refrescan proveedor, fechas, IVA, líneas y totales del albarán.'}
-            </p>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
+                Nº Factura *
+              </label>
+              <input
+                className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-mono"
+                placeholder="Ej. FAC-2026-014"
+                value={form.invoiceNumber}
+                onChange={(e) => setForm((f) => ({ ...f, invoiceNumber: e.target.value }))}
+              />
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -4121,7 +4279,6 @@ interface PurchaseInvoiceViewModalProps {
   onLoadWarehouse?: (invoice: PurchaseInvoice, options?: { force?: boolean }) => void | Promise<void>;
   onLinkFinance?: (invoice: PurchaseInvoice) => void | Promise<void>;
   onDelete?: (invoice: PurchaseInvoice) => void | Promise<void>;
-  onEditManual?: (invoice: PurchaseInvoice) => void;
 }
 
 function invoiceDetailLines(inv: PurchaseInvoice) {
@@ -4186,7 +4343,6 @@ function PurchaseInvoiceViewModal({
   onLoadWarehouse,
   onLinkFinance,
   onDelete,
-  onEditManual,
 }: PurchaseInvoiceViewModalProps) {
   useModalClose(isOpen, onClose);
   if (!isOpen || !invoice) return null;
@@ -4211,8 +4367,9 @@ function PurchaseInvoiceViewModal({
     if (nameKey) varianceByKey.set(`n:${nameKey}`, vl);
   }
   const totals = invoiceStoredTotalsFromDoc(invoice);
-  const isManual = invoice.entryMethod === 'manual' && invoice.source !== 'email';
   const attachmentName = invoice.attachments?.[0]?.filename;
+  const isAlbaran = isAlbaranInvoice(invoice) || invoiceIsAlbaran(invoice);
+  const docLabel = isAlbaran ? 'Albarán' : 'Factura de compra';
 
   return (
     <div
@@ -4230,7 +4387,11 @@ function PurchaseInvoiceViewModal({
                 {num.primary}
               </h2>
               <span className={`px-2 py-0.5 text-xs font-semibold rounded-full border shrink-0 ${statusCfg.badgeClass}`}>
-                {statusCfg.label}
+                {isAlbaran
+                  ? invoice.ocrStockReceivedAt
+                    ? 'Cargado'
+                    : 'Por comprobar'
+                  : statusCfg.label}
               </span>
             </div>
             {num.hint ? (
@@ -4240,8 +4401,14 @@ function PurchaseInvoiceViewModal({
               </p>
             ) : null}
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-              Factura de compra · {invoice.supplierName || 'Proveedor sin nombre'}
+              {docLabel} · {invoice.supplierName || 'Proveedor sin nombre'}
             </p>
+            {!isAlbaran ? (
+              <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
+                Documento del proveedor · solo revisión. Si algo no cuadra con tu coste esperado, lo
+                marcamos abajo.
+              </p>
+            ) : null}
             {attachmentName ? (
               <p className="text-xs text-gray-400 mt-1 truncate flex items-center gap-1">
                 <FileText className="w-3.5 h-3.5 shrink-0" />
@@ -4307,6 +4474,14 @@ function PurchaseInvoiceViewModal({
                 <p className="text-xs text-gray-500 dark:text-gray-400">Pedido</p>
                 <p className="font-semibold text-gray-900 dark:text-gray-100 font-mono text-xs">
                   {linkedOrder.orderNumber || invoice.linkedPurchaseOrderNumber || '—'}
+                </p>
+              </div>
+            ) : null}
+            {!isAlbaran && (invoice.linkedAlbaranId || invoice.linkedAlbaranNumber) ? (
+              <div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Albarán enlazado</p>
+                <p className="font-semibold text-gray-900 dark:text-gray-100 font-mono text-xs">
+                  {invoice.linkedAlbaranNumber || invoice.linkedAlbaranId?.slice(-8) || '—'}
                 </p>
               </div>
             ) : null}
@@ -4445,46 +4620,45 @@ function PurchaseInvoiceViewModal({
         </div>
 
         <div className="sticky bottom-0 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 sm:p-6 flex flex-wrap gap-2 rounded-b-2xl">
-          {invoice.status !== 'paid' ? (
-            <button
-              type="button"
-              onClick={() => void onTogglePaid(invoice)}
-              className={`${VERTIAL_BTN_PRIMARY} !min-h-0 inline-flex items-center gap-2`}
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              Marcar como pagada
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => void onTogglePaid(invoice)}
-              className={`${VERTIAL_BTN_SECONDARY} !min-h-0 inline-flex items-center gap-2`}
-            >
-              <Clock className="w-4 h-4" />
-              Marcar como pendiente
-            </button>
-          )}
-          {onLoadWarehouse ? (
-            <button
-              type="button"
-              onClick={() => {
-                if (
-                  invoice.ocrStockReceivedAt &&
-                  !window.confirm(
-                    '¿Forzar carga al almacén? Úsalo si el stock no subió. Si ya entró, se puede duplicar.',
-                  )
-                ) {
-                  return;
-                }
-                void onLoadWarehouse(invoice, { force: Boolean(invoice.ocrStockReceivedAt) });
-              }}
-              className={`${VERTIAL_BTN_SECONDARY} !min-h-0 inline-flex items-center gap-2`}
-            >
-              <PackageCheck className="w-4 h-4 text-emerald-600" />
-              {invoice.ocrStockReceivedAt ? 'Forzar carga al almacén' : 'Cargar al almacén'}
-            </button>
+          {!isAlbaran ? (
+            invoice.status !== 'paid' ? (
+              <button
+                type="button"
+                onClick={() => void onTogglePaid(invoice)}
+                className={`${VERTIAL_BTN_PRIMARY} !min-h-0 inline-flex items-center gap-2`}
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                Marcar como pagada
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void onTogglePaid(invoice)}
+                className={`${VERTIAL_BTN_SECONDARY} !min-h-0 inline-flex items-center gap-2`}
+              >
+                <Clock className="w-4 h-4" />
+                Marcar como pendiente
+              </button>
+            )
           ) : null}
-          {!financeLinked && onLinkFinance ? (
+          {onLoadWarehouse ? (
+            invoice.ocrStockReceivedAt ? (
+              <span className={`${VERTIAL_BTN_SECONDARY} !min-h-0 inline-flex items-center gap-2 opacity-70 pointer-events-none`}>
+                <PackageCheck className="w-4 h-4 text-emerald-600" />
+                Stock ya cargado
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void onLoadWarehouse(invoice)}
+                className={`${VERTIAL_BTN_SECONDARY} !min-h-0 inline-flex items-center gap-2`}
+              >
+                <PackageCheck className="w-4 h-4 text-emerald-600" />
+                Cargar al almacén
+              </button>
+            )
+          ) : null}
+          {!isAlbaran && !financeLinked && onLinkFinance ? (
             <button
               type="button"
               onClick={() => void onLinkFinance(invoice)}
@@ -4494,16 +4668,6 @@ function PurchaseInvoiceViewModal({
               Registrar en finanzas
             </button>
           ) : null}
-          {isManual && onEditManual ? (
-            <button
-              type="button"
-              onClick={() => onEditManual(invoice)}
-              className={`${VERTIAL_BTN_SECONDARY} !min-h-0 inline-flex items-center gap-2`}
-            >
-              <Edit3 className="w-4 h-4" />
-              Corregir datos
-            </button>
-          ) : null}
           {canDelete && onDelete ? (
             <button
               type="button"
@@ -4511,7 +4675,7 @@ function PurchaseInvoiceViewModal({
               className="ml-auto px-4 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl transition-colors inline-flex items-center gap-2"
             >
               <Trash2 className="w-4 h-4" />
-              Eliminar
+              {isAlbaran ? 'Eliminar albarán' : 'Eliminar'}
             </button>
           ) : null}
         </div>
@@ -4671,7 +4835,7 @@ function CatalogModuleNav({
 
   return (
     <nav
-      className="flex w-full items-center gap-1 rounded-xl border border-stone-200 bg-stone-100/80 p-1 dark:border-stone-700 dark:bg-stone-900/60"
+      className="flex w-full items-center gap-1 overflow-x-auto rounded-xl border border-stone-200 bg-stone-100/80 p-1 dark:border-stone-700 dark:bg-stone-900/60"
       aria-label="Secciones del catálogo"
     >
       {items.map((tab) => {
@@ -4683,7 +4847,7 @@ function CatalogModuleNav({
             onClick={() => onChange(tab.id)}
             aria-current={isActive ? 'page' : undefined}
             title={tab.label}
-            className={`inline-flex min-h-8 min-w-0 flex-1 items-center justify-center gap-0.5 rounded-lg px-1 py-1 text-[11px] font-semibold leading-tight transition-colors sm:text-xs ${
+            className={`inline-flex min-h-9 min-w-[5.5rem] shrink-0 flex-1 items-center justify-center gap-0.5 rounded-lg px-2 py-1.5 text-[11px] font-semibold leading-tight transition-colors sm:min-w-0 sm:text-xs ${
               isActive
                 ? 'bg-[var(--v-blue,#2563eb)] text-white'
                 : 'bg-white text-stone-700 hover:bg-blue-50/60 hover:text-[var(--v-blue,#2563eb)] dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-blue-950/40 dark:hover:text-blue-300'
@@ -4838,11 +5002,12 @@ export function CatalogPage() {
   const [purchaseOrdersLoading, setPurchaseOrdersLoading] = useState(false);
   const [replenishingOrder, setReplenishingOrder] = useState(false);
   const [albaranCorroborate, setAlbaranCorroborate] = useState<{
-    order: PurchaseOrder;
+    order: PurchaseOrder | null;
     invoice?: PurchaseInvoice | null;
   } | null>(null);
   const [waitingAlbaranOrderId, setWaitingAlbaranOrderId] = useState('');
   const [albaranOcrBusy, setAlbaranOcrBusy] = useState(false);
+  const albaranStandaloneOcrInputRef = useRef<HTMLInputElement | null>(null);
   const [loading, setLoading] = useState(true);
   const [suppliersLoading, setSuppliersLoading] = useState(false);
   const [invoicesHydrating, setInvoicesHydrating] = useState(false);
@@ -4862,10 +5027,8 @@ export function CatalogPage() {
   const activeTab = useMemo(() => {
     const raw = searchParams.get('tab') || 'catalog';
     const tab = raw === 'tpv-templates' ? 'ingredientes' : raw;
-    // Bar/restaurante: sin pestaña Ingredientes (stock vía Almacén + escandallo en Carta).
-    if (isRestaurantCatalog && tab === 'ingredientes') return 'catalog';
     return (CATALOG_TABS as readonly string[]).includes(tab) ? tab : 'catalog';
-  }, [searchParams, isRestaurantCatalog]);
+  }, [searchParams]);
   const setActiveTab = useCallback((tab: string) => setSearchParams({ tab }), [setSearchParams]);
 
   const reloadInvoiceEmailStatus = useCallback(async () => {
@@ -5874,12 +6037,56 @@ export function CatalogPage() {
         imageBase64: prepared.mime.startsWith('image/') ? prepared.base64 : '',
       });
       setAlbaranCorroborate({ order, invoice: draft });
-      toast.success('Albarán leído. Revisa cantidades y pulsa Confirmar pedido.');
+      toast.success('Albarán leído. Revisa y entra a almacén o déjalo en espera.');
     } catch (err) {
       toast.error(toUserFacingMessage(err, 'No se pudo escanear el albarán'));
     } finally {
       setAlbaranOcrBusy(false);
     }
+  };
+
+  const handleStandaloneAlbaranOcrFile = async (file: File) => {
+    setAlbaranOcrBusy(true);
+    try {
+      const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+      const prepared = isPdf
+        ? { base64: await fileToRawBase64(file), mime: 'application/pdf' }
+        : await downscaleImageFileToBase64(file);
+      const scanRes = await scanDocument(prepared.base64, prepared.mime, { targetModule: 'compras' });
+      if (scanRes.data?.parseError) {
+        throw new Error('No se pudo leer el albarán. Prueba una foto más clara.');
+      }
+      const waiting = waitingAlbaranOrderId
+        ? scopedPurchaseOrders.find((o) => o._id === waitingAlbaranOrderId) || null
+        : null;
+      const draft = waiting
+        ? purchaseInvoiceFromAlbaranOcr(waiting, scanRes.data, {
+            imageBase64: prepared.mime.startsWith('image/') ? prepared.base64 : '',
+          })
+        : purchaseInvoiceFromStandaloneAlbaranOcr(scanRes.data, {
+            imageBase64: prepared.mime.startsWith('image/') ? prepared.base64 : '',
+          });
+      setAlbaranCorroborate({ order: waiting, invoice: draft });
+      toast.success('Albarán leído. Revisa y entra a almacén o déjalo en espera.');
+    } catch (err) {
+      toast.error(toUserFacingMessage(err, 'No se pudo escanear el albarán'));
+    } finally {
+      setAlbaranOcrBusy(false);
+    }
+  };
+
+  const openManualAlbaranEntry = () => {
+    const waiting = waitingAlbaranOrderId
+      ? scopedPurchaseOrders.find((o) => o._id === waitingAlbaranOrderId) || null
+      : scopedPurchaseOrders.find(
+          (o) => isPurchaseOrderWaitingAlbaran(o) && o.status !== 'received',
+        ) || null;
+    if (waiting) {
+      setAlbaranCorroborate({ order: waiting, invoice: null });
+      return;
+    }
+    // Sin pedido: meter albarán = OCR (misma pantalla de decisión al terminar)
+    albaranStandaloneOcrInputRef.current?.click();
   };
 
   const handleReplenishPendingOrder = useCallback(async (
@@ -6600,15 +6807,32 @@ export function CatalogPage() {
       costCenterName: activeWorkCenterName,
     };
     try {
-      if (editingInvoice) {
-        const updated = await updatePurchaseInvoiceRequest(dataUserId, { ...editingInvoice, ...data, ...scope } as PurchaseInvoice);
+      // Nunca actualizar un albarán desde «Nueva factura»: si venimos de cargar albarán, crear factura.
+      const editingIsRealInvoice =
+        Boolean(editingInvoice) && !invoiceIsAlbaran(editingInvoice!);
+      if (editingIsRealInvoice && editingInvoice) {
+        const updated = await updatePurchaseInvoiceRequest(dataUserId, {
+          ...editingInvoice,
+          ...data,
+          ...scope,
+          documentKind: 'factura_proveedor',
+        } as PurchaseInvoice);
         setInvoices(prev => prev.map(i => i._id === updated._id ? updated : i));
         toast.success('Factura actualizada');
       } else {
-        const created = await createPurchaseInvoiceRequest(dataUserId, { ...data, ...scope });
+        const { _id: _dropId, _rev: _dropRev, id: _dropLegacy, ...createPayload } = data as PurchaseInvoice;
+        const created = await createPurchaseInvoiceRequest(dataUserId, {
+          ...createPayload,
+          ...scope,
+          documentKind: 'factura_proveedor',
+        });
         setInvoices(prev => [created, ...prev]);
         setInvoiceFinanceLinks((prev) => new Set(prev).add(created._id));
-        toast.success('Factura creada · gasto registrado en finanzas');
+        toast.success(
+          created.linkedAlbaranId
+            ? `Factura creada · enlazada al albarán ${created.linkedAlbaranNumber || ''}`.trim()
+            : 'Factura creada · gasto registrado en finanzas',
+        );
       }
       setShowCreateInvoice(false);
       setEditingInvoice(null);
@@ -6673,11 +6897,15 @@ export function CatalogPage() {
     }
   };
 
-  const handleLoadInvoiceToWarehouse = async (invoice: PurchaseInvoice, options?: { force?: boolean }) => {
+  const handleLoadInvoiceToWarehouse = async (invoice: PurchaseInvoice, _options?: { force?: boolean }) => {
     if (!dataUserId) return;
+    if (invoice.ocrStockReceivedAt) {
+      toast.message('Este albarán ya cargó stock una vez');
+      return;
+    }
     try {
       const result = await loadPurchaseInvoiceStockRequest(dataUserId, invoice._id, {
-        force: Boolean(options?.force),
+        force: false,
         warehouseId: storeWarehouseId || invoice.warehouseId || '',
         salesPointId: String(activeStore.activeSalesPointId || '').trim(),
         workCenterId: activeWorkCenterId || '',
@@ -7998,8 +8226,7 @@ export function CatalogPage() {
     const loadedAlbaranes = albaranes.filter((a) => a.ocrStockReceivedAt);
 
     const openInvoice = (inv: PurchaseInvoice) => {
-      setEditingInvoice(inv);
-      setShowCreateInvoice(true);
+      setViewingInvoice(inv);
     };
 
     const openCorroborateForInvoice = (inv: PurchaseInvoice) => {
@@ -8012,23 +8239,7 @@ export function CatalogPage() {
             o.supplierId === inv.supplierId,
         ) ||
         null;
-      if (!linked) {
-        toast.message('Sin pedido vinculado: abre el albarán con Ver o carga stock con «Almacén»');
-        openInvoice(inv);
-        return;
-      }
       setAlbaranCorroborate({ order: linked, invoice: inv });
-    };
-
-    const repairStock = (inv: PurchaseInvoice) => {
-      if (
-        !window.confirm(
-          '¿Forzar carga al almacén? Úsalo si el albarán dice «Cargado» pero el stock no subió. Si el stock ya entró, se puede duplicar.',
-        )
-      ) {
-        return;
-      }
-      void handleLoadInvoiceToWarehouse(inv, { force: true });
     };
 
     const empty = waitingOrders.length === 0 && albaranes.length === 0;
@@ -8047,6 +8258,39 @@ export function CatalogPage() {
         storeLabel={storeLabel}
         dataUserId={dataUserId}
         storeWarehouseId={storeWarehouseId}
+        toolbarRight={
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={albaranStandaloneOcrInputRef}
+              type="file"
+              accept="image/*,application/pdf"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = '';
+                if (file) void handleStandaloneAlbaranOcrFile(file);
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => openManualAlbaranEntry()}
+              className={`${VERTIAL_BTN_SECONDARY} !min-h-0 px-3 py-2 text-xs inline-flex items-center gap-1.5`}
+              disabled={albaranOcrBusy}
+            >
+              <Package className="w-3.5 h-3.5" />
+              Meter albarán
+            </button>
+            <button
+              type="button"
+              onClick={() => albaranStandaloneOcrInputRef.current?.click()}
+              className={`${VERTIAL_BTN_PRIMARY} !min-h-0 px-3 py-2 text-xs inline-flex items-center gap-1.5`}
+              disabled={albaranOcrBusy || !dataUserId}
+            >
+              <ScanLine className="w-3.5 h-3.5" />
+              {albaranOcrBusy ? 'Leyendo…' : 'OCR albarán'}
+            </button>
+          </div>
+        }
       >
         {empty ? (
           <SaasTabEmpty
@@ -8055,7 +8299,7 @@ export function CatalogPage() {
             description={
               invoicesHydrating || purchaseOrdersLoading
                 ? 'Actualizando en segundo plano…'
-                : 'Cuando crees un pedido de compra aparecerá aquí en espera. Ábrelo, escanea el albarán (OCR) y al comprobar queda en histórico.'
+                : 'Mete un albarán (manual u OCR), o crea un pedido de compra: aparecerá aquí en espera.'
             }
           />
         ) : (
@@ -8199,15 +8443,6 @@ export function CatalogPage() {
                         >
                           Ver
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => repairStock(inv)}
-                          className={`${VERTIAL_BTN_SECONDARY} !min-h-0 px-3 py-2 text-xs`}
-                          title="Si el stock no subió, fuerza la carga al almacén"
-                        >
-                          <PackageCheck className="w-3.5 h-3.5" />
-                          Reparar stock
-                        </button>
                         {canDeletePurchaseDocs ? (
                           <button
                             type="button"
@@ -8305,13 +8540,12 @@ export function CatalogPage() {
 
     const renderInvoiceActions = (originalInvoice: PurchaseInvoice, compact: boolean) => {
       const pad = compact ? 'p-1.5' : 'p-2';
-      const isManual = originalInvoice.entryMethod === 'manual' && originalInvoice.source !== 'email';
       return (
         <div className="flex items-center shrink-0 gap-0.5" onClick={(e) => e.stopPropagation()}>
           <button
             onClick={() => openInvoiceView(originalInvoice)}
             className={`${pad} hover:bg-blue-50 dark:hover:bg-blue-950/30 rounded-lg transition-colors`}
-            title="Ver factura"
+            title="Ver factura del proveedor"
           >
             <Eye className="w-4 h-4 text-blue-600" />
           </button>
@@ -8350,15 +8584,6 @@ export function CatalogPage() {
               <Clock className="w-4 h-4 text-amber-600" />
             </button>
           )}
-          {isManual ? (
-            <button
-              onClick={() => { setEditingInvoice(originalInvoice); setShowCreateInvoice(true); }}
-              className={`${pad} hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors`}
-              title="Corregir datos manuales"
-            >
-              <Edit3 className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-            </button>
-          ) : null}
           <button
             onClick={(e) => void handleDeleteInvoice(originalInvoice, e)}
             className={`${pad} hover:bg-red-100 rounded-lg transition-colors`}
@@ -8566,12 +8791,19 @@ export function CatalogPage() {
             <SaasTabSecondaryButton
               onClick={() => openInvoiceOcrFlow()}
               disabled={!dataUserId}
-              title="Escanear factura con OCR: proveedor, artículos y stock"
+              title="Escanear la factura que te envía el proveedor"
             >
               <ScanLine className="w-3.5 h-3.5" />
               Escanear factura
             </SaasTabSecondaryButton>
-            <SaasTabPrimaryButton onClick={() => { setEditingInvoice(null); setShowCreateInvoice(true); }}>
+            <SaasTabPrimaryButton
+              onClick={() => {
+                setEditingInvoice(null);
+                setShowCreateInvoice(true);
+              }}
+              disabled={!dataUserId}
+              title="Nueva factura manual enlazada a un albarán"
+            >
               <Plus className="w-3.5 h-3.5" />
               Nueva factura
             </SaasTabPrimaryButton>
@@ -8585,19 +8817,25 @@ export function CatalogPage() {
             description={
               invoicesHydrating
                 ? 'Actualizando lista en segundo plano…'
-                : 'Registra la primera factura de proveedor'
+                : 'La factura la emite el proveedor. Escanéala, sincroniza el correo o créala a mano desde el albarán.'
             }
             action={
               <div className="flex flex-wrap items-center justify-center gap-2">
                 <SaasTabSecondaryButton
                   onClick={() => openInvoiceOcrFlow()}
                   disabled={!dataUserId}
-                  title="Escanear factura con OCR: proveedor, artículos y stock"
+                  title="Escanear la factura que te envía el proveedor"
                 >
                   <ScanLine className="w-3.5 h-3.5" />
                   Escanear factura
                 </SaasTabSecondaryButton>
-                <SaasTabPrimaryButton onClick={() => { setEditingInvoice(null); setShowCreateInvoice(true); }}>
+                <SaasTabPrimaryButton
+                  onClick={() => {
+                    setEditingInvoice(null);
+                    setShowCreateInvoice(true);
+                  }}
+                  disabled={!dataUserId}
+                >
                   <Plus className="w-3.5 h-3.5" />
                   Nueva factura
                 </SaasTabPrimaryButton>
@@ -8710,16 +8948,6 @@ export function CatalogPage() {
     const cartaTabs: CatalogNavGroup['tabs'] = [
       { id: 'catalog', label: 'Carta', count: catalogMenuItems.filter((i) => i.active).length || undefined },
     ];
-    const almacenTabs: CatalogNavGroup['tabs'] = [
-      { id: 'stock', label: 'Almacén', count: stockTabCount || undefined },
-    ];
-    if (!isRestaurantCatalog) {
-      almacenTabs.push({
-        id: 'ingredientes',
-        label: 'Ingredientes',
-        count: storeIngredients.length || undefined,
-      });
-    }
 
     return [
       {
@@ -8728,9 +8956,20 @@ export function CatalogPage() {
         tabs: cartaTabs,
       },
       {
+        id: 'ingredientes',
+        label: 'Ingredientes',
+        tabs: [
+          {
+            id: 'ingredientes',
+            label: 'Ingredientes',
+            count: storeIngredients.length || undefined,
+          },
+        ],
+      },
+      {
         id: 'almacen',
         label: 'Almacén',
-        tabs: almacenTabs,
+        tabs: [{ id: 'stock', label: 'Almacén', count: stockTabCount || undefined }],
       },
       {
         id: 'compras',
@@ -8754,7 +8993,6 @@ export function CatalogPage() {
       },
     ];
   }, [
-    isRestaurantCatalog,
     stockTabCount,
     catalogMenuItems,
     storeIngredients,
@@ -8819,8 +9057,8 @@ export function CatalogPage() {
     }
     if (activeTab === 'ingredientes') {
       return {
-        pageTitle: 'Almacén / Inventario',
-        pageSubtitle: 'Ingredientes · lista maestra y stock',
+        pageTitle: 'Ingredientes',
+        pageSubtitle: 'Lista maestra TPV · stock por tienda',
       };
     }
     if (activeTab === 'suppliers' || activeTab === 'purchase-orders' || activeTab === 'albaranes' || activeTab === 'invoices') {
@@ -8908,10 +9146,21 @@ export function CatalogPage() {
 
         {activeTab === 'catalog' && renderCatalogTab()}
 
-        {activeTab === 'ingredientes' && !isRestaurantCatalog && renderIngredientesTab()}
+        {activeTab === 'ingredientes' && renderIngredientesTab()}
 
-        {activeTab === 'stock' && (
-          <InventoryPanel seedStockItems={filterStockInventoryItems(catalogItems)} />
+        {activeTab === 'stock' && dataUserId && (
+          <StockTabPanel
+            items={filterStockInventoryItems(catalogItems)}
+            warehouses={warehouses}
+            userId={dataUserId}
+            searchQuery=""
+            itemLabelPlural={verticalConfig.itemLabelPlural || 'Productos'}
+            storeLabel={storeLabel}
+            warehouseId={storeWarehouseId || ''}
+            businessType={businessType || String(currentBusiness?.businessType || '')}
+            onReload={() => { void loadCatalog(); }}
+            catalogLoading={loading}
+          />
         )}
 
         {activeTab === 'staff-consumption' && (
@@ -9098,7 +9347,19 @@ export function CatalogPage() {
             matchedLines?: number;
             totalLines?: number;
             financeMovementId?: string;
+            documentKind?: string;
           } | undefined;
+          const docKind = String(
+            fx?.documentKind
+            || (payload as { documentKind?: string })?.documentKind
+            || '',
+          ).toLowerCase();
+          const isAlb = docKind.includes('albaran');
+          if (isAlb) {
+            setSearchParams({ tab: 'albaranes' });
+            toast.success('Albarán guardado en «por comprobar». Ábrelo y entra a almacén o déjalo en espera.');
+            return;
+          }
           const unmatched =
             fx?.totalLines != null && fx?.matchedLines != null
               ? Math.max(0, fx.totalLines - fx.matchedLines)
@@ -9173,11 +9434,6 @@ export function CatalogPage() {
           await handleDeleteInvoice(inv);
           setViewingInvoice(null);
         }}
-        onEditManual={(inv) => {
-          setViewingInvoice(null);
-          setEditingInvoice(inv);
-          setShowCreateInvoice(true);
-        }}
       />
 
       {albaranCorroborate && dataUserId ? (
@@ -9189,11 +9445,37 @@ export function CatalogPage() {
           warehouseId={storeWarehouseId}
           salesPointId={String(activeStore.activeSalesPointId || '').trim()}
           workCenterId={activeWorkCenterId || ''}
+          suppliers={suppliers}
+          catalogItems={catalogItems}
+          storeIngredients={storeIngredients}
+          commercialBrands={commercialLines}
           onClose={() => setAlbaranCorroborate(null)}
-          onDone={({ order, invoice }) => {
+          onSupplierEnsured={(supplier, catalogUpdates) => {
+            setSuppliers((prev) => {
+              const idx = prev.findIndex((s) => s._id === supplier._id);
+              if (idx >= 0) {
+                const next = [...prev];
+                next[idx] = supplier;
+                return next;
+              }
+              return [supplier, ...prev];
+            });
+            if (catalogUpdates.length > 0) {
+              const byId = new Map(catalogUpdates.map((i) => [i._id, i]));
+              setAllCatalogItems((prev) => prev.map((i) => byId.get(i._id) ?? i));
+            }
+          }}
+          onDone={({ order, invoice, revoked }) => {
+            const draftId = albaranCorroborate.invoice?._id || '';
             setAlbaranCorroborate(null);
-            setWaitingAlbaranOrderId((id) => (id === order._id ? '' : id));
-            setPurchaseOrders((prev) => prev.map((o) => (o._id === order._id ? order : o)));
+            if (order?._id) {
+              setWaitingAlbaranOrderId((id) => (id === order._id ? '' : id));
+              setPurchaseOrders((prev) => prev.map((o) => (o._id === order._id ? order : o)));
+            }
+            if (revoked && draftId) {
+              setInvoices((prev) => prev.filter((i) => i._id !== draftId));
+              return;
+            }
             if (invoice) {
               setInvoices((prev) => {
                 const idx = prev.findIndex((i) => i._id === invoice._id);

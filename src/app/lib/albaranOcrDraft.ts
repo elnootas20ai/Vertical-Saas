@@ -67,6 +67,88 @@ export function purchaseInvoiceFromAlbaranOcr(
       documentType: ocr.documentType || 'albaran',
       documentTypeLabel: ocr.documentTypeLabel,
       emitter: ocr.emitter,
+      emitterCIF: ocr.emitterCIF,
+      receiver: ocr.receiver,
+      date: ocr.date,
+      documentNumber: ocr.documentNumber,
+      subtotal: ocr.subtotal,
+      taxRate: ocr.taxRate,
+      taxAmount: ocr.taxAmount,
+      total: ocr.total,
+      currency: ocr.currency,
+      lines: (ocr.lines || []).map((l) => ({
+        description: l.description,
+        quantity: l.quantity,
+        unitPrice: l.unitPrice,
+        total: l.total,
+      })),
+      notes: ocr.notes,
+    },
+    ocrImageBase64: extras.imageBase64 || '',
+    validationStatus: 'pending_validation',
+    createdAt: '',
+    updatedAt: '',
+  };
+}
+
+/** OCR de albarán sin pedido previo (entrada manual / correo / suelto). */
+export function purchaseInvoiceFromStandaloneAlbaranOcr(
+  ocr: OcrResult,
+  extras: {
+    imageBase64?: string;
+    supplierId?: string;
+    supplierName?: string;
+    taxRate?: number;
+  } = {},
+): PurchaseInvoice {
+  const lines: PurchaseInvoiceLine[] = (ocr.lines || []).map((line, idx) => {
+    const quantity = Number(line.quantity) || 0;
+    const unitPrice = Number(line.unitPrice) || 0;
+    const total = Number(line.total) || quantity * unitPrice;
+    return {
+      id: `ocr-${idx}`,
+      itemName: String(line.description || line.catalogItemName || '').trim() || `Línea ${idx + 1}`,
+      quantity,
+      unitPrice,
+      total: Math.round(total * 100) / 100,
+      catalogItemId: String(line.catalogItemId || ''),
+      catalogItemName: String(line.catalogItemName || line.description || ''),
+    };
+  });
+  const subtotal = lines.reduce((sum, l) => sum + Number(l.total || 0), 0);
+  const taxRate = Number(ocr.taxRate ?? extras.taxRate ?? 21) || 21;
+  const taxAmount = Number(ocr.taxAmount) || subtotal * (taxRate / 100);
+  const supplierName =
+    String(extras.supplierName || ocr.emitter || '').trim() || 'Proveedor';
+
+  return {
+    _id: '',
+    type: 'purchase_invoice',
+    id: '',
+    invoiceNumber: String(ocr.documentNumber || '').trim(),
+    user_id: '',
+    supplierId: String(extras.supplierId || ''),
+    supplierName,
+    supplierCif: String(ocr.emitterCIF || '').trim(),
+    date: parseOcrDate(ocr.date),
+    dueDate: '',
+    status: 'pending',
+    lines,
+    subtotal,
+    taxRate,
+    taxAmount,
+    total: Number(ocr.total) || subtotal + taxAmount,
+    notes: String(ocr.notes || ''),
+    paidAt: '',
+    linkedPurchaseOrderId: '',
+    linkedPurchaseOrderNumber: '',
+    documentKind: 'albaran',
+    entryMethod: 'ocr',
+    ocrData: {
+      documentType: ocr.documentType || 'albaran',
+      documentTypeLabel: ocr.documentTypeLabel,
+      emitter: ocr.emitter,
+      emitterCIF: ocr.emitterCIF,
       receiver: ocr.receiver,
       date: ocr.date,
       documentNumber: ocr.documentNumber,

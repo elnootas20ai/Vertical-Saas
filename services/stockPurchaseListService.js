@@ -123,16 +123,25 @@ export function buildPurchaseListFromStockCount(stockCount, catalogItems = []) {
 }
 
 /** Crea borradores de pedido agrupados por proveedor a partir de una revisión de stock. */
-export async function createPurchaseOrdersFromStockList(req, userId, countId, stockCount) {
+export async function createPurchaseOrdersFromStockList(req, userId, countId, stockCount, options = {}) {
+  const onlyWithSupplier = Boolean(options?.onlyWithSupplier);
   const catalogItems = filterStockInventoryItems(await listCatalogItemsByUser(req, userId));
   const purchaseList = buildPurchaseListFromStockCount(stockCount, catalogItems);
 
-  if (!purchaseList.items.length) {
+  const supplierGroups = (purchaseList.supplierGroups || []).filter((group) => {
+    if (!onlyWithSupplier) return true;
+    const sid = String(group.supplierId || '').trim();
+    return Boolean(sid) && sid !== '__no_supplier__';
+  });
+
+  if (!purchaseList.items.length || supplierGroups.length === 0) {
     return {
       ok: true,
       created: 0,
       orders: [],
-      message: 'No hay productos que requieran pedido.',
+      message: onlyWithSupplier
+        ? 'No hay productos con proveedor asignado que requieran pedido.'
+        : 'No hay productos que requieran pedido.',
     };
   }
 
@@ -144,7 +153,7 @@ export async function createPurchaseOrdersFromStockList(req, userId, countId, st
   const createdOrders = [];
   const usedNumbers = (await listPurchaseOrdersByUser(req, userId)).map((o) => o.orderNumber);
 
-  for (const group of purchaseList.supplierGroups) {
+  for (const group of supplierGroups) {
     const orderItems = group.items.map((item) => ({
       catalogItemId: item.catalogItemId,
       sku: item.sku,

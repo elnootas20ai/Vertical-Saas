@@ -18,6 +18,7 @@ export function WorkerStockReviewPage() {
     storeWarehouseId,
     warehouses,
     stockedCount,
+    stockItems,
     loading,
     reload,
   } = useStockWorkspace({
@@ -51,6 +52,7 @@ export function WorkerStockReviewPage() {
             storeWarehouseId={storeWarehouseId}
             warehouses={warehouses}
             stockedCount={stockedCount}
+            catalogItems={stockItems}
             role="worker"
             onRevisionCompleted={reload}
           />

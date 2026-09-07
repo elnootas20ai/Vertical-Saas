@@ -1,15 +1,16 @@
 /**
- * Barra inferior tablet bar/restaurante: Salir a Vertial · Mesas · Cocina · Lista espera.
+ * Barra inferior tablet bar/restaurante: Salir · Mesas · Cocina · Espera · Stock.
  * No reutiliza WorkerTpvBottomBar de Delivery.
  */
-import { useNavigate } from 'react-router-dom';
-import { Armchair, ChefHat, LayoutGrid, LogOut } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { Armchair, Boxes, ChefHat, LayoutGrid, LogOut } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { isTpvTabletBound, leaveTpvTabletSession, readTpvTabletBinding } from '../../lib/tpvTabletSession';
 import { resolveTpvCeoExitPath } from '../../lib/retailOpsPaths';
+import { requestTpvStockReviewOpen, tpvPathWithStockReview } from '../../lib/tpvStockReview';
 
-export type RestaurantTabletNavTab = 'mesas' | 'cocina' | 'espera';
+export type RestaurantTabletNavTab = 'mesas' | 'cocina' | 'espera' | 'stock';
 
 const PATHS = {
   mesasCeo: '/saas/caja/tpv',
@@ -20,6 +21,11 @@ const PATHS = {
 
 function mesasPath(): string {
   return readTpvTabletBinding()?.pdvId ? PATHS.mesasTablet : PATHS.mesasCeo;
+}
+
+function isOnRestaurantTpvShell(pathname: string): boolean {
+  const path = String(pathname || '').toLowerCase();
+  return path.includes('/caja/tpv') || path.includes('/worker/tpv/restaurant');
 }
 
 export function shouldShowRestaurantTabletNav(opts?: {
@@ -35,10 +41,13 @@ export function shouldShowRestaurantTabletNav(opts?: {
 type Props = {
   active: RestaurantTabletNavTab;
   className?: string;
+  /** Si Stock está abierto en el shell TPV, Mesas cierra el overlay. */
+  onCloseStock?: () => void;
 };
 
-export function RestaurantTabletBottomNav({ active, className = '' }: Props) {
+export function RestaurantTabletBottomNav({ active, className = '', onCloseStock }: Props) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { logout } = useAuth();
   const { currentBusiness } = useBusiness();
   const tabletBound = isTpvTabletBound();
@@ -54,8 +63,17 @@ export function RestaurantTabletBottomNav({ active, className = '' }: Props) {
     );
   };
 
+  const handleStock = () => {
+    const target = mesasPath();
+    if (isOnRestaurantTpvShell(location.pathname)) {
+      requestTpvStockReviewOpen();
+      return;
+    }
+    navigate(tpvPathWithStockReview(target));
+  };
+
   const tabs: Array<{
-    id: RestaurantTabletNavTab;
+    id: Exclude<RestaurantTabletNavTab, 'stock'>;
     label: string;
     icon: typeof LayoutGrid;
     path: string;
@@ -70,7 +88,7 @@ export function RestaurantTabletBottomNav({ active, className = '' }: Props) {
       className={`shrink-0 border-t border-stone-200 bg-white/95 px-2 py-1.5 dark:border-stone-700 dark:bg-stone-900/95 ${className}`}
       aria-label="Navegación tablet sala"
     >
-      <div className="mx-auto flex max-w-2xl items-stretch gap-1.5">
+      <div className="mx-auto flex max-w-3xl items-stretch gap-1.5">
         <button
           type="button"
           onClick={handleExit}
@@ -89,6 +107,10 @@ export function RestaurantTabletBottomNav({ active, className = '' }: Props) {
               key={tab.id}
               type="button"
               onClick={() => {
+                if (active === 'stock' && tab.id === 'mesas' && onCloseStock) {
+                  onCloseStock();
+                  return;
+                }
                 if (!isActive) navigate(tab.path);
               }}
               className={`flex flex-1 min-h-[44px] items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-bold touch-manipulation ${
@@ -107,6 +129,19 @@ export function RestaurantTabletBottomNav({ active, className = '' }: Props) {
             </button>
           );
         })}
+        <button
+          type="button"
+          onClick={handleStock}
+          className={`flex shrink-0 min-h-[44px] items-center justify-center gap-1.5 rounded-xl px-2.5 text-xs font-bold touch-manipulation ${
+            active === 'stock'
+              ? 'bg-emerald-700 text-white dark:bg-emerald-500 dark:text-stone-900'
+              : 'border border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200'
+          }`}
+          title="Stock"
+        >
+          <Boxes className="h-4 w-4" />
+          Stock
+        </button>
       </div>
     </nav>
   );

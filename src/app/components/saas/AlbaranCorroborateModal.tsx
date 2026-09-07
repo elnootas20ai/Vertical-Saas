@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   AlertTriangle,
@@ -11,11 +11,15 @@ import {
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import type { PurchaseInvoice } from '../../lib/deliveryApi';
+import type { CatalogItem, PurchaseInvoice, Supplier } from '../../lib/deliveryApi';
 import {
   createPurchaseInvoiceRequest,
+  deletePurchaseInvoiceRequest,
+  loadPurchaseInvoiceStockRequest,
   updatePurchaseInvoiceRequest,
 } from '../../lib/deliveryApi';
+import type { StoreIngredient } from '../../lib/catalogCustomization';
+import type { InventoryCommercialBrand } from '../../lib/inventoryUtils';
 import {
   markOrderReceivedRequest,
   type PurchaseOrder,
@@ -23,6 +27,7 @@ import {
 import {
   applyManualAlbaranQty,
   buildAlbaranCompareRows,
+  buildAlbaranRowsFromInvoiceOnly,
   buildPendingOrderLinesFromCompare,
   compareRowHasIssue,
   isAlbaranReceptionIncomplete,
@@ -32,6 +37,10 @@ import {
   toggleCompareRowExcluded,
   type AlbaranCompareRow,
 } from '../../lib/albaranReceptionCompare';
+import {
+  ensureAlbaranSupplierFromOcr,
+  rematchAlbaranLinesToCatalog,
+} from '../../lib/albaranSupplierEnsure';
 import { nextPurchaseDocNumber } from '../../lib/purchaseDocNumber';
 import { formatMoneyEs, formatQtyEs } from '../../lib/formatNumberEs';
 import { toUserFacingMessage } from '../../lib/userFacingError';
@@ -59,60 +68,171 @@ function statusClass(status: AlbaranCompareRow['status'], excluded: boolean): st
 const inputClass =
   'w-full min-w-0 rounded-xl border-2 border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-950 px-2.5 py-2 text-sm text-right tabular-nums focus:border-blue-500 outline-none';
 
+function buildRows(
+  order: PurchaseOrder | null | undefined,
+  invoice: PurchaseInvoice | null | undefined,
+): AlbaranCompareRow[] {
+  if (order) return buildAlbaranCompareRows(order, invoice);
+  return buildAlbaranRowsFromInvoiceOnly(invoice);
+}
+
 export function AlbaranCorroborateModal({
   userId,
-  order,
+  order = null,
   invoice,
   existingInvoiceNumbers = [],
   warehouseId = '',
   salesPointId = '',
   workCenterId = '',
+  suppliers = [],
+  catalogItems = [],
+  storeIngredients = [],
+  commercialBrands = [],
   onClose,
   onDone,
+  onSupplierEnsured,
 }: {
   userId: string;
-  order: PurchaseOrder;
+  order?: PurchaseOrder | null;
   invoice?: PurchaseInvoice | null;
   existingInvoiceNumbers?: Array<string | undefined | null>;
-  /** Almacén de la tienda activa (imprescindible multi-tienda). */
   warehouseId?: string;
   salesPointId?: string;
   workCenterId?: string;
+  suppliers?: Supplier[];
+  catalogItems?: CatalogItem[];
+  storeIngredients?: StoreIngredient[];
+  commercialBrands?: InventoryCommercialBrand[];
   onClose: () => void;
-  onDone: (result: { order: PurchaseOrder; invoice?: PurchaseInvoice | null }) => void;
+  onDone: (result: {
+    order?: PurchaseOrder | null;
+    invoice?: PurchaseInvoice | null;
+    revoked?: boolean;
+  }) => void;
+  onSupplierEnsured?: (supplier: Supplier, catalogUpdates: CatalogItem[]) => void;
 }) {
-  useModalClose(true, onClose);
-  const [rows, setRows] = useState<AlbaranCompareRow[]>(() => buildAlbaranCompareRows(order, invoice));
+  const [workingInvoice, setWorkingInvoice] = useState<PurchaseInvoice | null | undefined>(invoice);
+  const [rows, setRows] = useState<AlbaranCompareRow[]>(() => buildRows(order, invoice));
   const [saving, setSaving] = useState(false);
+  const [ensuringSupplier, setEnsuringSupplier] = useState(false);
+  const [supplierLabel, setSupplierLabel] = useState(
+    () => invoice?.supplierName || order?.supplierName || '',
+  );
   const [albaranNumber, setAlbaranNumber] = useState(
     () => invoice?.invoiceNumber || nextPurchaseDocNumber('albaran', existingInvoiceNumbers),
   );
+  const ensureRanRef = useRef(false);
+  const leaveBusyRef = useRef(false);
 
   useEffect(() => {
-    setRows(buildAlbaranCompareRows(order, invoice));
-  }, [order, invoice]);
+    setWorkingInvoice(invoice);
+    setRows(buildRows(order, invoice));
+    setSupplierLabel(invoice?.supplierName || order?.supplierName || '');
+    setAlbaranNumber(
+      invoice?.invoiceNumber || nextPurchaseDocNumber('albaran', existingInvoiceNumbers),
+    );
+    ensureRanRef.current = false;
+  }, [order, invoice, existingInvoiceNumbers]);
 
+  useEffect(() => {
+    if (ensureRanRef.current || !userId) return;
+    const ocr = workingInvoice?.ocrData;
+    const hasEmitter = Boolean(String(ocr?.emitter || workingInvoice?.supplierName || '').trim());
+    if (!hasEmitter && workingInvoice?.supplierId) return;
+    if (!ocr && workingInvoice?.supplierId) return;
+    if (!ocr && !workingInvoice?.supplierId && order?.supplierId) return;
+
+    ensureRanRef.current = true;
+    let cancelled = false;
+    (async () => {
+      setEnsuringSupplier(true);
+      try {
+        const result = await ensureAlbaranSupplierFromOcr({
+          userId,
+          suppliers,
+          catalogItems,
+          storeIngredients,
+          commercialBrands,
+          emitter: ocr?.emitter || workingInvoice?.supplierName || order?.supplierName || '',
+          emitterCif: ocr?.emitterCIF || workingInvoice?.supplierCif || '',
+          ocrLines: (ocr?.lines || workingInvoice?.lines || []).map((l) => ({
+            description: 'description' in l ? String((l as { description?: string }).description || '') : '',
+            itemName: 'itemName' in l ? String((l as { itemName?: string }).itemName || '') : '',
+            catalogItemName:
+              'catalogItemName' in l
+                ? String((l as { catalogItemName?: string }).catalogItemName || '')
+                : '',
+          })),
+          existingSupplierId: workingInvoice?.supplierId || order?.supplierId || '',
+        });
+        if (cancelled || !result) return;
+        const rematchedLines = rematchAlbaranLinesToCatalog(
+          workingInvoice?.lines || [],
+          result.catalogItemsUpdated.length
+            ? catalogItems.map((c) => {
+                const u = result.catalogItemsUpdated.find((x) => x._id === c._id);
+                return u || c;
+              })
+            : catalogItems,
+          result.supplier._id,
+        );
+        const nextInv: PurchaseInvoice = {
+          ...(workingInvoice || ({} as PurchaseInvoice)),
+          supplierId: result.supplier._id,
+          supplierName: result.supplier.name,
+          supplierCif: result.supplier.cif || workingInvoice?.supplierCif || '',
+          lines: rematchedLines.length > 0 ? rematchedLines : workingInvoice?.lines || [],
+          documentKind: 'albaran',
+        };
+        setWorkingInvoice(nextInv);
+        setSupplierLabel(result.supplier.name);
+        setRows(buildRows(order, nextInv));
+        onSupplierEnsured?.(result.supplier, result.catalogItemsUpdated);
+        if (result.created) {
+          toast.success(`Proveedor «${result.supplier.name}» creado y productos vinculados`);
+        }
+      } catch (err) {
+        toast.message(toUserFacingMessage(err, 'No se pudo auto-asignar proveedor'));
+      } finally {
+        if (!cancelled) setEnsuringSupplier(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Solo al abrir / cambiar draft
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, workingInvoice?._id, workingInvoice?.ocrData?.emitter, order?._id]);
+
+  const allowExtras = !order;
   const summary = useMemo(() => summarizeCompareIssues(rows), [rows]);
-  const receivable = useMemo(() => rows.filter(isCompareRowReceivable), [rows]);
+  const receivable = useMemo(
+    () => rows.filter((r) => isCompareRowReceivable(r, { allowExtras })),
+    [rows, allowExtras],
+  );
   const incomingRows = useMemo(
-    () => rows.filter((r) => !r.excluded && r.status !== 'extra_invoice'),
-    [rows],
+    () => rows.filter((r) => !r.excluded && (allowExtras || r.status !== 'extra_invoice')),
+    [rows, allowExtras],
   );
   const removedRows = useMemo(
     () => rows.filter((r) => r.excluded && r.status !== 'extra_invoice'),
     [rows],
   );
-  const extraRows = useMemo(() => rows.filter((r) => r.status === 'extra_invoice'), [rows]);
+  const extraRows = useMemo(
+    () => (allowExtras ? [] : rows.filter((r) => r.status === 'extra_invoice')),
+    [rows, allowExtras],
+  );
   const orderIncomplete = useMemo(
-    () => isAlbaranReceptionIncomplete(order, rows),
+    () => (order ? isAlbaranReceptionIncomplete(order, rows) : false),
     [order, rows],
   );
   const pendingPreview = useMemo(
-    () => buildPendingOrderLinesFromCompare(order, rows),
+    () => (order ? buildPendingOrderLinesFromCompare(order, rows) : []),
     [order, rows],
   );
 
   const pendingQtyForRow = (row: AlbaranCompareRow) => {
+    if (!order) return Math.max(0, row.invoiceQty || row.receiveQty);
     const item = (order.items || []).find(
       (i) => i.catalogItemId === row.catalogItemId && i.name === row.name,
     );
@@ -149,8 +269,138 @@ export function AlbaranCorroborateModal({
     );
   };
 
+  const buildInvoiceLines = () =>
+    receivable.map((r, idx) => ({
+      id: `pinvl-${idx}`,
+      itemName: r.name,
+      quantity: r.receiveQty,
+      unitPrice: r.receiveUnitCost,
+      total: Math.round(r.receiveQty * r.receiveUnitCost * 100) / 100,
+      catalogItemId: r.catalogItemId,
+      catalogItemName: r.name,
+    }));
+
+  const buildDraftPayload = (opts?: { withStock?: boolean; stockOk?: boolean }) => {
+    const lines =
+      buildInvoiceLines().length > 0
+        ? buildInvoiceLines()
+        : (workingInvoice?.lines || []).map((l, idx) => ({
+            id: l.id || `draft-${idx}`,
+            itemName: l.itemName,
+            quantity: l.quantity,
+            unitPrice: l.unitPrice,
+            total: l.total,
+            catalogItemId: l.catalogItemId,
+            catalogItemName: l.catalogItemName,
+          }));
+    const pendingOrderLines = order ? buildPendingOrderLinesFromCompare(order, rows) : [];
+    const incomplete = pendingOrderLines.length > 0;
+    const number =
+      albaranNumber.trim()
+      || workingInvoice?.invoiceNumber
+      || nextPurchaseDocNumber('albaran', existingInvoiceNumbers);
+    return {
+      supplierId: workingInvoice?.supplierId || order?.supplierId || '',
+      supplierName: supplierLabel || workingInvoice?.supplierName || order?.supplierName || '',
+      supplierCif: workingInvoice?.supplierCif || '',
+      invoiceNumber: number,
+      date: workingInvoice?.date || new Date().toISOString().slice(0, 10),
+      status: 'pending' as const,
+      lines,
+      taxRate: workingInvoice?.taxRate || order?.taxRate || 21,
+      notes: workingInvoice?.notes || '',
+      linkedPurchaseOrderId: order?._id || workingInvoice?.linkedPurchaseOrderId || '',
+      linkedPurchaseOrderNumber: order?.orderNumber || workingInvoice?.linkedPurchaseOrderNumber || '',
+      documentKind: 'albaran' as const,
+      entryMethod: workingInvoice?.entryMethod || (workingInvoice?.ocrData ? 'ocr' : 'manual'),
+      ocrData: workingInvoice?.ocrData,
+      ocrImageBase64: workingInvoice?.ocrImageBase64,
+      loadToWarehouse: false,
+      warehouseId: warehouseId || workingInvoice?.warehouseId || '',
+      salesPointId: salesPointId || workingInvoice?.salesPointId || '',
+      workCenterId: workCenterId || workingInvoice?.workCenterId || '',
+      ocrStockReceivedAt: opts?.withStock && opts.stockOk ? new Date().toISOString() : '',
+      pendingOrderLines,
+      flags: {
+        ...(workingInvoice?.flags || {}),
+        orderIncomplete: incomplete,
+        stockPending: !(opts?.withStock && opts.stockOk),
+      },
+    };
+  };
+
+  const persistDraft = async (): Promise<PurchaseInvoice> => {
+    const payload = buildDraftPayload({ withStock: false });
+    if (workingInvoice?._id) {
+      return updatePurchaseInvoiceRequest(userId, {
+        ...workingInvoice,
+        ...payload,
+        ocrStockReceivedAt: '',
+      } as PurchaseInvoice);
+    }
+    return createPurchaseInvoiceRequest(userId, payload as Partial<PurchaseInvoice> & { loadToWarehouse?: boolean });
+  };
+
+  const handleLeaveWaiting = async () => {
+    if (leaveBusyRef.current || saving) return;
+    leaveBusyRef.current = true;
+    setSaving(true);
+    try {
+      const hasContent =
+        Boolean(workingInvoice?.ocrData)
+        || (workingInvoice?.lines || []).length > 0
+        || rows.some((r) => !r.excluded && r.receiveQty > 0)
+        || Boolean(albaranNumber.trim());
+      if (!hasContent && !workingInvoice?._id) {
+        onClose();
+        return;
+      }
+      const saved = await persistDraft();
+      toast.message('Albarán guardado en «por comprobar»');
+      onDone({ order: order || null, invoice: saved });
+      onClose();
+    } catch (err) {
+      toast.error(toUserFacingMessage(err, 'No se pudo guardar el albarán'));
+    } finally {
+      leaveBusyRef.current = false;
+      setSaving(false);
+    }
+  };
+
+  useModalClose(true, () => {
+    void handleLeaveWaiting();
+  });
+
+  const handleRevoke = async () => {
+    if (saving) return;
+    if (workingInvoice?.ocrStockReceivedAt) {
+      toast.error('El stock ya entró; no se puede revocar');
+      return;
+    }
+    setSaving(true);
+    try {
+      if (workingInvoice?._id) {
+        await deletePurchaseInvoiceRequest(userId, workingInvoice._id);
+      }
+      toast.message('Albarán revocado · no entró en almacén');
+      onDone({ order: order || null, invoice: null, revoked: true });
+      onClose();
+    } catch (err) {
+      toast.error(toUserFacingMessage(err, 'No se pudo revocar el albarán'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const renderAlbaranQty = (row: AlbaranCompareRow) => {
-    if (invoice) {
+    if (workingInvoice && (workingInvoice.lines || []).length > 0 && order) {
+      return (
+        <span className="tabular-nums font-medium text-stone-800 dark:text-stone-200">
+          {formatQtyEs(row.invoiceQty)}
+        </span>
+      );
+    }
+    if (workingInvoice?.ocrData && order) {
       return (
         <span className="tabular-nums font-medium text-stone-800 dark:text-stone-200">
           {formatQtyEs(row.invoiceQty)}
@@ -196,17 +446,19 @@ export function AlbaranCorroborateModal({
       </div>
 
       <div className="grid grid-cols-2 gap-2 text-xs">
-        <div className="rounded-lg bg-stone-50 dark:bg-stone-950/60 px-2.5 py-2">
-          <p className="text-stone-500 mb-0.5">Pedido</p>
-          <p className="font-semibold tabular-nums text-stone-800 dark:text-stone-200">
-            {formatQtyEs(row.orderedQty)}
-            <span className="text-stone-400 font-normal"> · {formatMoneyEs(row.orderedUnitCost)}€</span>
-          </p>
-        </div>
-        <div className="rounded-lg bg-stone-50 dark:bg-stone-950/60 px-2.5 py-2">
+        {order ? (
+          <div className="rounded-lg bg-stone-50 dark:bg-stone-950/60 px-2.5 py-2">
+            <p className="text-stone-500 mb-0.5">Pedido</p>
+            <p className="font-semibold tabular-nums text-stone-800 dark:text-stone-200">
+              {formatQtyEs(row.orderedQty)}
+              <span className="text-stone-400 font-normal"> · {formatMoneyEs(row.orderedUnitCost)}€</span>
+            </p>
+          </div>
+        ) : null}
+        <div className={`rounded-lg bg-stone-50 dark:bg-stone-950/60 px-2.5 py-2 ${order ? '' : 'col-span-2'}`}>
           <p className="text-stone-500 mb-0.5">En albarán</p>
           <div className="font-semibold">{renderAlbaranQty(row)}</div>
-          {invoice && row.invoiceUnitCost > 0 ? (
+          {row.invoiceUnitCost > 0 ? (
             <p className="text-stone-400 mt-0.5 tabular-nums">{formatMoneyEs(row.invoiceUnitCost)}€</p>
           ) : null}
         </div>
@@ -269,13 +521,15 @@ export function AlbaranCorroborateModal({
         <p className="font-medium text-stone-900 dark:text-stone-100">{row.name}</p>
         {row.sku ? <p className="text-[11px] text-stone-400 mt-0.5">{row.sku}</p> : null}
       </td>
-      <td className="px-3 py-3 align-top text-right tabular-nums text-stone-600 dark:text-stone-400 whitespace-nowrap">
-        <span className="font-medium text-stone-800 dark:text-stone-200">{formatQtyEs(row.orderedQty)}</span>
-        <div className="text-[11px] text-stone-400">{formatMoneyEs(row.orderedUnitCost)}€</div>
-      </td>
+      {order ? (
+        <td className="px-3 py-3 align-top text-right tabular-nums text-stone-600 dark:text-stone-400 whitespace-nowrap">
+          <span className="font-medium text-stone-800 dark:text-stone-200">{formatQtyEs(row.orderedQty)}</span>
+          <div className="text-[11px] text-stone-400">{formatMoneyEs(row.orderedUnitCost)}€</div>
+        </td>
+      ) : null}
       <td className="px-3 py-3 align-top text-right whitespace-nowrap">
         <div className="inline-block min-w-[5rem]">{renderAlbaranQty(row)}</div>
-        {invoice && row.invoiceUnitCost > 0 ? (
+        {row.invoiceUnitCost > 0 ? (
           <div className="text-[11px] text-stone-400 tabular-nums">{formatMoneyEs(row.invoiceUnitCost)}€</div>
         ) : null}
       </td>
@@ -330,120 +584,133 @@ export function AlbaranCorroborateModal({
 
   const handleConfirm = async () => {
     if (receivable.length === 0) {
-      toast.error('Indica al menos una cantidad a recibir');
+      toast.error(
+        allowExtras
+          ? 'Vincula al menos una línea a un artículo de almacén (proveedor / catálogo)'
+          : 'Indica al menos una cantidad a recibir',
+      );
       return;
     }
     setSaving(true);
     try {
-      const receivedItems = receivable.map((r) => ({
-        catalogItemId: r.catalogItemId,
-        quantity: r.receiveQty,
-        unitCost: r.receiveUnitCost,
-      }));
+      const invoiceLines = buildInvoiceLines();
+      let savedInvoice: PurchaseInvoice | null | undefined = workingInvoice || null;
+      let updatedOrder: PurchaseOrder | null = order || null;
+      let stockOk = false;
+      let stockUpdated = 0;
+      let resolvedWarehouseId = warehouseId || '';
 
-      const receiveResult = await markOrderReceivedRequest(userId, order._id, receivedItems, {
-        warehouseId,
-        salesPointId,
-        workCenterId,
-      });
-      const updatedOrder = receiveResult.order;
-      const pendingOrderLines = buildPendingOrderLinesFromCompare(order, rows);
-      const incomplete = pendingOrderLines.length > 0;
-
-      let savedInvoice: PurchaseInvoice | null | undefined = invoice || null;
-      const invoiceLines = receivable.map((r, idx) => ({
-        id: `pinvl-${idx}`,
-        itemName: r.name,
-        quantity: r.receiveQty,
-        unitPrice: r.receiveUnitCost,
-        total: Math.round(r.receiveQty * r.receiveUnitCost * 100) / 100,
-        catalogItemId: r.catalogItemId,
-        catalogItemName: r.name,
-      }));
-
-      // Solo «cargado» si realmente entró stock (no si faltaba catalogItemId).
-      const stockOk = (receiveResult.stockUpdated || 0) > 0;
-      const resolvedWarehouseId = receiveResult.warehouseId || warehouseId || '';
-      const receptionNote = incomplete
-        ? `Pedido incompleto: pendiente ${pendingOrderLines.map((l) => `${l.name} (${l.pendingQty})`).join(', ')}`
-        : '';
-      const mergedNotes = [invoice?.notes, receptionNote].filter(Boolean).join('\n');
-
-      if (invoice?._id) {
-        savedInvoice = await updatePurchaseInvoiceRequest(userId, {
-          ...invoice,
-          linkedPurchaseOrderId: order._id,
-          linkedPurchaseOrderNumber: order.orderNumber || '',
-          lines: invoiceLines,
-          warehouseId: resolvedWarehouseId || invoice.warehouseId,
-          salesPointId: salesPointId || invoice.salesPointId,
-          workCenterId: workCenterId || invoice.workCenterId,
-          ocrStockReceivedAt: stockOk ? new Date().toISOString() : '',
-          documentKind: invoice.documentKind || 'albaran',
-          pendingOrderLines,
-          flags: {
-            ...invoice.flags,
-            orderIncomplete: incomplete,
-            stockPending: !stockOk,
-          },
-          notes: mergedNotes || invoice.notes,
-        } as PurchaseInvoice);
-      } else {
-        savedInvoice = await createPurchaseInvoiceRequest(userId, {
-          supplierId: order.supplierId,
-          supplierName: order.supplierName,
-          invoiceNumber:
-            albaranNumber.trim()
-            || invoice?.invoiceNumber
-            || nextPurchaseDocNumber('albaran', existingInvoiceNumbers),
-          date: invoice?.date || new Date().toISOString().slice(0, 10),
-          status: 'pending',
-          lines: invoiceLines,
-          taxRate: invoice?.taxRate || order.taxRate || 21,
-          notes: mergedNotes || `Comprobado con pedido ${order.orderNumber || order._id.slice(-8)}`,
-          linkedPurchaseOrderId: order._id,
-          linkedPurchaseOrderNumber: order.orderNumber || '',
-          documentKind: 'albaran',
-          entryMethod: invoice?.entryMethod || 'manual',
-          ocrData: invoice?.ocrData,
-          ocrImageBase64: invoice?.ocrImageBase64,
-          loadToWarehouse: false,
-          warehouseId: resolvedWarehouseId,
+      if (order) {
+        const receivedItems = receivable.map((r) => ({
+          catalogItemId: r.catalogItemId,
+          quantity: r.receiveQty,
+          unitCost: r.receiveUnitCost,
+        }));
+        const receiveResult = await markOrderReceivedRequest(userId, order._id, receivedItems, {
+          warehouseId,
           salesPointId,
           workCenterId,
+        });
+        updatedOrder = receiveResult.order;
+        stockOk = (receiveResult.stockUpdated || 0) > 0;
+        stockUpdated = receiveResult.stockUpdated || 0;
+        resolvedWarehouseId = receiveResult.warehouseId || warehouseId || '';
+        const pendingOrderLines = buildPendingOrderLinesFromCompare(order, rows);
+        const incomplete = pendingOrderLines.length > 0;
+        const receptionNote = incomplete
+          ? `Pedido incompleto: pendiente ${pendingOrderLines.map((l) => `${l.name} (${l.pendingQty})`).join(', ')}`
+          : '';
+        const mergedNotes = [workingInvoice?.notes, receptionNote].filter(Boolean).join('\n');
+        const payload = {
+          ...buildDraftPayload({ withStock: true, stockOk }),
+          lines: invoiceLines,
+          notes: mergedNotes || workingInvoice?.notes || '',
+          warehouseId: resolvedWarehouseId || warehouseId,
           ocrStockReceivedAt: stockOk ? new Date().toISOString() : '',
           pendingOrderLines,
           flags: { orderIncomplete: incomplete, stockPending: !stockOk },
-        } as Partial<PurchaseInvoice> & { loadToWarehouse?: boolean });
+        };
+        if (workingInvoice?._id) {
+          savedInvoice = await updatePurchaseInvoiceRequest(userId, {
+            ...workingInvoice,
+            ...payload,
+          } as PurchaseInvoice);
+        } else {
+          savedInvoice = await createPurchaseInvoiceRequest(
+            userId,
+            payload as Partial<PurchaseInvoice> & { loadToWarehouse?: boolean },
+          );
+        }
+        if (!stockOk) {
+          toast.message(
+            resolvedWarehouseId
+              ? 'Pedido comprobado, pero el stock no entró. Revisa vínculos de artículos.'
+              : 'Pedido comprobado, pero no hay almacén de tienda.',
+          );
+        } else if (incomplete) {
+          toast.message(
+            `Pedido incompleto: ${pendingOrderLines.length} producto(s) pendientes de pedir de nuevo`,
+          );
+        } else {
+          toast.success(
+            `Entró en almacén (${stockUpdated} línea${stockUpdated === 1 ? '' : 's'})`,
+          );
+        }
+      } else {
+        const payload = buildDraftPayload({ withStock: false });
+        if (workingInvoice?._id) {
+          savedInvoice = await updatePurchaseInvoiceRequest(userId, {
+            ...workingInvoice,
+            ...payload,
+            lines: invoiceLines,
+            ocrStockReceivedAt: '',
+          } as PurchaseInvoice);
+        } else {
+          savedInvoice = await createPurchaseInvoiceRequest(userId, {
+            ...payload,
+            lines: invoiceLines,
+            ocrStockReceivedAt: '',
+          } as Partial<PurchaseInvoice> & { loadToWarehouse?: boolean });
+        }
+        const loadResult = await loadPurchaseInvoiceStockRequest(userId, savedInvoice._id, {
+          force: false,
+          warehouseId: warehouseId || savedInvoice.warehouseId || '',
+          salesPointId,
+          workCenterId,
+        });
+        savedInvoice = loadResult.invoice;
+        stockUpdated = loadResult.reconcile?.stockUpdated || 0;
+        stockOk = stockUpdated > 0 || Boolean(savedInvoice.ocrStockReceivedAt);
+        if (stockOk) {
+          toast.success(
+            stockUpdated > 0
+              ? `Entró en almacén (${stockUpdated} artículo${stockUpdated === 1 ? '' : 's'})`
+              : 'Albarán cargado en almacén',
+          );
+        } else {
+          toast.message('Albarán guardado, pero no subió stock. Revisa vínculos de artículos.');
+        }
       }
 
-      if (!stockOk) {
-        toast.message(
-          resolvedWarehouseId
-            ? 'Pedido comprobado, pero el stock no entró. Abre el albarán y pulsa «Cargar al almacén».'
-            : 'Pedido comprobado, pero no hay almacén de tienda. Elige tienda y pulsa «Cargar al almacén».',
-        );
-      } else if (incomplete) {
-        toast.message(
-          `Pedido incompleto: ${pendingOrderLines.length} producto(s) pendientes de pedir de nuevo`,
-        );
-      } else {
-        toast.success(
-          `Comprobado: stock actualizado (${receiveResult.stockUpdated || 0} línea${(receiveResult.stockUpdated || 0) === 1 ? '' : 's'})`,
-        );
-      }
       onDone({ order: updatedOrder, invoice: savedInvoice });
       onClose();
     } catch (err) {
-      toast.error(toUserFacingMessage(err, 'No se pudo comprobar la recepción'));
+      toast.error(toUserFacingMessage(err, 'No se pudo confirmar la recepción'));
     } finally {
       setSaving(false);
     }
   };
 
+  const busy = saving || ensuringSupplier;
+
   return createPortal(
     <div className="fixed inset-0 z-[80] flex items-end justify-center sm:items-center p-0 sm:p-4 bg-black/40 backdrop-blur-sm">
-      <button type="button" className="absolute inset-0" aria-label="Cerrar" onClick={onClose} />
+      <button
+        type="button"
+        className="absolute inset-0"
+        aria-label="Dejar en espera"
+        onClick={() => void handleLeaveWaiting()}
+      />
       <div className="relative w-full max-w-4xl max-h-[92vh] overflow-hidden rounded-t-2xl sm:rounded-2xl border border-stone-200 bg-white shadow-2xl dark:border-stone-800 dark:bg-stone-900 flex flex-col">
         <div className="flex items-start justify-between gap-3 px-4 sm:px-6 py-4 border-b border-stone-200 dark:border-stone-800">
           <div className="min-w-0">
@@ -452,25 +719,35 @@ export function AlbaranCorroborateModal({
               <h2 className="text-lg font-bold text-stone-900 dark:text-stone-100">
                 Comprobar albarán
               </h2>
+              {ensuringSupplier ? (
+                <Loader2 className="w-4 h-4 animate-spin text-stone-400" />
+              ) : null}
             </div>
             <p className="text-sm text-stone-500 dark:text-stone-400 mt-1">
-              <span className="font-mono font-semibold text-stone-700 dark:text-stone-300">
-                {order.orderNumber || 'Pedido'}
-              </span>
-              {' · '}
-              {order.supplierName || 'Proveedor'}
-              {invoice?.invoiceNumber ? (
+              {order ? (
+                <>
+                  <span className="font-mono font-semibold text-stone-700 dark:text-stone-300">
+                    {order.orderNumber || 'Pedido'}
+                  </span>
+                  {' · '}
+                </>
+              ) : (
+                <span className="text-amber-700 dark:text-amber-300">Sin pedido · </span>
+              )}
+              {supplierLabel || 'Proveedor'}
+              {workingInvoice?.invoiceNumber || albaranNumber ? (
                 <>
                   {' · Albarán '}
-                  <span className="font-mono">{invoice.invoiceNumber}</span>
+                  <span className="font-mono">{workingInvoice?.invoiceNumber || albaranNumber}</span>
                 </>
               ) : null}
             </p>
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => void handleLeaveWaiting()}
             className="p-2 rounded-xl hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors shrink-0"
+            title="Dejar en espera"
           >
             <X className="w-5 h-5 text-stone-500" />
           </button>
@@ -505,8 +782,9 @@ export function AlbaranCorroborateModal({
           <div className="flex gap-2 rounded-xl border border-blue-100 bg-blue-50/60 dark:border-blue-900/40 dark:bg-blue-950/20 px-3 py-2.5 text-xs text-blue-900 dark:text-blue-200">
             <Info className="w-4 h-4 shrink-0 mt-0.5 text-blue-600" />
             <p>
-              Compara pedido y albarán. Ajusta <strong>Recibir</strong> si llegó distinto.
-              Si un producto <strong>no viene</strong>, pulsa Quitar — no entra en stock.
+              {order
+                ? <>Compara pedido y albarán. Ajusta <strong>Recibir</strong> si llegó distinto. Si un producto <strong>no viene</strong>, pulsa Quitar.</>
+                : <>Revisa líneas del albarán. <strong>Entrar a almacén</strong> carga stock; salir guarda en «por comprobar».</>}
             </p>
           </div>
         </div>
@@ -524,7 +802,7 @@ export function AlbaranCorroborateModal({
           </div>
         ) : null}
 
-        {!invoice ? (
+        {!workingInvoice?._id || !workingInvoice.invoiceNumber ? (
           <div className="px-4 sm:px-6 py-3 border-b border-stone-100 dark:border-stone-800">
             <label className="block text-xs font-semibold text-stone-600 dark:text-stone-400 mb-1.5">
               Nº albarán
@@ -541,7 +819,9 @@ export function AlbaranCorroborateModal({
         <div className="flex-1 overflow-y-auto min-h-0">
           {incomingRows.length === 0 ? (
             <p className="px-4 sm:px-6 py-10 text-sm text-stone-500 text-center">
-              No queda ningún producto en el albarán. Recupera alguno abajo o cancela.
+              {order
+                ? 'No queda ningún producto en el albarán. Recupera alguno abajo o deja en espera.'
+                : 'Sin líneas. Escanea un albarán o abre uno desde «por comprobar».'}
             </p>
           ) : (
             <>
@@ -550,11 +830,11 @@ export function AlbaranCorroborateModal({
               </div>
 
               <div className="hidden md:block overflow-x-auto">
-                <table className="w-full min-w-[720px] text-sm">
+                <table className="w-full min-w-[640px] text-sm">
                   <thead className="sticky top-0 z-10 bg-stone-50 dark:bg-stone-950 text-xs text-stone-500 border-b border-stone-200 dark:border-stone-800">
                     <tr>
                       <th className="px-4 py-3 font-semibold text-left">Producto</th>
-                      <th className="px-3 py-3 font-semibold text-right">Pedido</th>
+                      {order ? <th className="px-3 py-3 font-semibold text-right">Pedido</th> : null}
                       <th className="px-3 py-3 font-semibold text-right">En albarán</th>
                       <th className="px-3 py-3 font-semibold text-right w-28">Recibir</th>
                       <th className="px-3 py-3 font-semibold text-right w-32">Precio €</th>
@@ -584,7 +864,9 @@ export function AlbaranCorroborateModal({
                     <div className="min-w-0">
                       <p className="text-sm text-stone-500 line-through truncate">{row.name}</p>
                       <p className="text-[11px] text-stone-400">
-                        Pedido {formatQtyEs(row.orderedQty)} · no viene en este albarán
+                        {order
+                          ? `Pedido ${formatQtyEs(row.orderedQty)} · no viene en este albarán`
+                          : 'Quitado · no entra en stock'}
                       </p>
                     </div>
                     <button
@@ -618,19 +900,37 @@ export function AlbaranCorroborateModal({
           ) : null}
         </div>
 
-        <div className="sticky bottom-0 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 px-4 sm:px-6 py-4 border-t border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900">
-          <button type="button" onClick={onClose} className={`${VERTIAL_BTN_SECONDARY} w-full sm:w-auto`} disabled={saving}>
-            Cancelar
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleConfirm()}
-            className={`${VERTIAL_BTN_PRIMARY} w-full sm:w-auto inline-flex items-center justify-center gap-2`}
-            disabled={saving}
-          >
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-            Confirmar recepción
-          </button>
+        <div className="sticky bottom-0 flex flex-col gap-2 px-4 sm:px-6 py-4 border-t border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900">
+          <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={() => void handleRevoke()}
+              className={`${VERTIAL_BTN_DANGER} w-full sm:w-auto`}
+              disabled={busy}
+              title="No entrar a almacén (antes de cargar stock)"
+            >
+              Revocar
+            </button>
+            <div className="flex flex-col-reverse sm:flex-row gap-2 w-full sm:w-auto">
+              <button
+                type="button"
+                onClick={() => void handleLeaveWaiting()}
+                className={`${VERTIAL_BTN_SECONDARY} w-full sm:w-auto`}
+                disabled={busy}
+              >
+                Dejar en espera
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleConfirm()}
+                className={`${VERTIAL_BTN_PRIMARY} w-full sm:w-auto inline-flex items-center justify-center gap-2`}
+                disabled={busy}
+              >
+                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <PackageCheck className="w-4 h-4" />}
+                Entrar a almacén
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>,

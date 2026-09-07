@@ -3,42 +3,56 @@ import { Loader2, Plus, Search, Trash2 } from 'lucide-react';
 import type { Brand } from '../../lib/brandsApi';
 import { type ProductRecipeLine } from '../../lib/catalogCosting';
 import {
+  normalizeStoreIngredientUnit,
   readStoreIngredientTpvFlags,
   resolveIngredientRole,
   type StoreIngredient,
 } from '../../lib/catalogCustomization';
 import {
+  commitRecipeQtyDraft,
   formatRecipeQtyDisplay,
   isRecipeQtyDraftAllowed,
   parseRecipeQtyDraft,
+  RECIPE_QTY_MAX_DECIMALS,
+  resolveRecipeQtyDisplay,
   sanitizeRecipeQtyTyping,
 } from '../../lib/recipeQtyInput';
 import { VERTIAL_BTN_PRIMARY } from '../../lib/vertialUiTokens';
 
+function roundRecipeQty(n: number): number {
+  const factor = 10 ** RECIPE_QTY_MAX_DECIMALS;
+  return Math.round(n * factor) / factor;
+}
+
 function RecipeQtyInput({
   value,
+  valueText,
   onCommit,
   ariaLabel,
 }: {
   value: number;
-  onCommit: (n: number) => void;
+  /** Texto tipado persistido («2,50»). Sin esto el 0 final muere al reabrir. */
+  valueText?: string;
+  onCommit: (n: number, text: string) => void;
   ariaLabel: string;
 }) {
-  const [draft, setDraft] = useState(() => formatRecipeQtyDisplay(value));
+  const [draft, setDraft] = useState(() => resolveRecipeQtyDisplay(value, valueText));
   const [focused, setFocused] = useState(false);
 
   useEffect(() => {
-    if (!focused) setDraft(formatRecipeQtyDisplay(value));
-  }, [value, focused]);
+    if (focused) return;
+    setDraft(resolveRecipeQtyDisplay(value, valueText));
+  }, [value, valueText, focused]);
 
   const commit = () => {
     const parsed = parseRecipeQtyDraft(draft, { commitIncomplete: true });
     if (parsed == null) {
-      setDraft(formatRecipeQtyDisplay(value));
+      setDraft(resolveRecipeQtyDisplay(value, valueText));
       return;
     }
-    setDraft(formatRecipeQtyDisplay(parsed));
-    if (parsed !== value) onCommit(parsed);
+    const text = commitRecipeQtyDraft(draft, value);
+    setDraft(text);
+    onCommit(parsed, text);
   };
 
   return (
@@ -71,6 +85,8 @@ export type CatalogRecipePick = {
   storeIngredientId: string;
   name: string;
   quantity: number;
+  /** Texto tipado es-ES para no perder ceros finales al guardar/reabrir. */
+  quantityText?: string;
   unit: string;
   /** Si true, aparece en TPV para que el cliente pueda quitarlo. */
   tpvRemovable: boolean;
@@ -95,6 +111,8 @@ type CatalogProductRecipePickerProps = {
   /** Crea ingrediente maestro + almacén; el picker lo mete en la composición. */
   onCreateIngredient?: (input: CatalogRecipeCreateIngredientInput) => Promise<StoreIngredient | null>;
   creatingIngredient?: boolean;
+  /** Persiste la unidad también en el ingrediente de almacén (misma fuente de verdad). */
+  onIngredientUnitChange?: (storeIngredientId: string, unit: string) => void;
 };
 
 function foldName(s: string): string {
@@ -132,6 +150,7 @@ export function recipePicksToLines(picks: CatalogRecipePick[]): ProductRecipeLin
       storeIngredientId: p.storeIngredientId,
       name: p.name,
       quantity: p.quantity,
+      ...(p.quantityText ? { quantityText: p.quantityText } : {}),
       unit: p.unit || 'ud',
       stockCategory: 'ingredient' as const,
     }));
@@ -146,7 +165,23 @@ export function recipePicksToTpvIngredientsText(picks: CatalogRecipePick[]): str
 }
 
 function ingredientUnit(ing: StoreIngredient): string {
-  return String((ing as { unit?: string }).unit || 'ud').trim() || 'ud';
+  return toRecipePickerUnit((ing as { unit?: string }).unit);
+}
+
+/** Solo 3 unidades en receta: und / LT / KG. g→kg y ml→l. */
+function toRecipePickerUnit(raw: unknown): string {
+  const u = normalizeStoreIngredientUnit(raw, 'ud');
+  if (u === 'g') return 'kg';
+  if (u === 'ml') return 'l';
+  if (u === 'kg' || u === 'l' || u === 'ud') return u;
+  return 'ud';
+}
+
+/** Unidad visible = almacén si existe; si no, la de la línea de receta. */
+function resolvePickUnit(pick: CatalogRecipePick, storeIngredients: StoreIngredient[]): string {
+  const ing = storeIngredients.find((row) => row.id === pick.storeIngredientId);
+  if (ing) return ingredientUnit(ing);
+  return toRecipePickerUnit(pick.unit);
 }
 
 export function CatalogProductRecipePicker({
@@ -160,6 +195,7 @@ export function CatalogProductRecipePicker({
   hideTpvOptions = false,
   onCreateIngredient,
   creatingIngredient = false,
+  onIngredientUnitChange,
 }: CatalogProductRecipePickerProps) {
   const [search, setSearch] = useState('');
   const [showCreatePanel, setShowCreatePanel] = useState(false);
@@ -183,23 +219,27 @@ export function CatalogProductRecipePicker({
     const flags = readStoreIngredientTpvFlags(ing);
     const role = resolveIngredientRole(ing);
     const unit = unitOverride || ingredientUnit(ing);
+    const quantity = defaultQtyForIngredient(ing, unit);
     onChange([
       ...picks,
       {
         storeIngredientId: ing.id,
         name: ing.name,
-        quantity: defaultQtyForIngredient(ing, unit),
+        quantity,
+        quantityText: formatRecipeQtyDisplay(quantity),
         unit,
         tpvRemovable: hideTpvOptions ? false : flags.allowRemove && role !== 'escandallo',
       },
     ]);
   };
 
-  const setQty = (id: string, n: number) => {
+  const setQty = (id: string, n: number, text: string) => {
     if (!Number.isFinite(n) || n < 0) return;
+    const quantity = roundRecipeQty(n);
+    const quantityText = commitRecipeQtyDraft(text, quantity);
     onChange(
       picks.map((p) =>
-        p.storeIngredientId === id ? { ...p, quantity: Math.round(n * 1000) / 1000 } : p,
+        p.storeIngredientId === id ? { ...p, quantity, quantityText } : p,
       ),
     );
   };
@@ -269,27 +309,27 @@ export function CatalogProductRecipePicker({
                   </span>
                   <RecipeQtyInput
                     value={pick.quantity}
-                    onCommit={(n) => setQty(pick.storeIngredientId, n)}
+                    valueText={pick.quantityText}
+                    onCommit={(n, text) => setQty(pick.storeIngredientId, n, text)}
                     ariaLabel={`Cantidad de ${pick.name}`}
                   />
                   <select
-                    value={pick.unit || 'ud'}
+                    value={resolvePickUnit(pick, storeIngredients)}
                     onChange={(e) => {
-                      const unit = e.target.value;
+                      const unit = toRecipePickerUnit(e.target.value);
                       onChange(
                         picks.map((p) =>
                           p.storeIngredientId === pick.storeIngredientId ? { ...p, unit } : p,
                         ),
                       );
+                      onIngredientUnitChange?.(pick.storeIngredientId, unit);
                     }}
                     aria-label={`Unidad de ${pick.name}`}
                     className="h-10 rounded-xl border-2 border-stone-200 bg-white pl-2 pr-1 text-xs font-semibold text-stone-700 outline-none focus:border-[var(--v-blue,#2563eb)] dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200"
                   >
-                    <option value="g">g</option>
-                    <option value="kg">kg</option>
-                    <option value="ml">ml</option>
-                    <option value="l">l</option>
-                    <option value="ud">ud</option>
+                    <option value="ud">UND</option>
+                    <option value="l">LT</option>
+                    <option value="kg">KG</option>
                   </select>
                   <span className="text-[10px] text-stone-400 hidden sm:inline">aprox.</span>
                 </div>
@@ -464,6 +504,7 @@ export type CatalogPackagingPick = {
   catalogItemId: string;
   name: string;
   quantity: number;
+  quantityText?: string;
   unit: string;
 };
 
@@ -474,6 +515,7 @@ export function packagingPicksToLines(picks: CatalogPackagingPick[]): ProductRec
       catalogItemId: p.catalogItemId,
       name: p.name,
       quantity: p.quantity,
+      ...(p.quantityText ? { quantityText: p.quantityText } : {}),
       unit: p.unit || 'ud',
       stockCategory: 'packaging' as const,
     }));
@@ -520,16 +562,19 @@ export function CatalogProductPackagingPicker({
         catalogItemId: item._id,
         name: item.name,
         quantity: 1,
+        quantityText: '1',
         unit: String(item.unit || 'ud').trim() || 'ud',
       },
     ]);
   };
 
-  const setQty = (id: string, n: number) => {
+  const setQty = (id: string, n: number, text: string) => {
     if (!Number.isFinite(n) || n < 0) return;
+    const quantity = Math.max(0, roundRecipeQty(n));
+    const quantityText = commitRecipeQtyDraft(text, quantity);
     onChange(
       picks.map((p) =>
-        p.catalogItemId === id ? { ...p, quantity: Math.max(0, Math.round(n * 1000) / 1000) } : p,
+        p.catalogItemId === id ? { ...p, quantity, quantityText } : p,
       ),
     );
   };
@@ -582,7 +627,8 @@ export function CatalogProductPackagingPicker({
                 </span>
                 <RecipeQtyInput
                   value={pick.quantity}
-                  onCommit={(n) => setQty(pick.catalogItemId, n)}
+                  valueText={pick.quantityText}
+                  onCommit={(n, text) => setQty(pick.catalogItemId, n, text)}
                   ariaLabel={`Cantidad de ${pick.name}`}
                 />
                 <button

@@ -41,7 +41,7 @@ import {
   type PdvWizardVariant,
 } from '../../../lib/retailLocationCopy';
 import { useActiveStoreScope } from '../../../context/ActiveStoreScopeContext';
-import { readSidebarRetailCache } from '../../../lib/sidebarRetailCache';
+import { readRetailScopeCacheForBusiness } from '../../../verticals/retailScopeRegistry';
 import { useModalClose } from '../../../hooks/useModalClose';
 import { useHasProAccess } from '../../../hooks/useHasProAccess';
 import { usePointOfSaleAccess } from '../../../hooks/usePointOfSaleAccess';
@@ -1773,8 +1773,12 @@ export function SalesPointsTab() {
   }, [businessScopeId, businessesFetchSettled, applyDeliveryStoresState]);
 
   useEffect(() => {
-    if (!businessScopeId || !usesRetailPdvFlow) return;
-    const cached = readSidebarRetailCache(businessScopeId);
+    if (!businessScopeId || !usesRetailPdvFlow || !currentBusiness) return;
+    const cached = readRetailScopeCacheForBusiness(businessScopeId, {
+      business: currentBusiness,
+      businesses,
+      accountBusinessCount,
+    });
     if (!cached?.retailWorkCenters?.length) return;
     applyDeliveryStoresState({
       dataUserId: dataUserId || '',
@@ -1782,7 +1786,15 @@ export function SalesPointsTab() {
       pointsOfSale: cached.allPointsOfSale || [],
     });
     setLoading(false);
-  }, [businessScopeId, usesRetailPdvFlow, dataUserId, applyDeliveryStoresState]);
+  }, [
+    businessScopeId,
+    usesRetailPdvFlow,
+    dataUserId,
+    applyDeliveryStoresState,
+    currentBusiness,
+    businesses,
+    accountBusinessCount,
+  ]);
 
   useEffect(() => {
     if (!businessesFetchSettled) return;

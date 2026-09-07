@@ -268,6 +268,7 @@ const menuItemDefs = [
   { id: 'catalog-stock',    navKey: 'articles',        icon: <Boxes className="w-5 h-5" />,       path: '/saas/inventory' },
   // TPV (delivery / restaurante / heladería): las 4 secciones del módulo catálogo.
   { id: 'catalog-carta',    navKey: 'cartaTpv',        icon: <BookOpen className="w-5 h-5" />,    path: '/saas/catalog?tab=catalog' },
+  { id: 'catalog-ingredientes', navKey: 'ingredientesTpv', icon: <Leaf className="w-5 h-5" />, path: '/saas/catalog?tab=ingredientes' },
   { id: 'catalog-stock-tpv', navKey: 'almacenTpv',     icon: <Boxes className="w-5 h-5" />,       path: '/saas/catalog?tab=stock' },
   { id: 'catalog-purchases', navKey: 'catalogPurchases', icon: <ShoppingCart className="w-5 h-5" />, path: '/saas/catalog?tab=suppliers' },
   { id: 'catalog-invoices', navKey: 'catalogInvoices', icon: <Receipt className="w-5 h-5" />, path: '/saas/catalog?tab=invoices' },
@@ -640,6 +641,7 @@ const VERTICAL_GROUP_ITEM_OVERRIDES: Partial<Record<BusinessType, Record<string,
     clientesCrm: ['clients', 'promotions'],
     catalogProviders: [
       'catalog-carta',
+      'catalog-ingredientes',
       'catalog-stock-tpv',
       'catalog-purchases',
       'catalog-invoices',
@@ -1357,11 +1359,12 @@ function SidebarInner({
     let itemIds = override ? [...override] : [...g.itemIds];
     if (g.id === 'catalogProviders') {
       if (usesDeliverySidebarCore || isRestaurantVertical || isEventsVertical) {
-        // TPV: Carta · Almacén · Compras · Facturas · Consumo equipo · Correo facturas (abajo).
+        // TPV: Carta · Ingredientes · Almacén · Compras · Facturas · Consumo equipo · Correo facturas.
         // Eventos: misma carta TPV, sin consumos de staff.
         itemIds = isEventsVertical
           ? [
               'catalog-carta',
+              'catalog-ingredientes',
               'catalog-stock-tpv',
               'catalog-purchases',
               'catalog-invoices',
@@ -1369,6 +1372,7 @@ function SidebarInner({
             ]
           : [
               'catalog-carta',
+              'catalog-ingredientes',
               'catalog-stock-tpv',
               'catalog-purchases',
               'catalog-invoices',
@@ -1764,7 +1768,8 @@ function SidebarInner({
         && new URLSearchParams(location.search).get('tab') === 'productos')
     )) ||
     (item.id === 'catalog-stock' && location.pathname.startsWith('/saas/inventory')) ||
-    (item.id === 'catalog-stock-tpv' && location.pathname.startsWith('/saas/catalog') && ['stock', 'ingredientes'].includes(catalogTab)) ||
+    (item.id === 'catalog-ingredientes' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'ingredientes') ||
+    (item.id === 'catalog-stock-tpv' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'stock') ||
     (item.id === 'catalog-purchases' && location.pathname.startsWith('/saas/catalog') && ['suppliers', 'purchase-orders', 'albaranes'].includes(catalogTab)) ||
     (item.id === 'catalog-invoices' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'invoices') ||
     (item.id === 'catalog-consumos' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'staff-consumption') ||

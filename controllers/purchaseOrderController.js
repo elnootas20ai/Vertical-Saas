@@ -572,6 +572,8 @@ export async function receiveWithInvoice(req, res) {
         total: Number(ocrResult.total || 0),
         status: 'pending',
         purchaseOrderId: existing._id,
+        linkedPurchaseOrderId: existing._id,
+        linkedPurchaseOrderNumber: existing.orderNumber || existing.number || '',
         entryMethod: 'ocr',
         ocrData: ocrResult,
       };

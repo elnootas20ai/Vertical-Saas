@@ -84,6 +84,11 @@ export type ProductRecipeLine = {
   catalogItemId?: string;
   name: string;
   quantity: number;
+  /**
+   * Texto tipado es-ES (p. ej. «2,50» / «1,2000»).
+   * Sin esto, al reabrir se pierde el 0 final porque `quantity` es number.
+   */
+  quantityText?: string;
   unit: string;
   stockCategory?: StockCategory;
 };
@@ -115,7 +120,13 @@ export function normalizeProductRecipeLines(raw: unknown): ProductRecipeLine[] {
     const storeIngredientId = String(rec.storeIngredientId || '').trim();
     const catalogItemId = String(rec.catalogItemId || '').trim();
     const name = String(rec.name || '').trim();
-    const quantity = Number(rec.quantity);
+    const quantityTextRaw = String(rec.quantityText || '').trim();
+    let quantity = Number(rec.quantity);
+    // Si hay texto tipado válido, manda el número (y conserva ceros finales).
+    if (quantityTextRaw) {
+      const fromText = Number(quantityTextRaw.replace(',', '.'));
+      if (Number.isFinite(fromText) && fromText > 0) quantity = fromText;
+    }
     if ((!storeIngredientId && !catalogItemId) || !name || !Number.isFinite(quantity) || quantity <= 0) {
       continue;
     }
@@ -126,6 +137,7 @@ export function normalizeProductRecipeLines(raw: unknown): ProductRecipeLine[] {
       ...(catalogItemId ? { catalogItemId } : {}),
       name,
       quantity,
+      ...(quantityTextRaw ? { quantityText: quantityTextRaw } : {}),
       unit,
       ...(stockCategory ? { stockCategory } : {}),
     });

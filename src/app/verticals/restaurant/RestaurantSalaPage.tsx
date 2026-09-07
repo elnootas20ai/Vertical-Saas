@@ -41,7 +41,9 @@ import { loadOpenDiningOrderForTable } from '../../lib/restaurantDiningTpv';
 import type { SalaRoom, SalaRoomType } from '../../lib/salaStudioTypes';
 import { RestaurantSalaQuickSetup } from './RestaurantSalaQuickSetup';
 import { RestaurantSalaLiveView } from './RestaurantSalaLiveView';
+import { RestaurantSalaFloorEditor } from './RestaurantSalaFloorEditor';
 import { RestaurantTpvTableAccount } from './RestaurantTpvTableAccount';
+import { VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
 import { applyRestaurantSalaQuickSetup } from './applyRestaurantSalaQuickSetup';
 import { clearRestaurantClientCaches } from './clearRestaurantClientCaches';
 import { clearOnboardingDraft } from './onboarding/draftStorage';
@@ -141,6 +143,7 @@ export function RestaurantSalaPage() {
   const [accountTable, setAccountTable] = useState<DiningTable | null>(null);
   const [accountOrder, setAccountOrder] = useState<DiningOrder | null>(null);
   const [accountLoading, setAccountLoading] = useState(false);
+  const [salaSurface, setSalaSurface] = useState<'live' | 'plano'>('live');
   const bootRef = useRef('');
 
   useEffect(() => {
@@ -758,29 +761,68 @@ export function RestaurantSalaPage() {
 
   return (
     <Layout title="Sala" noPadding>
-      <div className="min-h-[calc(100vh-4rem)] bg-neutral-50">
-        <RestaurantSalaLiveView
-          rooms={rooms}
-          tables={tables}
-          storeLabel={displayLabelForActive || currentBusiness?.name}
-          userId={userId}
-          businessId={businessId}
-          actorName={user?.fullName || user?.email || 'Sala'}
-          mapBusy={mapBusy}
-          onTablesChange={setTables}
-          onAddZone={handleAddZone}
-          onAddTables={handleAddTables}
-          onUpdateTablePeople={handleUpdateTablePeople}
-          onRemoveTable={handleRemoveTable}
-          onRemoveZone={handleRemoveZone}
-          onRemount={() => {
-            bootRef.current = '';
-            void runFreshStart({ clearDraft: true });
-          }}
-          onOpenTableAccount={(table, orderId) => {
-            void handleOpenTableAccount(table, orderId);
-          }}
-        />
+      <div className="flex min-h-[calc(100vh-4rem)] flex-col bg-neutral-50 dark:bg-stone-950">
+        <div className="shrink-0 border-b border-stone-200 bg-white/95 px-3 py-2 dark:border-stone-800 dark:bg-stone-900/95">
+          <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSalaSurface('live')}
+              className={`${VERTIAL_BTN_SECONDARY} !min-h-10 !px-4 !py-2 text-xs ${
+                salaSurface === 'live' ? 'ring-2 ring-[var(--v-blue,#2563eb)] border-blue-300' : ''
+              }`}
+            >
+              En vivo
+            </button>
+            <button
+              type="button"
+              onClick={() => setSalaSurface('plano')}
+              className={`${VERTIAL_BTN_SECONDARY} !min-h-10 !px-4 !py-2 text-xs ${
+                salaSurface === 'plano' ? 'ring-2 ring-[var(--v-blue,#2563eb)] border-blue-300' : ''
+              }`}
+            >
+              Plano
+            </button>
+            <span className="text-[11px] text-stone-400">
+              {salaSurface === 'plano'
+                ? 'Diseño por zona · mueve mesas'
+                : 'Servicio · mesas y cuentas'}
+            </span>
+          </div>
+        </div>
+
+        {salaSurface === 'live' ? (
+          <RestaurantSalaLiveView
+            rooms={rooms}
+            tables={tables}
+            storeLabel={displayLabelForActive || currentBusiness?.name}
+            userId={userId}
+            businessId={businessId}
+            actorName={user?.fullName || user?.email || 'Sala'}
+            mapBusy={mapBusy}
+            onTablesChange={setTables}
+            onAddZone={handleAddZone}
+            onAddTables={handleAddTables}
+            onUpdateTablePeople={handleUpdateTablePeople}
+            onRemoveTable={handleRemoveTable}
+            onRemoveZone={handleRemoveZone}
+            onRemount={() => {
+              bootRef.current = '';
+              void runFreshStart({ clearDraft: true });
+            }}
+            onOpenTableAccount={(table, orderId) => {
+              void handleOpenTableAccount(table, orderId);
+            }}
+          />
+        ) : (
+          <RestaurantSalaFloorEditor
+            rooms={rooms}
+            tables={tables}
+            userId={userId}
+            businessId={businessId}
+            mapBusy={mapBusy}
+            onTablesChange={setTables}
+          />
+        )}
       </div>
 
       {accountTable

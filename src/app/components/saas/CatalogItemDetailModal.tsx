@@ -303,8 +303,24 @@ export function CatalogItemDetailModal({
   const productImage = useMemo(() => resolveCatalogProductImage(item), [item]);
 
   const [nameDraft, setNameDraft] = useState(item.name);
-  const [unitPriceDraft, setUnitPriceDraft] = useState(String(item.unitPrice ?? ''));
-  const [costPriceDraft, setCostPriceDraft] = useState(String(item.costPrice ?? ''));
+  const [unitPriceDraft, setUnitPriceDraft] = useState(
+    Number.isFinite(item.unitPrice)
+      ? Number(item.unitPrice).toLocaleString('es-ES', {
+          useGrouping: false,
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })
+      : '',
+  );
+  const [costPriceDraft, setCostPriceDraft] = useState(
+    Number.isFinite(item.costPrice)
+      ? Number(item.costPrice).toLocaleString('es-ES', {
+          useGrouping: false,
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })
+      : '',
+  );
   const [activeDraft, setActiveDraft] = useState(item.active !== false);
   const [ingredientDraft, setIngredientDraft] = useState('');
   const [newIngredient, setNewIngredient] = useState('');
@@ -323,8 +339,24 @@ export function CatalogItemDetailModal({
     const raw =
       typeof next.customFields?.ingredients === 'string' ? next.customFields.ingredients : '';
     setNameDraft(next.name);
-    setUnitPriceDraft(String(next.unitPrice ?? ''));
-    setCostPriceDraft(String(next.costPrice ?? ''));
+    setUnitPriceDraft(
+      Number.isFinite(next.unitPrice)
+        ? Number(next.unitPrice).toLocaleString('es-ES', {
+            useGrouping: false,
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })
+        : '',
+    );
+    setCostPriceDraft(
+      Number.isFinite(next.costPrice)
+        ? Number(next.costPrice).toLocaleString('es-ES', {
+            useGrouping: false,
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })
+        : '',
+    );
     setActiveDraft(next.active !== false);
     setIngredientDraft(raw);
     setComboItems(Array.isArray(next.comboItems) ? [...next.comboItems] : []);
@@ -477,8 +509,8 @@ export function CatalogItemDetailModal({
       toast.error('El nombre no puede estar vacío');
       return;
     }
-    const unitPrice = Number(unitPriceDraft);
-    const costPrice = Number(costPriceDraft);
+    const unitPrice = Number(String(unitPriceDraft).trim().replace(',', '.'));
+    const costPrice = Number(String(costPriceDraft).trim().replace(',', '.'));
     if (!Number.isFinite(unitPrice) || unitPrice < 0) {
       toast.error('Precio de venta no válido');
       return;
@@ -633,9 +665,8 @@ export function CatalogItemDetailModal({
                   Precio venta (€)
                 </label>
                 <input
-                  type="number"
-                  min="0"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
                   value={unitPriceDraft}
                   onChange={(e) => {
                     setUnitPriceDraft(e.target.value);
@@ -649,9 +680,8 @@ export function CatalogItemDetailModal({
                   Coste (€)
                 </label>
                 <input
-                  type="number"
-                  min="0"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
                   value={costPriceDraft}
                   onChange={(e) => {
                     setCostPriceDraft(e.target.value);
@@ -953,12 +983,18 @@ export function CatalogItemDetailModal({
           <div className={activeTab === 'ventas' ? 'block space-y-5' : 'hidden'}>
           <section className="space-y-5">
             {(() => {
-              const pvp = unitPriceDraft !== '' && Number.isFinite(Number(unitPriceDraft))
-                ? Number(unitPriceDraft)
+              const parseDraftMoney = (raw: string) =>
+                Number(String(raw).trim().replace(',', '.'));
+              const pvpParsed = parseDraftMoney(unitPriceDraft);
+              const costParsed = parseDraftMoney(costPriceDraft);
+              const pvp = unitPriceDraft !== '' && Number.isFinite(pvpParsed)
+                ? pvpParsed
                 : Number(item.unitPrice) || 0;
               const cost = costingEnabled && costingStatus !== 'none'
                 ? costingUnitCost
-                : Number(costPriceDraft) || 0;
+                : Number.isFinite(costParsed)
+                  ? costParsed
+                  : 0;
               const margin = marginPercent(cost, pvp);
               const fc = foodCostPercent(cost, pvp);
               const profitPerUnit = Math.round((pvp - cost) * 100) / 100;

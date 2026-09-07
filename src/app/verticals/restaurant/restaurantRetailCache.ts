@@ -1,6 +1,9 @@
 import type { PointOfSale } from '../../lib/deliveryApi';
 import { buildDeliverySidebarStoreRows, type DeliverySidebarStoreRow } from '../../lib/deliveryApi';
-import { filterPointsOfSaleForWorkCenters } from '../../lib/deliverySetup';
+import {
+  dedupeRetailWorkCentersForBusiness,
+  filterPointsOfSaleForWorkCenters,
+} from '../../lib/deliverySetup';
 import type { WorkCenter } from '../../lib/workCentersApi';
 import {
   filterRestaurantRetailWorkCenters,
@@ -22,7 +25,7 @@ function sanitizeSnapshot(
   activeBusiness: RestaurantBusinessRef,
   allBusinesses: RestaurantBusinessRef[],
 ): { retailWorkCenters: WorkCenter[]; allPointsOfSale: PointOfSale[] } {
-  const retail = filterRestaurantRetailWorkCenters(
+  const filtered = filterRestaurantRetailWorkCenters(
     snapshot.retailWorkCenters,
     activeBusiness,
     allBusinesses,
@@ -31,10 +34,23 @@ function sanitizeSnapshot(
     .replace(/^business:/, '')
     .trim();
   // businessId obligatorio: sin retail (solo salas) no vaciar PDVs de la empresa.
-  const allPointsOfSale = filterPointsOfSaleForWorkCenters(snapshot.allPointsOfSale, retail, {
-    businessId: bid || undefined,
+  const allPointsOfSale = filterPointsOfSaleForWorkCenters(
+    snapshot.allPointsOfSale,
+    filtered,
+    { businessId: bid || undefined },
+  );
+  const preferred = allPointsOfSale
+    .map((p) => String(p.workCenterId || '').trim())
+    .filter(Boolean);
+  const retail = dedupeRetailWorkCentersForBusiness(filtered, {
+    preferredWorkCenterIds: preferred,
   });
-  return { retailWorkCenters: retail, allPointsOfSale };
+  return {
+    retailWorkCenters: retail,
+    allPointsOfSale: filterPointsOfSaleForWorkCenters(allPointsOfSale, retail, {
+      businessId: bid || undefined,
+    }),
+  };
 }
 
 export function readRestaurantRetailCache(

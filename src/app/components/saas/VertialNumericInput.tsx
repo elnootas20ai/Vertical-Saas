@@ -32,6 +32,18 @@ function parseIntDraft(raw: string): number | null {
   return Number.isFinite(n) ? Math.floor(n) : null;
 }
 
+function displayFromValue(value: number, mode: Mode): string {
+  if (!Number.isFinite(value)) return '';
+  if (value === 0) return '';
+  if (mode === 'int') return String(Math.floor(value));
+  // Conserva el 0 final de céntimos (1,50) en vez de «1.5».
+  return value.toLocaleString('es-ES', {
+    useGrouping: false,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
 function parseDecimalDraft(raw: string): number | null {
   const t = raw.trim().replace(',', '.');
   if (t === '' || t === '.') return null;
@@ -39,12 +51,6 @@ function parseDecimalDraft(raw: string): number | null {
   const n = Number(t);
   if (!Number.isFinite(n)) return null;
   return Math.round(n * 100) / 100;
-}
-
-function displayFromValue(value: number, mode: Mode): string {
-  if (!Number.isFinite(value) || value === 0) return '';
-  if (mode === 'int') return String(Math.floor(value));
-  return String(value);
 }
 
 function resolveBounds(min: Props['min'], max: Props['max']): { minN?: number; maxN?: number } {
@@ -88,21 +94,22 @@ export function VertialNumericInput({
         const raw = mode === 'decimal' ? e.target.value.replace(',', '.') : e.target.value;
         if (mode === 'int') {
           if (raw !== '' && !/^\d*$/.test(raw)) return;
-        } else if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) {
+        } else if (raw !== '' && !/^\d*[.,]?\d*$/.test(e.target.value.replace(/\s/g, ''))) {
           return;
         }
-        setDraft(raw);
-        if (raw === '') return;
+        const draftValue = mode === 'decimal' ? e.target.value.replace('.', ',') : raw;
+        setDraft(mode === 'decimal' ? draftValue.replace(/[^\d,]/g, '') : raw);
+        if (raw === '' || raw === '.' || raw === ',') return;
         const parsed = mode === 'int' ? parseIntDraft(raw) : parseDecimalDraft(raw);
         if (parsed === null) return;
         commit(parsed);
       }}
       onBlur={(e) => {
         const raw = (draft ?? '').trim();
-        if (raw === '' || raw === '.') {
+        if (raw === '' || raw === '.' || raw === ',') {
           commit(emptyAs);
         } else {
-          const parsed = mode === 'int' ? parseIntDraft(raw) : parseDecimalDraft(raw);
+          const parsed = mode === 'int' ? parseIntDraft(raw.replace(',', '.')) : parseDecimalDraft(raw);
           if (parsed !== null) commit(parsed);
         }
         setDraft(null);

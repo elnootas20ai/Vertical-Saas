@@ -1,4 +1,8 @@
-import type { StockCount } from './stockCountApi';
+import type { StockCount, StockCountLine } from './stockCountApi';
+import type { CatalogItem } from './deliveryApi';
+import type { StoreIngredient } from './catalogCustomization';
+import type { InventoryCommercialBrand } from './inventoryUtils';
+import { groupStockItemsByOrganizer } from './purchaseSuggestions';
 
 /** Misma fecha local (día de revisión diaria). */
 export function isSameLocalDay(iso: string | null | undefined, now = new Date()): boolean {
@@ -53,4 +57,72 @@ export function groupCountsByDay(counts: StockCount[]): { dayKey: string; dayLab
           new Date(b.completedAt || b.updatedAt).getTime() - new Date(a.completedAt || a.updatedAt).getTime(),
       ),
     }));
+}
+
+/** Ítem mínimo para resolver organizador cuando el catálogo no trae el documento. */
+export function catalogItemFromStockCountLine(
+  line: Pick<StockCountLine, 'catalogItemId' | 'catalogItemName' | 'sku' | 'stockCategory' | 'unit' | 'costPrice' | 'minStock'>,
+): CatalogItem {
+  return {
+    _id: line.catalogItemId,
+    id: line.catalogItemId,
+    name: line.catalogItemName || '',
+    sku: line.sku || '',
+    stockCategory: line.stockCategory || 'other',
+    unit: line.unit || 'ud',
+    costPrice: Number(line.costPrice || 0),
+    minStock: Number(line.minStock || 0),
+    stockQuantity: 0,
+    module: 'stock',
+    isStockItem: true,
+    active: true,
+  } as CatalogItem;
+}
+
+export type RevisionEntryGroup<T extends { line: Pick<StockCountLine, 'catalogItemId'> }> = {
+  organizerId: string;
+  organizerLabel: string;
+  entries: T[];
+};
+
+/** Agrupa líneas de revisión con el mismo criterio que Inventario / Compras. */
+export function groupRevisionEntriesByOrganizer<
+  T extends {
+    line: Pick<
+      StockCountLine,
+      'catalogItemId' | 'catalogItemName' | 'sku' | 'stockCategory' | 'unit' | 'costPrice' | 'minStock'
+    >;
+  },
+>(
+  entries: T[],
+  catalogItems: CatalogItem[] = [],
+  storeIngredients: StoreIngredient[] = [],
+  commercialBrands: InventoryCommercialBrand[] = [],
+): RevisionEntryGroup<T>[] {
+  if (entries.length === 0) return [];
+
+  const byId = new Map(
+    catalogItems.map((item) => [String(item._id || item.id || ''), item] as const),
+  );
+  const uniqueItems: CatalogItem[] = [];
+  const entriesByItemId = new Map<string, T[]>();
+
+  for (const entry of entries) {
+    const id = String(entry.line.catalogItemId || '').trim();
+    if (!id) continue;
+    if (!entriesByItemId.has(id)) {
+      entriesByItemId.set(id, []);
+      uniqueItems.push(byId.get(id) || catalogItemFromStockCountLine(entry.line));
+    }
+    entriesByItemId.get(id)!.push(entry);
+  }
+
+  const groups = groupStockItemsByOrganizer(uniqueItems, storeIngredients, commercialBrands);
+  return groups
+    .map((group) => ({
+      organizerId: group.organizerId,
+      organizerLabel: group.organizerLabel,
+      entries: group.items.flatMap((item) => entriesByItemId.get(String(item._id || item.id || '')) || []),
+    }))
+    .filter((group) => group.entries.length > 0);
 }

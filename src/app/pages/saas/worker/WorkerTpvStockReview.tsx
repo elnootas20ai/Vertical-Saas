@@ -38,6 +38,7 @@ export function WorkerTpvStockReview({ onBack, scopeOverride }: WorkerTpvStockRe
     storeWarehouseId,
     warehouses,
     stockedCount,
+    stockItems,
     loading,
     reload,
   } = useStockWorkspace({
@@ -92,6 +93,7 @@ export function WorkerTpvStockReview({ onBack, scopeOverride }: WorkerTpvStockRe
               storeWarehouseId={storeWarehouseId}
               warehouses={warehouses}
               stockedCount={stockedCount}
+              catalogItems={stockItems}
               role="worker"
               onRevisionCompleted={reload}
             />

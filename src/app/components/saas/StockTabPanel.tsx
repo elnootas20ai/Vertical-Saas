@@ -1,24 +1,37 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import {
-  CheckCircle2, ClipboardCheck, PackagePlus, AlertTriangle, Loader2, MapPin,
-  Boxes, Plus, LayoutDashboard, History, ChevronDown, ChevronRight, User, Calendar,
-  ArrowRight, ShoppingCart,
+  CheckCircle2, ClipboardCheck, PackagePlus, Loader2, MapPin,
+  Boxes, Plus, History, ChevronDown, ChevronRight, User, Calendar,
+  ShoppingCart, ListChecks, Warehouse, Package,
 } from 'lucide-react';
 import { DELIVERY_ACTIVE_STORE_CHANGED } from '../../lib/deliveryOpsPdvSelection';
 import type { CatalogItem, StockCategory } from '../../lib/deliveryApi';
-import { bulkUpdateCatalogStockRequest, createCatalogItemRequest } from '../../lib/deliveryApi';
+import { bulkUpdateCatalogStockRequest, createCatalogItemRequest, getDeliveryConfigRequest } from '../../lib/deliveryApi';
+import { listBrandsRequest } from '../../lib/brandsApi';
+import { commercialLineBrands } from '../../lib/deliveryCatalogImportLogic';
+import {
+  unifyStoreIngredientsFromConfig,
+  normalizeStoreIngredients,
+  type StoreIngredient,
+} from '../../lib/catalogCustomization';
+import type { InventoryCommercialBrand } from '../../lib/inventoryUtils';
+import { groupStockItemsByOrganizer } from '../../lib/purchaseSuggestions';
 import { useVerticalCatalog } from '../../hooks/useVerticalCatalog';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
-import type { Warehouse } from '../../lib/warehouseApi';
+import type { Warehouse as WarehouseDoc } from '../../lib/warehouseApi';
 import {
   listStockCountsRequest,
+  getStockRevisionListRequest,
+  putStockRevisionListRequest,
   type StockCount,
 } from '../../lib/stockCountApi';
-import { filterStockInventoryItems } from '../../lib/stockInventoryScope';
+import { filterStockInventoryItems, filterStockRevisionItems } from '../../lib/stockInventoryScope';
 import { StockRevisionPanel } from './StockRevisionPanel';
 import { StockPurchaseListPreview } from './StockPurchaseListPreview';
+import { InventoryPanel } from './InventoryPanel';
+import { StoreIngredientsPanel } from './StoreIngredientsPanel';
 import { SaasTabWorkspace } from './SaasTabWorkspace';
 import {
   formatStockDate,
@@ -27,9 +40,9 @@ import {
   groupCountsByDay,
 } from '../../lib/stockRevisionUtils';
 
-type StockSection = 'summary' | 'inventory' | 'operations' | 'history';
-type OperationsMode = 'pending' | 'revision';
-type InventoryFilter = 'all' | 'ok' | 'low' | 'out' | 'negative';
+type StockSection = 'warehouse' | 'ingredients' | 'inventory' | 'operations' | 'history';
+type OperationsMode = 'pending' | 'revision' | 'checklist';
+type InventoryFilter = 'ok' | 'low' | 'out' | 'negative';
 
 const STOCK_CATEGORY_LABELS: Record<StockCategory, string> = {
   ingredient: 'Ingrediente',
@@ -49,29 +62,13 @@ const DEFAULT_UNIT_OPTIONS = [
   { value: 'ud', label: 'ud' },
 ];
 
-function stockStatus(item: CatalogItem): InventoryFilter | 'ok' {
+function stockStatus(item: CatalogItem): InventoryFilter {
   const qty = Number(item.stockQuantity || 0);
   const min = Number(item.minStock || 0);
   if (qty < 0) return 'negative';
   if (qty === 0) return 'out';
   if (min > 0 && qty <= min) return 'low';
   return 'ok';
-}
-
-function StockStatusBadge({ item }: { item: CatalogItem }) {
-  const status = stockStatus(item);
-  const cfg = {
-    ok: { label: 'OK', className: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' },
-    low: { label: 'Bajo mínimo', className: 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' },
-    out: { label: 'Sin stock', className: 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300' },
-    negative: { label: 'Negativo', className: 'bg-gray-900 text-white dark:bg-white dark:text-gray-900' },
-  }[status];
-  return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-xs font-semibold ${cfg.className}`}>
-      <StockSemaphore qty={Number(item.stockQuantity || 0)} min={Number(item.minStock || 0)} />
-      {cfg.label}
-    </span>
-  );
 }
 
 function AddIngredientModal({
@@ -242,7 +239,7 @@ function AddIngredientModal({
 
 interface StockTabPanelProps {
   items: CatalogItem[];
-  warehouses: Warehouse[];
+  warehouses: WarehouseDoc[];
   userId: string;
   searchQuery: string;
   itemLabelPlural: string;
@@ -253,15 +250,9 @@ interface StockTabPanelProps {
   catalogLoading?: boolean;
 }
 
-function StockSemaphore({ qty, min }: { qty: number; min: number }) {
-  if (qty < 0) return <span className="inline-block w-2.5 h-2.5 rounded-full bg-black dark:bg-white" title="Stock negativo" />;
-  if (qty === 0) return <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500" title="Sin stock" />;
-  if (min > 0 && qty <= min) return <span className="inline-block w-2.5 h-2.5 rounded-full bg-amber-500" title="Bajo mínimo" />;
-  return <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500" title="OK" />;
-}
-
-const SECTION_TABS: { id: StockSection; label: string; icon: typeof LayoutDashboard }[] = [
-  { id: 'summary', label: 'Resumen', icon: LayoutDashboard },
+const SECTION_TABS: { id: StockSection; label: string; icon: typeof Warehouse }[] = [
+  { id: 'warehouse', label: 'Almacén', icon: Warehouse },
+  { id: 'ingredients', label: 'Ingredientes', icon: Package },
   { id: 'inventory', label: 'Inventario', icon: Boxes },
   { id: 'operations', label: 'Operaciones', icon: ClipboardCheck },
   { id: 'history', label: 'Historial', icon: History },
@@ -282,10 +273,10 @@ export function StockTabPanel({
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
   const actorUserId = String(user?.user_id || user?.id || '').trim();
+  const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '').trim();
 
-  const [section, setSection] = useState<StockSection>('summary');
+  const [section, setSection] = useState<StockSection>('warehouse');
   const [operationsMode, setOperationsMode] = useState<OperationsMode>('pending');
-  const [inventoryFilter, setInventoryFilter] = useState<InventoryFilter | 'all'>('all');
   const [showAddIngredient, setShowAddIngredient] = useState(false);
   const [quantities, setQuantities] = useState<Record<string, string>>({});
   const [savingPending, setSavingPending] = useState(false);
@@ -296,6 +287,12 @@ export function StockTabPanel({
   const [warehouseId, setWarehouseId] = useState('');
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
   const [purchaseListHistoryId, setPurchaseListHistoryId] = useState<string | null>(null);
+  const [revisionItemIds, setRevisionItemIds] = useState<string[]>([]);
+  const [revisionListLoaded, setRevisionListLoaded] = useState(false);
+  const [savingRevisionList, setSavingRevisionList] = useState(false);
+  const [checklistSearch, setChecklistSearch] = useState('');
+  const [storeIngredients, setStoreIngredients] = useState<StoreIngredient[]>([]);
+  const [commercialBrands, setCommercialBrands] = useState<InventoryCommercialBrand[]>([]);
 
   const q = searchQuery.toLowerCase().trim();
 
@@ -331,10 +328,16 @@ export function StockTabPanel({
   }, [storeWarehouseId]);
 
   const scopedItems = useMemo(() => filterStockInventoryItems(items), [items]);
+  const revisionSelectableItems = useMemo(() => filterStockRevisionItems(items), [items]);
 
   const activeProducts = useMemo(
     () => scopedItems.filter((i) => i.active && !i.deletedAt),
     [scopedItems],
+  );
+
+  const revisionActiveProducts = useMemo(
+    () => revisionSelectableItems.filter((i) => i.active && !i.deletedAt),
+    [revisionSelectableItems],
   );
 
   const pendingItems = useMemo(() => {
@@ -401,6 +404,123 @@ export function StockTabPanel({
   }, [storeWarehouseId, storeLabel]);
 
   useEffect(() => {
+    let cancelled = false;
+    const wh = warehouseId || storeWarehouseId;
+    if (!userId) {
+      setRevisionItemIds([]);
+      setRevisionListLoaded(false);
+      return;
+    }
+    setRevisionListLoaded(false);
+    void getStockRevisionListRequest(userId, wh || '')
+      .then((list) => {
+        if (cancelled) return;
+        setRevisionItemIds(list.catalogItemIds || []);
+        setRevisionListLoaded(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setRevisionItemIds([]);
+        setRevisionListLoaded(true);
+      });
+    return () => { cancelled = true; };
+  }, [userId, warehouseId, storeWarehouseId]);
+
+  const checklistItems = useMemo(() => {
+    const search = checklistSearch.toLowerCase().trim();
+    return revisionActiveProducts.filter((item) => {
+      if (!search) return true;
+      return item.name?.toLowerCase().includes(search) || item.sku?.toLowerCase().includes(search);
+    });
+  }, [revisionActiveProducts, checklistSearch]);
+
+  const checklistGroups = useMemo(
+    () => groupStockItemsByOrganizer(checklistItems, storeIngredients, commercialBrands),
+    [checklistItems, storeIngredients, commercialBrands],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!businessId) {
+        setCommercialBrands([]);
+        setStoreIngredients([]);
+        return;
+      }
+      try {
+        const [brandList, cfg] = await Promise.all([
+          listBrandsRequest(businessId).catch(() => []),
+          userId ? getDeliveryConfigRequest(userId).catch(() => null) : Promise.resolve(null),
+        ]);
+        if (cancelled) return;
+        const commercial = commercialLineBrands(brandList);
+        setCommercialBrands(
+          commercial.map((b) => ({
+            _id: b._id,
+            name: b.name,
+            deliveryLineKind: b.deliveryLineKind,
+            primaryColor: String(b.primaryColor || '').trim() || undefined,
+          })),
+        );
+        if (cfg) {
+          setStoreIngredients(
+            normalizeStoreIngredients(
+              unifyStoreIngredientsFromConfig(cfg, commercial.map((b) => b._id)),
+            ),
+          );
+        } else {
+          setStoreIngredients([]);
+        }
+      } catch {
+        if (!cancelled) {
+          setCommercialBrands([]);
+          setStoreIngredients([]);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [businessId, userId]);
+
+  const toggleRevisionItem = useCallback((itemId: string) => {
+    setRevisionItemIds((prev) => (
+      prev.includes(itemId) ? prev.filter((id) => id !== itemId) : [...prev, itemId]
+    ));
+  }, []);
+
+  const toggleOrganizerItems = useCallback((itemIds: string[], selectAll: boolean) => {
+    setRevisionItemIds((prev) => {
+      const set = new Set(prev);
+      if (selectAll) {
+        for (const id of itemIds) set.add(id);
+      } else {
+        for (const id of itemIds) set.delete(id);
+      }
+      return Array.from(set);
+    });
+  }, []);
+
+  const handleSaveRevisionList = useCallback(async () => {
+    if (!userId) return;
+    setSavingRevisionList(true);
+    try {
+      const saved = await putStockRevisionListRequest(userId, {
+        warehouseId: warehouseId || storeWarehouseId || '',
+        catalogItemIds: revisionItemIds,
+      });
+      setRevisionItemIds(saved.catalogItemIds || []);
+      toast.success(
+        saved.catalogItemIds.length > 0
+          ? `Lista de revisión guardada (${saved.catalogItemIds.length})`
+          : 'Lista de revisión vacía: se usará el stock con cantidad',
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo guardar la lista');
+    } finally {
+      setSavingRevisionList(false);
+    }
+  }, [userId, warehouseId, storeWarehouseId, revisionItemIds]);
+
+  useEffect(() => {
     if (activeCount) setOperationsMode('revision');
     else if (pendingItems.length > 0) setOperationsMode('pending');
   }, [activeCount, pendingItems.length]);
@@ -441,14 +561,10 @@ export function StockTabPanel({
     }
   };
 
-  const reviewedCount = activeCount?.lines.filter((l) => l.countedStock !== null).length ?? 0;
-  const totalReviewLines = activeCount?.lines.length ?? 0;
-  const progressPct = totalReviewLines > 0 ? Math.round((reviewedCount / totalReviewLines) * 100) : 0;
-
   const handleRevisionCompleted = () => {
     onReload();
     void loadStockCounts();
-    setSection('summary');
+    setSection('history');
   };
 
   const inventoryStats = useMemo(() => {
@@ -465,23 +581,6 @@ export function StockTabPanel({
     });
     return { total: activeProducts.length, ok, low, out, negative };
   }, [activeProducts]);
-
-  const inventoryRows = useMemo(() => {
-    const sorted = [...activeProducts].sort((a, b) => {
-      const rank = (item: CatalogItem) => {
-        const s = stockStatus(item);
-        if (s === 'negative') return 0;
-        if (s === 'out') return 1;
-        if (s === 'low') return 2;
-        return 3;
-      };
-      const diff = rank(a) - rank(b);
-      if (diff !== 0) return diff;
-      return (a.name || '').localeCompare(b.name || '', 'es');
-    });
-    if (inventoryFilter === 'all') return sorted;
-    return sorted.filter((item) => stockStatus(item) === inventoryFilter);
-  }, [activeProducts, inventoryFilter]);
 
   const handleIngredientCreated = () => {
     onReload();
@@ -507,13 +606,7 @@ export function StockTabPanel({
     [allCounts, matchesWarehouse],
   );
 
-  const lastCompletedCount = completedCounts[0] ?? null;
   const historyByDay = useMemo(() => groupCountsByDay(completedCounts), [completedCounts]);
-
-  const goToOperations = (sub: OperationsMode) => {
-    setOperationsMode(sub);
-    setSection('operations');
-  };
 
   return (
     <div className="space-y-4">
@@ -581,153 +674,24 @@ export function StockTabPanel({
           </div>
         }
       >
-      {/* ── Resumen ── */}
-      {section === 'summary' && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {[
-              { label: 'Artículos', value: String(inventoryStats.total), sub: `${stockedCount} con stock`, color: 'text-gray-900 dark:text-white' },
-              { label: 'OK', value: String(inventoryStats.ok), sub: 'dentro de mínimo', color: 'text-emerald-600' },
-              { label: 'Alertas', value: String(inventoryStats.low + inventoryStats.out), sub: `${inventoryStats.low} bajo · ${inventoryStats.out} sin stock`, color: inventoryStats.low + inventoryStats.out > 0 ? 'text-amber-600' : 'text-gray-400' },
-              { label: 'Valor estimado', value: `${estimatedValue.toFixed(0)} €`, sub: 'coste × cantidad', color: 'text-gray-900 dark:text-white' },
-            ].map(({ label, value, sub, color }) => (
-              <div key={label} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
-                <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">{label}</p>
-                <p className={`text-2xl font-bold tabular-nums mt-1 ${color}`}>{value}</p>
-                <p className="text-xs text-gray-500 mt-0.5">{sub}</p>
-              </div>
-            ))}
-          </div>
-
-          {/* Acciones pendientes */}
-          {(activeCount || pendingItems.length > 0) && (
-            <div className="grid sm:grid-cols-2 gap-3">
-              {activeCount && (
-                <button
-                  type="button"
-                  onClick={() => goToOperations('revision')}
-                  className="flex items-center gap-3 p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl text-left hover:bg-emerald-100/60 transition-colors"
-                >
-                  <ClipboardCheck className="w-8 h-8 text-emerald-600 shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-emerald-900 dark:text-emerald-100">Revisión en curso</p>
-                    <p className="text-sm text-emerald-700/80 dark:text-emerald-300/80 truncate">
-                      {reviewedCount}/{totalReviewLines} revisados · {progressPct}%
-                    </p>
-                  </div>
-                  <ArrowRight className="w-4 h-4 text-emerald-600 shrink-0" />
-                </button>
-              )}
-              {pendingItems.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => goToOperations('pending')}
-                  className="flex items-center gap-3 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl text-left hover:bg-amber-100/60 transition-colors"
-                >
-                  <PackagePlus className="w-8 h-8 text-amber-600 shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-amber-900 dark:text-amber-100">Pendientes de cargar</p>
-                    <p className="text-sm text-amber-700/80 dark:text-amber-300/80">
-                      {pendingItems.length} artículo{pendingItems.length === 1 ? '' : 's'} sin stock inicial
-                    </p>
-                  </div>
-                  <ArrowRight className="w-4 h-4 text-amber-600 shrink-0" />
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* Última revisión */}
-          <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-5">
-            <h3 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2 mb-3">
-              <Calendar className="w-4 h-4 text-gray-400" />
-              Última revisión
-            </h3>
-            {lastCompletedCount ? (
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                  <p className="font-semibold text-gray-900 dark:text-white">{lastCompletedCount.name}</p>
-                  <p className="text-sm text-gray-500 mt-1">
-                    {formatStockDate(lastCompletedCount.completedAt)} · {formatStockTime(lastCompletedCount.completedAt)}
-                  </p>
-                  <p className="text-sm text-gray-500 flex items-center gap-1.5 mt-2">
-                    <User className="w-3.5 h-3.5" />
-                    Cerrada por <strong>{resolveUserName(lastCompletedCount.completedBy || lastCompletedCount.startedBy)}</strong>
-                  </p>
-                </div>
-                <div className="text-right">
-                  {countDiscrepancies(lastCompletedCount) === 0 ? (
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 text-sm font-semibold">
-                      <CheckCircle2 className="w-4 h-4" /> Todo cuadró
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 text-sm font-semibold">
-                      <AlertTriangle className="w-4 h-4" />
-                      {countDiscrepancies(lastCompletedCount)} discrepancia{countDiscrepancies(lastCompletedCount) === 1 ? '' : 's'}
-                    </span>
-                  )}
-                  {lastCompletedCount.totalDifferenceValue !== 0 && (
-                    <p className="text-xs text-gray-400 mt-2 tabular-nums">
-                      Dif. valor: {lastCompletedCount.totalDifferenceValue > 0 ? '+' : ''}{lastCompletedCount.totalDifferenceValue.toFixed(2)} €
-                    </p>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <p className="text-sm text-gray-500">Aún no hay revisiones completadas en esta tienda.</p>
-            )}
-            {completedCounts.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setSection('history')}
-                className="mt-4 text-sm font-semibold text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white inline-flex items-center gap-1"
-              >
-                Ver historial completo
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-
-          {lastCompletedCount && (
-            <StockPurchaseListPreview
-              userId={userId}
-              countId={lastCompletedCount._id}
-              countName={lastCompletedCount.name}
-              compact
-            />
-          )}
-
-          {/* Accesos rápidos */}
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setSection('inventory')}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-semibold hover:bg-gray-50 dark:hover:bg-gray-700"
-            >
-              <Boxes className="w-4 h-4" /> Ver inventario
-            </button>
-            {!activeCount && stockedCount > 0 && (
-              <button
-                type="button"
-                onClick={() => { setSection('operations'); setOperationsMode('revision'); }}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl text-sm font-semibold hover:bg-emerald-700"
-              >
-                <ClipboardCheck className="w-4 h-4" />
-                Iniciar revisión
-              </button>
-            )}
-          </div>
-        </div>
+      {/* ── Almacén: organizadores + artículos ── */}
+      {section === 'warehouse' && (
+        <InventoryPanel seedStockItems={scopedItems} />
       )}
+
+      {/* ── Ingredientes: organizadores + lista ── */}
+      {section === 'ingredients' && businessId ? (
+        <StoreIngredientsPanel userId={userId} businessId={businessId} />
+      ) : null}
 
       {/* ── Operaciones ── */}
       {section === 'operations' && (
-        <div className="space-y-4">
-          <div className="flex gap-2 overflow-x-auto pb-1 [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
+        <div className="p-4 sm:p-5 space-y-5">
+          <div className="flex gap-3 overflow-x-auto pb-1 [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
             <button
               type="button"
               onClick={() => setOperationsMode('pending')}
-              className={`inline-flex items-center gap-2 px-4 py-3 min-h-[44px] touch-manipulation rounded-xl text-sm font-semibold border shrink-0 transition-colors ${
+              className={`inline-flex items-center gap-2.5 px-4 py-3.5 min-h-[48px] touch-manipulation rounded-xl text-sm font-semibold border shrink-0 transition-colors ${
                 operationsMode === 'pending'
                   ? 'bg-amber-50 border-amber-300 text-amber-800 dark:bg-amber-900/30 dark:border-amber-700 dark:text-amber-200'
                   : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
@@ -741,8 +705,23 @@ export function StockTabPanel({
             </button>
             <button
               type="button"
+              onClick={() => setOperationsMode('checklist')}
+              className={`inline-flex items-center gap-2.5 px-4 py-3.5 min-h-[48px] touch-manipulation rounded-xl text-sm font-semibold border shrink-0 transition-colors ${
+                operationsMode === 'checklist'
+                  ? 'bg-blue-50 border-blue-300 text-blue-800 dark:bg-blue-900/30 dark:border-blue-700 dark:text-blue-200'
+                  : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+              }`}
+            >
+              <ListChecks className="w-4 h-4" />
+              Qué revisar
+              {revisionListLoaded && revisionItemIds.length > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full bg-blue-200 dark:bg-blue-800 text-xs font-bold">{revisionItemIds.length}</span>
+              )}
+            </button>
+            <button
+              type="button"
               onClick={() => setOperationsMode('revision')}
-              className={`inline-flex items-center gap-2 px-4 py-3 min-h-[44px] touch-manipulation rounded-xl text-sm font-semibold border shrink-0 transition-colors ${
+              className={`inline-flex items-center gap-2.5 px-4 py-3.5 min-h-[48px] touch-manipulation rounded-xl text-sm font-semibold border shrink-0 transition-colors ${
                 operationsMode === 'revision'
                   ? 'bg-emerald-50 border-emerald-300 text-emerald-800 dark:bg-emerald-900/30 dark:border-emerald-700 dark:text-emerald-200'
                   : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
@@ -759,7 +738,7 @@ export function StockTabPanel({
           {operationsMode === 'pending' && (
             <div>
               <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                Ingredientes, bebidas, envases y suministros sin stock cargado. Los platos de carta no van aquí.
+                Ingredientes, bebidas, envases y suministros sin stock cargado.
               </p>
               {pendingItems.length === 0 ? (
                 <div className="text-center py-16 text-gray-400 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700">
@@ -814,6 +793,103 @@ export function StockTabPanel({
             </div>
           )}
 
+          {operationsMode === 'checklist' && (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Elige qué sale en la revisión del TPV, agrupado por organizadores (Bebidas, Complementos, Envases…). Incluye almacén y lo comprable a proveedor (si un plato/pizza tiene proveedor o control de stock, también puede salir). Lista vacía = se revisan los que tengan stock cargado.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setRevisionItemIds(revisionActiveProducts.map((i) => i._id))}
+                  className="px-3 py-2 rounded-xl text-xs font-semibold border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
+                >
+                  Marcar todos
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRevisionItemIds([])}
+                  className="px-3 py-2 rounded-xl text-xs font-semibold border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
+                >
+                  Quitar todos
+                </button>
+                <input
+                  type="search"
+                  value={checklistSearch}
+                  onChange={(e) => setChecklistSearch(e.target.value)}
+                  placeholder="Buscar…"
+                  className="flex-1 min-w-[160px] px-3 py-2 rounded-xl text-sm border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 max-h-[480px] overflow-y-auto">
+                {checklistItems.length === 0 ? (
+                  <p className="p-6 text-sm text-gray-500 text-center">No hay artículos de almacén.</p>
+                ) : (
+                  <div className="divide-y divide-gray-100 dark:divide-gray-700/50">
+                    {checklistGroups.map((group) => {
+                      const groupIds = group.items.map((i) => i._id);
+                      const selectedCount = groupIds.filter((id) => revisionItemIds.includes(id)).length;
+                      const allSelected = groupIds.length > 0 && selectedCount === groupIds.length;
+                      return (
+                        <div key={group.organizerId}>
+                          <div className="sticky top-0 z-[1] flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 bg-gray-50/95 dark:bg-gray-900/95 border-b border-gray-100 dark:border-gray-700/50">
+                            <p className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                              {group.organizerLabel}
+                              <span className="ml-1.5 font-semibold normal-case tracking-normal text-gray-400">
+                                {selectedCount}/{group.items.length}
+                              </span>
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => toggleOrganizerItems(groupIds, !allSelected)}
+                              className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline"
+                            >
+                              {allSelected ? 'Quitar grupo' : 'Marcar grupo'}
+                            </button>
+                          </div>
+                          <ul>
+                            {group.items.map((item) => {
+                              const checked = revisionItemIds.includes(item._id);
+                              return (
+                                <li key={item._id}>
+                                  <label className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30">
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={() => toggleRevisionItem(item._id)}
+                                      className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                    />
+                                    <span className="flex-1 min-w-0">
+                                      <span className="block font-medium text-gray-900 dark:text-white truncate">{item.name}</span>
+                                      <span className="block text-xs text-gray-500 truncate">
+                                        {item.sku || 'Sin SKU'} · {Number(item.stockQuantity || 0)} {item.unit || 'ud'}
+                                      </span>
+                                    </span>
+                                  </label>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => void handleSaveRevisionList()}
+                  disabled={savingRevisionList || !revisionListLoaded}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold disabled:opacity-60"
+                >
+                  {savingRevisionList ? <Loader2 className="w-4 h-4 animate-spin" /> : <ListChecks className="w-4 h-4" />}
+                  Guardar lista ({revisionItemIds.length})
+                </button>
+              </div>
+            </div>
+          )}
+
           {operationsMode === 'revision' && (
             <StockRevisionPanel
               userId={userId}
@@ -822,6 +898,9 @@ export function StockTabPanel({
               warehouses={warehouses}
               stockedCount={stockedCount}
               role="manager"
+              catalogItems={revisionSelectableItems.length > 0 ? revisionSelectableItems : scopedItems}
+              storeIngredients={storeIngredients}
+              commercialBrands={commercialBrands}
               controlledActiveCount={activeCount}
               skipCountsFetch
               onRequestRefresh={loadStockCounts}
@@ -834,7 +913,7 @@ export function StockTabPanel({
 
       {/* ── Historial ── */}
       {section === 'history' && (
-        <div className="space-y-4">
+        <div className="p-4 sm:p-5 space-y-5">
           {loadingCount && completedCounts.length === 0 ? (
             <div className="flex justify-center py-16">
               <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
@@ -953,88 +1032,7 @@ export function StockTabPanel({
 
       {/* ── Inventario ── */}
       {section === 'inventory' && (
-        <section>
-          <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-            <div>
-              <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                <Boxes className="w-5 h-5 text-gray-500" />
-                Ingredientes y suministros
-              </h3>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                Vista general del almacén · {inventoryStats.total} artículo{inventoryStats.total === 1 ? '' : 's'}
-              </p>
-            </div>
-            <button type="button" onClick={() => setShowAddIngredient(true)} className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-xl text-sm font-semibold hover:opacity-90 transition-opacity">
-              <Plus className="w-4 h-4" /> Añadir ingrediente
-            </button>
-          </div>
-          <div className="flex flex-wrap gap-2 mb-4">
-            {[
-              { id: 'all' as const, label: 'Todos', count: inventoryStats.total },
-              { id: 'ok' as const, label: 'OK', count: inventoryStats.ok },
-              { id: 'low' as const, label: 'Bajo mínimo', count: inventoryStats.low },
-              { id: 'out' as const, label: 'Sin stock', count: inventoryStats.out },
-              ...(inventoryStats.negative > 0 ? [{ id: 'negative' as const, label: 'Negativo', count: inventoryStats.negative }] : []),
-            ].map((chip) => (
-              <button key={chip.id} type="button" onClick={() => setInventoryFilter(chip.id)} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${inventoryFilter === chip.id ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-900 border-transparent' : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}`}>
-                {chip.label}
-                <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${inventoryFilter === chip.id ? 'bg-white/20 dark:bg-gray-900/20' : 'bg-gray-100 dark:bg-gray-700'}`}>{chip.count}</span>
-              </button>
-            ))}
-          </div>
-          <div className="overflow-x-auto -mx-1 px-1">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden min-w-[640px]">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-gray-50 dark:bg-gray-900/40 text-left text-xs text-gray-500 uppercase tracking-wider">
-                  <th className="px-4 py-3">Producto</th>
-                  <th className="px-4 py-3">Tipo</th>
-                  <th className="px-4 py-3">SKU</th>
-                  <th className="px-4 py-3 text-right">Stock</th>
-                  <th className="px-4 py-3 text-right">Mínimo</th>
-                  <th className="px-4 py-3">Estado</th>
-                  <th className="px-4 py-3 w-28" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
-                {inventoryRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="px-4 py-12 text-center text-gray-400">
-                      {activeProducts.length === 0 ? 'No hay ingredientes en esta tienda. Pulsa «Añadir ingrediente» para empezar.' : 'Ningún artículo coincide con este filtro.'}
-                    </td>
-                  </tr>
-                ) : inventoryRows.map((item) => {
-                  const qty = Number(item.stockQuantity || 0);
-                  const min = Number(item.minStock || 0);
-                  const isUnloaded = qty === 0;
-                  const category = item.stockCategory && STOCK_CATEGORY_LABELS[item.stockCategory] ? STOCK_CATEGORY_LABELS[item.stockCategory] : item.category || '—';
-                  return (
-                    <tr key={item._id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
-                      <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">{item.name}</td>
-                      <td className="px-4 py-3 text-gray-500 text-xs">{category}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-gray-500">{item.sku || '—'}</td>
-                      <td className="px-4 py-3 text-right">
-                        <span className="inline-flex items-center gap-1.5 justify-end">
-                          <StockSemaphore qty={qty} min={min} />
-                          <span className="font-semibold">{qty}</span>
-                          <span className="text-gray-400 text-xs">{item.unit || 'ud'}</span>
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right text-gray-500">{min > 0 ? `${min} ${item.unit || 'ud'}` : '—'}</td>
-                      <td className="px-4 py-3"><StockStatusBadge item={item} /></td>
-                      <td className="px-4 py-3 text-right">
-                        {isUnloaded && (
-                          <button type="button" onClick={() => goToOperations('pending')} className="text-xs font-semibold text-amber-700 dark:text-amber-400 hover:underline">Cargar</button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          </div>
-        </section>
+        <InventoryPanel seedStockItems={scopedItems} />
       )}
 
       <AddIngredientModal

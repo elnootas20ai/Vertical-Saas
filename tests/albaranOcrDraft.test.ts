@@ -1,50 +1,51 @@
 import { describe, expect, it } from 'vitest';
-import { purchaseInvoiceFromAlbaranOcr } from '../src/app/lib/albaranOcrDraft.ts';
+import {
+  purchaseInvoiceFromAlbaranOcr,
+  purchaseInvoiceFromStandaloneAlbaranOcr,
+} from '../src/app/lib/albaranOcrDraft.ts';
+import type { OcrResult } from '../src/app/lib/ocrApi.ts';
 
-describe('purchaseInvoiceFromAlbaranOcr', () => {
-  it('monta un albarán enlazado al pedido con las líneas del OCR', () => {
-    const inv = purchaseInvoiceFromAlbaranOcr(
-      {
-        _id: 'po-1',
-        orderNumber: 'PC-0001',
-        supplierId: 'sup-1',
-        supplierName: 'Bebidas SA',
-        taxRate: 21,
-      },
-      {
-        documentType: 'albaran',
-        documentTypeLabel: 'Albarán',
-        documentNumber: 'AB-88',
-        date: '19/08/2026',
-        emitter: 'Bebidas SA',
-        emitterCIF: null,
-        receiver: null,
-        receiverCIF: null,
-        subtotal: 10,
-        taxRate: 21,
-        taxAmount: 2.1,
-        total: 12.1,
-        currency: 'EUR',
-        confidenceScore: 90,
-        lines: [
-          { description: 'Cola 1L', quantity: 12, unitPrice: 0.8, total: 9.6 },
-        ],
-        workerName: null,
-        workerDNI: null,
-        periodStart: null,
-        periodEnd: null,
-        contractDuration: null,
-        notes: null,
-      },
+const sampleOcr = {
+  documentType: 'albaran',
+  documentTypeLabel: 'Albarán',
+  emitter: 'Proveedor Demo',
+  emitterCIF: 'B12345678',
+  documentNumber: 'ALB-9',
+  date: '2026-09-01',
+  taxRate: 21,
+  taxAmount: 2.1,
+  total: 12.1,
+  subtotal: 10,
+  lines: [
+    { description: 'Harina', quantity: 5, unitPrice: 2, total: 10, catalogItemId: 'c1' },
+  ],
+  notes: null,
+  currency: 'EUR',
+  receiver: null,
+  confidenceScore: 90,
+  parseError: false,
+} as OcrResult;
+
+describe('albaranOcrDraft', () => {
+  it('purchaseInvoiceFromAlbaranOcr enlaza pedido', () => {
+    const draft = purchaseInvoiceFromAlbaranOcr(
+      { _id: 'po1', orderNumber: 'PC-1', supplierId: 's1', supplierName: 'Makro', taxRate: 21 },
+      sampleOcr,
     );
-    expect(inv._id).toBe('');
-    expect(inv.documentKind).toBe('albaran');
-    expect(inv.entryMethod).toBe('ocr');
-    expect(inv.invoiceNumber).toBe('AB-88');
-    expect(inv.date).toBe('2026-08-19');
-    expect(inv.linkedPurchaseOrderId).toBe('po-1');
-    expect(inv.lines).toHaveLength(1);
-    expect(inv.lines[0].itemName).toBe('Cola 1L');
-    expect(inv.lines[0].quantity).toBe(12);
+    expect(draft.documentKind).toBe('albaran');
+    expect(draft.linkedPurchaseOrderId).toBe('po1');
+    expect(draft.supplierId).toBe('s1');
+    expect(draft.ocrData?.emitterCIF).toBe('B12345678');
+    expect(draft.ocrStockReceivedAt || '').toBe('');
+  });
+
+  it('purchaseInvoiceFromStandaloneAlbaranOcr no fuerza pedido', () => {
+    const draft = purchaseInvoiceFromStandaloneAlbaranOcr(sampleOcr);
+    expect(draft.documentKind).toBe('albaran');
+    expect(draft.linkedPurchaseOrderId || '').toBe('');
+    expect(draft.supplierName).toBe('Proveedor Demo');
+    expect(draft.supplierCif).toBe('B12345678');
+    expect(draft.lines).toHaveLength(1);
+    expect(draft.ocrStockReceivedAt || '').toBe('');
   });
 });
