@@ -429,17 +429,11 @@ export function isTpvTabletBindingAllowedForAuth(params: {
   const boundAuth = String(binding.authUserId || '').trim();
   if (boundAuth && boundAuth !== selfId) return false;
 
-  // Quien activó el código en este dispositivo: solo OK si la empresa del binding
-  // está en SU lista (evita arrastrar PDV de otro negocio al cambiar de cuenta).
-  if (boundAuth === selfId) {
-    if (params.businessesSettled) {
-      const list = Array.isArray(params.businesses) ? params.businesses : [];
-      return list.some(
-        (b) => normalizeBusinessScopeId(b.business_id || b.id) === businessId,
-      );
-    }
-    return true;
-  }
+  // Quien activó el código en este dispositivo: OK siempre.
+  // Debe ir ANTES de mirar la lista de empresas: si el API tarda, viene vacío
+  // o no trae aún ese negocio, no se puede echar del TPV tras un login correcto.
+  // Cambio de cuenta: boundAuth !== selfId (arriba) + AuthContext limpian el binding.
+  if (boundAuth === selfId) return true;
 
   const dataUserId = String(binding.dataUserId || '').trim();
   if (!dataUserId) return false;

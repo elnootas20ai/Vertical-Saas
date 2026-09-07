@@ -8374,21 +8374,21 @@ export function TpvRegisterGate({
   closingBusyRef.current = closingBusy;
 
   /**
-   * Tablet: el gesto/botón Atrás del navegador debe salir al código de tienda.
-   * Si no, history.back() cae en /saas con sesión activa y parece que «no deja volver».
+   * Tablet: el gesto/botón Atrás NO debe cerrar la sesión ni ir al código de tienda.
+   * Solo re-apila historial para quedarse en el TPV (salida = botón Salir explícito).
    * Mientras el modal de cierre está abierto, manda el trap de abajo.
    */
   useEffect(() => {
     if (!isTabletSession || showClosing) return;
     window.history.pushState({ tpvTabletSession: true }, '');
     const onPopState = () => {
-      void leaveTpvTabletSession(logout, { navigate });
+      window.history.pushState({ tpvTabletSession: true }, '');
     };
     window.addEventListener('popstate', onPopState);
     return () => {
       window.removeEventListener('popstate', onPopState);
     };
-  }, [isTabletSession, showClosing, logout, navigate]);
+  }, [isTabletSession, showClosing]);
 
   /** Evita que el botón/gesto Atrás de la tablet cierre el modal y salte al dashboard CEO. */
   useEffect(() => {
