@@ -781,6 +781,20 @@ export async function activateUberPosForBusiness(req, res) {
       partnerStoreId: uberIntegratorStoreId(businessId, storeId),
       businessId,
     });
+    let activationMenuResult = null;
+    try {
+      activationMenuResult = await pushUberMenuFromCatalog(req, {
+        businessId,
+        storeId,
+        storeName: binding.storeName,
+        brandId: binding.brandId,
+      });
+    } catch (menuError) {
+      logger.warn(
+        { businessId, storeId, error: errorMsg(menuError) },
+        'Uber activate POS: no se pudo refrescar el menú durante provisioning',
+      );
+    }
     const { accessToken: appAccessToken } = await getUberEatsAppAccessToken();
     let posData = await getUberEatsPosData(appAccessToken, storeId);
     let posIntegrationEnabled = integrationEnabledFromPosData(posData);
@@ -798,6 +812,10 @@ export async function activateUberPosForBusiness(req, res) {
       environment: binding.environment,
       posIntegrationEnabled,
       provisionedAt: posIntegrationEnabled ? now : binding.provisionedAt,
+      ...(activationMenuResult ? {
+        menuPushedAt: now,
+        menuItemCount: Number(activationMenuResult.itemCount || 0),
+      } : {}),
     });
     const integrations = binding.primary
       ? await saveUberPatch(req, businessId, current, {
@@ -805,6 +823,10 @@ export async function activateUberPosForBusiness(req, res) {
         posDataCheckedAt: now,
         salesPointId,
         ...(posIntegrationEnabled ? { provisionedAt: now } : {}),
+        ...(activationMenuResult ? {
+          menuPushedAt: now,
+          menuItemCount: Number(activationMenuResult.itemCount || 0),
+        } : {}),
       })
       : sanitizeDeliveryIntegrations(current);
     if (!posIntegrationEnabled) {

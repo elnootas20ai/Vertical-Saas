@@ -59,9 +59,27 @@ export function UberStoreBindingsPanel({
         getUberBindingOptionsRequest(businessId),
       ]);
       const nextBindings = bindingResult.bindings || [];
+      const nextBrands = [...(optionResult.brands || [])];
+      const nextPdvs = [...(optionResult.pdvs || [])];
+      for (const binding of nextBindings) {
+        if (binding.brandId && !nextBrands.some((brand) => brand.id === binding.brandId)) {
+          nextBrands.push({
+            id: binding.brandId,
+            name: binding.brandName || 'Marca vinculada',
+          });
+        }
+        if (binding.salesPointId && !nextPdvs.some((pdv) => pdv.id === binding.salesPointId)) {
+          nextPdvs.push({
+            id: binding.salesPointId,
+            name: binding.salesPointName || 'PDV vinculado',
+            code: '',
+            workCenterId: binding.workCenterId || '',
+          });
+        }
+      }
       setBindings(nextBindings);
-      setBrands(optionResult.brands || []);
-      setPdvs(optionResult.pdvs || []);
+      setBrands(nextBrands);
+      setPdvs(nextPdvs);
       setDrafts(Object.fromEntries(nextBindings.map((binding) => [
         binding.storeId,
         {
