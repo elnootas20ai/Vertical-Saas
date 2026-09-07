@@ -7,6 +7,11 @@ import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
+import {
+  filterPointsOfSaleStrictlyForBusiness,
+  normalizeBusinessScopeId,
+  workCentersStrictlyForBusiness,
+} from '../../lib/businessStoreScope';
 import { getApiBase } from '../../lib/apiBase';
 import {
   completeUberEatsOAuthRequest,
@@ -59,9 +64,9 @@ const UBER_ORDER_CHECK_KEYS = new Set([
 
 export function DeliveryIntegrations() {
   const { user } = useAuth();
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, businesses } = useBusiness();
   const activeStoreScope = useActiveStoreScope();
-  const businessId = currentBusiness?.business_id || '';
+  const businessId = normalizeBusinessScopeId(currentBusiness?.business_id || currentBusiness?.id || '');
   const isRestaurant = isRestaurantBusinessType(currentBusiness?.businessType);
   const pageTitle = isRestaurant ? 'Integradores' : 'Integraciones';
   const canSeeTechSetup = isVertialSuperAdminEmail(user?.email);
@@ -575,7 +580,31 @@ export function DeliveryIntegrations() {
   const uberMenuPushed = Boolean(integrations.uber?.menuPushedAt);
   const uberOnline = String(integrations.uber?.lastStoreStatus || '').toUpperCase() === 'ONLINE';
   const uberReceivingOrders = uberOnline && uberPosReady;
-  const businessPdvs = (activeStoreScope?.pointsOfSale || []).filter((pdv) => pdv.active !== false);
+  const businessPdvs = useMemo(() => {
+    const scopedWorkCenters = workCentersStrictlyForBusiness(
+      activeStoreScope?.retailWorkCenters || [],
+      businessId,
+    );
+    const foreignBusinessNames = (businesses || [])
+      .filter((business) => normalizeBusinessScopeId(
+        business.business_id || business.id || '',
+      ) !== businessId)
+      .map((business) => String(business.name || '').trim())
+      .filter(Boolean);
+    return filterPointsOfSaleStrictlyForBusiness(
+      activeStoreScope?.pointsOfSale || [],
+      {
+        businessId,
+        workCenters: scopedWorkCenters,
+        foreignBusinessNames,
+      },
+    );
+  }, [
+    activeStoreScope?.pointsOfSale,
+    activeStoreScope?.retailWorkCenters,
+    businessId,
+    businesses,
+  ]);
   const soleBusinessPdv = businessPdvs.length === 1 ? businessPdvs[0] : null;
   const linkedPdvName = businessPdvs.find((pdv) => pdv._id === integrations.uber?.salesPointId)?.name
     || soleBusinessPdv?.name
@@ -981,7 +1010,6 @@ export function DeliveryIntegrations() {
                         <UberStoreBindingsPanel
                           businessId={businessId}
                           stores={uberStores}
-                          pdvs={businessPdvs}
                           onIntegrations={applyIntegrations}
                         />
                       )}

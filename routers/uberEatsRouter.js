@@ -6,6 +6,7 @@ import {
   completeUberEatsOAuth,
   deleteUberBindingForBusiness,
   getUberEatsOAuthConfig,
+  getUberBindingOptionsForBusiness,
   getUberCertStatus,
   getUberDeliveryStoreForBusiness,
   getUberPosDataForBusiness,
@@ -33,6 +34,7 @@ uberEatsRouter.post('/oauth/callback', completeUberEatsOAuth);
 uberEatsRouter.get('/stores', listUberStoresForBusiness);
 uberEatsRouter.post('/stores/select', selectUberStoreForBusiness);
 uberEatsRouter.get('/bindings', listUberBindingsForBusiness);
+uberEatsRouter.get('/binding-options', getUberBindingOptionsForBusiness);
 uberEatsRouter.post('/bindings/save', saveUberBindingForBusiness);
 uberEatsRouter.delete('/bindings', deleteUberBindingForBusiness);
 uberEatsRouter.post('/store/pdv', selectUberSalesPointForBusiness);

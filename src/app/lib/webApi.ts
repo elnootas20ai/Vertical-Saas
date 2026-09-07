@@ -328,6 +328,16 @@ export interface UberStoreBinding {
   lastStoreStatusAt: string;
 }
 
+export interface UberBindingOption {
+  id: string;
+  name: string;
+}
+
+export interface UberPdvBindingOption extends UberBindingOption {
+  code: string;
+  workCenterId: string;
+}
+
 export interface UberSandboxOrder {
   id: string;
   businessId: string;
@@ -464,6 +474,14 @@ export async function listUberBindingsRequest(businessId: string) {
   return authRequest<{ ok: boolean; bindings: UberStoreBinding[] }>(
     `/api/uber-eats/bindings?businessId=${encodeURIComponent(businessId)}`,
   );
+}
+
+export async function getUberBindingOptionsRequest(businessId: string) {
+  return authRequest<{
+    ok: boolean;
+    pdvs: UberPdvBindingOption[];
+    brands: UberBindingOption[];
+  }>(`/api/uber-eats/binding-options?businessId=${encodeURIComponent(businessId)}`);
 }
 
 export async function saveUberBindingRequest(

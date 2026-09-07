@@ -7,30 +7,24 @@ import {
   VERTIAL_BTN_PRIMARY,
   VERTIAL_BTN_SECONDARY,
 } from '../../../lib/vertialUiTokens';
-import { listBrandsRequest, type Brand } from '../../../lib/brandsApi';
 import {
   activateUberEatsPosRequest,
   deleteUberBindingRequest,
+  getUberBindingOptionsRequest,
   listUberBindingsRequest,
   pushUberEatsMenuRequest,
   saveUberBindingRequest,
   setUberEatsStoreStatusRequest,
   type DeliveryIntegrations,
   type UberEatsStoreOption,
+  type UberBindingOption,
+  type UberPdvBindingOption,
   type UberStoreBinding,
 } from '../../../lib/webApi';
-
-interface UberBindingPdv {
-  _id: string;
-  name: string;
-  workCenterId?: string;
-  active?: boolean;
-}
 
 interface Props {
   businessId: string;
   stores: UberEatsStoreOption[];
-  pdvs: UberBindingPdv[];
   onIntegrations?: (integrations: DeliveryIntegrations) => void;
 }
 
@@ -43,11 +37,11 @@ interface BindingDraft {
 export function UberStoreBindingsPanel({
   businessId,
   stores,
-  pdvs,
   onIntegrations,
 }: Props) {
   const [bindings, setBindings] = useState<UberStoreBinding[]>([]);
-  const [brands, setBrands] = useState<Brand[]>([]);
+  const [brands, setBrands] = useState<UberBindingOption[]>([]);
+  const [pdvs, setPdvs] = useState<UberPdvBindingOption[]>([]);
   const [drafts, setDrafts] = useState<Record<string, BindingDraft>>({});
   const [newStoreId, setNewStoreId] = useState('');
   const [newBrandId, setNewBrandId] = useState('');
@@ -60,13 +54,14 @@ export function UberStoreBindingsPanel({
     if (!businessId) return;
     setLoading(true);
     try {
-      const [bindingResult, brandResult] = await Promise.all([
+      const [bindingResult, optionResult] = await Promise.all([
         listUberBindingsRequest(businessId),
-        listBrandsRequest(businessId),
+        getUberBindingOptionsRequest(businessId),
       ]);
       const nextBindings = bindingResult.bindings || [];
       setBindings(nextBindings);
-      setBrands((brandResult || []).filter((brand) => brand.active !== false && !brand.deletedAt));
+      setBrands(optionResult.brands || []);
+      setPdvs(optionResult.pdvs || []);
       setDrafts(Object.fromEntries(nextBindings.map((binding) => [
         binding.storeId,
         {
@@ -205,14 +200,18 @@ export function UberStoreBindingsPanel({
               <span className="mb-1 block text-[9px] font-bold uppercase text-stone-500">Marca Vertial</span>
               <select value={newBrandId} onChange={(event) => setNewBrandId(event.target.value)} className="w-full rounded-xl border border-blue-200 bg-white px-3 py-2.5 text-xs dark:border-blue-800 dark:bg-stone-950">
                 <option value="">Selecciona marca</option>
-                {brands.map((brand) => <option key={brand._id} value={brand._id}>{brand.name}</option>)}
+                {brands.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}
               </select>
             </label>
             <label>
               <span className="mb-1 block text-[9px] font-bold uppercase text-stone-500">PDV receptor</span>
               <select value={newPdvId} onChange={(event) => setNewPdvId(event.target.value)} className="w-full rounded-xl border border-blue-200 bg-white px-3 py-2.5 text-xs dark:border-blue-800 dark:bg-stone-950">
                 <option value="">Selecciona PDV</option>
-                {pdvs.filter((pdv) => pdv.active !== false).map((pdv) => <option key={pdv._id} value={pdv._id}>{pdv.name}</option>)}
+                {pdvs.map((pdv) => (
+                  <option key={pdv.id} value={pdv.id}>
+                    {pdv.name}{pdv.code ? ` · ${pdv.code}` : ''}
+                  </option>
+                ))}
               </select>
             </label>
           </div>
@@ -292,7 +291,7 @@ export function UberStoreBindingsPanel({
                       className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-xs dark:border-stone-700 dark:bg-stone-950"
                     >
                       <option value="">Selecciona marca</option>
-                      {brands.map((brand) => <option key={brand._id} value={brand._id}>{brand.name}</option>)}
+                      {brands.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}
                     </select>
                   </label>
                   <label>
@@ -306,8 +305,10 @@ export function UberStoreBindingsPanel({
                       className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-xs dark:border-stone-700 dark:bg-stone-950"
                     >
                       <option value="">Selecciona PDV</option>
-                      {pdvs.filter((pdv) => pdv.active !== false).map((pdv) => (
-                        <option key={pdv._id} value={pdv._id}>{pdv.name}</option>
+                      {pdvs.map((pdv) => (
+                        <option key={pdv.id} value={pdv.id}>
+                          {pdv.name}{pdv.code ? ` · ${pdv.code}` : ''}
+                        </option>
                       ))}
                     </select>
                   </label>

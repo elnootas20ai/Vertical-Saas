@@ -444,6 +444,36 @@ export async function listUberBindingsForBusiness(req, res) {
   }
 }
 
+/** GET /api/uber-eats/binding-options?businessId= */
+export async function getUberBindingOptionsForBusiness(req, res) {
+  try {
+    const businessId = String(req.query.businessId || '').trim();
+    if (!businessId) return badRequest(res, 'Falta businessId');
+    if (!(await requireUberBusinessAccess(req, res, businessId))) return;
+    const [{ pdvs }, brands] = await Promise.all([
+      loadBusinessActivePdvs(req, businessId),
+      listBrandsByBusiness(req, businessId),
+    ]);
+    return res.json({
+      ok: true,
+      pdvs: pdvs.map((pdv) => ({
+        id: String(pdv._id || ''),
+        name: String(pdv.name || ''),
+        code: String(pdv.code || ''),
+        workCenterId: String(pdv.workCenterId || ''),
+      })),
+      brands: brands
+        .filter((brand) => !brand.deletedAt && brand.active !== false)
+        .map((brand) => ({
+          id: String(brand._id || ''),
+          name: String(brand.name || ''),
+        })),
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: errorMsg(error) });
+  }
+}
+
 /** POST /api/uber-eats/bindings/save */
 export async function saveUberBindingForBusiness(req, res) {
   try {
