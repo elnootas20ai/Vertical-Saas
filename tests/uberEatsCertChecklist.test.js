@@ -63,6 +63,18 @@ describe('parseUberWebhookEvent', () => {
     expect(ev.resourceHref).toContain('ord-9');
   });
 
+  it('parses store provisioning webhooks with top-level store id', () => {
+    const ev = parseUberWebhookEvent({
+      event_type: 'store.provisioned',
+      store_id: 'store-2',
+      perform_refresh_menu: true,
+      resource_href: 'https://api.uber.com/v1/eats/stores/store-2/pos_data',
+      webhook_meta: { webhook_msg_uuid: 'provision-event-1' },
+    });
+    expect(ev.storeId).toBe('store-2');
+    expect(ev.eventId).toBe('provision-event-1');
+  });
+
   it('validates the webhook signature against the raw body', () => {
     const previous = process.env.UBER_EATS_CLIENT_SECRET;
     process.env.UBER_EATS_CLIENT_SECRET = 'webhook-test-secret';

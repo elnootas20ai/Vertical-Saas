@@ -22,7 +22,11 @@ import {
   verifyUberWebhookSignature,
 } from '../services/uberEatsWebhook.js';
 import { getUberEatsEnv, isUberEatsSandbox } from '../services/uberEatsOAuth.js';
-import { getUberEatsAppAccessToken } from '../services/uberEatsApi.js';
+import {
+  getUberEatsAppAccessToken,
+  isUberPosOrderManagerEnabled,
+} from '../services/uberEatsApi.js';
+import { getUberEatsPosData } from '../services/uberEatsStores.js';
 import { autoAcceptUberOrderAfterIngest } from '../services/uberEatsOrderSync.js';
 import { pushUberMenuFromCatalog } from '../services/uberEatsMenu.js';
 import logger from '../services/logger.js';
@@ -338,21 +342,76 @@ async function handleUberPrimaryWebhook(req, res) {
 
         if (event.eventType === 'store.provisioned' && event.storeId) {
           if (cfg?.business_id) {
+            let menuResult = null;
+            if (req.body?.perform_refresh_menu === true) {
+              try {
+                menuResult = await pushUberMenuFromCatalog(req, {
+                  businessId: cfg.business_id,
+                  storeId: event.storeId,
+                  storeName: String(binding?.storeName || cfg.integrations?.uber?.storeName || ''),
+                  brandId: String(binding?.brandId || ''),
+                });
+              } catch (error) {
+                logger.warn(
+                  { businessId: cfg.business_id, storeId: event.storeId, error: error?.message },
+                  'Uber store.provisioned: refresco de menú falló',
+                );
+              }
+            }
+            let posIntegrationEnabled = false;
+            try {
+              const { accessToken } = await getUberEatsAppAccessToken();
+              if (menuResult) await new Promise((resolve) => setTimeout(resolve, 750));
+              const posData = await getUberEatsPosData(accessToken, event.storeId);
+              posIntegrationEnabled = isUberPosOrderManagerEnabled(posData);
+            } catch (error) {
+              logger.warn(
+                { businessId: cfg.business_id, storeId: event.storeId, error: error?.message },
+                'Uber store.provisioned: no se pudo verificar pos_data',
+              );
+            }
             const current = await getWebConfigByBusinessId(req, cfg.business_id);
             const prevUber = current?.integrations?.uber || {};
+            const now = new Date().toISOString();
             const next = {
               ...(current?.integrations || {}),
               uber: {
                 ...prevUber,
                 storeId: event.storeId,
                 enabled: true,
-                provisionedAt: prevUber.provisionedAt || new Date().toISOString(),
+                posIntegrationEnabled,
+                posDataCheckedAt: now,
+                ...(posIntegrationEnabled ? { provisionedAt: prevUber.provisionedAt || now } : {}),
+                ...(menuResult ? {
+                  menuPushedAt: now,
+                  menuItemCount: Number(menuResult.itemCount || 0),
+                } : {}),
               },
             };
-            const { buildWebConfigDocument } = await import('../services/couchdb.js');
             const doc = buildWebConfigDocument(cfg.business_id, { integrations: next }, current);
             await putDocument(req, getWebDbName(), doc._id, doc);
-            logger.info({ businessId: cfg.business_id, storeId: event.storeId }, 'Uber store.provisioned guardado');
+            if (binding) {
+              await saveUberStoreBinding(req, {
+                ...binding,
+                businessId: cfg.business_id,
+                environment: binding.environment,
+                posIntegrationEnabled,
+                ...(posIntegrationEnabled ? { provisionedAt: binding.provisionedAt || now } : {}),
+                ...(menuResult ? {
+                  menuPushedAt: now,
+                  menuItemCount: Number(menuResult.itemCount || 0),
+                } : {}),
+              });
+            }
+            logger.info(
+              {
+                businessId: cfg.business_id,
+                storeId: event.storeId,
+                posIntegrationEnabled,
+                menuRefreshed: Boolean(menuResult),
+              },
+              'Uber store.provisioned guardado',
+            );
           }
           await markEventProcessed();
           return;

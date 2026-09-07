@@ -776,7 +776,7 @@ export async function activateUberPosForBusiness(req, res) {
     let posData = await getUberEatsPosData(appAccessToken, storeId);
     let posIntegrationEnabled = integrationEnabledFromPosData(posData);
     // La nominación como order manager puede tardar unos segundos en reflejarse.
-    for (let attempt = 0; !posIntegrationEnabled && attempt < 2; attempt += 1) {
+    for (let attempt = 0; !posIntegrationEnabled && attempt < 6; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 750));
       posData = await getUberEatsPosData(appAccessToken, storeId);
       posIntegrationEnabled = integrationEnabledFromPosData(posData);

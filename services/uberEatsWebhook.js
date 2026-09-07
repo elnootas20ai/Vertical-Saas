@@ -60,8 +60,17 @@ export function verifyUberWebhookAccessToken(token) {
 export function parseUberWebhookEvent(body) {
   const eventType = String(body?.event_type || '').trim();
   const orderId = String(body?.meta?.resource_id || body?.meta?.order_id || '').trim();
-  const storeId = String(body?.meta?.user_id || body?.meta?.store_id || '').trim();
+  const storeId = String(
+    body?.store_id
+    || body?.meta?.user_id
+    || body?.meta?.store_id
+    || '',
+  ).trim();
   const resourceHref = String(body?.resource_href || '').trim();
-  const eventId = String(body?.event_id || '').trim();
+  const eventId = String(
+    body?.event_id
+    || body?.webhook_meta?.webhook_msg_uuid
+    || '',
+  ).trim();
   return { eventType, orderId, storeId, resourceHref, eventId };
 }
