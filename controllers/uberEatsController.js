@@ -19,6 +19,7 @@ import {
   assertUberEatsSandbox,
   getUberEatsPublicConfig,
   isUberEatsConfigured,
+  isUberEatsSandbox,
   resolveUberEatsRedirectUri,
   verifyUberOAuthState,
 } from '../services/uberEatsOAuth.js';
