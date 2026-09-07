@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { buildUberMenuFromCatalogItems } from '../services/uberEatsMenu.js';
 import {
+  issueUberWebhookAccessToken,
   parseUberWebhookEvent,
+  verifyUberWebhookAccessToken,
   verifyUberWebhookSignature,
 } from '../services/uberEatsWebhook.js';
 import crypto from 'node:crypto';
@@ -71,6 +73,16 @@ describe('parseUberWebhookEvent', () => {
       .digest('hex');
     expect(verifyUberWebhookSignature(rawBody, signature)).toBe(true);
     expect(verifyUberWebhookSignature(rawBody, 'invalid')).toBe(false);
+    if (previous === undefined) delete process.env.UBER_EATS_CLIENT_SECRET;
+    else process.env.UBER_EATS_CLIENT_SECRET = previous;
+  });
+
+  it('validates the OAuth bearer issued for Uber webhooks', () => {
+    const previous = process.env.UBER_EATS_CLIENT_SECRET;
+    process.env.UBER_EATS_CLIENT_SECRET = 'webhook-test-secret';
+    const token = issueUberWebhookAccessToken(300);
+    expect(verifyUberWebhookAccessToken(token)).toBe(true);
+    expect(verifyUberWebhookAccessToken(`${token}x`)).toBe(false);
     if (previous === undefined) delete process.env.UBER_EATS_CLIENT_SECRET;
     else process.env.UBER_EATS_CLIENT_SECRET = previous;
   });

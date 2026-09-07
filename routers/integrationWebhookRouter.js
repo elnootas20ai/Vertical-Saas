@@ -15,7 +15,9 @@ import {
 import { broadcastToUser, broadcastToBusiness } from '../services/sseService.js';
 import {
   fetchUberOrderDetails,
+  issueUberWebhookAccessToken,
   parseUberWebhookEvent,
+  verifyUberWebhookAccessToken,
   verifyUberWebhookSignature,
 } from '../services/uberEatsWebhook.js';
 import { getUberEatsEnv, isUberEatsSandbox } from '../services/uberEatsOAuth.js';
@@ -263,9 +265,18 @@ async function handlePlatformWebhook(platform, req, res) {
 async function handleUberPrimaryWebhook(req, res) {
   const rawBody = typeof req.rawBody === 'string' ? req.rawBody : JSON.stringify(req.body || {});
   const signature = req.headers['x-uber-signature'] || req.headers['X-Uber-Signature'];
+  const authorization = String(req.headers.authorization || '');
+  const bearerToken = authorization.toLowerCase().startsWith('bearer ')
+    ? authorization.slice(7).trim()
+    : '';
+  const hasValidSignature = Boolean(signature && verifyUberWebhookSignature(rawBody, signature));
+  const hasValidBearer = verifyUberWebhookAccessToken(bearerToken);
 
-  if (!signature || !verifyUberWebhookSignature(rawBody, signature)) {
-    logger.warn({ hasSignature: Boolean(signature) }, 'Uber webhook: firma ausente o inválida');
+  if (!hasValidSignature && !hasValidBearer) {
+    logger.warn(
+      { hasSignature: Boolean(signature), hasBearer: Boolean(bearerToken) },
+      'Uber webhook: autenticación ausente o inválida',
+    );
     return res.status(401).end();
   }
 
@@ -622,17 +633,14 @@ webhookRouter.post('/ubereats/token', (req, res) => {
   if (!id || !secret || clientId !== id || clientSecret !== secret || grant !== 'client_credentials') {
     return res.status(401).json({ error: 'invalid_client' });
   }
-  const token = Buffer.from(`uber-wh:${Date.now()}:${cryptoRandom()}`).toString('base64url');
+  const expiresIn = 3600;
+  const token = issueUberWebhookAccessToken(expiresIn);
   return res.json({
     access_token: token,
     token_type: 'Bearer',
-    expires_in: 3600,
+    expires_in: expiresIn,
   });
 });
-
-function cryptoRandom() {
-  return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
-}
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
