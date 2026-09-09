@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { resolveEffectiveSalesPointRef } from '../src/app/lib/workerStoreAssignment';
+import {
+  listMemberSiteLabels,
+  resolveEffectiveSalesPointRef,
+} from '../src/app/lib/workerStoreAssignment';
 
 describe('resolveEffectiveSalesPointRef', () => {
   it('prioriza employment.salesPointId', () => {
@@ -47,5 +50,42 @@ describe('resolveEffectiveSalesPointRef', () => {
         workCenters: [{ _id: 'a' }, { _id: 'b' }],
       }),
     ).toBe('');
+  });
+});
+
+describe('listMemberSiteLabels', () => {
+  it('usa salesPointId cuando no hay assignments (caso Pol / invite)', () => {
+    expect(
+      listMemberSiteLabels(
+        { salesPointId: 'wc-bad' },
+        [{ _id: 'wc-bad', name: 'LOCAL BADALONA' }],
+      ),
+    ).toEqual(['LOCAL BADALONA']);
+  });
+
+  it('combina assignments activos y salesPointId sin duplicar', () => {
+    expect(
+      listMemberSiteLabels(
+        {
+          salesPointId: 'wc-bad',
+          assignments: [
+            {
+              id: 'a1',
+              type: 'work_center',
+              entityId: 'wc-bad',
+              entityName: 'LOCAL BADALONA',
+              startDate: '2026-01-01',
+              isPrimary: true,
+              status: 'active',
+            },
+          ],
+        },
+        [{ _id: 'wc-bad', name: 'LOCAL BADALONA' }],
+      ),
+    ).toEqual(['LOCAL BADALONA']);
+  });
+
+  it('devuelve vacío si no hay sede', () => {
+    expect(listMemberSiteLabels({}, [])).toEqual([]);
   });
 });

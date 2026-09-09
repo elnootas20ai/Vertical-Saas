@@ -64,6 +64,35 @@ export function hasExplicitSiteAssignment(employment?: Partial<EmploymentInfo> |
   return listActiveSiteAssignments(employment.assignments).length > 0;
 }
 
+/** Nombres de sede/local para listados: assignments activos + fallback salesPointId. */
+export function listMemberSiteLabels(
+  employment?: Partial<EmploymentInfo> | null,
+  workCenters?: Array<{ _id?: string; id?: string; name?: string }> | null,
+): string[] {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  const push = (raw: string) => {
+    const name = String(raw || '').trim();
+    if (!name || seen.has(name)) return;
+    seen.add(name);
+    names.push(name);
+  };
+
+  for (const a of listActiveSiteAssignments(employment?.assignments)) {
+    push(a.entityName || a.entityId);
+  }
+
+  const ref = String(employment?.salesPointId || '').trim();
+  if (ref) {
+    const wc = (workCenters || []).find(
+      (w) => String(w._id || w.id || '').trim() === ref,
+    );
+    push(wc?.name || ref);
+  }
+
+  return names;
+}
+
 /** Asigna (o cambia) el sitio principal de fichaje/TPV y sincroniza salesPointId. */
 export function assignPrimaryWorkSite(
   employment: EmploymentInfo | undefined,

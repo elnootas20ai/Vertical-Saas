@@ -108,7 +108,8 @@ import {
   type PayrollDocumentType,
 } from '../../lib/payrollApi';
 import { PayrollDocumentPreviewModal } from '../../components/saas/PayrollDocumentPreviewModal';
-import { getVertialAccessPermissionModules } from '../../lib/roleCatalog';
+import { getInvitePermissionsForUser, getVertialAccessPermissionModules } from '../../lib/roleCatalog';
+import { getInviteRoleDisplayLabel } from '../../lib/inviteFunctionRoles';
 import { getRetailOpsUiCopy } from '../../lib/retailUiCopy';
 import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import { getHrLocationCopy } from '../../lib/retailLocationCopy';
@@ -644,6 +645,7 @@ export function TeamMemberDetail() {
   // Permissions
   const [permissions, setPermissions] = useState<AccountPermissionMatrix>({});
   const [permissionSaving, setPermissionSaving] = useState('');
+  const [roleSaving, setRoleSaving] = useState(false);
   const [assignmentSaving, setAssignmentSaving] = useState(false);
   const [assignSiteId, setAssignSiteId] = useState('');
 
@@ -664,8 +666,24 @@ export function TeamMemberDetail() {
   const [editingHr, setEditingHr] = useState(false);
   const [hrForm, setHrForm] = useState<EmploymentInfo>(() => buildEmploymentInfo());
   const [savingHr, setSavingHr] = useState(false);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [profileForm, setProfileForm] = useState({ fullName: '', email: '', phone: '' });
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [editingProductivity, setEditingProductivity] = useState(false);
+  const [prodForm, setProdForm] = useState({
+    enabled: false,
+    type: 'hours' as 'hours' | 'units' | 'revenue' | 'custom',
+    target: '',
+    unit: 'h',
+    period: 'monthly' as 'daily' | 'weekly' | 'monthly',
+    nextCostReview: '',
+  });
+  const [savingProductivity, setSavingProductivity] = useState(false);
 
-  const canManageHr = HR_MANAGER_ROLES.has(String(user?.role || ''));
+  const isBusinessOwner = Boolean(
+    currentBusiness?.owner_user_id && user?.user_id === currentBusiness.owner_user_id,
+  );
+  const canManageHr = HR_MANAGER_ROLES.has(String(user?.role || '')) || isBusinessOwner;
   // ─── Load member ────────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -689,7 +707,107 @@ export function TeamMemberDetail() {
     setHrForm(buildEmploymentInfo(member.employment));
     setAssignSiteId(String(member.employment?.salesPointId || '').trim());
     setEditingHr(false);
+    setEditingProfile(false);
+    setEditingProductivity(false);
+    setProfileForm({
+      fullName: member.fullName || '',
+      email: member.email || '',
+      phone: member.phone || '',
+    });
+    const bp = member.employment?.baseProductivity;
+    setProdForm({
+      enabled: Boolean(bp && Number(bp.target) > 0),
+      type: bp?.type || 'hours',
+      target: bp?.target != null ? String(bp.target) : '',
+      unit: bp?.unit || (bp?.type === 'revenue' ? '€' : bp?.type === 'units' ? 'uds' : 'h'),
+      period: bp?.period || 'monthly',
+      nextCostReview: String(member.employment?.nextCostReview || '').slice(0, 10),
+    });
   }, [member]);
+
+  const handleSaveProfile = async () => {
+    if (!member || !canManageHr) return;
+    const fullName = profileForm.fullName.trim();
+    const email = profileForm.email.trim();
+    if (!fullName) {
+      toast.error('El nombre es obligatorio');
+      return;
+    }
+    if (!email || !email.includes('@')) {
+      toast.error('Email no válido');
+      return;
+    }
+    setSavingProfile(true);
+    try {
+      const result = await updateUser(member.user_id, {
+        fullName,
+        email,
+        phone: profileForm.phone.trim(),
+      });
+      if (!result.success || !result.user) {
+        toast.error(result.error || 'No se pudieron guardar los datos');
+        return;
+      }
+      setMember(result.user);
+      setEditingProfile(false);
+      toast.success('Datos personales guardados');
+    } catch {
+      toast.error('Error al guardar datos personales');
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const handleSaveProductivity = async () => {
+    if (!member || !canManageHr) return;
+    setSavingProductivity(true);
+    try {
+      const nextReview = String(prodForm.nextCostReview || '').trim();
+      let baseProductivity: EmploymentInfo['baseProductivity'] | null = null;
+      if (prodForm.enabled) {
+        const target = Number(prodForm.target);
+        if (!Number.isFinite(target) || target <= 0) {
+          toast.error('Indica un objetivo mayor que 0');
+          setSavingProductivity(false);
+          return;
+        }
+        const unit = String(prodForm.unit || '').trim()
+          || (prodForm.type === 'revenue' ? '€' : prodForm.type === 'units' ? 'uds' : 'h');
+        baseProductivity = {
+          type: prodForm.type,
+          target,
+          unit,
+          period: prodForm.period,
+        };
+      }
+      const employment = {
+        ...buildEmploymentInfo(member.employment),
+        nextCostReview: nextReview,
+        // null limpia en mergeEmploymentInfo (undefined se pierde en JSON)
+        baseProductivity: baseProductivity as EmploymentInfo['baseProductivity'],
+      };
+      const patched = applyLaborCostToEmployment(employment);
+      patched.nextCostReview = nextReview;
+      patched.baseProductivity = baseProductivity as EmploymentInfo['baseProductivity'];
+      const result = await updateUser(member.user_id, {
+        employment: {
+          ...patched,
+          baseProductivity: baseProductivity as any,
+        },
+      });
+      if (!result.success || !result.user) {
+        toast.error(result.error || 'No se pudo guardar la productividad');
+        return;
+      }
+      setMember(result.user);
+      setEditingProductivity(false);
+      toast.success('Productividad y revisión guardadas');
+    } catch {
+      toast.error('Error al guardar');
+    } finally {
+      setSavingProductivity(false);
+    }
+  };
 
   const handleSaveHr = async () => {
     if (!member) return;
@@ -1006,6 +1124,31 @@ export function TeamMemberDetail() {
 
   // ─── Permissions handler ──────────────────────────────────────────────────
 
+  const handleRoleChange = async (nextRole: string) => {
+    if (!member || !canManageHr) return;
+    const role = String(nextRole || '').trim();
+    if (!role || role === String(member.role || '').trim()) return;
+    setRoleSaving(true);
+    try {
+      const nextPermissions = getInvitePermissionsForUser(role, roles);
+      const result = await updateUser(member.user_id, {
+        role,
+        permissions: nextPermissions,
+      });
+      if (result.success && result.user) {
+        setMember(result.user);
+        setPermissions(normalizePermissions(result.user.permissions, currentBusiness?.businessType));
+        toast.success(`Función actualizada a «${getInviteRoleDisplayLabel(role, currentBusiness?.businessType) || role}»`);
+      } else {
+        toast.error(result.error || 'No se pudo cambiar la función');
+      }
+    } catch {
+      toast.error('Error al cambiar la función');
+    } finally {
+      setRoleSaving(false);
+    }
+  };
+
   const handlePermissionToggle = async (moduleKey: string, field: 'view' | 'edit') => {
     if (!member) return;
     const next = normalizePermissions(
@@ -1204,7 +1347,7 @@ export function TeamMemberDetail() {
                     {member.status === 'active' ? 'Activo' : member.status === 'pending' ? 'Pendiente' : 'Inactivo'}
                   </span>
                   <span className="flex-shrink-0 rounded-full bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 text-xs font-bold text-blue-700 dark:text-blue-300">
-                    {member.role || 'Usuario'}
+                    {getInviteRoleDisplayLabel(member.role, currentBusiness?.businessType) || member.role || 'Usuario'}
                   </span>
                 </div>
                 <div className="mt-1 flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400 flex-wrap">
@@ -1341,22 +1484,99 @@ export function TeamMemberDetail() {
           <div className="space-y-6">
             {/* Datos personales */}
             <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6">
-              <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
-                <User className="w-4 h-4 text-blue-500" />
-                Datos personales
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                <InfoField label="Nombre completo" value={member.fullName} />
-                <InfoField label="Email" value={member.email} />
-                <InfoField label="Teléfono" value={member.phone} />
-                {emp.emergencyContact?.trim() ? (
-                  <InfoField label="Contacto de emergencia" value={emp.emergencyContact} />
-                ) : null}
-                {emp.emergencyPhone?.trim() ? (
-                  <InfoField label="Teléfono de emergencia" value={emp.emergencyPhone} />
-                ) : null}
-                <InfoField label="Fecha de registro" value={member.createdAt ? formatDateEs(member.createdAt) : undefined} />
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                  <User className="w-4 h-4 text-blue-500" />
+                  Datos personales
+                </h3>
+                {canManageHr && !editingProfile && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProfileForm({
+                        fullName: member.fullName || '',
+                        email: member.email || '',
+                        phone: member.phone || '',
+                      });
+                      setEditingProfile(true);
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-700/40 dark:text-gray-200 dark:hover:bg-gray-700"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                    Editar
+                  </button>
+                )}
               </div>
+              {editingProfile && canManageHr ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div>
+                      <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Nombre completo *</label>
+                      <input
+                        className={inputClassName}
+                        value={profileForm.fullName}
+                        onChange={(e) => setProfileForm((prev) => ({ ...prev, fullName: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Email *</label>
+                      <input
+                        type="email"
+                        className={inputClassName}
+                        value={profileForm.email}
+                        onChange={(e) => setProfileForm((prev) => ({ ...prev, email: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Teléfono</label>
+                      <input
+                        className={inputClassName}
+                        value={profileForm.phone}
+                        onChange={(e) => setProfileForm((prev) => ({ ...prev, phone: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={savingProfile}
+                      onClick={() => void handleSaveProfile()}
+                      className="inline-flex items-center gap-2 rounded-xl bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                    >
+                      {savingProfile ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                      Guardar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={savingProfile}
+                      onClick={() => {
+                        setEditingProfile(false);
+                        setProfileForm({
+                          fullName: member.fullName || '',
+                          email: member.email || '',
+                          phone: member.phone || '',
+                        });
+                      }}
+                      className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <InfoField label="Nombre completo" value={member.fullName} />
+                  <InfoField label="Email" value={member.email} />
+                  <InfoField label="Teléfono" value={member.phone} />
+                  {emp.emergencyContact?.trim() ? (
+                    <InfoField label="Contacto de emergencia" value={emp.emergencyContact} />
+                  ) : null}
+                  {emp.emergencyPhone?.trim() ? (
+                    <InfoField label="Teléfono de emergencia" value={emp.emergencyPhone} />
+                  ) : null}
+                  <InfoField label="Fecha de registro" value={member.createdAt ? formatDateEs(member.createdAt) : undefined} />
+                </div>
+              )}
               <div className="mt-4">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
                   Verificación del correo
@@ -1590,7 +1810,33 @@ export function TeamMemberDetail() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <InfoField label="Rol" value={member.role} />
+                  {canManageHr ? (
+                    <div>
+                      <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">
+                        Función / rol
+                      </label>
+                      <select
+                        className={inputClassName}
+                        value={member.role || 'Usuario'}
+                        disabled={roleSaving}
+                        onChange={(e) => void handleRoleChange(e.target.value)}
+                      >
+                        {roles.map((role) => (
+                          <option key={role.id} value={role.id}>
+                            {getInviteRoleDisplayLabel(role.id, currentBusiness?.businessType) || role.id}
+                          </option>
+                        ))}
+                        {member.role && !roles.some((r) => r.id === member.role) ? (
+                          <option value={member.role}>{member.role}</option>
+                        ) : null}
+                      </select>
+                      <p className="mt-1 text-[10px] text-gray-400">
+                        Al cambiar la función se actualizan los permisos base de ese rol.
+                      </p>
+                    </div>
+                  ) : (
+                    <InfoField label="Rol" value={member.role} />
+                  )}
                   <InfoField label="Fecha de alta" value={emp.startDate ? formatDateEs(emp.startDate) : undefined} />
                   <InfoField label="Grupo de cotización" value={emp.contributionGroup} />
                   <InfoField label="Mutua" value={emp.mutualInsurance} />
@@ -1805,18 +2051,150 @@ export function TeamMemberDetail() {
 
             {/* Productivity */}
             <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6">
-              <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
-                <Target className="w-4 h-4 text-blue-500" />
-                Productividad base
-              </h3>
-              {emp.baseProductivity ? (
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                  <Target className="w-4 h-4 text-blue-500" />
+                  Productividad base y revisión
+                </h3>
+                {canManageHr && !editingProductivity && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const bp = emp.baseProductivity;
+                      setProdForm({
+                        enabled: Boolean(bp && Number(bp.target) > 0),
+                        type: bp?.type || 'hours',
+                        target: bp?.target != null ? String(bp.target) : '',
+                        unit: bp?.unit || (bp?.type === 'revenue' ? '€' : bp?.type === 'units' ? 'uds' : 'h'),
+                        period: bp?.period || 'monthly',
+                        nextCostReview: String(emp.nextCostReview || '').slice(0, 10),
+                      });
+                      setEditingProductivity(true);
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-800 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-200"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                    {emp.baseProductivity || emp.nextCostReview ? 'Editar' : 'Definir'}
+                  </button>
+                )}
+              </div>
+
+              {editingProductivity && canManageHr ? (
                 <div className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <InfoField label="Tipo" value={emp.baseProductivity.type === 'hours' ? 'Horas' : emp.baseProductivity.type === 'units' ? 'Unidades' : emp.baseProductivity.type === 'revenue' ? 'Facturación' : 'Personalizado'} />
-                    <InfoField label="Objetivo" value={`${emp.baseProductivity.target} ${emp.baseProductivity.unit}`} />
-                    <InfoField label="Período" value={emp.baseProductivity.period === 'daily' ? 'Diario' : emp.baseProductivity.period === 'weekly' ? 'Semanal' : 'Mensual'} />
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">
+                      Próxima revisión de coste
+                    </label>
+                    <input
+                      type="date"
+                      className={`${inputClassName} max-w-xs`}
+                      value={prodForm.nextCostReview}
+                      onChange={(e) => setProdForm((prev) => ({ ...prev, nextCostReview: e.target.value }))}
+                    />
                   </div>
-                  {emp.baseProductivity.type === 'hours' && clockinSummary.totalMinutes > 0 && (
+                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200">
+                    <input
+                      type="checkbox"
+                      checked={prodForm.enabled}
+                      onChange={(e) => setProdForm((prev) => ({ ...prev, enabled: e.target.checked }))}
+                      className="rounded border-gray-300"
+                    />
+                    Activar objetivo de productividad
+                  </label>
+                  {prodForm.enabled ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                      <div>
+                        <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Tipo</label>
+                        <select
+                          className={inputClassName}
+                          value={prodForm.type}
+                          onChange={(e) => {
+                            const type = e.target.value as typeof prodForm.type;
+                            setProdForm((prev) => ({
+                              ...prev,
+                              type,
+                              unit: type === 'revenue' ? '€' : type === 'units' ? 'uds' : type === 'hours' ? 'h' : prev.unit || 'uds',
+                            }));
+                          }}
+                        >
+                          <option value="hours">Horas</option>
+                          <option value="units">Unidades</option>
+                          <option value="revenue">Facturación</option>
+                          <option value="custom">Personalizado</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Objetivo</label>
+                        <input
+                          type="number"
+                          min={0}
+                          step="any"
+                          className={inputClassName}
+                          value={prodForm.target}
+                          onChange={(e) => setProdForm((prev) => ({ ...prev, target: e.target.value }))}
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Unidad</label>
+                        <input
+                          className={inputClassName}
+                          value={prodForm.unit}
+                          onChange={(e) => setProdForm((prev) => ({ ...prev, unit: e.target.value }))}
+                          placeholder="h / uds / €"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Período</label>
+                        <select
+                          className={inputClassName}
+                          value={prodForm.period}
+                          onChange={(e) => setProdForm((prev) => ({
+                            ...prev,
+                            period: e.target.value as typeof prev.period,
+                          }))}
+                        >
+                          <option value="daily">Diario</option>
+                          <option value="weekly">Semanal</option>
+                          <option value="monthly">Mensual</option>
+                        </select>
+                      </div>
+                    </div>
+                  ) : null}
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={savingProductivity}
+                      onClick={() => void handleSaveProductivity()}
+                      className="inline-flex items-center gap-2 rounded-xl bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                    >
+                      {savingProductivity ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                      Guardar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={savingProductivity}
+                      onClick={() => setEditingProductivity(false)}
+                      className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              ) : emp.baseProductivity || emp.nextCostReview ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {emp.nextCostReview ? (
+                      <InfoField label="Próxima revisión" value={formatDateEs(emp.nextCostReview)} />
+                    ) : null}
+                    {emp.baseProductivity ? (
+                      <>
+                        <InfoField label="Tipo" value={emp.baseProductivity.type === 'hours' ? 'Horas' : emp.baseProductivity.type === 'units' ? 'Unidades' : emp.baseProductivity.type === 'revenue' ? 'Facturación' : 'Personalizado'} />
+                        <InfoField label="Objetivo" value={`${emp.baseProductivity.target} ${emp.baseProductivity.unit}`} />
+                        <InfoField label="Período" value={emp.baseProductivity.period === 'daily' ? 'Diario' : emp.baseProductivity.period === 'weekly' ? 'Semanal' : 'Mensual'} />
+                      </>
+                    ) : null}
+                  </div>
+                  {emp.baseProductivity?.type === 'hours' && clockinSummary.totalMinutes > 0 && (
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-xs font-semibold text-gray-500">Cumplimiento este mes</span>
@@ -1832,7 +2210,7 @@ export function TeamMemberDetail() {
                       </div>
                     </div>
                   )}
-                  {isRealEstate && emp.baseProductivity.type === 'units' && emp.baseProductivity.target > 0 && (
+                  {isRealEstate && emp.baseProductivity?.type === 'units' && emp.baseProductivity.target > 0 && (
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-xs font-semibold text-gray-500">Visitas este mes vs objetivo</span>
@@ -2602,6 +2980,35 @@ export function TeamMemberDetail() {
             PERMISOS
         ═══════════════════════════════════════════════════════════════════════ */}
         {activeTab === 'permissions' && (
+          <div className="space-y-4">
+            {canManageHr ? (
+              <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                  <label className="flex-1 block text-xs font-semibold text-gray-600 dark:text-gray-400">
+                    Función / rol
+                    <select
+                      className={`${inputClassName} mt-1.5`}
+                      value={member.role || 'Usuario'}
+                      disabled={roleSaving}
+                      onChange={(e) => void handleRoleChange(e.target.value)}
+                    >
+                      {roles.map((role) => (
+                        <option key={role.id} value={role.id}>
+                          {getInviteRoleDisplayLabel(role.id, currentBusiness?.businessType) || role.id}
+                        </option>
+                      ))}
+                      {member.role && !roles.some((r) => r.id === member.role) ? (
+                        <option value={member.role}>{member.role}</option>
+                      ) : null}
+                    </select>
+                  </label>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 sm:max-w-xs">
+                    Al cambiar la función se aplican los permisos base de ese rol. Luego puedes afinarlos abajo.
+                  </p>
+                </div>
+              </div>
+            ) : null}
+
           <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-700">
               <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
@@ -2668,6 +3075,7 @@ export function TeamMemberDetail() {
               </tbody>
             </table>
           </div>
+          </div>
         )}
 
         {/* ═══════════════════════════════════════════════════════════════════════
@@ -2723,8 +3131,8 @@ export function TeamMemberDetail() {
                     <Receipt className="w-4 h-4 text-emerald-500" />
                     Nóminas
                   </h4>
-                  {(HR_MANAGER_ROLES.has(String(user?.role || ''))
-                    || Boolean(currentBusiness?.owner_user_id && user?.user_id === currentBusiness.owner_user_id)) && (
+                  {(isBusinessOwner
+                    || HR_MANAGER_ROLES.has(String(user?.role || ''))) && (
                     <button
                       type="button"
                       onClick={() => openPayrollUpload('nomina')}
@@ -3025,27 +3433,81 @@ export function TeamMemberDetail() {
             )}
 
             {/* Otros documentos */}
-            {(docCategory === 'all' || docCategory === 'other') && (
+            {(docCategory === 'all' || docCategory === 'other') && (() => {
+              const otherTypes = new Set([
+                'certificado',
+                'justificante',
+                'baja',
+                'reconocimiento_medico',
+                'prl',
+                'certificado_penales',
+                'seguro',
+                'titulo',
+                'otro',
+              ]);
+              const otherDocs = payrollDocs.filter((d) => otherTypes.has(d.documentType));
+              return (
               <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5">
-                <h4 className="text-sm font-bold text-gray-900 dark:text-gray-100 mb-3 flex items-center gap-2">
-                  <File className="w-4 h-4 text-gray-500" />
-                  Otros documentos
-                </h4>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Certificados, informes y otros documentos.</p>
-                <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-                  <File className="w-8 h-8 mx-auto mb-2 text-gray-300 dark:text-gray-600" />
-                  <p className="text-sm">Sube certificados, informes y demás documentación.</p>
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                    <File className="w-4 h-4 text-gray-500" />
+                    Otros documentos
+                  </h4>
                   <button
                     type="button"
                     onClick={() => openPayrollUpload('certificado')}
-                    className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-gray-50 dark:bg-gray-700 px-3 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-gray-50 dark:bg-gray-700 px-3 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
                   >
                     <Upload className="w-3.5 h-3.5" />
                     Subir documento
                   </button>
                 </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Certificados, informes y otros documentos.</p>
+                {payrollLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="w-5 h-5 text-gray-400 animate-spin" />
+                  </div>
+                ) : otherDocs.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                    <File className="w-8 h-8 mx-auto mb-2 text-gray-300 dark:text-gray-600" />
+                    <p className="text-sm">No hay certificados u otros documentos todavía.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {otherDocs.map((doc) => (
+                      <div key={doc._id} className="flex items-center justify-between rounded-xl border border-gray-100 dark:border-gray-700 p-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">{doc.name}</p>
+                          <p className="text-xs text-gray-500">
+                            {PAYROLL_DOC_TYPE_LABELS[doc.documentType] || doc.documentType}
+                            {' · '}
+                            {new Date(doc.createdAt).toLocaleDateString('es-ES')}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {doc.fileData ? (
+                            <button
+                              type="button"
+                              onClick={() => setPayrollPreviewDoc(doc)}
+                              className="rounded-lg p-1.5 text-gray-400 hover:bg-blue-50 hover:text-blue-600"
+                              title="Ver documento"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                          ) : null}
+                          {doc.fileData ? (
+                            <a href={doc.fileData} download={doc.fileName || doc.name} className="text-xs font-semibold text-blue-600">
+                              Descargar
+                            </a>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
+              );
+            })()}
           </div>
         )}
 

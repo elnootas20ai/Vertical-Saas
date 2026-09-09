@@ -114,7 +114,11 @@ import {
   mergeRoleCatalog,
   upsertCustomRole,
 } from '../../lib/roleCatalog';
-import { assignPrimaryWorkSite, clearPrimaryWorkSite } from '../../lib/workerStoreAssignment';
+import {
+  assignPrimaryWorkSite,
+  clearPrimaryWorkSite,
+  listMemberSiteLabels,
+} from '../../lib/workerStoreAssignment';
 import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import { getFunctionRolesForBusiness, getInviteRoleDisplayLabel } from '../../lib/inviteFunctionRoles';
 import { getRoleTaskBundle } from '../../lib/roleTaskTemplates';
@@ -3139,11 +3143,8 @@ export function Team() {
   const branchFilterOptions = useMemo(() => {
     const branches = new Set<string>();
     for (const m of members) {
-      const activeAssignments = m.employment?.assignments?.filter(a => a.status === 'active' && (a.type === 'branch' || a.type === 'work_center')) || [];
-      for (const a of activeAssignments) branches.add(a.entityName);
-      if (m.employment?.salesPointId) {
-        const wc = workCentersData.find(w => w._id === m.employment?.salesPointId || w.id === m.employment?.salesPointId);
-        if (wc) branches.add(wc.name);
+      for (const name of listMemberSiteLabels(m.employment, workCentersData)) {
+        branches.add(name);
       }
     }
     return [...branches].sort().map(v => ({ value: v, label: v }));
@@ -3174,13 +3175,9 @@ export function Team() {
     }
 
     if (filterBranch.size > 0) {
-      result = result.filter(m => {
-        const activeAssignments = m.employment?.assignments?.filter(a => a.status === 'active') || [];
-        const names = activeAssignments.map(a => a.entityName);
-        const wc = workCentersData.find(w => w._id === m.employment?.salesPointId || w.id === m.employment?.salesPointId);
-        if (wc) names.push(wc.name);
-        return names.some(n => filterBranch.has(n));
-      });
+      result = result.filter(m =>
+        listMemberSiteLabels(m.employment, workCentersData).some(n => filterBranch.has(n)),
+      );
     }
 
     if (sortState.dir) {
@@ -3788,8 +3785,10 @@ export function Team() {
                             {branchFilterOptions.length > 0 && (
                               <td className="px-5 py-4">
                                 {(() => {
-                                  const active = (member.employment?.assignments || []).filter(a => a.status === 'active' && (a.type === 'branch' || a.type === 'work_center'));
-                                  if (active.length > 0) return <span className="text-xs text-gray-600 dark:text-gray-400">{active.map(a => a.entityName).join(', ')}</span>;
+                                  const labels = listMemberSiteLabels(member.employment, workCentersData);
+                                  if (labels.length > 0) {
+                                    return <span className="text-xs text-gray-600 dark:text-gray-400">{labels.join(', ')}</span>;
+                                  }
                                   return <span className="text-xs text-gray-300 dark:text-gray-600 italic">Sin asignar</span>;
                                 })()}
                               </td>
