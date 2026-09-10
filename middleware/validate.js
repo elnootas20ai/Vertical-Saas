@@ -221,3 +221,58 @@ export const tpvTabletLoginSchema = z.object({
 export const setPosPinSchema = z.object({
   pin: z.string().regex(/^\d{4,6}$/, 'El PIN debe tener entre 4 y 6 dígitos'),
 });
+
+// ─── Escrituras críticas (finanzas / tokens / webhooks / suscripción) ─────────
+
+export const createFinanceMovementSchema = z.object({
+  movement: z
+    .object({
+      type: z.enum(['cobro', 'pago']),
+      concept: z.string().min(1, 'El concepto es obligatorio').max(500).trim(),
+      category: z.string().min(1, 'La categoría es obligatoria').max(200).trim(),
+      amountBase: z.union([z.number(), z.string()]),
+    })
+    .passthrough(),
+});
+
+export const updateFinanceMovementSchema = z.object({
+  movement: z.object({}).passthrough(),
+});
+
+export const createBankAccountSchema = z.object({
+  account: z.object({}).passthrough(),
+});
+
+export const createApiTokenSchema = z.object({
+  name: z.string().min(1, 'El nombre es obligatorio').max(200).trim(),
+  description: z.string().max(1000).trim().optional().default(''),
+  userId: z.string().min(1, 'userId obligatorio').max(100).trim(),
+  permissions: z.array(z.string().max(100)).optional().default([]),
+  expiresInDays: z.coerce.number().int().min(1).max(3650).optional().nullable(),
+});
+
+export const createWebhookSchema = z.object({
+  name: z.string().min(1, 'El nombre es obligatorio').max(200).trim(),
+  url: z.string().url('URL inválida').max(2000).trim(),
+  userId: z.string().min(1, 'userId obligatorio').max(100).trim(),
+  events: z.array(z.string().max(100)).optional().default([]),
+  active: z.boolean().optional().default(true),
+});
+
+export const updateWebhookSchema = z.object({
+  name: z.string().min(1).max(200).trim().optional(),
+  url: z.string().url('URL inválida').max(2000).trim().optional(),
+  events: z.array(z.string().max(100)).optional(),
+  active: z.boolean().optional(),
+}).passthrough();
+
+export const createSubscriptionSchema = z.object({
+  planId: z.string().max(100).trim().optional().default('basic'),
+  billingMode: z.enum(['monthly', 'annual']).optional().default('monthly'),
+}).passthrough();
+
+export const purchaseAddonSchema = z.object({
+  addonId: z.string().min(1).max(100).trim(),
+  billingMode: z.enum(['monthly', 'annual']).optional().default('monthly'),
+  quantity: z.coerce.number().int().min(1).max(100).optional().default(1),
+}).passthrough();

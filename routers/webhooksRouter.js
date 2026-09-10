@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { couchRequest, ensureDatabase } from '../services/couchdb.js';
 import { WEBHOOKS_DB, WEBHOOK_EVENTS, testWebhook } from '../services/webhookService.js';
+import { validate, createWebhookSchema, updateWebhookSchema } from '../middleware/validate.js';
 
 const webhooksRouter = Router();
 
@@ -62,7 +63,7 @@ webhooksRouter.get('/', async (req, res) => {
 });
 
 // POST /api/webhooks — Crear webhook
-webhooksRouter.post('/', async (req, res) => {
+webhooksRouter.post('/', validate(createWebhookSchema), async (req, res) => {
   try {
     const { name, url, userId, events, active } = req.body || {};
 
@@ -126,7 +127,7 @@ webhooksRouter.post('/', async (req, res) => {
 });
 
 // PUT /api/webhooks/:id — Actualizar webhook
-webhooksRouter.put('/:id', async (req, res) => {
+webhooksRouter.put('/:id', validate(updateWebhookSchema), async (req, res) => {
   try {
     const webhookId = String(req.params.id || '').trim();
     if (!webhookId) {

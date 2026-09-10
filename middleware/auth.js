@@ -1,8 +1,7 @@
 import jwt from 'jsonwebtoken';
 import { findAccountByUserId } from '../services/couchdb.js';
+import { JWT_SECRET, JWT_REFRESH_SECRET } from '../config/jwtSecrets.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'vertial-dev-secret-change-in-production';
-const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || `${JWT_SECRET}_refresh`;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '8h';
 const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '30d';
 const AUTH_EPOCH = Number.parseInt(String(process.env.AUTH_EPOCH || '0'), 10) || 0;
@@ -112,8 +111,13 @@ export function requireAuth(req, res, next) {
   const token = readAccessTokenFromRequest(req);
 
   if (!token) {
-    // Diagnóstico: loguear qué cookies llegan realmente
-    console.warn('[requireAuth] Sin token. cookies:', JSON.stringify(req.cookies), '| cookie-header:', req.headers.cookie || '(vacío)');
+    const cookieNames = Object.keys(req.cookies || {});
+    console.warn(
+      '[requireAuth] Sin token. cookieNames:',
+      cookieNames.length ? cookieNames.join(',') : '(ninguna)',
+      '| hasCookieHeader:',
+      Boolean(req.headers.cookie),
+    );
     return res.status(401).json({ ok: false, error: 'Token de autenticación requerido' });
   }
 

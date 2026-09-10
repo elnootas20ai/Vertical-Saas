@@ -1,8 +1,7 @@
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import logger from './logger.js';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'vertial-dev-secret-change-in-production';
+import { JWT_SECRET } from '../config/jwtSecrets.js';
 
 /** Ruta real de Integraciones delivery en el SaaS. */
 export const UBER_EATS_REDIRECT_PATH = '/saas/vertical/delivery/integraciones';

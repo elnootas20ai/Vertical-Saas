@@ -8,8 +8,7 @@ import {
   VAPID_PUBLIC_KEY,
 } from '../services/pushService.js';
 import { isNativePushConfigured } from '../services/nativePushService.js';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'vertial-dev-secret-change-in-production';
+import { JWT_SECRET } from '../config/jwtSecrets.js';
 
 const pushRouter = Router();
 

@@ -12,14 +12,15 @@ import {
   getTransferInstructions,
   notifyTransferPayment,
 } from '../controllers/subscriptionController.js';
+import { validate, createSubscriptionSchema, purchaseAddonSchema } from '../middleware/validate.js';
 
 const subscriptionRouter = Router();
 
 subscriptionRouter.get('/capabilities', getBillingCapabilities);
 
 // Rutas protegidas (requieren JWT)
-subscriptionRouter.post('/create', requireAuthAndEmailVerified, createAndActivate);
-subscriptionRouter.post('/addons/purchase', requireAuthAndEmailVerified, purchaseAddon);
+subscriptionRouter.post('/create', requireAuthAndEmailVerified, validate(createSubscriptionSchema), createAndActivate);
+subscriptionRouter.post('/addons/purchase', requireAuthAndEmailVerified, validate(purchaseAddonSchema), purchaseAddon);
 subscriptionRouter.get('/status', requireAuthAndEmailVerified, getStatus);
 subscriptionRouter.get('/transfer-instructions', requireAuthAndEmailVerified, getTransferInstructions);
 subscriptionRouter.post('/notify-transfer-payment', requireAuthAndEmailVerified, notifyTransferPayment);

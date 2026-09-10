@@ -1,6 +1,8 @@
 import './config/env.js';
+import './config/jwtSecrets.js';
 import express from 'express';
 import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
@@ -8,10 +10,8 @@ import fs from 'node:fs';
 import logger from './services/logger.js';
 import { runHuellaIndexer } from './index-huella.js';
 
-// SEC-02: Red de seguridad para que un fallo aislado no tumbe el proceso.
-// Antes de esto, una promesa rechazada sin .catch() o un throw fuera de try
-// hacía que Node se reiniciara (o, peor, se quedara en estado indefinido)
-// y el VPS dejaba de aceptar `/api/*`. Ahora se loguea y se sigue sirviendo.
+// SEC-02: Fallos no capturados — log + salir para que PM2/Docker reinicien limpio.
+// Seguir vivo tras uncaughtException deja estado corrupto en memoria.
 process.on('unhandledRejection', (reason) => {
   logger.error(
     { tag: 'PROCESS', kind: 'unhandledRejection', reason: reason?.stack || reason?.message || String(reason) },
@@ -21,8 +21,16 @@ process.on('unhandledRejection', (reason) => {
 process.on('uncaughtException', (err) => {
   logger.error(
     { tag: 'PROCESS', kind: 'uncaughtException', err: err?.message, stack: err?.stack },
-    'Excepción no capturada — el proceso continúa',
+    'Excepción no capturada — saliendo para reinicio limpio',
   );
+  // Dar tiempo a flush de logs; forzar salida si el logger cuelga.
+  setTimeout(() => process.exit(1), 1500).unref?.();
+  try {
+    process.exitCode = 1;
+  } catch {
+    /* ignore */
+  }
+  process.exit(1);
 });
 process.on('warning', (warning) => {
   logger.warn(
@@ -262,6 +270,18 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 
+// Detrás de Nginx/Docker: IPs reales en rate-limit y logs.
+app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS || 1));
+
+// Cabeceras HTTP de seguridad (API + static). CSP la gestiona el front/nginx.
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  }),
+);
+
 // APIs JSON autenticadas: sin ETag → evita HTTP 304 con cuerpo vacío (toasts falsos en el cliente).
 app.set('etag', false);
 app.use('/api', (_req, res, next) => {
@@ -309,11 +329,24 @@ app.use((req, res, next) => {
   });
 });
 
+function isLargeJsonBodyRequest(req) {
+  const p = String(req.path || '');
+  return (
+    p.startsWith('/api/ocr')
+    || p.includes('/attachment/')
+    || p.startsWith('/api/couch/attachment/')
+  );
+}
+
 app.use((req, res, next) => {
   if (isRawBodyWebhookRequest(req)) return next();
-  express.json({ limit: '50mb' })(req, res, next);
+  const limit = isLargeJsonBodyRequest(req) ? '50mb' : '2mb';
+  express.json({ limit })(req, res, next);
 });
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use((req, res, next) => {
+  const limit = isLargeJsonBodyRequest(req) ? '50mb' : '2mb';
+  express.urlencoded({ extended: true, limit })(req, res, next);
+});
 app.use(cookieParser());
 // SEC-03: CORS restrictivo con whitelist de dominios configurada via ALLOWED_ORIGINS.
 // Los orígenes base se infieren del entorno para evitar acoplar el código a un dominio fijo.
@@ -1703,8 +1736,16 @@ Los campos financieros (subtotal, taxRate, lines, etc.) solo se rellenan si el d
   }
 });
 
-// S-05: Bases de datos CouchDB accesibles según rol
-const COUCH_ADMIN_ROLES = new Set(['Admin', 'Gerente']);
+// S-05: Bases de datos CouchDB accesibles según rol (alineado con managers en couchdb.js)
+const COUCH_ADMIN_ROLES = new Set([
+  'Admin',
+  'Gerente',
+  'Administrador',
+  'Encargado',
+  'Gestor',
+  'GerenteGrupo',
+  'Superadmin',
+]);
 const COUCH_ALLOWED_DBS = new Set(['vehicles', 'notifications', 'cards', 'accounts', 'invoice', 'schedules', 'vacations', 'payroll', 'staff-expenses']);
 /** Lectura para trabajadores: tienda de la contratación (fichaje / horario). Escritura sigue Admin/Gerente. */
 const COUCH_WORKER_READ_DBS = new Set(['sales-points']);
@@ -1728,7 +1769,13 @@ function requireCouchDbAccess(req, res, next) {
   return res.status(403).json({ ok: false, error: 'Acceso a esta base de datos no está permitido' });
 }
 
-app.get('/api/couch/dbs', cacheResponse({ ttl: cacheService.TTL_PRESETS.DB_LIST, keyFn: () => 'db:_all_dbs' }), async (req, res) => {
+function requireCouchAdmin(req, res, next) {
+  const role = req.authUser?.role;
+  if (COUCH_ADMIN_ROLES.has(role)) return next();
+  return res.status(403).json({ ok: false, error: 'Se requiere rol de administración para esta operación Couch' });
+}
+
+app.get('/api/couch/dbs', requireCouchAdmin, cacheResponse({ ttl: cacheService.TTL_PRESETS.DB_LIST, keyFn: () => 'db:_all_dbs' }), async (req, res) => {
   try {
     const response = await couchRequest(req, '/_all_dbs');
     const payload = await response.json();
@@ -1744,7 +1791,7 @@ app.get('/api/couch/dbs', cacheResponse({ ttl: cacheService.TTL_PRESETS.DB_LIST,
   }
 });
 
-app.put('/api/couch/db/:dbName', async (req, res) => {
+app.put('/api/couch/db/:dbName', requireCouchDbAccess, async (req, res) => {
   try {
     const dbName = encodeURIComponent(req.params.dbName);
     const response = await couchRequest(req, `/${dbName}`, { method: 'PUT' });
@@ -2038,7 +2085,7 @@ app.delete('/api/couch/doc/:dbName/:docId', requireCouchDbAccess, async (req, re
 
 // ── CouchDB Manager: endpoints adicionales ──────────────────────────────────
 
-app.get('/api/couch/db/:dbName/info', cacheResponse({ ttl: cacheService.TTL_PRESETS.SUMMARY, keyFn: (req) => `db:${req.params.dbName}:info` }), async (req, res) => {
+app.get('/api/couch/db/:dbName/info', requireCouchDbAccess, cacheResponse({ ttl: cacheService.TTL_PRESETS.SUMMARY, keyFn: (req) => `db:${req.params.dbName}:info` }), async (req, res) => {
   try {
     const dbName = encodeURIComponent(req.params.dbName);
     const response = await couchRequest(req, `/${dbName}`);
@@ -2050,7 +2097,7 @@ app.get('/api/couch/db/:dbName/info', cacheResponse({ ttl: cacheService.TTL_PRES
   }
 });
 
-app.delete('/api/couch/db/:dbName', async (req, res) => {
+app.delete('/api/couch/db/:dbName', requireCouchAdmin, async (req, res) => {
   try {
     const dbName = encodeURIComponent(req.params.dbName);
     const response = await couchRequest(req, `/${dbName}`, { method: 'DELETE' });
@@ -2064,7 +2111,7 @@ app.delete('/api/couch/db/:dbName', async (req, res) => {
   }
 });
 
-app.get('/api/couch/docs-paginated/:dbName', cacheResponse({ ttl: cacheService.TTL_PRESETS.DOCS_LIST, keyFn: (req) => `db:${req.params.dbName}:paginated:${req.query.limit || 25}:${req.query.skip || 0}:${req.query.descending || ''}` }), async (req, res) => {
+app.get('/api/couch/docs-paginated/:dbName', requireCouchDbAccess, cacheResponse({ ttl: cacheService.TTL_PRESETS.DOCS_LIST, keyFn: (req) => `db:${req.params.dbName}:paginated:${req.query.limit || 25}:${req.query.skip || 0}:${req.query.descending || ''}` }), async (req, res) => {
   try {
     const dbName = encodeURIComponent(req.params.dbName);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 25, 1), 200);
@@ -2081,7 +2128,7 @@ app.get('/api/couch/docs-paginated/:dbName', cacheResponse({ ttl: cacheService.T
   }
 });
 
-app.post('/api/couch/db/:dbName/find', async (req, res) => {
+app.post('/api/couch/db/:dbName/find', requireCouchDbAccess, async (req, res) => {
   try {
     const dbName = encodeURIComponent(req.params.dbName);
     const response = await couchRequest(req, `/${dbName}/_find`, {
@@ -2096,7 +2143,7 @@ app.post('/api/couch/db/:dbName/find', async (req, res) => {
   }
 });
 
-app.post('/api/couch/db/:dbName/bulk-delete', async (req, res) => {
+app.post('/api/couch/db/:dbName/bulk-delete', requireCouchDbAccess, async (req, res) => {
   try {
     const dbName = encodeURIComponent(req.params.dbName);
     const { docs } = req.body || {};
@@ -2115,7 +2162,7 @@ app.post('/api/couch/db/:dbName/bulk-delete', async (req, res) => {
   }
 });
 
-app.post('/api/couch/doc-hard/:dbName/:docId', async (req, res) => {
+app.post('/api/couch/doc-hard/:dbName/:docId', requireCouchDbAccess, async (req, res) => {
   try {
     const dbName = encodeURIComponent(req.params.dbName);
     const docId = encodeURIComponent(req.params.docId);

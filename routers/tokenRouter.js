@@ -2,6 +2,7 @@ import { Router } from 'express';
 import crypto from 'node:crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { couchRequest, ensureDatabase } from '../services/couchdb.js';
+import { validate, createApiTokenSchema } from '../middleware/validate.js';
 
 export const API_TOKENS_DB = 'api-tokens';
 
@@ -56,7 +57,7 @@ function resolveExpiresAt(expiresInDays) {
 }
 
 // POST /api/tokens — Crear nuevo token
-tokenRouter.post('/', async (req, res) => {
+tokenRouter.post('/', validate(createApiTokenSchema), async (req, res) => {
   try {
     const { name, description, userId, permissions, expiresInDays } = req.body || {};
 

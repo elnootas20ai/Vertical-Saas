@@ -2,9 +2,9 @@ import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import { addSSEClient, removeSSEClient } from '../services/sseService.js';
 import { requireAuthAndEmailVerified } from '../middleware/auth.js';
+import { JWT_SECRET } from '../config/jwtSecrets.js';
 
 const sseRouter = Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'vertial-dev-secret-change-in-production';
 
 function resolveSseToken(req) {
   const queryToken = String(req.query.token || '').trim();

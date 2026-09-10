@@ -21,6 +21,7 @@ import {
   AFFILIATE_COMMISSION_MONTHS_PER_CLIENT,
   evaluateAffiliateCommissionEligibility,
 } from '../utils/affiliateCommissionWindow.js';
+import { JWT_SECRET } from '../config/jwtSecrets.js';
 
 // ── Public constants ───────────────────────────────────────────────────────────
 
@@ -227,11 +228,9 @@ const AFFILIATE_EMAIL_ACTION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const AFFILIATE_EMAIL_ACTIONS = new Set(['accept', 'reject', 'pending']);
 
 function getAffiliateActionSecret() {
-  return (
-    process.env.AFFILIATE_ACTION_SECRET
-    || process.env.JWT_SECRET
-    || 'vertial-dev-secret-change-in-production'
-  );
+  const explicit = String(process.env.AFFILIATE_ACTION_SECRET || '').trim();
+  if (explicit) return explicit;
+  return JWT_SECRET;
 }
 
 function signAffiliateEmailActionToken(affiliateId, action) {
