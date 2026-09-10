@@ -27,7 +27,7 @@ import {
   putStockRevisionListRequest,
   type StockCount,
 } from '../../lib/stockCountApi';
-import { filterStockInventoryItems, filterStockRevisionItems } from '../../lib/stockInventoryScope';
+import { filterSupplierOrderStockItems, filterStockRevisionItems } from '../../lib/stockInventoryScope';
 import { StockRevisionPanel } from './StockRevisionPanel';
 import { StockPurchaseListPreview } from './StockPurchaseListPreview';
 import { InventoryPanel } from './InventoryPanel';
@@ -327,7 +327,7 @@ export function StockTabPanel({
     if (storeWarehouseId) setWarehouseId(storeWarehouseId);
   }, [storeWarehouseId]);
 
-  const scopedItems = useMemo(() => filterStockInventoryItems(items), [items]);
+  const scopedItems = useMemo(() => filterSupplierOrderStockItems(items), [items]);
   const revisionSelectableItems = useMemo(() => filterStockRevisionItems(items), [items]);
 
   const activeProducts = useMemo(

@@ -28,7 +28,7 @@ import { wipeCatalogLeftoversAfterEmptyCarta } from '../../lib/catalogFullWipe';
 import { resolveCatalogProductImage, resolveCatalogProductPlaceholderUrl } from '../../lib/catalogProductPlaceholders';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import { catalogItemOperatesAtWorkCenter } from '../../lib/pdvScope';
-import { filterStockInventoryItems, summarizeCatalogDeleteScope, isStockInventoryItem } from '../../lib/stockInventoryScope';
+import { filterStockInventoryItems, filterSupplierOrderStockItems, summarizeCatalogDeleteScope, isStockInventoryItem } from '../../lib/stockInventoryScope';
 import { DELIVERY_ACTIVE_STORE_CHANGED } from '../../lib/deliveryOpsPdvSelection';
 import { listWarehousesRequest, type Warehouse } from '../../lib/warehouseApi';
 import { useVerticalCatalog } from '../../hooks/useVerticalCatalog';
@@ -5659,14 +5659,30 @@ export function CatalogPage() {
     if (!dataUserId) return;
     const onCatalogStockChanged = () => {
       invalidateCatalogListCache(dataUserId);
-      void listCatalogItemsRequest(dataUserId, 'stock')
-        .then((stockItems) => {
-          setAllCatalogItems((prev) => {
-            const kept = prev.filter((i) => (i.module || 'catalog') !== 'stock');
-            return [...kept, ...stockItems];
+      // Refrescar carta + almacén: si solo se pedía module=stock, los platos
+      // soft-deleted (module catalog + isStockItem) quedaban fantasma en el badge.
+      void Promise.all([
+        listCatalogItemsRequest(dataUserId, 'catalog').catch(() => null),
+        listCatalogItemsRequest(dataUserId, 'stock').catch(() => [] as CatalogItem[]),
+      ]).then(([carta, stockItems]) => {
+        setAllCatalogItems((prev) => {
+          const other = prev.filter((i) => {
+            const m = i.module || 'catalog';
+            return m !== 'catalog' && m !== 'stock';
           });
-        })
-        .catch(() => {});
+          if (carta == null) {
+            const keptCarta = prev.filter(
+              (i) => (i.module || 'catalog') === 'catalog' && !i.deletedAt,
+            );
+            return [...other, ...keptCarta, ...stockItems.filter((i) => !i.deletedAt)];
+          }
+          return [
+            ...other,
+            ...carta.filter((i) => !i.deletedAt),
+            ...stockItems.filter((i) => !i.deletedAt),
+          ];
+        });
+      });
     };
     window.addEventListener(DELIVERY_CATALOG_CHANGED, onCatalogStockChanged);
     return () => window.removeEventListener(DELIVERY_CATALOG_CHANGED, onCatalogStockChanged);
@@ -7168,10 +7184,14 @@ export function CatalogPage() {
   }, [scopedInvoices]);
 
   const stockTabCount = useMemo(() => {
-    const scoped = filterStockInventoryItems(catalogForActiveStore);
-    const pending = scoped.filter((i) => Number(i.stockQuantity || 0) === 0).length;
-    return pending > 0 ? pending : scoped.filter((i) => Number(i.stockQuantity || 0) > 0).length;
+    // Solo almacén real (no platos de carta con control de stock).
+    return filterSupplierOrderStockItems(catalogForActiveStore).length;
   }, [catalogForActiveStore]);
+
+  const ingredientsTabCount = useMemo(
+    () => storeIngredients.filter((ing) => String(ing.name || '').trim()).length,
+    [storeIngredients],
+  );
 
   // ── Tab: Catálogo ───────────────────────────────────────────────────────────
 
@@ -8947,7 +8967,7 @@ export function CatalogPage() {
           {
             id: 'ingredientes',
             label: 'Ingredientes',
-            count: storeIngredients.length || undefined,
+            count: ingredientsTabCount || undefined,
           },
         ],
       },
@@ -8979,8 +8999,8 @@ export function CatalogPage() {
     ];
   }, [
     stockTabCount,
+    ingredientsTabCount,
     catalogMenuItems,
-    storeIngredients,
     supplierKpis.active,
     invoiceKpis.pending,
   ]);
@@ -9135,7 +9155,7 @@ export function CatalogPage() {
 
         {activeTab === 'stock' && dataUserId && (
           <StockTabPanel
-            items={filterStockInventoryItems(catalogItems)}
+            items={filterSupplierOrderStockItems(catalogItems)}
             warehouses={warehouses}
             userId={dataUserId}
             searchQuery=""

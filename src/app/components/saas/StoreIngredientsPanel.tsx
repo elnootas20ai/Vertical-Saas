@@ -1350,6 +1350,11 @@ export function StoreIngredientsPanel({
   const syncToWarehouse = useCallback(
     async (rows: StoreIngredient[]) => {
       try {
+        // Vaciar ingredientes TPV no debe regenerar almacén desde columnas/recetas de carta.
+        if (rows.length === 0) {
+          notifyDeliveryCatalogChanged(userId, businessId);
+          return null;
+        }
         const result = await syncInventoryCatalogFromSources(userId, {
           businessType: String(currentBusiness?.businessType || 'delivery'),
           businessId,

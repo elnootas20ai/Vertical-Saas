@@ -6,7 +6,7 @@ import { listCatalogItemsRequest, type CatalogItem } from '../lib/deliveryApi';
 import { filterCatalogItemsForBusinessScope } from '../lib/catalogBusinessScope';
 import { listBrandsRequest } from '../lib/brandsApi';
 import { resolveBusinessScopeId } from '../lib/deliverySetup';
-import { filterStockInventoryItems } from '../lib/stockInventoryScope';
+import { filterSupplierOrderStockItems } from '../lib/stockInventoryScope';
 import { resolveBusinessDataUserId } from '../lib/tenantUserId';
 import {
   createWarehouseRequest,
@@ -144,20 +144,20 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
 
   const [items, setItems] = useState<CatalogItem[]>(() => {
     if (!Array.isArray(seedStockItems)) return [];
-    return filterStockInventoryItems(seedStockItems);
+    return filterSupplierOrderStockItems(seedStockItems);
   });
   /** Carta + almacén (scoped) — para chips de categoría de carta en Inventario. */
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [loading, setLoading] = useState(() => {
     if (!Array.isArray(seedStockItems)) return true;
-    return filterStockInventoryItems(seedStockItems).length === 0;
+    return filterSupplierOrderStockItems(seedStockItems).length === 0;
   });
   const [loadDetail, setLoadDetail] = useState('Cargando artículos del almacén…');
   const pointsOfSaleRef = useRef(activeStore.pointsOfSale);
   pointsOfSaleRef.current = activeStore.pointsOfSale;
   const hasPaintedRef = useRef(
-    Array.isArray(seedStockItems) && filterStockInventoryItems(seedStockItems).length > 0,
+    Array.isArray(seedStockItems) && filterSupplierOrderStockItems(seedStockItems).length > 0,
   );
 
   const scopeSalesPointId = String(scopeInput?.salesPointId || '').trim();
@@ -193,7 +193,7 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
     return byName?._id || activeWh.find((w) => w.isDefault)?._id || activeWh[0]?._id || '';
   }, [warehouses, storeLabel, resolvedSalesPointId]);
 
-  const stockItems = useMemo(() => filterStockInventoryItems(items), [items]);
+  const stockItems = useMemo(() => filterSupplierOrderStockItems(items), [items]);
 
   const stockedCount = useMemo(
     () =>
@@ -216,7 +216,7 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
     // Solo pintura inicial con seed con datos. Un [] del padre (aún cargando)
     // no cuenta como «ya cargado» — si no, sale «Sin artículos» y luego aparecen.
     if (hasPaintedRef.current) return;
-    const seeded = filterStockInventoryItems(seedStockItems);
+    const seeded = filterSupplierOrderStockItems(seedStockItems);
     if (seeded.length === 0) return;
     setItems(seeded);
     setLoading(false);
@@ -263,7 +263,7 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
             activeBusinessType: currentBusiness?.businessType,
           })
         : allCatalog;
-      const scoped = filterStockInventoryItems(scopedAll);
+      const scoped = filterSupplierOrderStockItems(scopedAll);
       setCatalogItems(scopedAll);
       setItems(scoped);
       setWarehouses(wh);
