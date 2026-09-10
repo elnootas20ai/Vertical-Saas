@@ -48,32 +48,16 @@ import {
 } from '../../lib/catalogServiceRules';
 import { CatalogCoreLoadingState } from '../../components/saas/CatalogCoreLoadingState';
 import { CatalogUnitChip, StockQtyWithUnit } from '../../components/saas/CatalogUnitChip';
-import { SupplierPaymentTermsField } from '../../components/saas/SupplierPaymentTermsField';
-import {
-  initialSupplierCatalogItemIds,
-  initialSupplierItemCosts,
-  initialSupplierOrganizerIds,
-  parseSupplierItemCosts,
-  resolveSupplierOrganizerIdsForSave,
-  labelsForSupplierOrganizerIds,
-  supplierFormInitFingerprint,
-  SupplierOrganizersField,
-  supplierOrganizerFieldSessionKey,
-} from '../../components/saas/SupplierOrganizersField';
-import { syncSupplierCatalogItemLinks, resolveSupplierSelectedStockIds } from '../../lib/supplierCatalogLinks';
+import { labelsForSupplierOrganizerIds } from '../../components/saas/SupplierOrganizersField';
 import { explicitMarkedStockItemsForSupplier } from '../../lib/purchaseSuggestions';
 import {
   detectSupplierPriceVariance,
   type SupplierPriceVariance,
 } from '../../lib/supplierPriceVariance';
 import {
-  normalizeSupplierCode,
-  sanitizeSupplierCodeInput,
-  suggestNextSupplierCode,
-  suggestSupplierCodeFromName,
-  supplierCodeAlreadyUsed,
-  SUPPLIER_CODE_MAX_LEN,
-} from '../../lib/supplierCode';
+  PURCHASES_WORKSPACE,
+  purchasesWorkspaceNavigateState,
+} from '../../lib/purchasesWorkspacePaths';
 import { PurchaseOrdersPage } from './PurchaseOrdersPage';
 import { EscandalloPanel } from './CostingPage';
 import { AlbaranCorroborateModal } from '../../components/saas/AlbaranCorroborateModal';
@@ -147,8 +131,6 @@ import {
   deleteCatalogItemRequest,
   bulkCreateCatalogItemsRequest,
   listSuppliersRequest,
-  createSupplierRequest,
-  updateSupplierRequest,
   deleteSupplierRequest,
   listPurchaseInvoicesRequest,
   createPurchaseInvoiceRequest,
@@ -3063,384 +3045,6 @@ function CreateCatalogItemModal({
   );
 }
 
-// ─── Create Supplier Modal ────────────────────────────────────────────────────
-
-interface CreateSupplierModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onCreate: (data: Partial<Supplier> & { catalogItemCosts?: Record<string, number> }) => Promise<void>;
-  editItem?: Supplier | null;
-  /** Mientras se recarga el proveedor del servidor antes de editar. */
-  editHydrating?: boolean;
-  brands?: Brand[];
-  catalogItems?: CatalogItem[];
-  storeIngredients?: StoreIngredient[];
-  /** Para sugerir PROV-001… y avisar si el código ya existe. */
-  existingSuppliers?: Supplier[];
-  businessType?: string | null;
-}
-
-function CreateSupplierModal({
-  isOpen,
-  onClose,
-  onCreate,
-  editItem,
-  editHydrating = false,
-  brands = [],
-  catalogItems = [],
-  storeIngredients = [],
-  existingSuppliers = [],
-  businessType = null,
-}: CreateSupplierModalProps) {
-  const [submitting, setSubmitting] = useState(false);
-  const [formInitReady, setFormInitReady] = useState(false);
-  const [organizersFieldKey, setOrganizersFieldKey] = useState(0);
-  /** Si el usuario toca el código a mano, deja de regenerarlo al escribir el nombre. */
-  const [codeManual, setCodeManual] = useState(false);
-  const [form, setForm] = useState({
-    name: '',
-    code: '',
-    cif: '',
-    email: '',
-    phone: '',
-    address: '',
-    contactPerson: '',
-    category: '',
-    paymentTerms: '',
-    notes: '',
-    organizerIds: [] as string[],
-    catalogItemIds: [] as string[],
-    itemCosts: {} as Record<string, string>,
-  });
-  const supplierFormSessionRef = useRef<{ fingerprint: string } | null>(null);
-  const organizersTouchedRef = useRef(false);
-  const formRef = useRef(form);
-  const editItemRef = useRef(editItem);
-  const catalogItemsRef = useRef(catalogItems);
-  const brandsRef = useRef(brands);
-  const storeIngredientsRef = useRef(storeIngredients);
-  editItemRef.current = editItem;
-  catalogItemsRef.current = catalogItems;
-  brandsRef.current = brands;
-  storeIngredientsRef.current = storeIngredients;
-
-  const applyForm = (next: typeof form | ((prev: typeof form) => typeof form)) => {
-    setForm((prev) => {
-      const merged = typeof next === 'function' ? next(prev) : next;
-      formRef.current = merged;
-      return merged;
-    });
-  };
-  formRef.current = form;
-
-  const editSnapshot = supplierFormInitFingerprint(editItem, catalogItems.length);
-
-  useEffect(() => {
-    if (!isOpen) {
-      supplierFormSessionRef.current = null;
-      organizersTouchedRef.current = false;
-      setFormInitReady(false);
-      return;
-    }
-    if (editItem && (editHydrating || catalogItems.length === 0)) {
-      setFormInitReady(false);
-      return;
-    }
-
-    const edit = editItemRef.current;
-    const items = catalogItemsRef.current;
-    const fingerprint = supplierFormInitFingerprint(edit, items.length);
-    if (organizersTouchedRef.current && supplierFormSessionRef.current?.fingerprint === fingerprint) {
-      setFormInitReady(true);
-      return;
-    }
-    if (supplierFormSessionRef.current?.fingerprint === fingerprint) {
-      setFormInitReady(true);
-      return;
-    }
-
-    supplierFormSessionRef.current = { fingerprint };
-
-    setCodeManual(Boolean(edit?.code));
-    if (edit) {
-      const catalogItemIds = initialSupplierCatalogItemIds(edit, items);
-      const nextForm = {
-        name: edit.name,
-        code: edit.code || '',
-        cif: edit.cif || '',
-        email: edit.email || '',
-        phone: edit.phone || '',
-        address: edit.address || '',
-        contactPerson: edit.contactPerson || '',
-        category: edit.category || '',
-        paymentTerms: edit.paymentTerms || '',
-        notes: edit.notes || '',
-        organizerIds: initialSupplierOrganizerIds(
-          edit,
-          items,
-          storeIngredientsRef.current,
-          brandsRef.current,
-        ),
-        catalogItemIds,
-        itemCosts: initialSupplierItemCosts(catalogItemIds, items),
-      };
-      formRef.current = nextForm;
-      setForm(nextForm);
-    } else {
-      const nextForm = {
-        name: '',
-        code: suggestNextSupplierCode(existingSuppliers),
-        cif: '',
-        email: '',
-        phone: '',
-        address: '',
-        contactPerson: '',
-        category: '',
-        paymentTerms: '',
-        notes: '',
-        organizerIds: [] as string[],
-        catalogItemIds: [] as string[],
-        itemCosts: {} as Record<string, string>,
-      };
-      formRef.current = nextForm;
-      setForm(nextForm);
-    }
-    setOrganizersFieldKey((k) => k + 1);
-    setFormInitReady(true);
-  }, [isOpen, editSnapshot, editHydrating, catalogItems.length, existingSuppliers]);
-  useModalClose(isOpen, onClose);
-
-  const handleNameChange = (name: string) => {
-    setForm((f) => ({
-      ...f,
-      name,
-      code: codeManual
-        ? f.code
-        : suggestSupplierCodeFromName(name, existingSuppliers, editItem?._id),
-    }));
-  };
-
-  const handleCodeChange = (raw: string) => {
-    setCodeManual(true);
-    setForm((f) => ({ ...f, code: sanitizeSupplierCodeInput(raw) }));
-  };
-
-  if (!isOpen) return null;
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const current = formRef.current;
-    if (!current.name.trim()) {
-      toast.error('El nombre es obligatorio');
-      return;
-    }
-    const code = normalizeSupplierCode(current.code);
-    if (!code) {
-      toast.error('El código del proveedor es obligatorio');
-      return;
-    }
-    if (supplierCodeAlreadyUsed(code, existingSuppliers, editItem?._id)) {
-      toast.error(`Ya existe un proveedor con el código ${code}`);
-      return;
-    }
-    const priorOrganizers = (editItem?.organizerIds || []).filter(Boolean).length;
-    if (
-      editItem &&
-      priorOrganizers > 0 &&
-      current.organizerIds.length === 0 &&
-      !organizersTouchedRef.current
-    ) {
-      toast.error('Las categorías no se cargaron bien. Cierra y vuelve a abrir el proveedor.');
-      return;
-    }
-    setSubmitting(true);
-    try {
-      const organizerIds = resolveSupplierOrganizerIdsForSave(
-        current.organizerIds,
-        current.catalogItemIds,
-        catalogItemsRef.current,
-        storeIngredientsRef.current,
-        brandsRef.current,
-      );
-      await onCreate({
-        name: current.name,
-        code,
-        cif: current.cif,
-        email: current.email,
-        phone: current.phone,
-        address: current.address,
-        contactPerson: current.contactPerson,
-        category: current.category,
-        paymentTerms: current.paymentTerms,
-        notes: current.notes,
-        organizerIds,
-        catalogItemIds: current.catalogItemIds,
-        catalogItemCosts: parseSupplierItemCosts(current.itemCosts),
-        active: editItem?.active ?? true,
-      });
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/40 backdrop-blur-sm">
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[95vh] sm:max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700">
-          <div>
-            <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-              {editItem ? 'Editar proveedor' : 'Nuevo proveedor'}
-            </h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-              {editItem ? 'Modifica los datos del proveedor' : 'Registra un nuevo proveedor'}
-            </p>
-          </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors">
-            <X className="w-5 h-5 text-gray-500 dark:text-gray-400" />
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-5">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Nombre *</label>
-              <input
-                className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                placeholder="Nombre del proveedor"
-                value={form.name}
-                onChange={(e) => handleNameChange(e.target.value)}
-                autoFocus={!editItem}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Código *</label>
-              <input
-                className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-mono uppercase"
-                placeholder="MAK-001"
-                maxLength={SUPPLIER_CODE_MAX_LEN}
-                value={form.code}
-                onChange={(e) => handleCodeChange(e.target.value)}
-              />
-              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
-                Se rellena solo con el nombre (ej. Makro → MAK-001). Puedes editarlo. Máx. {SUPPLIER_CODE_MAX_LEN} caracteres: A–Z, 0–9 y guión.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">CIF/NIF</label>
-              <input
-                className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-mono uppercase"
-                placeholder="B12345678"
-                value={form.cif}
-                onChange={e => setForm(f => ({ ...f, cif: e.target.value.toUpperCase() }))}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Email</label>
-              <input
-                type="email"
-                className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                placeholder="proveedor@email.com"
-                value={form.email}
-                onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Teléfono</label>
-              <input
-                className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                placeholder="600 000 000"
-                value={form.phone}
-                onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Persona de contacto</label>
-              <input
-                className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                placeholder="Nombre del contacto"
-                value={form.contactPerson}
-                onChange={e => setForm(f => ({ ...f, contactPerson: e.target.value }))}
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Dirección</label>
-            <input
-              className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-              placeholder="Dirección del proveedor"
-              value={form.address}
-              onChange={e => setForm(f => ({ ...f, address: e.target.value }))}
-            />
-          </div>
-
-          {formInitReady ? (
-            <SupplierOrganizersField
-              key={`supplier-organizers-${organizersFieldKey}`}
-              organizerIds={form.organizerIds}
-              catalogItemIds={form.catalogItemIds}
-              itemCosts={form.itemCosts}
-              onChange={({ organizerIds, catalogItemIds, itemCosts }) => {
-                organizersTouchedRef.current = true;
-                applyForm((f) => ({ ...f, organizerIds, catalogItemIds, itemCosts }));
-              }}
-              brands={brands}
-              catalogItems={catalogItems}
-              storeIngredients={storeIngredients}
-              businessType={businessType}
-            />
-          ) : (
-            <div className="rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700 px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-              {editItem && (editHydrating || catalogItems.length === 0)
-                ? 'Cargando categorías y productos del proveedor…'
-                : 'Preparando el formulario…'}
-            </div>
-          )}
-
-          <SupplierPaymentTermsField
-            value={form.paymentTerms}
-            onChange={(paymentTerms) => setForm((f) => ({ ...f, paymentTerms }))}
-          />
-
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Notas</label>
-            <textarea
-              rows={2}
-              className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 resize-none"
-              placeholder="Notas adicionales..."
-              value={form.notes}
-              onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
-            />
-          </div>
-
-          <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 -mx-4 px-4 -mb-4 pb-4 sm:-mx-6 sm:px-6 sm:-mb-6 sm:pb-6 pt-4 flex gap-3 rounded-b-2xl">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-4 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="flex-1 px-4 py-3 bg-gray-900 hover:bg-black text-white rounded-xl font-semibold transition-colors disabled:opacity-60 disabled:cursor-wait"
-            >
-              {submitting ? 'Guardando…' : editItem ? 'Guardar cambios' : 'Crear proveedor'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
 // ─── Create Purchase Invoice Modal ────────────────────────────────────────────
 
 interface CreateInvoiceModalProps {
@@ -3688,6 +3292,15 @@ function CreateInvoiceModal({
   }, [editItem, isOpen, purchaseOrders]);
   useModalClose(isOpen, onClose);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const applyAlbaranToForm = (inv: PurchaseInvoice) => {
@@ -3904,25 +3517,39 @@ function CreateInvoiceModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[95vh] sm:max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700">
-          <div>
-            <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-              {editItem && !isAlbaranInvoice(editItem) ? 'Editar factura' : 'Nueva factura de compra'}
-            </h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-              {editItem && !isAlbaranInvoice(editItem)
-                ? 'Modifica los datos de la factura'
-                : 'Carga el albarán (mismo proveedor) y pon el nº de factura del proveedor'}
-            </p>
-          </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors">
-            <X className="w-5 h-5 text-gray-500 dark:text-gray-400" />
-          </button>
+    <div className="fixed inset-0 z-[200] flex flex-col bg-stone-50 dark:bg-stone-950">
+      <header className="shrink-0 flex items-center gap-3 border-b border-stone-200 bg-white px-3 py-2.5 sm:px-5 dark:border-stone-800 dark:bg-stone-900">
+        <button type="button" onClick={onClose} className={`${VERTIAL_BTN_SECONDARY} !min-h-10 shrink-0`}>
+          <X className="w-4 h-4" />
+          <span className="hidden sm:inline">Volver</span>
+        </button>
+        <div className="min-w-0 flex-1">
+          <h2 className="truncate text-base font-bold text-stone-900 dark:text-stone-100 sm:text-lg">
+            {editItem && !isAlbaranInvoice(editItem) ? 'Editar factura' : 'Nueva factura de compra'}
+          </h2>
+          <p className="truncate text-xs text-stone-500 dark:text-stone-400">
+            {editItem && !isAlbaranInvoice(editItem)
+              ? 'Modifica los datos de la factura'
+              : 'Carga el albarán y pon el nº de factura del proveedor'}
+          </p>
         </div>
+        <button
+          type="submit"
+          form="purchases-invoice-form"
+          disabled={submitting}
+          className={`${VERTIAL_BTN_PRIMARY} !min-h-10 shrink-0`}
+        >
+          {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+          {submitting
+            ? 'Guardando…'
+            : editItem && !isAlbaranInvoice(editItem)
+              ? 'Guardar'
+              : 'Crear factura'}
+        </button>
+      </header>
 
-        <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-5">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 sm:p-5">
+        <form id="purchases-invoice-form" onSubmit={handleSubmit} className="mx-auto max-w-4xl space-y-5">
           {albaranIncomplete && albaranPendingLines.length > 0 ? (
             <div className="rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50/80 dark:bg-amber-950/30 p-4 space-y-3">
               <div>
@@ -4182,22 +3809,6 @@ function CreateInvoiceModal({
             />
           </div>
 
-          <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 -mx-4 px-4 -mb-4 pb-4 sm:-mx-6 sm:px-6 sm:-mb-6 sm:pb-6 pt-4 flex gap-3 rounded-b-2xl">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-4 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="flex-1 px-4 py-3 bg-gray-900 hover:bg-black text-white rounded-xl font-semibold transition-colors disabled:opacity-60 disabled:cursor-wait"
-            >
-              {submitting ? 'Guardando…' : editItem ? 'Guardar cambios' : 'Crear factura'}
-            </button>
-          </div>
         </form>
       </div>
     </div>
@@ -4822,9 +4433,7 @@ export function CatalogPage() {
   type CatalogLoadModules = { carta?: boolean; stock?: boolean };
 
   const catalogModulesForTab = useCallback(
-    (tab: string, createSupplierOpen: boolean): CatalogLoadModules => {
-      // Proveedor: carta (secciones → ingredientes) + almacén (envases…).
-      if (createSupplierOpen) return { carta: true, stock: true };
+    (tab: string): CatalogLoadModules => {
       if (tab === 'stock' || tab === 'ingredientes') return { carta: false, stock: true };
       if (tab === 'catalog' || tab === 'escandallo' || tab === 'staff-consumption') {
         return { carta: true, stock: false };
@@ -5061,35 +4670,16 @@ export function CatalogPage() {
   // Stock state
   const [stockAdjustItem, setStockAdjustItem] = useState<CatalogItem | null>(null);
 
-  // Supplier state
-  const [showCreateSupplier, setShowCreateSupplier] = useState(false);
-  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
-  const [supplierModalHydrating, setSupplierModalHydrating] = useState(false);
-
+  // Supplier: hoja chromeless /saas/compras/proveedor
   const openSupplierEditor = useCallback(
-    async (supplier: Supplier | null) => {
-      setEditingSupplier(supplier);
-      setShowCreateSupplier(true);
-      if (!supplier?._id || !dataUserId) {
-        setSupplierModalHydrating(false);
-        return;
-      }
-      setSupplierModalHydrating(true);
-      try {
-        const freshSuppliers = await listSuppliersRequest(dataUserId, {
-          businessId: businessId || undefined,
-          accountBusinessCount,
-        });
-        setSuppliers(freshSuppliers);
-        const fresh = freshSuppliers.find((s) => s._id === supplier._id);
-        if (fresh) setEditingSupplier(fresh);
-      } catch {
-        /* se usa el proveedor de la lista local */
-      } finally {
-        setSupplierModalHydrating(false);
-      }
+    (supplier: Supplier | null) => {
+      const returnTo = `${window.location.pathname}${window.location.search || '?tab=suppliers'}`;
+      const path = supplier?._id
+        ? PURCHASES_WORKSPACE.supplierEdit(supplier._id)
+        : PURCHASES_WORKSPACE.supplierNew;
+      navigate(path, { state: purchasesWorkspaceNavigateState(returnTo) });
     },
-    [dataUserId, businessId, accountBusinessCount],
+    [navigate],
   );
 
   // Invoice state
@@ -5897,7 +5487,7 @@ export function CatalogPage() {
   useEffect(() => {
     if (!catalogDataReady) return;
 
-    const modules = catalogModulesForTab(activeTab, showCreateSupplier);
+    const modules = catalogModulesForTab(activeTab);
     const needsCarta = modules.carta && !catalogCartaLoadedRef.current;
     const needsStock = modules.stock && !catalogStockLoadedRef.current;
     if (!needsCarta && !needsStock) {
@@ -5934,7 +5524,6 @@ export function CatalogPage() {
     catalogDataReady,
     dataUserId,
     activeTab,
-    showCreateSupplier,
     loadCatalog,
     catalogModulesForTab,
   ]);
@@ -6653,85 +6242,6 @@ export function CatalogPage() {
 
   // ── CRUD: Suppliers ─────────────────────────────────────────────────────────
 
-  const handleCreateSupplier = async (data: Partial<Supplier> & { catalogItemCosts?: Record<string, number> }) => {
-    if (!dataUserId) { toast.error('Sesión no válida. Recarga la página e inicia sesión de nuevo.'); return; }
-    const { catalogItemCosts, ...rest } = data;
-    const resolvedCatalogItemIds = resolveSupplierSelectedStockIds(
-      rest.catalogItemIds || [],
-      catalogItems,
-      storeIngredients,
-    );
-    const resolvedCosts: Record<string, number> = {};
-    for (const [rawId, cost] of Object.entries(catalogItemCosts || {})) {
-      const mapped = resolveSupplierSelectedStockIds([rawId], catalogItems, storeIngredients)[0];
-      if (mapped) resolvedCosts[mapped] = cost;
-    }
-    const organizerIds = [
-      ...new Set(
-        (Array.isArray(rest.organizerIds) ? rest.organizerIds : [])
-          .map((id) => String(id || '').trim())
-          .filter(Boolean),
-      ),
-    ];
-    const supplierData = {
-      ...rest,
-      organizerIds,
-      catalogItemIds: resolvedCatalogItemIds,
-      business_id: businessId || rest.business_id || editingSupplier?.business_id || undefined,
-    };
-    try {
-      if (editingSupplier) {
-        const updated = await updateSupplierRequest(dataUserId, {
-          ...editingSupplier,
-          ...supplierData,
-          organizerIds,
-          catalogItemIds: resolvedCatalogItemIds,
-        } as Supplier);
-        const linked = await syncSupplierCatalogItemLinks(
-          dataUserId,
-          updated,
-          supplierData.catalogItemIds || [],
-          catalogItems,
-          resolvedCosts,
-          storeIngredients,
-        );
-        if (linked.length > 0) {
-          const byId = new Map(linked.map((i) => [i._id, i]));
-          setAllCatalogItems((prev) => prev.map((i) => byId.get(i._id) ?? i));
-        }
-        const freshSuppliers = await listSuppliersRequest(dataUserId, {
-          businessId: businessId || undefined,
-          accountBusinessCount,
-        });
-        setSuppliers(freshSuppliers);
-        toast.success('Proveedor actualizado');
-      } else {
-        const created = await createSupplierRequest(dataUserId, supplierData);
-        const linked = await syncSupplierCatalogItemLinks(
-          dataUserId,
-          created,
-          supplierData.catalogItemIds || [],
-          catalogItems,
-          resolvedCosts,
-          storeIngredients,
-        );
-        if (linked.length > 0) {
-          const byId = new Map(linked.map((i) => [i._id, i]));
-          setAllCatalogItems((prev) => prev.map((i) => byId.get(i._id) ?? i));
-        }
-        const freshSuppliers = await listSuppliersRequest(dataUserId, {
-          businessId: businessId || undefined,
-          accountBusinessCount,
-        });
-        setSuppliers(freshSuppliers);
-        toast.success('Proveedor creado');
-      }
-      setShowCreateSupplier(false);
-      setEditingSupplier(null);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Error al guardar el proveedor');
-    }
-  };
 
   const handleDeleteSupplier = async (supplier: Supplier) => {
     if (!dataUserId) return;
@@ -9266,20 +8776,6 @@ export function CatalogPage() {
           onSave={handleSaveDetailItem}
         />
       )}
-
-      <CreateSupplierModal
-        isOpen={showCreateSupplier}
-        onClose={() => { setShowCreateSupplier(false); setEditingSupplier(null); setSupplierModalHydrating(false); }}
-        onCreate={handleCreateSupplier}
-        editItem={editingSupplier}
-        editHydrating={supplierModalHydrating}
-        brands={brands}
-        catalogItems={catalogItems}
-        storeIngredients={storeIngredients}
-        existingSuppliers={suppliers}
-        businessType={currentBusiness?.businessType}
-      />
-
       {showInvoiceOcrStorePicker ? (
         <div className="fixed inset-0 z-[70] flex items-end justify-center sm:items-center p-0 sm:p-4">
           <button

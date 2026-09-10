@@ -371,6 +371,14 @@ export function AlbaranCorroborateModal({
     void handleLeaveWaiting();
   });
 
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
   const handleRevoke = async () => {
     if (saving) return;
     if (workingInvoice?.ocrStockReceivedAt) {
@@ -704,15 +712,8 @@ export function AlbaranCorroborateModal({
   const busy = saving || ensuringSupplier;
 
   return createPortal(
-    <div className="fixed inset-0 z-[80] flex items-end justify-center sm:items-center p-0 sm:p-4 bg-black/40 backdrop-blur-sm">
-      <button
-        type="button"
-        className="absolute inset-0"
-        aria-label="Dejar en espera"
-        onClick={() => void handleLeaveWaiting()}
-      />
-      <div className="relative w-full max-w-4xl max-h-[92vh] overflow-hidden rounded-t-2xl sm:rounded-2xl border border-stone-200 bg-white shadow-2xl dark:border-stone-800 dark:bg-stone-900 flex flex-col">
-        <div className="flex items-start justify-between gap-3 px-4 sm:px-6 py-4 border-b border-stone-200 dark:border-stone-800">
+    <div className="fixed inset-0 z-[200] flex flex-col bg-stone-50 dark:bg-stone-950">
+      <div className="flex items-start justify-between gap-3 px-4 sm:px-6 py-3 border-b border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 shrink-0">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <PackageCheck className="w-5 h-5 text-blue-600 shrink-0" />
@@ -753,7 +754,7 @@ export function AlbaranCorroborateModal({
           </button>
         </div>
 
-        <div className="px-4 sm:px-6 py-3 border-b border-stone-100 dark:border-stone-800 bg-stone-50/80 dark:bg-stone-950/40 space-y-3">
+        <div className="px-4 sm:px-6 py-3 border-b border-stone-100 dark:border-stone-800 bg-stone-50/80 dark:bg-stone-950/40 space-y-3 shrink-0">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <div className="rounded-xl bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 px-3 py-2">
               <p className="text-[10px] uppercase tracking-wide text-stone-500 font-semibold">Correctos</p>
@@ -816,7 +817,7 @@ export function AlbaranCorroborateModal({
           </div>
         ) : null}
 
-        <div className="flex-1 overflow-y-auto min-h-0">
+        <div className="flex-1 overflow-y-auto min-h-0 overscroll-contain">
           {incomingRows.length === 0 ? (
             <p className="px-4 sm:px-6 py-10 text-sm text-stone-500 text-center">
               {order
@@ -900,7 +901,7 @@ export function AlbaranCorroborateModal({
           ) : null}
         </div>
 
-        <div className="sticky bottom-0 flex flex-col gap-2 px-4 sm:px-6 py-4 border-t border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900">
+        <div className="shrink-0 flex flex-col gap-2 px-4 sm:px-6 py-4 border-t border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900">
           <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-2">
             <button
               type="button"
@@ -932,7 +933,6 @@ export function AlbaranCorroborateModal({
             </div>
           </div>
         </div>
-      </div>
     </div>,
     document.body,
   );

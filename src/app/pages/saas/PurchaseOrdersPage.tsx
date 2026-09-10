@@ -56,6 +56,11 @@ import {
   SaasTabSecondaryButton,
 } from '../../components/saas/SaasTabWorkspace';
 import { CatalogTabShell } from '../../components/saas/CatalogTabShell';
+import {
+  PurchasesChromelessShell,
+  PURCHASES_FIELD_INPUT,
+  PURCHASES_FIELD_LABEL,
+} from '../../components/saas/purchases/PurchasesChromelessShell';
 const STATUS_META: Record<PurchaseOrderStatus, { label: string; className: string }> = {
   draft: {
     label: 'Borrador',
@@ -719,99 +724,91 @@ function NewPurchaseOrderModal({
         )}`;
 
   return createPortal(
-    <div
-      className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/45 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] overflow-hidden flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="shrink-0 px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3">
+    <PurchasesChromelessShell
+      portal
+      title="Nuevos pedidos a proveedores"
+      subtitle={`Nº ${nextSeqPreview} · automático`}
+      onBack={onClose}
+      backLabel="Volver"
+      primaryLabel={
+        orderPayloads.length <= 1
+          ? 'Crear pedido'
+          : `Crear ${orderPayloads.length} pedidos`
+      }
+      onPrimary={() => void handleSave()}
+      primaryDisabled={!canSave}
+      primaryLoading={saving}
+      left={
+        <>
           <div>
-            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Nuevos pedidos a proveedores</h2>
-            <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
-              Nº{' '}
-              <span className="font-bold tabular-nums text-gray-900 dark:text-gray-100">{nextSeqPreview}</span>
-              <span className="text-xs font-semibold text-gray-400 ml-1.5">· automático</span>
-            </p>
-          </div>
-          <button type="button" onClick={onClose} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800">
-            <X className="w-5 h-5 text-gray-500" />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-          <div>
-            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-              <label className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <label className={PURCHASES_FIELD_LABEL}>
                 Proveedores
                 {activeSuppliers.length > 0 ? (
-                  <span className="ml-1.5 font-normal text-gray-400">
-                    ({selectedSupplierIds.length}/{activeSuppliers.length} seleccionado
-                    {selectedSupplierIds.length !== 1 ? 's' : ''})
+                  <span className="ml-1 font-normal normal-case tracking-normal text-stone-400">
+                    ({selectedSupplierIds.length}/{activeSuppliers.length})
                   </span>
                 ) : null}
               </label>
-              {activeSuppliers.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5">
+            </div>
+            {activeSuppliers.length > 0 ? (
+              <div className="mb-2 flex flex-wrap gap-1">
+                <button
+                  type="button"
+                  onClick={selectAllSuppliers}
+                  className="rounded-lg border border-blue-200 px-2 py-1 text-[11px] font-semibold text-[var(--v-blue,#2563eb)] dark:border-blue-900"
+                >
+                  Todos
+                </button>
+                {suppliersWithLowStock.length > 0 ? (
                   <button
                     type="button"
-                    onClick={selectAllSuppliers}
-                    className="px-2 py-1 rounded-lg text-[11px] font-semibold text-[var(--v-blue,#2563eb)] border border-blue-200 dark:border-blue-900"
+                    onClick={selectLowStockSuppliers}
+                    className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
                   >
-                    Todos
+                    Bajo mín. ({suppliersWithLowStock.length})
                   </button>
-                  {suppliersWithLowStock.length > 0 ? (
-                    <button
-                      type="button"
-                      onClick={selectLowStockSuppliers}
-                      className="px-2 py-1 rounded-lg text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 dark:text-amber-200 dark:bg-amber-950/40 dark:border-amber-900"
-                    >
-                      Con bajo mínimo ({suppliersWithLowStock.length})
-                    </button>
-                  ) : null}
-                  {selectedSupplierIds.length > 0 ? (
-                    <button
-                      type="button"
-                      onClick={clearSuppliers}
-                      className="px-2 py-1 rounded-lg text-[11px] font-semibold text-gray-500 border border-gray-200 dark:border-gray-700"
-                    >
-                      Ninguno
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-
+                ) : null}
+                {selectedSupplierIds.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={clearSuppliers}
+                    className="rounded-lg border border-stone-200 px-2 py-1 text-[11px] font-semibold text-stone-500 dark:border-stone-700"
+                  >
+                    Ninguno
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
             {activeSuppliers.length === 0 ? (
               <p className="text-xs text-amber-700 dark:text-amber-400">
-                No tienes proveedores dados de alta. Créalos en la pestaña Proveedores.
+                No hay proveedores. Créalos en la pestaña Proveedores.
               </p>
             ) : (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex max-h-[40vh] flex-col gap-1.5 overflow-y-auto overscroll-contain md:max-h-none">
                 {activeSuppliers.map((s) => {
                   const selected = selectedSupplierIds.includes(s._id);
                   const lineCount = draftsBySupplier[s._id]?.lines.length || 0;
                   return (
                     <label
                       key={s._id}
-                      className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl border-2 cursor-pointer transition-colors ${
+                      className={`inline-flex cursor-pointer items-center gap-2 rounded-xl border-2 px-2.5 py-2 transition-colors ${
                         selected
                           ? 'border-[var(--v-blue,#2563eb)] bg-blue-50/80 dark:bg-blue-950/30'
-                          : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                          : 'border-stone-200 hover:border-stone-300 dark:border-stone-700'
                       }`}
                     >
                       <input
                         type="checkbox"
                         checked={selected}
                         onChange={() => toggleSupplier(s._id)}
-                        className="rounded border-gray-300 text-[var(--v-blue,#2563eb)]"
+                        className="rounded border-stone-300 text-[var(--v-blue,#2563eb)]"
                       />
-                      <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">{s.name}</span>
-                      {s.code ? <span className="text-[11px] text-gray-400">{s.code}</span> : null}
+                      <span className="min-w-0 flex-1 truncate text-sm font-semibold text-stone-900 dark:text-stone-100">
+                        {s.name}
+                      </span>
                       {selected && lineCount > 0 ? (
-                        <span className="text-[10px] font-bold tabular-nums px-1.5 py-0.5 rounded bg-white/80 dark:bg-gray-900 text-gray-600 dark:text-gray-300">
+                        <span className="shrink-0 rounded bg-white/80 px-1.5 py-0.5 text-[10px] font-bold tabular-nums dark:bg-stone-950">
                           {lineCount}
                         </span>
                       ) : null}
@@ -820,85 +817,64 @@ function NewPurchaseOrderModal({
                 })}
               </div>
             )}
-
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-              Marca todos los proveedores a los que quieras pedir. Se crea un pedido (PC-0001, PC-0002…) por cada uno
-              con líneas.
-            </p>
           </div>
-
-          {selectedSupplierIds.length === 0 ? (
-            <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-6 rounded-xl border border-dashed border-gray-200 dark:border-gray-700">
-              Elige uno o más proveedores. Solo salen productos marcados en su ficha (Proveedores → Qué te vende).
-            </p>
-          ) : loadingSuggestions ? (
-            <div className="flex items-center justify-center gap-2 py-8 text-sm text-gray-500">
-              <Loader2 className="w-5 h-5 animate-spin" />
-              Revisando stock y productos marcados…
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {selectedSupplierIds.map((id) => {
-                const supplier = activeSupplierById.get(id);
-                const draft = draftsBySupplier[id];
-                if (!supplier || !draft) return null;
-                return (
-                  <SupplierOrderDraftSection
-                    key={id}
-                    supplier={supplier}
-                    draft={draft}
-                    catalogItems={catalogItems}
-                    catalogById={catalogById}
-                    storeIngredients={storeIngredients}
-                    commercialBrands={commercialBrands}
-                    defaultExpanded={selectedSupplierIds.length === 1 || id === initialSupplierId}
-                    onChange={(next) => setDraftsBySupplier((prev) => ({ ...prev, [id]: next }))}
-                  />
-                );
-              })}
-            </div>
-          )}
-
           <div>
-            <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">
-              Notas (opcional, para todos los pedidos)
-            </label>
+            <label className={PURCHASES_FIELD_LABEL}>Notas (todos los pedidos)</label>
             <input
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Ej: entregar antes del viernes"
-              className="w-full px-3 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm"
+              className={PURCHASES_FIELD_INPUT}
             />
           </div>
-        </div>
-
-        <div className="shrink-0 px-5 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3">
-          <p className="text-sm text-gray-600 dark:text-gray-400 tabular-nums">
+          <p className="text-xs tabular-nums text-stone-500">
             {orderPayloads.length > 0 ? (
               <>
                 {orderPayloads.length} pedido{orderPayloads.length !== 1 ? 's' : ''} ·{' '}
-                <span className="font-bold text-gray-900 dark:text-gray-100">Total {formatMoney(grandTotal)}</span>
+                <span className="font-bold text-stone-900 dark:text-stone-100">
+                  Total {formatMoney(grandTotal)}
+                </span>
               </>
             ) : (
               'Añade líneas en al menos un proveedor'
             )}
           </p>
-          <div className="flex gap-2 shrink-0">
-            <SaasTabSecondaryButton onClick={onClose}>Cancelar</SaasTabSecondaryButton>
-            <SaasTabPrimaryButton onClick={() => void handleSave()} disabled={!canSave}>
-              {saving ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Plus className="w-4 h-4" />
-              )}
-              {orderPayloads.length <= 1
-                ? 'Crear pedido'
-                : `Crear ${orderPayloads.length} pedidos`}
-            </SaasTabPrimaryButton>
+        </>
+      }
+      right={
+        selectedSupplierIds.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-stone-300 bg-white px-4 py-16 text-center text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900">
+            Elige uno o más proveedores a la izquierda. Solo salen productos de «Qué te vende».
           </div>
-        </div>
-      </div>
-    </div>,
+        ) : loadingSuggestions ? (
+          <div className="flex items-center justify-center gap-2 py-16 text-sm text-stone-500">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            Revisando stock y productos…
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {selectedSupplierIds.map((id) => {
+              const supplier = activeSupplierById.get(id);
+              const draft = draftsBySupplier[id];
+              if (!supplier || !draft) return null;
+              return (
+                <SupplierOrderDraftSection
+                  key={id}
+                  supplier={supplier}
+                  draft={draft}
+                  catalogItems={catalogItems}
+                  catalogById={catalogById}
+                  storeIngredients={storeIngredients}
+                  commercialBrands={commercialBrands}
+                  defaultExpanded={selectedSupplierIds.length === 1 || id === initialSupplierId}
+                  onChange={(next) => setDraftsBySupplier((prev) => ({ ...prev, [id]: next }))}
+                />
+              );
+            })}
+          </div>
+        )
+      }
+    />,
     document.body,
   );
 }
@@ -998,67 +974,55 @@ function EditPurchaseOrderModal({
   };
 
   return createPortal(
-    <div
-      className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/45 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-hidden flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="shrink-0 px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3">
+    <PurchasesChromelessShell
+      portal
+      title={`Editar pedido ${order.orderNumber || ''}`}
+      subtitle={`${order.supplierName || 'Sin proveedor'} · borrador · Total ${formatMoney(total)}`}
+      onBack={onClose}
+      backLabel="Volver"
+      primaryLabel="Guardar cambios"
+      onPrimary={() => void handleSave()}
+      primaryDisabled={!canSave}
+      primaryLoading={saving}
+      left={
+        <>
           <div>
-            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">
-              Editar pedido {order.orderNumber || ''}
-            </h2>
-            <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
-              {order.supplierName || 'Sin proveedor'} · borrador
+            <p className={PURCHASES_FIELD_LABEL}>Proveedor</p>
+            <p className="text-sm font-bold text-stone-900 dark:text-stone-100">
+              {order.supplierName || '—'}
             </p>
           </div>
-          <button type="button" onClick={onClose} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800">
-            <X className="w-5 h-5 text-gray-500" />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-          {!supplier ? (
-            <p className="text-sm text-amber-800 dark:text-amber-300 text-center py-6 px-3 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50/80 dark:bg-amber-950/30">
-              No se encontró el proveedor de este pedido. Revisa Proveedores.
-            </p>
-          ) : (
-            <SupplierOrderDraftSection
-              supplier={supplier}
-              draft={draft}
-              catalogItems={catalogItems}
-              catalogById={catalogById}
-              defaultExpanded
-              onChange={setDraft}
-            />
-          )}
-
           <div>
-            <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">Notas</label>
+            <label className={PURCHASES_FIELD_LABEL}>Notas</label>
             <input
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm"
+              className={PURCHASES_FIELD_INPUT}
             />
           </div>
-        </div>
-
-        <div className="shrink-0 px-5 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3">
-          <p className="text-sm text-gray-600 dark:text-gray-400 tabular-nums">
-            Total <span className="font-bold text-gray-900 dark:text-gray-100">{formatMoney(total)}</span>
+          <p className="text-xs tabular-nums text-stone-500">
+            Total{' '}
+            <span className="font-bold text-stone-900 dark:text-stone-100">{formatMoney(total)}</span>
           </p>
-          <div className="flex gap-2 shrink-0">
-            <SaasTabSecondaryButton onClick={onClose}>Cancelar</SaasTabSecondaryButton>
-            <SaasTabPrimaryButton onClick={() => void handleSave()} disabled={!canSave}>
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Guardar cambios'}
-            </SaasTabPrimaryButton>
+        </>
+      }
+      right={
+        !supplier ? (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-10 text-center text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
+            No se encontró el proveedor de este pedido. Revisa Proveedores.
           </div>
-        </div>
-      </div>
-    </div>,
+        ) : (
+          <SupplierOrderDraftSection
+            supplier={supplier}
+            draft={draft}
+            catalogItems={catalogItems}
+            catalogById={catalogById}
+            defaultExpanded
+            onChange={setDraft}
+          />
+        )
+      }
+    />,
     document.body,
   );
 }
@@ -1719,7 +1683,10 @@ export function PurchaseOrdersPage({
     }
     if (suppliers.length > 0) return;
     let cancelled = false;
-    void listSuppliersRequest(userId)
+    void listSuppliersRequest(userId, {
+      businessId: businessId || undefined,
+      accountBusinessCount,
+    })
       .then((list) => {
         if (!cancelled) setResolvedSuppliers(list);
       })
@@ -1729,7 +1696,7 @@ export function PurchaseOrdersPage({
     return () => {
       cancelled = true;
     };
-  }, [userId, suppliers.length]);
+  }, [userId, suppliers.length, businessId, accountBusinessCount]);
 
   const load = useCallback(async () => {
     if (!userId) return;

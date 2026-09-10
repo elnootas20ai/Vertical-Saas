@@ -42,6 +42,7 @@ import { RequirePdvTerminal } from './components/saas/RequirePdvTerminal';
 import { RequireTpvTabletEntry } from './components/saas/RequireTpvTabletEntry';
 import { RedirectLegacyDeliveryTpv } from './components/saas/RedirectLegacyDeliveryTpv';
 import { RequireBusinessOwner } from './components/saas/RequireBusinessOwner';
+import { SuppliersEntryRedirect } from './components/saas/SuppliersEntryRedirect';
 import { RequireDeliveryVertical } from './components/saas/RequireDeliveryVertical';
 import { RequireCompraventaVertical } from './components/saas/RequireCompraventaVertical';
 import { RequireCleaningVertical } from './components/saas/RequireCleaningVertical';
@@ -230,6 +231,10 @@ const ArticlesPage = lazyPage(() => import('./pages/saas/ArticlesPage'), 'Articl
 const SuppliersPage = lazyPage(() => import('./pages/saas/SuppliersPage'), 'SuppliersPage');
 const SuppliersLayout = lazyPage(() => import('./pages/saas/suppliers/SuppliersLayout'), 'SuppliersLayout');
 const SupplierDetailPage = lazyPage(() => import('./pages/saas/SupplierDetailPage'), 'SupplierDetailPage');
+const SupplierWorkspacePage = lazyPage(
+  () => import('./pages/saas/purchases/SupplierWorkspacePage'),
+  'SupplierWorkspacePage',
+);
 const ComprasStockPage = lazyPage(() => import('./pages/saas/ComprasStockPage'), 'ComprasStockPage');
 const PromotionsPage = lazyPage(() => import('./pages/saas/PromotionsPage'), 'PromotionsPage');
 const Clockins = lazyPage(() => import('./pages/saas/Clockins'), 'Clockins');
@@ -690,11 +695,15 @@ export const router = createBrowserRouter([
           { path: 'ebitda', element: <RequireBusinessOwner><EbitdaPage /></RequireBusinessOwner> },
           { path: 'taxes', element: <RequireBusinessOwner><TaxesPage /></RequireBusinessOwner> },
           { path: 'bank-reconciliation', element: <RequireBusinessOwner><BankReconciliationPage /></RequireBusinessOwner> },
-          { path: 'catalog', element: <RedirectEventsFromRetailRoutes><VerticalCatalogEntry /></RedirectEventsFromRetailRoutes> },
+          { path: 'catalog', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><VerticalCatalogEntry /></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
+          { path: 'compras', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><Outlet /></RedirectEventsFromRetailRoutes></RequireBusinessOwner>, children: [
+            { path: 'proveedor/nuevo', element: <SupplierWorkspacePage /> },
+            { path: 'proveedor/:supplierId/editar', element: <SupplierWorkspacePage /> },
+          ]},
           { path: 'correo-facturas', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><SupplierInvoiceEmailPage /></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
           { path: 'inventory', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><InventoryPage /></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
           { path: 'articles', element: <RedirectEventsFromRetailRoutes><VerticalArticlesRedirect /></RedirectEventsFromRetailRoutes> },
-          { path: 'suppliers', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><Outlet /></RedirectEventsFromRetailRoutes></RequireBusinessOwner>, children: [
+          { path: 'suppliers', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><SuppliersEntryRedirect /></RedirectEventsFromRetailRoutes></RequireBusinessOwner>, children: [
             {
               element: <SuppliersLayout />,
               children: [

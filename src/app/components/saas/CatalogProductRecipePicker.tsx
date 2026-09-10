@@ -111,8 +111,6 @@ type CatalogProductRecipePickerProps = {
   /** Crea ingrediente maestro + almacén; el picker lo mete en la composición. */
   onCreateIngredient?: (input: CatalogRecipeCreateIngredientInput) => Promise<StoreIngredient | null>;
   creatingIngredient?: boolean;
-  /** Persiste la unidad también en el ingrediente de almacén (misma fuente de verdad). */
-  onIngredientUnitChange?: (storeIngredientId: string, unit: string) => void;
 };
 
 function foldName(s: string): string {
@@ -168,20 +166,16 @@ function ingredientUnit(ing: StoreIngredient): string {
   return toRecipePickerUnit((ing as { unit?: string }).unit);
 }
 
-/** Solo 3 unidades en receta: und / LT / KG. g→kg y ml→l. */
+/**
+ * Solo 3 unidades de uso en receta: und / LT / KG.
+ * g→kg y ml→l (misma familia; el coste €/kg o €/l sigue en la ficha del ingrediente).
+ */
 function toRecipePickerUnit(raw: unknown): string {
   const u = normalizeStoreIngredientUnit(raw, 'ud');
   if (u === 'g') return 'kg';
   if (u === 'ml') return 'l';
   if (u === 'kg' || u === 'l' || u === 'ud') return u;
   return 'ud';
-}
-
-/** Unidad visible = almacén si existe; si no, la de la línea de receta. */
-function resolvePickUnit(pick: CatalogRecipePick, storeIngredients: StoreIngredient[]): string {
-  const ing = storeIngredients.find((row) => row.id === pick.storeIngredientId);
-  if (ing) return ingredientUnit(ing);
-  return toRecipePickerUnit(pick.unit);
 }
 
 export function CatalogProductRecipePicker({
@@ -195,7 +189,6 @@ export function CatalogProductRecipePicker({
   hideTpvOptions = false,
   onCreateIngredient,
   creatingIngredient = false,
-  onIngredientUnitChange,
 }: CatalogProductRecipePickerProps) {
   const [search, setSearch] = useState('');
   const [showCreatePanel, setShowCreatePanel] = useState(false);
@@ -218,7 +211,8 @@ export function CatalogProductRecipePicker({
   const addIngredient = (ing: StoreIngredient, unitOverride?: string) => {
     const flags = readStoreIngredientTpvFlags(ing);
     const role = resolveIngredientRole(ing);
-    const unit = unitOverride || ingredientUnit(ing);
+    // Unidad de uso en la línea (no pisa el €/kg de la ficha).
+    const unit = toRecipePickerUnit(unitOverride || ingredientUnit(ing));
     const quantity = defaultQtyForIngredient(ing, unit);
     onChange([
       ...picks,
@@ -281,12 +275,13 @@ export function CatalogProductRecipePicker({
     <div className={`space-y-3 ${compact ? '' : ''}`}>
       <p className="text-[11px] text-stone-500 dark:text-stone-400 leading-snug">
         {hideTpvOptions
-          ? 'Elige qué componentes forman este elaborado. Las cantidades se descontarán del stock al vender los productos que elijas.'
+          ? 'Elige qué componentes forman este elaborado. UND/LT/KG es cuánto usas en la composición; el €/kg o €/l del coste está en la ficha del ingrediente.'
           : (
             <>
-              Elige qué lleva este plato. El coste de compra se gestiona en{' '}
+              Elige qué lleva este plato. UND/LT/KG es <strong className="font-semibold text-stone-700 dark:text-stone-200">cuánto usas</strong>
+              {' '}en la receta; el precio de compra (€/kg, €/l…) se gestiona en{' '}
               <strong className="font-semibold text-stone-700 dark:text-stone-200">Ingredientes / proveedores</strong>
-              ; aquí solo la composición.
+              .
             </>
           )}
       </p>
@@ -314,7 +309,7 @@ export function CatalogProductRecipePicker({
                     ariaLabel={`Cantidad de ${pick.name}`}
                   />
                   <select
-                    value={resolvePickUnit(pick, storeIngredients)}
+                    value={toRecipePickerUnit(pick.unit)}
                     onChange={(e) => {
                       const unit = toRecipePickerUnit(e.target.value);
                       onChange(
@@ -322,9 +317,9 @@ export function CatalogProductRecipePicker({
                           p.storeIngredientId === pick.storeIngredientId ? { ...p, unit } : p,
                         ),
                       );
-                      onIngredientUnitChange?.(pick.storeIngredientId, unit);
                     }}
-                    aria-label={`Unidad de ${pick.name}`}
+                    aria-label={`Unidad de uso de ${pick.name}`}
+                    title="Unidad de uso en la receta (no es el €/kg del coste)"
                     className="h-10 rounded-xl border-2 border-stone-200 bg-white pl-2 pr-1 text-xs font-semibold text-stone-700 outline-none focus:border-[var(--v-blue,#2563eb)] dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200"
                   >
                     <option value="ud">UND</option>

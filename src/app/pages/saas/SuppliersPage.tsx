@@ -1,7 +1,6 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { useModalClose } from '../../hooks/useModalClose';
 import { useAuth } from '../../context/AuthContext';
 import {
   listSuppliersRequest,
@@ -22,7 +21,6 @@ import {
 import {
   Plus,
   Search,
-  X,
   Trash2,
   Edit3,
   Factory,
@@ -50,297 +48,21 @@ import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 import { SUPPLIERS_HUB } from '../../lib/suppliersHubPaths';
-import { SupplierPaymentTermsField } from '../../components/saas/SupplierPaymentTermsField';
-import {
-  initialSupplierCatalogItemIds,
-  initialSupplierItemCosts,
-  initialSupplierOrganizerIds,
-  parseSupplierItemCosts,
-  resolveSupplierOrganizerIdsForSave,
-  labelsForSupplierOrganizerIds,
-  supplierFormInitFingerprint,
-  SupplierOrganizersField,
-} from '../../components/saas/SupplierOrganizersField';
-import { syncSupplierCatalogItemLinks, resolveSupplierSelectedStockIds } from '../../lib/supplierCatalogLinks';
+import { labelsForSupplierOrganizerIds } from '../../components/saas/SupplierOrganizersField';
 import { explicitMarkedStockItemsForSupplier } from '../../lib/purchaseSuggestions';
 import { commercialLineBrands } from '../../lib/deliveryCatalogImportLogic';
 import { unifyStoreIngredientsFromConfig } from '../../lib/catalogCustomization';
-import {
-  normalizeSupplierCode,
-  sanitizeSupplierCodeInput,
-  suggestNextSupplierCode,
-  suggestSupplierCodeFromName,
-  supplierCodeAlreadyUsed,
-  SUPPLIER_CODE_MAX_LEN,
-} from '../../lib/supplierCode';
 import type { StoreIngredient } from '../../lib/catalogCustomization';
 import { useBusinessOptional } from '../../context/BusinessContext';
 import { listBrandsRequest, type Brand } from '../../lib/brandsApi';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { filterPurchaseDocsByBusinessScope } from '../../lib/purchaseBusinessScope';
+import {
+  PURCHASES_WORKSPACE,
+  purchasesWorkspaceNavigateState,
+} from '../../lib/purchasesWorkspacePaths';
 
-interface CreateSupplierModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onCreate: (data: Partial<Supplier> & { catalogItemCosts?: Record<string, number> }) => Promise<void>;
-  editItem?: Supplier | null;
-  editHydrating?: boolean;
-  brands?: Brand[];
-  catalogItems?: CatalogItem[];
-  storeIngredients?: StoreIngredient[];
-  existingSuppliers?: Supplier[];
-}
-
-function CreateSupplierModal({
-  isOpen,
-  onClose,
-  onCreate,
-  editItem,
-  editHydrating = false,
-  brands = [],
-  catalogItems = [],
-  storeIngredients = [],
-  existingSuppliers = [],
-}: CreateSupplierModalProps) {
-  const [submitting, setSubmitting] = useState(false);
-  const [formInitReady, setFormInitReady] = useState(false);
-  const [organizersFieldKey, setOrganizersFieldKey] = useState(0);
-  const [codeManual, setCodeManual] = useState(false);
-  const [form, setForm] = useState({
-    name: '', code: '', cif: '', email: '', phone: '', address: '',
-    contactPerson: '', category: '', paymentTerms: '', notes: '',
-    organizerIds: [] as string[],
-    catalogItemIds: [] as string[],
-    itemCosts: {} as Record<string, string>,
-  });
-  const supplierFormSessionRef = useRef<{ fingerprint: string } | null>(null);
-  const organizersTouchedRef = useRef(false);
-  const formRef = useRef(form);
-  const editItemRef = useRef(editItem);
-  const catalogItemsRef = useRef(catalogItems);
-  const brandsRef = useRef(brands);
-  const storeIngredientsRef = useRef(storeIngredients);
-  editItemRef.current = editItem;
-  catalogItemsRef.current = catalogItems;
-  brandsRef.current = brands;
-  storeIngredientsRef.current = storeIngredients;
-
-  const applyForm = (next: typeof form | ((prev: typeof form) => typeof form)) => {
-    setForm((prev) => {
-      const merged = typeof next === 'function' ? next(prev) : next;
-      formRef.current = merged;
-      return merged;
-    });
-  };
-  formRef.current = form;
-
-  const editSnapshot = supplierFormInitFingerprint(editItem, catalogItems.length);
-
-  useEffect(() => {
-    if (!isOpen) {
-      supplierFormSessionRef.current = null;
-      organizersTouchedRef.current = false;
-      setFormInitReady(false);
-      return;
-    }
-    if (editItem && (editHydrating || catalogItems.length === 0)) {
-      setFormInitReady(false);
-      return;
-    }
-
-    const edit = editItemRef.current;
-    const items = catalogItemsRef.current;
-    const fingerprint = supplierFormInitFingerprint(edit, items.length);
-    if (organizersTouchedRef.current && supplierFormSessionRef.current?.fingerprint === fingerprint) {
-      setFormInitReady(true);
-      return;
-    }
-    if (supplierFormSessionRef.current?.fingerprint === fingerprint) {
-      setFormInitReady(true);
-      return;
-    }
-
-    supplierFormSessionRef.current = { fingerprint };
-
-    setCodeManual(Boolean(edit?.code));
-    if (edit) {
-      const catalogItemIds = initialSupplierCatalogItemIds(edit, items);
-      const nextForm = {
-        name: edit.name, code: edit.code || '', cif: edit.cif || '', email: edit.email || '',
-        phone: edit.phone || '', address: edit.address || '',
-        contactPerson: edit.contactPerson || '', category: edit.category || '',
-        paymentTerms: edit.paymentTerms || '', notes: edit.notes || '',
-        organizerIds: initialSupplierOrganizerIds(
-          edit,
-          items,
-          storeIngredientsRef.current,
-          brandsRef.current,
-        ),
-        catalogItemIds,
-        itemCosts: initialSupplierItemCosts(catalogItemIds, items),
-      };
-      formRef.current = nextForm;
-      setForm(nextForm);
-    } else {
-      const nextForm = {
-        name: '', code: suggestNextSupplierCode(existingSuppliers), cif: '', email: '', phone: '', address: '', contactPerson: '',
-        category: '', paymentTerms: '', notes: '', organizerIds: [] as string[], catalogItemIds: [] as string[],
-        itemCosts: {} as Record<string, string>,
-      };
-      formRef.current = nextForm;
-      setForm(nextForm);
-    }
-    setOrganizersFieldKey((k) => k + 1);
-    setFormInitReady(true);
-  }, [isOpen, editSnapshot, editHydrating, catalogItems.length, existingSuppliers]);
-  useModalClose(isOpen, onClose);
-
-  const handleNameChange = (name: string) => {
-    setForm((f) => ({
-      ...f,
-      name,
-      code: codeManual
-        ? f.code
-        : suggestSupplierCodeFromName(name, existingSuppliers, editItem?._id),
-    }));
-  };
-
-  const handleCodeChange = (raw: string) => {
-    setCodeManual(true);
-    setForm((f) => ({ ...f, code: sanitizeSupplierCodeInput(raw) }));
-  };
-
-  if (!isOpen) return null;
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const current = formRef.current;
-    if (!current.name.trim()) { toast.error('El nombre es obligatorio'); return; }
-    const code = normalizeSupplierCode(current.code);
-    if (!code) { toast.error('El código del proveedor es obligatorio'); return; }
-    if (supplierCodeAlreadyUsed(code, existingSuppliers, editItem?._id)) {
-      toast.error(`Ya existe un proveedor con el código ${code}`);
-      return;
-    }
-    const priorOrganizers = (editItem?.organizerIds || []).filter(Boolean).length;
-    if (
-      editItem &&
-      priorOrganizers > 0 &&
-      current.organizerIds.length === 0 &&
-      !organizersTouchedRef.current
-    ) {
-      toast.error('Las categorías no se cargaron bien. Cierra y vuelve a abrir el proveedor.');
-      return;
-    }
-    setSubmitting(true);
-    try {
-      const organizerIds = resolveSupplierOrganizerIdsForSave(
-        current.organizerIds,
-        current.catalogItemIds,
-        catalogItemsRef.current,
-        storeIngredientsRef.current,
-        brandsRef.current,
-      );
-      await onCreate({
-        name: current.name,
-        code,
-        cif: current.cif,
-        email: current.email,
-        phone: current.phone,
-        address: current.address,
-        contactPerson: current.contactPerson,
-        category: current.category,
-        paymentTerms: current.paymentTerms,
-        notes: current.notes,
-        organizerIds,
-        catalogItemIds: current.catalogItemIds,
-        catalogItemCosts: parseSupplierItemCosts(current.itemCosts),
-        active: editItem?.active ?? true,
-      });
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const inputClass = 'w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 dark:focus:border-gray-400 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100';
-  const labelClass = 'block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5';
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
-          <div>
-            <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">{editItem ? 'Editar proveedor' : 'Nuevo proveedor'}</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{editItem ? 'Modifica los datos del proveedor' : 'Registra un nuevo proveedor'}</p>
-          </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors"><X className="w-5 h-5 text-gray-500 dark:text-gray-400" /></button>
-        </div>
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className={labelClass}>Nombre *</label>
-              <input className={inputClass} placeholder="Nombre del proveedor" value={form.name} onChange={(e) => handleNameChange(e.target.value)} autoFocus={!editItem} />
-            </div>
-            <div>
-              <label className={labelClass}>Código *</label>
-              <input className={`${inputClass} font-mono uppercase`} placeholder="MAK-001" maxLength={SUPPLIER_CODE_MAX_LEN} value={form.code} onChange={(e) => handleCodeChange(e.target.value)} />
-              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
-                Se rellena solo con el nombre (ej. Makro → MAK-001). Puedes editarlo. Máx. {SUPPLIER_CODE_MAX_LEN} caracteres: A–Z, 0–9 y guión.
-              </p>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div><label className={labelClass}>CIF/NIF</label><input className={`${inputClass} font-mono uppercase`} placeholder="B12345678" value={form.cif} onChange={e => setForm(f => ({ ...f, cif: e.target.value.toUpperCase() }))} /></div>
-            <div><label className={labelClass}>Email</label><input type="email" className={inputClass} placeholder="proveedor@email.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div><label className={labelClass}>Teléfono</label><input className={inputClass} placeholder="600 000 000" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} /></div>
-            <div>
-              <label className={labelClass}>Persona de contacto</label>
-              <input className={inputClass} placeholder="Nombre del contacto" value={form.contactPerson} onChange={e => setForm(f => ({ ...f, contactPerson: e.target.value }))} />
-            </div>
-          </div>
-          <div><label className={labelClass}>Dirección</label><input className={inputClass} placeholder="Dirección del proveedor" value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} /></div>
-          {formInitReady ? (
-            <SupplierOrganizersField
-              key={`supplier-organizers-${organizersFieldKey}`}
-              organizerIds={form.organizerIds}
-              catalogItemIds={form.catalogItemIds}
-              itemCosts={form.itemCosts}
-              onChange={({ organizerIds, catalogItemIds, itemCosts }) => {
-                organizersTouchedRef.current = true;
-                applyForm((f) => ({ ...f, organizerIds, catalogItemIds, itemCosts }));
-              }}
-              brands={brands}
-              catalogItems={catalogItems}
-              storeIngredients={storeIngredients}
-              labelClassName={labelClass}
-              businessType={businessCtx?.currentBusiness?.businessType}
-            />
-          ) : (
-            <div className="rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700 px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-              {editItem && (editHydrating || catalogItems.length === 0)
-                ? 'Cargando categorías y productos del proveedor…'
-                : 'Preparando el formulario…'}
-            </div>
-          )}
-          <SupplierPaymentTermsField
-            value={form.paymentTerms}
-            onChange={(paymentTerms) => setForm((f) => ({ ...f, paymentTerms }))}
-            labelClassName={labelClass}
-            inputClassName={inputClass}
-          />
-          <div><label className={labelClass}>Notas</label><textarea rows={2} className={`${inputClass} resize-none`} placeholder="Notas adicionales..." value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} /></div>
-          <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 -mx-6 px-6 -mb-6 pb-6 pt-4 flex gap-3 rounded-b-2xl">
-            <button type="button" onClick={onClose} className="flex-1 px-4 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">Cancelar</button>
-            <button type="submit" disabled={submitting} className="flex-1 px-4 py-3 bg-gray-900 hover:bg-black dark:bg-gray-100 dark:hover:bg-white dark:text-gray-900 text-white rounded-xl font-semibold transition-colors disabled:opacity-60 disabled:cursor-wait">{submitting ? 'Guardando…' : editItem ? 'Guardar cambios' : 'Crear proveedor'}</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
 
 function isOverdueInvoice(inv: PurchaseInvoice): boolean {
   return inv.status === 'pending' && !!inv.dueDate && new Date(inv.dueDate) < new Date();
@@ -371,9 +93,6 @@ export function SuppliersPage() {
   const [brands, setBrands] = useState<Brand[]>([]);
   const [storeIngredients, setStoreIngredients] = useState<StoreIngredient[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showCreateSupplier, setShowCreateSupplier] = useState(false);
-  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
-  const [supplierModalHydrating, setSupplierModalHydrating] = useState(false);
   const [searchSupplier, setSearchSupplier] = useState('');
   const [showAIModal, setShowAIModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -381,26 +100,14 @@ export function SuppliersPage() {
   const inventoryCommercialBrands = useMemo(() => commercialLineBrands(brands), [brands]);
 
   const openSupplierEditor = useCallback(
-    async (supplier: Supplier | null) => {
-      setEditingSupplier(supplier);
-      setShowCreateSupplier(true);
-      if (!supplier?._id || !dataUserId) {
-        setSupplierModalHydrating(false);
-        return;
-      }
-      setSupplierModalHydrating(true);
-      try {
-        const freshSuppliers = await listSuppliersRequest(dataUserId);
-        setSuppliers(freshSuppliers);
-        const fresh = freshSuppliers.find((s) => s._id === supplier._id);
-        if (fresh) setEditingSupplier(fresh);
-      } catch {
-        /* se usa el proveedor de la lista local */
-      } finally {
-        setSupplierModalHydrating(false);
-      }
+    (supplier: Supplier | null) => {
+      const returnTo = `${window.location.pathname}${window.location.search || ''}` || SUPPLIERS_HUB.directorio;
+      const path = supplier?._id
+        ? PURCHASES_WORKSPACE.supplierEdit(supplier._id)
+        : PURCHASES_WORKSPACE.supplierNew;
+      navigate(path, { state: purchasesWorkspaceNavigateState(returnTo) });
     },
-    [dataUserId],
+    [navigate],
   );
 
   const SUPPLIER_AI_FIELDS: AIFieldDef[] = [
@@ -432,7 +139,11 @@ export function SuppliersPage() {
     let created = 0;
     for (const entry of entries) {
       try {
-        const sup = await createSupplierRequest(dataUserId, { ...entry, active: true } as any);
+        const sup = await createSupplierRequest(dataUserId, {
+          ...entry,
+          active: true,
+          business_id: businessId || undefined,
+        } as any);
         setSuppliers(prev => [sup, ...prev.filter((s) => s._id !== sup._id)]);
         created++;
       } catch { /* skip */ }
@@ -445,7 +156,11 @@ export function SuppliersPage() {
     let created = 0;
     for (const entry of entries) {
       try {
-        const sup = await createSupplierRequest(dataUserId, { ...entry, active: true } as any);
+        const sup = await createSupplierRequest(dataUserId, {
+          ...entry,
+          active: true,
+          business_id: businessId || undefined,
+        } as any);
         setSuppliers(prev => [sup, ...prev.filter((s) => s._id !== sup._id)]);
         created++;
       } catch { /* skip */ }
@@ -457,7 +172,10 @@ export function SuppliersPage() {
     if (!dataUserId) return;
     setLoading(true);
     try {
-      const sups = await listSuppliersRequest(dataUserId);
+      const sups = await listSuppliersRequest(dataUserId, {
+        businessId: businessId || undefined,
+        accountBusinessCount,
+      });
       setSuppliers(sups);
     } catch {
       toast.error('Error al cargar proveedores');
@@ -516,100 +234,27 @@ export function SuppliersPage() {
 
   useEffect(() => {
     const editId = searchParams.get('edit');
-    if (!editId || suppliers.length === 0) return;
-    const found = suppliers.find(s => s._id === editId);
-    if (!found) return;
-    void openSupplierEditor(found);
-    // Quitar ?edit= al abrir: si queda, cada alta reabre el mismo proveedor.
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.delete('edit');
-      return next;
-    }, { replace: true });
-  }, [searchParams, suppliers, setSearchParams, openSupplierEditor]);
+    if (!editId) return;
+    navigate(PURCHASES_WORKSPACE.supplierEdit(editId), {
+      replace: true,
+      state: purchasesWorkspaceNavigateState(SUPPLIERS_HUB.directorio),
+    });
+  }, [searchParams, navigate]);
 
   useEffect(() => {
     const action = searchParams.get('action');
     if (!action) return;
     if (action === 'new') {
-      void openSupplierEditor(null);
-    } else if (action === 'import') setShowImportModal(true);
+      navigate(PURCHASES_WORKSPACE.supplierNew, {
+        replace: true,
+        state: purchasesWorkspaceNavigateState(SUPPLIERS_HUB.directorio),
+      });
+      return;
+    }
+    if (action === 'import') setShowImportModal(true);
     else if (action === 'ai') setShowAIModal(true);
     setSearchParams({}, { replace: true });
-  }, [searchParams, setSearchParams, openSupplierEditor]);
-
-  const handleCreateSupplier = async (data: Partial<Supplier> & { catalogItemCosts?: Record<string, number> }) => {
-    if (!dataUserId) { toast.error('Sesión no válida. Recarga la página e inicia sesión de nuevo.'); return; }
-    const { catalogItemCosts, ...rest } = data;
-    const resolvedCatalogItemIds = resolveSupplierSelectedStockIds(
-      rest.catalogItemIds || [],
-      catalogItems,
-      storeIngredients,
-    );
-    const resolvedCosts: Record<string, number> = {};
-    for (const [rawId, cost] of Object.entries(catalogItemCosts || {})) {
-      const mapped = resolveSupplierSelectedStockIds([rawId], catalogItems, storeIngredients)[0];
-      if (mapped) resolvedCosts[mapped] = cost;
-    }
-    const organizerIds = [
-      ...new Set(
-        (Array.isArray(rest.organizerIds) ? rest.organizerIds : [])
-          .map((id) => String(id || '').trim())
-          .filter(Boolean),
-      ),
-    ];
-    const supplierData = {
-      ...rest,
-      organizerIds,
-      catalogItemIds: resolvedCatalogItemIds,
-    };
-    try {
-      if (editingSupplier) {
-        const updated = await updateSupplierRequest(dataUserId, {
-          ...editingSupplier,
-          ...supplierData,
-          organizerIds,
-          catalogItemIds: resolvedCatalogItemIds,
-        } as Supplier);
-        const linked = await syncSupplierCatalogItemLinks(
-          dataUserId,
-          updated,
-          supplierData.catalogItemIds || [],
-          catalogItems,
-          resolvedCosts,
-          storeIngredients,
-        );
-        if (linked.length > 0) {
-          const byId = new Map(linked.map((i) => [i._id, i]));
-          setCatalogItems((prev) => prev.map((i) => byId.get(i._id) ?? i));
-        }
-        const freshSuppliers = await listSuppliersRequest(dataUserId);
-        setSuppliers(freshSuppliers);
-        toast.success('Proveedor actualizado');
-      } else {
-        const created = await createSupplierRequest(dataUserId, supplierData);
-        const linked = await syncSupplierCatalogItemLinks(
-          dataUserId,
-          created,
-          supplierData.catalogItemIds || [],
-          catalogItems,
-          resolvedCosts,
-          storeIngredients,
-        );
-        if (linked.length > 0) {
-          const byId = new Map(linked.map((i) => [i._id, i]));
-          setCatalogItems((prev) => prev.map((i) => byId.get(i._id) ?? i));
-        }
-        const freshSuppliers = await listSuppliersRequest(dataUserId);
-        setSuppliers(freshSuppliers);
-        toast.success('Proveedor creado');
-      }
-      setShowCreateSupplier(false);
-      setEditingSupplier(null);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Error al guardar el proveedor');
-    }
-  };
+  }, [searchParams, setSearchParams, navigate]);
 
   const handleDeleteSupplier = async (supplier: Supplier) => {
     if (!dataUserId) return;
@@ -922,18 +567,6 @@ export function SuppliersPage() {
             })}
           </div>
         )}
-
-      <CreateSupplierModal
-        isOpen={showCreateSupplier}
-        onClose={() => { setShowCreateSupplier(false); setEditingSupplier(null); setSupplierModalHydrating(false); }}
-        onCreate={handleCreateSupplier}
-        editItem={editingSupplier}
-        editHydrating={supplierModalHydrating}
-        brands={brands}
-        catalogItems={catalogItems}
-        storeIngredients={storeIngredients}
-        existingSuppliers={suppliers}
-      />
 
       <AIAddModal
         isOpen={showAIModal}

@@ -12,6 +12,8 @@ const CHROMELESS_PREFIXES = [
   '/saas/tpv/punto/',
   /** TPV operativo tras código de tienda (no es la caja del CEO en /saas/caja). */
   '/saas/worker/tpv',
+  /** Compras: proveedor / pedido / factura / albarán a pantalla completa. */
+  '/saas/compras/',
 ];
 
 /** Rutas a pantalla completa sin sidebar/topbar estándar. */

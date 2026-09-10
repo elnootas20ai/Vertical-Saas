@@ -413,7 +413,8 @@ export function CreateIngredientRecipeModal({
             <div className="space-y-2">
               <p className="text-sm text-stone-600 dark:text-stone-300">
                 ¿De qué está hecho <strong>{name.trim() || 'este elaborado'}</strong>? Puedes crear un
-                ingrediente nuevo si no está en la lista.
+                ingrediente nuevo si no está en la lista. UND/LT/KG es cuánto usas de cada base; el
+                coste (€/kg…) no se cambia aquí.
               </p>
               <CatalogProductRecipePicker
                 picks={picks}
