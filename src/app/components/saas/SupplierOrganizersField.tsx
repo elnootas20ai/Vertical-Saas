@@ -8,6 +8,7 @@ import {
 } from '../../lib/inventoryUtils';
 import {
   commercialLineBrands,
+  isCatalogCategoryOrganizerId,
   isImportComboCategory,
   listCatalogCategoryOrganizerChoices,
 } from '../../lib/deliveryCatalogImportLogic';
@@ -21,7 +22,26 @@ import {
   VERTIAL_BTN_SECONDARY,
 } from '../../lib/vertialUiTokens';
 import { CatalogUnitChip } from './CatalogUnitChip';
-/** Etiquetas legacy `cat:…` + categorías de carta (sin Combos) en «Qué te vende». */
+
+/** Almacén = compra directa · Ingredients = agrupados por sección de receta (no el plato TPV). */
+export type SupplierOrganizerChoiceKind = 'warehouse' | 'ingredients';
+
+export type SupplierOrganizerChoice = {
+  id: string;
+  label: string;
+  kind: SupplierOrganizerChoiceKind;
+};
+
+export function supplierOrganizerChoiceKind(id: string): SupplierOrganizerChoiceKind {
+  return isCatalogCategoryOrganizerId(id) ? 'ingredients' : 'warehouse';
+}
+
+function sortSupplierOrganizerChoices(list: SupplierOrganizerChoice[]): SupplierOrganizerChoice[] {
+  return [...list].sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === 'warehouse' ? -1 : 1;
+    return a.label.localeCompare(b.label, 'es');
+  });
+}
 
 type BrandLike = {
   _id: string;
@@ -83,9 +103,10 @@ export function supplierFormInitFingerprint(
 }
 
 /**
- * Categorías de Carta (sin Combos) + organizadores de Almacén.
- * Carta siempre visible (aunque aún no haya escandallo/almacén) — cuentas legacy/admin.
- * Almacén: presets siempre + grupos con artículos.
+ * Organizadores de compra para «Qué te vende»:
+ * - Almacén: presets (Envases, Limpieza…) siempre + grupos con artículos.
+ * - Ingredientes (`cat:`): solo si esa sección de receta ya tiene algo comprable,
+ *   o si el proveedor ya la tenía guardada. Nunca el listado vacío de secciones TPV.
  */
 export function buildSupplierOrganizerChoices(
   brands: BrandLike[] = [],
@@ -95,7 +116,7 @@ export function buildSupplierOrganizerChoices(
     storeIngredients?: StoreIngredient[];
     selectedOrganizerIds?: string[];
   },
-): Array<{ id: string; label: string }> {
+): SupplierOrganizerChoice[] {
   const commercialBrands = commercialLineBrands(brands) as InventoryCommercialBrand[];
   const storeIngredients = options?.storeIngredients || [];
   const selected = new Set(
@@ -103,9 +124,9 @@ export function buildSupplierOrganizerChoices(
   );
   const seen = new Set<string>();
   const seenLabelKeys = new Set<string>();
-  const out: Array<{ id: string; label: string }> = [];
+  const out: SupplierOrganizerChoice[] = [];
 
-  const push = (id: string, label: string) => {
+  const push = (id: string, label: string, kind: SupplierOrganizerChoiceKind) => {
     const cleanId = String(id || '').trim();
     const cleanLabel = String(label || '').trim() || cleanId;
     if (!cleanId || seen.has(cleanId)) return;
@@ -116,19 +137,12 @@ export function buildSupplierOrganizerChoices(
         .normalize('NFD')
         .replace(/\p{M}/gu, ''),
     );
-    out.push({ id: cleanId, label: cleanLabel });
+    out.push({ id: cleanId, label: cleanLabel, kind });
   };
 
-  // 1) Secciones de Carta — siempre (sin Combos). Sin exigir escandallo/almacén.
-  for (const c of listCatalogCategoryOrganizerChoices(brands, catalogItems, {
-    businessType: options?.businessType,
-  })) {
-    if (isImportComboCategory(c.label)) continue;
-    push(c.id, c.label);
-  }
-
-  // 2) Almacén con artículos (envases, invcat, líneas…).
   const stock = catalogItems.filter(isSupplierOrderStockItem);
+
+  // 1) Almacén con artículos (envases, invcat, líneas…).
   const groups = buildInventoryOrganizerGroups(stock, storeIngredients, commercialBrands).filter(
     (g) => g.id !== ORGANIZER_TOTAL && (g.total > 0 || selected.has(g.id)),
   );
@@ -139,10 +153,10 @@ export function buildSupplierOrganizerChoices(
       .normalize('NFD')
       .replace(/\p{M}/gu, '');
     if (seenLabelKeys.has(labelKey) && !selected.has(g.id)) continue;
-    push(g.id, g.label);
+    push(g.id, g.label, 'warehouse');
   }
 
-  // 3) Presets de almacén siempre (Envases, Limpieza…). Líneas de marca solo si hay stock o ya seleccionadas.
+  // 2) Presets de almacén siempre (Envases, Limpieza…). Líneas de marca solo si hay stock o ya seleccionadas.
   const WAREHOUSE_PRESET_IDS = new Set([
     'packaging',
     'cleaning',
@@ -165,15 +179,38 @@ export function buildSupplierOrganizerChoices(
     ) {
       continue;
     }
-    push(c.id, c.label);
+    push(c.id, c.label, 'warehouse');
+  }
+
+  // 3) Ingredientes por sección: solo si hay algo comprable (o ya guardadas).
+  for (const c of listCatalogCategoryOrganizerChoices(brands, catalogItems, {
+    businessType: options?.businessType,
+  })) {
+    if (isImportComboCategory(c.label)) continue;
+    if (seen.has(c.id)) continue;
+    if (!selected.has(c.id)) {
+      const items = stockItemsForOrganizer(
+        catalogItems,
+        c.id,
+        storeIngredients,
+        commercialBrands,
+      );
+      if (items.length === 0) continue;
+    }
+    const labelKey = String(c.label || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '');
+    if (seenLabelKeys.has(labelKey) && !selected.has(c.id)) continue;
+    push(c.id, c.label, 'ingredients');
   }
 
   for (const id of selected) {
     if (seen.has(id)) continue;
-    push(id, id);
+    push(id, id, supplierOrganizerChoiceKind(id));
   }
 
-  return out.sort((a, b) => a.label.localeCompare(b.label, 'es'));
+  return sortSupplierOrganizerChoices(out);
 }
 
 function organizerIdsForMarkedItems(
@@ -251,8 +288,8 @@ export function resolveSupplierOrganizerIdsForSave(
 }
 
 /**
- * Alta de proveedor: categorías de Carta (ingredientes por sección) + Almacén
- * (envases, limpieza…). Los ingredientes no salen en el TPV.
+ * Alta de proveedor: Almacén + ingredientes agrupados por sección de receta.
+ * En UI: chips Almacén / Ingredientes.
  */
 export function SupplierOrganizersField({
   organizerIds,
@@ -275,25 +312,30 @@ export function SupplierOrganizersField({
     () => commercialLineBrands(brands) as InventoryCommercialBrand[],
     [brands],
   );
-  const allChoices = useMemo(() => {
-    const list = buildSupplierOrganizerChoices(brands, catalogItems, {
-      businessType,
-      storeIngredients,
-      selectedOrganizerIds: organizerIds,
-    });
-    return [...list].sort((a, b) => a.label.localeCompare(b.label, 'es'));
-  }, [brands, catalogItems, businessType, storeIngredients, organizerIds]);
+  const allChoices = useMemo(
+    () =>
+      buildSupplierOrganizerChoices(brands, catalogItems, {
+        businessType,
+        storeIngredients,
+        selectedOrganizerIds: organizerIds,
+      }),
+    [brands, catalogItems, businessType, storeIngredients, organizerIds],
+  );
   const choices = allChoices;
+  const choiceById = useMemo(() => new Map(choices.map((c) => [c.id, c])), [choices]);
   const labelById = useMemo(
     () => new Map(choices.map((c) => [c.id, c.label])),
     [choices],
   );
   const selectedOrgs = useMemo(() => {
     const ids = [...new Set((organizerIds || []).map((id) => String(id || '').trim()).filter(Boolean))];
-    return ids.sort((a, b) =>
-      String(labelById.get(a) || a).localeCompare(String(labelById.get(b) || b), 'es'),
-    );
-  }, [organizerIds, labelById]);
+    return ids.sort((a, b) => {
+      const kindA = choiceById.get(a)?.kind || supplierOrganizerChoiceKind(a);
+      const kindB = choiceById.get(b)?.kind || supplierOrganizerChoiceKind(b);
+      if (kindA !== kindB) return kindA === 'warehouse' ? -1 : 1;
+      return String(labelById.get(a) || a).localeCompare(String(labelById.get(b) || b), 'es');
+    });
+  }, [organizerIds, labelById, choiceById]);
   const selectedItems = useMemo(
     () => new Set((catalogItemIds || []).map((id) => String(id || '').trim()).filter(Boolean)),
     [catalogItemIds],
@@ -317,13 +359,22 @@ export function SupplierOrganizersField({
   };
   const remaining = useMemo(
     () =>
-      choices
-        .filter((c) => !selectedOrgs.includes(c.id))
-        .filter((c) => matchesQuery(c.label))
-        .sort((a, b) => a.label.localeCompare(b.label, 'es')),
+      sortSupplierOrganizerChoices(
+        choices
+          .filter((c) => !selectedOrgs.includes(c.id))
+          .filter((c) => matchesQuery(c.label) || matchesQuery(c.kind === 'ingredients' ? 'ingredientes' : 'almacen')),
+      ),
     // matchesQuery closes over queryNorm
     // eslint-disable-next-line react-hooks/exhaustive-deps -- queryNorm drives filter
     [choices, selectedOrgs, queryNorm],
+  );
+  const remainingWarehouse = useMemo(
+    () => remaining.filter((c) => c.kind === 'warehouse'),
+    [remaining],
+  );
+  const remainingIngredients = useMemo(
+    () => remaining.filter((c) => c.kind === 'ingredients'),
+    [remaining],
   );
 
   const visibleSelectedOrgs = useMemo(() => {
@@ -439,7 +490,8 @@ export function SupplierOrganizersField({
       <div>
         <label className={labelClassName}>Qué te vende</label>
         <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-          Elige categorías de almacén o de carta (en carta se listan los <span className="font-semibold">ingredientes</span>, no el plato). Marca lo que te vende y pon el precio €/ud.
+          Primero <span className="font-semibold">Almacén</span> (Envases, Limpieza…).{' '}
+          <span className="font-semibold">Ingredientes</span> van agrupados por sección de receta (nunca el plato del TPV). Marca lo que te vende y pon el precio €/ud.
         </p>
         <div className="flex flex-col sm:flex-row gap-2">
           <select
@@ -455,11 +507,24 @@ export function SupplierOrganizersField({
             <option value="">
               {queryNorm && remaining.length === 0 ? 'Sin coincidencias…' : 'Elegir categoría…'}
             </option>
-            {remaining.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.label}
-              </option>
-            ))}
+            {remainingWarehouse.length > 0 ? (
+              <optgroup label="Almacén">
+                {remainingWarehouse.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.label}
+                  </option>
+                ))}
+              </optgroup>
+            ) : null}
+            {remainingIngredients.length > 0 ? (
+              <optgroup label="Ingredientes">
+                {remainingIngredients.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.label}
+                  </option>
+                ))}
+              </optgroup>
+            ) : null}
           </select>
           <button
             type="button"
@@ -502,6 +567,7 @@ export function SupplierOrganizersField({
       {visibleSelectedOrgs.length > 0 ? (
         <div className="space-y-2">
           {visibleSelectedOrgs.map((orgId) => {
+            const kind = choiceById.get(orgId)?.kind || supplierOrganizerChoiceKind(orgId);
             const itemsAll = stockItemsForOrganizer(
               catalogItems,
               orgId,
@@ -535,15 +601,32 @@ export function SupplierOrganizersField({
                       aria-hidden
                     />
                     <span className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
-                        {labelById.get(orgId) || orgId}
-                      </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        {itemsAll.length === 0
-                          ? 'Sin productos en esta categoría'
-                          : queryNorm
-                            ? `${items.length} coincidencia${items.length !== 1 ? 's' : ''} · ${checkedCount} marcado${checkedCount !== 1 ? 's' : ''}`
-                            : `${checkedCount} de ${itemsAll.length} producto${itemsAll.length !== 1 ? 's' : ''} marcado${checkedCount !== 1 ? 's' : ''}`}
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span
+                          className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                            kind === 'ingredients'
+                              ? 'bg-teal-50 text-teal-700 dark:bg-teal-950/40 dark:text-teal-300'
+                              : 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300'
+                          }`}
+                        >
+                          {kind === 'ingredients' ? 'Ingredientes' : 'Almacén'}
+                        </span>
+                        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
+                          {labelById.get(orgId) || orgId}
+                        </p>
+                      </span>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                        {kind === 'ingredients'
+                          ? itemsAll.length === 0
+                            ? 'Sin ingredientes comprables en esta sección'
+                            : queryNorm
+                              ? `${items.length} coincidencia${items.length !== 1 ? 's' : ''} · ${checkedCount} marcado${checkedCount !== 1 ? 's' : ''}`
+                              : `${checkedCount} de ${itemsAll.length} ingrediente${itemsAll.length !== 1 ? 's' : ''} marcado${checkedCount !== 1 ? 's' : ''}`
+                          : itemsAll.length === 0
+                            ? 'Sin productos en esta categoría de almacén'
+                            : queryNorm
+                              ? `${items.length} coincidencia${items.length !== 1 ? 's' : ''} · ${checkedCount} marcado${checkedCount !== 1 ? 's' : ''}`
+                              : `${checkedCount} de ${itemsAll.length} producto${itemsAll.length !== 1 ? 's' : ''} marcado${checkedCount !== 1 ? 's' : ''}`}
                       </p>
                     </span>
                     <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 shrink-0 hidden sm:inline">
