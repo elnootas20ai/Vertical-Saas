@@ -14,7 +14,7 @@ import {
 import { stockItemsForOrganizer } from '../../lib/purchaseSuggestions';
 import type { CatalogItem } from '../../lib/deliveryApi';
 import type { StoreIngredient } from '../../lib/catalogCustomization';
-import { isStockInventoryItem } from '../../lib/stockInventoryScope';
+import { isSupplierOrderStockItem } from '../../lib/stockInventoryScope';
 import {
   VERTIAL_ACCENT_BG,
   VERTIAL_ACCENT_BORDER,
@@ -128,7 +128,7 @@ export function buildSupplierOrganizerChoices(
   }
 
   // 2) Almacén con artículos (envases, invcat, líneas…).
-  const stock = catalogItems.filter(isStockInventoryItem);
+  const stock = catalogItems.filter(isSupplierOrderStockItem);
   const groups = buildInventoryOrganizerGroups(stock, storeIngredients, commercialBrands).filter(
     (g) => g.id !== ORGANIZER_TOTAL && (g.total > 0 || selected.has(g.id)),
   );
@@ -439,7 +439,7 @@ export function SupplierOrganizersField({
       <div>
         <label className={labelClassName}>Qué te vende</label>
         <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-          Elige una categoría del desplegable (se añade al elegir) o pulsa <span className="font-semibold">Añadir otro</span> para elegir otra. Marca lo que te vende y pon el precio €/ud.
+          Elige categorías de almacén o de carta (en carta se listan los <span className="font-semibold">ingredientes</span>, no el plato). Marca lo que te vende y pon el precio €/ud.
         </p>
         <div className="flex flex-col sm:flex-row gap-2">
           <select

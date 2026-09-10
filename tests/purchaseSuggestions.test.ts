@@ -416,4 +416,34 @@ describe('stockItemsForOrganizer', () => {
     expect(bocatas.every((i) => i._id !== 'carta-bocata')).toBe(true);
     expect(stockItemsForOrganizer(catalog, 'cat:combos')).toEqual([]);
   });
+
+  it('plato de carta con isStockItem sticky no sale en Qué te vende (solo ingredientes)', () => {
+    const pan = catalogItem({
+      _id: 'stock-pan',
+      name: 'pan',
+      module: 'stock',
+      category: 'Ingredientes',
+      isStockItem: true,
+      stockCategory: 'ingredient',
+      customFields: { storeIngredientId: 'ing-pan' },
+    });
+    const burger = catalogItem({
+      _id: 'carta-burger',
+      name: 'Burger classic',
+      module: 'catalog',
+      category: 'Hamburguesas',
+      isStockItem: true,
+      stockCategory: 'finished_product',
+      unitPrice: 9.5,
+      customFields: {
+        costingType: 'recipe',
+        costingRecipe: [
+          { storeIngredientId: 'ing-pan', name: 'pan', quantity: 1, unit: 'ud' },
+        ],
+      },
+    });
+    const items = stockItemsForOrganizer([pan, burger], 'cat:hamburguesas');
+    expect(items.map((i) => i._id)).toEqual(['stock-pan']);
+    expect(items.every((i) => i._id !== 'carta-burger')).toBe(true);
+  });
 });

@@ -365,11 +365,26 @@ function CatalogEmptyActions({
   );
 }
 
-/** Fusiona listados sin perder filas recién creadas en UI (race con reload). */
-function mergeCatalogItemsById(prev: CatalogItem[], incoming: CatalogItem[]): CatalogItem[] {
-  const byId = new Map(incoming.map((item) => [item._id, item]));
+/**
+ * Fusiona listados sin perder filas recién creadas en UI (race con reload).
+ * Nunca reintroducir soft-deletes ni ids que el caller acaba de quitar.
+ */
+function mergeCatalogItemsById(
+  prev: CatalogItem[],
+  incoming: CatalogItem[],
+  opts?: { omitIds?: ReadonlySet<string> },
+): CatalogItem[] {
+  const omit = opts?.omitIds;
+  const byId = new Map<string, CatalogItem>();
+  for (const item of incoming) {
+    if (!item?._id || item.deletedAt) continue;
+    if (omit?.has(item._id)) continue;
+    byId.set(item._id, item);
+  }
   for (const item of prev) {
-    if (!item.deletedAt && !byId.has(item._id)) byId.set(item._id, item);
+    if (!item?._id || item.deletedAt) continue;
+    if (omit?.has(item._id)) continue;
+    if (!byId.has(item._id)) byId.set(item._id, item);
   }
   return [...byId.values()];
 }
@@ -583,7 +598,7 @@ function CreateCatalogItemModal({
               quantity: line.quantity,
               ...(line.quantityText ? { quantityText: line.quantityText } : {}),
               unit: normalizeStoreIngredientUnit(
-                fromWarehouse?.unit || line.unit,
+                line.unit || fromWarehouse?.unit,
                 'ud',
               ),
               tpvRemovable:
@@ -747,84 +762,9 @@ function CreateCatalogItemModal({
       ? modalBrandIngredientSelection
       : brandIngredientSelection;
 
-  // Receta ↔ almacén: la unidad del pick sigue la del ingrediente maestro.
-  useEffect(() => {
-    if (!isOpen || recipePicks.length === 0 || effectiveStoreIngredients.length === 0) return;
-    setRecipePicks((prev) => {
-      let changed = false;
-      const next = prev.map((pick) => {
-        const ing = effectiveStoreIngredients.find((row) => row.id === pick.storeIngredientId);
-        if (!ing) return pick;
-        const warehouseUnit = normalizeStoreIngredientUnit(ing.unit, '');
-        if (!warehouseUnit) return pick;
-        if (normalizeStoreIngredientUnit(pick.unit, '') === warehouseUnit) return pick;
-        changed = true;
-        return { ...pick, unit: warehouseUnit };
-      });
-      return changed ? next : prev;
-    });
-  }, [isOpen, effectiveStoreIngredients, recipePicks.length]);
-
-  const persistRecipeIngredientUnit = useCallback(
-    (storeIngredientId: string, unit: string) => {
-      const nextUnit = normalizeStoreIngredientUnit(unit, 'ud');
-      if (!storeIngredientId || !nextUnit) return;
-
-      setModalStoreIngredients((prev) => {
-        const base = prev.length > 0 ? prev : storeIngredients;
-        return normalizeStoreIngredients(
-          base.map((ing) => (ing.id === storeIngredientId ? { ...ing, unit: nextUnit } : ing)),
-        );
-      });
-      setRecipePicks((prev) =>
-        prev.map((pick) =>
-          pick.storeIngredientId === storeIngredientId ? { ...pick, unit: nextUnit } : pick,
-        ),
-      );
-
-      if (!dataUserId) return;
-      void (async () => {
-        try {
-          const cfg = await getDeliveryConfigRequest(dataUserId);
-          const lineBrandIds = commercialLineBrands(brands).map((b) => b._id);
-          const current = unifyStoreIngredientsFromConfig(cfg, lineBrandIds);
-          const nextRows = normalizeStoreIngredients(
-            current.map((ing) =>
-              ing.id === storeIngredientId ? { ...ing, unit: nextUnit } : ing,
-            ),
-          );
-          await updateDeliveryConfigRequest(dataUserId, {
-            _id: cfg?._id || `dlvconf-${normalizeTenantUserId(dataUserId)}`,
-            _rev: cfg?._rev,
-            storeIngredients: nextRows,
-          } as Parameters<typeof updateDeliveryConfigRequest>[1]);
-          await syncInventoryCatalogFromSources(dataUserId, {
-            businessType: isRestaurantCatalog ? 'restaurant' : 'delivery',
-            businessId: businessId || undefined,
-            storeIngredients: nextRows,
-            brands: commercialLineBrands(brands).map((b) => ({
-              _id: b._id,
-              deliveryLineKind: b.deliveryLineKind,
-            })),
-            inventorySyncExcludedKeys: Array.isArray(cfg?.inventorySyncExcludedKeys)
-              ? cfg.inventorySyncExcludedKeys
-              : undefined,
-          }).catch(() => null);
-          notifyDeliveryConfigChanged();
-          setModalStoreIngredients(nextRows);
-        } catch {
-          toast.error('No se pudo guardar la unidad en almacén');
-        }
-      })();
-    },
-    [
-      brands,
-      businessId,
-      dataUserId,
-      isRestaurantCatalog,
-      storeIngredients,
-    ],
-  );
+  // Receta ↔ almacén: la unidad del pick es de uso en la línea;
+  // la unidad de coste (€/kg…) vive solo en la ficha del ingrediente.
+  // No sincronizar pick.unit ← almacén (rompía el select UND/LT/KG).
 
   useEffect(() => {
     if (!isOpen) return;
@@ -2445,7 +2385,6 @@ function CreateCatalogItemModal({
           compact
           onCreateIngredient={createRecipeLinkedIngredient}
           creatingIngredient={creatingRecipeIngredient}
-          onIngredientUnitChange={persistRecipeIngredientUnit}
         />
         {!isRestaurantCatalog ? (
           <CatalogProductPackagingPicker
@@ -4948,7 +4887,10 @@ export function CatalogPage() {
 
   /** Solo productos de carta TPV (excluye ingredientes/almacén module stock). */
   const catalogMenuItemsRaw = useMemo(
-    () => catalogItems.filter((item) => (item.module || 'catalog') === 'catalog'),
+    () =>
+      catalogItems.filter(
+        (item) => (item.module || 'catalog') === 'catalog' && !item.deletedAt,
+      ),
     [catalogItems],
   );
 
@@ -5134,7 +5076,10 @@ export function CatalogPage() {
       }
       setSupplierModalHydrating(true);
       try {
-        const freshSuppliers = await listSuppliersRequest(dataUserId);
+        const freshSuppliers = await listSuppliersRequest(dataUserId, {
+          businessId: businessId || undefined,
+          accountBusinessCount,
+        });
         setSuppliers(freshSuppliers);
         const fresh = freshSuppliers.find((s) => s._id === supplier._id);
         if (fresh) setEditingSupplier(fresh);
@@ -5144,7 +5089,7 @@ export function CatalogPage() {
         setSupplierModalHydrating(false);
       }
     },
-    [dataUserId],
+    [dataUserId, businessId, accountBusinessCount],
   );
 
   // Invoice state
@@ -5789,7 +5734,10 @@ export function CatalogPage() {
       suppliersLoadStartedRef.current = false;
     }, 45_000);
     try {
-      const data = await listSuppliersRequest(dataUserId);
+      const data = await listSuppliersRequest(dataUserId, {
+        businessId: businessId || undefined,
+        accountBusinessCount,
+      });
       setSuppliers(data);
       suppliersFetchedRef.current = true;
     } catch {
@@ -5798,7 +5746,7 @@ export function CatalogPage() {
       window.clearTimeout(watchdog);
       setSuppliersLoading(false);
     }
-  }, [dataUserId]);
+  }, [dataUserId, businessId, accountBusinessCount]);
 
   const loadInvoices = useCallback(async () => {
     if (!dataUserId) return;
@@ -6523,11 +6471,21 @@ export function CatalogPage() {
       ) {
         setActiveCatalogCategory(null);
       }
-      const deletedIds = new Set(list.map((i) => i._id));
+      const remaining = new Set(result.remainingIds || []);
+      const deletedIds = new Set(
+        list.map((i) => i._id).filter((id) => !remaining.has(id)),
+      );
+      // Quitar del estado local ANTES del reload: si no, mergeCatalogItemsById
+      // reinyecta los borrados (el API ya no los trae y prev aún los tenía).
+      setAllCatalogItems((prev) => prev.filter((i) => !deletedIds.has(i._id)));
       setDetailItem((prev) => (prev && deletedIds.has(prev._id) ? null : prev));
       setEditingItem((prev) => (prev && deletedIds.has(prev._id) ? null : prev));
 
       await loadCatalog();
+      // Por si un merge en carrera reintroduce algo: volver a asegurar.
+      if (deletedIds.size > 0) {
+        setAllCatalogItems((prev) => prev.filter((i) => !deletedIds.has(i._id)));
+      }
       notifyDeliveryCatalogChanged(dataUserId, businessId);
 
       // Carta vacía → limpiar restos del Excel (almacén sync, ingredientes TPV, recetas, organizadores).
@@ -6557,6 +6515,9 @@ export function CatalogPage() {
           }
         }
         await loadCatalog();
+        if (deletedIds.size > 0) {
+          setAllCatalogItems((prev) => prev.filter((i) => !deletedIds.has(i._id)));
+        }
       }
 
       toast.dismiss(toastId);
@@ -6700,6 +6661,7 @@ export function CatalogPage() {
       ...rest,
       organizerIds,
       catalogItemIds: resolvedCatalogItemIds,
+      business_id: businessId || rest.business_id || editingSupplier?.business_id || undefined,
     };
     try {
       if (editingSupplier) {
@@ -6721,7 +6683,10 @@ export function CatalogPage() {
           const byId = new Map(linked.map((i) => [i._id, i]));
           setAllCatalogItems((prev) => prev.map((i) => byId.get(i._id) ?? i));
         }
-        const freshSuppliers = await listSuppliersRequest(dataUserId);
+        const freshSuppliers = await listSuppliersRequest(dataUserId, {
+          businessId: businessId || undefined,
+          accountBusinessCount,
+        });
         setSuppliers(freshSuppliers);
         toast.success('Proveedor actualizado');
       } else {
@@ -6738,7 +6703,10 @@ export function CatalogPage() {
           const byId = new Map(linked.map((i) => [i._id, i]));
           setAllCatalogItems((prev) => prev.map((i) => byId.get(i._id) ?? i));
         }
-        const freshSuppliers = await listSuppliersRequest(dataUserId);
+        const freshSuppliers = await listSuppliersRequest(dataUserId, {
+          businessId: businessId || undefined,
+          accountBusinessCount,
+        });
         setSuppliers(freshSuppliers);
         toast.success('Proveedor creado');
       }
@@ -7049,7 +7017,18 @@ export function CatalogPage() {
 
   const handleDeleteCategorySection = useCallback(
     (category: string, items: CatalogItem[]) => {
-      if (!dataUserId || bulkDeletingCatalog || bulkMovingCatalog || items.length === 0) return;
+      if (!dataUserId || bulkDeletingCatalog || bulkMovingCatalog) return;
+      // Sección vacía (solo en sesión): quitarla sin guard de productos.
+      if (items.length === 0) {
+        setSessionCatalogSections((prev) =>
+          prev.filter((c) => c.toLowerCase() !== category.toLowerCase()),
+        );
+        if (activeCatalogCategory?.toLowerCase() === category.toLowerCase()) {
+          setActiveCatalogCategory(null);
+        }
+        toast.success(`Sección «${category}» quitada`);
+        return;
+      }
       const expanded = expandCatalogItemsForDeletion(items, catalogMenuItemsRaw);
       setCatalogDeleteGuard({
         mode: 'bulk',
@@ -7057,7 +7036,13 @@ export function CatalogPage() {
         categoryLabel: category,
       });
     },
-    [dataUserId, bulkDeletingCatalog, bulkMovingCatalog, catalogMenuItemsRaw],
+    [
+      dataUserId,
+      bulkDeletingCatalog,
+      bulkMovingCatalog,
+      catalogMenuItemsRaw,
+      activeCatalogCategory,
+    ],
   );
 
   const handleDeleteEmptyOrganizer = useCallback(

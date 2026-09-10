@@ -1,4 +1,5 @@
 import type { CatalogItem } from './deliveryApi';
+import { isSellableCartaCatalogSignal } from './tpvWarehouseCatalog';
 
 const STOCK_CATEGORIES = new Set([
   'ingredient',
@@ -32,6 +33,33 @@ export function isStockInventoryItem(item: CatalogItem | null | undefined): bool
 
 export function filterStockInventoryItems(items: CatalogItem[]): CatalogItem[] {
   return items.filter(isStockInventoryItem);
+}
+
+/**
+ * Lo que se puede marcar / pedir a un proveedor («Qué te vende», pedidos, albaranes).
+ * Almacén real (ingredientes, bebidas, envases…).
+ * No incluye el plato de carta aunque tenga isStockItem (control de stock en ficha):
+ * la carta se compra vía ingredientes de almacén, no el producto final de TPV.
+ */
+export function isSupplierOrderStockItem(item: CatalogItem | null | undefined): boolean {
+  if (!isStockInventoryItem(item) || !item) return false;
+
+  const mod = String(item.module || 'catalog').trim() || 'catalog';
+  if (mod === 'stock') return true;
+
+  const sc = String(item.stockCategory || '').trim();
+  // Categoría de compra real aunque el doc diga module catalog.
+  if (sc && STOCK_CATEGORIES.has(sc)) return true;
+
+  // Plato / elaborado de carta (finished_product o señales TPV) → no comprable.
+  if (sc === 'finished_product') return false;
+  if (isSellableCartaCatalogSignal(item)) return false;
+
+  return false;
+}
+
+export function filterSupplierOrderStockItems(items: CatalogItem[]): CatalogItem[] {
+  return (items || []).filter(isSupplierOrderStockItem);
 }
 
 /** Comprable a proveedor (pedido / albarán). */

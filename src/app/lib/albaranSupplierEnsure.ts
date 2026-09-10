@@ -4,7 +4,7 @@ import type { StoreIngredient } from './catalogCustomization';
 import type { InventoryCommercialBrand } from './inventoryUtils';
 import { catalogCategoryOrganizerId } from './deliveryCatalogImportLogic';
 import { nameMatchScore } from './albaranReceptionCompare';
-import { isStockInventoryItem } from './stockInventoryScope';
+import { isSupplierOrderStockItem } from './stockInventoryScope';
 import { stockItemsForOrganizer } from './purchaseSuggestions';
 import { syncSupplierCatalogItemLinks } from './supplierCatalogLinks';
 
@@ -63,7 +63,7 @@ export function inferOrganizerIdsFromOcrLines(
   const defaultIng = catalogCategoryOrganizerId('Ingredientes');
   if (defaultIng) orgs.add(defaultIng);
 
-  const stock = catalogItems.filter(isStockInventoryItem);
+  const stock = catalogItems.filter(isSupplierOrderStockItem);
   for (const line of lines || []) {
     const label = String(
       line.itemName || line.catalogItemName || line.description || '',
@@ -104,7 +104,7 @@ export function catalogItemIdsForOrganizers(
       storeIngredients,
       commercialBrands,
     )) {
-      if (isStockInventoryItem(item) && item._id) out.add(item._id);
+      if (isSupplierOrderStockItem(item) && item._id) out.add(item._id);
     }
   }
   return [...out];
@@ -116,7 +116,7 @@ export function rematchAlbaranLinesToCatalog(
   catalogItems: CatalogItem[],
   supplierId = '',
 ): PurchaseInvoiceLine[] {
-  const stock = catalogItems.filter(isStockInventoryItem);
+  const stock = catalogItems.filter(isSupplierOrderStockItem);
   const supplierKey = String(supplierId || '').trim();
   const preferred = supplierKey
     ? stock.filter((i) => String(i.supplierId || '').trim() === supplierKey)

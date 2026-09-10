@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import {
   ArrowLeft,
   Loader2,
@@ -1280,6 +1281,10 @@ export function StoreIngredientsPanel({
   const startCreateIngredient = () => {
     setEditingId(null);
     setEditingOpenTab('datos');
+    setListSearch('');
+    // Ingrediente nuevo no está en ninguna categoría de carta aún.
+    setCategoryFilter(INGREDIENT_UNCATEGORIZED_ID);
+    setExpandedPreview(true);
     setNewDraft(emptyDraft());
     setCreating(true);
   };

@@ -32,6 +32,14 @@ function normalizePhrase(s: string) {
   return s.trim().replace(/\s+/g, ' ');
 }
 
+/** Comparación tolerante a mayúsculas y tildes (producción ≈ produccion). */
+function foldPhrase(s: string) {
+  return normalizePhrase(s)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
 interface CatalogDeleteGuardModalProps {
   open: boolean;
   payload: CatalogDeleteGuardPayload | null;
@@ -82,12 +90,12 @@ export function CatalogDeleteGuardModal({
         return;
       }
     } else if (payload.mode === 'single') {
-      if (normalizePhrase(phrase) !== normalizePhrase(payload.itemName)) {
+      if (foldPhrase(phrase) !== foldPhrase(payload.itemName)) {
         setError('El texto no coincide con el nombre del producto');
         return;
       }
     } else if (isSectionDelete) {
-      if (normalizePhrase(phrase).toLowerCase() !== normalizePhrase(sectionName).toLowerCase()) {
+      if (foldPhrase(phrase) !== foldPhrase(sectionName)) {
         setError('El texto no coincide con el nombre de la sección');
         return;
       }

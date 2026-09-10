@@ -1,7 +1,7 @@
 import type { CatalogItem, Supplier } from './deliveryApi';
 import { updateCatalogItemRequest } from './deliveryApi';
 import type { StoreIngredient } from './catalogCustomization';
-import { isStockInventoryItem } from './stockInventoryScope';
+import { isSupplierOrderStockItem } from './stockInventoryScope';
 
 function foldName(value: string): string {
   return String(value || '')
@@ -21,7 +21,7 @@ export function resolveSupplierSelectedStockIds(
   catalogItems: CatalogItem[],
   storeIngredients: StoreIngredient[] = [],
 ): string[] {
-  const stockItems = catalogItems.filter(isStockInventoryItem);
+  const stockItems = catalogItems.filter(isSupplierOrderStockItem);
   const stockIdSet = new Set(stockItems.map((i) => i._id));
   const byIngredientId = new Map<string, string>();
   const byName = new Map<string, string>();
@@ -74,7 +74,7 @@ export async function syncSupplierCatalogItemLinks(
   const selected = new Set(resolvedIds);
   const changed: CatalogItem[] = [];
   for (const item of catalogItems) {
-    if (!isStockInventoryItem(item)) continue;
+    if (!isSupplierOrderStockItem(item)) continue;
     const want = selected.has(item._id);
     const had = item.supplierId === supplier._id;
     const rawCost = resolvedCosts[item._id] ?? itemCosts[item._id];

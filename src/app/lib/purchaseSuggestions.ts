@@ -10,7 +10,7 @@
 import type { CatalogItem, Supplier } from './deliveryApi';
 import type { StoreIngredient } from './catalogCustomization';
 import type { SuggestionItem } from './purchaseOrderApi';
-import { isStockInventoryItem } from './stockInventoryScope';
+import { isSupplierOrderStockItem } from './stockInventoryScope';
 import {
   listInventoryOrganizerChoices,
   ORGANIZER_TOTAL,
@@ -91,7 +91,7 @@ export function resolveStockOrganizerId(
   storeIngredients: StoreIngredient[] = [],
   commercialBrands: InventoryCommercialBrand[] = [],
 ): string {
-  if (!isStockInventoryItem(item)) return '';
+  if (!isSupplierOrderStockItem(item)) return '';
   const { ingredientsById, ingredientsByName } = ingredientMaps(storeIngredients);
   const id = resolveInventoryOrganizerId(item, ingredientsById, ingredientsByName, commercialBrands);
   if (!id || id === ORGANIZER_TOTAL) return '';
@@ -125,7 +125,7 @@ export function catalogItemBelongsToSupplier(
   /** Catálogo completo (carta + almacén) para enlazar `cat:Bocatas` → ingredientes de receta. */
   allCatalogItems: CatalogItem[] = [],
 ): boolean {
-  if (!isStockInventoryItem(item)) return false;
+  if (!isSupplierOrderStockItem(item)) return false;
   const marked = supplierCatalogItemIdSet(supplier);
   if (marked.has(item._id)) return true;
   if (item.supplierId && item.supplierId === supplier._id) return true;
@@ -225,7 +225,7 @@ function stockItemsForCartaCategoryOrganizer(
       && itemMatchesCategoryOrganizer(item, organizerId),
   );
 
-  const stockItems = catalogItems.filter(isStockInventoryItem);
+  const stockItems = catalogItems.filter(isSupplierOrderStockItem);
   const stockById = new Map(stockItems.map((i) => [i._id, i]));
   const stockByIngId = new Map<string, CatalogItem>();
   const stockByName = new Map<string, CatalogItem>();
@@ -251,8 +251,8 @@ function stockItemsForCartaCategoryOrganizer(
   };
 
   for (const product of productsInCat) {
-    // Bebida/envase con stock en esa sección de carta → se compra tal cual.
-    if (isStockInventoryItem(product)) {
+    // Solo si es comprable de almacén (bebida/envase…). Nunca el plato de carta.
+    if (isSupplierOrderStockItem(product)) {
       out.set(product._id, product);
     }
     for (const line of readProductRecipeLines(product)) {
@@ -311,7 +311,7 @@ export function stockItemsForOrganizer(
     // Cubo de almacén «Ingredientes» (no sección de carta).
     if (catKey === 'ingredientes') {
       const fromCatalog = catalogItems
-        .filter(isStockInventoryItem)
+        .filter(isSupplierOrderStockItem)
         .filter((item) => itemMatchesCategoryOrganizer(item, want))
         .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
       return mergePendingStoreIngredients(fromCatalog, want, storeIngredients, commercialBrands);
@@ -324,7 +324,7 @@ export function stockItemsForOrganizer(
     );
   }
   const fromStock = catalogItems
-    .filter(isStockInventoryItem)
+    .filter(isSupplierOrderStockItem)
     .filter((item) => resolveStockOrganizerId(item, storeIngredients, commercialBrands) === want)
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
   return mergePendingStoreIngredients(fromStock, want, storeIngredients, commercialBrands);
@@ -343,7 +343,7 @@ export function explicitMarkedStockItemsForSupplier(
   storeIngredients: StoreIngredient[] = [],
   commercialBrands: InventoryCommercialBrand[] = [],
 ): CatalogItem[] {
-  const stock = catalogItems.filter(isStockInventoryItem);
+  const stock = catalogItems.filter(isSupplierOrderStockItem);
   const byId = new Map(stock.map((i) => [i._id, i]));
   const markedRaw = supplierCatalogItemIdSet(supplier);
   const resolvedMarkedIds = new Set(
@@ -382,7 +382,7 @@ export function explicitMarkedStockItemsForSupplier(
       orgId,
       storeIngredients,
       commercialBrands,
-    ).filter(isStockInventoryItem);
+    ).filter(isSupplierOrderStockItem);
     const markedInOrg = orgItems.filter(
       (item) => resolvedMarkedIds.has(item._id) || markedRaw.has(item._id),
     );
@@ -414,7 +414,7 @@ export function stockItemsForSupplierOrder(
   storeIngredients: StoreIngredient[] = [],
   commercialBrands: InventoryCommercialBrand[] = [],
 ): CatalogItem[] {
-  const stock = catalogItems.filter(isStockInventoryItem);
+  const stock = catalogItems.filter(isSupplierOrderStockItem);
   if (!supplier) {
     return [...stock].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
   }
@@ -499,7 +499,7 @@ function resolveSuggestionSupplier(
     catalogItem?.supplierId && supplierById.get(String(catalogItem.supplierId).trim());
   if (fromCatalog) return { supplier: fromCatalog, matchedBy: 'item' };
 
-  if (catalogItem && isStockInventoryItem(catalogItem)) {
+  if (catalogItem && isSupplierOrderStockItem(catalogItem)) {
     const markedSuppliers = activeSuppliers.filter((sup) =>
       supplierCatalogItemIdSet(sup).has(catalogItem._id),
     );
