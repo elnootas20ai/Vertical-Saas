@@ -150,11 +150,31 @@ const DOC_CATEGORIES: { id: DocCategory; label: string; icon: React.ReactNode }[
 function normalizePermissions(
   permissions: AccountPermissionMatrix | undefined,
   businessType?: string | null,
+  role?: string | null,
 ): AccountPermissionMatrix {
   const modules = getVertialAccessPermissionModules(businessType);
   const result: AccountPermissionMatrix = { ...(permissions || {}) };
+  const managerDefaults = new Set([
+    'Admin',
+    'Gerente',
+    'GerenteGrupo',
+    'Administrador',
+    'Encargado',
+    'Gestor',
+    'Superadmin',
+  ]);
+  const isManager = managerDefaults.has(String(role || '').trim());
   for (const mod of modules) {
     const current = permissions?.[mod.key];
+    if (current === undefined || current === null) {
+      // Clave nueva: Encargado/Admin conservan inventario ON por defecto.
+      if (mod.key === 'inventory' && isManager) {
+        result[mod.key] = { view: true, edit: true };
+      } else {
+        result[mod.key] = { view: false, edit: false };
+      }
+      continue;
+    }
     result[mod.key] = {
       view: Boolean(current?.view),
       edit: Boolean(current?.edit),
@@ -167,6 +187,7 @@ function normalizePermissions(
 function permissionModuleLabel(key: string, fallback: string, businessType?: string | null): string {
   if (key === 'delivery') return getRetailOpsUiCopy(businessType).permissionDeliveryModule;
   if (key === 'sala') return isRestaurantBusinessType(businessType) ? 'Sala / Mesas' : 'Sala';
+  if (key === 'inventory') return 'Inventario (cerrar revisión y preparar compra)';
   return fallback;
 }
 
@@ -695,7 +716,7 @@ export function TeamMemberDetail() {
         setMember(found || null);
         setRoles(roleList);
         if (found) {
-          setPermissions(normalizePermissions(found.permissions, currentBusiness?.businessType));
+          setPermissions(normalizePermissions(found.permissions, currentBusiness?.businessType, found.role));
           setAssignSiteId(String(found.employment?.salesPointId || '').trim());
         }
       })
@@ -1137,7 +1158,7 @@ export function TeamMemberDetail() {
       });
       if (result.success && result.user) {
         setMember(result.user);
-        setPermissions(normalizePermissions(result.user.permissions, currentBusiness?.businessType));
+        setPermissions(normalizePermissions(result.user.permissions, currentBusiness?.businessType, result.user.role));
         toast.success(`Función actualizada a «${getInviteRoleDisplayLabel(role, currentBusiness?.businessType) || role}»`);
       } else {
         toast.error(result.error || 'No se pudo cambiar la función');
@@ -1154,6 +1175,7 @@ export function TeamMemberDetail() {
     const next = normalizePermissions(
       { ...(member.permissions || {}), ...permissions },
       currentBusiness?.businessType,
+      member.role,
     );
     const current = next[moduleKey]?.[field] || false;
     next[moduleKey] = {
@@ -1170,7 +1192,7 @@ export function TeamMemberDetail() {
       const result = await updateUser(member.user_id, { permissions: next });
       if (result.success && result.user) {
         setMember(result.user);
-        setPermissions(normalizePermissions(result.user.permissions, currentBusiness?.businessType));
+        setPermissions(normalizePermissions(result.user.permissions, currentBusiness?.businessType, result.user.role));
         toast.success('Permisos actualizados');
       }
     } catch {

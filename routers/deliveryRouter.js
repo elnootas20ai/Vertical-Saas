@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { resolveDataOwnerUserId } from '../services/couchdb.js';
+import { requireUserScope } from '../middleware/requireUserScope.js';
 import {
   listDeliveryOrders,
   createDeliveryOrder,
@@ -132,6 +133,9 @@ deliveryRouter.param('userId', async (req, res, next, rawUserId) => {
     return next();
   }
 });
+
+// CORE: :userId del path atado al JWT (fail closed). Tras remap de worker.
+deliveryRouter.use(requireUserScope);
 
 deliveryRouter.get('/orders/:userId', listDeliveryOrders);
 deliveryRouter.get('/orders/:userId/filter', filterDeliveryOrders);

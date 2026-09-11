@@ -16,8 +16,10 @@ import {
   sendPurchaseOrder,
   createBulkPurchaseOrders,
 } from '../controllers/purchaseOrderController.js';
+import { requireUserScope } from '../middleware/requireUserScope.js';
 
 const purchaseOrderRouter = Router();
+purchaseOrderRouter.use(requireUserScope);
 
 purchaseOrderRouter.get('/:userId/low-stock', getLowStockReport);
 purchaseOrderRouter.get('/:userId/forecast', getSalesForecast);

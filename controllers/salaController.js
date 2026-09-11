@@ -38,6 +38,7 @@ import { maybeDeductRecipeStockForDiningOrder } from '../services/diningStockSer
 import { ensureDiningOrderIncomeServer } from '../services/diningOrderFinanceService.js';
 import { syncClientAfterDiningOrder } from '../services/restaurantClientSync.js';
 import { redeemClientLoyaltyPoints } from '../services/restaurantLoyaltyRedeem.js';
+import { stampOpsDoc, resolveBusinessIdFromRequest, resolveAccountBusinessCount } from '../shared/scope/opsScope.js';
 import { emitGlobalAlert } from '../services/alertEmitter.js';
 import { randomUUID } from 'crypto';
 
@@ -118,7 +119,10 @@ export async function createTable(req, res) {
 
     const db = getSalaDbName();
     await ensureDatabase(req, db);
-    const doc = buildDiningTableDocument(userId, table);
+    const doc = buildDiningTableDocument(userId, stampOpsDoc(table, {
+      ownerUserId: userId,
+      businessId: table.businessId || table.business_id || resolveBusinessIdFromRequest(req),
+    }));
     const saved = await putDocument(req, db, doc._id, doc);
     const sanitized = sanitizeDiningTable({ ...doc, _rev: saved.rev });
 
@@ -354,6 +358,11 @@ export async function listOrders(req, res) {
     if (clientId) filters.clientId = String(clientId).trim();
     if (dateFrom) filters.dateFrom = dateFrom;
     if (dateTo) filters.dateTo = dateTo;
+    const businessId = resolveBusinessIdFromRequest(req);
+    if (businessId) {
+      filters.businessId = businessId;
+      filters.accountBusinessCount = resolveAccountBusinessCount(req);
+    }
 
     const orders = await listDiningOrdersByUser(req, userId, filters);
     return res.json({ ok: true, orders: orders.map(sanitizeDiningOrder) });
@@ -384,7 +393,11 @@ export async function createOrder(req, res) {
     const db = getSalaDbName();
     await ensureDatabase(req, db);
 
-    const doc = buildDiningOrderDocument(userId, { ...order, status: 'open' });
+    const doc = buildDiningOrderDocument(userId, stampOpsDoc({ ...order, status: 'open' }, {
+      ownerUserId: userId,
+      businessId: order.businessId || order.business_id || resolveBusinessIdFromRequest(req),
+      salesPointId: order.salesPointId,
+    }));
     const saved = await putDocument(req, db, doc._id, doc);
 
     // Auto-transition table to occupied

@@ -103,6 +103,12 @@ import {
   roundRevenueMap,
 } from '../shared/delivery/orderLineRevenueSplit.js';
 import { buildFoodFamilyCountsFromOrders } from '../shared/delivery/foodFamilyCounts.js';
+import { assertUserScope } from '../middleware/assertUserScope.js';
+import {
+  filterDocsForBusiness,
+  resolveBusinessIdFromRequest,
+  stampOpsDoc,
+} from '../shared/scope/opsScope.js';
 import {
   buildStableImportCatalogSku,
   buildCatalogImportIndexes,
@@ -307,26 +313,21 @@ async function resolveOrderSalesPoint(req, userId, order, callerAccount) {
   };
 }
 
-function assertUserScope(req, res, userId) {
-  const authId = String(req.authUser?.user_id || req.authUser?.id || '').trim();
-  const paramId = String(userId || '').trim();
-  if (!authId || !paramId) return true;
-  // Allow exact match or "account:" prefix variants
-  const norm = (v) => (v.startsWith('account:') ? v.slice('account:'.length) : v);
-  const authNormalized = norm(authId);
-  const paramNormalized = norm(paramId);
-  if (authNormalized === paramNormalized) return true;
-  // El middleware multi-tenant del router puede haber reescrito :userId al
-  // owner del negocio. En ese caso `req.callerUserId` conserva el userId del
-  // JWT (el del team member que está autenticado): aceptamos esa coincidencia.
-  const callerId = String(req.callerUserId || '').trim();
-  if (callerId && authNormalized === norm(callerId)) return true;
-  res.status(403).json({ ok: false, error: 'Acceso denegado' });
-  return false;
-}
-
 function normalizeDuplicateValue(value) {
   return String(value || '').trim().toLowerCase();
+}
+
+async function resolveOwnerBusinessCount(req, userId) {
+  const fromQuery = Number(req?.query?.accountBusinessCount);
+  if (Number.isFinite(fromQuery) && fromQuery >= 1) return Math.floor(fromQuery);
+  try {
+    const list = await listOwnerBusinessesForUser(req, userId);
+    const n = (Array.isArray(list) ? list : []).filter((b) => b && !b.deletedAt).length;
+    if (n >= 1) return n;
+  } catch {
+    /* ignore */
+  }
+  return 1;
 }
 
 function catalogItemDedupeRank(item, businessId = '') {
@@ -610,7 +611,7 @@ export async function listDeliveryOrders(req, res) {
   try {
     const { userId } = req.params;
     if (!userId) return badRequest(res, 'Falta userId');
-    if (!assertUserScope(req, res, userId)) return;
+    if (!(await assertUserScope(req, res, userId))) return;
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     // Workers: solo jornada (Couch no carga histórico; cocina/montaje/reparto del día).
@@ -642,6 +643,11 @@ export async function listDeliveryOrders(req, res) {
         return true;
       });
     }
+    const scopeBid = resolveBusinessIdFromRequest(req);
+    const accountN = await resolveOwnerBusinessCount(req, userId);
+    if (scopeBid) {
+      orders = filterDocsForBusiness(orders, scopeBid, { accountBusinessCount: accountN });
+    }
     return res.json({ ok: true, orders: orders.map(sanitizeDeliveryOrder) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al cargar pedidos delivery' });
@@ -653,7 +659,7 @@ export async function createDeliveryOrder(req, res) {
     const { userId } = req.params;
     const { order } = req.body || {};
     if (!userId) return badRequest(res, 'Falta userId');
-    if (!assertUserScope(req, res, userId)) return;
+    if (!(await assertUserScope(req, res, userId))) return;
     if (!order || typeof order !== 'object') return badRequest(res, 'Falta el objeto order en el body');
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
@@ -667,7 +673,11 @@ export async function createDeliveryOrder(req, res) {
         return badRequest(res, 'Indica la tienda (salesPointId) del pedido');
       }
     }
-    const doc = buildDeliveryOrderDocument(userId, { ...order, ...scoped });
+    const doc = buildDeliveryOrderDocument(userId, stampOpsDoc({ ...order, ...scoped }, {
+      ownerUserId: userId,
+      businessId: scoped.business_id || order.business_id || order.businessId || resolveBusinessIdFromRequest(req),
+      salesPointId: scoped.salesPointId,
+    }));
     const channel = String(doc.channel || '').toLowerCase();
     if (channel === 'tpv') {
       const orderPdvId = await resolveOrderPdvIdForCaja(req, userId, doc, req.callerAccount || account);
@@ -750,7 +760,7 @@ export async function updateDeliveryOrder(req, res) {
   try {
     const { userId, orderId } = req.params;
     const { order } = req.body || {};
-    if (!assertUserScope(req, res, userId)) return;
+    if (!(await assertUserScope(req, res, userId))) return;
     if (!order || typeof order !== 'object') return badRequest(res, 'Faltan datos del pedido');
     const existing = await ensureDeliveryOrderOwner(req, userId, orderId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
@@ -826,7 +836,7 @@ export async function updateDeliveryOrder(req, res) {
 export async function removeDeliveryOrder(req, res) {
   try {
     const { userId, orderId } = req.params;
-    if (!assertUserScope(req, res, userId)) return;
+    if (!(await assertUserScope(req, res, userId))) return;
     const existing = await ensureDeliveryOrderOwner(req, userId, orderId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
     const account = await findAccountByUserId(req, userId);
@@ -876,7 +886,7 @@ export async function cancelDeliveryOrder(req, res) {
   try {
     const { userId, orderId } = req.params;
     const { cancelReason } = req.body || {};
-    if (!assertUserScope(req, res, userId)) return;
+    if (!(await assertUserScope(req, res, userId))) return;
     if (!cancelReason || String(cancelReason).trim().length < 4) {
       return badRequest(res, 'El motivo de cancelación es obligatorio (mínimo 4 caracteres)');
     }
@@ -1063,7 +1073,7 @@ export async function reopenDeliveryOrder(req, res) {
   try {
     const { userId, orderId } = req.params;
     const { notes } = req.body || {};
-    if (!assertUserScope(req, res, userId)) return;
+    if (!(await assertUserScope(req, res, userId))) return;
     const existing = await ensureDeliveryOrderOwner(req, userId, orderId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
     if (existing.status !== 'cancelled' && existing.status !== 'entregado') {
@@ -1106,7 +1116,7 @@ export async function refundDeliveryOrder(req, res) {
   try {
     const { userId, orderId } = req.params;
     const { refundReason, refundAmount: rawRefundAmount } = req.body || {};
-    if (!assertUserScope(req, res, userId)) return;
+    if (!(await assertUserScope(req, res, userId))) return;
     if (!refundReason || String(refundReason).trim().length < 10) {
       return badRequest(res, 'El motivo de devolución es obligatorio (mínimo 10 caracteres)');
     }
@@ -1540,7 +1550,7 @@ export async function registerPayment(req, res) {
   try {
     const { userId, orderId } = req.params;
     const { paymentMethod, paidAmount, amountReceived, changeGiven } = req.body || {};
-    if (!assertUserScope(req, res, userId)) return;
+    if (!(await assertUserScope(req, res, userId))) return;
     if (!paymentMethod) return badRequest(res, 'Falta el método de pago');
     if (!paidAmount || Number(paidAmount) <= 0) return badRequest(res, 'El importe debe ser mayor que 0');
     const existing = await ensureDeliveryOrderOwner(req, userId, orderId);
@@ -1655,7 +1665,7 @@ export async function correctDeliveryOrderPayment(req, res) {
   try {
     const { userId, orderId } = req.params;
     const { paymentMethod } = req.body || {};
-    if (!assertUserScope(req, res, userId)) return;
+    if (!(await assertUserScope(req, res, userId))) return;
     const rawPm = String(paymentMethod || '').trim().toLowerCase();
     if (!rawPm || !ALLOWED_PAYMENT_METHODS.has(rawPm)) {
       return badRequest(res, 'Método de pago no válido');
@@ -1771,7 +1781,7 @@ export async function filterDeliveryOrders(req, res) {
   try {
     const { userId } = req.params;
     if (!userId) return badRequest(res, 'Falta userId');
-    if (!assertUserScope(req, res, userId)) return;
+    if (!(await assertUserScope(req, res, userId))) return;
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     let { channel, salesPointId, status, dateFrom, dateTo, clientId, deliveryType, search, businessId, business_id } = req.query;
@@ -1799,11 +1809,9 @@ export async function filterDeliveryOrders(req, res) {
     );
     orders = orders.map(sanitizeDeliveryOrder).filter(Boolean);
     const businessFilter = String(businessId || business_id || '').replace(/^business:/, '').trim();
+    const accountN = await resolveOwnerBusinessCount(req, userId);
     if (businessFilter) {
-      orders = orders.filter((o) => {
-        const ob = String(o.business_id || o.businessId || '').replace(/^business:/, '').trim();
-        return ob === businessFilter;
-      });
+      orders = filterDocsForBusiness(orders, businessFilter, { accountBusinessCount: accountN });
     }
     if (channel) orders = orders.filter((o) => o.channel === channel);
     if (salesPointId) {
@@ -1847,7 +1855,7 @@ export async function clientOrderHistory(req, res) {
   try {
     const { userId, clientId } = req.params;
     if (!userId || !clientId) return badRequest(res, 'Falta userId o clientId');
-    if (!assertUserScope(req, res, userId)) return;
+    if (!(await assertUserScope(req, res, userId))) return;
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
@@ -1881,7 +1889,7 @@ export async function listCatalogItems(req, res) {
   try {
     const { userId } = req.params;
     if (!userId) return badRequest(res, 'Falta userId');
-    if (!assertUserScope(req, res, userId)) return;
+    if (!(await assertUserScope(req, res, userId))) return;
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     const filterModule = req.query.module || undefined;
@@ -1926,6 +1934,11 @@ export async function listCatalogItems(req, res) {
       module: filterModule,
       ...(tpvFields ? { fields: tpvFields } : {}),
     });
+    const scopeBid = resolveBusinessIdFromRequest(req);
+    const accountN = await resolveOwnerBusinessCount(req, userId);
+    if (scopeBid) {
+      items = filterDocsForBusiness(items, scopeBid, { accountBusinessCount: accountN });
+    }
     // TPV: solo ocultar almacén puro. Carta con isStockItem (control stock) SÍ se vende.
     if (view === 'tpv') {
       const comboReferencedIds = collectComboReferencedProductIds(items);
@@ -1958,7 +1971,12 @@ export async function createCatalogItem(req, res) {
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     const db = getCatalogDbName();
     await ensureDatabase(req, db);
-    const doc = buildCatalogItemDocument(userId, item);
+    const doc = buildCatalogItemDocument(userId, stampOpsDoc(item, {
+      ownerUserId: userId,
+      businessId: item.business_id || item.businessId || resolveBusinessIdFromRequest(req),
+      vertical: item.vertical,
+      salesPointId: item.salesPointId,
+    }));
     const duplicate = await findCatalogDuplicate(req, userId, doc);
     if (duplicate) {
       let existing = duplicate.item;
@@ -2028,7 +2046,11 @@ export async function bulkCreateCatalogItems(req, res) {
       if (String(prepared.module || 'catalog').trim() === 'catalog') {
         prepared = applyCatalogImportCartaStockGuard(prepared, null);
       }
-      return buildCatalogItemDocument(userId, prepared);
+      return buildCatalogItemDocument(userId, stampOpsDoc(prepared, {
+        ownerUserId: userId,
+        businessId: prepared.business_id || prepared.businessId || resolveBusinessIdFromRequest(req),
+        vertical: prepared.vertical,
+      }));
     });
 
     if (docs.length === 0) return badRequest(res, 'Ningún item válido para importar');
@@ -2884,7 +2906,12 @@ export async function listSuppliers(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     const suppliers = await listSuppliersByUser(req, userId);
-    return res.json({ ok: true, suppliers: suppliers.map(sanitizeSupplier) });
+    const scopeBid = resolveBusinessIdFromRequest(req);
+    const accountN = await resolveOwnerBusinessCount(req, userId);
+    const scoped = scopeBid
+      ? filterDocsForBusiness(suppliers, scopeBid, { accountBusinessCount: accountN })
+      : suppliers;
+    return res.json({ ok: true, suppliers: scoped.map(sanitizeSupplier) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al cargar proveedores' });
   }
@@ -2908,7 +2935,10 @@ export async function createSupplier(req, res) {
       id: _ignoreLegacyId,
       ...supplierFields
     } = supplier;
-    const doc = buildSupplierDocument(userId, supplierFields);
+    const doc = buildSupplierDocument(userId, stampOpsDoc(supplierFields, {
+      ownerUserId: userId,
+      businessId: supplierFields.business_id || supplierFields.businessId || resolveBusinessIdFromRequest(req),
+    }));
     const saved = await putDocument(req, db, doc._id, doc);
     return res.status(201).json({ ok: true, supplier: sanitizeSupplier({ ...doc, _rev: saved.rev }) });
   } catch (error) {
@@ -4578,7 +4608,11 @@ export async function createPointOfSale(req, res) {
       }
     }
 
-    const doc = buildPointOfSaleDocument(userId, body);
+    const doc = buildPointOfSaleDocument(userId, stampOpsDoc(body, {
+      ownerUserId: userId,
+      businessId: body.businessId || body.business_id || resolveBusinessIdFromRequest(req),
+      workCenterId: wcId,
+    }));
     const saved = await putDocument(req, db, doc._id, doc);
     await logAccountActivity(req, {
       actorUserId: userId, actorName: account.fullName, targetUserId: userId,

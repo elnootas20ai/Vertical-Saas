@@ -76,6 +76,15 @@ import {
   RESTAURANT_COUNTER_TABLE_ID,
 } from './RestaurantTpvTableAccount';
 import { RestaurantTpvKitchenPanel } from './RestaurantTpvKitchenPanel';
+import {
+  compactFloorDimensions,
+  RestaurantSalaFloorCanvas,
+} from './RestaurantSalaFloorCanvas';
+import {
+  DEFAULT_FLOOR_HEIGHT,
+  DEFAULT_FLOOR_WIDTH,
+  skinForRoomType,
+} from './restaurantSalaFloorSkins';
 import type { RestaurantTableContext } from '../../components/saas/tpv/RestaurantTableTpvFlow';
 import {
   TpvRegisterProvider,
@@ -280,6 +289,8 @@ export function RestaurantTpvFloorBoard({
   const [loading, setLoading] = useState(true);
   const [rooms, setRooms] = useState<SalaRoom[]>([]);
   const [tables, setTables] = useState<DiningTable[]>([]);
+  const [floorWidth, setFloorWidth] = useState(DEFAULT_FLOOR_WIDTH);
+  const [floorHeight, setFloorHeight] = useState(DEFAULT_FLOOR_HEIGHT);
   const [openOrdersByTable, setOpenOrdersByTable] = useState<Map<string, DiningOrder>>(() => new Map());
   const [activeRoomId, setActiveRoomId] = useState('');
   const [seatTable, setSeatTable] = useState<DiningTable | null>(null);
@@ -328,6 +339,13 @@ export function RestaurantTpvFloorBoard({
       });
       setRooms(nextRooms);
       setTables(nextTables);
+      const compact = compactFloorDimensions(
+        nextTables,
+        Number(config?.floorWidth) || DEFAULT_FLOOR_WIDTH,
+        Number(config?.floorHeight) || DEFAULT_FLOOR_HEIGHT,
+      );
+      setFloorWidth(compact.width);
+      setFloorHeight(compact.height);
       setOpenOrdersByTable(openOrdersByTableId(scopedOrders));
       if (nextRooms.length > 0) {
         setActiveRoomId((prev) =>
@@ -395,6 +413,7 @@ export function RestaurantTpvFloorBoard({
 
   const activeRoom =
     sortedRooms.find((r) => r.id === activeRoomId) || sortedRooms[0] || null;
+  const activeFloorSkin = skinForRoomType(activeRoom?.roomType);
   const roomTables = activeRoom ? tablesForRoom(tables, activeRoom) : [];
 
   const visibleTables = useMemo(() => {
@@ -892,6 +911,7 @@ export function RestaurantTpvFloorBoard({
         onSeat={handleSeatReservation}
         onManage={() => openReservationsPanel(false)}
         onCreate={() => openReservationsPanel(true)}
+        showManageButton={false}
         defaultOpen={todayReservations.some((r) => reservationMinutesUntil(r) <= 30)}
       />
 
@@ -982,11 +1002,79 @@ export function RestaurantTpvFloorBoard({
               </div>
             ) : (
               <div className="space-y-4">
+                <RestaurantSalaFloorCanvas
+                  room={activeRoom}
+                  tables={visibleTables}
+                  floorWidth={floorWidth}
+                  floorHeight={floorHeight}
+                  minScale={tabletMode ? 0.62 : 0.55}
+                  emptyMessage="No hay mesas en esta zona"
+                  renderTable={({ table }) => {
+                    const tableId = String(table._id || table.id || '');
+                    const openOrder = openOrdersByTable.get(tableId) || null;
+                    const visualStatus = resolveTpvFloorVisualStatus(table, openOrder);
+                    const ui = STATUS_UI[visualStatus] || STATUS_UI.available;
+                    const ticket = buildTableTicket(openOrder);
+                    const capacity = resolveTableCapacity(table);
+                    const guests = table.currentGuests > 0 ? table.currentGuests : 0;
+                    const reservationHint = reservationByTableId.get(tableId) || null;
+                    const busy = busyId === tableId;
+                    const isBarSeat = activeFloorSkin.id === 'barra';
+                    const isTerraceTable = activeFloorSkin.id === 'terraza';
+                    const isVipTable = activeFloorSkin.id === 'vip';
+                    const isRound =
+                      isBarSeat
+                      || isTerraceTable
+                      || table.shape === 'round'
+                      || table.shape === 'high';
+                    const tableTitle = table.name?.trim() || `Mesa ${table.number}`;
+                    const visualTitle = isBarSeat
+                      ? `Puesto ${table.number || '·'}`
+                      : tableTitle;
+                    return (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => handleTableClick(table)}
+                        className={`relative flex flex-col items-center justify-center overflow-hidden border px-2 py-2 text-center shadow-md transition hover:-translate-y-0.5 hover:shadow-lg disabled:opacity-60 ${
+                          isBarSeat
+                            ? 'h-[84px] w-[84px] rounded-full ring-4 ring-zinc-500/20'
+                            : isTerraceTable
+                              ? 'h-[96px] w-[96px] rounded-full ring-2 ring-emerald-700/15'
+                              : isVipTable
+                                ? 'min-h-[84px] w-[120px] rounded-[24px] ring-2 ring-violet-300/20'
+                                : `min-h-[82px] w-[112px] ${isRound ? 'rounded-full' : 'rounded-[18px]'}`
+                        } ${ui.card}`}
+                        aria-label={`${visualTitle}, ${ui.label}`}
+                      >
+                        <span className={`absolute inset-x-0 top-0 h-1.5 ${ui.accent}`} aria-hidden />
+                        <span className="max-w-full truncate text-sm font-bold leading-tight">
+                          {visualTitle}
+                        </span>
+                        <span className="mt-0.5 text-[10px] font-semibold text-stone-500 dark:text-stone-300">
+                          {visualStatus === 'reserved' && reservationHint
+                            ? formatReservationHint(reservationHint)
+                            : `${guests || capacity} pax`}
+                        </span>
+                        {ticket ? (
+                          <span className="mt-1 text-xs font-bold tabular-nums">
+                            {formatTableMoney(ticket.due)}
+                          </span>
+                        ) : (
+                          <span className={`mt-1 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${ui.badge}`}>
+                            {ui.label}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  }}
+                />
+
                 {activeTables.length > 0 ? (
                   <section>
                     <div className="mb-2 flex items-baseline justify-between gap-2">
                       <h2 className="text-xs font-bold uppercase tracking-wide text-stone-500">
-                        En servicio
+                        Cuentas en servicio
                       </h2>
                       <span className="text-[11px] text-stone-400">{activeTables.length}</span>
                     </div>
@@ -1196,41 +1284,6 @@ export function RestaurantTpvFloorBoard({
                   </section>
                 ) : null}
 
-                {freeTables.length > 0 ? (
-                  <section>
-                    <div className="mb-2 flex items-baseline justify-between gap-2">
-                      <h2 className="text-xs font-bold uppercase tracking-wide text-stone-500">
-                        Libres
-                      </h2>
-                      <span className="text-[11px] text-stone-400">{freeTables.length}</span>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6">
-                      {freeTables.map((table) => {
-                        const tableId = String(table._id || table.id || '');
-                        const busy = busyId === tableId;
-                        const capacity = resolveTableCapacity(table);
-                        const tableTitle = table.name?.trim() || `Mesa ${table.number}`;
-                        return (
-                          <button
-                            key={tableId}
-                            type="button"
-                            disabled={busy}
-                            onClick={() => handleTableClick(table)}
-                            className="min-h-16 rounded-xl border border-emerald-200 bg-emerald-50/80 px-2.5 py-3 text-left transition-colors hover:border-emerald-300 hover:bg-emerald-100/80 disabled:opacity-60 dark:border-emerald-900 dark:bg-emerald-950/30 dark:hover:bg-emerald-950/50"
-                          >
-                            <p className="truncate text-sm font-bold text-emerald-950 dark:text-emerald-50">
-                              {tableTitle}
-                            </p>
-                            <p className="mt-0.5 flex items-center gap-1 text-[11px] text-emerald-800/80 dark:text-emerald-200/70">
-                              <Users className="h-3 w-3 shrink-0" strokeWidth={2} aria-hidden />
-                              {capacity} pax
-                            </p>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </section>
-                ) : null}
               </div>
             )}
           </>

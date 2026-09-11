@@ -10,8 +10,10 @@ import {
   recalculateCosts,
   checkRecipeStock,
 } from '../controllers/recipeController.js';
+import { requireUserScope } from '../middleware/requireUserScope.js';
 
 const recipeRouter = Router();
+recipeRouter.use(requireUserScope);
 
 recipeRouter.post('/:userId/recalculate-costs', recalculateCosts);
 recipeRouter.post('/:userId/check-stock', checkRecipeStock);

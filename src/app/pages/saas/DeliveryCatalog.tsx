@@ -47,10 +47,6 @@ import {
   PURCHASES_WORKSPACE,
   purchasesWorkspaceNavigateState,
 } from '../../lib/purchasesWorkspacePaths';
-import {
-  CATALOG_PRODUCT_WORKSPACE,
-  catalogProductWorkspaceNavigateState,
-} from '../../lib/catalogProductWorkspacePaths';
 import { PurchaseOrdersPage } from './PurchaseOrdersPage';
 import { EscandalloPanel } from './CostingPage';
 import { AlbaranCorroborateModal } from '../../components/saas/AlbaranCorroborateModal';
@@ -67,6 +63,7 @@ import {
   invoiceIsAlbaran,
   isAlbaranInvoiceIncomplete,
   isPurchaseOrderWaitingAlbaran,
+  findOpenPurchaseOrderForSupplier,
   buildReplenishPurchaseOrderPayload,
   pendingLinesFromPurchaseOrder,
   resolveAlbaranPendingLines,
@@ -99,6 +96,9 @@ import {
   syncTpvOrganizersAfterCatalogImport,
   removeCatalogCategoryFromBrands,
 } from '../../lib/deliveryCatalogImport';
+import { syncInventoryCatalogFromSources } from '../../lib/inventorySync';
+import { syncRecipesFromCostingCatalog } from '../../lib/recipeSyncFromCosting';
+import { applyVertialAutoCostingToCatalogItem } from '../../lib/catalogImportCosting';
 import { commercialLineBrands, isWarehouseImportCategory, organizerBrandsForCatalogTemplate } from '../../lib/deliveryCatalogImportLogic';
 import {
   catalogImportFieldsForVertical,
@@ -142,6 +142,7 @@ import {
   Layers,
   Truck,
   FileText,
+  ClipboardList,
   AlertTriangle,
   CheckCircle2,
   Clock,
@@ -204,15 +205,15 @@ import {
   type TpvBrandIngredientSelection,
 } from '../../lib/catalogCustomization';
 import { StoreIngredientsPanel } from '../../components/saas/StoreIngredientsPanel';
+import { CreateCatalogItemModal } from '../../components/saas/CreateCatalogItemModal';
+import { CatalogItemDetailModal } from '../../components/saas/CatalogItemDetailModal';
 import { isCatalogCostingProduct } from '../../lib/catalogCosting';
-import { syncInventoryCatalogFromSources } from '../../lib/inventorySync';
-import { syncRecipesFromCostingCatalog } from '../../lib/recipeSyncFromCosting';
 import {
   COMBO_SLOT_META,
   resolveComboRefSlotKind,
   type ComboStructureSlot,
 } from '../../lib/catalogComboSlots';
-import { buildCatalogSalesIndex } from '../../lib/catalogItemSalesStats';
+import { buildCatalogSalesIndex, computeCatalogItemSalesStats } from '../../lib/catalogItemSalesStats';
 import {
   applyCatalogMoveTarget,
   commercialLinesWithoutCatalogItems,
@@ -2820,11 +2821,9 @@ export function CatalogPage() {
 
     const isComprasTab = COMPRAS_TAB_IDS.has(activeTab);
 
-    if (
-      isComprasTab
-      && !suppliersFetchedRef.current
-      && !suppliersLoadStartedRef.current
-    ) {
+    // Compras: siempre refrescar proveedores al entrar (tras editar «Qué te vende»
+    // en ruta chromeless el estado local quedaba desfasado si solo se cargaba 1 vez).
+    if (isComprasTab) {
       suppliersLoadStartedRef.current = true;
       void loadSuppliers();
     }
@@ -3053,11 +3052,7 @@ export function CatalogPage() {
       const uid = dataUserId;
       const bid = businessId;
       const createdOrUpdated = savedItem;
-      const recipeLines = Array.isArray(createdOrUpdated?.customFields?.costingRecipe)
-        ? (createdOrUpdated.customFields.costingRecipe as unknown[])
-        : [];
-      const needsRecipeStock =
-        createdOrUpdated?.customFields?.costingType === 'recipe' && recipeLines.length > 0;
+      // Sync acotado: NO pipeline Excel completo (inyectaba bases Vertial: harina, mozzarella…).
       void (async () => {
         try {
           if (usesTpvCatalogUi && bid && createdOrUpdated) {
@@ -3065,24 +3060,58 @@ export function CatalogPage() {
             const activation = await activateCommercialLinesAfterCatalogImport(bid, [createdOrUpdated]);
             if (sync.updatedBrands > 0 || activation.activated > 0) await loadBrands();
           }
-          if (createdOrUpdated && needsRecipeStock && !isRestaurantCatalog) {
-            const bizType = currentBusiness?.businessType || 'delivery';
+          if (bid && createdOrUpdated) {
+            const ingredientsText = String(createdOrUpdated.customFields?.ingredients || '').trim();
+            if (ingredientsText) {
+              await syncStoreIngredientsFromCatalogImport(uid, bid, [createdOrUpdated]);
+            }
+
+            const cfg = await getDeliveryConfigRequest(uid).catch(() => null);
+            const lineBrands = commercialLineBrands(brands);
+            const brandIds = lineBrands.map((b) => b._id);
+            const currentIngredients = unifyStoreIngredientsFromConfig(cfg, brandIds);
+            const fullCatalog = await listCatalogItemsRequest(uid).catch(() => [] as CatalogItem[]);
+            const bizType =
+              currentBusiness?.businessType ||
+              (isRestaurantCatalog ? 'restaurant' : 'delivery');
+
             await syncInventoryCatalogFromSources(uid, {
               businessType: String(bizType),
-              businessId: bid || undefined,
-              storeIngredients,
-              catalogItems: [createdOrUpdated, ...allCatalogItems],
-              brands,
+              businessId: bid,
+              storeIngredients: currentIngredients,
+              catalogItems: fullCatalog.length > 0 ? fullCatalog : [createdOrUpdated],
+              brands: lineBrands,
             });
+
             const refreshed = await listCatalogItemsRequest(uid).catch(() => null);
+            const inventory = filterStockInventoryItems(refreshed || fullCatalog);
+
+            const costingStatus = String(createdOrUpdated.customFields?.costingType || '').trim();
+            if (!costingStatus || costingStatus === 'none') {
+              const applied = applyVertialAutoCostingToCatalogItem(
+                createdOrUpdated,
+                currentIngredients,
+                lineBrands,
+                { catalog: refreshed || fullCatalog, inventoryItems: inventory },
+              );
+              if (applied.mode !== 'skipped') {
+                const patched = await updateCatalogItemRequest(uid, applied.item);
+                setAllCatalogItems((prev) => mergeCatalogItemsById(prev, [patched]));
+                await syncRecipesFromCostingCatalog(uid, [patched], inventory).catch(() => undefined);
+              }
+            } else {
+              await syncRecipesFromCostingCatalog(uid, [createdOrUpdated], inventory).catch(
+                () => undefined,
+              );
+            }
+
             if (refreshed) {
-              const inventory = filterStockInventoryItems(refreshed);
-              await syncRecipesFromCostingCatalog(uid, [createdOrUpdated], inventory);
               setAllCatalogItems((prev) => mergeCatalogItemsById(prev, refreshed));
             }
+            await loadTpvIngredients().catch(() => undefined);
           }
         } catch {
-          /* el producto ya está en carta; TPV/escandallo se pueden regenerar luego */
+          /* el producto ya está en carta; Escandallo → Generar si hace falta */
         } finally {
           notifyDeliveryCatalogChanged(uid, bid);
         }
@@ -3713,31 +3742,15 @@ export function CatalogPage() {
     ].sort();
   }, [catalogItems]);
 
-  const openProductWorkspace = useCallback(
-    (item?: CatalogItem | null, opts?: { seedFrom?: CatalogItem | null }) => {
-      if (!dataUserId) {
-        toast.error('Sesión no válida. Recarga la página e inicia sesión de nuevo.');
-        return;
-      }
-      const state = {
-        ...catalogProductWorkspaceNavigateState(
-          '/saas/catalog',
-          activeCatalogCategory || undefined,
-        ),
-        ...(opts?.seedFrom?._id ? { seedProductId: opts.seedFrom._id } : {}),
-      };
-      if (item?._id) {
-        navigate(CATALOG_PRODUCT_WORKSPACE.edit(item._id), { state });
-        return;
-      }
-      navigate(CATALOG_PRODUCT_WORKSPACE.nuevo, { state });
-    },
-    [dataUserId, navigate, activeCatalogCategory],
-  );
-
   const openNewCatalogItemManual = useCallback(() => {
-    openProductWorkspace(null);
-  }, [openProductWorkspace]);
+    if (!dataUserId) {
+      toast.error('Sesión no válida. Recarga la página e inicia sesión de nuevo.');
+      return;
+    }
+    setEditingItem(null);
+    setComboSeedProduct(null);
+    setShowCreateItem(true);
+  }, [dataUserId]);
 
   const openCatalogImport = useCallback(() => {
     if (!dataUserId) {
@@ -4094,7 +4107,7 @@ export function CatalogPage() {
                     onImport={openCatalogImport}
                     onPurchaseList={() => setSearchParams({ tab: 'purchase-orders' })}
                     quickAddLabel="Añadir manualmente"
-                    quickAddDesc="Ficha completa: precios, foto, ingredientes y resultados"
+                    quickAddDesc="Marca, categoría, precios y stock en 3 pasos"
                     importAddLabel="Importar Excel"
                     importAddDesc="Plantilla con productos, precios e imágenes opcionales"
                     purchaseListLabel="Lista de la compra"
@@ -4390,7 +4403,7 @@ export function CatalogPage() {
                             )}
                             <button
                               type="button"
-                              onClick={() => openProductWorkspace(item)}
+                              onClick={() => setDetailItem(item)}
                               className="flex items-start gap-2.5 min-w-0 flex-1 text-left"
                               title="Ver ficha: ventas, escandallo e ingredientes"
                             >
@@ -4465,7 +4478,7 @@ export function CatalogPage() {
                               <Globe className="w-4 h-4" />
                             </button>
                             <button
-                              onClick={() => { openProductWorkspace(item); }}
+                              onClick={() => { setEditingItem(item); setComboSeedProduct(null); setShowCreateItem(true); }}
                               className="p-2 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
                               title="Editar"
                             >
@@ -4536,7 +4549,7 @@ export function CatalogPage() {
                               <td className="px-4 py-3">
                                 <button
                                   type="button"
-                                  onClick={() => openProductWorkspace(item)}
+                                  onClick={() => setDetailItem(item)}
                                   className="flex items-center gap-3 w-full text-left group"
                                   title="Ver ficha: ventas, escandallo e ingredientes"
                                 >
@@ -4630,7 +4643,7 @@ export function CatalogPage() {
                                     <Globe className="w-4 h-4" />
                                   </button>
                                   <button
-                                    onClick={() => { openProductWorkspace(item); }}
+                                    onClick={() => { setEditingItem(item); setComboSeedProduct(null); setShowCreateItem(true); }}
                                     className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-gray-700 transition-colors"
                                     title="Editar"
                                   >
@@ -4778,6 +4791,31 @@ export function CatalogPage() {
                   )}
                 </div>
                 <div className="flex items-center shrink-0">
+                  {(() => {
+                    const openPo = findOpenPurchaseOrderForSupplier(scopedPurchaseOrders, supplier._id);
+                    if (openPo) {
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => setSearchParams({ tab: 'purchase-orders', order: openPo._id })}
+                          className="px-2 py-1 mr-1 rounded-lg text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 dark:text-amber-200 dark:bg-amber-950/40 dark:border-amber-800"
+                          title={`Pedido ${openPo.orderNumber || ''} en curso`}
+                        >
+                          En curso
+                        </button>
+                      );
+                    }
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => setSearchParams({ tab: 'purchase-orders', supplier: supplier._id })}
+                        className="px-2 py-1 mr-1 rounded-lg text-[11px] font-semibold text-[var(--v-blue,#2563eb)] border border-blue-200"
+                        title="Crear pedido a este proveedor"
+                      >
+                        Pedir
+                      </button>
+                    );
+                  })()}
                   <button
                     onClick={() => { void openSupplierEditor(supplier); }}
                     className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
@@ -4882,14 +4920,33 @@ export function CatalogPage() {
                   </td>
                   <td className="px-3 py-2.5 align-middle">
                     <div className="flex flex-wrap items-center gap-1">
-                      <button
-                        onClick={() => setSearchParams({ tab: 'purchase-orders', supplier: supplier._id })}
-                        className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold text-[var(--v-blue,#2563eb)] border border-blue-200 hover:bg-blue-50 dark:border-blue-900 dark:hover:bg-blue-950/30 transition-colors"
-                        title="Crear pedido a este proveedor"
-                      >
-                        <Truck className="w-3.5 h-3.5" />
-                        Pedir
-                      </button>
+                      {(() => {
+                        const openPo = findOpenPurchaseOrderForSupplier(scopedPurchaseOrders, supplier._id);
+                        if (openPo) {
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => setSearchParams({ tab: 'purchase-orders', order: openPo._id })}
+                              className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 hover:bg-amber-100 dark:text-amber-200 dark:bg-amber-950/40 dark:border-amber-800 dark:hover:bg-amber-950/60 transition-colors"
+                              title={`Ya hay un pedido en curso (${openPo.orderNumber || 'sin nº'}). Ábrelo en vez de crear otro.`}
+                            >
+                              <ClipboardList className="w-3.5 h-3.5" />
+                              En curso
+                            </button>
+                          );
+                        }
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => setSearchParams({ tab: 'purchase-orders', supplier: supplier._id })}
+                            className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold text-[var(--v-blue,#2563eb)] border border-blue-200 hover:bg-blue-50 dark:border-blue-900 dark:hover:bg-blue-950/30 transition-colors"
+                            title="Crear pedido a este proveedor"
+                          >
+                            <Truck className="w-3.5 h-3.5" />
+                            Pedir
+                          </button>
+                        );
+                      })()}
                       <button
                         onClick={() => { void openSupplierEditor(supplier); }}
                         className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
@@ -5117,12 +5174,13 @@ export function CatalogPage() {
             {waitingOrders.length > 0 && (
               <AlbaranEsperaList
                 orders={waitingOrders}
-                selectedId={waitingAlbaranOrderId}
                 ocrBusy={albaranOcrBusy}
                 replenishing={replenishingOrder}
-                onSelect={setWaitingAlbaranOrderId}
                 onPickFile={(order, file) => void handleAlbaranOcrFile(order, file)}
-                onComprobar={(order) => setAlbaranCorroborate({ order, invoice: null })}
+                onOpen={(order) => {
+                  setWaitingAlbaranOrderId(order._id);
+                  setAlbaranCorroborate({ order, invoice: null });
+                }}
                 onReplenishPending={(order) => void handleReplenishPendingOrder(order)}
               />
             )}
@@ -6019,6 +6077,58 @@ export function CatalogPage() {
           </>
         )}
       </div>
+
+      <CreateCatalogItemModal
+        isOpen={showCreateItem}
+        onClose={() => {
+          setShowCreateItem(false);
+          setEditingItem(null);
+          setComboSeedProduct(null);
+        }}
+        onCreate={handleCreateItem}
+        editItem={editingItem}
+        seedFromProduct={comboSeedProduct}
+        brands={brands}
+        businessId={businessId}
+        dataUserId={dataUserId}
+        onBrandsChange={setBrands}
+        catalogCategoriesInUse={categories}
+        catalogItems={catalogForComboEditor}
+        catalogMenuItemsForDuplicateCheck={catalogMenuItemsRaw}
+        storeIngredients={storeIngredients}
+        brandIngredientSelection={brandIngredientSelection}
+        packagingStockItems={filterStockInventoryItems(catalogItems).filter(
+          (item) => item.stockCategory === 'packaging',
+        )}
+        isRestaurantCatalog={isRestaurantCatalog}
+      />
+
+      {detailItem && (
+        <CatalogItemDetailModal
+          item={detailItem}
+          brands={brands}
+          catalogItems={catalogForComboEditor}
+          stats={catalogSalesIndex.get(detailItem._id) || computeCatalogItemSalesStats(detailItem, deliveryOrders)}
+          statsLoading={ordersLoading}
+          storeIngredients={storeIngredients}
+          stockItems={filterStockInventoryItems(catalogItems)}
+          dataUserId={dataUserId}
+          businessId={businessId}
+          onArmCombo={() => {
+            const seed = detailItem;
+            setDetailItem(null);
+            setEditingItem(null);
+            setComboSeedProduct(seed);
+            setShowCreateItem(true);
+          }}
+          onCostingSaved={(saved) => {
+            setAllCatalogItems((prev) => prev.map((i) => (i._id === saved._id ? saved : i)));
+            setDetailItem(saved);
+          }}
+          onClose={() => setDetailItem(null)}
+          onSave={handleSaveDetailItem}
+        />
+      )}
 
       {showInvoiceOcrStorePicker ? (
         <div className="fixed inset-0 z-[70] flex items-end justify-center sm:items-center p-0 sm:p-4">

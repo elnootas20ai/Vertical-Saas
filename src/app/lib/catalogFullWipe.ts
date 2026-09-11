@@ -1,11 +1,9 @@
 /**
  * Tras vaciar la Carta: limpia restos del Excel/import (almacén sync, ingredientes TPV,
- * recetas y organizadores vacíos). La plantilla Excel de descarga no se toca.
+ * recetas). Las marcas NO se borran aquí — solo a mano en Ajustes → Marca.
+ * La plantilla Excel de descarga no se toca.
  */
-import { deleteBrandRequest, listBrandsRequest, updateBrandRequest, type Brand } from './brandsApi';
-import { commercialLineBrands } from './deliveryCatalogImportLogic';
-import { isDefaultCommercialBrand } from './brandUtils';
-import { commercialLinesWithoutCatalogItems } from './catalogItemMove';
+import { listBrandsRequest, updateBrandRequest, type Brand } from './brandsApi';
 import { deleteCatalogItemsRelentlessly } from './catalogBulkDelete';
 import {
   filterCatalogItemsForBusinessScope,
@@ -30,6 +28,7 @@ export type CatalogFullWipeResult = {
   stockDeleted: number;
   cartaLeftoversDeleted: number;
   recipesDeleted: number;
+  /** Siempre 0: las marcas no se eliminan al vaciar carta. */
   organizersDeleted: number;
   ingredientsCleared: boolean;
 };
@@ -136,38 +135,25 @@ export async function wipeCatalogLeftoversAfterEmptyCarta(
     /* best-effort */
   }
 
-  let organizersDeleted = 0;
+  // Marcas: nunca borrar. Solo limpiar categorías TPV huérfanas si la carta quedó vacía.
   if (bid) {
     try {
-      const brands = options?.brands?.length
+      const remaining = options?.brands?.length
         ? options.brands
         : await listBrandsRequest(bid).catch(() => [] as Brand[]);
-      const commercial = commercialLineBrands(brands);
-      // Tras wipe, carta vacía → todos los organizadores no-General están vacíos.
-      const emptyLines = commercialLinesWithoutCatalogItems(commercial, []);
-      for (const line of emptyLines) {
-        if (isDefaultCommercialBrand(line)) continue;
-        try {
-          await deleteBrandRequest(bid, line._id);
-          organizersDeleted += 1;
-        } catch {
-          /* best-effort */
-        }
-      }
-
-      // Limpia pestañas/categorías TPV huérfanas en marcas que queden.
-      const remaining = await listBrandsRequest(bid).catch(() => [] as Brand[]);
+      let catsCleared = 0;
       for (const brand of remaining) {
-        const cats = brand.catalogCategories || [];
+        if (brand.deletedAt) continue;
+        const cats = Array.isArray(brand.catalogCategories) ? brand.catalogCategories : [];
         if (cats.length === 0) continue;
         try {
           await updateBrandRequest(bid, { ...brand, catalogCategories: [] });
+          catsCleared += 1;
         } catch {
           /* best-effort */
         }
       }
-
-      if (organizersDeleted > 0) notifyDeliveryBrandsChanged();
+      if (catsCleared > 0) notifyDeliveryBrandsChanged();
     } catch {
       /* best-effort */
     }
@@ -179,7 +165,7 @@ export async function wipeCatalogLeftoversAfterEmptyCarta(
     stockDeleted,
     cartaLeftoversDeleted,
     recipesDeleted,
-    organizersDeleted,
+    organizersDeleted: 0,
     ingredientsCleared,
   };
 }

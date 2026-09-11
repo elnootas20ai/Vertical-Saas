@@ -14,8 +14,6 @@ const CHROMELESS_PREFIXES = [
   '/saas/worker/tpv',
   /** Compras: proveedor / pedido / factura / albarán a pantalla completa. */
   '/saas/compras/',
-  /** Ficha producto TPV (crear / editar) a pantalla completa. */
-  '/saas/catalog/producto/',
 ];
 
 /** Rutas a pantalla completa sin sidebar/topbar estándar. */

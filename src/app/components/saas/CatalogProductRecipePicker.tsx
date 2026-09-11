@@ -4,7 +4,6 @@ import type { Brand } from '../../lib/brandsApi';
 import { type ProductRecipeLine } from '../../lib/catalogCosting';
 import {
   normalizeStoreIngredientUnit,
-  readStoreIngredientTpvFlags,
   resolveIngredientRole,
   type StoreIngredient,
 } from '../../lib/catalogCustomization';
@@ -106,7 +105,7 @@ type CatalogProductRecipePickerProps = {
   brandIds?: string[];
   salePrice?: number;
   compact?: boolean;
-  /** Oculta «Quitar en TPV» (recetas de elaboración / stock). */
+  /** Oculta «Se puede quitar al pedir» (recetas de elaboración / stock). */
   hideTpvOptions?: boolean;
   /** Crea ingrediente maestro + almacén; el picker lo mete en la composición. */
   onCreateIngredient?: (input: CatalogRecipeCreateIngredientInput) => Promise<StoreIngredient | null>;
@@ -209,11 +208,15 @@ export function CatalogProductRecipePicker({
   }, [scoped, pickedIds, search]);
 
   const addIngredient = (ing: StoreIngredient, unitOverride?: string) => {
-    const flags = readStoreIngredientTpvFlags(ing);
     const role = resolveIngredientRole(ing);
     // Unidad de uso en la línea (no pisa el €/kg de la ficha).
     const unit = toRecipePickerUnit(unitOverride || ingredientUnit(ing));
     const quantity = defaultQtyForIngredient(ing, unit);
+    // Por defecto: se puede quitar en el pedido (salvo escandallo / elaboración).
+    const tpvRemovable =
+      hideTpvOptions || role === 'escandallo'
+        ? false
+        : true;
     onChange([
       ...picks,
       {
@@ -222,7 +225,7 @@ export function CatalogProductRecipePicker({
         quantity,
         quantityText: formatRecipeQtyDisplay(quantity),
         unit,
-        tpvRemovable: hideTpvOptions ? false : flags.allowRemove && role !== 'escandallo',
+        tpvRemovable,
       },
     ]);
   };
@@ -329,14 +332,17 @@ export function CatalogProductRecipePicker({
                   <span className="text-[10px] text-stone-400 hidden sm:inline">aprox.</span>
                 </div>
                 {hideTpvOptions ? null : (
-                  <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-gray-600 dark:text-gray-300 cursor-pointer shrink-0">
+                  <label
+                    className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-gray-600 dark:text-gray-300 cursor-pointer shrink-0"
+                    title="Si está marcado, en el TPV se puede quitar este ingrediente del pedido (ej. sin cebolla)."
+                  >
                     <input
                       type="checkbox"
                       checked={pick.tpvRemovable}
                       onChange={() => toggleRemovable(pick.storeIngredientId)}
                       className="rounded"
                     />
-                    Quitar en TPV
+                    Se puede quitar al pedir
                   </label>
                 )}
                 <button

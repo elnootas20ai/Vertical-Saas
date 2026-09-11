@@ -36,6 +36,37 @@ export function filterStockInventoryItems(items: CatalogItem[]): CatalogItem[] {
 }
 
 /**
+ * Stock de cocina / materias (sync store_ingredient o categoría ingredientes).
+ * Va a Almacén → subpestaña Ingredientes; no al Almacén general (Bebidas/envases…).
+ */
+export function isKitchenIngredientStockItem(item: CatalogItem | null | undefined): boolean {
+  if (!isStockInventoryItem(item) || !item) return false;
+  const sc = String(item.stockCategory || '').trim().toLowerCase();
+  if (sc === 'ingredient') return true;
+  const src = String(
+    (item as { inventorySyncSource?: string }).inventorySyncSource ||
+      item.customFields?.inventorySyncSource ||
+      '',
+  ).trim();
+  if (src === 'store_ingredient') return true;
+  if (String(item.customFields?.storeIngredientId || '').trim()) return true;
+  const cat = String(item.category || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .trim();
+  return cat === 'ingredientes' || cat === 'cocina' || cat.startsWith('cocina ');
+}
+
+export function filterKitchenIngredientStockItems(items: CatalogItem[]): CatalogItem[] {
+  return items.filter(isKitchenIngredientStockItem);
+}
+
+export function filterGeneralWarehouseStockItems(items: CatalogItem[]): CatalogItem[] {
+  return items.filter((item) => isStockInventoryItem(item) && !isKitchenIngredientStockItem(item));
+}
+
+/**
  * Lo que se puede marcar / pedir a un proveedor («Qué te vende», pedidos, albaranes).
  * Almacén real (ingredientes, bebidas, envases…).
  * No incluye el plato de carta aunque tenga isStockItem (control de stock en ficha):

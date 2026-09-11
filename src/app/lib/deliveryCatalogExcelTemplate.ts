@@ -308,7 +308,7 @@ export function lineCategoriesForCatalogTemplate(
   brand: ImportBrandLike,
   vertical?: string | null,
 ): string[] {
-  const fromBrand = (brand.catalogCategories ?? [])
+  const fromBrand = (Array.isArray(brand.catalogCategories) ? brand.catalogCategories : [])
     .map((c) => normalizeImportCategory(String(c || '')))
     .filter((c) => c && !shouldClearBrandForCategory(c));
   if (fromBrand.length > 0) {

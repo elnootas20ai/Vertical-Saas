@@ -15,6 +15,8 @@ type Props = {
   onManage?: () => void;
   /** Abrir panel ya en modo nueva reserva. */
   onCreate?: () => void;
+  /** Oculta el botón redundante cuando la pantalla ya ofrece gestión en su cabecera. */
+  showManageButton?: boolean;
   compact?: boolean;
   defaultOpen?: boolean;
 };
@@ -31,6 +33,7 @@ export function RestaurantTpvReservationsStrip({
   onSeat,
   onManage,
   onCreate,
+  showManageButton = true,
   compact = false,
   defaultOpen = false,
 }: Props) {
@@ -95,7 +98,7 @@ export function RestaurantTpvReservationsStrip({
             Nueva
           </button>
         ) : null}
-        {onManage ? (
+        {onManage && showManageButton ? (
           <button
             type="button"
             onClick={onManage}

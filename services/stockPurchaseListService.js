@@ -21,16 +21,19 @@ import { nextPurchaseOrderNumber } from './purchaseOrderNumber.js';
 
 const URGENCY_ORDER = { critical: 0, high: 1, normal: 2 };
 
-function urgencyForLine(counted, min, diff) {
+/** Urgencia solo por stock contado vs mínimo (la merma/descuadre no hincha el pedido). */
+function urgencyForLine(counted, min) {
   if (counted === 0) return 'critical';
   if (min > 0 && counted < min * 0.5) return 'high';
-  if (diff < 0) return 'high';
+  if (min > 0 && counted < min) return 'high';
   return 'normal';
 }
 
 /**
  * @param {object} stockCount - documento stock_count completado o en curso
  * @param {object[]} catalogItems - ítems de catálogo (inventario)
+ *
+ * Compra = stock contado + mínimo. Las diferencias (merma) NO entran en suggestedQty.
  */
 export function buildPurchaseListFromStockCount(stockCount, catalogItems = []) {
   const itemsById = new Map(
@@ -48,10 +51,6 @@ export function buildPurchaseListFromStockCount(stockCount, catalogItems = []) {
     const reasons = [];
     let suggestedQty = 0;
 
-    if (diff !== null && diff < 0) {
-      suggestedQty = Math.max(suggestedQty, Math.abs(diff));
-      reasons.push('inventario_faltante');
-    }
     if (min > 0 && counted < min) {
       suggestedQty = Math.max(suggestedQty, min - counted);
       reasons.push('bajo_minimo');
@@ -80,7 +79,7 @@ export function buildPurchaseListFromStockCount(stockCount, catalogItems = []) {
       estimatedTotal: Math.round(qty * costPrice * 100) / 100,
       supplierId: String(cat.supplierId || ''),
       supplierName: String(cat.supplierName || ''),
-      urgency: urgencyForLine(counted, min, diff ?? 0),
+      urgency: urgencyForLine(counted, min),
       reasons,
       source: 'stock_count',
       stockCountId: stockCount._id || stockCount.id,

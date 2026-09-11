@@ -7,6 +7,8 @@ export interface SalaRoom {
   name: string;
   color: string;
   roomType: SalaRoomType;
+  /** Acabado del suelo; si falta, usa el fondo natural de la skin. */
+  floorBackgroundId?: 'wood' | 'tile' | 'outdoor' | 'night';
   sortOrder: number;
   /** PDV de caja compartido del restaurante */
   pdvId?: string;

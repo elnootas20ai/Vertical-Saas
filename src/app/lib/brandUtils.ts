@@ -140,10 +140,13 @@ function effectiveCatalogCategories(
   brand: Pick<Brand, 'catalogCategories'>,
   lineKind: string,
 ): string[] {
-  const saved = (brand.catalogCategories ?? []).map((c) => String(c || '').trim()).filter(Boolean);
+  const saved = (Array.isArray(brand.catalogCategories) ? brand.catalogCategories : [])
+    .map((c) => String(c || '').trim())
+    .filter(Boolean);
   if (saved.length > 0) return saved;
   if (!lineKind) return [];
-  return getDeliveryBrandLinePreset(lineKind)?.typicalCategories ?? [];
+  const typical = getDeliveryBrandLinePreset(lineKind)?.typicalCategories;
+  return Array.isArray(typical) ? typical : [];
 }
 
 /** Qué falta por completar en la marca General (u otra) antes de operar con claridad. */

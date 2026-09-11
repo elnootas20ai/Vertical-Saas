@@ -231,7 +231,8 @@ export function catalogCategorySuggestions(
       ? brands.filter((b) => selectedBrandIds.includes(b._id))
       : brands;
   for (const b of relevant) {
-    for (const c of b.catalogCategories ?? []) {
+    const cats = Array.isArray(b.catalogCategories) ? b.catalogCategories : [];
+    for (const c of cats) {
       const t = String(c || '').trim();
       if (t) out.add(t);
     }

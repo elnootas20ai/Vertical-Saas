@@ -34,8 +34,10 @@ import {
   updateFinanceMovementSchema,
   createBankAccountSchema,
 } from '../middleware/validate.js';
+import { requireUserScope } from '../middleware/requireUserScope.js';
 
 const financeRouter = Router();
+financeRouter.use(requireUserScope);
 
 // Bank accounts
 financeRouter.get('/:userId/accounts', validateParams(userIdParamSchema), listAccounts);

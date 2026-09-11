@@ -15,8 +15,10 @@ import {
   searchByPhone,
 } from '../controllers/clientsController.js';
 import { generateClientPortalToken } from '../controllers/portalController.js';
+import { requireUserScope } from '../middleware/requireUserScope.js';
 
 const clientsRouter = Router();
+clientsRouter.use(requireUserScope);
 
 // Base CRUD
 clientsRouter.get('/:userId', listClients);

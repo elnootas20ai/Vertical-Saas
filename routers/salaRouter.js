@@ -35,8 +35,10 @@ import {
   ensureMesaQrTokens,
   regenerateMesaQrToken,
 } from '../controllers/mesaQrController.js';
+import { requireUserScope } from '../middleware/requireUserScope.js';
 
 const salaRouter = Router();
+salaRouter.use(requireUserScope);
 
 // Tables
 salaRouter.get('/tables/:userId', listTables);

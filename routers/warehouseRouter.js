@@ -5,8 +5,10 @@ import {
   updateWarehouse,
   removeWarehouse,
 } from '../controllers/warehouseController.js';
+import { requireUserScope } from '../middleware/requireUserScope.js';
 
 const warehouseRouter = Router();
+warehouseRouter.use(requireUserScope);
 
 warehouseRouter.get('/:userId', listWarehouses);
 warehouseRouter.post('/:userId', createWarehouse);

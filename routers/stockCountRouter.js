@@ -5,6 +5,7 @@ import {
   getStockCount,
   updateCountLine,
   completeStockCount,
+  cancelStockCount,
   generateAdjustments,
   getStockCountPurchaseList,
   createPurchaseOrdersFromStockCount,
@@ -23,6 +24,7 @@ stockCountRouter.post('/:userId/:countId/purchase-list/create-orders', createPur
 stockCountRouter.get('/:userId/:countId', getStockCount);
 stockCountRouter.put('/:userId/:countId/line/:lineIdx', updateCountLine);
 stockCountRouter.post('/:userId/:countId/complete', completeStockCount);
+stockCountRouter.post('/:userId/:countId/cancel', cancelStockCount);
 stockCountRouter.post('/:userId/:countId/generate-adjustments', generateAdjustments);
 
 export { stockCountRouter };

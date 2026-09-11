@@ -24,6 +24,8 @@ export interface StockPurchaseListPreviewProps {
   countId: string;
   countName?: string;
   compact?: boolean;
+  /** Si false, se ve la lista pero no «Generar pedidos» (sin permiso Inventario). */
+  canCreateOrders?: boolean;
   onGoToPurchaseOrders?: (countId: string) => void;
   onOrdersCreated?: (created: number) => void;
 }
@@ -33,6 +35,7 @@ export function StockPurchaseListPreview({
   countId,
   countName,
   compact = false,
+  canCreateOrders = true,
   onGoToPurchaseOrders,
   onOrdersCreated,
 }: StockPurchaseListPreviewProps) {
@@ -62,6 +65,10 @@ export function StockPurchaseListPreview({
 
   const handleCreateOrders = async () => {
     if (!userId || !countId) return;
+    if (!canCreateOrders) {
+      toast.error('Sin permiso de Inventario para generar pedidos');
+      return;
+    }
     setCreating(true);
     try {
       const result = await createPurchaseOrdersFromStockListRequest(userId, countId);
@@ -154,15 +161,21 @@ export function StockPurchaseListPreview({
               Ir a pedidos de compra
             </button>
           )}
-          <button
-            type="button"
-            disabled={creating}
-            onClick={() => void handleCreateOrders()}
-            className="px-4 py-2 rounded-xl text-sm font-semibold bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:opacity-90 disabled:opacity-50 inline-flex items-center gap-2"
-          >
-            {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Truck className="w-4 h-4" />}
-            Generar pedidos
-          </button>
+          {canCreateOrders ? (
+            <button
+              type="button"
+              disabled={creating}
+              onClick={() => void handleCreateOrders()}
+              className="px-4 py-2 rounded-xl text-sm font-semibold bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:opacity-90 disabled:opacity-50 inline-flex items-center gap-2"
+            >
+              {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Truck className="w-4 h-4" />}
+              Generar pedidos
+            </button>
+          ) : (
+            <p className="text-xs text-amber-800 dark:text-amber-200 self-center max-w-[14rem]">
+              Solo el encargado (permiso Inventario) puede generar pedidos.
+            </p>
+          )}
         </div>
       </div>
 

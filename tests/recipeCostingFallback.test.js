@@ -73,6 +73,36 @@ describe('recipeCostingFallback', () => {
       ],
     );
     expect(ingredients[0]?.wastePercent).toBe(8);
+    // Merma no reduce netQuantity: stock descuenta la qty de línea.
+    expect(ingredients[0]?.netQuantity).toBe(0.1);
+  });
+
+  it('convierte qty de escandallo a unidad del SKU (g → kg)', () => {
+    const ingredients = buildRecipeIngredientsFromCostingItem(
+      {
+        _id: 'prod',
+        customFields: {
+          costingType: 'recipe',
+          costingRecipe: [
+            { storeIngredientId: 'ing-moz', name: 'Mozzarella', quantity: 150, unit: 'g' },
+          ],
+        },
+      },
+      [
+        {
+          _id: 'stock-moz',
+          name: 'Mozzarella',
+          module: 'stock',
+          unit: 'kg',
+          costPrice: 8,
+          lastPurchasePrice: 8,
+          customFields: { storeIngredientId: 'ing-moz' },
+        },
+      ],
+    );
+    expect(ingredients[0]?.quantity).toBe(0.15);
+    expect(ingredients[0]?.unit).toBe('kg');
+    expect(ingredients[0]?.totalCost).toBe(1.2);
   });
 
   it('devuelve vacío si no hay escandallo recipe', () => {

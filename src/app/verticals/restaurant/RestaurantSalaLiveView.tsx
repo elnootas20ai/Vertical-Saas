@@ -4,14 +4,13 @@
  * Modo editar: capacidad / comensales +/- , añadir/quitar mesas y zonas.
  */
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   Clock,
   LayoutGrid,
   Minus,
-  Pencil,
   Plus,
   Receipt,
   Trash2,
@@ -24,6 +23,7 @@ import { useBusiness } from '../../context/BusinessContext';
 import { useSSE } from '../../hooks/useSSE';
 import {
   changeTableStatusRequest,
+  getFloorConfigRequest,
   listDiningOrdersRequest,
   listDiningTablesRequest,
   listTableTicketStatsRequest,
@@ -44,6 +44,15 @@ import { SALA_ROOM_TYPE_LABELS } from '../../lib/salaStudioTypes';
 import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
 import { RestaurantAddTablesModal } from './RestaurantAddTablesModal';
 import { RestaurantAddZoneModal } from './RestaurantAddZoneModal';
+import {
+  compactFloorDimensions,
+  RestaurantSalaFloorCanvas,
+} from './RestaurantSalaFloorCanvas';
+import {
+  DEFAULT_FLOOR_HEIGHT,
+  DEFAULT_FLOOR_WIDTH,
+  skinForRoomType,
+} from './restaurantSalaFloorSkins';
 import { resolveTableCapacity } from './tableCapacity';
 
 type Props = {
@@ -54,6 +63,7 @@ type Props = {
   businessId: string;
   actorName?: string;
   mapBusy?: boolean;
+  editMode: boolean;
   onTablesChange: (tables: DiningTable[]) => void;
   onAddZone?: (input: {
     name: string;
@@ -162,72 +172,6 @@ const STATUS_UI: Record<DiningTableStatus, TableStatusUi> = {
     accent: 'from-stone-200 to-stone-300',
   },
 };
-
-/** Suelo del plano de sala: tono cálido, trama de baldosas y luz ambiental. */
-const SALA_FLOOR_STYLE: CSSProperties = {
-  backgroundColor: '#faf7f2',
-  backgroundImage:
-    'radial-gradient(ellipse 90% 70% at 50% 0%, rgba(255,255,255,0.9), transparent 70%), radial-gradient(circle, rgba(120, 100, 80, 0.14) 1px, transparent 1px)',
-  backgroundSize: 'auto, 18px 18px',
-};
-
-/**
- * Figura de mesa: forma y sillas según capacidad.
- * ≤2 pax → redonda · 3-4 → cuadrada con laterales · 5+ → rectangular con laterales.
- */
-function tableFigureLayout(capacity: number): {
-  top: number;
-  bottom: number;
-  left: number;
-  right: number;
-  surface: string;
-} {
-  const cap = Math.max(1, capacity);
-  if (cap <= 2) {
-    return {
-      top: 1,
-      bottom: cap > 1 ? 1 : 0,
-      left: 0,
-      right: 0,
-      surface: 'h-16 w-16 rounded-full',
-    };
-  }
-  const left = 1;
-  const right = cap >= 4 ? 1 : 0;
-  const rest = cap - left - right;
-  const top = Math.min(4, Math.ceil(rest / 2));
-  const bottom = Math.min(4, rest - top);
-  const width = top <= 1 ? 'w-16' : top === 2 ? 'w-20' : top === 3 ? 'w-24' : 'w-28';
-  return { top, bottom, left, right, surface: `h-14 ${width} rounded-xl` };
-}
-
-const EMPTY_CHAIR = 'bg-stone-300/90 shadow-sm shadow-stone-400/20';
-
-/** Fila de sillas (vista cenital): rellenas = comensales sentados. */
-function ChairRow({ count, filled, fill }: { count: number; filled: number; fill: string }) {
-  if (count <= 0) return <span className="h-2" aria-hidden />;
-  return (
-    <div className="flex justify-center gap-1.5" aria-hidden>
-      {Array.from({ length: count }).map((_, i) => (
-        <span
-          key={i}
-          className={`h-2 w-5 rounded-md transition-colors ${i < filled ? fill : EMPTY_CHAIR}`}
-        />
-      ))}
-    </div>
-  );
-}
-
-/** Silla lateral (izquierda/derecha de la mesa). */
-function SideChair({ present, filled, fill }: { present: boolean; filled: boolean; fill: string }) {
-  if (!present) return <span className="w-2" aria-hidden />;
-  return (
-    <span
-      className={`h-5 w-2 rounded-md transition-colors ${filled ? fill : EMPTY_CHAIR}`}
-      aria-hidden
-    />
-  );
-}
 
 function tablesForRoom(tables: DiningTable[], room: SalaRoom): DiningTable[] {
   return tables
@@ -342,6 +286,7 @@ export function RestaurantSalaLiveView({
   businessId,
   actorName,
   mapBusy = false,
+  editMode,
   onTablesChange,
   onAddZone,
   onAddTables,
@@ -372,7 +317,6 @@ export function RestaurantSalaLiveView({
   const [infoOpenOrder, setInfoOpenOrder] = useState<DiningOrder | null>(null);
   const [infoTodayAmount, setInfoTodayAmount] = useState(0);
   const [infoTodayTickets, setInfoTodayTickets] = useState(0);
-  const [editMode, setEditMode] = useState(false);
   const [editTable, setEditTable] = useState<DiningTable | null>(null);
   const [editCapacity, setEditCapacity] = useState(4);
   const [editGuests, setEditGuests] = useState(0);
@@ -380,6 +324,8 @@ export function RestaurantSalaLiveView({
   const [showAddTables, setShowAddTables] = useState(false);
   const [busyId, setBusyId] = useState('');
   const [floorOrders, setFloorOrders] = useState<DiningOrder[]>([]);
+  const [floorWidth, setFloorWidth] = useState(DEFAULT_FLOOR_WIDTH);
+  const [floorHeight, setFloorHeight] = useState(DEFAULT_FLOOR_HEIGHT);
 
   const reloadFloorOrders = useCallback(() => {
     if (!userId) return;
@@ -392,6 +338,26 @@ export function RestaurantSalaLiveView({
   useEffect(() => {
     reloadFloorOrders();
   }, [reloadFloorOrders]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!userId || !businessId) return;
+    void getFloorConfigRequest(userId, { businessId })
+      .then((config) => {
+        if (cancelled) return;
+        const compact = compactFloorDimensions(
+          tables,
+          Number(config?.floorWidth) || DEFAULT_FLOOR_WIDTH,
+          Number(config?.floorHeight) || DEFAULT_FLOOR_HEIGHT,
+        );
+        setFloorWidth(compact.width);
+        setFloorHeight(compact.height);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, businessId]);
 
   const openByTable = useMemo(() => openOrdersByTableId(floorOrders), [floorOrders]);
   const visualOf = useCallback(
@@ -429,10 +395,6 @@ export function RestaurantSalaLiveView({
     handlers: salaSseHandlers,
     enabled: Boolean(userId && businessId && !editMode),
   });
-
-  const canEditMap = Boolean(
-    onAddZone || onAddTables || onUpdateTablePeople || onRemoveTable || onRemoveZone || onRemount,
-  );
 
   useEffect(() => {
     if (!sortedRooms.length) {
@@ -520,6 +482,7 @@ export function RestaurantSalaLiveView({
 
   const activeRoom =
     sortedRooms.find((r) => r.id === activeRoomId) || sortedRooms[0] || null;
+  const activeFloorSkin = skinForRoomType(activeRoom?.roomType);
   const roomTables = activeRoom ? tablesForRoom(tables, activeRoom) : [];
   const visibleTables = tables.filter((t) => t.active !== false && t.status !== 'hidden');
   const statsTables = activeRoom ? roomTables : visibleTables;
@@ -656,20 +619,14 @@ export function RestaurantSalaLiveView({
     setInfoTable(table);
   };
 
-  const toggleEditMode = () => {
-    setEditMode((v) => {
-      if (v) {
-        setEditTable(null);
-        setShowAddZone(false);
-        setShowAddTables(false);
-      } else {
-        setInfoTable(null);
-        setSeatTable(null);
-        setReservedTable(null);
-      }
-      return !v;
-    });
-  };
+  useEffect(() => {
+    setEditTable(null);
+    setShowAddZone(false);
+    setShowAddTables(false);
+    setInfoTable(null);
+    setSeatTable(null);
+    setReservedTable(null);
+  }, [editMode]);
 
   const saveEditTable = async () => {
     if (!editTable || !onUpdateTablePeople) return;
@@ -713,21 +670,6 @@ export function RestaurantSalaLiveView({
             </h1>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {canEditMap && (
-              <button
-                type="button"
-                disabled={mapBusy}
-                onClick={toggleEditMode}
-                className={
-                  editMode
-                    ? 'inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-amber-400 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-900 transition-colors hover:bg-amber-100 disabled:opacity-50'
-                    : VERTIAL_BTN_SECONDARY
-                }
-              >
-                <Pencil className="h-4 w-4" strokeWidth={2} />
-                {editMode ? 'Listo' : 'Editar sala'}
-              </button>
-            )}
             {editMode && onAddZone && (
               <button
                 type="button"
@@ -954,12 +896,13 @@ export function RestaurantSalaLiveView({
               )}
             </div>
           ) : (
-            <div
-              className="rounded-3xl border border-stone-200/80 p-3 shadow-inner sm:p-5"
-              style={SALA_FLOOR_STYLE}
-            >
-            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-              {roomTables.map((table) => {
+            <RestaurantSalaFloorCanvas
+              room={activeRoom}
+              tables={roomTables}
+              floorWidth={floorWidth}
+              floorHeight={floorHeight}
+              minScale={0.7}
+              renderTable={({ table }) => {
                 const visual = visualOf(table);
                 const ui = STATUS_UI[visual] || STATUS_UI.available;
                 const capacity = resolveTableCapacity(table);
@@ -972,107 +915,68 @@ export function RestaurantSalaLiveView({
                 const longStay =
                   occupied && seatedMins != null && seatedMins >= LONG_STAY_MINUTES;
                 const guests = occupied ? Math.max(0, Number(table.currentGuests) || 0) : 0;
-                const isBarSeat = activeRoom?.roomType === 'barra';
-                const layout = tableFigureLayout(capacity);
-                const filledTop = Math.min(guests, layout.top);
-                const filledBottom = Math.min(Math.max(0, guests - filledTop), layout.bottom);
-                const filledLeft = Math.min(
-                  Math.max(0, guests - filledTop - filledBottom),
-                  layout.left,
-                );
-                const filledRight = Math.min(
-                  Math.max(0, guests - filledTop - filledBottom - filledLeft),
-                  layout.right,
-                );
-                const customName =
-                  table.name && table.name !== `Mesa ${table.number}` ? table.name : '';
+                const isBarSeat = activeFloorSkin.id === 'barra';
+                const isTerraceTable = activeFloorSkin.id === 'terraza';
+                const isVipTable = activeFloorSkin.id === 'vip';
+                const tableTitle = isBarSeat
+                  ? `Puesto ${table.number || '·'}`
+                  : table.name?.trim() || `Mesa ${table.number}`;
+                const openOrder = openByTable.get(tableId) || null;
+                const due = openOrder ? diningOrderDueAmount(openOrder) : 0;
+                const shapeClass = isBarSeat || isTerraceTable || table.shape === 'round'
+                  ? 'rounded-full'
+                  : isVipTable
+                    ? 'rounded-[24px]'
+                    : 'rounded-[18px]';
+                const sizeClass = isBarSeat
+                  ? 'h-[84px] w-[84px]'
+                  : isTerraceTable
+                    ? 'h-[96px] w-[96px]'
+                    : isVipTable
+                      ? 'h-[88px] w-[120px]'
+                      : 'h-[88px] w-[104px]';
                 return (
                   <button
-                    key={tableId}
                     type="button"
                     disabled={busy || mapBusy}
                     onClick={() => handleTableClick(table)}
-                    className={`group relative flex flex-col items-center rounded-2xl px-2 py-3 text-center transition-all active:scale-[0.97] disabled:opacity-60 ${ui.card} ${
+                    className={`relative flex flex-col items-center justify-center overflow-hidden border-2 px-2 text-center transition-all active:scale-[0.97] disabled:opacity-60 ${shapeClass} ${sizeClass} ${ui.tableSurface} ${
                       selectedEdit ? 'ring-2 ring-amber-500 ring-offset-2' : ''
                     }`}
+                    aria-label={`${tableTitle}, ${ui.label}`}
                   >
-                    {editMode && (
-                      <span className="absolute right-2 top-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+                    {editMode ? (
+                      <span className="absolute right-1.5 top-1.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[8px] font-bold text-amber-800">
                         Editar
                       </span>
-                    )}
-
-                    {/* Figura de mesa (o taburete en barra) */}
-                    {isBarSeat ? (
-                      <div
-                        className={`mt-1 flex h-14 w-14 flex-col items-center justify-center rounded-full border-2 transition-colors ${ui.tableSurface}`}
+                    ) : null}
+                    <span className="max-w-full truncate text-sm font-bold leading-tight">
+                      {tableTitle}
+                    </span>
+                    <span className="mt-0.5 text-[10px] font-semibold opacity-85">
+                      {guests > 0 ? `${guests}/${capacity} pax` : `${capacity} pax`}
+                    </span>
+                    <span className="mt-1 text-[9px] font-bold uppercase tracking-wide opacity-90">
+                      {ui.label}
+                    </span>
+                    {due > 0 ? (
+                      <span className="mt-0.5 text-[10px] font-bold tabular-nums">
+                        {formatEuro(due)}
+                      </span>
+                    ) : !editMode && occupied && seatedMins != null ? (
+                      <span
+                        className={`mt-0.5 inline-flex items-center gap-0.5 text-[9px] font-semibold ${
+                          longStay ? 'text-amber-200' : 'opacity-75'
+                        }`}
                       >
-                        <span className="text-lg font-bold leading-none">{table.number}</span>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col items-center gap-1">
-                        <ChairRow count={layout.top} filled={filledTop} fill={ui.chairFill} />
-                        <div className="flex items-center gap-1">
-                          <SideChair
-                            present={layout.left > 0}
-                            filled={filledLeft > 0}
-                            fill={ui.chairFill}
-                          />
-                          <div
-                            className={`flex flex-col items-center justify-center border-2 transition-colors ${layout.surface} ${ui.tableSurface}`}
-                          >
-                            <span className="text-lg font-bold leading-none">{table.number}</span>
-                            <span className="mt-0.5 text-[10px] font-semibold opacity-80">
-                              {guests > 0 ? `${guests}/${capacity}` : `${capacity} pax`}
-                            </span>
-                          </div>
-                          <SideChair
-                            present={layout.right > 0}
-                            filled={filledRight > 0}
-                            fill={ui.chairFill}
-                          />
-                        </div>
-                        <ChairRow count={layout.bottom} filled={filledBottom} fill={ui.chairFill} />
-                      </div>
-                    )}
-
-                    {/* Pie: nombre propio (si lo hay) + estado / tiempo */}
-                    <div className="mt-2 w-full">
-                      {customName && (
-                        <p className="truncate text-xs font-bold text-stone-800">{customName}</p>
-                      )}
-                      <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-[11px] font-semibold">
-                        <span className={ui.statusText}>{ui.label}</span>
-                        {!editMode && occupied && seatedMins != null && (
-                          <span
-                            className={`inline-flex items-center gap-0.5 ${
-                              longStay ? 'text-amber-700' : 'text-stone-400'
-                            }`}
-                          >
-                            <Clock className="h-3 w-3" strokeWidth={2} />
-                            {formatDurationMinutes(seatedMins)}
-                          </span>
-                        )}
-                      </div>
-                    </div>
+                        <Clock className="h-2.5 w-2.5" strokeWidth={2} />
+                        {formatDurationMinutes(seatedMins)}
+                      </span>
+                    ) : null}
                   </button>
                 );
-              })}
-              {editMode && onAddTables && (
-                <button
-                  type="button"
-                  disabled={mapBusy}
-                  onClick={() => setShowAddTables(true)}
-                  className="flex min-h-[140px] flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed border-stone-300 bg-white/60 px-4 py-4 text-stone-500 transition-colors hover:border-blue-300 hover:text-blue-700 disabled:opacity-50"
-                >
-                  <Plus className="h-5 w-5" strokeWidth={1.5} />
-                  <span className="text-xs font-semibold">
-                    Añadir {activeRoom?.roomType === 'barra' ? 'puesto' : 'mesa'}
-                  </span>
-                </button>
-              )}
-            </div>
-            </div>
+              }}
+            />
           )}
         </>
       )}

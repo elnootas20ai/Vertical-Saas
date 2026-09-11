@@ -133,11 +133,8 @@ export async function deductByRecipe(req, userId, {
 
   for (const ingredient of recipe.ingredients) {
     const quantityPerUnit = ingredient.quantity / (recipe.portions || 1);
+    // Merma del escandallo solo infla coste (€); stock descuenta la qty de línea.
     let quantityToDeduct = quantityPerUnit * quantitySold;
-
-    if (ingredient.wastePercent > 0) {
-      quantityToDeduct = quantityToDeduct / (1 - ingredient.wastePercent / 100);
-    }
 
     quantityToDeduct = Math.round(quantityToDeduct * 10000) / 10000;
 

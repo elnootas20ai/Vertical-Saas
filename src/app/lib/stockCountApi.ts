@@ -176,7 +176,7 @@ export async function updateCountLineRequest(
 export async function completeStockCountRequest(
   userId: string,
   countId: string,
-  data?: { completedBy?: string },
+  data?: { completedBy?: string; createPurchaseOrders?: boolean },
 ): Promise<{
   adjustmentsCreated: number;
   stockCount: StockCount;
@@ -201,6 +201,20 @@ export async function completeStockCountRequest(
     purchaseList: result.purchaseList,
     purchaseOrdersCreated: result.purchaseOrdersCreated ?? 0,
   };
+}
+
+export async function cancelStockCountRequest(
+  userId: string,
+  countId: string,
+  data?: { cancelledBy?: string },
+): Promise<StockCount> {
+  const id = normalizeUserId(userId);
+  const result = await request<{ ok: boolean; stockCount: StockCount }>(
+    `/api/stock-counts/${encodeURIComponent(id)}/${encodeURIComponent(countId)}/cancel`,
+    { method: 'POST', body: JSON.stringify(data || {}) },
+  );
+  if (!result.stockCount) throw new Error('Respuesta invalida del servidor');
+  return result.stockCount;
 }
 
 export async function generateAdjustmentsRequest(

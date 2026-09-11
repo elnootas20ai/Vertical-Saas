@@ -4,6 +4,11 @@
  */
 import { getCatalogDbName, ensureDatabase, getDocument, getAllDocuments } from './couchdb.js';
 import { filterStockInventoryItems } from './stockInventoryScope.js';
+import {
+  convertQuantityBetweenUnits,
+  normalizeStockUnit,
+  quantityInStockUnit,
+} from '../shared/stock/unitConversion.js';
 
 function readProductCostingType(item) {
   const t = String(item?.customFields?.costingType || '').trim();
@@ -59,21 +64,36 @@ function stockUnitCost(stock) {
   return Number(stock.costPrice) || 0;
 }
 
+/** Coste línea: qty convertida a unidad de coste (€/kg o €/l si ficha sin unidad). */
+function lineCostWithUnitConversion(quantity, lineUnit, costPerUnit, stockUnit) {
+  const from = normalizeStockUnit(lineUnit, 'ud');
+  let costUnit = normalizeStockUnit(stockUnit, '');
+  if (costUnit !== 'g' && costUnit !== 'kg' && costUnit !== 'ml' && costUnit !== 'l') {
+    if (from === 'g' || from === 'kg') costUnit = 'kg';
+    else if (from === 'ml' || from === 'l') costUnit = 'l';
+    else costUnit = from || 'ud';
+  }
+  const qtyInCost = convertQuantityBetweenUnits(quantity, from, costUnit);
+  const qty = qtyInCost != null ? qtyInCost : Number(quantity) || 0;
+  return Math.round(qty * (Number(costPerUnit) || 0) * 100) / 100;
+}
+
 function lineToRecipeIngredient(line, inventoryById, storeIngToStock, wastePercent) {
   let catalogItemId = String(line.catalogItemId || '').trim();
   let catalogItemName = line.name;
   let costPerUnit = 0;
   let stockCategory = line.stockCategory || 'ingredient';
+  let stock = null;
 
   if (!catalogItemId && line.storeIngredientId) {
-    const stock = storeIngToStock.get(line.storeIngredientId);
+    stock = storeIngToStock.get(line.storeIngredientId);
     if (!stock) return null;
     catalogItemId = stock._id;
     catalogItemName = stock.name;
     costPerUnit = stockUnitCost(stock);
     stockCategory = stock.stockCategory || stockCategory;
   } else if (catalogItemId) {
-    const stock = inventoryById.get(catalogItemId);
+    stock = inventoryById.get(catalogItemId);
     if (stock) {
       catalogItemName = stock.name;
       costPerUnit = stockUnitCost(stock);
@@ -85,16 +105,20 @@ function lineToRecipeIngredient(line, inventoryById, storeIngToStock, wastePerce
   const quantity = Number(line.quantity) || 0;
   if (quantity <= 0) return null;
 
-  const totalCost = Math.round(quantity * costPerUnit * 100) / 100;
+  const lineUnit = line.unit || 'ud';
+  const stockUnit = normalizeStockUnit(stock?.unit || lineUnit, lineUnit);
+  const qtyForStock = Math.round(quantityInStockUnit(quantity, lineUnit, stockUnit) * 10000) / 10000;
+  const totalCost = lineCostWithUnitConversion(quantity, lineUnit, costPerUnit, stock?.unit);
   const isPackaging = stockCategory === 'packaging';
   const waste = isPackaging ? 0 : Math.min(100, Math.max(0, Number(wastePercent) || 0));
   return {
     catalogItemId,
     catalogItemName,
-    quantity,
-    unit: line.unit || 'ud',
+    quantity: qtyForStock,
+    unit: stockUnit,
     wastePercent: waste,
-    netQuantity: Math.round(quantity * (1 - waste / 100) * 10000) / 10000,
+    // Merma solo en coste UI; stock descuenta qty de línea convertida.
+    netQuantity: qtyForStock,
     costPerUnit,
     totalCost,
     stockCategory,

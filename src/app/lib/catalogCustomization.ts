@@ -200,7 +200,9 @@ function resolveTpvCategoryFromItemCatalogCategory(
       ? brands.filter((b) => productBrandIds.includes(b._id))
       : brands;
   for (const brand of brandScope) {
-    const brandCats = (brand.catalogCategories ?? []).map((c) => foldCategoryKey(c));
+    const brandCats = (Array.isArray(brand.catalogCategories) ? brand.catalogCategories : []).map((c) =>
+      foldCategoryKey(c),
+    );
     if (!brandCats.includes(folded)) continue;
     for (const key of resolveBrandTpvCategoryKeys(brand)) keys.add(key);
   }
@@ -812,7 +814,7 @@ export function resolveBrandTpvCategoryKeys(brand: {
   catalogCategories?: string[];
 }): TpvCategoryTemplateKey[] {
   const keys = new Set<TpvCategoryTemplateKey>();
-  for (const cat of brand.catalogCategories ?? []) {
+  for (const cat of Array.isArray(brand.catalogCategories) ? brand.catalogCategories : []) {
     const c = foldCategoryKey(cat);
     if (c === 'pizzas' || c === 'pizza') keys.add('pizzas');
     if (c === 'hamburguesas' || c === 'burgers' || c === 'burger') keys.add('hamburguesas');
@@ -1367,11 +1369,41 @@ export function catalogItemsUsingIngredient(
     Pick<CatalogItem, '_id' | 'name' | 'brandIds' | 'customFields' | 'active' | 'module'>
   >,
   ingredientName: string,
-  options?: { brandId?: string },
+  options?: { brandId?: string; storeIngredientId?: string },
 ): Array<Pick<CatalogItem, '_id' | 'name'>> {
   const needle = ingredientNameKey(ingredientName);
-  if (!needle) return [];
+  const storeIngredientId = String(options?.storeIngredientId || '').trim();
+  if (!needle && !storeIngredientId) return [];
   const brandId = String(options?.brandId || '').trim();
+
+  const itemUsesIngredient = (item: (typeof catalogItems)[number]): boolean => {
+    // 1) Texto libre (Excel / campo ingredientes).
+    const raw = item.customFields?.ingredients;
+    if (typeof raw === 'string' && raw.trim() && needle) {
+      if (parseIngredientsText(raw).some((part) => ingredientNameKey(part) === needle)) {
+        return true;
+      }
+    }
+    // 2) Receta de escandallo / picker (costingRecipe) — lo habitual al crear desde Carta.
+    const recipeRaw = item.customFields?.costingRecipe;
+    const lines = Array.isArray(recipeRaw)
+      ? recipeRaw
+      : Array.isArray((recipeRaw as { lines?: unknown } | null)?.lines)
+        ? ((recipeRaw as { lines: unknown[] }).lines)
+        : [];
+    for (const line of lines) {
+      if (!line || typeof line !== 'object') continue;
+      const row = line as { name?: unknown; storeIngredientId?: unknown };
+      if (storeIngredientId && String(row.storeIngredientId || '').trim() === storeIngredientId) {
+        return true;
+      }
+      if (needle && ingredientNameKey(String(row.name || '')) === needle) {
+        return true;
+      }
+    }
+    return false;
+  };
+
   return catalogItems
     .filter((item) => {
       if (item.module && item.module !== 'catalog') return false;
@@ -1382,9 +1414,7 @@ export function catalogItemsUsingIngredient(
           : [];
         if (ids.length > 0 && !ids.includes(brandId)) return false;
       }
-      const raw = item.customFields?.ingredients;
-      if (typeof raw !== 'string' || !raw.trim()) return false;
-      return parseIngredientsText(raw).some((part) => ingredientNameKey(part) === needle);
+      return itemUsesIngredient(item);
     })
     .map((item) => ({ _id: item._id, name: item.name }));
 }

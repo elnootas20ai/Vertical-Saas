@@ -3,6 +3,8 @@ import {
   applyManualAlbaranQty,
   buildAlbaranCompareRows,
   buildAlbaranRowsFromInvoiceOnly,
+  buildCumulativeReceivedItems,
+  findOpenPurchaseOrderForSupplier,
   buildPendingOrderLinesFromCompare,
   buildReplenishPurchaseOrderPayload,
   invoiceIsAlbaran,
@@ -281,5 +283,53 @@ describe('albaranReceptionCompare', () => {
     };
     expect(isCompareRowReceivable(row)).toBe(false);
     expect(isCompareRowReceivable(row, { allowExtras: true })).toBe(true);
+  });
+
+  it('buildCumulativeReceivedItems suma ya recibido + qty de este albarán', () => {
+    const order = {
+      items: [
+        {
+          id: '1',
+          catalogItemId: 'c1',
+          sku: '',
+          name: 'Harina',
+          quantity: 10,
+          unitCost: 1,
+          total: 10,
+          received: 4,
+          notes: '',
+        },
+      ],
+    };
+    const rows = [
+      {
+        catalogItemId: 'c1',
+        name: 'Harina',
+        sku: '',
+        orderedQty: 10,
+        orderedUnitCost: 1,
+        invoiceQty: 6,
+        invoiceUnitCost: 1.1,
+        status: 'ok' as const,
+        receiveQty: 6,
+        receiveUnitCost: 1.1,
+        excluded: false,
+      },
+    ];
+    const payload = buildCumulativeReceivedItems(order, rows);
+    expect(payload).toEqual([{ catalogItemId: 'c1', quantity: 10, unitCost: 1.1 }]);
+  });
+
+  it('findOpenPurchaseOrderForSupplier ignora recibidos y elige el más reciente en curso', () => {
+    const orders = [
+      { _id: 'old', supplierId: 'sup-1', status: 'sent' as const, createdAt: '2026-01-01T00:00:00.000Z' },
+      { _id: 'new', supplierId: 'sup-1', status: 'draft' as const, createdAt: '2026-09-01T00:00:00.000Z' },
+      { _id: 'done', supplierId: 'sup-1', status: 'received' as const, createdAt: '2026-09-10T00:00:00.000Z' },
+      { _id: 'other', supplierId: 'sup-2', status: 'sent' as const, createdAt: '2026-09-11T00:00:00.000Z' },
+    ];
+    expect(findOpenPurchaseOrderForSupplier(orders, 'sup-1')?._id).toBe('new');
+    expect(findOpenPurchaseOrderForSupplier(orders, 'sup-2')?._id).toBe('other');
+    expect(findOpenPurchaseOrderForSupplier(orders, 'sup-3')).toBeNull();
+    expect(findOpenPurchaseOrderForSupplier([{ _id: 'r', supplierId: 'sup-1', status: 'received' as const, createdAt: '2026-09-11' }], 'sup-1')).toBeNull();
   });
 });

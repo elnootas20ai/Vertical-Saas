@@ -23,6 +23,7 @@ import {
   buildPurchaseListFromStockCount,
   createPurchaseOrdersFromStockList,
 } from '../services/stockPurchaseListService.js';
+import { assertCanManageStockInventory } from '../services/stockInventoryAccess.js';
 import { quantityForWarehouse } from '../shared/stock/warehouseStockQty.js';
 
 function isActiveProduct(item) {
@@ -317,6 +318,9 @@ export async function completeStockCount(req, res) {
     const { userId, countId } = req.params;
     if (!userId || !countId) return badRequest(res, 'Falta userId o countId');
 
+    const gate = await assertCanManageStockInventory(req, userId);
+    if (!gate.ok) return res.status(gate.status).json({ ok: false, error: gate.error });
+
     const existing = await ensureCountOwner(req, userId, countId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Inventario no encontrado' });
     if (existing.status === 'completed') return badRequest(res, 'El inventario ya esta completado');
@@ -355,17 +359,22 @@ export async function completeStockCount(req, res) {
     const purchaseList = buildPurchaseListFromStockCount(sanitized, catalogItems);
     await notifyStockPurchaseListReady(req, account, sanitized, catalogItems).catch(() => null);
 
+    // Pedidos: por defecto no se crean al cerrar (hub Inventario / Encargado prepara compra).
+    // Solo si el cliente pide createPurchaseOrders: true.
     let purchaseOrdersCreated = 0;
     let purchaseOrders = [];
-    try {
-      const orderResult = await createPurchaseOrdersFromStockList(req, userId, countId, sanitized, {
-        onlyWithSupplier: true,
-      });
-      purchaseOrdersCreated = Number(orderResult?.created || 0);
-      purchaseOrders = Array.isArray(orderResult?.orders) ? orderResult.orders : [];
-    } catch {
-      purchaseOrdersCreated = 0;
-      purchaseOrders = [];
+    const wantOrders = req.body?.createPurchaseOrders === true;
+    if (wantOrders) {
+      try {
+        const orderResult = await createPurchaseOrdersFromStockList(req, userId, countId, sanitized, {
+          onlyWithSupplier: true,
+        });
+        purchaseOrdersCreated = Number(orderResult?.created || 0);
+        purchaseOrders = Array.isArray(orderResult?.orders) ? orderResult.orders : [];
+      } catch {
+        purchaseOrdersCreated = 0;
+        purchaseOrders = [];
+      }
     }
 
     return res.json({
@@ -378,6 +387,39 @@ export async function completeStockCount(req, res) {
     });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Error al completar inventario' });
+  }
+}
+
+/** Descarta una revisión abierta (draft / in_progress) sin corregir stock. */
+export async function cancelStockCount(req, res) {
+  try {
+    const { userId, countId } = req.params;
+    if (!userId || !countId) return badRequest(res, 'Falta userId o countId');
+
+    const gate = await assertCanManageStockInventory(req, userId);
+    if (!gate.ok) return res.status(gate.status).json({ ok: false, error: gate.error });
+
+    const existing = await ensureCountOwner(req, userId, countId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Inventario no encontrado' });
+    if (existing.status === 'completed') return badRequest(res, 'La revisión ya está completada');
+    if (existing.status === 'cancelled') {
+      return res.json({ ok: true, stockCount: sanitizeStockCount(existing) });
+    }
+
+    const db = getCatalogDbName();
+    const doc = buildStockCountDocument(userId, {
+      ...existing,
+      status: 'cancelled',
+      completedAt: new Date().toISOString(),
+      completedBy: String(req.body?.cancelledBy || userId).trim() || userId,
+      notes: [String(existing.notes || '').trim(), 'Descartada sin corregir stock']
+        .filter(Boolean)
+        .join(' · '),
+    }, existing);
+    const saved = await putDocument(req, db, doc._id, doc);
+    return res.json({ ok: true, stockCount: sanitizeStockCount({ ...doc, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Error al descartar revisión' });
   }
 }
 
@@ -402,6 +444,9 @@ export async function createPurchaseOrdersFromStockCount(req, res) {
   try {
     const { userId, countId } = req.params;
     if (!userId || !countId) return badRequest(res, 'Falta userId o countId');
+
+    const gate = await assertCanManageStockInventory(req, userId);
+    if (!gate.ok) return res.status(gate.status).json({ ok: false, error: gate.error });
 
     const existing = await ensureCountOwner(req, userId, countId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Inventario no encontrado' });

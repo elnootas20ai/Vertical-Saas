@@ -1,5 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import type { ReactNode } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, type InputHTMLAttributes } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Plus, X, CheckCircle2, Loader2, Upload, ImagePlus } from 'lucide-react';
@@ -99,11 +98,6 @@ import {
 } from '../../lib/catalogComboSlots';
 import { normalizeTenantUserId } from '../../lib/tenantUserId';
 import { VehicleConfirmDialog } from './vehicles/VehicleConfirmDialog';
-import {
-  PurchasesChromelessShell,
-  PURCHASES_FIELD_INPUT,
-  PURCHASES_FIELD_LABEL,
-} from './purchases/PurchasesChromelessShell';
 
 // ─── Create Catalog Item Wizard ──────────────────────────────────────────────
 
@@ -139,13 +133,25 @@ export interface CreateCatalogItemModalProps {
   packagingStockItems?: CatalogItem[];
   /** Bar/restaurante: el paso 2 no es escandallo (eso va en Escandallo). */
   isRestaurantCatalog?: boolean;
-  /** modal = overlay (default); workspace = hoja fullscreen Compras-style */
-  variant?: 'modal' | 'workspace';
-  /** Panel Resultados (solo workspace edit); pestaña Resultados */
-  resultadosPanel?: ReactNode;
 }
 
-type WorkspaceTab = 'composicion' | 'tpv' | 'datos' | 'combo' | 'resultados';
+/** Input de importe con € visible a la derecha (el valor sigue siendo numérico). */
+function EuroAmountInput({
+  className = '',
+  ...props
+}: InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <div className="relative">
+      <input {...props} className={`${className} pr-9`.trim()} />
+      <span
+        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-gray-500 dark:text-gray-400"
+        aria-hidden
+      >
+        €
+      </span>
+    </div>
+  );
+}
 
 export function CreateCatalogItemModal({
   isOpen,
@@ -164,8 +170,6 @@ export function CreateCatalogItemModal({
   brandIngredientSelection = {},
   packagingStockItems = [],
   isRestaurantCatalog = false,
-  variant = 'modal',
-  resultadosPanel = null,
 }: CreateCatalogItemModalProps) {
   const navigate = useNavigate();
   const commercialBrandCount = useMemo(() => countCommercialBrands(brands), [brands]);
@@ -206,7 +210,6 @@ export function CreateCatalogItemModal({
   const [creatingByoIngredient, setCreatingByoIngredient] = useState(false);
   const [creatingRecipeIngredient, setCreatingRecipeIngredient] = useState(false);
   const [fieldErrorsShown, setFieldErrorsShown] = useState(false);
-  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('composicion');
   const emptyCreateForm = useCallback(
     () => ({
       itemType: 'product' as CatalogItem['itemType'],
@@ -522,8 +525,15 @@ export function CreateCatalogItemModal({
   }, []);
 
   const selectCategoryChip = useCallback((cat: string) => {
+    const key = normalizeImportCategory(String(cat || '').trim()).toLowerCase();
+    setForm((f) => {
+      const current = normalizeImportCategory(String(f.category || '').trim()).toLowerCase();
+      if (key && current === key) {
+        return { ...f, category: '' };
+      }
+      return { ...f, category: cat };
+    });
     pinCategoryChip(cat);
-    setForm((f) => ({ ...f, category: cat }));
   }, [pinCategoryChip]);
 
   const categoryChips = useMemo(() => {
@@ -765,34 +775,6 @@ export function CreateCatalogItemModal({
     if (isEditMode) return;
     if (step > totalSteps) setStep(totalSteps);
   }, [isEditMode, step, totalSteps]);
-
-  const workspaceTabs = useMemo<Array<{ id: WorkspaceTab; label: string }>>(
-    () =>
-      (
-        [
-          { id: 'composicion', label: 'Composición', show: form.itemType !== 'service' },
-          { id: 'tpv', label: 'TPV', show: form.itemType === 'product' },
-          { id: 'datos', label: 'Datos', show: true },
-          {
-            id: 'combo',
-            label: 'Combo',
-            show: form.itemType === 'combo' || /combo/i.test(form.category),
-          },
-          { id: 'resultados', label: 'Resultados', show: isEditMode },
-        ] as Array<{ id: WorkspaceTab; label: string; show: boolean }>
-      )
-        .filter((tab) => tab.show)
-        .map(({ id, label }) => ({ id, label })),
-    [form.itemType, form.category, isEditMode],
-  );
-
-  // Al cambiar el tipo (o la categoría) la pestaña activa puede desaparecer.
-  useEffect(() => {
-    if (variant !== 'workspace') return;
-    if (workspaceTabs.some((tab) => tab.id === workspaceTab)) return;
-    const first = workspaceTabs[0];
-    if (first) setWorkspaceTab(first.id);
-  }, [variant, workspaceTabs, workspaceTab]);
 
   /** Crear marca con el asistente de Ajustes; si el plan no da, CTA a facturación. */
   const handleNuevaMarcaCta = () => {
@@ -2132,6 +2114,10 @@ export function CreateCatalogItemModal({
           onCreateIngredient={createRecipeLinkedIngredient}
           creatingIngredient={creatingRecipeIngredient}
         />
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          Con ingredientes: van a Ingredientes y Almacén. Sin ellos: producto completo (compras en
+          Almacén), igual que al importar Excel. También puedes montar la carta con Excel.
+        </p>
         {!isRestaurantCatalog ? (
           <CatalogProductPackagingPicker
             picks={packagingPicks}
@@ -2263,270 +2249,6 @@ export function CreateCatalogItemModal({
   );
 
   if (!isOpen) return null;
-
-  if (variant === 'workspace') {
-    const title = editItem
-      ? form.itemType === 'service'
-        ? 'Editar servicio'
-        : 'Editar producto'
-      : form.itemType === 'service'
-        ? 'Nuevo servicio'
-        : 'Nuevo producto';
-    const subtitle = form.name.trim() || form.category.trim() || undefined;
-
-    const left = (
-      <div className="space-y-3">
-        {renderProductPhotoField()}
-        {renderItemTypePicker()}
-        <div>
-          <label className={PURCHASES_FIELD_LABEL}>Nombre *</label>
-          <input
-            className={PURCHASES_FIELD_INPUT}
-            value={form.name}
-            onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-          />
-          {showNameDuplicateError ? (
-            <p className="mt-1 text-xs text-red-600">
-              {formatCatalogDuplicateNameError(duplicateCatalogItemByName)}
-            </p>
-          ) : null}
-          {showNameRequiredError ? (
-            <p className="mt-1 text-xs text-red-600">Indica el nombre.</p>
-          ) : null}
-        </div>
-        {form.itemType === 'service' ? (
-          <CatalogServiceRulesFields
-            rules={form.serviceRules}
-            onChange={(serviceRules) => setForm((f) => ({ ...f, serviceRules }))}
-            brands={brands}
-            showValidation={fieldErrorsShown}
-          />
-        ) : (
-          <>
-            {renderCategoryUnit()}
-            {renderBrandPicker()}
-          </>
-        )}
-        <div className="grid grid-cols-1 gap-2">
-          <div>
-            <label className={PURCHASES_FIELD_LABEL}>Precio venta (€) *</label>
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              className={PURCHASES_FIELD_INPUT}
-              value={form.unitPrice}
-              onChange={(e) => setForm((f) => ({ ...f, unitPrice: e.target.value }))}
-            />
-          </div>
-          <div>
-            <label className={PURCHASES_FIELD_LABEL}>Precio empleado (€)</label>
-            <input
-              type="number"
-              step="0.01"
-              className={PURCHASES_FIELD_INPUT}
-              placeholder="Opcional"
-              value={form.staffPrice}
-              onChange={(e) => setForm((f) => ({ ...f, staffPrice: e.target.value }))}
-            />
-          </div>
-          <div>
-            <label className={PURCHASES_FIELD_LABEL}>Coste (€)</label>
-            <input
-              type="number"
-              step="0.01"
-              className={PURCHASES_FIELD_INPUT}
-              value={form.costPrice}
-              onChange={(e) => setForm((f) => ({ ...f, costPrice: e.target.value }))}
-            />
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={() => setForm((f) => ({ ...f, active: !f.active }))}
-          className={`w-full p-3 rounded-xl border-2 text-left text-sm font-semibold ${
-            form.active !== false
-              ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-950/20'
-              : 'border-stone-200 dark:border-stone-700'
-          }`}
-        >
-          {form.active !== false ? 'Activo en carta' : 'Inactivo'}
-        </button>
-      </div>
-    );
-
-    const right = (
-      <div className="space-y-3">
-        <div className="flex flex-wrap gap-2">
-          {workspaceTabs.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setWorkspaceTab(tab.id)}
-              className={`min-h-10 px-3 rounded-xl text-sm font-semibold border-2 ${
-                workspaceTab === tab.id
-                  ? 'border-blue-600 bg-blue-50 text-blue-800 dark:bg-blue-950/40 dark:text-blue-200'
-                  : 'border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-300'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-        <div className="rounded-2xl border border-stone-200 bg-white p-3 sm:p-4 dark:border-stone-800 dark:bg-stone-900 space-y-4">
-          {workspaceTab === 'composicion' && form.itemType !== 'service'
-            ? showComboBuilder && form.itemType === 'combo'
-              ? renderComboBuilderSection()
-              : renderCustomizationSection()
-            : null}
-          {workspaceTab === 'tpv' ? (
-            <div className="space-y-3">
-              {renderProductConfiguratorOptions()}
-              {renderBuildYourOwnIngredientPicker()}
-              {renderHalfHalfPizzaPicker()}
-            </div>
-          ) : null}
-          {workspaceTab === 'datos' ? (
-            <div className="space-y-4">
-              {form.itemType !== 'service' ? (
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className={labelClass}>Stock actual</label>
-                    <input
-                      type="number"
-                      className={inputClass}
-                      value={form.stockQuantity}
-                      onChange={(e) => setForm((f) => ({ ...f, stockQuantity: e.target.value }))}
-                    />
-                  </div>
-                  <div>
-                    <label className={labelClass}>Stock mínimo</label>
-                    <input
-                      type="number"
-                      className={inputClass}
-                      value={form.minStock}
-                      onChange={(e) => setForm((f) => ({ ...f, minStock: e.target.value }))}
-                    />
-                  </div>
-                  <div>
-                    <label className={labelClass}>IVA %</label>
-                    <input
-                      type="number"
-                      className={inputClass}
-                      placeholder="21"
-                      value={form.taxRate}
-                      onChange={(e) => setForm((f) => ({ ...f, taxRate: e.target.value }))}
-                    />
-                  </div>
-                </div>
-              ) : null}
-              <div>
-                <label className={labelClass}>Descripción</label>
-                <textarea
-                  rows={3}
-                  className={`${inputClass} resize-none`}
-                  value={form.description}
-                  onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-                />
-              </div>
-              <div>
-                <label className={labelClass}>Alérgenos</label>
-                <div className="flex flex-wrap gap-2">
-                  {ALLERGEN_OPTIONS.map((a) => (
-                    <button
-                      key={a}
-                      type="button"
-                      onClick={() => toggleAllergen(a)}
-                      className={`px-3 py-1.5 rounded-full text-xs font-semibold border-2 ${
-                        form.allergens.includes(a)
-                          ? 'bg-orange-100 border-orange-400 text-orange-800'
-                          : 'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600'
-                      }`}
-                    >
-                      {a}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className={labelClass}>Notas internas</label>
-                <textarea
-                  rows={2}
-                  className={`${inputClass} resize-none`}
-                  value={form.notes}
-                  onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-                />
-              </div>
-              <button
-                type="button"
-                onClick={() => setForm((f) => ({ ...f, webVisible: !f.webVisible }))}
-                className={`w-full p-4 rounded-2xl border-2 text-left ${
-                  form.webVisible
-                    ? 'border-green-400 bg-green-50 dark:bg-green-900/20'
-                    : 'border-gray-200 dark:border-gray-700'
-                }`}
-              >
-                <span className="font-semibold">Visible en la web</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setForm((f) => ({ ...f, available: !f.available }))}
-                className={`w-full p-4 rounded-2xl border-2 text-left ${
-                  form.available
-                    ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/20'
-                    : 'border-red-300 bg-red-50 dark:bg-red-900/20'
-                }`}
-              >
-                <span className="font-semibold">{form.available ? 'Disponible' : 'Agotado'}</span>
-              </button>
-            </div>
-          ) : null}
-          {workspaceTab === 'combo' ? renderComboBuilderSection() : null}
-          {workspaceTab === 'resultados'
-            ? resultadosPanel || (
-                <p className="text-sm text-stone-500">
-                  Guarda el producto para ver resultados de ventas.
-                </p>
-              )
-            : null}
-        </div>
-      </div>
-    );
-
-    return (
-      <>
-        <PurchasesChromelessShell
-          title={title}
-          subtitle={subtitle}
-          onBack={onClose}
-          backLabel="Volver"
-          primaryLabel={submitting ? 'Guardando…' : editItem ? 'Guardar' : 'Crear'}
-          onPrimary={() => void handleFinalSubmit(false)}
-          primaryDisabled={submitting}
-          primaryLoading={submitting}
-          left={left}
-          right={right}
-        />
-        <VehicleConfirmDialog
-          open={Boolean(categoryPendingDelete)}
-          title="Eliminar categoría"
-          message={
-            categoryPendingDelete
-              ? `¿Seguro que quieres eliminar «${categoryPendingDelete}»? Se quitará de las sugerencias y de las pestañas del TPV de tus marcas.`
-              : ''
-          }
-          confirmLabel="Sí, eliminar"
-          cancelLabel="Cancelar"
-          tone="danger"
-          loading={Boolean(deletingCategoryKey)}
-          onConfirm={() => void confirmDeleteCategoryChip()}
-          onCancel={() => {
-            if (!deletingCategoryKey) setCategoryPendingDelete(null);
-          }}
-        />
-      </>
-    );
-  }
 
   return (
     <>
@@ -2692,13 +2414,13 @@ export function CreateCatalogItemModal({
                 <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Precios e inventario</h3>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className={labelClass}>Precio venta (€) *</label>
-                    <input
+                    <label className={labelClass}>Precio venta *</label>
+                    <EuroAmountInput
                       type="number"
                       step="0.01"
                       min="0.01"
                       className={`${inputClass}${showSalePriceError ? ' border-red-400 dark:border-red-500 focus:border-red-500' : ''}`}
-                      placeholder="0.00"
+                      placeholder="0,00"
                       value={form.unitPrice}
                       onChange={(e) => setForm((f) => ({ ...f, unitPrice: e.target.value }))}
                     />
@@ -2709,12 +2431,26 @@ export function CreateCatalogItemModal({
                     ) : null}
                   </div>
                   <div>
-                    <label className={labelClass}>Precio empleado (€)</label>
-                    <input type="number" step="0.01" className={inputClass} placeholder="Opcional" value={form.staffPrice} onChange={(e) => setForm((f) => ({ ...f, staffPrice: e.target.value }))} />
+                    <label className={labelClass}>Precio empleado</label>
+                    <EuroAmountInput
+                      type="number"
+                      step="0.01"
+                      className={inputClass}
+                      placeholder="Opcional"
+                      value={form.staffPrice}
+                      onChange={(e) => setForm((f) => ({ ...f, staffPrice: e.target.value }))}
+                    />
                   </div>
                   <div>
-                    <label className={labelClass}>Precio coste (€)</label>
-                    <input type="number" step="0.01" className={inputClass} placeholder="0.00" value={form.costPrice} onChange={(e) => setForm((f) => ({ ...f, costPrice: e.target.value }))} />
+                    <label className={labelClass}>Precio coste</label>
+                    <EuroAmountInput
+                      type="number"
+                      step="0.01"
+                      className={inputClass}
+                      placeholder="0,00"
+                      value={form.costPrice}
+                      onChange={(e) => setForm((f) => ({ ...f, costPrice: e.target.value }))}
+                    />
                   </div>
                 </div>
                 {form.itemType !== 'service' && (
@@ -2824,13 +2560,13 @@ export function CreateCatalogItemModal({
                 <>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className={labelClass}>Precio (€) *</label>
-                      <input
+                      <label className={labelClass}>Precio *</label>
+                      <EuroAmountInput
                         type="number"
                         step="0.01"
                         min="0.01"
                         className={`${inputClass}${showSalePriceError ? ' border-red-400 dark:border-red-500 focus:border-red-500' : ''}`}
-                        placeholder="0.00"
+                        placeholder="0,00"
                         value={form.unitPrice}
                         onChange={(e) => setForm((f) => ({ ...f, unitPrice: e.target.value }))}
                       />
@@ -2841,8 +2577,8 @@ export function CreateCatalogItemModal({
                       ) : null}
                     </div>
                     <div>
-                      <label className={labelClass}>Precio empleado (€)</label>
-                      <input
+                      <label className={labelClass}>Precio empleado</label>
+                      <EuroAmountInput
                         type="number"
                         step="0.01"
                         className={inputClass}
@@ -2872,13 +2608,13 @@ export function CreateCatalogItemModal({
                   {renderBrandPicker()}
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className={labelClass}>Precio venta (€) *</label>
-                      <input
+                      <label className={labelClass}>Precio venta *</label>
+                      <EuroAmountInput
                         type="number"
                         step="0.01"
                         min="0.01"
                         className={`${inputClass}${showSalePriceError ? ' border-red-400 dark:border-red-500 focus:border-red-500' : ''}`}
-                        placeholder="0.00"
+                        placeholder="0,00"
                         value={form.unitPrice}
                         onChange={(e) => setForm((f) => ({ ...f, unitPrice: e.target.value }))}
                       />
@@ -2889,8 +2625,8 @@ export function CreateCatalogItemModal({
                       ) : null}
                     </div>
                     <div>
-                      <label className={labelClass}>Precio empleado (€)</label>
-                      <input
+                      <label className={labelClass}>Precio empleado</label>
+                      <EuroAmountInput
                         type="number"
                         step="0.01"
                         className={inputClass}

@@ -22,7 +22,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useModalClose } from '../../hooks/useModalClose';
 import type { CatalogItem, Supplier } from '../../lib/deliveryApi';
-import { listSuppliersRequest } from '../../lib/deliveryApi';
+import { listCatalogItemsRequest, listSuppliersRequest } from '../../lib/deliveryApi';
 import type { StoreIngredient } from '../../lib/catalogCustomization';
 import {
   createPurchaseOrderRequest,
@@ -42,7 +42,7 @@ import {
   groupSuggestionsForVertial,
   suggestionOrderQuantity,
 } from '../../lib/purchaseSuggestions';
-import { pendingLinesFromPurchaseOrder } from '../../lib/albaranReceptionCompare';
+import { pendingLinesFromPurchaseOrder, findOpenPurchaseOrderForSupplier } from '../../lib/albaranReceptionCompare';
 import { CatalogUnitChip } from '../../components/saas/CatalogUnitChip';
 import type { InventoryCommercialBrand } from '../../lib/inventoryUtils';
 import { formatDateEs, formatDateTimeEs } from '../../lib/formatDateEs';
@@ -221,6 +221,17 @@ function buildSupplierDraft(
   return { lines: [], suggestionsById };
 }
 
+/** Une catálogo padre + almacén recién pedido (ids únicos). */
+function mergeCatalogForOrders(base: CatalogItem[], extra: CatalogItem[]): CatalogItem[] {
+  const byId = new Map<string, CatalogItem>();
+  for (const item of [...base, ...extra]) {
+    const id = String(item?._id || '').trim();
+    if (!id || item.deletedAt) continue;
+    byId.set(id, item);
+  }
+  return [...byId.values()];
+}
+
 function parseDraftLines(lines: DraftLine[]) {
   return lines.map((l) => {
     const quantityNum = Math.max(0, Number(String(l.quantity).replace(',', '.')) || 0);
@@ -233,7 +244,6 @@ function SupplierOrderDraftSection({
   supplier,
   draft,
   catalogItems,
-  catalogById,
   onChange,
   defaultExpanded = false,
   storeIngredients = [],
@@ -242,40 +252,62 @@ function SupplierOrderDraftSection({
   supplier: Supplier;
   draft: SupplierDraftState;
   catalogItems: CatalogItem[];
-  catalogById: Map<string, CatalogItem>;
   onChange: (next: SupplierDraftState) => void;
   defaultExpanded?: boolean;
   storeIngredients?: StoreIngredient[];
   commercialBrands?: InventoryCommercialBrand[];
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
+  useEffect(() => {
+    setExpanded(defaultExpanded);
+  }, [defaultExpanded]);
+
   const markedStockItems = useMemo(
     () => explicitMarkedStockItemsForSupplier(catalogItems, supplier, storeIngredients, commercialBrands),
     [catalogItems, supplier, storeIngredients, commercialBrands],
   );
   const { lines, suggestionsById } = draft;
 
-  const availableToAdd = useMemo(
-    () => markedStockItems.filter((item) => !lines.some((l) => l.catalogItemId === item._id)),
-    [markedStockItems, lines],
-  );
+  const linesById = useMemo(() => new Map(lines.map((l) => [l.catalogItemId, l])), [lines]);
+
+  /** Marcados + líneas ya en el pedido (p. ej. editar borrador con algo fuera de «Qué te vende»). */
+  const displayItems = useMemo(() => {
+    const byId = new Map(markedStockItems.map((item) => [item._id, item]));
+    for (const line of lines) {
+      if (byId.has(line.catalogItemId)) continue;
+      const fromCatalog = catalogItems.find((c) => c._id === line.catalogItemId);
+      byId.set(
+        line.catalogItemId,
+        fromCatalog ||
+          ({
+            _id: line.catalogItemId,
+            name: line.name,
+            sku: line.sku,
+            unit: line.unit,
+            stockQuantity: 0,
+            minStock: 0,
+            costPrice: Number(line.unitCost) || 0,
+          } as CatalogItem),
+      );
+    }
+    return [...byId.values()];
+  }, [markedStockItems, lines, catalogItems]);
 
   const pickerGroups = useMemo(
-    () => groupStockItemsByOrganizer(availableToAdd, storeIngredients, commercialBrands),
-    [availableToAdd, storeIngredients, commercialBrands],
+    () => groupStockItemsByOrganizer(displayItems, storeIngredients, commercialBrands),
+    [displayItems, storeIngredients, commercialBrands],
   );
 
   const lowStockMarkedNotInLines = useMemo(() => {
-    const inLines = new Set(lines.map((l) => l.catalogItemId));
     return markedStockItems.filter((item) => {
-      if (inLines.has(item._id)) return false;
+      if (linesById.has(item._id)) return false;
       const sug = suggestionsById.get(item._id);
       if (sug) return sug.needsReorder || Number(sug.stockQuantity) <= Number(sug.minStock);
       const stock = Number(item.stockQuantity) || 0;
       const min = Number(item.minStock) || 0;
       return min > 0 && stock <= min;
     });
-  }, [markedStockItems, lines, suggestionsById]);
+  }, [markedStockItems, linesById, suggestionsById]);
 
   const parsedLines = useMemo(() => parseDraftLines(lines), [lines]);
   const sectionSubtotal = parsedLines.reduce((s, l) => s + l.total, 0);
@@ -291,16 +323,17 @@ function SupplierOrderDraftSection({
   };
 
   const addItemToLines = (item: CatalogItem) => {
+    if (linesById.has(item._id)) return;
     patchDraft({ lines: [...lines, draftLineFromItem(item, suggestedQtyForItem(item))] });
   };
 
   const addAllLowStock = () => {
-    const inLines = new Set(lines.map((l) => l.catalogItemId));
     const next = [...lines];
+    const seen = new Set(lines.map((l) => l.catalogItemId));
     for (const item of lowStockMarkedNotInLines) {
-      if (inLines.has(item._id)) continue;
+      if (seen.has(item._id)) continue;
       next.push(draftLineFromItem(item, suggestedQtyForItem(item)));
-      inLines.add(item._id);
+      seen.add(item._id);
     }
     patchDraft({ lines: next });
   };
@@ -315,7 +348,7 @@ function SupplierOrderDraftSection({
     patchDraft({ lines: lines.filter((l) => l.catalogItemId !== catalogItemId) });
   };
 
-  if (markedStockItems.length === 0) {
+  if (displayItems.length === 0) {
     return (
       <p className="text-sm text-amber-800 dark:text-amber-300 text-center py-4 px-3 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50/80 dark:bg-amber-950/30">
         Sin productos marcados. Edítalo en Proveedores → Qué te vende.
@@ -353,175 +386,190 @@ function SupplierOrderDraftSection({
       </button>
 
       {expanded ? (
-        <div className="divide-y divide-gray-100 dark:divide-gray-800">
-          <div>
-            <div className="px-3 py-2 flex flex-wrap items-center justify-between gap-2 bg-white dark:bg-gray-900">
-              <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                Qué quieres pedir
-              </p>
-              {lowStockMarkedNotInLines.length > 0 ? (
-                <button
-                  type="button"
-                  onClick={addAllLowStock}
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 dark:text-amber-200 dark:bg-amber-950/40 dark:border-amber-900"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  Bajo mínimo ({lowStockMarkedNotInLines.length})
-                </button>
-              ) : null}
-            </div>
-
-            {availableToAdd.length === 0 ? (
-              <p className="px-3 pb-3 text-sm text-gray-500 dark:text-gray-400">
-                Todos los marcados están en el pedido.
-              </p>
-            ) : (
-              <div className="space-y-3 px-3 pb-3">
-                {pickerGroups.map((group) => (
-                  <div key={group.organizerId}>
-                    {pickerGroups.length > 1 ? (
-                      <p className="text-[11px] font-semibold text-gray-400 dark:text-gray-500 mb-1.5 px-0.5">
-                        {group.organizerLabel}
-                      </p>
-                    ) : null}
-                    <div className="rounded-lg border border-gray-100 dark:border-gray-800 overflow-hidden divide-y divide-gray-100 dark:divide-gray-800">
-                      {group.items.map((item) => {
-                        const stock = Number(item.stockQuantity) || 0;
-                        const min = Number(item.minStock) || 0;
-                        const low = min > 0 && stock <= min;
-                        const sug = suggestionsById.get(item._id);
-                        const suggested =
-                          sug && (sug.needsReorder || Number(sug.stockQuantity) <= Number(sug.minStock))
-                            ? suggestionOrderQuantity(sug)
-                            : null;
-                        return (
-                          <div
-                            key={item._id}
-                            className="flex items-center gap-2 px-2.5 py-2 bg-white dark:bg-gray-900"
-                          >
-                            <div className="min-w-0 flex-1">
-                              <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                                {item.name}
-                              </p>
-                              <p className="text-[11px] text-gray-500 tabular-nums">
-                                Stock {formatQty(stock)}
-                                {min > 0 ? (
-                                  <>
-                                    {' '}
-                                    · mín. {formatQty(min)}
-                                    {low ? (
-                                      <span className="ml-1 font-semibold text-amber-700 dark:text-amber-300">
-                                        bajo mínimo
-                                      </span>
-                                    ) : null}
-                                  </>
-                                ) : null}
-                                {suggested ? (
-                                  <span className="ml-1 text-gray-400">· sugerido {formatQty(suggested)}</span>
-                                ) : null}
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => addItemToLines(item)}
-                              className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-[var(--v-blue,#2563eb)] border border-blue-200 dark:border-blue-900 hover:bg-blue-50/80 dark:hover:bg-blue-950/30"
-                            >
-                              <Plus className="w-3.5 h-3.5" />
-                              Añadir
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+        <div>
+          <div className="px-3 py-2 flex flex-wrap items-center justify-between gap-2 bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800">
+            <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+              Qué quieres pedir
+            </p>
+            {lowStockMarkedNotInLines.length > 0 ? (
+              <button
+                type="button"
+                onClick={addAllLowStock}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 dark:text-amber-200 dark:bg-amber-950/40 dark:border-amber-900"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Bajo mínimo ({lowStockMarkedNotInLines.length})
+              </button>
+            ) : null}
           </div>
 
-          {parsedLines.length > 0 ? (
-            <div>
-              <div className="px-3 py-2 bg-white dark:bg-gray-900">
-                <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                  Cantidades y precios
-                </p>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm min-w-[36rem]">
-                  <thead className="bg-gray-50/80 dark:bg-gray-900/60 text-gray-500 text-xs">
-                    <tr>
-                      <th className="text-left px-3 py-2 font-semibold">Artículo</th>
-                      <th className="text-right px-2 py-2 font-semibold w-16">Stock</th>
-                      <th className="text-right px-2 py-2 font-semibold w-14">Mín.</th>
-                      <th className="text-right px-2 py-2 font-semibold w-28">Pedir</th>
-                      <th className="text-right px-2 py-2 font-semibold w-24">Coste/u</th>
-                      <th className="text-right px-3 py-2 font-semibold w-20">Total</th>
-                      <th className="w-9" />
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                    {parsedLines.map((l) => {
-                      const item = catalogById.get(l.catalogItemId);
-                      const stock = Number(item?.stockQuantity) || 0;
-                      const min = Number(item?.minStock) || 0;
-                      const low = min > 0 && stock <= min;
+          <div className="space-y-3 px-3 py-3">
+            {pickerGroups.map((group) => (
+              <div key={group.organizerId}>
+                {pickerGroups.length > 1 ? (
+                  <p className="text-[11px] font-semibold text-gray-400 dark:text-gray-500 mb-1.5 px-0.5">
+                    {group.organizerLabel}
+                  </p>
+                ) : null}
+                <div className="rounded-lg border border-gray-100 dark:border-gray-800 overflow-hidden divide-y divide-gray-100 dark:divide-gray-800">
+                  {group.items.map((item) => {
+                    const stock = Number(item.stockQuantity) || 0;
+                    const min = Number(item.minStock) || 0;
+                    const low = min > 0 && stock <= min;
+                    const sug = suggestionsById.get(item._id);
+                    const suggested =
+                      sug && (sug.needsReorder || Number(sug.stockQuantity) <= Number(sug.minStock))
+                        ? suggestionOrderQuantity(sug)
+                        : null;
+                    const line = linesById.get(item._id);
+                    const qtyNum = line
+                      ? Math.max(0, Number(String(line.quantity).replace(',', '.')) || 0)
+                      : 0;
+                    const costNum = line
+                      ? Math.max(0, Number(String(line.unitCost).replace(',', '.')) || 0)
+                      : 0;
+                    const lineTotal = qtyNum * costNum;
+
+                    if (line) {
                       return (
-                        <tr key={l.catalogItemId}>
-                          <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">{l.name}</td>
-                          <td
-                            className={`px-2 py-2 text-right tabular-nums text-xs ${
-                              low ? 'font-bold text-amber-700 dark:text-amber-300' : 'text-gray-500'
-                            }`}
-                          >
-                            {formatQty(stock)}
-                          </td>
-                          <td className="px-2 py-2 text-right tabular-nums text-xs text-gray-400">
-                            {min > 0 ? formatQty(min) : '—'}
-                          </td>
-                          <td className="px-2 py-1.5 text-right">
-                            <span className="inline-flex items-center justify-end gap-1.5">
-                              <input
-                                type="number"
-                                min="0"
-                                step="any"
-                                value={l.quantity}
-                                onChange={(e) => updateLine(l.catalogItemId, { quantity: e.target.value })}
-                                className="w-16 px-1.5 py-1 text-right text-sm tabular-nums rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800"
-                              />
-                              <CatalogUnitChip unit={l.unit} size="sm" />
-                            </span>
-                          </td>
-                          <td className="px-2 py-1.5 text-right">
+                        <div
+                          key={item._id}
+                          className="flex flex-wrap items-center gap-2 px-2.5 py-2 bg-blue-50/60 dark:bg-blue-950/25"
+                        >
+                          <div className="min-w-0 flex-1 basis-[10rem]">
+                            <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                              {item.name}
+                            </p>
+                            <p className="text-[11px] text-gray-500 tabular-nums">
+                              Stock {formatQty(stock)}
+                              {min > 0 ? (
+                                <>
+                                  {' '}
+                                  · mín. {formatQty(min)}
+                                  {low ? (
+                                    <span className="ml-1 font-semibold text-amber-700 dark:text-amber-300">
+                                      bajo mínimo
+                                    </span>
+                                  ) : null}
+                                </>
+                              ) : null}
+                            </p>
+                          </div>
+                          <span className="inline-flex items-center gap-1.5 shrink-0">
                             <input
                               type="number"
                               min="0"
-                              step="0.01"
-                              value={l.unitCost}
-                              onChange={(e) => updateLine(l.catalogItemId, { unitCost: e.target.value })}
-                              className="w-20 px-1.5 py-1 text-right text-sm tabular-nums rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800"
+                              step="any"
+                              value={line.quantity}
+                              onChange={(e) => updateLine(item._id, { quantity: e.target.value })}
+                              aria-label={`Cantidad ${item.name}`}
+                              className="w-16 px-1.5 py-1.5 text-right text-sm tabular-nums rounded-lg border border-blue-200 dark:border-blue-800 bg-white dark:bg-gray-900"
                             />
-                          </td>
-                          <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatMoney(l.total)}</td>
-                          <td className="px-1 py-1.5 text-center">
-                            <button
-                              type="button"
-                              onClick={() => removeLine(l.catalogItemId)}
-                              className="p-1 rounded-lg text-gray-300 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
-                              title="Quitar línea"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </td>
-                        </tr>
+                            <CatalogUnitChip unit={line.unit} size="sm" />
+                          </span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={line.unitCost}
+                            onChange={(e) => updateLine(item._id, { unitCost: e.target.value })}
+                            aria-label={`Coste unitario ${item.name}`}
+                            title="Coste / u"
+                            className="w-20 shrink-0 px-1.5 py-1.5 text-right text-sm tabular-nums rounded-lg border border-blue-200 dark:border-blue-800 bg-white dark:bg-gray-900"
+                          />
+                          <span className="shrink-0 min-w-[4.5rem] text-right text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+                            {formatMoney(lineTotal)}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => removeLine(item._id)}
+                            className="shrink-0 p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                            title="Quitar del pedido"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
                       );
-                    })}
-                  </tbody>
-                </table>
+                    }
+
+                    return (
+                      <div
+                        key={item._id}
+                        className="flex items-center gap-2 px-2.5 py-2 bg-white dark:bg-gray-900"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                            {item.name}
+                          </p>
+                          <p className="text-[11px] text-gray-500 tabular-nums">
+                            Stock {formatQty(stock)}
+                            {min > 0 ? (
+                              <>
+                                {' '}
+                                · mín. {formatQty(min)}
+                                {low ? (
+                                  <span className="ml-1 font-semibold text-amber-700 dark:text-amber-300">
+                                    bajo mínimo
+                                  </span>
+                                ) : null}
+                              </>
+                            ) : null}
+                            {suggested ? (
+                              <span className="ml-1 text-gray-400">· sugerido {formatQty(suggested)}</span>
+                            ) : null}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => addItemToLines(item)}
+                          className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-[var(--v-blue,#2563eb)] border border-blue-200 dark:border-blue-900 hover:bg-blue-50/80 dark:hover:bg-blue-950/30"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          Añadir
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {parsedLines.length > 0 ? (
+            <div className="border-t border-gray-100 dark:border-gray-800 bg-stone-50/90 dark:bg-stone-900/50 px-3 py-3 space-y-2">
+              <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                Resumen antes de pedir
+              </p>
+              <ul className="space-y-1">
+                {parsedLines.map((l) => (
+                  <li
+                    key={l.catalogItemId}
+                    className="flex items-baseline justify-between gap-2 text-sm"
+                  >
+                    <span className="min-w-0 truncate text-gray-800 dark:text-gray-200">
+                      {l.name}
+                      <span className="ml-1.5 text-[11px] tabular-nums text-gray-500">
+                        {formatQty(l.quantityNum)} {l.unit}
+                      </span>
+                    </span>
+                    <span className="shrink-0 font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+                      {formatMoney(l.total)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <div className="flex items-center justify-between gap-2 pt-1 border-t border-gray-200/80 dark:border-gray-700">
+                <span className="text-xs font-semibold text-gray-500">
+                  {parsedLines.length} artículo{parsedLines.length !== 1 ? 's' : ''}
+                </span>
+                <span className="text-sm font-bold tabular-nums text-gray-900 dark:text-gray-100">
+                  Subtotal {formatMoney(sectionSubtotal)}
+                </span>
               </div>
             </div>
           ) : (
-            <p className="px-3 py-4 text-sm text-gray-500 dark:text-gray-400 text-center">
-              Añade artículos arriba para ver cantidades y precios.
+            <p className="border-t border-gray-100 dark:border-gray-800 px-3 py-3 text-sm text-gray-500 dark:text-gray-400 text-center">
+              Pulsa Añadir en la misma línea para elegir cantidad y coste.
             </p>
           )}
         </div>
@@ -557,21 +605,62 @@ function NewPurchaseOrderModal({
   const [draftsBySupplier, setDraftsBySupplier] = useState<Record<string, SupplierDraftState>>({});
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
-  const [loadingSuggestions, setLoadingSuggestions] = useState(true);
+  /** Sugerencias de stock: no bloquean la UI. */
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [allSuggestions, setAllSuggestions] = useState<SuggestionItem[]>([]);
+  const [liveSuppliers, setLiveSuppliers] = useState<Supplier[]>(suppliers);
+  const [liveCatalogItems, setLiveCatalogItems] = useState<CatalogItem[]>(catalogItems);
+  const [hydratingCatalog, setHydratingCatalog] = useState(true);
+
+  useEffect(() => {
+    setLiveSuppliers(suppliers);
+  }, [suppliers]);
+
+  useEffect(() => {
+    setLiveCatalogItems((prev) => mergeCatalogForOrders(catalogItems, prev));
+  }, [catalogItems]);
+
+  useEffect(() => {
+    if (!userId) {
+      setHydratingCatalog(false);
+      return;
+    }
+    let cancelled = false;
+    setHydratingCatalog(true);
+    void Promise.all([
+      listSuppliersRequest(userId).catch(() => null),
+      listCatalogItemsRequest(userId, 'stock').catch(() => [] as CatalogItem[]),
+      listCatalogItemsRequest(userId, 'catalog').catch(() => [] as CatalogItem[]),
+    ])
+      .then(([supplierList, stock, carta]) => {
+        if (cancelled) return;
+        if (Array.isArray(supplierList) && supplierList.length > 0) {
+          setLiveSuppliers(supplierList);
+        }
+        setLiveCatalogItems((prev) =>
+          mergeCatalogForOrders(prev, [...(stock || []), ...(carta || [])]),
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setHydratingCatalog(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   const activeSuppliers = useMemo(
     () =>
-      [...suppliers]
+      [...liveSuppliers]
         .filter((s) => s.active !== false)
         .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es')),
-    [suppliers],
+    [liveSuppliers],
   );
   const activeSupplierById = useMemo(
     () => new Map(activeSuppliers.map((s) => [s._id, s])),
     [activeSuppliers],
   );
-  const catalogById = useMemo(() => new Map(catalogItems.map((i) => [i._id, i])), [catalogItems]);
+  const orderCatalogItems = liveCatalogItems;
 
   useEffect(() => {
     if (!userId) {
@@ -597,34 +686,34 @@ function NewPurchaseOrderModal({
   }, [userId]);
 
   useEffect(() => {
-    if (loadingSuggestions) return;
     setDraftsBySupplier((prev) => {
       const next: Record<string, SupplierDraftState> = {};
       for (const id of selectedSupplierIds) {
-        if (prev[id]) {
-          next[id] = prev[id];
-          continue;
-        }
         const supplier = activeSupplierById.get(id);
         if (!supplier) continue;
-        next[id] = {
-          ...buildSupplierDraft(
-            supplier,
-            catalogItems,
-            allSuggestions,
-            storeIngredients,
-            commercialBrands,
-          ),
-          addItemId: '',
-        };
+        const built = buildSupplierDraft(
+          supplier,
+          orderCatalogItems,
+          allSuggestions,
+          storeIngredients,
+          commercialBrands,
+        );
+        const existing = prev[id];
+        if (existing) {
+          next[id] = {
+            ...existing,
+            suggestionsById: built.suggestionsById,
+          };
+        } else {
+          next[id] = { ...built, addItemId: '' };
+        }
       }
       return next;
     });
   }, [
     selectedSupplierIds,
-    loadingSuggestions,
     allSuggestions,
-    catalogItems,
+    orderCatalogItems,
     activeSupplierById,
     storeIngredients,
     commercialBrands,
@@ -633,7 +722,7 @@ function NewPurchaseOrderModal({
   const suppliersWithLowStock = useMemo(() => {
     return activeSuppliers.filter((supplier) => {
       const marked = explicitMarkedStockItemsForSupplier(
-        catalogItems,
+        orderCatalogItems,
         supplier,
         storeIngredients,
         commercialBrands,
@@ -646,7 +735,7 @@ function NewPurchaseOrderModal({
         return min > 0 && stock <= min;
       });
     });
-  }, [activeSuppliers, catalogItems, allSuggestions, storeIngredients, commercialBrands]);
+  }, [activeSuppliers, orderCatalogItems, allSuggestions, storeIngredients, commercialBrands]);
 
   const toggleSupplier = (id: string) => {
     setSelectedSupplierIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -789,6 +878,12 @@ function NewPurchaseOrderModal({
                 {activeSuppliers.map((s) => {
                   const selected = selectedSupplierIds.includes(s._id);
                   const lineCount = draftsBySupplier[s._id]?.lines.length || 0;
+                  const markedCount = explicitMarkedStockItemsForSupplier(
+                    orderCatalogItems,
+                    s,
+                    storeIngredients,
+                    commercialBrands,
+                  ).length;
                   return (
                     <label
                       key={s._id}
@@ -807,9 +902,17 @@ function NewPurchaseOrderModal({
                       <span className="min-w-0 flex-1 truncate text-sm font-semibold text-stone-900 dark:text-stone-100">
                         {s.name}
                       </span>
+                      {markedCount > 0 ? (
+                        <span
+                          className="shrink-0 rounded bg-stone-100 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-stone-500 dark:bg-stone-800 dark:text-stone-400"
+                          title="Productos en «Qué te vende»"
+                        >
+                          {markedCount}
+                        </span>
+                      ) : null}
                       {selected && lineCount > 0 ? (
                         <span className="shrink-0 rounded bg-white/80 px-1.5 py-0.5 text-[10px] font-bold tabular-nums dark:bg-stone-950">
-                          {lineCount}
+                          {lineCount} en pedido
                         </span>
                       ) : null}
                     </label>
@@ -846,24 +949,45 @@ function NewPurchaseOrderModal({
           <div className="rounded-2xl border border-dashed border-stone-300 bg-white px-4 py-16 text-center text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900">
             Elige uno o más proveedores a la izquierda. Solo salen productos de «Qué te vende».
           </div>
-        ) : loadingSuggestions ? (
-          <div className="flex items-center justify-center gap-2 py-16 text-sm text-stone-500">
-            <Loader2 className="h-5 w-5 animate-spin" />
-            Revisando stock y productos…
-          </div>
         ) : (
           <div className="space-y-3">
+            {(hydratingCatalog || loadingSuggestions) && (
+              <p className="flex items-center gap-2 text-xs text-stone-400">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                {hydratingCatalog
+                  ? 'Actualizando catálogo del proveedor…'
+                  : 'Actualizando sugerencias de stock…'}
+              </p>
+            )}
             {selectedSupplierIds.map((id) => {
               const supplier = activeSupplierById.get(id);
               const draft = draftsBySupplier[id];
-              if (!supplier || !draft) return null;
+              if (!supplier) {
+                return (
+                  <p
+                    key={id}
+                    className="rounded-xl border border-dashed border-stone-200 px-3 py-4 text-center text-sm text-stone-500 dark:border-stone-700"
+                  >
+                    Cargando proveedor…
+                  </p>
+                );
+              }
+              if (!draft) {
+                return (
+                  <p
+                    key={id}
+                    className="rounded-xl border border-dashed border-stone-200 px-3 py-4 text-center text-sm text-stone-500 dark:border-stone-700"
+                  >
+                    Preparando productos de {supplier.name}…
+                  </p>
+                );
+              }
               return (
                 <SupplierOrderDraftSection
                   key={id}
                   supplier={supplier}
                   draft={draft}
-                  catalogItems={catalogItems}
-                  catalogById={catalogById}
+                  catalogItems={orderCatalogItems}
                   storeIngredients={storeIngredients}
                   commercialBrands={commercialBrands}
                   defaultExpanded={selectedSupplierIds.length === 1 || id === initialSupplierId}
@@ -895,7 +1019,6 @@ function EditPurchaseOrderModal({
   onSaved: (order: PurchaseOrder) => void;
 }) {
   useModalClose(true, onClose);
-  const catalogById = useMemo(() => new Map(catalogItems.map((i) => [i._id, i])), [catalogItems]);
   const [draft, setDraft] = useState<SupplierDraftState>(() => ({
     lines: (order.items || []).map((item) => {
       const cat = catalogItems.find((c) => c._id === item.catalogItemId);
@@ -1016,7 +1139,6 @@ function EditPurchaseOrderModal({
             supplier={supplier}
             draft={draft}
             catalogItems={catalogItems}
-            catalogById={catalogById}
             defaultExpanded
             onChange={setDraft}
           />
@@ -1661,16 +1783,32 @@ export function PurchaseOrdersPage({
   const [sendOrder, setSendOrder] = useState<PurchaseOrder | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // Llegada desde Proveedores («Pedir»): abre el modal con el proveedor preseleccionado.
+  // Llegada desde Proveedores («Pedir» / «En curso»).
   useEffect(() => {
     const supplierParam = searchParams.get('supplier');
-    if (!supplierParam) return;
-    setCreateSupplierId(supplierParam);
-    setShowCreate(true);
+    const orderParam = searchParams.get('order');
+    if (!supplierParam && !orderParam) return;
+    if (loading) return;
+
+    if (orderParam) {
+      const found = orders.find((o) => o._id === orderParam);
+      if (found) setViewingOrder(found);
+    } else if (supplierParam) {
+      const open = findOpenPurchaseOrderForSupplier(orders, supplierParam);
+      if (open) {
+        setViewingOrder(open);
+        toast.message(`Ya hay un pedido en curso (${open.orderNumber || 'sin nº'}). Ábrelo en vez de crear otro.`);
+      } else {
+        setCreateSupplierId(supplierParam);
+        setShowCreate(true);
+      }
+    }
+
     const next = new URLSearchParams(searchParams);
     next.delete('supplier');
+    next.delete('order');
     setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams, loading, orders]);
 
   useEffect(() => {
     setResolvedSuppliers(suppliers);
@@ -1763,8 +1901,21 @@ export function PurchaseOrdersPage({
       : {};
     const created: PurchaseOrder[] = [];
     for (const payload of list) {
+      const supplierId = String(payload.supplierId || '').trim();
+      if (supplierId) {
+        const open = findOpenPurchaseOrderForSupplier(orders, supplierId);
+        if (open) {
+          toast.error(
+            `Ya hay un pedido en curso con ${open.supplierName || 'este proveedor'} (${open.orderNumber || 'sin nº'}).`,
+          );
+          setViewingOrder(open);
+          setShowCreate(false);
+          continue;
+        }
+      }
       created.push(await createPurchaseOrderRequest(userId, { ...payload, ...scope }));
     }
+    if (created.length === 0) return;
     setOrders((prev) =>
       [...created, ...prev].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))),
     );

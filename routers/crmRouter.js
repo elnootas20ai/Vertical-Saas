@@ -7,8 +7,10 @@ import {
   updateReminder,
   deleteReminder,
 } from '../controllers/crmController.js';
+import { requireUserScope } from '../middleware/requireUserScope.js';
 
 const crmRouter = Router();
+crmRouter.use(requireUserScope);
 
 // CRM Alerts
 crmRouter.get('/:userId/alerts', getCrmAlerts);

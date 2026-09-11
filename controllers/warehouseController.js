@@ -11,6 +11,12 @@ import {
   logAccountActivity,
 } from '../services/couchdb.js';
 import logger from '../services/logger.js';
+import {
+  filterDocsForBusiness,
+  resolveAccountBusinessCount,
+  resolveBusinessIdFromRequest,
+  stampOpsDoc,
+} from '../shared/scope/opsScope.js';
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
@@ -31,7 +37,12 @@ export async function listWarehouses(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     const warehouses = await listWarehousesByUser(req, userId);
-    return res.json({ ok: true, warehouses: warehouses.map(sanitizeWarehouse) });
+    const scopeBid = resolveBusinessIdFromRequest(req);
+    const accountN = resolveAccountBusinessCount(req);
+    const scoped = scopeBid
+      ? filterDocsForBusiness(warehouses, scopeBid, { accountBusinessCount: accountN })
+      : warehouses;
+    return res.json({ ok: true, warehouses: scoped.map(sanitizeWarehouse) });
   } catch (error) {
     logger.error({ tag: 'WAREHOUSE', err: error?.message }, 'Error listando almacenes');
     return res.status(500).json({ ok: false, error: error.message || 'Error al cargar almacenes' });
@@ -55,7 +66,11 @@ export async function createWarehouse(req, res) {
     const existing = await listWarehousesByUser(req, userId);
     const isFirst = existing.length === 0;
 
-    const doc = buildWarehouseDocument(userId, { ...warehouse, isDefault: isFirst ? true : (warehouse.isDefault || false) });
+    const doc = buildWarehouseDocument(userId, stampOpsDoc({ ...warehouse, isDefault: isFirst ? true : (warehouse.isDefault || false) }, {
+      ownerUserId: userId,
+      businessId: warehouse.business_id || warehouse.businessId || resolveBusinessIdFromRequest(req),
+      salesPointId: warehouse.salesPointId,
+    }));
 
     if (doc.isDefault && !isFirst) {
       for (const wh of existing) {

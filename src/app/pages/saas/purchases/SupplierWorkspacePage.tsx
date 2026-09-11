@@ -49,6 +49,7 @@ import {
   PURCHASES_RETURN_DEFAULT,
   resolvePurchasesReturnTo,
 } from '../../../lib/purchasesWorkspacePaths';
+import { notifyDeliveryCatalogChanged } from '../../../lib/deliverySetup';
 import { resolveBusinessScopeId } from '../../../lib/businessStoreScope';
 import { resolveBusinessDataUserId } from '../../../lib/tenantUserId';
 import { VertialLoadingState } from '../../../components/VertialLoadingState';
@@ -384,6 +385,7 @@ export function SupplierWorkspacePage() {
         );
         toast.success('Proveedor creado');
       }
+      notifyDeliveryCatalogChanged(dataUserId, businessId || undefined);
       navigate(returnTo);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar el proveedor');

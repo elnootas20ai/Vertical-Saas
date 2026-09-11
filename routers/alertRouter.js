@@ -16,24 +16,26 @@ import {
   assignAlert,
   deleteAlert,
 } from '../controllers/alertCenterController.js';
+import { requireBusinessAccess } from '../middleware/requireBusinessAccess.js';
+import { requireUserScope } from '../middleware/requireUserScope.js';
 
 const alertRouter = Router();
 
 // ── Centro de alertas globales (por businessId) ──
-alertRouter.get('/:businessId/center', listAlerts);
-alertRouter.get('/:businessId/history', listAlertHistory);
-alertRouter.get('/:businessId/summary', getAlertSummary);
-alertRouter.get('/:businessId/:alertId/timeline', getAlertTimeline);
-alertRouter.put('/:businessId/bulk-status', bulkUpdateAlertStatus);
-alertRouter.post('/:businessId/resolve-all', resolveAllUnresolvedAlerts);
-alertRouter.put('/:businessId/:alertId/status', updateAlertStatus);
-alertRouter.put('/:businessId/:alertId/assign', assignAlert);
-alertRouter.delete('/:businessId/:alertId', deleteAlert);
+alertRouter.get('/:businessId/center', requireBusinessAccess, listAlerts);
+alertRouter.get('/:businessId/history', requireBusinessAccess, listAlertHistory);
+alertRouter.get('/:businessId/summary', requireBusinessAccess, getAlertSummary);
+alertRouter.get('/:businessId/:alertId/timeline', requireBusinessAccess, getAlertTimeline);
+alertRouter.put('/:businessId/bulk-status', requireBusinessAccess, bulkUpdateAlertStatus);
+alertRouter.post('/:businessId/resolve-all', requireBusinessAccess, resolveAllUnresolvedAlerts);
+alertRouter.put('/:businessId/:alertId/status', requireBusinessAccess, updateAlertStatus);
+alertRouter.put('/:businessId/:alertId/assign', requireBusinessAccess, assignAlert);
+alertRouter.delete('/:businessId/:alertId', requireBusinessAccess, deleteAlert);
 
 // ── Endpoints legacy (por userId) — backward compat ──
-alertRouter.get('/:userId', getAlerts);
-alertRouter.post('/:userId/check', triggerAlertCheck);
-alertRouter.get('/:userId/config', getAlertSettings);
-alertRouter.put('/:userId/config', updateAlertSettings);
+alertRouter.get('/:userId', requireUserScope, getAlerts);
+alertRouter.post('/:userId/check', requireUserScope, triggerAlertCheck);
+alertRouter.get('/:userId/config', requireUserScope, getAlertSettings);
+alertRouter.put('/:userId/config', requireUserScope, updateAlertSettings);
 
 export { alertRouter };

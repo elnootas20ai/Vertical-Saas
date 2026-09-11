@@ -4,8 +4,10 @@ import { getCouchConfig, buildCouchAuthHeader } from '../services/couchdb.js';
 import { broadcastToBusiness } from '../services/sseService.js';
 import { notifyChatMessageRecipients } from '../services/chatNotifications.js';
 import logger from '../services/logger.js';
+import { requireBusinessAccess } from '../middleware/requireBusinessAccess.js';
 
 const chatRouter = Router();
+chatRouter.use(requireBusinessAccess);
 
 const CHAT_DB = 'team_chat';
 

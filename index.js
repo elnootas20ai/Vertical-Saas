@@ -3605,9 +3605,10 @@ setInterval(() => {
       const rssMB = bytesToMB(mem.rss);
       const heapMB = bytesToMB(mem.heapUsed);
 
-      // RAM alta: RSS > 1200 MB o heap > 900 MB (ajustable por env).
-      const rssLimitMB = Number(process.env.ALERT_RSS_MB || 1200);
-      const heapLimitMB = Number(process.env.ALERT_HEAP_MB || 900);
+      // RAM alta del proceso Node (no del host). Defaults pensados para VPS ~16 GB.
+      // Ajustable: ALERT_RSS_MB / ALERT_HEAP_MB (remote-config-alerts → 4000 / 1800).
+      const rssLimitMB = Number(process.env.ALERT_RSS_MB || 4000);
+      const heapLimitMB = Number(process.env.ALERT_HEAP_MB || 1800);
       if (rssMB >= rssLimitMB || heapMB >= heapLimitMB) {
         await sendAdminAlert({
           key: 'ram_high',

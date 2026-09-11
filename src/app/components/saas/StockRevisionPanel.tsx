@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import {
   AlertTriangle, CheckCircle2, ClipboardCheck, Loader2, Minus, Plus, Search, ShoppingCart, User, X,
@@ -9,6 +9,7 @@ import { useBusiness } from '../../context/BusinessContext';
 import type { Warehouse } from '../../lib/warehouseApi';
 import {
   completeStockCountRequest,
+  cancelStockCountRequest,
   createStockCountRequest,
   getStockRevisionListRequest,
   listStockCountsRequest,
@@ -18,10 +19,12 @@ import {
 import type { StockPurchaseList } from '../../lib/stockPurchaseListApi';
 import {
   countDiscrepancies,
+  formatStockDate,
   formatStockTime,
   groupRevisionEntriesByOrganizer,
   isSameLocalDay,
 } from '../../lib/stockRevisionUtils';
+import { canManageStockInventory } from '../../lib/stockInventoryAccess';
 import type { TpvClockedInWorker } from '../../lib/tpvClockedInWorkers';
 import type { CatalogItem } from '../../lib/deliveryApi';
 import { getDeliveryConfigRequest } from '../../lib/deliveryApi';
@@ -33,6 +36,7 @@ import {
   type StoreIngredient,
 } from '../../lib/catalogCustomization';
 import type { InventoryCommercialBrand } from '../../lib/inventoryUtils';
+import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
 import { StockPurchaseListPreview } from './StockPurchaseListPreview';
 import { ClockedInWorkerBubbles } from './ClockedInWorkerBubbles';
 import { useTpvRegisterIfOpen } from './TpvRegisterGate';
@@ -259,10 +263,12 @@ function RevisionLineCard({
 function RevisionReportModal({
   report,
   userId,
+  canPreparePurchase,
   onClose,
 }: {
   report: CompletionReport;
   userId: string;
+  canPreparePurchase: boolean;
   onClose: () => void;
 }) {
   const diffs = report.count.lines.filter((l) => l.countedStock !== null && l.difference !== 0);
@@ -315,20 +321,34 @@ function RevisionReportModal({
 
           {diffs.length > 0 ? (
             <div>
-              <p className="text-xs font-semibold uppercase text-gray-500 mb-2">Desvíos</p>
+              <p className="text-xs font-semibold uppercase text-gray-500 mb-2">Desvíos (merma operativa)</p>
               <ul className="space-y-2">
-                {diffs.map((line) => (
-                  <li
-                    key={line.catalogItemId}
-                    className="flex items-center justify-between gap-3 text-sm border-b border-gray-50 dark:border-gray-700/50 pb-2"
-                  >
-                    <span className="font-medium text-gray-900 dark:text-white truncate">{line.catalogItemName}</span>
-                    <span className={`shrink-0 font-bold tabular-nums ${(line.difference ?? 0) < 0 ? 'text-red-600' : 'text-blue-600'}`}>
-                      {(line.difference ?? 0) > 0 ? '+' : ''}
-                      {line.difference} {line.unit || 'ud'}
-                    </span>
-                  </li>
-                ))}
+                {diffs.map((line) => {
+                  const pct =
+                    line.differencePercent != null
+                      ? line.differencePercent
+                      : Number(line.theoreticalStock) > 0 && line.difference != null
+                        ? Math.round((Number(line.difference) / Number(line.theoreticalStock)) * 10000) / 100
+                        : null;
+                  return (
+                    <li
+                      key={line.catalogItemId}
+                      className="flex items-center justify-between gap-3 text-sm border-b border-gray-50 dark:border-gray-700/50 pb-2"
+                    >
+                      <span className="font-medium text-gray-900 dark:text-white truncate">{line.catalogItemName}</span>
+                      <span className={`shrink-0 font-bold tabular-nums ${(line.difference ?? 0) < 0 ? 'text-red-600' : 'text-blue-600'}`}>
+                        {(line.difference ?? 0) > 0 ? '+' : ''}
+                        {line.difference} {line.unit || 'ud'}
+                        {pct != null ? (
+                          <span className="ml-1.5 text-xs font-semibold opacity-80">
+                            ({pct > 0 ? '+' : ''}
+                            {pct.toLocaleString('es-ES', { maximumFractionDigits: 1 })} %)
+                          </span>
+                        ) : null}
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           ) : (
@@ -344,11 +364,18 @@ function RevisionReportModal({
                 <ShoppingCart className="w-3.5 h-3.5" />
                 Lista de compra sugerida
               </p>
-              <StockPurchaseListPreview
-                userId={userId}
-                countId={report.count._id}
-                countName={report.count.name}
-              />
+              {canPreparePurchase ? (
+                <StockPurchaseListPreview
+                  userId={userId}
+                  countId={report.count._id}
+                  countName={report.count.name}
+                  canCreateOrders
+                />
+              ) : (
+                <p className="text-sm text-gray-500">
+                  Hay {purchaseCount} producto(s) para pedir. El encargado o quien tenga permiso de Inventario prepara la compra en Stock → Inventario.
+                </p>
+              )}
             </div>
           ) : (
             <p className="text-sm text-gray-500">Tras esta revisión no hace falta pedido automático.</p>
@@ -386,15 +413,17 @@ export function StockRevisionPanel({
   onRequestRefresh,
 }: StockRevisionPanelProps) {
   const { user } = useAuth();
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, businesses } = useBusiness();
   const register = useTpvRegisterIfOpen();
   const actorUserId = String(user?.user_id || user?.id || '').trim();
   const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '').trim();
-  void role; // abierto para todos; se mantiene la prop por compatibilidad
+  const canCloseAndBuy = canManageStockInventory(user, businesses);
+  void role; // compat: el gate real es canCloseAndBuy (permiso Inventario / Encargado)
 
   const [activeCount, setActiveCount] = useState<StockCount | null>(null);
   const [loadingCount, setLoadingCount] = useState(false);
   const [startingCount, setStartingCount] = useState(false);
+  const [cancellingCount, setCancellingCount] = useState(false);
   const [completingCount, setCompletingCount] = useState(false);
   const [lineBusy, setLineBusy] = useState<number | null>(null);
   const [mismatchIdx, setMismatchIdx] = useState<number | null>(null);
@@ -406,7 +435,6 @@ export function StockRevisionPanel({
   const [selectedCounterId, setSelectedCounterId] = useState('');
   const [localStoreIngredients, setLocalStoreIngredients] = useState<StoreIngredient[]>([]);
   const [localCommercialBrands, setLocalCommercialBrands] = useState<InventoryCommercialBrand[]>([]);
-  const autoEnsureKeyRef = useRef('');
 
   const storeIngredients = storeIngredientsProp ?? localStoreIngredients;
   const commercialBrands = commercialBrandsProp ?? localCommercialBrands;
@@ -563,7 +591,6 @@ export function StockRevisionPanel({
 
   useEffect(() => {
     if (skipCountsFetch) return;
-    autoEnsureKeyRef.current = '';
     syncActiveCount(null);
     void loadStockCounts();
   }, [storeWarehouseId, storeLabel, loadStockCounts, syncActiveCount, skipCountsFetch]);
@@ -571,7 +598,6 @@ export function StockRevisionPanel({
   useEffect(() => {
     if (skipCountsFetch) return;
     const onStoreChange = () => {
-      autoEnsureKeyRef.current = '';
       void (onRequestRefresh?.() ?? loadStockCounts());
     };
     window.addEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStoreChange);
@@ -595,11 +621,9 @@ export function StockRevisionPanel({
     });
   }, []);
 
-  const ensureTodayRevision = useCallback(async (opts?: { silent?: boolean }) => {
+  const ensureTodayRevision = useCallback(async () => {
     if (!userId) return null;
-    const counterId = opts?.silent
-      ? (resolveCounterId() || actorUserId)
-      : requireCounter();
+    const counterId = requireCounter();
     if (!counterId) return null;
     const wh = warehouses.find((w) => w._id === warehouseId) || defaultWarehouse;
     setStartingCount(true);
@@ -613,7 +637,7 @@ export function StockRevisionPanel({
         catalogItemIds = [];
       }
       if (stockedCount === 0 && catalogItemIds.length === 0) {
-        if (!opts?.silent) toast.error('Carga el stock inicial antes de hacer una revisión');
+        toast.error('Carga el stock inicial antes de hacer una revisión');
         return null;
       }
       const count = await createStockCountRequest(userId, {
@@ -627,43 +651,17 @@ export function StockRevisionPanel({
       syncActiveCount(count);
       setRevisionFilter('pending');
       setRevisionSearch('');
-      if (!opts?.silent) toast.success('Revisión de hoy lista');
+      toast.success('Revisión de hoy lista');
       return count;
     } catch (err) {
-      if (!opts?.silent) {
-        toast.error(err instanceof Error ? err.message : 'No se pudo iniciar la revisión');
-      }
+      toast.error(err instanceof Error ? err.message : 'No se pudo iniciar la revisión');
       return null;
     } finally {
       setStartingCount(false);
     }
-  }, [userId, stockedCount, warehouses, warehouseId, defaultWarehouse, storeLabel, syncActiveCount, requireCounter, resolveCounterId, actorUserId]);
+  }, [userId, stockedCount, warehouses, warehouseId, defaultWarehouse, storeLabel, syncActiveCount, requireCounter, actorUserId]);
 
-  // Revisión del día: se activa sola (trabajador o encargado), sin permiso previo.
-  // Tras cerrar la de hoy no se vuelve a crear sola hasta mañana (o hasta pulsar el botón).
-  useEffect(() => {
-    if (resolvedLoading || startingCount || resolvedActiveCount) return;
-    if (!userId || stockedCount === 0) return;
-    if (!resolveCounterId() && counterWorkers.length > 0) return;
-    const wh = warehouseId || storeWarehouseId || 'default';
-    const key = `${userId}:${wh}:${new Date().toLocaleDateString('es-ES')}`;
-    if (autoEnsureKeyRef.current === key) return;
-    autoEnsureKeyRef.current = key;
-    void ensureTodayRevision({ silent: true }).then((count) => {
-      if (!count && autoEnsureKeyRef.current === key) autoEnsureKeyRef.current = '';
-    });
-  }, [
-    resolvedLoading,
-    startingCount,
-    resolvedActiveCount,
-    userId,
-    stockedCount,
-    warehouseId,
-    storeWarehouseId,
-    ensureTodayRevision,
-    resolveCounterId,
-    counterWorkers.length,
-  ]);
+  // Sin auto-crear: solo al pulsar «Empezar revisión de hoy» (o desde TPV con el mismo botón).
 
   const markLineOk = async (lineIdx: number) => {
     if (!resolvedActiveCount || !userId) return;
@@ -741,12 +739,17 @@ export function StockRevisionPanel({
 
   const handleCompleteRevision = async () => {
     if (!resolvedActiveCount || !userId) return;
+    if (!canCloseAndBuy) {
+      toast.error('Solo el encargado (o quien tenga permiso de Inventario) puede cerrar y corregir stock');
+      return;
+    }
     const counterId = requireCounter();
     if (!counterId) return;
     setCompletingCount(true);
     try {
       const result = await completeStockCountRequest(userId, resolvedActiveCount._id, {
         completedBy: counterId,
+        createPurchaseOrders: false,
       });
       setCompletionReport({
         count: result.stockCount,
@@ -755,27 +758,45 @@ export function StockRevisionPanel({
         purchaseOrdersCreated: result.purchaseOrdersCreated ?? 0,
       });
       syncActiveCount(null);
-      // Bloquear auto-crear otra del mismo día; el botón manual sí permite otra.
-      const wh = warehouseId || storeWarehouseId || 'default';
-      autoEnsureKeyRef.current = `${userId}:${wh}:${new Date().toLocaleDateString('es-ES')}`;
       refreshCounts();
       onRevisionCompleted?.();
       const adj = result.adjustmentsCreated ?? 0;
       const diffs = countDiscrepancies(result.stockCount);
-      const orders = result.purchaseOrdersCreated ?? 0;
+      const buyHint = (result.purchaseList?.itemCount ?? 0) > 0
+        ? ' Prepara la compra en Stock → Inventario.'
+        : '';
       toast.success(
-        orders > 0
-          ? `Revisión cerrada. ${orders} pedido(s) a proveedor creados.`
-          : adj > 0
-            ? `Revisión cerrada. ${adj} ajuste(s), ${diffs} desvío(s).`
-            : diffs > 0
-              ? `Revisión cerrada. ${diffs} desvío(s).`
-              : 'Revisión cerrada. Todo cuadra.',
+        adj > 0
+          ? `Revisión cerrada. ${adj} ajuste(s), ${diffs} desvío(s).${buyHint}`
+          : diffs > 0
+            ? `Revisión cerrada. ${diffs} desvío(s).${buyHint}`
+            : `Revisión cerrada. Todo cuadra.${buyHint}`,
       );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'No se pudo cerrar la revisión');
     } finally {
       setCompletingCount(false);
+    }
+  };
+
+  const handleCancelRevision = async () => {
+    if (!resolvedActiveCount || !userId) return;
+    if (!canCloseAndBuy) {
+      toast.error('Solo el encargado puede descartar la revisión');
+      return;
+    }
+    setCancellingCount(true);
+    try {
+      await cancelStockCountRequest(userId, resolvedActiveCount._id, {
+        cancelledBy: actorUserId || undefined,
+      });
+      syncActiveCount(null);
+      refreshCounts();
+      toast.success('Revisión descartada');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo descartar');
+    } finally {
+      setCancellingCount(false);
     }
   };
 
@@ -810,7 +831,9 @@ export function StockRevisionPanel({
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-16">
         <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
-        <p className="text-sm text-gray-500">Preparando revisión de hoy…</p>
+        <p className="text-sm text-gray-500">
+          {startingCount ? 'Preparando revisión…' : 'Cargando…'}
+        </p>
       </div>
     );
   }
@@ -834,7 +857,6 @@ export function StockRevisionPanel({
               <select
                 value={warehouseId}
                 onChange={(e) => {
-                  autoEnsureKeyRef.current = '';
                   setWarehouseId(e.target.value);
                 }}
                 className="w-full px-3 py-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500"
@@ -876,6 +898,7 @@ export function StockRevisionPanel({
           <RevisionReportModal
             report={completionReport}
             userId={userId}
+            canPreparePurchase={canCloseAndBuy}
             onClose={() => setCompletionReport(null)}
           />
         )}
@@ -883,13 +906,36 @@ export function StockRevisionPanel({
     );
   }
 
+  const staleOpen =
+    Boolean(resolvedActiveCount) &&
+    !isSameLocalDay(resolvedActiveCount?.startedAt || resolvedActiveCount?.createdAt);
+
   return (
     <div className="space-y-4">
+      {staleOpen ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/80 dark:border-amber-900 dark:bg-amber-950/30 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-amber-900 dark:text-amber-200">
+            Revisión abierta de otro día ({formatStockDate(resolvedActiveCount?.startedAt || resolvedActiveCount?.createdAt)}). Puedes continuar o descartarla.
+          </p>
+          {canCloseAndBuy ? (
+            <button
+              type="button"
+              disabled={cancellingCount}
+              onClick={() => void handleCancelRevision()}
+              className={`${VERTIAL_BTN_SECONDARY} !min-h-0 px-3 py-2 text-xs`}
+            >
+              {cancellingCount ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+              Descartar
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="font-bold text-gray-900 dark:text-white">{resolvedActiveCount.name}</h3>
+          <h3 className="font-bold text-gray-900 dark:text-white">{resolvedActiveCount!.name}</h3>
           <p className="text-sm text-gray-500">
-            {resolvedActiveCount.warehouseName || storeLabel} · {reviewedCount}/{totalReviewLines} revisados
+            {resolvedActiveCount!.warehouseName || storeLabel} · {reviewedCount}/{totalReviewLines} revisados
             {pendingRevisionCount > 0 && (
               <> · <span className="text-amber-600 font-semibold">{pendingRevisionCount} pendientes</span></>
             )}
@@ -1000,18 +1046,26 @@ export function StockRevisionPanel({
       )}
 
       <div className="sticky bottom-0 pt-3 pb-1 bg-gradient-to-t from-gray-50 via-gray-50 to-transparent dark:from-gray-900 dark:via-gray-900">
-        <button
-          type="button"
-          onClick={() => void handleCompleteRevision()}
-          disabled={completingCount || reviewedCount < totalReviewLines}
-          className="w-full sm:w-auto sm:float-right inline-flex items-center justify-center gap-2 min-h-[52px] touch-manipulation px-6 py-3 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-xl text-base font-semibold disabled:opacity-50"
-        >
-          {completingCount ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />}
-          Cerrar revisión y corregir stock
-        </button>
-        {reviewedCount < totalReviewLines && (
-          <p className="text-sm text-gray-500 sm:text-right mt-2 clear-both">
-            Faltan {totalReviewLines - reviewedCount} producto{totalReviewLines - reviewedCount === 1 ? '' : 's'}
+        {canCloseAndBuy ? (
+          <>
+            <button
+              type="button"
+              onClick={() => void handleCompleteRevision()}
+              disabled={completingCount || reviewedCount < totalReviewLines}
+              className={`${VERTIAL_BTN_PRIMARY} w-full sm:w-auto sm:float-right !min-h-[52px] px-6 py-3 text-base`}
+            >
+              {completingCount ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />}
+              Cerrar revisión y corregir stock
+            </button>
+            {reviewedCount < totalReviewLines && (
+              <p className="text-sm text-gray-500 sm:text-right mt-2 clear-both">
+                Faltan {totalReviewLines - reviewedCount} producto{totalReviewLines - reviewedCount === 1 ? '' : 's'}
+              </p>
+            )}
+          </>
+        ) : (
+          <p className="text-sm text-center text-amber-800 dark:text-amber-200 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50/80 dark:bg-amber-950/30 px-4 py-3">
+            Puedes marcar Cuadra / No cuadra. El <strong>encargado</strong> (o quien tenga permiso de Inventario en Equipo) cierra y corrige el stock.
           </p>
         )}
       </div>
@@ -1020,6 +1074,7 @@ export function StockRevisionPanel({
         <RevisionReportModal
           report={completionReport}
           userId={userId}
+          canPreparePurchase={canCloseAndBuy}
           onClose={() => setCompletionReport(null)}
         />
       )}

@@ -10,11 +10,13 @@ import {
   comboItemsInCatalogSection,
   comboMenuSectionKey,
   comboMenuSizePresetsForCatalog,
+  comboSizeCountsFromPresetStructure,
   defaultComboStructureForCatalog,
   inferComboSlotKind,
   isComboMenuComplete,
   normalizeComboItemsForSave,
   pickComboProductInSection,
+  scaleComboStructureCounts,
   totalUnitsInCatalogSection,
   unitsNeededInComboSection,
   type ComboMenuCatalogSection,
@@ -480,8 +482,13 @@ export function CatalogComboCompositionEditor({
   const applyPreset = (presetId: string) => {
     const preset = menuSizePresets.find((p) => p.id === presetId);
     if (!preset) return;
-    emitStructure(preset.structure.map((s) => ({ ...s })));
-    if (comboItems.length > 0) emitChange([]);
+    // Solo cantidades: no sustituye partes ni borra productos ya marcados.
+    const counts = comboSizeCountsFromPresetStructure(preset.structure);
+    const base =
+      structure.length > 0
+        ? structure
+        : defaultComboStructureForCatalog({ restaurant: restaurantCatalog });
+    emitStructure(scaleComboStructureCounts(base, counts));
   };
 
   const menuSections = useMemo(
@@ -544,7 +551,7 @@ export function CatalogComboCompositionEditor({
             <Plus className="w-4 h-4" />
             Añadir parte
           </button>
-          <span className="text-[11px] text-gray-400">Plantillas:</span>
+          <span className="text-[11px] text-gray-400">Para cuántos:</span>
           {menuSizePresets.map((preset) => (
             <button
               key={preset.id}
@@ -553,9 +560,7 @@ export function CatalogComboCompositionEditor({
               className="px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
               title={preset.hint}
             >
-              {preset.id === 'estandar' && '1 persona'}
-              {preset.id === 'duo' && '2 personas'}
-              {preset.id === 'familiar' && 'Familia'}
+              {preset.label}
             </button>
           ))}
         </div>

@@ -59,7 +59,7 @@ export const SALA_FLOOR_SKINS: Record<SalaFloorSkinId, SalaFloorSkin> = {
     atmosphereClass:
       'bg-[radial-gradient(ellipse_at_50%_0%,rgba(167,139,250,0.25),transparent_55%),radial-gradient(ellipse_at_80%_90%,rgba(232,121,249,0.12),transparent_40%)]',
     tableClass:
-      'border-2 border-violet-400/50 bg-violet-950/90 shadow-lg shadow-violet-900/40',
+      'border-2 border-amber-300/45 bg-gradient-to-br from-violet-900 to-fuchsia-950/90 shadow-lg shadow-violet-900/40',
     tableTextClass: 'text-violet-50',
     badgeClass: 'bg-violet-500/90 text-white',
   },
@@ -87,4 +87,4 @@ export function skinForRoomType(roomType: SalaRoomType | string | undefined): Sa
 
 export const DEFAULT_FLOOR_WIDTH = 960;
 export const DEFAULT_FLOOR_HEIGHT = 640;
-export const TABLE_NODE_SIZE = 72;
+export const TABLE_NODE_SIZE = 88;

@@ -17,6 +17,7 @@ export const ROLE_PERMISSION_OPTIONS = [
   { key: 'sala', label: 'Sala', description: 'Gestión de mesas, comandas y cobro en sala' },
   { key: 'scrapyard', label: 'Desguace', description: 'Entrada de vehiculos, despiece y bajas' },
   { key: 'construction.collections', label: 'Cobros de obra', description: 'Ver y gestionar cobros de clientes en obras' },
+  { key: 'inventory', label: 'Inventario', description: 'Cerrar revisión de stock y preparar compra' },
   { key: 'butcher_purchases', label: 'Compras carnicería', description: 'Entradas de mercancía, lotes y costes' },
   { key: 'butcher_waste', label: 'Merma carnicería', description: 'Registrar y revisar mermas / caducados' },
 ] as const;
@@ -41,6 +42,7 @@ export const VERTIAL_ACCESS_PERMISSION_MODULES = [
   { key: 'cash_register', label: 'Caja / TPV' },
   { key: 'cleaning_materials', label: 'Materiales limpieza' },
   { key: 'acquisitions', label: 'Compras' },
+  { key: 'inventory', label: 'Inventario' },
   { key: 'butcher_purchases', label: 'Compras carnicería' },
   { key: 'butcher_waste', label: 'Merma carnicería' },
   { key: 'reports', label: 'Informes' },
@@ -71,8 +73,8 @@ export function getVertialAccessPermissionModules(businessType?: string | null) 
     if (module.key === 'sala' || module.key === 'reservations') {
       return isRestaurant || !type;
     }
-    // Inmobiliaria: sin compras / caja TPV / flota delivery.
-    if (isRealEstate && (module.key === 'acquisitions' || module.key === 'cash_register' || module.key === 'fleet' || module.key === 'delivery')) {
+    // Inmobiliaria: sin compras / inventario stock / caja TPV / flota delivery.
+    if (isRealEstate && (module.key === 'acquisitions' || module.key === 'inventory' || module.key === 'cash_register' || module.key === 'fleet' || module.key === 'delivery')) {
       return false;
     }
     // clients, finance, sales, documents, team, delivery, cash_register, reports, fleet, acquisitions…

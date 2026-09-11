@@ -326,7 +326,7 @@ export async function removeCatalogCategoryFromBrands(
   let updatedBrands = 0;
 
   for (const brand of brands) {
-    const prev = brand.catalogCategories ?? [];
+    const prev = Array.isArray(brand.catalogCategories) ? brand.catalogCategories : [];
     const next = prev.filter((c) => normalizeImportCategory(c) !== target);
     if (next.length === prev.length) continue;
     await updateBrandRequest(bid, { ...brand, catalogCategories: next });
@@ -556,7 +556,11 @@ export async function activateCommercialLinesAfterCatalogImport(
   if (!bid || items.length === 0) return { activated: 0 };
 
   const usedBrandIds = new Set(
-    items.flatMap((item) => (item.brandIds ?? []).map((id) => String(id || '').trim()).filter(Boolean)),
+    items.flatMap((item) =>
+      (Array.isArray(item.brandIds) ? item.brandIds : [])
+        .map((id) => String(id || '').trim())
+        .filter(Boolean),
+    ),
   );
   if (usedBrandIds.size === 0) return { activated: 0 };
 

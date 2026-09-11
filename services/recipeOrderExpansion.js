@@ -113,11 +113,8 @@ export function expandOrderItemsForRecipeDeduction(items, catalogById) {
 }
 
 function ingredientQtyPerUnit(ingredient, portions = 1) {
-  let q = Number(ingredient.quantity || 0) / (Number(portions) > 0 ? Number(portions) : 1);
-  if (ingredient.wastePercent > 0) {
-    q = q / (1 - ingredient.wastePercent / 100);
-  }
-  return q;
+  // Merma solo en coste de escandallo; half-half descuenta qty de línea.
+  return Number(ingredient.quantity || 0) / (Number(portions) > 0 ? Number(portions) : 1);
 }
 
 /**

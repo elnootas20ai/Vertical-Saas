@@ -12,6 +12,7 @@ import {
   listPointsOfSaleByUser,
 } from './couchdb.js';
 import { storeWarehouseDisplayName } from '../shared/stock/warehouseStockQty.js';
+import { stampOpsDoc } from '../shared/scope/opsScope.js';
 import logger from './logger.js';
 
 function activePdvs(pointsOfSale = []) {
@@ -67,6 +68,8 @@ export async function ensureStoreWarehouses(req, userId, pointsOfSale) {
     if (!pdvId) continue;
     const desiredName = storeWarehouseDisplayName(pdv.name || pdv.code || 'Tienda');
 
+    const pdvBiz = String(pdv.businessId || pdv.business_id || '').replace(/^business:/, '').trim();
+
     let hit = findWarehouseForSalesPoint(warehouses, pdvId);
     if (hit) {
       const needsName = String(hit.name || '').trim() !== desiredName;
@@ -111,13 +114,17 @@ export async function ensureStoreWarehouses(req, userId, pointsOfSale) {
       continue;
     }
 
-    const doc = buildWarehouseDocument(uid, {
+    const doc = buildWarehouseDocument(uid, stampOpsDoc({
       name: desiredName,
       salesPointId: pdvId,
       warehouseType: 'store',
       isDefault: warehouses.filter((w) => w.active !== false && !w.deletedAt).length === 0,
       active: true,
-    });
+    }, {
+      ownerUserId: uid,
+      businessId: pdvBiz,
+      salesPointId: pdvId,
+    }));
     const saved = await putDocument(req, db, doc._id, doc);
     warehouses.push({ ...doc, _rev: saved.rev });
     created += 1;

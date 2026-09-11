@@ -66,7 +66,12 @@ export function buildDiningTableDocument(userId, data = {}, existing = null) {
     _rev: existing?._rev || undefined,
     type: 'dining_table',
     user_id: userId,
-    businessId: String(data.businessId || existing?.businessId || ''),
+    businessId: String(data.businessId || data.business_id || existing?.businessId || existing?.business_id || '')
+      .replace(/^business:/, '')
+      .trim(),
+    business_id: String(data.business_id || data.businessId || existing?.business_id || existing?.businessId || '')
+      .replace(/^business:/, '')
+      .trim(),
 
     number: Number(data.number ?? existing?.number ?? 0),
     name: String(data.name ?? existing?.name ?? ''),
@@ -462,7 +467,12 @@ export function buildDiningOrderDocument(userId, data = {}, existing = null) {
     _rev: existing?._rev || undefined,
     type: 'dining_order',
     user_id: userId,
-    businessId: String(data.businessId || existing?.businessId || ''),
+    businessId: String(data.businessId || data.business_id || existing?.businessId || existing?.business_id || '')
+      .replace(/^business:/, '')
+      .trim(),
+    business_id: String(data.business_id || data.businessId || existing?.business_id || existing?.businessId || '')
+      .replace(/^business:/, '')
+      .trim(),
 
     tableId: String(data.tableId ?? existing?.tableId ?? ''),
     tableNumber: Number(data.tableNumber ?? existing?.tableNumber ?? 0),
@@ -518,7 +528,8 @@ export function sanitizeDiningOrder(doc) {
     type: 'dining_order',
     id: doc._id,
     userId: doc.user_id,
-    businessId: doc.businessId || '',
+    businessId: doc.businessId || doc.business_id || '',
+    business_id: doc.business_id || doc.businessId || '',
     tableId: doc.tableId || '',
     tableNumber: doc.tableNumber || 0,
     tableName: doc.tableName || '',
@@ -611,6 +622,17 @@ export async function listDiningOrdersByUser(req, userId, filters = {}) {
   }
   if (filters.dateTo) {
     orders = orders.filter((o) => o.createdAt <= filters.dateTo);
+  }
+  const businessFilter = String(filters.businessId || filters.business_id || '')
+    .replace(/^business:/, '')
+    .trim();
+  if (businessFilter) {
+    const accountN = Math.max(1, Number(filters.accountBusinessCount) || 1);
+    orders = orders.filter((o) => {
+      const ob = String(o.businessId || o.business_id || '').replace(/^business:/, '').trim();
+      if (!ob) return accountN <= 1;
+      return ob === businessFilter;
+    });
   }
 
   return orders.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));

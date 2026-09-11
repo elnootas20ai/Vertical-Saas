@@ -34,8 +34,16 @@ import { resolvePurchaseInvoiceNumber } from './purchaseDocNumber.js';
 import { sanitizeSupplierProductAliases } from '../shared/purchases/supplierProductAlias.js';
 import { normalizeEsTaxPolicy } from '../shared/tax/spainVat.js';
 import { isEncryptedSecret, sealImapPassword } from './secretAtRest.js';
+import {
+  filterCatalogDocsByBusinessScope as filterCatalogDocsByBusinessScopeCore,
+} from '../shared/scope/opsScope.js';
 
 export { clientMatchesBusinessScope };
+
+/** Re-export CORE: multi-empresa no comparte legacy sin business_id. */
+export function filterCatalogDocsByBusinessScope(docs, businessId, accountBusinessCount = 1) {
+  return filterCatalogDocsByBusinessScopeCore(docs, businessId, accountBusinessCount);
+}
 
 function normalizeDbName(value) {
   return String(value || 'vertial')
@@ -70,7 +78,7 @@ export const INVOICES_DB = 'invoice';
 export const FLEET_DB = 'fleet';
 export const NOTIFICATIONS_DB = 'notifications';
 export const ACCOUNT_ACTIVITY_LIMIT = 50;
-export const TEAM_PERMISSION_KEYS = ['vehicles', 'clients', 'sales', 'reservations', 'documents', 'finance', 'ancove', 'team', 'fleet', 'delivery', 'cash_register', 'cleaning_materials', 'acquisitions', 'butcher_waste', 'butcher_purchases', 'reports', 'scrapyard_docs', 'scrapyard', 'workshop'];
+export const TEAM_PERMISSION_KEYS = ['vehicles', 'clients', 'sales', 'reservations', 'documents', 'finance', 'ancove', 'team', 'fleet', 'delivery', 'cash_register', 'cleaning_materials', 'acquisitions', 'inventory', 'butcher_waste', 'butcher_purchases', 'reports', 'scrapyard_docs', 'scrapyard', 'workshop'];
 
 export const ROLE_DEFINITIONS = [
   {
@@ -7985,18 +7993,6 @@ function normalizeBusinessScopeId(value) {
   return String(value || '').replace(/^business:/, '').trim();
 }
 
-/** Compras/facturas: aislar por empresa (multi-cuenta en mismo user_id). */
-function filterCatalogDocsByBusinessScope(docs, businessId, accountBusinessCount = 1) {
-  const bid = normalizeBusinessScopeId(businessId);
-  if (!bid) return docs;
-  const n = Math.max(1, Number(accountBusinessCount) || 1);
-  return (docs || []).filter((doc) => {
-    const docBid = normalizeBusinessScopeId(doc?.businessId || doc?.business_id || '');
-    if (!docBid) return n <= 1;
-    return docBid === bid;
-  });
-}
-
 function normalizeAccountUserId(value) {
   const v = String(value || '').trim();
   return v.startsWith('account:') ? v.slice('account:'.length) : v;
@@ -12262,6 +12258,16 @@ export function buildSupplierDocument(userId, data = {}, existing = null) {
     validated: data.validated !== undefined ? Boolean(data.validated) : (existing?.validated ?? false),
     validatedAt: data.validatedAt || existing?.validatedAt || '',
     validatedBy: data.validatedBy || existing?.validatedBy || '',
+    business_id: String(
+      data.business_id || data.businessId || existing?.business_id || existing?.businessId || '',
+    )
+      .replace(/^business:/, '')
+      .trim(),
+    businessId: String(
+      data.businessId || data.business_id || existing?.businessId || existing?.business_id || '',
+    )
+      .replace(/^business:/, '')
+      .trim(),
     createdAt: existing?.createdAt || now,
     updatedAt: now,
   };
@@ -12291,6 +12297,8 @@ export function sanitizeSupplier(doc) {
     validated: doc.validated !== undefined ? Boolean(doc.validated) : false,
     validatedAt: doc.validatedAt || '',
     validatedBy: doc.validatedBy || '',
+    business_id: String(doc.business_id || doc.businessId || '').replace(/^business:/, '').trim(),
+    businessId: String(doc.businessId || doc.business_id || '').replace(/^business:/, '').trim(),
     createdAt: doc.createdAt || new Date().toISOString(),
     updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
     deletedAt: doc.deletedAt || null,
@@ -13025,6 +13033,16 @@ export function buildWarehouseDocument(userId, data = {}, existing = null) {
     salesPointId: String(
       data.salesPointId !== undefined ? data.salesPointId : existing?.salesPointId || '',
     ).trim(),
+    business_id: String(
+      data.business_id || data.businessId || existing?.business_id || existing?.businessId || '',
+    )
+      .replace(/^business:/, '')
+      .trim(),
+    businessId: String(
+      data.businessId || data.business_id || existing?.businessId || existing?.business_id || '',
+    )
+      .replace(/^business:/, '')
+      .trim(),
     createdAt: existing?.createdAt || now,
     updatedAt: now,
   };
@@ -13049,6 +13067,8 @@ export function sanitizeWarehouse(doc) {
     email: doc.email || '',
     warehouseType: doc.warehouseType || 'general',
     salesPointId: doc.salesPointId || '',
+    business_id: String(doc.business_id || doc.businessId || '').replace(/^business:/, '').trim(),
+    businessId: String(doc.businessId || doc.business_id || '').replace(/^business:/, '').trim(),
     assignedWorkerId: doc.assignedWorkerId || '',
     assignedWorkerName: doc.assignedWorkerName || '',
     vehiclePlate: doc.vehiclePlate || '',

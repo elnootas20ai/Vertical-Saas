@@ -35,10 +35,10 @@ export const COMBO_SLOT_META: Record<ComboSlotKind, ComboSlotMeta> = {
   main: {
     kind: 'main',
     label: 'Plato principal',
-    shortLabel: 'Pizza o burger',
-    hint: 'Todo lo de categoría Pizzas o Burgers en tu catálogo',
-    emoji: '🍕',
-    categoryPatterns: [/pizza/i, /burger/i, /hamburg/i],
+    shortLabel: 'Plato principal',
+    hint: 'Platos principales de tu carta (pizzas, burgers, tapas…)',
+    emoji: '🍽️',
+    categoryPatterns: [/pizza/i, /burger/i, /hamburg/i, /tapa/i, /principal/i, /racion/i],
   },
   drink: {
     kind: 'drink',
@@ -74,9 +74,9 @@ export const COMBO_SLOT_META: Record<ComboSlotKind, ComboSlotMeta> = {
   },
 };
 
-/** Menú estándar Modomio: pizza + complemento + bebida. */
+/** Menú estándar: plato + complemento + bebida (categorías reales las pone el dueño). */
 export const DEFAULT_COMBO_STRUCTURE: ComboStructureSlot[] = [
-  { slotKind: 'main', label: 'Pizza o burger', required: true, expectedCount: 1 },
+  { slotKind: 'main', label: 'Plato principal', required: true, expectedCount: 1 },
   { slotKind: 'side', label: 'Complemento', required: true, expectedCount: 1 },
   { slotKind: 'drink', label: 'Bebida', required: true, expectedCount: 1 },
 ];
@@ -121,14 +121,14 @@ export function comboMenuSizePresetsForCatalog(options?: { restaurant?: boolean 
   return [
     {
       id: 'estandar',
-      label: 'Individual',
-      hint: '1 plato + 1 complemento + 1 bebida',
+      label: '1 persona',
+      hint: 'Cantidades para 1 persona',
       structure: RESTAURANT_DEFAULT_COMBO_STRUCTURE.map((s) => ({ ...s })),
     },
     {
       id: 'duo',
-      label: 'Dúo',
-      hint: '2 platos + 1 complemento + 2 bebidas',
+      label: '2 personas',
+      hint: 'Cantidades para 2 personas',
       structure: [
         { slotKind: 'main', label: 'Plato principal (×2)', required: true, expectedCount: 2 },
         { slotKind: 'side', label: 'Complemento', required: true, expectedCount: 1 },
@@ -138,7 +138,7 @@ export function comboMenuSizePresetsForCatalog(options?: { restaurant?: boolean 
     {
       id: 'familiar',
       label: 'Familia',
-      hint: '3 platos + 2 complementos + 4 bebidas',
+      hint: 'Cantidades para familia',
       structure: [
         { slotKind: 'main', label: 'Plato principal (×3)', required: true, expectedCount: 3 },
         { slotKind: 'side', label: 'Complemento (×2)', required: true, expectedCount: 2 },
@@ -235,7 +235,7 @@ export function isComboStructureConfirmed(
 export function validateComboSectionDraft(
   draft: Record<'main' | 'side' | 'drink' | 'dessert', ComboSectionDraft>,
 ): string | null {
-  if (!draft.main.enabled) return 'El menú debe incluir pizza';
+  if (!draft.main.enabled) return 'El menú debe incluir plato principal';
   if (!draft.side.enabled) return 'El menú debe incluir complemento';
   if (!draft.drink.enabled) return 'El menú debe incluir bebida';
   return null;
@@ -248,46 +248,89 @@ export type ComboMenuPreset = {
   structure: ComboStructureSlot[];
 };
 
-/** Plantillas rápidas para definir qué lleva el menú. */
+/** Plantillas rápidas: solo cantidades (1 / 2 / familia). No inventan categorías. */
 export const COMBO_MENU_PRESETS: ComboMenuPreset[] = [
   {
     id: 'estandar',
-    label: 'Individual',
-    hint: '1 pizza + 1 complemento + 1 bebida',
+    label: '1 persona',
+    hint: 'Cantidades para 1 persona',
     structure: DEFAULT_COMBO_STRUCTURE,
   },
   {
     id: 'duo',
-    label: 'Dúo',
-    hint: '2 pizzas + 1 complemento + 2 bebidas',
+    label: '2 personas',
+    hint: 'Cantidades para 2 personas',
     structure: [
-      { slotKind: 'main', label: 'Pizzas (×2)', required: true, expectedCount: 2 },
+      { slotKind: 'main', label: 'Plato principal (×2)', required: true, expectedCount: 2 },
       { slotKind: 'side', label: 'Complemento', required: true, expectedCount: 1 },
-      { slotKind: 'drink', label: 'Bebidas (×2)', required: true, expectedCount: 2 },
+      { slotKind: 'drink', label: 'Bebida (×2)', required: true, expectedCount: 2 },
     ],
   },
   {
     id: 'familiar',
-    label: 'Familiar',
-    hint: '3 pizzas + 2 complementos + 4 bebidas',
+    label: 'Familia',
+    hint: 'Cantidades para familia',
     structure: [
-      { slotKind: 'main', label: 'Pizzas (×3)', required: true, expectedCount: 3 },
-      { slotKind: 'side', label: 'Complementos (×2)', required: true, expectedCount: 2 },
-      { slotKind: 'drink', label: 'Bebidas (×4)', required: true, expectedCount: 4 },
+      { slotKind: 'main', label: 'Plato principal (×3)', required: true, expectedCount: 3 },
+      { slotKind: 'side', label: 'Complemento (×2)', required: true, expectedCount: 2 },
+      { slotKind: 'drink', label: 'Bebida (×4)', required: true, expectedCount: 4 },
     ],
   },
   {
     id: 'con_postre',
     label: 'Con postre',
-    hint: 'Pizza + complemento + bebida + postre',
+    hint: 'Plato + complemento + bebida + postre',
     structure: [
-      { slotKind: 'main', label: 'Pizza', required: true, expectedCount: 1 },
+      { slotKind: 'main', label: 'Plato principal', required: true, expectedCount: 1 },
       { slotKind: 'side', label: 'Complemento', required: true, expectedCount: 1 },
       { slotKind: 'drink', label: 'Bebida', required: true, expectedCount: 1 },
       { slotKind: 'dessert', label: 'Postre', required: false, expectedCount: 1 },
     ],
   },
 ];
+
+/**
+ * Extrae conteos por tipo de hueco desde una plantilla de tamaño.
+ * Solo se usan números — no se copian labels/categorías de la plantilla.
+ */
+export function comboSizeCountsFromPresetStructure(
+  structure: ComboStructureSlot[],
+): Partial<Record<ComboSlotKind, number>> {
+  const out: Partial<Record<ComboSlotKind, number>> = {};
+  for (const slot of structure || []) {
+    if (!slot?.slotKind) continue;
+    out[slot.slotKind] = Math.max(1, Math.min(12, Number(slot.expectedCount) || 1));
+  }
+  return out;
+}
+
+/**
+ * Aplica tamaño (1 persona / 2 / familia) solo cambiando expectedCount.
+ * Conserva catalogCategory, allowedProductIds y el resto de la estructura del dueño.
+ */
+export function scaleComboStructureCounts(
+  current: ComboStructureSlot[],
+  counts: Partial<Record<ComboSlotKind, number>>,
+): ComboStructureSlot[] {
+  if (!Array.isArray(current) || current.length === 0) return [];
+  return current.map((slot) => {
+    const raw = counts[slot.slotKind];
+    if (raw == null) return { ...slot };
+    const n = Math.max(1, Math.min(12, Number(raw) || 1));
+    const baseLabel =
+      String(slot.catalogCategory || '').trim() ||
+      String(slot.label || '')
+        .replace(/\s*\(×\d+\)\s*$/u, '')
+        .trim() ||
+      COMBO_SLOT_META[slot.slotKind]?.shortLabel ||
+      'Parte';
+    return {
+      ...slot,
+      expectedCount: n,
+      label: n > 1 ? `${baseLabel} (×${n})` : baseLabel,
+    };
+  });
+}
 
 export type ComboMainFamily = 'pizza' | 'burger' | 'taco';
 

@@ -28,6 +28,7 @@ import {
   applyManualAlbaranQty,
   buildAlbaranCompareRows,
   buildAlbaranRowsFromInvoiceOnly,
+  buildCumulativeReceivedItems,
   buildPendingOrderLinesFromCompare,
   compareRowHasIssue,
   isAlbaranReceptionIncomplete,
@@ -609,11 +610,8 @@ export function AlbaranCorroborateModal({
       let resolvedWarehouseId = warehouseId || '';
 
       if (order) {
-        const receivedItems = receivable.map((r) => ({
-          catalogItemId: r.catalogItemId,
-          quantity: r.receiveQty,
-          unitCost: r.receiveUnitCost,
-        }));
+        // Backend espera recibido acumulado absoluto, no el delta de este albarán.
+        const receivedItems = buildCumulativeReceivedItems(order, receivable);
         const receiveResult = await markOrderReceivedRequest(userId, order._id, receivedItems, {
           warehouseId,
           salesPointId,

@@ -8,8 +8,10 @@ import {
   createTransfer,
   createInternalConsumption,
 } from '../controllers/stockMovementController.js';
+import { requireUserScope } from '../middleware/requireUserScope.js';
 
 const stockMovementRouter = Router();
+stockMovementRouter.use(requireUserScope);
 
 stockMovementRouter.get('/:userId/summary', getSummary);
 stockMovementRouter.get('/:userId/item/:catalogItemId', getMovementsByItem);

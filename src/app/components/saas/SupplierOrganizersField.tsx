@@ -362,7 +362,10 @@ export function SupplierOrganizersField({
       sortSupplierOrganizerChoices(
         choices
           .filter((c) => !selectedOrgs.includes(c.id))
-          .filter((c) => matchesQuery(c.label) || matchesQuery(c.kind === 'ingredients' ? 'ingredientes' : 'almacen')),
+          .filter((c) =>
+            matchesQuery(c.label) ||
+            matchesQuery(c.kind === 'ingredients' ? 'carta secciones tapas' : 'almacen cocina'),
+          ),
       ),
     // matchesQuery closes over queryNorm
     // eslint-disable-next-line react-hooks/exhaustive-deps -- queryNorm drives filter
@@ -410,7 +413,22 @@ export function SupplierOrganizersField({
   const addOrganizer = (rawId: string) => {
     const id = String(rawId || '').trim();
     if (!id || selectedOrgs.includes(id)) return;
-    emit([...selectedOrgs, id], selectedItems);
+    const itemsOfOrg = stockItemsForOrganizer(
+      catalogItems,
+      id,
+      storeIngredients,
+      commercialBrands,
+    );
+    const nextItems = new Set(selectedItems);
+    const nextCosts = { ...itemCosts };
+    for (const item of itemsOfOrg) {
+      nextItems.add(item._id);
+      if (nextCosts[item._id] == null || String(nextCosts[item._id]).trim() === '') {
+        const n = Number(item.costPrice);
+        nextCosts[item._id] = Number.isFinite(n) && n > 0 ? String(n) : '';
+      }
+    }
+    emit([...selectedOrgs, id], nextItems, nextCosts);
     setOpenOrganizerId(id);
     setPickId('');
   };
@@ -490,8 +508,9 @@ export function SupplierOrganizersField({
       <div>
         <label className={labelClassName}>Qué te vende</label>
         <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-          Primero <span className="font-semibold">Almacén</span> (Envases, Limpieza…).{' '}
-          <span className="font-semibold">Ingredientes</span> van agrupados por sección de receta (nunca el plato del TPV). Marca lo que te vende y pon el precio €/ud.
+          Primero <span className="font-semibold">Almacén</span> (Cocina, Bebidas, Envases…).{' '}
+          <span className="font-semibold">Secciones de carta</span> (Tapas, etc.) agrupan materias por
+          receta — nunca el plato del TPV. Marca lo que te vende y pon el precio €/ud.
         </p>
         <div className="flex flex-col sm:flex-row gap-2">
           <select
@@ -517,7 +536,7 @@ export function SupplierOrganizersField({
               </optgroup>
             ) : null}
             {remainingIngredients.length > 0 ? (
-              <optgroup label="Ingredientes">
+              <optgroup label="Secciones de carta">
                 {remainingIngredients.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.label}
@@ -609,7 +628,7 @@ export function SupplierOrganizersField({
                               : 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300'
                           }`}
                         >
-                          {kind === 'ingredients' ? 'Ingredientes' : 'Almacén'}
+                          {kind === 'ingredients' ? 'Carta' : 'Almacén'}
                         </span>
                         <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
                           {labelById.get(orgId) || orgId}

@@ -235,10 +235,6 @@ const SupplierWorkspacePage = lazyPage(
   () => import('./pages/saas/purchases/SupplierWorkspacePage'),
   'SupplierWorkspacePage',
 );
-const ProductWorkspacePage = lazyPage(
-  () => import('./pages/saas/catalog/ProductWorkspacePage'),
-  'ProductWorkspacePage',
-);
 const ComprasStockPage = lazyPage(() => import('./pages/saas/ComprasStockPage'), 'ComprasStockPage');
 const PromotionsPage = lazyPage(() => import('./pages/saas/PromotionsPage'), 'PromotionsPage');
 const Clockins = lazyPage(() => import('./pages/saas/Clockins'), 'Clockins');
@@ -700,8 +696,6 @@ export const router = createBrowserRouter([
           { path: 'taxes', element: <RequireBusinessOwner><TaxesPage /></RequireBusinessOwner> },
           { path: 'bank-reconciliation', element: <RequireBusinessOwner><BankReconciliationPage /></RequireBusinessOwner> },
           { path: 'catalog', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><VerticalCatalogEntry /></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
-          { path: 'catalog/producto/nuevo', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><ProductWorkspacePage /></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
-          { path: 'catalog/producto/:productId', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><ProductWorkspacePage /></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
           { path: 'compras', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><Outlet /></RedirectEventsFromRetailRoutes></RequireBusinessOwner>, children: [
             { path: 'proveedor/nuevo', element: <SupplierWorkspacePage /> },
             { path: 'proveedor/:supplierId/editar', element: <SupplierWorkspacePage /> },

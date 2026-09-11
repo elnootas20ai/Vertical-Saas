@@ -66,6 +66,23 @@ export function isPurchaseOrderWaitingAlbaran(order: Pick<PurchaseOrder, 'status
   return PURCHASE_ORDER_WAITING_STATUSES.has(String(order.status || ''));
 }
 
+/** Pedido abierto (borrador / enviado / parcial) más reciente de ese proveedor. */
+export function findOpenPurchaseOrderForSupplier<
+  T extends Pick<PurchaseOrder, 'supplierId' | 'status' | 'createdAt'>,
+>(orders: T[] | null | undefined, supplierId: string): T | null {
+  const sid = String(supplierId || '').trim();
+  if (!sid || !Array.isArray(orders) || orders.length === 0) return null;
+  let best: T | null = null;
+  for (const order of orders) {
+    if (String(order.supplierId || '').trim() !== sid) continue;
+    if (!isPurchaseOrderWaitingAlbaran(order)) continue;
+    if (!best || String(order.createdAt || '') > String(best.createdAt || '')) {
+      best = order;
+    }
+  }
+  return best;
+}
+
 export function invoiceIsAlbaran(inv: Pick<PurchaseInvoice, 'documentKind' | 'ocrData'>): boolean {
   const kind = String(inv.documentKind || '').toLowerCase();
   const ocrKind = String(inv.ocrData?.documentType || '').toLowerCase();
@@ -201,6 +218,35 @@ export function pendingOrderQty(item: Pick<PurchaseOrderItem, 'quantity' | 'rece
   const orderedQty = Number(item.quantity) || 0;
   const alreadyReceived = Number(item.received) || 0;
   return Math.max(0, orderedQty - alreadyReceived);
+}
+
+/**
+ * Payload para markOrderReceived: el backend trata `quantity` como recibido
+ * acumulado absoluto (no delta de este albarán).
+ */
+export function buildCumulativeReceivedItems(
+  order: Pick<PurchaseOrder, 'items'>,
+  rows: AlbaranCompareRow[],
+): Array<{ catalogItemId: string; quantity: number; unitCost: number }> {
+  const orderItems = Array.isArray(order.items) ? order.items : [];
+  const out: Array<{ catalogItemId: string; quantity: number; unitCost: number }> = [];
+
+  for (const row of rows) {
+    if (row.excluded || !row.catalogItemId) continue;
+    const receiveNow = Number(row.receiveQty) || 0;
+    if (receiveNow <= 0) continue;
+    const item =
+      orderItems.find((i) => i.catalogItemId === row.catalogItemId && i.name === row.name) ||
+      orderItems.find((i) => i.catalogItemId === row.catalogItemId);
+    const alreadyReceived = Number(item?.received) || 0;
+    out.push({
+      catalogItemId: row.catalogItemId,
+      quantity: alreadyReceived + receiveNow,
+      unitCost: Number(row.receiveUnitCost) || 0,
+    });
+  }
+
+  return out;
 }
 
 /** Recalcula fila tras editar la cantidad del albarán (comprobación manual). */

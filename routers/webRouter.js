@@ -11,6 +11,7 @@ import {
   updateWebOrder,
 } from '../controllers/webController.js';
 import { getPublicMesaByToken } from '../controllers/mesaQrController.js';
+import { requireBusinessAccess } from '../middleware/requireBusinessAccess.js';
 
 const webPublicRouter = Router();
 webPublicRouter.get('/storefront/:slug', getPublicStorefront);
@@ -19,6 +20,7 @@ webPublicRouter.post('/storefront/:slug/orders', createPublicOrder);
 webPublicRouter.get('/mesa/:token', getPublicMesaByToken);
 
 const webProtectedRouter = Router();
+webProtectedRouter.use(requireBusinessAccess);
 webProtectedRouter.get('/config/:businessId', getWebConfig);
 webProtectedRouter.put('/config/:businessId', saveWebConfig);
 webProtectedRouter.get('/integrations/:businessId', getDeliveryIntegrations);

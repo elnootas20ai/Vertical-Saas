@@ -27,18 +27,20 @@ import {
   putStockRevisionListRequest,
   type StockCount,
 } from '../../lib/stockCountApi';
-import { filterSupplierOrderStockItems, filterStockRevisionItems } from '../../lib/stockInventoryScope';
+import { filterSupplierOrderStockItems, filterStockRevisionItems, filterKitchenIngredientStockItems, filterGeneralWarehouseStockItems } from '../../lib/stockInventoryScope';
+import { canManageStockInventory } from '../../lib/stockInventoryAccess';
 import { StockRevisionPanel } from './StockRevisionPanel';
 import { StockPurchaseListPreview } from './StockPurchaseListPreview';
 import { InventoryPanel } from './InventoryPanel';
-import { StoreIngredientsPanel } from './StoreIngredientsPanel';
+import { InventoryCeoHub } from './InventoryCeoHub';
 import { SaasTabWorkspace } from './SaasTabWorkspace';
 import {
-  formatStockDate,
   formatStockTime,
   countDiscrepancies,
   groupCountsByDay,
+  isSameLocalDay,
 } from '../../lib/stockRevisionUtils';
+import { formatMoneyEs, formatQtyEs } from '../../lib/formatNumberEs';
 
 type StockSection = 'warehouse' | 'ingredients' | 'inventory' | 'operations' | 'history';
 type OperationsMode = 'pending' | 'revision' | 'checklist';
@@ -271,9 +273,10 @@ export function StockTabPanel({
   catalogLoading = false,
 }: StockTabPanelProps) {
   const { user } = useAuth();
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, businesses } = useBusiness();
   const actorUserId = String(user?.user_id || user?.id || '').trim();
   const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '').trim();
+  const canPreparePurchase = canManageStockInventory(user, businesses);
 
   const [section, setSection] = useState<StockSection>('warehouse');
   const [operationsMode, setOperationsMode] = useState<OperationsMode>('pending');
@@ -328,6 +331,14 @@ export function StockTabPanel({
   }, [storeWarehouseId]);
 
   const scopedItems = useMemo(() => filterSupplierOrderStockItems(items), [items]);
+  const generalWarehouseItems = useMemo(
+    () => filterGeneralWarehouseStockItems(scopedItems),
+    [scopedItems],
+  );
+  const kitchenIngredientStockItems = useMemo(
+    () => filterKitchenIngredientStockItems(scopedItems),
+    [scopedItems],
+  );
   const revisionSelectableItems = useMemo(() => filterStockRevisionItems(items), [items]);
 
   const activeProducts = useMemo(
@@ -370,12 +381,13 @@ export function StockTabPanel({
       const counts = await listStockCountsRequest(userId);
       setAllCounts(counts);
       const wh = warehouseId || storeWarehouseId;
-      const open = counts.find(
+      const open = counts.filter(
         (c) =>
           (c.status === 'draft' || c.status === 'in_progress') &&
           (!wh || !c.warehouseId || c.warehouseId === wh),
       );
-      setActiveCount(open || null);
+      const today = open.find((c) => isSameLocalDay(c.startedAt || c.createdAt));
+      setActiveCount(today || open[0] || null);
     } catch {
       setAllCounts([]);
       setActiveCount(null);
@@ -619,11 +631,6 @@ export function StockTabPanel({
       <SaasTabWorkspace
         stats={[
           { label: 'artículos', value: inventoryStats.total },
-          {
-            label: 'alertas',
-            value: inventoryStats.low + inventoryStats.out,
-            tone: inventoryStats.low + inventoryStats.out > 0 ? 'amber' : 'default',
-          },
           { label: 'valor €', value: estimatedValue.toFixed(0) },
         ]}
         banner={
@@ -641,9 +648,11 @@ export function StockTabPanel({
               const badge =
                 id === 'operations' && (pendingItems.length > 0 || activeCount)
                   ? (activeCount ? 'en curso' : pendingItems.length)
-                  : id === 'inventory' && (inventoryStats.low + inventoryStats.out > 0)
-                    ? inventoryStats.low + inventoryStats.out
-                    : null;
+                  : id === 'inventory' && activeCount
+                    ? 'en curso'
+                    : id === 'inventory' && (inventoryStats.low + inventoryStats.out > 0)
+                      ? inventoryStats.low + inventoryStats.out
+                      : null;
               return (
                 <button
                   key={id}
@@ -674,19 +683,22 @@ export function StockTabPanel({
           </div>
         }
       >
-      {/* ── Almacén: organizadores + artículos ── */}
+      {/* ── Almacén: bebidas / reventa / envases (sin materias de cocina) ── */}
       {section === 'warehouse' && (
-        <InventoryPanel seedStockItems={scopedItems} />
+        <InventoryPanel seedStockItems={generalWarehouseItems} stockScope="general" />
       )}
 
-      {/* ── Ingredientes: organizadores + lista ── */}
-      {section === 'ingredients' && businessId ? (
-        <StoreIngredientsPanel userId={userId} businessId={businessId} />
-      ) : null}
+      {/* ── Ingredientes: stock de cocina (mismo destino que Excel/sync) ── */}
+      {section === 'ingredients' && (
+        <InventoryPanel seedStockItems={kitchenIngredientStockItems} stockScope="ingredients" />
+      )}
 
       {/* ── Operaciones ── */}
       {section === 'operations' && (
         <div className="p-4 sm:p-5 space-y-5">
+          <p className="text-xs text-stone-500 dark:text-stone-400 rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50/80 dark:bg-stone-900/40 px-3 py-2">
+            El conteo diario se hace en el <strong>TPV de tienda</strong>. Aquí preparas «Qué revisar», cargas ceros iniciales y el encargado cierra. La compra se prepara en la pestaña Inventario.
+          </p>
           <div className="flex gap-3 overflow-x-auto pb-1 [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
             <button
               type="button"
@@ -967,34 +979,109 @@ export function StockTabPanel({
                                 <CheckCircle2 className="w-4 h-4" /> Todos los productos cuadraron
                               </p>
                             ) : (
-                              <table className="w-full text-sm">
-                                <thead>
-                                  <tr className="text-xs text-gray-400 uppercase">
-                                    <th className="py-2 text-left">Producto</th>
-                                    <th className="py-2 text-right">Sistema</th>
-                                    <th className="py-2 text-right">Contado</th>
-                                    <th className="py-2 text-right">Dif.</th>
-                                    <th className="py-2 text-left">Contado por</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-50 dark:divide-gray-700/50">
-                                  {diffLines.map((line, idx) => (
-                                    <tr key={`${line.catalogItemId}-${idx}`}>
-                                      <td className="py-2 font-medium">{line.catalogItemName}</td>
-                                      <td className="py-2 text-right tabular-nums">{line.theoreticalStock} {line.unit}</td>
-                                      <td className="py-2 text-right tabular-nums">{line.countedStock} {line.unit}</td>
-                                      <td className={`py-2 text-right font-bold tabular-nums ${(line.difference ?? 0) < 0 ? 'text-red-600' : 'text-blue-600'}`}>
-                                        {(line.difference ?? 0) > 0 ? '+' : ''}{line.difference}
-                                      </td>
-                                      <td className="py-2 text-xs text-gray-500">{line.countedBy ? resolveUserName(line.countedBy) : '—'}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
+                              <>
+                                <div className="mb-3 flex flex-wrap gap-3 text-xs tabular-nums">
+                                  <span className="text-red-700 dark:text-red-300 font-semibold">
+                                    Faltantes{' '}
+                                    {formatMoneyEs(
+                                      Math.abs(
+                                        diffLines
+                                          .filter((l) => Number(l.differenceValue || 0) < 0)
+                                          .reduce((s, l) => s + Number(l.differenceValue || 0), 0),
+                                      ),
+                                    )}
+                                  </span>
+                                  <span className="text-blue-700 dark:text-blue-300 font-semibold">
+                                    Sobrantes{' '}
+                                    {formatMoneyEs(
+                                      diffLines
+                                        .filter((l) => Number(l.differenceValue || 0) > 0)
+                                        .reduce((s, l) => s + Number(l.differenceValue || 0), 0),
+                                    )}
+                                  </span>
+                                </div>
+                                <div className="overflow-x-auto">
+                                  <table className="w-full text-sm min-w-[32rem]">
+                                    <thead>
+                                      <tr className="text-xs text-gray-400 uppercase">
+                                        <th className="py-2 text-left">Producto</th>
+                                        <th className="py-2 text-right">Sistema</th>
+                                        <th className="py-2 text-right">Contado</th>
+                                        <th className="py-2 text-right">Dif.</th>
+                                        <th className="py-2 text-right">%</th>
+                                        <th className="py-2 text-right">€</th>
+                                        <th className="py-2 text-left">Contado por</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-50 dark:divide-gray-700/50">
+                                      {diffLines.map((line, idx) => {
+                                        const pct =
+                                          line.differencePercent != null
+                                            ? line.differencePercent
+                                            : Number(line.theoreticalStock) > 0 && line.difference != null
+                                              ? Math.round(
+                                                  (Number(line.difference) / Number(line.theoreticalStock)) * 10000,
+                                                ) / 100
+                                              : null;
+                                        const euro =
+                                          line.differenceValue != null
+                                            ? line.differenceValue
+                                            : line.difference != null
+                                              ? Math.round(Number(line.difference) * Number(line.costPrice || 0) * 100) / 100
+                                              : null;
+                                        return (
+                                          <tr key={`${line.catalogItemId}-${idx}`}>
+                                            <td className="py-2 font-medium">{line.catalogItemName}</td>
+                                            <td className="py-2 text-right tabular-nums">
+                                              {formatQtyEs(Number(line.theoreticalStock))} {line.unit}
+                                            </td>
+                                            <td className="py-2 text-right tabular-nums">
+                                              {formatQtyEs(Number(line.countedStock))} {line.unit}
+                                            </td>
+                                            <td
+                                              className={`py-2 text-right font-bold tabular-nums ${
+                                                (line.difference ?? 0) < 0 ? 'text-red-600' : 'text-blue-600'
+                                              }`}
+                                            >
+                                              {(line.difference ?? 0) > 0 ? '+' : ''}
+                                              {formatQtyEs(Number(line.difference ?? 0))}
+                                            </td>
+                                            <td
+                                              className={`py-2 text-right tabular-nums text-xs ${
+                                                (pct ?? 0) < 0 ? 'text-red-600' : 'text-blue-600'
+                                              }`}
+                                            >
+                                              {pct == null
+                                                ? '—'
+                                                : `${pct > 0 ? '+' : ''}${pct.toLocaleString('es-ES', {
+                                                    maximumFractionDigits: 1,
+                                                  })} %`}
+                                            </td>
+                                            <td
+                                              className={`py-2 text-right tabular-nums text-xs ${
+                                                (euro ?? 0) < 0 ? 'text-red-600' : 'text-blue-600'
+                                              }`}
+                                            >
+                                              {euro == null
+                                                ? '—'
+                                                : `${euro > 0 ? '+' : ''}${formatMoneyEs(euro)}`}
+                                            </td>
+                                            <td className="py-2 text-xs text-gray-500">
+                                              {line.countedBy ? resolveUserName(line.countedBy) : '—'}
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </>
                             )}
                             {count.totalDifferenceValue !== 0 && (
                               <p className="text-xs text-gray-400 mt-3 tabular-nums">
-                                Impacto en valor: {count.totalDifferenceValue > 0 ? '+' : ''}{count.totalDifferenceValue.toFixed(2)} €
+                                Impacto neto en valor:{' '}
+                                {count.totalDifferenceValue > 0 ? '+' : ''}
+                                {formatMoneyEs(count.totalDifferenceValue)}
                               </p>
                             )}
                             <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-700">
@@ -1014,6 +1101,7 @@ export function StockTabPanel({
                                     userId={userId}
                                     countId={count._id}
                                     countName={count.name}
+                                    canCreateOrders={canPreparePurchase}
                                   />
                                 </div>
                               )}
@@ -1030,9 +1118,22 @@ export function StockTabPanel({
         </div>
       )}
 
-      {/* ── Inventario ── */}
+      {/* ── Inventario (hub CEO / Encargado) ── */}
       {section === 'inventory' && (
-        <InventoryPanel seedStockItems={scopedItems} />
+        <InventoryCeoHub
+          items={activeProducts}
+          activeCount={activeCount}
+          completedCounts={completedCounts}
+          loading={loadingCount || catalogLoading}
+          userId={userId}
+          canPreparePurchase={canPreparePurchase}
+          resolveUserName={resolveUserName}
+          onGoOperations={() => {
+            setOperationsMode(activeCount ? 'revision' : 'checklist');
+            setSection('operations');
+          }}
+          onGoHistory={() => setSection('history')}
+        />
       )}
 
       <AddIngredientModal

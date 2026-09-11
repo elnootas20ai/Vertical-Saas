@@ -82,8 +82,11 @@ function emptyOrganizerStats(total: number): Pick<
 function cartaCategoriesForIngredient(
   catalogItems: CatalogItem[],
   ingredientName: string,
+  storeIngredientId?: string,
 ): Array<{ id: string; label: string }> {
-  const used = catalogItemsUsingIngredient(catalogItems, ingredientName);
+  const used = catalogItemsUsingIngredient(catalogItems, ingredientName, {
+    storeIngredientId,
+  });
   if (used.length === 0) return [];
   const byId = new Map(catalogItems.map((item) => [item._id, item]));
   const out = new Map<string, string>();
@@ -106,7 +109,7 @@ function buildIngredientCategoryGroups(
   const uncategorized = new Set<string>();
 
   for (const ing of ingredients) {
-    const cats = cartaCategoriesForIngredient(catalogItems, ing.name);
+    const cats = cartaCategoriesForIngredient(catalogItems, ing.name, ing.id);
     if (cats.length === 0) {
       uncategorized.add(ing.id);
       continue;
@@ -670,7 +673,7 @@ function listProductsLinkedToIngredient(
     }
   >();
   const catalogById = new Map(catalogItems.map((item) => [item._id, item]));
-  for (const p of catalogItemsUsingIngredient(catalogItems, ing.name)) {
+  for (const p of catalogItemsUsingIngredient(catalogItems, ing.name, { storeIngredientId: ing.id })) {
     const full = catalogById.get(p._id);
     byId.set(p._id, {
       name: p.name,
@@ -1242,7 +1245,7 @@ export function StoreIngredientsPanel({
       : sorted;
     if (!q && categoryFilter) {
       list = list.filter((ing) => {
-        const cats = cartaCategoriesForIngredient(catalogItems, ing.name);
+        const cats = cartaCategoriesForIngredient(catalogItems, ing.name, ing.id);
         if (categoryFilter === INGREDIENT_UNCATEGORIZED_ID) return cats.length === 0;
         return cats.some((c) => c.id === categoryFilter);
       });
@@ -1907,7 +1910,9 @@ export function StoreIngredientsPanel({
                           const flags = readStoreIngredientTpvFlags(ing);
                           const hasInventory =
                             catalogInventoryItemsForIngredient(catalogItems, ing.name).length > 0;
-                          const usageCount = catalogItemsUsingIngredient(catalogItems, ing.name).length;
+                          const usageCount = catalogItemsUsingIngredient(catalogItems, ing.name, {
+                            storeIngredientId: ing.id,
+                          }).length;
                           const openTab: EditIngredientTab = categoryFilter ? 'productos' : 'datos';
                           return (
                             <li key={ing.id} className="px-3 py-2.5">
@@ -2051,7 +2056,9 @@ export function StoreIngredientsPanel({
                               const flags = readStoreIngredientTpvFlags(ing);
                               const hasInventory =
                                 catalogInventoryItemsForIngredient(catalogItems, ing.name).length > 0;
-                              const usageCount = catalogItemsUsingIngredient(catalogItems, ing.name).length;
+                              const usageCount = catalogItemsUsingIngredient(catalogItems, ing.name, {
+                                storeIngredientId: ing.id,
+                              }).length;
                               const openTab: EditIngredientTab = categoryFilter ? 'productos' : 'datos';
                               return (
                                 <tr

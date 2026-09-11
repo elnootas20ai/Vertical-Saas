@@ -145,6 +145,7 @@ export interface SalaRoomConfig {
   name: string;
   color: string;
   roomType: 'salon' | 'terraza' | 'patio' | 'barra' | 'vip' | 'privado';
+  floorBackgroundId?: 'wood' | 'tile' | 'outdoor' | 'night';
   sortOrder: number;
   pdvId?: string;
   workCenterId?: string;

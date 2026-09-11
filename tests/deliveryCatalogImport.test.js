@@ -594,6 +594,8 @@ describe('deliveryCatalogExcelTemplate', () => {
     expect(isWarehouseImportCategory('Limpieza')).toBe(true);
     expect(isWarehouseImportCategory('Ingredientes')).toBe(true);
     expect(isWarehouseImportCategory('Ingredientes · Modomio')).toBe(true);
+    expect(isWarehouseImportCategory('Cocina')).toBe(true);
+    expect(isWarehouseImportCategory('Cocina · Modomio')).toBe(true);
     expect(isWarehouseImportCategory('Tapas')).toBe(false);
     expect(resolveWarehouseImportMeta('Varios')?.stockCategory).toBe('consumable');
 

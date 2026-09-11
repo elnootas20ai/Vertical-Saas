@@ -923,6 +923,7 @@ const PERMISSION_MODULE_ICONS: Record<string, React.ReactNode> = {
   cash_register: <Banknote className="w-3.5 h-3.5" />,
   cleaning_materials: <Package className="w-3.5 h-3.5" />,
   acquisitions: <Package className="w-3.5 h-3.5" />,
+  inventory: <Package className="w-3.5 h-3.5" />,
   butcher_purchases: <Package className="w-3.5 h-3.5" />,
   butcher_waste: <Package className="w-3.5 h-3.5" />,
   reports: <FileText className="w-3.5 h-3.5" />,
@@ -936,6 +937,9 @@ function resolvePermissionModuleLabel(key: string, fallbackLabel: string, busine
   }
   if (key === 'sala') {
     return isRestaurantBusinessType(businessType) ? 'Sala / Mesas' : 'Sala';
+  }
+  if (key === 'inventory') {
+    return 'Inventario (cerrar revisión y preparar compra)';
   }
   return fallbackLabel;
 }
@@ -1014,6 +1018,13 @@ function normalizePermissions(
 
   for (const module of modules) {
     const current = permissions[module.key];
+    // Clave nueva (p. ej. inventory): no forzar OFF si el rol ya trae preset.
+    if (current === undefined || current === null) {
+      if (!base[module.key]) {
+        base[module.key] = { view: false, edit: false };
+      }
+      continue;
+    }
     base[module.key] = {
       view: Boolean(current?.view),
       edit: Boolean(current?.edit),

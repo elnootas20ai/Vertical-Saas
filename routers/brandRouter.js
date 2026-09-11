@@ -7,8 +7,10 @@ import {
   getBrandBillingConfig,
   putBrandBillingConfig,
 } from '../controllers/brandController.js';
+import { requireBusinessAccess } from '../middleware/requireBusinessAccess.js';
 
 const brandRouter = Router();
+brandRouter.use(requireBusinessAccess);
 
 brandRouter.get('/:businessId/billing-config', getBrandBillingConfig);
 brandRouter.put('/:businessId/billing-config', putBrandBillingConfig);

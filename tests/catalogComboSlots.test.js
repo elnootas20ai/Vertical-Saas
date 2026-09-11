@@ -22,6 +22,8 @@ import {
   pickComboProductInSection,
   resolveComboRefSlotKind,
   resolveTpvComboMenuSections,
+  scaleComboStructureCounts,
+  comboSizeCountsFromPresetStructure,
   structureFromSectionDraft,
   totalUnitsInComboSlot,
   validateComboSectionDraft,
@@ -633,5 +635,36 @@ describe('catalogComboSlots', () => {
     const sections = buildComboMenuSections('estandar', catalog);
     expect(sections.some((s) => s.catalogCategory === 'Top Burgers')).toBe(true);
     expect(comboMenuHasMainFamilyChoice(sections)).toBe(true);
+  });
+
+  it('1/2/familia solo escala cantidades y conserva organizadores', () => {
+    const current = [
+      {
+        slotKind: 'main',
+        label: 'Burgers',
+        required: true,
+        expectedCount: 1,
+        catalogCategory: 'Burgers',
+        allowedProductIds: ['b1', 'b2'],
+      },
+      {
+        slotKind: 'drink',
+        label: 'Bebidas',
+        required: true,
+        expectedCount: 1,
+        catalogCategory: 'Bebidas',
+      },
+    ];
+    const duo = COMBO_MENU_PRESETS.find((p) => p.id === 'duo');
+    const counts = comboSizeCountsFromPresetStructure(duo.structure);
+    const scaled = scaleComboStructureCounts(current, counts);
+    expect(scaled).toHaveLength(2);
+    expect(scaled[0].catalogCategory).toBe('Burgers');
+    expect(scaled[0].allowedProductIds).toEqual(['b1', 'b2']);
+    expect(scaled[0].expectedCount).toBe(2);
+    expect(scaled[0].label).toContain('Burgers');
+    expect(scaled[1].catalogCategory).toBe('Bebidas');
+    expect(scaled[1].expectedCount).toBe(2);
+    expect(scaled.some((s) => /pizza/i.test(s.label))).toBe(false);
   });
 });

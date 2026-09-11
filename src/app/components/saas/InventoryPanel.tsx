@@ -35,7 +35,11 @@ import {
 import { deleteCatalogItemsRelentlessly } from '../../lib/catalogBulkDelete';
 import { invalidateCatalogListCache } from '../../lib/catalogListCache';
 import { normalizeBusinessScopeId, notifyDeliveryCatalogChanged } from '../../lib/deliverySetup';
-import { filterStockInventoryItems } from '../../lib/stockInventoryScope';
+import {
+  filterStockInventoryItems,
+  filterKitchenIngredientStockItems,
+  filterGeneralWarehouseStockItems,
+} from '../../lib/stockInventoryScope';
 import {
   createAdjustmentRequest,
   getMovementsByItemRequest,
@@ -1272,7 +1276,14 @@ function InventoryItemDetailModal({
   );
 }
 
-export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogItem[] } = {}) {
+export function InventoryPanel({
+  seedStockItems,
+  stockScope = 'all',
+}: {
+  seedStockItems?: CatalogItem[];
+  /** all = todo · general = sin materias de cocina · ingredients = solo cocina */
+  stockScope?: 'all' | 'general' | 'ingredients';
+} = {}) {
   const {
     dataUserId,
     businessType,
@@ -1469,16 +1480,19 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
     [localItems],
   );
 
-  const scopedItems = useMemo(
-    () =>
-      activeItems.map((item) => ({
-        ...item,
-        stockQuantity: quantityForWarehouse(item, storeWarehouseId),
-      })),
-    [activeItems, storeWarehouseId],
-  );
-
-  const stats = useMemo(() => computeInventoryStats(scopedItems), [scopedItems]);
+  const scopedItems = useMemo(() => {
+    const withQty = activeItems.map((item) => ({
+      ...item,
+      stockQuantity: quantityForWarehouse(item, storeWarehouseId),
+    }));
+    if (stockScope === 'ingredients') {
+      return filterKitchenIngredientStockItems(withQty);
+    }
+    if (stockScope === 'general') {
+      return filterGeneralWarehouseStockItems(withQty);
+    }
+    return withQty;
+  }, [activeItems, storeWarehouseId, stockScope]);
 
   const typeGroups = useMemo(() => {
     // No pintar chips hasta tener marcas/config: si no, salen «Ingredientes» genéricos y luego saltan.
@@ -1515,14 +1529,20 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
     setTypeFilter('');
   }, [typeFilter, typeGroups]);
 
-  const statusTabs = useMemo(
-    () => [
-      { id: 'ok', label: 'Correctos', count: stats.ok },
-      { id: 'low', label: 'Stock bajo', count: stats.low },
-      { id: 'out', label: 'Sin stock', count: stats.out + stats.negative },
-    ],
-    [stats],
-  );
+  const statusTabs = useMemo(() => {
+    const scopeForTabs = filterItemsByOrganizer(
+      scopedItems,
+      typeFilter || 'all',
+      storeIngredients,
+      commercialBrands,
+    );
+    const tabStats = computeInventoryStats(scopeForTabs);
+    return [
+      { id: 'ok', label: 'Correctos', count: tabStats.ok },
+      { id: 'low', label: 'Stock bajo', count: tabStats.low },
+      { id: 'out', label: 'Sin stock', count: tabStats.out + tabStats.negative },
+    ];
+  }, [scopedItems, typeFilter, storeIngredients, commercialBrands]);
 
   const brands = useMemo(() => {
     const set = new Set<string>();
@@ -1929,7 +1949,7 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
           <SaasTabEmpty
             icon={<Boxes className="w-10 h-10" />}
             title="Sin artículos en inventario"
-            description="Se sincronizan automáticamente desde Ingredientes y la columna ingredientes del catálogo. También puedes crearlos a mano."
+            description="Se sincronizan al crear o importar la Carta (productos completos e ingredientes) y desde Ingredientes. También puedes crearlos a mano."
             action={
               <div className="flex flex-wrap items-center justify-center gap-2">
                 <InventoryWarehouseActionsMenu
@@ -2183,52 +2203,6 @@ export function InventoryPanel({ seedStockItems }: { seedStockItems?: CatalogIte
             )}
           </div>
         )}
-        {!historyOpen ? (
-          <div className="flex flex-wrap items-center gap-y-1.5 px-3 py-2 border-t border-gray-100 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/40 rounded-b-xl">
-            <div className="flex flex-wrap items-center gap-y-1.5 divide-x divide-gray-200/80 dark:divide-gray-700">
-              {(
-                [
-                  { label: 'artículos', value: stats.total, tone: 'default' as const },
-                  { label: 'correcto', value: stats.ok, tone: 'emerald' as const },
-                  {
-                    label: 'bajo',
-                    value: stats.low,
-                    tone: (stats.low > 0 ? 'amber' : 'default') as 'amber' | 'default',
-                  },
-                  {
-                    label: 'sin stock',
-                    value: stats.out,
-                    tone: (stats.out > 0 ? 'red' : 'default') as 'red' | 'default',
-                  },
-                  {
-                    label: 'valor €',
-                    value: stats.estimatedValue.toFixed(0),
-                    tone: 'indigo' as const,
-                  },
-                ] as const
-              ).map((s) => {
-                const toneClass =
-                  s.tone === 'amber'
-                    ? 'text-amber-700 dark:text-amber-400'
-                    : s.tone === 'emerald'
-                      ? 'text-emerald-700 dark:text-emerald-400'
-                      : s.tone === 'red'
-                        ? 'text-red-700 dark:text-red-400'
-                        : s.tone === 'indigo'
-                          ? 'text-indigo-700 dark:text-indigo-400'
-                          : 'text-gray-900 dark:text-gray-100';
-                return (
-                  <div key={s.label} className="flex items-baseline gap-1.5 px-3 first:pl-0">
-                    <span className={`text-sm font-bold tabular-nums ${toneClass}`}>{s.value}</span>
-                    <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                      {s.label}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ) : null}
       </CatalogTabShell>
 
       {selectedItem ? (

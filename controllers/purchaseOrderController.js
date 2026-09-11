@@ -24,6 +24,7 @@ import {
   filterStockTrackedCatalogItems,
 } from '../services/stockAlertUtils.js';
 import logger from '../services/logger.js';
+import { stampOpsDoc, resolveBusinessIdFromRequest } from '../shared/scope/opsScope.js';
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
@@ -103,11 +104,18 @@ export async function createPurchaseOrder(req, res) {
 
     const db = getCatalogDbName();
     await ensureDatabase(req, db);
-    const bid = String(order.businessId || order.business_id || '').trim();
+    const bid = String(
+      order.businessId || order.business_id || resolveBusinessIdFromRequest(req) || '',
+    ).trim();
     const existingOrders = await listPurchaseOrdersByUser(req, userId, bid ? { businessId: bid } : {});
     const orderNumber = String(order.orderNumber || '').trim()
       || nextPurchaseOrderNumber(existingOrders.map((o) => o.orderNumber));
-    const doc = buildPurchaseOrderDocument(userId, { ...order, orderNumber });
+    const doc = buildPurchaseOrderDocument(userId, stampOpsDoc({ ...order, orderNumber }, {
+      ownerUserId: userId,
+      businessId: bid,
+      salesPointId: order.salesPointId,
+      workCenterId: order.workCenterId,
+    }));
     const result = await putDocument(req, db, doc._id, doc);
     const saved = { ...doc, _rev: result.rev };
 

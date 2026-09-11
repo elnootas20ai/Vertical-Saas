@@ -319,10 +319,19 @@ function isComplementStockItem(item: CatalogItem): boolean {
   return false;
 }
 
-function foodLineLabel(brand: InventoryCommercialBrand, opts?: { omitBrandName?: boolean }): string {
-  if (opts?.omitBrandName) return 'Ingredientes';
+/** Etiqueta UI del stock de cocina (nunca hardcodear nombre de marca). */
+function foodBrandCount(commercialBrands: InventoryCommercialBrand[]): number {
+  return commercialBrands.filter((b) => b.deliveryLineKind !== 'drinks_desserts').length;
+}
+
+function foodLineLabel(
+  brand: InventoryCommercialBrand,
+  opts?: { omitBrandName?: boolean; foodBrandCount?: number },
+): string {
+  const count = opts?.foodBrandCount ?? 2;
+  if (opts?.omitBrandName || count <= 1) return 'Cocina';
   const name = String(brand.name || '').trim() || 'Línea';
-  return `Ingredientes · ${name}`;
+  return `Cocina · ${name}`;
 }
 
 function labelForOrganizerGroup(id: string, commercialBrands: InventoryCommercialBrand[]): string {
@@ -341,13 +350,13 @@ function labelForOrganizerGroup(id: string, commercialBrands: InventoryCommercia
   if (id === ORGANIZER_PACKAGING) return 'Envases';
   if (id === ORGANIZER_CLEANING) return 'Limpieza';
   if (id === ORGANIZER_VARIOS) return 'Varios';
-  if (id === ORGANIZER_TOTAL) return 'Ingredientes';
+  if (id === ORGANIZER_TOTAL) return 'Cocina';
   const brand = commercialBrands.find((b) => b._id === id);
   if (brand) {
     if (brand.deliveryLineKind === 'drinks_desserts') {
       return String(brand.name || '').trim() || 'Bebidas';
     }
-    return foodLineLabel(brand);
+    return foodLineLabel(brand, { foodBrandCount: foodBrandCount(commercialBrands) });
   }
   return 'Otros';
 }
@@ -410,11 +419,15 @@ export function listInventoryOrganizerChoices(
 
   const inUseIds = opts?.inUseOrganizerIds ? new Set(opts.inUseOrganizerIds) : null;
   const genericInUse = (id: string) => (inUseIds ? inUseIds.has(id) : true);
+  const nFood = foodBrands.length;
 
   return [
     ...foodBrands.map((b) => ({
       id: b._id,
-      label: foodLineLabel(b, { omitBrandName: opts?.omitBrandInFoodLabels }),
+      label: foodLineLabel(b, {
+        omitBrandName: opts?.omitBrandInFoodLabels,
+        foodBrandCount: nFood,
+      }),
       // Con lista de uso: solo marcas que ya tienen artículos (como genéricos).
       inUse: inUseIds ? inUseIds.has(b._id) : true,
     })),
@@ -437,7 +450,7 @@ export function stockFieldsForOrganizer(organizerId: string): {
   if (id === ORGANIZER_CLEANING) return { stockCategory: 'cleaning', category: 'Limpieza' };
   if (id === ORGANIZER_VARIOS) return { stockCategory: 'consumable', category: 'Varios' };
   if (id === ORGANIZER_COMPLEMENTS) return { stockCategory: 'ingredient', category: 'Complementos' };
-  return { stockCategory: 'ingredient', category: 'Ingredientes' };
+  return { stockCategory: 'ingredient', category: 'Cocina' };
 }
 
 /**

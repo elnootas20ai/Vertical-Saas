@@ -204,7 +204,7 @@ const IMPORT_CATEGORY_ALIASES: Record<string, string> = {
 };
 
 /** Categorías de Excel / sync almacén → solo almacén (no aparecen en TPV ni chips de carta). */
-export const WAREHOUSE_IMPORT_CATEGORIES = ['Envases', 'Limpieza', 'Varios', 'Ingredientes'] as const;
+export const WAREHOUSE_IMPORT_CATEGORIES = ['Envases', 'Limpieza', 'Varios', 'Cocina', 'Ingredientes'] as const;
 
 export type WarehouseImportStockCategory = 'packaging' | 'cleaning' | 'consumable' | 'ingredient';
 
@@ -212,8 +212,15 @@ export function isWarehouseImportCategory(category: string): boolean {
   const key = foldKey(normalizeImportCategory(category));
   if (!key) return false;
   if (key === 'envases' || key === 'limpieza' || key === 'varios') return true;
-  // Sync escandallo → almacén crea «Ingredientes» / «Ingredientes · Marca». Nunca carta/TPV.
-  if (key === 'ingredientes' || key.startsWith('ingredientes ') || key.startsWith('ingredientes·')) {
+  // Sync escandallo → almacén crea «Cocina» / «Cocina · Marca» (legacy: Ingredientes). Nunca carta/TPV.
+  if (
+    key === 'cocina' ||
+    key.startsWith('cocina ') ||
+    key.startsWith('cocina·') ||
+    key === 'ingredientes' ||
+    key.startsWith('ingredientes ') ||
+    key.startsWith('ingredientes·')
+  ) {
     return true;
   }
   return false;
@@ -263,10 +270,12 @@ export function listCatalogCategoryOrganizerChoices(
   };
   for (const u of UNIVERSAL_CATALOG_CATEGORIES) add(u);
   for (const b of brands || []) {
-    for (const c of b?.catalogCategories ?? []) add(String(c || ''));
+    const cats = Array.isArray(b?.catalogCategories) ? b.catalogCategories : [];
+    for (const c of cats) add(String(c || ''));
     if (!skipLineKindPresets) {
       const preset = getDeliveryBrandLinePreset(String(b?.deliveryLineKind || '').trim());
-      for (const c of preset?.typicalCategories ?? []) add(String(c || ''));
+      const typical = Array.isArray(preset?.typicalCategories) ? preset.typicalCategories : [];
+      for (const c of typical) add(String(c || ''));
     }
   }
   for (const item of catalogItems || []) {
@@ -413,7 +422,8 @@ function brandHasCatalogCategory(
   category: string,
 ): boolean {
   const catKey = foldKey(category);
-  return (brand.catalogCategories ?? []).some((c) => foldKey(c) === catKey);
+  const cats = Array.isArray(brand.catalogCategories) ? brand.catalogCategories : [];
+  return cats.some((c) => foldKey(c) === catKey);
 }
 
 /** Si el nombre del producto incluye el nombre de una línea comercial (p. ej. BlackBurger → blackburger). */
@@ -708,8 +718,10 @@ export function mergeBrandCatalogCategories(existing: string[] | undefined, impo
     seen.add(key);
     out.push(trimmed);
   };
-  for (const cat of existing || []) add(cat);
-  for (const cat of imported) add(cat);
+  const prev = Array.isArray(existing) ? existing : [];
+  const next = Array.isArray(imported) ? imported : [];
+  for (const cat of prev) add(cat);
+  for (const cat of next) add(cat);
   return out;
 }
 
@@ -750,7 +762,7 @@ export function collectIngredientEntriesFromCatalogImport(
     const text = String(item.customFields?.ingredients || '').trim();
     if (!text) continue;
     const names = parseIngredientsBulkText(text);
-    let itemBrandIds = (item.brandIds ?? [])
+    let itemBrandIds = (Array.isArray(item.brandIds) ? item.brandIds : [])
       .map((id) => String(id || '').trim())
       .filter((id) => allBrandIds.includes(id));
 
@@ -776,8 +788,11 @@ export function collectIngredientEntriesFromCatalogImport(
   return entries;
 }
 
-function catalogImportIngredientKey(name: string, brandIds: string[]): string {
-  const brands = [...brandIds].map((id) => String(id || '').trim()).filter(Boolean).sort();
+function catalogImportIngredientKey(name: string, brandIds: unknown): string {
+  const brands = (Array.isArray(brandIds) ? brandIds : [])
+    .map((id) => String(id || '').trim())
+    .filter(Boolean)
+    .sort();
   return `${String(name || '').trim().toLowerCase()}::${brands.join(',')}`;
 }
 
@@ -801,7 +816,7 @@ export function applyCatalogImportIngredientEntries(
   const added = merged.length - before;
   let promoted = 0;
   merged = merged.map((ing) => {
-    const key = catalogImportIngredientKey(ing.name, ing.brandIds ?? []);
+    const key = catalogImportIngredientKey(ing.name, ing.brandIds);
     if (!importKeys.has(key) || resolveIngredientRole(ing) === 'extra') return ing;
     promoted += 1;
     return { ...ing, role: 'extra' as const, escandalloOnly: false };

@@ -1,12 +1,5 @@
 import { describe, expect, it } from 'vitest';
-
-/** Copia de la regla del filtro backend (sin arrancar Couch). */
-function orderMatchesBusinessFilter(order, businessFilter) {
-  const bid = String(businessFilter || '').replace(/^business:/, '').trim();
-  if (!bid) return true;
-  const ob = String(order?.business_id || order?.businessId || '').replace(/^business:/, '').trim();
-  return ob === bid;
-}
+import { filterDocsForBusiness } from '../shared/scope/opsScope.js';
 
 describe('filterDeliveryOrders — scope por empresa', () => {
   const modo = '33821959-ae50-4e52-bfea-ea2b145faeac';
@@ -19,11 +12,21 @@ describe('filterDeliveryOrders — scope por empresa', () => {
       { _id: '3', businessId: modo },
       { _id: '4' },
     ];
-    const filtered = orders.filter((o) => orderMatchesBusinessFilter(o, modo));
+    const filtered = filterDocsForBusiness(orders, modo, { multiEmpresa: true });
     expect(filtered.map((o) => o._id)).toEqual(['1', '3']);
   });
 
   it('sin filtro no descarta', () => {
-    expect(orderMatchesBusinessFilter({ business_id: bode }, '')).toBe(true);
+    const orders = [{ _id: '1', business_id: bode }];
+    expect(filterDocsForBusiness(orders, '', { multiEmpresa: true })).toEqual(orders);
+  });
+
+  it('legacy sin business_id solo con una empresa', () => {
+    const orders = [{ _id: 'legacy' }, { _id: 'ok', business_id: modo }];
+    expect(filterDocsForBusiness(orders, modo, { accountBusinessCount: 1 }).map((o) => o._id)).toEqual([
+      'legacy',
+      'ok',
+    ]);
+    expect(filterDocsForBusiness(orders, modo, { accountBusinessCount: 2 }).map((o) => o._id)).toEqual(['ok']);
   });
 });

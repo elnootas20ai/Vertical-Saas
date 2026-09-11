@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { ArrowRight, Loader2, Store } from 'lucide-react';
+import { ArrowRight, Loader2, Pencil, Store } from 'lucide-react';
 import { Layout } from '../../components/saas/Layout';
 import { TpvRegisterGate } from '../../components/saas/TpvRegisterGate';
 import { TpvOfflineBanner } from '../../components/saas/TpvOfflineBanner';
@@ -144,6 +144,7 @@ export function RestaurantSalaPage() {
   const [accountOrder, setAccountOrder] = useState<DiningOrder | null>(null);
   const [accountLoading, setAccountLoading] = useState(false);
   const [salaSurface, setSalaSurface] = useState<'live' | 'plano'>('live');
+  const [salaEditMode, setSalaEditMode] = useState(false);
   const bootRef = useRef('');
 
   useEffect(() => {
@@ -766,7 +767,10 @@ export function RestaurantSalaPage() {
           <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={() => setSalaSurface('live')}
+              onClick={() => {
+                setSalaSurface('live');
+                setSalaEditMode(false);
+              }}
               className={`${VERTIAL_BTN_SECONDARY} !min-h-10 !px-4 !py-2 text-xs ${
                 salaSurface === 'live' ? 'ring-2 ring-[var(--v-blue,#2563eb)] border-blue-300' : ''
               }`}
@@ -775,15 +779,36 @@ export function RestaurantSalaPage() {
             </button>
             <button
               type="button"
-              onClick={() => setSalaSurface('plano')}
+              onClick={() => {
+                setSalaSurface('plano');
+                setSalaEditMode(false);
+              }}
               className={`${VERTIAL_BTN_SECONDARY} !min-h-10 !px-4 !py-2 text-xs ${
                 salaSurface === 'plano' ? 'ring-2 ring-[var(--v-blue,#2563eb)] border-blue-300' : ''
               }`}
             >
               Plano
             </button>
+            <button
+              type="button"
+              disabled={mapBusy}
+              onClick={() => {
+                setSalaSurface('live');
+                setSalaEditMode((current) => (salaSurface === 'live' ? !current : true));
+              }}
+              className={`${VERTIAL_BTN_SECONDARY} !min-h-10 !px-4 !py-2 text-xs ${
+                salaEditMode
+                  ? '!border-amber-400 !bg-amber-50 !text-amber-900 ring-2 ring-amber-300'
+                  : ''
+              }`}
+            >
+              <Pencil className="h-3.5 w-3.5" strokeWidth={2} />
+              {salaEditMode ? 'Listo' : 'Editar sala'}
+            </button>
             <span className="text-[11px] text-stone-400">
-              {salaSurface === 'plano'
+              {salaEditMode
+                ? 'Configuración · zonas, mesas y capacidades'
+                : salaSurface === 'plano'
                 ? 'Diseño por zona · mueve mesas'
                 : 'Servicio · mesas y cuentas'}
             </span>
@@ -799,6 +824,7 @@ export function RestaurantSalaPage() {
             businessId={businessId}
             actorName={user?.fullName || user?.email || 'Sala'}
             mapBusy={mapBusy}
+            editMode={salaEditMode}
             onTablesChange={setTables}
             onAddZone={handleAddZone}
             onAddTables={handleAddTables}
@@ -820,6 +846,7 @@ export function RestaurantSalaPage() {
             userId={userId}
             businessId={businessId}
             mapBusy={mapBusy}
+            onRoomsChange={setRooms}
             onTablesChange={setTables}
           />
         )}
