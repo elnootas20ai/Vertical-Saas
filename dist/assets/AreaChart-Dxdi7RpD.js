@@ -1,0 +1,1 @@
+import{g as a,X as r,Y as s,f as i}from"./generateCategoricalChart-B16XG1Y-.js";import{A as x}from"./Area-lwn_DURG.js";var o=a({chartName:"AreaChart",GraphicalChild:x,axisComponents:[{axisType:"xAxis",AxisComp:r},{axisType:"yAxis",AxisComp:s}],formatAxisMap:i});export{o as A};
