@@ -1,1 +1,0 @@
-import{l as a,aO as i,a as o,aP as r,fi as c}from"./index-CJeRHNg4.js";function l(){const{user:t}=a(),{currentBusiness:s}=i(),n=o.useMemo(()=>r(t,s),[t,s]),e=o.useMemo(()=>c(s),[s]),u=o.useMemo(()=>({businessId:e||void 0,salesPointId:void 0}),[e]);return{userId:n,businessId:e,salesPointId:"",listOptions:u,ready:!!(n&&e)}}export{l as u};
