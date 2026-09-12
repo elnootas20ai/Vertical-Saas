@@ -598,6 +598,12 @@ describe('deliveryCatalogExcelTemplate', () => {
     expect(isWarehouseImportCategory('Cocina · Modomio')).toBe(true);
     expect(isWarehouseImportCategory('Tapas')).toBe(false);
     expect(resolveWarehouseImportMeta('Varios')?.stockCategory).toBe('consumable');
+    expect(resolveWarehouseImportMeta('Ingredientes')).toEqual({
+      stockCategory: 'ingredient',
+      categoryLabel: 'Ingredientes',
+      organizerId: 'total',
+    });
+    expect(resolveWarehouseImportMeta('Cocina · Modomio')?.categoryLabel).toBe('Ingredientes');
 
     const brands = [
       { _id: 'bode', name: 'Bar Casa', active: true, catalogCategories: ['Tapas'], deliveryLineKind: 'tapas_bar' },
@@ -631,6 +637,20 @@ describe('deliveryCatalogExcelTemplate', () => {
     expect(vaso?.item.module).toBe('stock');
     expect(vaso?.item.stockCategory).toBe('packaging');
     expect(isTpvWarehouseOnlyCatalogItem(vaso?.item)).toBe(true);
+
+    const ingredienteLegacy = await mapImportEntryToCatalogItem(
+      {
+        name: 'Harina',
+        category: 'Cocina',
+        price: '',
+        sku: 'ALM-HAR-1',
+      },
+      { businessId: 'biz-rest', brandCache: brands, vertical: 'restaurant' },
+    );
+    expect(ingredienteLegacy?.item.module).toBe('stock');
+    expect(ingredienteLegacy?.item.stockCategory).toBe('ingredient');
+    expect(ingredienteLegacy?.item.category).toBe('Ingredientes');
+    expect(ingredienteLegacy?.item.customFields?.inventoryOrganizerId).toBe('total');
   });
 
   it('restaurant import: IVA 10% y combos de bar (plato/tapa)', async () => {

@@ -24,8 +24,8 @@ import {
 
 export const PLAN_QUOTE_CATALOG = {
   basic: { id: 'basic', name: 'Básico', monthlyEuros: 49 },
-  normal: { id: 'normal', name: 'Normal', monthlyEuros: 149 },
-  pro: { id: 'pro', name: 'Pro', monthlyEuros: 349 },
+  normal: { id: 'normal', name: 'Normal', monthlyEuros: 179 },
+  pro: { id: 'pro', name: 'Pro', monthlyEuros: 350 },
 };
 
 export const ANNUAL_DISCOUNT = 0.2;

@@ -24,6 +24,10 @@ import {
   loadDeliveryStores,
   loadTpvPointsOfSaleForBusiness,
   shouldUseDeliveryStores,
+  setupDeliveryRetailStore,
+  afterRetailWorkCenterCreated,
+  createBusinessWorkCenter,
+  type CreateRetailStorePayload,
   type DeliveryStoresState,
 } from '../lib/deliverySetup';
 import { readTpvTabletBinding } from '../lib/tpvTabletSession';
@@ -73,6 +77,11 @@ export type LoadRetailStoresOptions = {
   includeInactivePdvs?: boolean;
   /** TPV: auto-crea PDV faltantes. Settings/listados: solo fetch. */
   tpvBootstrap?: boolean;
+  /**
+   * Alias de producto de `tpvBootstrap`: UI que no puede mentir «sin tiendas»
+   * si hay centro retail (Web Pedidos, Settings, etc.).
+   */
+  ensurePdv?: boolean;
   /** TPV: genera códigos tablet. Ajustes/listados: false. */
   ensureTabletCodes?: boolean;
   /** Listados: true (rápido). TPV bootstrap: false para enlazar PDV faltantes. */
@@ -84,11 +93,10 @@ export function resolveRetailScopeKind(
   businessType: string | null | undefined,
 ): RetailScopeKind {
   if (isRestaurantBusinessType(businessType)) return 'restaurant';
-  // Heladería y eventos: mismo pipeline de tiendas/PDV retail que delivery (PDV portátiles).
+  // Heladería usa el mismo pipeline de tiendas/PDV retail que delivery.
   if (
     isStrictDeliveryBusinessType(businessType)
     || isIceCreamShopBusinessType(businessType)
-    || isEventsBusinessType(businessType)
   ) {
     return 'delivery';
   }
@@ -333,11 +341,12 @@ export async function loadRetailStoresForBusiness(
   };
   const kind = resolveRetailScopeKind(business.businessType);
   const tpvBootstrap = options?.tpvBootstrap === true;
+  const ensurePdv = tpvBootstrap || options?.ensurePdv === true;
   const loadOpts = {
     accountBusinessCount: options?.accountBusinessCount,
     knownBusinessIds: options?.knownBusinessIds ?? knownBusinessIdsFromList(businesses),
     includeInactivePdvs: options?.includeInactivePdvs,
-    skipPdvMerge: options?.skipPdvMerge ?? !tpvBootstrap,
+    skipPdvMerge: options?.skipPdvMerge ?? !ensurePdv,
     ensureTabletCodes: options?.ensureTabletCodes ?? tpvBootstrap,
   };
 
@@ -346,12 +355,14 @@ export async function loadRetailStoresForBusiness(
       accountBusinessCount: options?.accountBusinessCount,
       includeInactivePdvs: options?.includeInactivePdvs,
       tpvBootstrap,
+      ensurePdv,
+      ensureTabletCodes: loadOpts.ensureTabletCodes,
       skipPdvMerge: loadOpts.skipPdvMerge,
       knownBusinessIds: loadOpts.knownBusinessIds,
     });
   }
 
-  const state = tpvBootstrap
+  const state = ensurePdv
     ? await loadTpvPointsOfSaleForBusiness(authUser, business, loadOpts)
     : await loadDeliveryStores(authUser, business, loadOpts);
 
@@ -366,6 +377,69 @@ export async function loadRetailStoresForBusiness(
   }
 
   return state;
+}
+
+/**
+ * CORE — UI que necesita tiendas visibles (Web Pedidos, Settings, TPV…).
+ * Siempre enlaza PDV faltantes a centros retail. No uses `listPointsOfSaleRequest` solo.
+ */
+export async function loadStoresForBusiness(
+  authUser: AuthLike,
+  business: Business,
+  businesses: Business[],
+  options?: Omit<LoadRetailStoresOptions, 'tpvBootstrap' | 'ensurePdv' | 'skipPdvMerge'>,
+): Promise<DeliveryStoresState> {
+  const state = await loadRetailStoresForBusiness(authUser, business, businesses, {
+    ...options,
+    ensurePdv: true,
+    skipPdvMerge: false,
+    ensureTabletCodes: false,
+  });
+  const activeRetail = state.workCenters.filter(
+    (wc) => wc.active !== false && !wc.deletedAt && isRetailCenterType(wc),
+  );
+  if (activeRetail.length > 0 && state.pointsOfSale.length === 0) {
+    throw new Error(
+      `Hay ${activeRetail.length} tienda${activeRetail.length === 1 ? '' : 's'}, pero no se pudo cargar o enlazar su PDV`,
+    );
+  }
+  return state;
+}
+
+/**
+ * CORE — alta de tienda/local. Crea centro + PDV + bootstrap/caché.
+ * No llames `createWorkCenter` a pelo para `punto_de_venta` / `almacen`.
+ */
+export async function createRetailStoreForBusiness(
+  authUser: AuthLike,
+  business: Business | null | undefined,
+  payload: CreateRetailStorePayload,
+): Promise<{ workCenter: WorkCenter; pointOfSale: PointOfSale }> {
+  return setupDeliveryRetailStore(authUser, business, payload);
+}
+
+/**
+ * CORE — tras un `createWorkCenter` retail legado (import/IA): asegura PDV.
+ * Oficinas / custom → no-op.
+ */
+export async function ensurePdvAfterRetailWorkCenterCreate(
+  authUser: AuthLike,
+  business: Business | null | undefined,
+  workCenter: WorkCenter,
+): Promise<PointOfSale | null> {
+  return afterRetailWorkCenterCreated(authUser, business, workCenter);
+}
+
+/**
+ * CORE — alta de cualquier centro con titular y empresa correctos.
+ * Tienda/almacén completan PDV + marca; oficina/custom solo crean el centro.
+ */
+export async function createWorkCenterForBusiness(
+  authUser: AuthLike,
+  business: Business | null | undefined,
+  payload: Parameters<typeof createBusinessWorkCenter>[2],
+): ReturnType<typeof createBusinessWorkCenter> {
+  return createBusinessWorkCenter(authUser, business, payload);
 }
 
 /** Tras crear/editar tienda + PDV: actualiza caché del vertical correcto. */

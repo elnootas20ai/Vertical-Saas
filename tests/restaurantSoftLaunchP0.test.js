@@ -70,7 +70,7 @@ describe('restaurant soft-launch P0', () => {
 
   it('sala addComanda valida catálogo y loyalty redeem en updateOrder', () => {
     const src = readFileSync(join(process.cwd(), 'controllers/salaController.js'), 'utf8');
-    expect(src).toMatch(/assertComandaCatalogAvailable/);
+    expect(src).toMatch(/prepareComandaFromCatalog/);
     expect(src).toMatch(/redeemClientLoyaltyPoints/);
   });
 
@@ -107,7 +107,7 @@ describe('restaurant soft-launch P0', () => {
     expect(sala).not.toMatch(/Créalo en Ajustes → Tienda\./);
   });
 
-  it('bar/restaurante: sin almacén auto ni pestaña inventario', () => {
+  it('bar/restaurante: almacén visible con alta controlada por Excel', () => {
     const policy = readFileSync(
       join(process.cwd(), 'src/app/verticals/restaurant/restaurantWarehousePolicy.ts'),
       'utf8',
@@ -125,11 +125,19 @@ describe('restaurant soft-launch P0', () => {
       'utf8',
     );
     expect(policy).toMatch(/restaurantWarehouseViaExcelOnly/);
-    expect(sidebar).toMatch(/catalog-stock-tpv/);
-    expect(sidebar).toMatch(
-      /isRestaurantVertical\s*\?\s*\[\s*'catalog-carta',\s*'catalog-purchases'/,
+    expect(sidebar).toMatch(/usesDeliverySidebarCore \|\| isRestaurantVertical/);
+    for (const itemId of [
+      'catalog-carta',
+      'catalog-ingredientes',
+      'catalog-stock-tpv',
+      'catalog-purchases',
+      'catalog-invoices',
+    ]) {
+      expect(sidebar).toContain(`'${itemId}'`);
+    }
+    expect(catalog).toMatch(
+      /tab === 'stock' \|\| tab === 'ingredientes'\) return \{ carta: false, stock: true \}/,
     );
-    expect(catalog).toMatch(/tab === 'stock'\) return 'catalog'/);
     expect(catalog).toMatch(/isRestaurantCatalog[\s\S]*\[\]/);
     expect(inventory).toMatch(/restaurantWarehouseViaExcelOnly/);
   });

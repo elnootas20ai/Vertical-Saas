@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { cartLinesToDiningItems } from '../src/app/lib/restaurantDiningTpv';
-import { buildKitchenTickets } from '../src/app/verticals/restaurant/restaurantKitchen';
+import {
+  buildKitchenItemInstructions,
+  buildKitchenTickets,
+} from '../src/app/verticals/restaurant/restaurantKitchen';
 import type { CatalogItem } from '../src/app/lib/deliveryApi';
 import type { DiningOrder } from '../src/app/lib/salaApi';
 import { EMPTY_CART_CUSTOMIZATION } from '../src/app/lib/catalogCustomization';
@@ -98,7 +101,7 @@ describe('comandas cocina: extras / SIN', () => {
               price: 12,
               quantity: 1,
               category: '',
-              notes: '',
+              notes: 'Poco hecha',
               modifiers: ['+ Bacon', 'SIN Cebolla'],
               extras: ['+ Bacon', 'SIN Cebolla'],
               ingredients: [
@@ -117,5 +120,9 @@ describe('comandas cocina: extras / SIN', () => {
     const [ticket] = buildKitchenTickets([order]);
     expect(ticket.items[0].extras).toEqual(['+ Bacon', 'SIN Cebolla']);
     expect(ticket.items[0].ingredients.some((i) => i.quantity === 'sin')).toBe(true);
+    const instructions = buildKitchenItemInstructions(ticket.items[0]);
+    expect(instructions.lines).toEqual(['+ Bacon', 'SIN Cebolla']);
+    expect(instructions.note).toBe('Poco hecha');
+    expect(instructions.lines).not.toContain('Poco hecha');
   });
 });

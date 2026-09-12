@@ -85,7 +85,8 @@ function lineToRecipeIngredient(
     lineUnit,
   );
   const convertedQty = convertQuantityBetweenUnits(quantity, lineUnit, stockUnit);
-  const qtyForStock = Math.round((convertedQty != null ? convertedQty : quantity) * 10000) / 10000;
+  // Seis decimales para no perder consumos expresados en mg al convertirlos a kg.
+  const qtyForStock = Math.round((convertedQty != null ? convertedQty : quantity) * 1_000_000) / 1_000_000;
   const totalCost = calculateRecipeLineCost(quantity, lineUnit, costPerUnit, ingredientUnit);
   const isPackaging = stockCategory === 'packaging';
   const waste = isPackaging ? 0 : Math.min(100, Math.max(0, Number(wastePercent) || 0));
@@ -134,7 +135,13 @@ export function buildRecipeIngredientsFromCostingItem(
 }
 
 export function recipeIngredientsNeedUpdate(
-  existing: Array<{ catalogItemId: string; quantity: number; unit: string; wastePercent?: number }>,
+  existing: Array<{
+    catalogItemId: string;
+    quantity: number;
+    unit: string;
+    wastePercent?: number;
+    costPerUnit?: number;
+  }>,
   next: RecipeIngredientDraft[],
 ): boolean {
   if (existing.length !== next.length) return true;
@@ -145,6 +152,7 @@ export function recipeIngredientsNeedUpdate(
     if (Math.abs(a.quantity - b.quantity) > 1e-6) return true;
     if (a.unit !== b.unit) return true;
     if (Math.abs(Number(a.wastePercent || 0) - Number(b.wastePercent || 0)) > 1e-6) return true;
+    if (Math.abs(Number(a.costPerUnit || 0) - Number(b.costPerUnit || 0)) > 1e-6) return true;
   }
   return false;
 }

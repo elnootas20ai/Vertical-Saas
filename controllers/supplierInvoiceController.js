@@ -1,6 +1,7 @@
 import {
   getCatalogDbName,
   buildPurchaseInvoiceDocument,
+  normalizePurchaseDocumentKind,
   sanitizePurchaseInvoice,
   listPurchaseInvoicesByUser,
   normalizePurchaseListLimit,
@@ -171,8 +172,12 @@ export async function listSupplierInvoices(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
+    const businessId = normalizeBusinessScopeId(req.query?.businessId);
+    const accountBusinessCount = Math.max(1, Number(req.query?.accountBusinessCount) || 1);
     let raw = await listPurchaseInvoicesByUser(req, userId, {
       limit: normalizePurchaseListLimit(req.query?.limit),
+      businessId: businessId || undefined,
+      accountBusinessCount,
     });
 
     const { status, supplierId, source, from, to } = req.query;
@@ -218,9 +223,22 @@ export async function createSupplierInvoice(req, res) {
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
     const forceDuplicate = Boolean(invoice.forceDuplicate);
-    const invoiceNumber = await assignPurchaseInvoiceNumber(req, userId, invoice);
+    const documentKind = normalizePurchaseDocumentKind(
+      invoice.documentKind || invoice.ocrData?.documentType || 'factura_proveedor',
+    );
+    const invoiceNumber = await assignPurchaseInvoiceNumber(req, userId, {
+      ...invoice,
+      documentKind,
+    });
     if (invoiceNumber && !forceDuplicate) {
-      const dup = await findDuplicatePurchaseInvoice(req, userId, invoiceNumber, invoice.supplierId || '', invoice.total);
+      const dup = await findDuplicatePurchaseInvoice(
+        req,
+        userId,
+        invoiceNumber,
+        invoice.supplierId || '',
+        invoice.total,
+        { documentKind },
+      );
       if (dup) {
         return res.status(409).json({
           ok: false,
@@ -236,6 +254,7 @@ export async function createSupplierInvoice(req, res) {
     const doc = buildPurchaseInvoiceDocument(userId, {
       ...invoice,
       invoiceNumber,
+      documentKind,
       source: invoice.source || 'manual',
       flags: {
         ...(invoice.flags || {}),
@@ -273,6 +292,16 @@ export async function updateSupplierInvoice(req, res) {
 
     const existing = await ensureInvoiceOwner(req, userId, invoiceId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Factura no encontrada' });
+    if (
+      existing.ocrStockReceivedAt
+      || existing.linkedExpenseId
+      || existing.linkedTaxEntryId
+    ) {
+      return res.status(409).json({
+        ok: false,
+        error: 'No se puede editar un documento con stock o finanzas aplicados',
+      });
+    }
 
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
@@ -280,6 +309,20 @@ export async function updateSupplierInvoice(req, res) {
     const db = getCatalogDbName();
     const doc = buildPurchaseInvoiceDocument(userId, { ...existing, ...invoice }, existing);
     const saved = await putDocument(req, db, doc._id, doc);
+    if (existing.linkedFinanceId && doc.documentKind !== 'albaran') {
+      try {
+        const { createFinancePagoFromPurchaseInvoice } = await import('../services/ocrPurchasePipeline.js');
+        await createFinancePagoFromPurchaseInvoice(req, userId, doc, {
+          financeSource: 'invoice',
+          entryMethod: doc.entryMethod || 'manual',
+        });
+      } catch {
+        return res.status(500).json({
+          ok: false,
+          error: 'La factura se guardó, pero no se pudo sincronizar su movimiento financiero',
+        });
+      }
+    }
 
     await logAccountActivity(req, {
       actorUserId: userId,
@@ -305,6 +348,17 @@ export async function removeSupplierInvoice(req, res) {
     const { userId, invoiceId } = req.params;
     const existing = await ensureInvoiceOwner(req, userId, invoiceId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Factura no encontrada' });
+    if (
+      existing.ocrStockReceivedAt
+      || existing.linkedFinanceId
+      || existing.linkedExpenseId
+      || existing.linkedTaxEntryId
+    ) {
+      return res.status(409).json({
+        ok: false,
+        error: 'No se puede eliminar un documento con stock o finanzas aplicados',
+      });
+    }
 
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
@@ -421,9 +475,17 @@ export async function linkToFinance(req, res) {
 
     const existing = await ensureInvoiceOwner(req, userId, invoiceId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Factura no encontrada' });
+    if (existing.documentKind === 'albaran') {
+      return badRequest(res, 'Un albarán no genera movimientos financieros');
+    }
 
     if (existing.linkedFinanceId) {
-      return res.status(409).json({ ok: false, error: 'Esta factura ya tiene un movimiento financiero vinculado', movementId: existing.linkedFinanceId });
+      return res.json({
+        ok: true,
+        skipped: true,
+        movementId: existing.linkedFinanceId,
+        invoice: sanitizePurchaseInvoice(existing),
+      });
     }
 
     const account = await findAccountByUserId(req, userId);
@@ -439,6 +501,8 @@ export async function linkToFinance(req, res) {
       category: existing.proposedCategory || 'proveedores',
       amountBase: Number(existing.subtotal || 0),
       taxRate: Number(existing.taxRate || 21),
+      taxAmount: Number(existing.taxAmount || 0),
+      totalAmount: Number(existing.total || 0),
       date: existing.date || new Date().toISOString().slice(0, 10),
       payMethod: existing.proposedPayMethod || '',
       companyName: existing.supplierName || '',
@@ -489,7 +553,14 @@ export async function supplierInvoiceStats(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
-    const invoices = (await listPurchaseInvoicesByUser(req, userId)).filter((i) => !i.deletedAt);
+    const businessId = normalizeBusinessScopeId(req.query?.businessId);
+    const accountBusinessCount = Math.max(1, Number(req.query?.accountBusinessCount) || 1);
+    const invoices = (
+      await listPurchaseInvoicesByUser(req, userId, {
+        businessId: businessId || undefined,
+        accountBusinessCount,
+      })
+    ).filter((i) => !i.deletedAt);
 
     const now = new Date();
     const thisMonth = now.toISOString().slice(0, 7);

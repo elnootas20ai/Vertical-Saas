@@ -24,6 +24,14 @@ import { resolveTpvCatalogBusinessId } from '../../lib/tpvRegisterScope';
 import { getRetailOpsUiCopy } from '../../lib/retailUiCopy';
 import { filterCatalogItemsForBusinessScope, dedupeCatalogItemsForDisplay, expandCatalogItemsForDeletion, findCatalogDuplicateByName, formatCatalogDuplicateNameError } from '../../lib/catalogBusinessScope';
 import { deleteCatalogItemsRelentlessly } from '../../lib/catalogBulkDelete';
+import {
+  completeMasterDataDeletes,
+  enqueueMasterDataDeletes,
+  listMasterDataDeleteQueue,
+  subscribeMasterDataDeleteQueue,
+  withMasterDataDeleteFlushLock,
+  type MasterDataDeleteEntry,
+} from '../../lib/masterDataDeleteQueue';
 import { wipeCatalogLeftoversAfterEmptyCarta } from '../../lib/catalogFullWipe';
 import { resolveCatalogProductImage, resolveCatalogProductPlaceholderUrl } from '../../lib/catalogProductPlaceholders';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
@@ -33,6 +41,7 @@ import { DELIVERY_ACTIVE_STORE_CHANGED } from '../../lib/deliveryOpsPdvSelection
 import { listWarehousesRequest, type Warehouse } from '../../lib/warehouseApi';
 import { useVerticalCatalog } from '../../hooks/useVerticalCatalog';
 import { useEffectivePlanTier } from '../../hooks/useEffectivePlanTier';
+import { useRestaurantPlanAccess } from '../../hooks/useRestaurantPlanAccess';
 import { VertialBillingUpgradeLink } from '../../components/saas/VertialBillingUpgradeLink';
 import { StockTabPanel } from '../../components/saas/StockTabPanel';
 import { CatalogCoreLoadingState } from '../../components/saas/CatalogCoreLoadingState';
@@ -111,7 +120,6 @@ import {
   listCatalogItemsRequest,
   createCatalogItemRequest,
   updateCatalogItemRequest,
-  deleteCatalogItemRequest,
   bulkCreateCatalogItemsRequest,
   listSuppliersRequest,
   deleteSupplierRequest,
@@ -1725,6 +1733,7 @@ export function CatalogPage() {
   const { user } = useAuth();
   const { currentBusiness, businessesFetchSettled, businesses } = useBusiness();
   const planTier = useEffectivePlanTier();
+  const canUseRestaurantManagement = useRestaurantPlanAccess('inventory');
   /** IMAP / correo automático de facturas: solo Pro. Mediano usa OCR/subida. */
   const canUseInvoiceImap = planTier === 'pro';
   const activeStore = useActiveStoreScope();
@@ -1764,14 +1773,45 @@ export function CatalogPage() {
   const [savingTpvExtraPrice, setSavingTpvExtraPrice] = useState(false);
   const accountBusinessCount = businesses.length;
   const [allCatalogItems, setAllCatalogItems] = useState<CatalogItem[]>([]);
+  const [pendingCatalogDeletes, setPendingCatalogDeletes] = useState<MasterDataDeleteEntry[]>([]);
+  const refreshPendingCatalogDeletes = useCallback(() => {
+    setPendingCatalogDeletes(
+      listMasterDataDeleteQueue({
+        userId: dataUserId,
+        businessId,
+        kinds: ['carta'],
+      }),
+    );
+  }, [dataUserId, businessId]);
+  useEffect(() => {
+    refreshPendingCatalogDeletes();
+    return subscribeMasterDataDeleteQueue(refreshPendingCatalogDeletes);
+  }, [refreshPendingCatalogDeletes]);
+  const pendingCatalogDeleteIds = useMemo(
+    () => new Set(pendingCatalogDeletes.map((entry) => entry.targetId)),
+    [pendingCatalogDeletes],
+  );
   const catalogItems = useMemo(
     () =>
-      filterCatalogItemsForBusinessScope(allCatalogItems, businessId, brands, {
-        accountBusinessCount,
-        activeBusinessType: currentBusiness?.businessType,
-        brandsSettled: !brandsLoading,
-      }),
-    [allCatalogItems, businessId, brands, accountBusinessCount, currentBusiness?.businessType, brandsLoading],
+      filterCatalogItemsForBusinessScope(
+        allCatalogItems.filter((item) => !pendingCatalogDeleteIds.has(item._id)),
+        businessId,
+        brands,
+        {
+          accountBusinessCount,
+          activeBusinessType: currentBusiness?.businessType,
+          brandsSettled: !brandsLoading,
+        },
+      ),
+    [
+      allCatalogItems,
+      pendingCatalogDeleteIds,
+      businessId,
+      brands,
+      accountBusinessCount,
+      currentBusiness?.businessType,
+      brandsLoading,
+    ],
   );
 
   /** Solo productos de carta TPV (excluye ingredientes/almacén module stock). */
@@ -1858,8 +1898,11 @@ export function CatalogPage() {
   const activeTab = useMemo(() => {
     const raw = searchParams.get('tab') || 'catalog';
     const tab = raw === 'tpv-templates' ? 'ingredientes' : raw;
+    if (isRestaurantCatalog && !canUseRestaurantManagement && tab !== 'catalog') {
+      return 'catalog';
+    }
     return (CATALOG_TABS as readonly string[]).includes(tab) ? tab : 'catalog';
-  }, [searchParams]);
+  }, [canUseRestaurantManagement, isRestaurantCatalog, searchParams]);
   const setActiveTab = useCallback((tab: string) => setSearchParams({ tab }), [setSearchParams]);
 
   const reloadInvoiceEmailStatus = useCallback(async () => {
@@ -2535,21 +2578,28 @@ export function CatalogPage() {
         listCatalogItemsRequest(dataUserId, 'catalog').catch(() => null),
         listCatalogItemsRequest(dataUserId, 'stock').catch(() => [] as CatalogItem[]),
       ]).then(([carta, stockItems]) => {
+        const omitIds = new Set(
+          listMasterDataDeleteQueue({
+            userId: dataUserId,
+            businessId,
+            kinds: ['carta'],
+          }).map((entry) => entry.targetId),
+        );
         setAllCatalogItems((prev) => {
           const other = prev.filter((i) => {
             const m = i.module || 'catalog';
-            return m !== 'catalog' && m !== 'stock';
+            return m !== 'catalog' && m !== 'stock' && !omitIds.has(i._id);
           });
           if (carta == null) {
             const keptCarta = prev.filter(
-              (i) => (i.module || 'catalog') === 'catalog' && !i.deletedAt,
+              (i) => (i.module || 'catalog') === 'catalog' && !i.deletedAt && !omitIds.has(i._id),
             );
-            return [...other, ...keptCarta, ...stockItems.filter((i) => !i.deletedAt)];
+            return [...other, ...keptCarta, ...stockItems.filter((i) => !i.deletedAt && !omitIds.has(i._id))];
           }
           return [
             ...other,
-            ...carta.filter((i) => !i.deletedAt),
-            ...stockItems.filter((i) => !i.deletedAt),
+            ...carta.filter((i) => !i.deletedAt && !omitIds.has(i._id)),
+            ...stockItems.filter((i) => !i.deletedAt && !omitIds.has(i._id)),
           ];
         });
       });
@@ -2586,7 +2636,14 @@ export function CatalogPage() {
       let idx = 0;
       const carta = wantCarta ? results[idx++] : [];
       const stock = wantStock ? results[idx++] : [];
-      setAllCatalogItems((prev) => mergeCatalogItemsById(prev, [...carta, ...stock]));
+      const omitIds = new Set(
+        listMasterDataDeleteQueue({
+          userId: requestUserId,
+          businessId: requestBusinessId,
+          kinds: ['carta'],
+        }).map((entry) => entry.targetId),
+      );
+      setAllCatalogItems((prev) => mergeCatalogItemsById(prev, [...carta, ...stock], { omitIds }));
 
       if (wantCarta) catalogCartaLoadedRef.current = true;
       if (wantStock) catalogStockLoadedRef.current = true;
@@ -2611,6 +2668,45 @@ export function CatalogPage() {
       return false;
     }
   }, [dataUserId, businessId, user, currentBusiness]);
+
+  const flushPendingCatalogDeletes = useCallback(async () => {
+    if (!dataUserId || !businessId) return;
+    await withMasterDataDeleteFlushLock(
+      `${dataUserId}:${businessId}:carta`,
+      async () => {
+        const entries = listMasterDataDeleteQueue({
+          userId: dataUserId,
+          businessId,
+          kinds: ['carta'],
+        });
+        if (entries.length === 0) return;
+        const result = await deleteCatalogItemsRelentlessly(
+          dataUserId,
+          entries.map((entry) => entry.targetId),
+          { maxRounds: 3 },
+        );
+        const remaining = new Set(result.remainingIds);
+        const completed = entries.filter((entry) => !remaining.has(entry.targetId));
+        if (completed.length === 0) return;
+        completeMasterDataDeletes(completed.map((entry) => entry.id));
+        const deletedIds = new Set(completed.map((entry) => entry.targetId));
+        setAllCatalogItems((prev) => prev.filter((item) => !deletedIds.has(item._id)));
+        invalidateCatalogListCache(dataUserId);
+        notifyDeliveryCatalogChanged(dataUserId, businessId);
+        await loadCatalog({ carta: true, stock: false });
+      },
+    );
+  }, [dataUserId, businessId, loadCatalog]);
+
+  useEffect(() => {
+    if (!pageReady) return;
+    void flushPendingCatalogDeletes().catch(() => undefined);
+    const onOnline = () => {
+      void flushPendingCatalogDeletes().catch(() => undefined);
+    };
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, [pageReady, flushPendingCatalogDeletes]);
 
   const loadSuppliers = useCallback(async () => {
     if (!dataUserId) return;
@@ -3307,15 +3403,32 @@ export function CatalogPage() {
 
     if (op.mode === 'single') {
       const item = op.item;
-      setDeletingItemIds((prev) => new Set(prev).add(item._id));
+      const expanded = expandCatalogItemsForDeletion([item], catalogMenuItemsRaw);
+      const list = expanded.length > 0 ? expanded : [item];
+      const ids = new Set(list.map((row) => row._id));
+      const queued = enqueueMasterDataDeletes(
+        list.map((row) => ({
+          userId: dataUserId,
+          businessId,
+          kind: 'carta' as const,
+          targetId: row._id,
+        })),
+      );
+      setDeletingItemIds((prev) => new Set([...prev, ...ids]));
+      setAllCatalogItems((prev) => prev.filter((row) => !ids.has(row._id)));
+      setDetailItem((prev) => (prev && ids.has(prev._id) ? null : prev));
+      setEditingItem((prev) => (prev && ids.has(prev._id) ? null : prev));
       try {
-        await deleteCatalogItemRequest(dataUserId, item._id);
-        setAllCatalogItems((prev) => prev.filter((i) => i._id !== item._id));
+        const result = await deleteCatalogItemsRelentlessly(dataUserId, [...ids], { maxRounds: 3 });
+        const remaining = new Set(result.remainingIds);
+        completeMasterDataDeletes(
+          queued.filter((entry) => !remaining.has(entry.targetId)).map((entry) => entry.id),
+        );
         notifyDeliveryCatalogChanged(dataUserId, businessId);
 
         // Último de carta → misma limpieza que el borrado masivo (recetas, almacén sync, ingredientes).
         const stillMenu = (await listCatalogItemsRequest(dataUserId, 'catalog').catch(() => []))
-          .filter((row) => (row.module || 'catalog') === 'catalog' && !row.deletedAt && row._id !== item._id);
+          .filter((row) => (row.module || 'catalog') === 'catalog' && !row.deletedAt && !ids.has(row._id));
         const stillScoped = businessId
           ? filterCatalogItemsForBusinessScope(stillMenu, businessId, brands, {
               accountBusinessCount,
@@ -3331,13 +3444,14 @@ export function CatalogPage() {
           setStoreIngredients([]);
         }
 
-        toast.success('Artículo eliminado');
+        if (result.failed === 0) toast.success('Artículo eliminado');
+        else toast.message(`${result.failed} borrado(s) pendiente(s) de conexión`);
       } catch {
-        toast.error('Error al eliminar el artículo');
+        toast.message('Artículo oculto. El borrado se completará cuando vuelva la conexión.');
       } finally {
         setDeletingItemIds((prev) => {
           const next = new Set(prev);
-          next.delete(item._id);
+          ids.forEach((id) => next.delete(id));
           return next;
         });
       }
@@ -3346,6 +3460,18 @@ export function CatalogPage() {
 
     const list = op.items;
     const categoryLabel = op.categoryLabel;
+    const queued = enqueueMasterDataDeletes(
+      list.map((item) => ({
+        userId: dataUserId,
+        businessId,
+        kind: 'carta' as const,
+        targetId: item._id,
+      })),
+    );
+    const optimisticIds = new Set(list.map((item) => item._id));
+    setAllCatalogItems((prev) => prev.filter((item) => !optimisticIds.has(item._id)));
+    setDetailItem((prev) => (prev && optimisticIds.has(prev._id) ? null : prev));
+    setEditingItem((prev) => (prev && optimisticIds.has(prev._id) ? null : prev));
     setBulkDeletingCatalog(true);
     const toastId = toast.loading(`Eliminando ${list.length} artículo(s)…`, { duration: Infinity });
     try {
@@ -3385,6 +3511,9 @@ export function CatalogPage() {
         setActiveCatalogCategory(null);
       }
       const remaining = new Set(result.remainingIds || []);
+      completeMasterDataDeletes(
+        queued.filter((entry) => !remaining.has(entry.targetId)).map((entry) => entry.id),
+      );
       const deletedIds = new Set(
         list.map((i) => i._id).filter((id) => !remaining.has(id)),
       );
@@ -3455,7 +3584,7 @@ export function CatalogPage() {
       }
     } catch {
       toast.dismiss(toastId);
-      toast.error('Error al eliminar el catálogo. Inténtalo de nuevo.');
+      toast.message('Los artículos están ocultos. El borrado se completará cuando vuelva la conexión.');
     } finally {
       setBulkDeletingCatalog(false);
       exitCatalogSelectMode();
@@ -3469,6 +3598,7 @@ export function CatalogPage() {
     accountBusinessCount,
     businessType,
     activeCatalogCategory,
+    catalogMenuItemsRaw,
   ]);
 
   const handleToggleField = async (item: CatalogItem, field: 'webVisible' | 'available' | 'active') => {
@@ -3732,7 +3862,7 @@ export function CatalogPage() {
   // ── Derived data ────────────────────────────────────────────────────────────
 
   const categories = useMemo(() => {
-    return [
+    const groups: CatalogNavGroup[] = [
       ...new Set(
         catalogItems
           .filter((i) => String(i.module || 'catalog') !== 'stock')
@@ -5860,12 +5990,17 @@ export function CatalogPage() {
         tabs: [{ id: 'staff-consumption', label: 'Consumos' }],
       },
     ];
+    return isRestaurantCatalog && !canUseRestaurantManagement
+      ? groups.slice(0, 1)
+      : groups;
   }, [
     stockTabCount,
     ingredientsTabCount,
     catalogMenuItems,
     supplierKpis.active,
     invoiceKpis.pending,
+    isRestaurantCatalog,
+    canUseRestaurantManagement,
   ]);
 
   const brandSetupCtx = useMemo(

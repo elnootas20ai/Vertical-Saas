@@ -293,6 +293,7 @@ function queueDeliveryOrderFinanceSync(userId: string, order: DeliveryOrder | nu
 }
 
 export type CatalogItemType = 'product' | 'service' | 'combo';
+export type RestaurantProductionArea = 'kitchen' | 'bar';
 
 export interface CatalogArticleRef {
   articleId: string;
@@ -339,6 +340,8 @@ export interface CatalogItem {
   name: string;
   description: string;
   category: string;
+  /** Estación de preparación de Restaurante PRO. Se conserva al cambiar de plan. */
+  productionArea?: RestaurantProductionArea;
   unitPrice: number;
   /** Precio empleado; si no se define, aplica la regla global de consumos. */
   staffPrice?: number | null;
@@ -427,8 +430,10 @@ export interface PurchaseInvoiceLine {
   id: string;
   itemName: string;
   quantity: number;
+  unit?: string;
   unitPrice: number;
   total: number;
+  taxRate?: number;
   catalogItemId?: string;
   catalogItemName?: string;
 }
@@ -463,7 +468,13 @@ export interface OcrData {
   taxAmount: number | null;
   total: number | null;
   currency: string | null;
-  lines: { description: string; quantity: number | null; unitPrice: number | null; total: number | null }[];
+  lines: {
+    description: string;
+    quantity: number | null;
+    unit?: string | null;
+    unitPrice: number | null;
+    total: number | null;
+  }[];
   notes: string | null;
   bankAccount?: string | null;
   paymentTerms?: string | null;
@@ -484,6 +495,7 @@ export interface PurchaseInvoice {
   date: string;
   dueDate: string;
   status: string;
+  paymentStatus?: string;
   lines: PurchaseInvoiceLine[];
   subtotal: number;
   taxRate: number;
@@ -496,6 +508,12 @@ export interface PurchaseInvoice {
   /** Albarán del que proviene esta factura (mismo proveedor / recepción). */
   linkedAlbaranId?: string;
   linkedAlbaranNumber?: string;
+  linkedFinanceId?: string;
+  proposedCategory?: string;
+  proposedPayMethod?: string;
+  reviewNotes?: string;
+  reviewedBy?: string;
+  reviewedAt?: string | null;
   costCenterId?: string;
   costCenterName?: string;
   ocrData?: OcrData;
@@ -782,26 +800,32 @@ export async function reopenDeliveryOrderRequest(userId: string, orderId: string
 export async function listCatalogItemsRequest(
   userId: string,
   module?: 'stock' | 'catalog',
-  options?: { view?: 'tpv' },
+  options?: {
+    view?: 'tpv';
+    businessId?: string;
+    accountBusinessCount?: number;
+  },
 ): Promise<CatalogItem[]> {
   const id = normalizeUserId(userId);
-  return listCatalogItemsCached(
-    id,
-    async () => {
-      const params = new URLSearchParams();
-      if (module) params.set('module', module);
-      if (options?.view) params.set('view', options.view);
-      const qs = params.toString() ? `?${params.toString()}` : '';
-      const payload = await request<{ ok: boolean; items: CatalogItem[] }>(
-        `/api/delivery/catalog/${encodeURIComponent(id)}${qs}`,
-        undefined,
-        { timeoutMs: DELIVERY_LIST_TIMEOUT_MS },
-      );
-      return payload.items || [];
-    },
-    module,
-    options?.view,
-  );
+  const fetchItems = async () => {
+    const params = new URLSearchParams();
+    if (module) params.set('module', module);
+    if (options?.view) params.set('view', options.view);
+    if (options?.businessId) params.set('businessId', options.businessId);
+    if (options?.accountBusinessCount) {
+      params.set('accountBusinessCount', String(options.accountBusinessCount));
+    }
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    const payload = await request<{ ok: boolean; items: CatalogItem[] }>(
+      `/api/delivery/catalog/${encodeURIComponent(id)}${qs}`,
+      undefined,
+      { timeoutMs: DELIVERY_LIST_TIMEOUT_MS },
+    );
+    return payload.items || [];
+  };
+  // La caché histórica no incluye empresa en su clave; evitar mezclar catálogos entre empresas.
+  if (options?.businessId) return fetchItems();
+  return listCatalogItemsCached(id, fetchItems, module, options?.view);
 }
 
 export class CatalogDuplicateError extends Error {
@@ -1043,10 +1067,14 @@ export async function deleteCatalogItemRequest(userId: string, itemId: string): 
 
 // ─── Suppliers API ────────────────────────────────────────────────────────────
 
-export async function listSuppliersRequest(userId: string): Promise<Supplier[]> {
+export async function listSuppliersRequest(
+  userId: string,
+  opts?: { businessId?: string; accountBusinessCount?: number },
+): Promise<Supplier[]> {
   const id = normalizeUserId(userId);
+  const qs = purchaseListQuery(opts?.businessId, opts?.accountBusinessCount);
   const payload = await request<{ ok: boolean; suppliers: Supplier[] }>(
-    `/api/delivery/suppliers/${encodeURIComponent(id)}`,
+    `/api/delivery/suppliers/${encodeURIComponent(id)}${qs}`,
   );
   return payload.suppliers || [];
 }
@@ -1443,6 +1471,17 @@ export interface PointOfSale {
   /** Dispositivos TPV vinculados (aprobación CEO). */
   tpvAllowedDevices?: TpvTabletDevice[];
   address: string;
+  publicOrderingConfig?: {
+    pickupEnabled: boolean;
+    deliveryEnabled: boolean;
+    minimumOrder: number;
+    deliveryFee: number;
+    estimatedDeliveryTime: string;
+    deliveryRadius: string;
+    shippingMode: 'fixed' | 'zones';
+    shippingZones: Array<Record<string, unknown>>;
+    customerKioskEnabled?: boolean;
+  };
   /** Config de impresión por defecto de la tienda (todos los TPV la heredan). */
   printerConfig?: VertialPrinterConfig;
   terminals: TerminalConfig[];
@@ -2729,9 +2768,7 @@ export async function createTpvRegisterSessionRequest(userId: string, data: Part
       body: JSON.stringify({ session: data }),
     });
   } catch (err) {
-    const hint = API_BASE
-      ? `No se pudo conectar con el servidor (${url}).`
-      : 'No se pudo conectar con el servidor. Comprueba que el backend esté en marcha (npm start, puerto 3001).';
+    const hint = 'Hay un problema de conexión. Comprueba tu red e inténtalo de nuevo.';
     throw new Error(err instanceof Error && err.message.includes('fetch') ? hint : (err instanceof Error ? err.message : hint));
   }
   const payload = (await response.json().catch(() => ({}))) as {

@@ -44,3 +44,8 @@ export {
   buildRestaurantOpsSnapshot,
   formatDwellMinutes,
 } from './restaurantOpsSnapshot';
+export {
+  RestaurantDailyPerformancePanel,
+  buildRestaurantDailyRows,
+} from './dashboard/RestaurantDailyPerformancePanel';
+export { RestaurantProductMarginPanel } from './dashboard/RestaurantProductMarginPanel';

@@ -8,6 +8,11 @@ import {
   findDocuments,
   ensureIndex,
 } from './couchdb.js';
+import {
+  normalizeRestaurantProductionArea,
+  resolveRestaurantProductionArea,
+} from '../shared/restaurant/productionArea.js';
+import { normalizeEsTaxRate } from '../shared/tax/spainVat.js';
 
 const salaTypeUserIndexReady = new Set();
 
@@ -371,6 +376,26 @@ function sanitizeComandaItem(item) {
         }))
         .filter((ing) => ing.name)
     : [];
+  const halfHalfPizza =
+    item?.halfHalfPizza?.firstProductId && item?.halfHalfPizza?.secondProductId
+      ? {
+          firstProductId: String(item.halfHalfPizza.firstProductId),
+          firstProductName: String(item.halfHalfPizza.firstProductName || ''),
+          secondProductId: String(item.halfHalfPizza.secondProductId),
+          secondProductName: String(item.halfHalfPizza.secondProductName || ''),
+        }
+      : undefined;
+  const comboSelections = Array.isArray(item.comboSelections)
+    ? item.comboSelections
+        .map((ref) => ({
+          productId: String(ref?.productId || '').trim(),
+          productName: String(ref?.productName || '').trim(),
+          quantity: Math.max(1, Number(ref?.quantity || 1)),
+          slotKind: String(ref?.slotKind || '').trim() || undefined,
+          instanceId: String(ref?.instanceId || '').trim() || undefined,
+        }))
+        .filter((ref) => ref.productId)
+    : [];
   return {
     id: item.id || uuidv4(),
     productId: String(item.productId || ''),
@@ -378,6 +403,11 @@ function sanitizeComandaItem(item) {
     price: Number(item.price || 0),
     quantity: Math.max(1, Number(item.quantity || 1)),
     category: String(item.category || ''),
+    taxRate: normalizeEsTaxRate(item.taxRate, {
+      enabled: true,
+      defaultFoodTaxRate: 10,
+    }),
+    productionArea: normalizeRestaurantProductionArea(item.productionArea) || undefined,
     notes: String(item.notes || ''),
     modifiers: modifiers.length > 0 ? modifiers : extras,
     extras,
@@ -386,16 +416,21 @@ function sanitizeComandaItem(item) {
     cancelledReason: String(item.cancelledReason || ''),
     cancelledBy: String(item.cancelledBy || ''),
     brandIds,
+    ...(halfHalfPizza ? { halfHalfPizza } : {}),
+    ...(comboSelections.length > 0 ? { comboSelections } : {}),
   };
 }
 
 function sanitizeComanda(comanda) {
+  const productionArea = normalizeRestaurantProductionArea(comanda.productionArea);
   return {
     id: comanda.id || uuidv4(),
     orderNumber: Number(comanda.orderNumber || 1),
+    productionArea: productionArea || undefined,
     items: Array.isArray(comanda.items) ? comanda.items.map(sanitizeComandaItem) : [],
     status: normalizeComandaStatus(comanda.status),
     sentToKitchenAt: String(comanda.sentToKitchenAt || ''),
+    preparationStartedAt: String(comanda.preparationStartedAt || ''),
     readyAt: String(comanda.readyAt || ''),
     servedAt: String(comanda.servedAt || ''),
     createdBy: String(comanda.createdBy || ''),
@@ -427,7 +462,7 @@ function sanitizePayment(payment) {
   };
 }
 
-function computeOrderTotals(comandas, discount, discountPercent) {
+export function computeOrderTotals(comandas, discount, discountPercent) {
   const subtotal = comandas
     .filter((c) => c.status !== 'cancelled')
     .reduce((sum, c) => sum + c.items
@@ -440,15 +475,30 @@ function computeOrderTotals(comandas, discount, discountPercent) {
   }
 
   const afterDiscount = Math.max(0, subtotal - discountAmount);
-  const tax = Math.round(afterDiscount * 0.10 * 100) / 100;
-  const total = Math.round((afterDiscount + tax) * 100) / 100;
+  // La carta de hostelería muestra precios finales con IVA incluido.
+  // `tax` es el desglose incluido en el total, no un recargo adicional.
+  const embeddedTaxBeforeDiscount = comandas
+    .filter((c) => c.status !== 'cancelled')
+    .reduce((sum, c) => sum + c.items
+      .filter((i) => i.status !== 'cancelled')
+      .reduce((itemSum, item) => {
+        const gross = Number(item.price || 0) * Number(item.quantity || 0);
+        const rate = normalizeEsTaxRate(item.taxRate, {
+          enabled: true,
+          defaultFoodTaxRate: 10,
+        });
+        return itemSum + (rate > 0 ? gross - (gross / (1 + rate / 100)) : 0);
+      }, 0), 0);
+  const discountRatio = subtotal > 0 ? afterDiscount / subtotal : 0;
+  const tax = Math.round(embeddedTaxBeforeDiscount * discountRatio * 100) / 100;
+  const total = Math.round(afterDiscount * 100) / 100;
 
   return { subtotal: Math.round(subtotal * 100) / 100, discount: discountAmount, tax, total };
 }
 
 export function buildDiningOrderDocument(userId, data = {}, existing = null) {
   const now = new Date().toISOString();
-  const id = existing?._id || `dining_order:${uuidv4()}`;
+  const id = existing?._id || data._id || `dining_order:${uuidv4()}`;
 
   const comandas = Array.isArray(data.comandas)
     ? data.comandas.map(sanitizeComanda)
@@ -663,6 +713,71 @@ export function updateComandaInOrder(order, comandaId, updates) {
   });
   const totals = computeOrderTotals(comandas, order.discount, order.discountPercent);
   return { comandas, ...totals };
+}
+
+/**
+ * Envía los borradores seleccionados en un único documento CouchDB.
+ * Normal agrupa cada borrador como Cocina. PRO lo divide por destino canónico.
+ */
+export function routeDraftComandasToProductionAreas(
+  order,
+  {
+    comandaIds,
+    catalogByProductId = new Map(),
+    hasProAccess = false,
+    sentAt = new Date().toISOString(),
+  } = {},
+) {
+  const selected = new Set(
+    Array.isArray(comandaIds)
+      ? comandaIds.map((id) => String(id || '').trim()).filter(Boolean)
+      : (order.comandas || [])
+          .filter((comanda) => comanda.status === 'draft')
+          .map((comanda) => String(comanda.id || '')),
+  );
+  const sentComandas = [];
+  const next = [];
+
+  for (const rawComanda of order.comandas || []) {
+    const comanda = sanitizeComanda(rawComanda);
+    if (comanda.status !== 'draft' || !selected.has(comanda.id)) {
+      next.push(comanda);
+      continue;
+    }
+
+    const groups = new Map();
+    for (const item of comanda.items || []) {
+      const canonical = catalogByProductId.get(String(item.productId || ''));
+      const area = hasProAccess
+        ? resolveRestaurantProductionArea(canonical || item)
+        : 'kitchen';
+      if (!groups.has(area)) groups.set(area, []);
+      groups.get(area).push({ ...item, productionArea: area });
+    }
+
+    const orderedAreas = hasProAccess ? ['kitchen', 'bar'] : ['kitchen'];
+    const populated = orderedAreas.filter((area) => (groups.get(area) || []).length > 0);
+    for (let index = 0; index < populated.length; index += 1) {
+      const area = populated[index];
+      const routed = sanitizeComanda({
+        ...comanda,
+        id: index === 0 ? comanda.id : `${comanda.id}:${area}`,
+        productionArea: area,
+        items: groups.get(area),
+        status: 'sent_to_kitchen',
+        sentToKitchenAt: sentAt,
+      });
+      next.push(routed);
+      sentComandas.push(routed);
+    }
+  }
+
+  const comandas = next.map((comanda, index) => sanitizeComanda({
+    ...comanda,
+    orderNumber: index + 1,
+  }));
+  const totals = computeOrderTotals(comandas, order.discount, order.discountPercent);
+  return { comandas, sentComandas, ...totals };
 }
 
 export function shouldAutoTransitionTable(order) {

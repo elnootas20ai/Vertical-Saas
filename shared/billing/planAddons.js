@@ -5,8 +5,8 @@ export const PLAN_ADDON_CATALOG = {
   extra_pdv: {
     id: 'extra_pdv',
     name: 'Tienda / PDV extra',
-    monthlyPrice: 4900,
-    annualPrice: 47040,
+    monthlyPrice: 14900,
+    annualPrice: 143040,
   },
   extra_brand: {
     id: 'extra_brand',

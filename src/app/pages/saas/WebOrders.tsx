@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Package, Clock, CheckCircle, Truck, Store, XCircle, Loader2,
@@ -20,6 +20,7 @@ import {
   type DeliveryIntegrations,
 } from '../../lib/webApi';
 import { Layout } from '../../components/saas/Layout';
+import { PublicOrderInbox } from '../../components/saas/PublicOrderInbox';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '../../components/ui/dialog';
@@ -187,6 +188,15 @@ export function WebOrders() {
     const hrs = Math.floor(mins / 60);
     return `hace ${hrs}h ${mins % 60}m`;
   };
+  const vertical = String(currentBusiness?.businessType || '').toLowerCase();
+  const inboxTargets: NonNullable<WebOrder['targetKind']>[] =
+    vertical === 'restaurant'
+      ? ['restaurant_table', 'restaurant_takeaway']
+      : vertical === 'delivery' || vertical === 'icecreamshop'
+        ? ['delivery_ops']
+        : vertical === 'butchershop'
+          ? ['butcher_ops']
+          : ['retail_ops'];
 
   return (
     <Layout title="Pedidos Web">
@@ -217,6 +227,12 @@ export function WebOrders() {
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Actualizar
             </button>
           </div>
+        </div>
+
+        <div className="mb-4 space-y-2">
+          {inboxTargets.map((targetKind) => (
+            <PublicOrderInbox key={targetKind} targetKind={targetKind} compact />
+          ))}
         </div>
 
         {error && (
@@ -313,6 +329,10 @@ export function WebOrders() {
                         <span className="font-semibold text-amber-600">{order.totalAmount.toFixed(2)} €</span>
                         <span className="text-gray-400">{timeSince(order.createdAt)}</span>
                       </div>
+                      <p className="mt-1 text-[11px] text-stone-400">
+                        {order.salesPointName || 'Tienda sin nombre'} · {order.sourceChannel || 'public_web'} · {order.targetKind || 'cola web'}
+                        {' · '}{order.reviewStatus === 'pending' ? 'Pendiente de aceptar' : order.reviewStatus === 'rejected' ? 'Rechazado' : 'Aceptado'}
+                      </p>
                     </div>
                     <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                   </button>

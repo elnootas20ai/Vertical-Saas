@@ -1,5 +1,5 @@
 import { createBrowserRouter, Navigate, Outlet, useLocation, useParams } from 'react-router-dom';
-import { lazy, Suspense, type ComponentType } from 'react';
+import { lazy, Suspense, useEffect, useState, type ComponentType } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { useAuth } from './context/AuthContext';
@@ -8,6 +8,7 @@ import { isWorkerAccount } from './lib/authApi';
 import { resolveWorkerSessionEntryPath, userOwnsAnyBusiness } from './lib/workerProfileCompletion';
 import { canUseCeoAdminPanel } from './lib/teamManagerAccess';
 import { isAffiliateWorldPath } from './lib/authEntryPaths';
+import { getPublicStorefrontByHost } from './lib/webApi';
 import { RootLayout } from './components/RootLayout';
 import { LandingNew } from './pages/LandingNew';
 import { NativeOnboarding } from './pages/native/NativeOnboarding';
@@ -52,6 +53,7 @@ import { RequireWebOrderingVertical } from './components/saas/RequireWebOrdering
 import { RedirectEventsFromRetailRoutes } from './components/saas/RedirectEventsFromRetailRoutes';
 import { RequireSuperAdmin } from './components/saas/RequireSuperAdmin';
 import { RequireWorkerPermission } from './components/saas/RequireWorkerPermission';
+import { RequireRestaurantFeature } from './components/saas/RequireRestaurantFeature';
 // Cleaning vertical pages (dedicated CRM/billing/stock for limpieza)
 
 
@@ -198,6 +200,7 @@ const CajaPage = lazyPage(() => import('./pages/saas/CajaPage'), 'CajaPage');
 const ChangelogPage = lazyPage(() => import('./pages/saas/ChangelogPage'), 'ChangelogPage');
 const WorkOrderStatus = lazyPage(() => import('./pages/public/WorkOrderStatus'), 'WorkOrderStatus');
 const WebStorefront = lazyPage(() => import('./pages/public/WebStorefront'), 'WebStorefront');
+const CustomerKioskPage = lazyPage(() => import('./pages/public/CustomerKioskPage'), 'CustomerKioskPage');
 const MesaQrPublicPage = lazyPage(() => import('./pages/public/MesaQrPublicPage'), 'MesaQrPublicPage');
 const QuotePublicResponse = lazyPage(() => import('./pages/public/QuotePublicResponse'), 'QuotePublicResponse');
 const PromoAcceptPublic = lazyPage(() => import('./pages/public/PromoAcceptPublic'), 'PromoAcceptPublic');
@@ -408,6 +411,14 @@ function CatchAll() {
 function HomeEntry() {
   const { isAuthenticated, isInitializing } = useAuth();
   if (!Capacitor.isNativePlatform()) {
+    const host = window.location.hostname.toLowerCase();
+    const isVertialHost =
+      host === 'localhost'
+      || host === '127.0.0.1'
+      || host === 'vertialapp.com'
+      || host === 'www.vertialapp.com'
+      || host === 'app.vertialapp.com';
+    if (!isVertialHost) return <CustomDomainStorefrontEntry host={host} />;
     return <LandingNew />;
   }
   if (isInitializing) {
@@ -420,6 +431,36 @@ function HomeEntry() {
     return <NativeOnboarding />;
   }
   return <Navigate to="/auth/entry" replace />;
+}
+
+function CustomDomainStorefrontEntry({ host }: { host: string }) {
+  const [slug, setSlug] = useState('');
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let mounted = true;
+    void getPublicStorefrontByHost(host)
+      .then((response) => {
+        if (mounted) setSlug(response.config.slug);
+      })
+      .catch((reason: unknown) => {
+        if (mounted) setError(reason instanceof Error ? reason.message : 'Tienda no disponible');
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [host]);
+  if (slug) return <Navigate to={`/web/${encodeURIComponent(slug)}`} replace />;
+  if (error) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-stone-50 p-4 text-center">
+        <div>
+          <p className="font-semibold text-stone-900">Tienda no disponible</p>
+          <p className="mt-1 text-sm text-stone-500">{error}</p>
+        </div>
+      </div>
+    );
+  }
+  return <AuthRouteLoading label="Abriendo tienda…" />;
 }
 
 /** /saas y /saas/ no tenían hijo index → Outlet vacío (pantalla en blanco). */
@@ -625,13 +666,13 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: <SaasIndexRedirect /> },
           { path: 'dashboard', element: <RequireBusinessOwner><Dashboard /></RequireBusinessOwner> },
-          { path: 'alerts', element: <RequireBusinessOwner><AlertCenterPage /></RequireBusinessOwner> },
+          { path: 'alerts', element: <RequireBusinessOwner><RequireRestaurantFeature feature="restaurant_ops"><AlertCenterPage /></RequireRestaurantFeature></RequireBusinessOwner> },
           { path: 'onboarding', Component: SetupOnboarding },
           { path: 'delivery/primer-pdv', element: <Navigate to="/saas/dashboard" replace /> },
           { path: 'user-dashboard', Component: UserDashboard },
-          { path: 'reports', element: <RequireBusinessOwner><Reports /></RequireBusinessOwner> },
-          { path: 'calendar', Component: CalendarView },
-          { path: 'chat', Component: Chat },
+          { path: 'reports', element: <RequireBusinessOwner><RequireRestaurantFeature feature="reports_advanced"><Reports /></RequireRestaurantFeature></RequireBusinessOwner> },
+          { path: 'calendar', element: <RequireRestaurantFeature feature="calendar"><CalendarView /></RequireRestaurantFeature> },
+          { path: 'chat', element: <RequireRestaurantFeature feature="team_chat"><Chat /></RequireRestaurantFeature> },
           { path: 'chat/:channelId', Component: Chat },
           { path: 'operations', element: <RequireBusinessOwner><Operations /></RequireBusinessOwner> },
           { path: 'operations/:id', element: <RequireWorkerPermission permission="vehicles"><OperationDetail /></RequireWorkerPermission> },
@@ -650,7 +691,7 @@ export const router = createBrowserRouter([
           { path: 'documents/:id', element: <RequireWorkerPermission permission="documents"><DocumentDetail /></RequireWorkerPermission> },
           { path: 'sales', element: <RequireWorkerPermission permission="sales"><Sales /></RequireWorkerPermission> },
           { path: 'sales/:id', element: <RequireWorkerPermission permission="sales"><SaleDetail /></RequireWorkerPermission> },
-          { path: 'sales-metrics', element: <RequireBusinessOwner><SalesMetrics /></RequireBusinessOwner> },
+          { path: 'sales-metrics', element: <RequireBusinessOwner><RequireRestaurantFeature feature="reports_advanced"><SalesMetrics /></RequireRestaurantFeature></RequireBusinessOwner> },
           { path: 'reservations', element: <RequireWorkerPermission permission="reservations"><RestaurantReservationsRouteEntry /></RequireWorkerPermission> },
           { path: 'reservas', element: <Navigate to="/saas/reservations" replace /> },
           { path: 'ancove', element: <RequireWorkerPermission permission="ancove"><Ancove /></RequireWorkerPermission> },
@@ -659,16 +700,16 @@ export const router = createBrowserRouter([
           { path: 'invitations', Component: Invitations },
           { path: 'equipo', element: <Navigate to="/saas/team" replace /> },
           { path: 'equipo/:userId', Component: EquipoRedirect },
-          { path: 'clockins', element: <RequireBusinessOwner><Clockins /></RequireBusinessOwner> },
-          { path: 'equipo/solicitudes', element: <RequireBusinessOwner><HrRequestsPage /></RequireBusinessOwner> },
-          { path: 'equipo/horarios-vacaciones', element: <RequireBusinessOwner><SchedulesVacations /></RequireBusinessOwner> },
+          { path: 'clockins', element: <RequireBusinessOwner><RequireRestaurantFeature feature="hr_advanced"><Clockins /></RequireRestaurantFeature></RequireBusinessOwner> },
+          { path: 'equipo/solicitudes', element: <RequireBusinessOwner><RequireRestaurantFeature feature="hr_advanced"><HrRequestsPage /></RequireRestaurantFeature></RequireBusinessOwner> },
+          { path: 'equipo/horarios-vacaciones', element: <RequireBusinessOwner><RequireRestaurantFeature feature="hr_advanced"><SchedulesVacations /></RequireRestaurantFeature></RequireBusinessOwner> },
           { path: 'schedules', element: <Navigate to="/saas/equipo/horarios-vacaciones" replace /> },
           { path: 'vacations', element: <Navigate to="/saas/equipo/solicitudes" replace /> },
           { path: 'affiliates', element: <RequireBusinessOwner><Affiliates /></RequireBusinessOwner> },
-          { path: 'finance', element: <RequireBusinessOwner><Finance /></RequireBusinessOwner> },
+          { path: 'finance', element: <RequireBusinessOwner><RequireRestaurantFeature feature="finance_advanced"><Finance /></RequireRestaurantFeature></RequireBusinessOwner> },
           { path: 'verifactu', element: <RequireBusinessOwner><VerifactuPage /></RequireBusinessOwner> },
-          { path: 'quotes', element: <RequireBusinessOwner><Quotes /></RequireBusinessOwner> },
-          { path: 'promotions', element: <RequireBusinessOwner><PromotionsPage /></RequireBusinessOwner> },
+          { path: 'quotes', element: <RequireBusinessOwner><RequireRestaurantFeature feature="crm_advanced"><Quotes /></RequireRestaurantFeature></RequireBusinessOwner> },
+          { path: 'promotions', element: <RequireBusinessOwner><RequireRestaurantFeature feature="crm_advanced"><PromotionsPage /></RequireRestaurantFeature></RequireBusinessOwner> },
           { path: 'sales-points', element: <Navigate to="/saas/settings/tienda" replace /> },
           { path: 'work-centers', element: <Navigate to="/saas/settings/tienda" replace /> },
           { path: 'groups', Component: Groups },
@@ -677,30 +718,30 @@ export const router = createBrowserRouter([
           { path: 'parts', element: <RequireWorkerPermission permission={['workshop', 'vehicles', 'fleet']}><Parts /></RequireWorkerPermission> },
           { path: 'tech', element: <RequireWorkerPermission permission={['workshop', 'vehicles', 'fleet']}><TechnicianView /></RequireWorkerPermission> },
           { path: 'commissions', element: <RequireBusinessOwner><Commissions /></RequireBusinessOwner> },
-          { path: 'payroll', element: <RequireTeamManager><PayrollPage /></RequireTeamManager> },
-          { path: 'gestoria', element: <RequireTeamManager><GestoriaHubPage /></RequireTeamManager> },
-          { path: 'restaurant-ops', element: <RequireBusinessOwner><RequireRestaurantVertical><RestaurantOpsCenter /></RequireRestaurantVertical></RequireBusinessOwner> },
+          { path: 'payroll', element: <RequireTeamManager><RequireRestaurantFeature feature="hr_advanced"><PayrollPage /></RequireRestaurantFeature></RequireTeamManager> },
+          { path: 'gestoria', element: <RequireTeamManager><RequireRestaurantFeature feature="hr_advanced"><GestoriaHubPage /></RequireRestaurantFeature></RequireTeamManager> },
+          { path: 'restaurant-ops', element: <RequireBusinessOwner><RequireRestaurantVertical><RequireRestaurantFeature feature="restaurant_ops"><RestaurantOpsCenter /></RequireRestaurantFeature></RequireRestaurantVertical></RequireBusinessOwner> },
           { path: 'sala/setup', element: <RequireSalaAccess><RequireWorkerPermission permission={['sala', 'reservations']}><RestaurantSalaRouteEntry /></RequireWorkerPermission></RequireSalaAccess> },
           { path: 'sala', element: <RequireSalaAccess><RequireWorkerPermission permission={['sala', 'reservations']}><RestaurantSalaRouteEntry /></RequireWorkerPermission></RequireSalaAccess> },
           { path: 'lista-espera', element: <RequireRestaurantVertical><RequireWorkerPermission permission="sala"><RestaurantWaitlistPage /></RequireWorkerPermission></RequireRestaurantVertical> },
           { path: 'cocina', element: <RequireWorkerPermission permission={['sala', 'delivery']}><RestaurantKitchenRouteEntry /></RequireWorkerPermission> },
-          { path: 'vertical/restaurant/informes', element: <RequireBusinessOwner><RequireRestaurantVertical><RestaurantReportsPage /></RequireRestaurantVertical></RequireBusinessOwner> },
+          { path: 'vertical/restaurant/informes', element: <RequireBusinessOwner><RequireRestaurantVertical><RequireRestaurantFeature feature="reports_advanced"><RestaurantReportsPage /></RequireRestaurantFeature></RequireRestaurantVertical></RequireBusinessOwner> },
           { path: 'vertical/restaurant/integraciones', element: <Navigate to="/saas/restaurant-ops" replace /> },
           { path: 'tpv/locales', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><TpvQuickBridgePage /></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
           { path: 'tpv', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><TpvQuickBridgePage /></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
           { path: 'tpv-mode', element: <RedirectLegacyDeliveryTpv /> },
           { path: 'tpv/punto/:salesPointId', element: <RedirectEventsFromRetailRoutes><SalesPointTpvPage /></RedirectEventsFromRetailRoutes> },
           { path: 'clock-kiosk', Component: ClockKiosk },
-          { path: 'income-expenses', element: <RequireBusinessOwner><IncomeExpensesPage /></RequireBusinessOwner> },
-          { path: 'ebitda', element: <RequireBusinessOwner><EbitdaPage /></RequireBusinessOwner> },
-          { path: 'taxes', element: <RequireBusinessOwner><TaxesPage /></RequireBusinessOwner> },
-          { path: 'bank-reconciliation', element: <RequireBusinessOwner><BankReconciliationPage /></RequireBusinessOwner> },
+          { path: 'income-expenses', element: <RequireBusinessOwner><RequireRestaurantFeature feature="finance_advanced"><IncomeExpensesPage /></RequireRestaurantFeature></RequireBusinessOwner> },
+          { path: 'ebitda', element: <RequireBusinessOwner><RequireRestaurantFeature feature="finance_advanced"><EbitdaPage /></RequireRestaurantFeature></RequireBusinessOwner> },
+          { path: 'taxes', element: <RequireBusinessOwner><RequireRestaurantFeature feature="finance_advanced"><TaxesPage /></RequireRestaurantFeature></RequireBusinessOwner> },
+          { path: 'bank-reconciliation', element: <RequireBusinessOwner><RequireRestaurantFeature feature="finance_advanced"><BankReconciliationPage /></RequireRestaurantFeature></RequireBusinessOwner> },
           { path: 'catalog', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><VerticalCatalogEntry /></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
           { path: 'compras', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><Outlet /></RedirectEventsFromRetailRoutes></RequireBusinessOwner>, children: [
             { path: 'proveedor/nuevo', element: <SupplierWorkspacePage /> },
             { path: 'proveedor/:supplierId/editar', element: <SupplierWorkspacePage /> },
           ]},
-          { path: 'correo-facturas', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><SupplierInvoiceEmailPage /></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
+          { path: 'correo-facturas', element: <RequireBusinessOwner><RequireRestaurantFeature feature="invoice_imap"><RedirectEventsFromRetailRoutes><SupplierInvoiceEmailPage /></RedirectEventsFromRetailRoutes></RequireRestaurantFeature></RequireBusinessOwner> },
           { path: 'inventory', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><InventoryPage /></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
           { path: 'articles', element: <RedirectEventsFromRetailRoutes><VerticalArticlesRedirect /></RedirectEventsFromRetailRoutes> },
           { path: 'suppliers', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><SuppliersEntryRedirect /></RedirectEventsFromRetailRoutes></RequireBusinessOwner>, children: [
@@ -720,7 +761,7 @@ export const router = createBrowserRouter([
           { path: 'compras-stock', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><ComprasStockPage /></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
           { path: 'supplier-billing', element: <Navigate to="/saas/catalog?tab=invoices" replace /> },
           { path: 'finanzas/facturacion-clientes', element: <RequireBusinessOwner><ClientBillingPage /></RequireBusinessOwner> },
-          { path: 'client-billing', element: <RequireBusinessOwner><ClientBillingPage /></RequireBusinessOwner> },
+          { path: 'client-billing', element: <RequireBusinessOwner><RequireRestaurantFeature feature="finance_advanced"><ClientBillingPage /></RequireRestaurantFeature></RequireBusinessOwner> },
           { path: 'costing', element: <Navigate to="/saas/catalog?tab=escandallo" replace /> },
           { path: 'delivery', element: <RequireBusinessOwner><RequireDeliveryVertical><RedirectLegacyDelivery /></RequireDeliveryVertical></RequireBusinessOwner> },
           { path: 'delivery-ops', element: <RequireBusinessOwner><RequireDeliveryVertical><DeliveryOpsCenterRoute /></RequireDeliveryVertical></RequireBusinessOwner> },
@@ -751,8 +792,8 @@ export const router = createBrowserRouter([
           { path: 'settings/:tab', element: <RequireBusinessOwner><Settings /></RequireBusinessOwner> },
           { path: 'billing', element: <RequireBusinessOwner><Billing /></RequireBusinessOwner> },
           { path: 'help', Component: HelpCenter },
-          { path: 'web-config', element: <RequireBusinessOwner><RequireWebOrderingVertical><WebConfig /></RequireWebOrderingVertical></RequireBusinessOwner> },
-          { path: 'web-orders', element: <RequireBusinessOwner><RequireWebOrderingVertical><WebOrders /></RequireWebOrderingVertical></RequireBusinessOwner> },
+          { path: 'web-config', element: <RequireBusinessOwner><RequireWebOrderingVertical><RequireRestaurantFeature feature="public_web_orders"><WebConfig /></RequireRestaurantFeature></RequireWebOrderingVertical></RequireBusinessOwner> },
+          { path: 'web-orders', element: <RequireBusinessOwner><RequireWebOrderingVertical><RequireRestaurantFeature feature="public_web_orders"><WebOrders /></RequireRestaurantFeature></RequireWebOrderingVertical></RequireBusinessOwner> },
           { path: 'vertical/limpieza', element: <RequireCleaningVertical><Navigate to="/saas/cleaning-hub" replace /></RequireCleaningVertical> },
           { path: 'cleaning-hub', element: <RequireBusinessOwner><RequireCleaningVertical><CleaningHub /></RequireCleaningVertical></RequireBusinessOwner> },
           { path: 'vertical/limpieza/servicios', element: <RequireBusinessOwner><RequireCleaningVertical><ServiceContractsPage /></RequireCleaningVertical></RequireBusinessOwner> },
@@ -1091,6 +1132,10 @@ export const router = createBrowserRouter([
       {
         path: 'm/:token',
         Component: MesaQrPublicPage,
+      },
+      {
+        path: 'k/:deviceToken',
+        Component: CustomerKioskPage,
       },
       {
         path: 'sign/:token',

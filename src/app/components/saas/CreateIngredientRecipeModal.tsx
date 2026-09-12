@@ -10,10 +10,13 @@ import {
   type ProductRecipeLine,
 } from '../../lib/catalogCosting';
 import {
+  DEFAULT_NEW_INGREDIENT_TPV_FLAGS,
   productBrandIdsFromItem,
   withStoreIngredientTpvFlags,
   type StoreIngredient,
   type StoreIngredientRecipeLine,
+  type StoreIngredientUsageSize,
+  type StoreIngredientUsageVariant,
 } from '../../lib/catalogCustomization';
 import { updateCatalogItemRequest, type CatalogItem } from '../../lib/deliveryApi';
 import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
@@ -30,6 +33,27 @@ const STEPS = [
   { id: 4, title: 'Resumen' },
 ] as const;
 
+const RECIPE_UNITS = ['kg', 'mg', 'ud'] as const;
+const RECIPE_SIZES: Array<{ id: StoreIngredientUsageSize; label: string }> = [
+  { id: 'small', label: 'Pequeño' },
+  { id: 'medium', label: 'Mediano' },
+  { id: 'large', label: 'Grande' },
+];
+
+type SizeUsageDraft = Record<StoreIngredientUsageSize, { quantity: string; unit: string }>;
+
+function emptySizeUsages(): SizeUsageDraft {
+  return {
+    small: { quantity: '', unit: 'kg' },
+    medium: { quantity: '', unit: 'kg' },
+    large: { quantity: '', unit: 'kg' },
+  };
+}
+
+function recipeUnitLabel(unit: string): string {
+  return unit === 'ud' ? 'unidad' : unit;
+}
+
 export type CreateIngredientRecipeResult = {
   ingredient: StoreIngredient;
   createdComponents: StoreIngredient[];
@@ -44,6 +68,8 @@ type CreateIngredientRecipeModalProps = {
   storeIngredients: StoreIngredient[];
   catalogItems: CatalogItem[];
   userId: string;
+  /** Si existe, el asistente carga y actualiza esta subreceta sin crear otra. */
+  editIngredient?: StoreIngredient | null;
   /** @deprecated Ya no se preselecciona marca; la conexión es por productos. */
   initialBrandId?: string;
 };
@@ -80,13 +106,17 @@ export function CreateIngredientRecipeModal({
   storeIngredients,
   catalogItems,
   userId,
+  editIngredient = null,
 }: CreateIngredientRecipeModalProps) {
   useModalClose(open, onClose);
 
   const [step, setStep] = useState(1);
   const [name, setName] = useState('');
-  const [usageQty, setUsageQty] = useState('180');
-  const [usageUnit, setUsageUnit] = useState('g');
+  const [usageQty, setUsageQty] = useState('');
+  const [usageUnit, setUsageUnit] = useState('kg');
+  const [hasSizes, setHasSizes] = useState(false);
+  const [sizeUsages, setSizeUsages] = useState<SizeUsageDraft>(() => emptySizeUsages());
+  const [productSizes, setProductSizes] = useState<Record<string, StoreIngredientUsageSize>>({});
   const [picks, setPicks] = useState<CatalogRecipePick[]>([]);
   const [localIngredients, setLocalIngredients] = useState<StoreIngredient[]>([]);
   const [createdComponents, setCreatedComponents] = useState<StoreIngredient[]>([]);
@@ -97,18 +127,75 @@ export function CreateIngredientRecipeModal({
 
   useEffect(() => {
     if (!open) return;
+    const variants = editIngredient?.usageVariants || [];
+    const hasExistingSizes = variants.length > 0;
+    const linkedProducts = editIngredient
+      ? catalogItems.flatMap((item) => {
+          const line = readProductRecipeLines(item).find(
+            (entry) => String(entry.storeIngredientId || '') === editIngredient.id,
+          );
+          return line ? [{ item, line }] : [];
+        })
+      : [];
     setStep(1);
-    setName('');
-    setUsageQty('180');
-    setUsageUnit('g');
-    setPicks([]);
+    setName(editIngredient?.name || '');
+    if (editIngredient?.usageUnit === 'g') {
+      setUsageQty(
+        editIngredient.usageQtyPerUnit != null
+          ? String(editIngredient.usageQtyPerUnit / 1000).replace('.', ',')
+          : '',
+      );
+      setUsageUnit('kg');
+    } else {
+      setUsageQty(
+        editIngredient?.usageQtyPerUnit != null
+          ? String(editIngredient.usageQtyPerUnit).replace('.', ',')
+          : '',
+      );
+      setUsageUnit(editIngredient?.usageUnit || 'kg');
+    }
+    setHasSizes(hasExistingSizes);
+    setSizeUsages(() => {
+      const next = emptySizeUsages();
+      for (const variant of variants) {
+        next[variant.size] = {
+          quantity: String(variant.quantity).replace('.', ','),
+          unit: variant.unit,
+        };
+      }
+      return next;
+    });
+    setProductSizes(() => {
+      const next: Record<string, StoreIngredientUsageSize> = {};
+      for (const { item, line } of linkedProducts) {
+        const matched = variants.find(
+          (variant) => variant.quantity === line.quantity && variant.unit === line.unit,
+        );
+        next[item._id] = matched?.size || 'medium';
+      }
+      return next;
+    });
+    setPicks(
+      (editIngredient?.recipeLines || []).map((line) => {
+        const legacyGrams = line.unit === 'g';
+        const quantity = legacyGrams ? line.quantity / 1000 : line.quantity;
+        return {
+          storeIngredientId: line.storeIngredientId,
+          name: line.name,
+          quantity,
+          quantityText: String(quantity).replace('.', ','),
+          unit: legacyGrams ? 'kg' : line.unit,
+          tpvRemovable: false,
+        };
+      }),
+    );
     setLocalIngredients(storeIngredients);
     setCreatedComponents([]);
-    setSelectedProductIds(new Set());
+    setSelectedProductIds(new Set(linkedProducts.map(({ item }) => item._id)));
     setProductSearch('');
     setSubmitting(false);
     setCreatingIngredient(false);
-  }, [open, storeIngredients]);
+  }, [open, editIngredient, storeIngredients, catalogItems]);
 
   const allProducts = useMemo(() => {
     return catalogItems
@@ -152,19 +239,36 @@ export function CreateIngredientRecipeModal({
   const compositionLines = useMemo(() => recipePicksToLines(picks), [picks]);
 
   const canNext = (() => {
-    if (step === 1) return Boolean(name.trim()) && parseQty(usageQty) != null;
+    if (step === 1) {
+      const validUsage = hasSizes
+        ? RECIPE_SIZES.every(({ id }) => parseQty(sizeUsages[id].quantity) != null)
+        : parseQty(usageQty) != null;
+      return Boolean(name.trim()) && validUsage;
+    }
     if (step === 2) return compositionLines.length > 0;
-    if (step === 3) return selectedProductIds.size > 0;
+    if (step === 3) {
+      return selectedProductIds.size > 0
+        && (!hasSizes || [...selectedProductIds].every((id) => Boolean(productSizes[id])));
+    }
     return true;
   })();
 
   const toggleProduct = (id: string) => {
+    const wasSelected = selectedProductIds.has(id);
     setSelectedProductIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
+      if (wasSelected) next.delete(id);
       else next.add(id);
       return next;
     });
+    if (hasSizes) {
+      setProductSizes((current) => {
+        const next = { ...current };
+        if (wasSelected) delete next[id];
+        else next[id] = next[id] || 'medium';
+        return next;
+      });
+    }
   };
 
   const setProductsSelected = (ids: string[], selected: boolean) => {
@@ -176,6 +280,16 @@ export function CreateIngredientRecipeModal({
       }
       return next;
     });
+    if (hasSizes) {
+      setProductSizes((current) => {
+        const next = { ...current };
+        for (const id of ids) {
+          if (selected) next[id] = next[id] || 'medium';
+          else delete next[id];
+        }
+        return next;
+      });
+    }
   };
 
   const selectAllFiltered = () => {
@@ -213,7 +327,7 @@ export function CreateIngredientRecipeModal({
           escandalloOnly: true,
           unit: 'g',
         },
-        { chargeExtra: false, allowRemove: false },
+        DEFAULT_NEW_INGREDIENT_TPV_FLAGS,
       );
       setLocalIngredients((prev) => [...prev, row]);
       setCreatedComponents((prev) => [...prev, row]);
@@ -225,8 +339,24 @@ export function CreateIngredientRecipeModal({
   };
 
   const handleSave = async () => {
-    const qty = parseQty(usageQty);
-    if (!name.trim() || qty == null || compositionLines.length === 0 || selectedProductIds.size === 0) {
+    const usageVariants: StoreIngredientUsageVariant[] = hasSizes
+      ? RECIPE_SIZES.flatMap(({ id, label }) => {
+          const quantity = parseQty(sizeUsages[id].quantity);
+          return quantity == null ? [] : [{ size: id, label, quantity, unit: sizeUsages[id].unit }];
+        })
+      : [];
+    const defaultUsage = hasSizes
+      ? usageVariants.find((variant) => variant.size === 'medium')
+      : null;
+    const qty = defaultUsage?.quantity ?? parseQty(usageQty);
+    const unit = defaultUsage?.unit ?? usageUnit;
+    if (
+      !name.trim()
+      || qty == null
+      || (hasSizes && usageVariants.length !== RECIPE_SIZES.length)
+      || compositionLines.length === 0
+      || selectedProductIds.size === 0
+    ) {
       toast.error('Revisa los pasos: falta algún dato');
       return;
     }
@@ -242,12 +372,13 @@ export function CreateIngredientRecipeModal({
 
       const elaborated = withStoreIngredientTpvFlags(
         {
-          id: `ing-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          id: editIngredient?.id || `ing-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           name: name.trim().replace(/\s+/g, ' '),
           escandalloOnly: true,
-          unit: usageUnit || 'g',
+          unit: unit || 'kg',
           usageQtyPerUnit: qty,
-          usageUnit: usageUnit || 'g',
+          usageUnit: unit || 'kg',
+          ...(usageVariants.length > 0 ? { usageVariants } : {}),
           recipeLines,
         },
         { chargeExtra: false, allowRemove: false },
@@ -260,24 +391,45 @@ export function CreateIngredientRecipeModal({
 
       const brandsHint = brands.map((b) => ({ _id: b._id, deliveryLineKind: b.deliveryLineKind }));
       const appliedProductIds: string[] = [];
-      // Al vender: solo el elaborado (masa). Las bases se gastan al fabricar, no en la venta.
-      const perSaleLines: ProductRecipeLine[] = [
-        {
-          storeIngredientId: elaborated.id,
-          name: elaborated.name,
-          quantity: qty,
-          unit: usageUnit || 'g',
-          stockCategory: 'ingredient',
-        },
-      ];
       const baseIds = new Set(recipeLines.map((line) => String(line.storeIngredientId || '').trim()).filter(Boolean));
+      const previouslyLinkedProductIds = new Set(
+        editIngredient
+          ? catalogItems
+              .filter((product) =>
+                readProductRecipeLines(product).some(
+                  (line) => String(line.storeIngredientId || '') === editIngredient.id,
+                ),
+              )
+              .map((product) => product._id)
+          : [],
+      );
+      const productsToUpdate = new Set([...previouslyLinkedProductIds, ...selectedProductIds]);
 
-      for (const productId of selectedProductIds) {
+      for (const productId of productsToUpdate) {
         const product = catalogItems.find((p) => p._id === productId);
         if (!product) continue;
+        const remainsSelected = selectedProductIds.has(productId);
+        const selectedVariant = hasSizes && remainsSelected
+          ? usageVariants.find((variant) => variant.size === productSizes[productId])
+          : null;
+        const productQty = selectedVariant?.quantity ?? qty;
+        const productUnit = selectedVariant?.unit ?? unit;
+        // Al vender: solo el elaborado. Las bases se gastan al fabricar, no en la venta.
+        const perSaleLines: ProductRecipeLine[] = remainsSelected ? [
+          {
+            storeIngredientId: elaborated.id,
+            name: elaborated.name,
+            quantity: productQty,
+            unit: productUnit || 'kg',
+            stockCategory: 'ingredient',
+          },
+        ] : [];
         // Quita bases de subreceta si un apply anterior las aplanó en el producto.
         const withoutBases = readProductRecipeLines(product).filter(
-          (line) => !baseIds.has(String(line.storeIngredientId || '').trim()),
+          (line) => {
+            const lineId = String(line.storeIngredientId || '').trim();
+            return !baseIds.has(lineId) && lineId !== elaborated.id;
+          },
         );
         const merged = mergeRecipeLines(withoutBases, perSaleLines);
         const patched = withProductCosting(
@@ -287,7 +439,7 @@ export function CreateIngredientRecipeModal({
           brandsHint,
         );
         await updateCatalogItemRequest(userId, patched);
-        appliedProductIds.push(productId);
+        if (remainsSelected) appliedProductIds.push(productId);
       }
 
       await onSaved({
@@ -296,7 +448,7 @@ export function CreateIngredientRecipeModal({
         appliedProductIds,
       });
       toast.success(
-        `«${elaborated.name}» creado · ${appliedProductIds.length} producto(s) · se descuenta al vender`,
+        `«${elaborated.name}» ${editIngredient ? 'actualizado' : 'creado'} · ${appliedProductIds.length} producto(s) · se descuenta al vender`,
         { duration: 7000 },
       );
       onClose();
@@ -325,7 +477,7 @@ export function CreateIngredientRecipeModal({
               id="create-ingredient-recipe-title"
               className="text-base font-bold text-stone-900 dark:text-stone-100"
             >
-              Crear receta
+              {editIngredient ? 'Editar subreceta' : 'Crear receta'}
             </h2>
             <p className="text-xs text-stone-500 mt-0.5">
               Paso {step} de 4 — {STEPS.find((s) => s.id === step)?.title}
@@ -372,36 +524,104 @@ export function CreateIngredientRecipeModal({
                   className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-[var(--v-blue,#2563eb)] dark:border-stone-700 dark:bg-stone-950"
                 />
               </label>
-              <div className="flex flex-wrap items-end gap-2">
-                <label className="block space-y-1 min-w-[8rem] flex-1">
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-stone-400">
-                    Por unidad vendida *
+              <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-stone-200 bg-stone-50/70 p-3 dark:border-stone-700 dark:bg-stone-950/40">
+                <input
+                  type="checkbox"
+                  checked={hasSizes}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setHasSizes(checked);
+                    if (checked) {
+                      setProductSizes((current) => {
+                        const next = { ...current };
+                        for (const id of selectedProductIds) next[id] = next[id] || 'medium';
+                        return next;
+                      });
+                    }
+                  }}
+                  className="mt-0.5 rounded"
+                />
+                <span>
+                  <span className="block text-sm font-semibold text-stone-800 dark:text-stone-100">
+                    Esta subreceta tiene tallas
                   </span>
-                  <input
-                    value={usageQty}
-                    onChange={(e) => setUsageQty(e.target.value)}
-                    inputMode="decimal"
-                    placeholder="180"
-                    className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm font-semibold tabular-nums outline-none focus:border-[var(--v-blue,#2563eb)] dark:border-stone-700 dark:bg-stone-950"
-                  />
-                </label>
-                <label className="block space-y-1 w-24">
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-stone-400">
-                    Unidad
+                  <span className="block text-[11px] text-stone-500">
+                    Define cuánto se descuenta en Pequeño, Mediano y Grande.
                   </span>
-                  <select
-                    value={usageUnit}
-                    onChange={(e) => setUsageUnit(e.target.value)}
-                    className="w-full rounded-xl border border-stone-200 bg-white px-2 py-2.5 text-sm font-semibold outline-none dark:border-stone-700 dark:bg-stone-950"
-                  >
-                    <option value="g">g</option>
-                    <option value="kg">kg</option>
-                    <option value="ml">ml</option>
-                    <option value="l">l</option>
-                    <option value="ud">ud</option>
-                  </select>
-                </label>
-              </div>
+                </span>
+              </label>
+              {hasSizes ? (
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {RECIPE_SIZES.map(({ id, label }) => (
+                    <div key={id} className="rounded-xl border border-stone-200 p-2.5 dark:border-stone-700">
+                      <p className="mb-1.5 text-xs font-bold text-stone-800 dark:text-stone-100">{label}</p>
+                      <div className="flex gap-1.5">
+                        <input
+                          value={sizeUsages[id].quantity}
+                          onChange={(e) =>
+                            setSizeUsages((current) => ({
+                              ...current,
+                              [id]: { ...current[id], quantity: e.target.value },
+                            }))
+                          }
+                          inputMode="decimal"
+                          placeholder="Cantidad"
+                          aria-label={`Cantidad para tamaño ${label}`}
+                          className="min-w-0 flex-1 rounded-xl border border-stone-200 bg-white px-2.5 py-2 text-sm font-semibold tabular-nums outline-none focus:border-[var(--v-blue,#2563eb)] dark:border-stone-700 dark:bg-stone-950"
+                        />
+                        <select
+                          value={sizeUsages[id].unit}
+                          onChange={(e) =>
+                            setSizeUsages((current) => ({
+                              ...current,
+                              [id]: { ...current[id], unit: e.target.value },
+                            }))
+                          }
+                          aria-label={`Unidad para tamaño ${label}`}
+                          className="w-20 rounded-xl border border-stone-200 bg-white px-2 py-2 text-xs font-semibold outline-none dark:border-stone-700 dark:bg-stone-950"
+                        >
+                          {RECIPE_UNITS.map((recipeUnit) => (
+                            <option key={recipeUnit} value={recipeUnit}>
+                              {recipeUnitLabel(recipeUnit)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-end gap-2">
+                  <label className="block min-w-[8rem] flex-1 space-y-1">
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-stone-400">
+                      Por unidad vendida *
+                    </span>
+                    <input
+                      value={usageQty}
+                      onChange={(e) => setUsageQty(e.target.value)}
+                      inputMode="decimal"
+                      placeholder="Cantidad"
+                      className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm font-semibold tabular-nums outline-none focus:border-[var(--v-blue,#2563eb)] dark:border-stone-700 dark:bg-stone-950"
+                    />
+                  </label>
+                  <label className="block w-28 space-y-1">
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-stone-400">
+                      Unidad
+                    </span>
+                    <select
+                      value={usageUnit}
+                      onChange={(e) => setUsageUnit(e.target.value)}
+                      className="w-full rounded-xl border border-stone-200 bg-white px-2 py-2.5 text-sm font-semibold outline-none dark:border-stone-700 dark:bg-stone-950"
+                    >
+                      {RECIPE_UNITS.map((recipeUnit) => (
+                        <option key={recipeUnit} value={recipeUnit}>
+                          {recipeUnitLabel(recipeUnit)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              )}
               <p className="text-[11px] text-stone-500">
                 Al vender el producto se descuenta esta cantidad del elaborado. Las bases se restan al
                 fabricar en almacén, no en la venta.
@@ -413,7 +633,7 @@ export function CreateIngredientRecipeModal({
             <div className="space-y-2">
               <p className="text-sm text-stone-600 dark:text-stone-300">
                 ¿De qué está hecho <strong>{name.trim() || 'este elaborado'}</strong>? Puedes crear un
-                ingrediente nuevo si no está en la lista. UND/LT/KG es cuánto usas de cada base; el
+                ingrediente nuevo si no está en la lista. KG/MG/UND es cuánto usas de cada base; el
                 coste (€/kg…) no se cambia aquí.
               </p>
               <CatalogProductRecipePicker
@@ -428,6 +648,7 @@ export function CreateIngredientRecipeModal({
                 brandIds={[]}
                 hideTpvOptions
                 compact
+                unitOptions={['kg', 'mg', 'ud']}
                 creatingIngredient={creatingIngredient}
                 onCreateIngredient={handleCreateComponent}
               />
@@ -500,8 +721,11 @@ export function CreateIngredientRecipeModal({
                           {group.products.map((p) => {
                             const checked = selectedProductIds.has(p._id);
                             return (
-                              <li key={`${group.id}-${p._id}`}>
-                                <label className="flex cursor-pointer items-center gap-2.5 px-3 py-2.5 text-sm hover:bg-stone-50 dark:hover:bg-stone-800/60">
+                              <li
+                                key={`${group.id}-${p._id}`}
+                                className="flex items-center gap-2 px-3 py-2.5 hover:bg-stone-50 dark:hover:bg-stone-800/60"
+                              >
+                                <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 text-sm">
                                   <input
                                     type="checkbox"
                                     checked={checked}
@@ -519,6 +743,23 @@ export function CreateIngredientRecipeModal({
                                     ) : null}
                                   </span>
                                 </label>
+                                {hasSizes && checked ? (
+                                  <select
+                                    value={productSizes[p._id] || 'medium'}
+                                    onChange={(e) =>
+                                      setProductSizes((current) => ({
+                                        ...current,
+                                        [p._id]: e.target.value as StoreIngredientUsageSize,
+                                      }))
+                                    }
+                                    aria-label={`Talla de ${p.name}`}
+                                    className="w-24 shrink-0 rounded-xl border border-stone-200 bg-white px-2 py-2 text-xs font-semibold outline-none focus:border-[var(--v-blue,#2563eb)] dark:border-stone-700 dark:bg-stone-900"
+                                  >
+                                    {RECIPE_SIZES.map((size) => (
+                                      <option key={size.id} value={size.id}>{size.label}</option>
+                                    ))}
+                                  </select>
+                                ) : null}
                               </li>
                             );
                           })}
@@ -541,9 +782,20 @@ export function CreateIngredientRecipeModal({
                 <p>
                   <span className="text-stone-500">Elaborado:</span>{' '}
                   <strong className="text-stone-900 dark:text-stone-100">{name.trim()}</strong>
-                  {' · '}
-                  {usageQty} {usageUnit} por venta
+                  {!hasSizes ? ` · ${usageQty} ${recipeUnitLabel(usageUnit)} por venta` : ''}
                 </p>
+                {hasSizes ? (
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {RECIPE_SIZES.map(({ id, label }) => (
+                      <span
+                        key={id}
+                        className="rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs font-semibold text-stone-700 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200"
+                      >
+                        {label}: {sizeUsages[id].quantity} {recipeUnitLabel(sizeUsages[id].unit)}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
               </div>
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-stone-400 mb-1">
@@ -568,8 +820,9 @@ export function CreateIngredientRecipeModal({
                   Productos ({selectedProducts.length})
                 </p>
                 <p className="mb-1.5 text-[11px] text-stone-500">
-                  En cada uno se añade solo «{name.trim() || 'elaborado'}» ({usageQty} {usageUnit} por
-                  venta). Bacon, salsas, etc. los pones tú en el escandallo del plato.
+                  En cada producto se añade solo «{name.trim() || 'elaborado'}» con
+                  {hasSizes ? ' el consumo de la talla elegida' : ` ${usageQty} ${recipeUnitLabel(usageUnit)}`}
+                  . Bacon, salsas, etc. los pones tú en el escandallo del plato.
                 </p>
                 <ul className="space-y-1.5">
                   {productsByOrganizer.map((group) => {
@@ -582,7 +835,10 @@ export function CreateIngredientRecipeModal({
                         </span>
                         <span className="text-stone-500">
                           {' — '}
-                          {picked.map((p) => p.name).join(' · ')}
+                          {picked.map((p) => {
+                            const size = RECIPE_SIZES.find((entry) => entry.id === productSizes[p._id]);
+                            return `${p.name}${hasSizes && size ? ` (${size.label})` : ''}`;
+                          }).join(' · ')}
                         </span>
                       </li>
                     );
@@ -632,7 +888,7 @@ export function CreateIngredientRecipeModal({
                 className={`${VERTIAL_BTN_PRIMARY} !min-h-0 px-3 py-2 text-xs disabled:opacity-50 inline-flex items-center gap-1.5`}
               >
                 {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                {submitting ? 'Guardando…' : 'Guardar receta'}
+                {submitting ? 'Guardando…' : editIngredient ? 'Guardar cambios' : 'Guardar receta'}
               </button>
             )}
           </div>

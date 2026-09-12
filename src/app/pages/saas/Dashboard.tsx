@@ -16,6 +16,7 @@ import {
   WorkerPayMonthPanel,
   buildWorkerPayMonthSummary,
   DeliveryOpsInsightsPanel,
+  DeliveryProgressiveSection,
   DeliverySoldProductMarginPanel,
   type WorkerPayMonthSummary,
 } from '../../verticals/delivery';
@@ -93,9 +94,6 @@ import { PortfolioOpsPulse } from '../../components/saas/PortfolioOpsPulse';
 import { CompanyBrandPerformancePanel } from '../../components/saas/CompanyBrandPerformancePanel';
 import {
   DashboardOpsPulseSkeleton,
-  DashboardBrandsSkeleton,
-  DashboardWorkerPaySkeleton,
-  DashboardLazyHeaderSkeleton,
   DashboardChartsSkeleton,
   DashboardKpiGridSkeleton,
   DashboardQuickFinanceSkeleton,
@@ -1083,24 +1081,35 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
   const [crmNewClientsToday, setCrmNewClientsToday] = useState<number | null>(null);
   const [crmNewClientsYesterday, setCrmNewClientsYesterday] = useState<number | null>(null);
   const [deliveryBrands, setDeliveryBrands] = useState<Brand[]>([]);
+  const [deliveryBrandsReady, setDeliveryBrandsReady] = useState(false);
+  const deliveryBrandsEnabled = deliveryPanelStage >= 2;
 
   useEffect(() => {
     if (!isDeliveryVertical || !businessId) {
       setDeliveryBrands([]);
+      setDeliveryBrandsReady(false);
       return;
     }
     // Marcas solo cuando el panel las necesita (stage ≥ 2) — no pelear con ola 0.
-    if (deliveryPanelStage < 2) return;
+    if (!deliveryBrandsEnabled) return;
     let cancelled = false;
+    setDeliveryBrands([]);
+    setDeliveryBrandsReady(false);
     listBrandsRequest(businessId)
       .then((list) => {
-        if (!cancelled) setDeliveryBrands(Array.isArray(list) ? list : []);
+        if (!cancelled) {
+          setDeliveryBrands(Array.isArray(list) ? list : []);
+          setDeliveryBrandsReady(true);
+        }
       })
       .catch(() => {
-        if (!cancelled) setDeliveryBrands([]);
+        if (!cancelled) {
+          setDeliveryBrands([]);
+          setDeliveryBrandsReady(true);
+        }
       });
     return () => { cancelled = true; };
-  }, [isDeliveryVertical, businessId, deliveryPanelStage]);
+  }, [isDeliveryVertical, businessId, deliveryBrandsEnabled]);
 
   const loadCrmClientsCount = useCallback(async () => {
     if (!financeUserId || !(isDeliveryVertical || isRestaurantVertical)) {
@@ -1476,21 +1485,18 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
   const deliveryOpsLoading =
     isDeliveryVertical && (deliveryPanelStage < 1 || (deliveryWaveBusy && !deliveryOpsPulses));
   const deliveryBrandsLoading =
-    isDeliveryVertical && deliveryPanelStage >= 2 && deliveryWaveBusy && deliveryDataLoading;
-  const deliveryBrandsAwaiting =
-    isDeliveryVertical && deliveryWaveBusy && deliveryPanelStage >= 1 && deliveryPanelStage < 2;
+    isDeliveryVertical && deliveryBrandsEnabled && !deliveryBrandsReady;
   const deliveryWorkerLoading =
     isDeliveryVertical && deliveryPanelStage >= 3 && deliveryWaveBusy && !workerPayMonth;
-  const deliveryWorkerAwaiting =
-    isDeliveryVertical && deliveryWaveBusy && deliveryPanelStage >= 2 && deliveryPanelStage < 3;
-  const deliveryLazyAwaiting =
-    isDeliveryVertical && deliveryWaveBusy && deliveryPanelStage >= 3 && deliveryPanelStage < 4;
   const deliveryInsightsLoading =
     isDeliveryVertical && deliveryPanelStage >= 4 && deliveryWaveBusy && deliveryDataLoading;
   const chartsLoading = isDeliveryVertical ? deliveryDataLoading : baseDataLoading;
   const operativeLoading = isDeliveryVertical
     ? crmClientsCount == null && (serverLoading || deliveryDataLoading)
     : serverLoading || verticalKpiLoading;
+  const AutoDashboardPanel = isDeliveryVertical
+    ? DeliveryProgressiveSection
+    : DashboardLazyPanel;
 
   // ── Funnel totals ──
   const funnelTotal = funnelCounts['new'] || 0;
@@ -1628,27 +1634,32 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
 
         {canViewDeliveryExtras || !isDeliveryVertical ? (
         <>
-        {/* Marcas — skeleton mientras llega la ola 2 */}
-        {isDeliveryVertical && deliveryBrandsAwaiting ? (
-          <DashboardBrandsSkeleton />
-        ) : null}
-        {isDeliveryVertical && businessId && deliveryPanelStage >= 2 ? (
-          <CompanyBrandPerformancePanel
-            businessId={businessId}
-            brands={deliveryBrands}
-            orders={scopedDeliveryOrders}
-            sessions={deliveryTpvSessions}
-            stores={deliveryScope?.stores || []}
-            loading={deliveryBrandsLoading}
-          />
+        {isDeliveryVertical && businessId ? (
+          <DeliveryProgressiveSection
+            title="Marcas"
+            hint="Venta y rendimiento por marca"
+            icon={<Building2 className="h-4 w-4" />}
+            ready={deliveryPanelStage >= 2 && deliveryBrandsReady}
+            minHeight={220}
+          >
+            <CompanyBrandPerformancePanel
+              businessId={businessId}
+              brands={deliveryBrands}
+              orders={scopedDeliveryOrders}
+              sessions={deliveryTpvSessions}
+              stores={deliveryScope?.stores || []}
+              loading={deliveryBrandsLoading}
+            />
+          </DeliveryProgressiveSection>
         ) : null}
 
-        {isDeliveryVertical && deliveryPanelStage >= 2 && financeUserId ? (
-          <DashboardLazyPanel
+        {isDeliveryVertical && financeUserId ? (
+          <DeliveryProgressiveSection
             title="Ranking productos · margen"
-            hint="Semana / mes · por tienda · escandallo · abrir"
+            hint="Semana o mes · por tienda · escandallo"
             icon={<Package className="w-4 h-4" />}
-            storageKey={`dash_lazy_sold_margin:${dashboardConfigScope}`}
+            ready={deliveryPanelStage >= 2 && deliveryBrandsReady}
+            minHeight={300}
           >
             <DeliverySoldProductMarginPanel
               orders={scopedDeliveryOrders}
@@ -1658,34 +1669,31 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
               accountBusinessCount={businesses.length || 1}
               businessType={currentBusiness?.businessType}
             />
-          </DashboardLazyPanel>
+          </DeliveryProgressiveSection>
         ) : null}
 
-        {/* Pagos trabajadores — skeleton ola 3 */}
-        {isDeliveryVertical && deliveryWorkerAwaiting ? (
-          <DashboardWorkerPaySkeleton />
-        ) : null}
-        {isDeliveryVertical && deliveryPanelStage >= 3 ? (
-          <WorkerPayMonthPanel
-            summary={workerPayMonth}
-            loading={deliveryWorkerLoading}
-          />
-        ) : null}
-
-        {/* Costes + tiempos — cabeceras skeleton mientras llega ola 4 */}
-        {isDeliveryVertical && deliveryLazyAwaiting ? (
-          <div className="space-y-2">
-            <DashboardLazyHeaderSkeleton titleWidth="w-48" />
-            <DashboardLazyHeaderSkeleton titleWidth="w-36" />
-          </div>
+        {isDeliveryVertical ? (
+          <DeliveryProgressiveSection
+            title="Pagos a trabajadores"
+            hint="Resumen del mes y consumos de personal"
+            icon={<Users className="h-4 w-4" />}
+            ready={deliveryPanelStage >= 3}
+            minHeight={190}
+          >
+            <WorkerPayMonthPanel
+              summary={workerPayMonth}
+              loading={deliveryWorkerLoading}
+            />
+          </DeliveryProgressiveSection>
         ) : null}
 
-        {isDeliveryVertical && deliveryPanelStage >= 4 ? (
-          <DashboardLazyPanel
+        {isDeliveryVertical ? (
+          <DeliveryProgressiveSection
             title="Costes, escandallo y merma"
-            hint="Food cost, merma e inventario · abrir para cargar paso a paso"
+            hint="Food cost, merma e inventario"
             icon={<Calculator className="w-4 h-4" />}
-            storageKey={`dash_lazy_stock_analytics:${dashboardConfigScope}`}
+            ready={deliveryPanelStage >= 4}
+            minHeight={320}
           >
             {financeUserId ? (
               <StockCostAnalyticsPanel
@@ -1693,15 +1701,16 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                 businessId={businessId}
               />
             ) : null}
-          </DashboardLazyPanel>
+          </DeliveryProgressiveSection>
         ) : null}
 
-        {isDeliveryVertical && deliveryPanelStage >= 4 ? (
-          <DashboardLazyPanel
+        {isDeliveryVertical ? (
+          <DeliveryProgressiveSection
             title="Tiempos de entrega"
-            hint="Por tienda · abrir para cargar"
+            hint="Preparación, entrega y rendimiento por tienda"
             icon={<Timer className="w-4 h-4" />}
-            storageKey={`dash_lazy_ops_insights:${dashboardConfigScope}`}
+            ready={deliveryPanelStage >= 4}
+            minHeight={260}
           >
             <DeliveryOpsInsightsPanel
               orders={scopedDeliveryOrders}
@@ -1714,7 +1723,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
               newClientsToday={crmNewClientsToday}
               newClientsYesterday={crmNewClientsYesterday}
             />
-          </DashboardLazyPanel>
+          </DeliveryProgressiveSection>
         ) : null}
         </>
         ) : null}
@@ -1751,13 +1760,14 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
         {isVisible('charts') && (
           <div style={{ order: getWidgetOrder('charts') }}>
             <DraggableWidget id="charts" {...dragProps}>
-              <DashboardLazyPanel
+              <AutoDashboardPanel
                 title="Gráficas principales"
                 hint={isDeliveryVertical
-                  ? 'Cobrado €, pedidos creados y productos · abrir para cargar'
+                  ? 'Cobrado, pedidos creados y productos'
                   : 'Ventas, leads y más · abrir para cargar'}
                 icon={<BarChart3 className="w-4 h-4" />}
                 storageKey={`dash_lazy_charts:${dashboardConfigScope}`}
+                minHeight={isDeliveryVertical ? 360 : undefined}
               >
                 {chartsLoading ? (
                   <DashboardChartsSkeleton />
@@ -1774,7 +1784,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                   />
                 </Suspense>
                 )}
-              </DashboardLazyPanel>
+              </AutoDashboardPanel>
             </DraggableWidget>
           </div>
         )}
@@ -1783,13 +1793,14 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
         {isVisible('operations') && (
           <div style={{ order: getWidgetOrder('operations') }}>
             <DraggableWidget id="operations" {...dragProps}>
-              <DashboardLazyPanel
+              <AutoDashboardPanel
                 title={isDeliveryVertical ? 'Clientes (CRM)' : 'Operativa del negocio'}
                 hint={isDeliveryVertical
-                  ? 'Cartera, altas y ritmo · abrir para ver'
+                  ? 'Cartera, altas y ritmo'
                   : 'Pedidos, clientes, equipo · abrir para ver'}
                 icon={isDeliveryVertical ? <Users className="w-4 h-4" /> : <Activity className="w-4 h-4" />}
                 storageKey={`dash_lazy_ops:${dashboardConfigScope}`}
+                minHeight={isDeliveryVertical ? 180 : undefined}
               >
                 {operativeLoading ? (
                   <DashboardKpiGridSkeleton
@@ -1825,7 +1836,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                   />
                 </div>
                 )}
-              </DashboardLazyPanel>
+              </AutoDashboardPanel>
             </DraggableWidget>
           </div>
         )}
@@ -1834,11 +1845,14 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
         {isVisible('quick_finance') && (quickFinance || (serverLoading && !quickFinance)) ? (
           <div style={{ order: getWidgetOrder('quick_finance') }}>
             <DraggableWidget id="quick_finance" {...dragProps}>
-              <DashboardLazyPanel
+              <AutoDashboardPanel
                 title="Resumen financiero"
-                hint="Ingresos, gastos y margen · abrir para ver"
+                hint={isDeliveryVertical
+                  ? 'Ingresos, gastos y margen'
+                  : 'Ingresos, gastos y margen · abrir para ver'}
                 icon={<Euro className="w-4 h-4" />}
                 storageKey={`dash_lazy_qfin:${dashboardConfigScope}`}
+                minHeight={isDeliveryVertical ? 230 : undefined}
               >
                 {!quickFinance ? (
                   <DashboardQuickFinanceSkeleton />
@@ -1886,21 +1900,24 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                   </div>
                 </div>
                 )}
-              </DashboardLazyPanel>
+              </AutoDashboardPanel>
             </DraggableWidget>
           </div>
         ) : null}
 
         {financeUserId && canViewFinanceWidget && (
           <div style={{ order: getWidgetOrder('quick_finance') + 1 }}>
-            <DashboardLazyPanel
+            <AutoDashboardPanel
               title="Finanzas"
-              hint="Saldo, ingresos y movimientos · abrir para cargar"
+              hint={isDeliveryVertical
+                ? 'Saldo, ingresos y movimientos'
+                : 'Saldo, ingresos y movimientos · abrir para cargar'}
               icon={<Wallet className="w-4 h-4" />}
               storageKey={`dash_lazy_fin:${dashboardConfigScope}`}
+              minHeight={isDeliveryVertical ? 280 : undefined}
             >
               <DashboardFinanceWidget userId={financeUserId} />
-            </DashboardLazyPanel>
+            </AutoDashboardPanel>
           </div>
         )}
 

@@ -36,7 +36,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(
       toUserFacingMessage(
         err,
-        'Sin conexión con el servidor. Comprueba que el backend esté en marcha e inténtalo de nuevo.',
+        'Hay un problema de conexión. Comprueba tu red e inténtalo de nuevo.',
       ),
     );
   }
@@ -60,8 +60,10 @@ export interface PurchaseOrderItem {
   sku: string;
   name: string;
   quantity: number;
+  unit?: string;
   unitCost: number;
   total: number;
+  taxRate?: number;
   received: number;
   notes: string;
   /** Proveedor de esta línea (pedido multi-proveedor). */
@@ -100,6 +102,8 @@ export interface PurchaseOrder {
   approvedAt: string;
   purchaseInvoiceId: string;
   financeMovementId: string;
+  linkedAlbaranId?: string;
+  linkedAlbaranNumber?: string;
   businessId?: string;
   businessName?: string;
   createdAt: string;
@@ -174,10 +178,14 @@ export async function triggerAutoOrdersRequest(userId: string): Promise<{ create
   );
 }
 
-export async function getLowStockReportRequest(userId: string): Promise<{ items: LowStockItem[]; total: number }> {
+export async function getLowStockReportRequest(
+  userId: string,
+  opts?: { businessId?: string; accountBusinessCount?: number },
+): Promise<{ items: LowStockItem[]; total: number }> {
   const id = normalizeUserId(userId);
+  const qs = purchaseListQuery(opts?.businessId, opts?.accountBusinessCount);
   return request<{ ok: boolean; items: LowStockItem[]; total: number }>(
-    `/api/purchase-orders/${encodeURIComponent(id)}/low-stock`,
+    `/api/purchase-orders/${encodeURIComponent(id)}/low-stock${qs}`,
   );
 }
 
@@ -191,6 +199,7 @@ export async function markOrderReceivedRequest(
   stockUpdated?: number;
   stockUnits?: number;
   stockFailed?: number;
+  stockComplete?: boolean;
   warehouseId?: string;
 }> {
   const id = normalizeUserId(userId);
@@ -200,6 +209,7 @@ export async function markOrderReceivedRequest(
     stockUpdated?: number;
     stockUnits?: number;
     stockFailed?: number;
+    stockComplete?: boolean;
     warehouseId?: string;
   }>(
     `/api/purchase-orders/${encodeURIComponent(id)}/${encodeURIComponent(orderId)}/receive`,
@@ -268,10 +278,14 @@ export interface ForecastItem {
   autoReorder: boolean;
 }
 
-export async function getSalesForecastRequest(userId: string): Promise<{ forecast: ForecastItem[]; weeksAnalyzed: number }> {
+export async function getSalesForecastRequest(
+  userId: string,
+  opts?: { businessId?: string; accountBusinessCount?: number },
+): Promise<{ forecast: ForecastItem[]; weeksAnalyzed: number }> {
   const id = normalizeUserId(userId);
+  const qs = purchaseListQuery(opts?.businessId, opts?.accountBusinessCount);
   return request<{ ok: boolean; forecast: ForecastItem[]; weeksAnalyzed: number }>(
-    `/api/purchase-orders/${encodeURIComponent(id)}/forecast`,
+    `/api/purchase-orders/${encodeURIComponent(id)}/forecast${qs}`,
   );
 }
 
@@ -299,10 +313,14 @@ export interface SmartListItem {
   workCenterName: string;
 }
 
-export async function getSmartPurchaseListRequest(userId: string): Promise<{ items: SmartListItem[]; isPreWeekend: boolean; total: number }> {
+export async function getSmartPurchaseListRequest(
+  userId: string,
+  opts?: { businessId?: string; accountBusinessCount?: number },
+): Promise<{ items: SmartListItem[]; isPreWeekend: boolean; total: number }> {
   const id = normalizeUserId(userId);
+  const qs = purchaseListQuery(opts?.businessId, opts?.accountBusinessCount);
   return request<{ ok: boolean; items: SmartListItem[]; isPreWeekend: boolean; total: number }>(
-    `/api/purchase-orders/${encodeURIComponent(id)}/smart-list`,
+    `/api/purchase-orders/${encodeURIComponent(id)}/smart-list${qs}`,
   );
 }
 
@@ -363,15 +381,19 @@ export interface SupplierSuggestionGroup {
   totalCost: number;
 }
 
-export async function getSuggestionsRequest(userId: string): Promise<{
+export async function getSuggestionsRequest(
+  userId: string,
+  opts?: { businessId?: string; accountBusinessCount?: number },
+): Promise<{
   suggestions: SuggestionItem[];
   bySupplier: SupplierSuggestionGroup[];
   totalItems: number;
   totalEstimatedCost: number;
 }> {
   const id = normalizeUserId(userId);
+  const qs = purchaseListQuery(opts?.businessId, opts?.accountBusinessCount);
   return request<any>(
-    `/api/purchase-orders/${encodeURIComponent(id)}/suggestions`,
+    `/api/purchase-orders/${encodeURIComponent(id)}/suggestions${qs}`,
   );
 }
 
@@ -401,10 +423,14 @@ export interface PurchaseKpis {
   receivedThisMonth: number;
 }
 
-export async function getPurchaseKpisRequest(userId: string): Promise<PurchaseKpis> {
+export async function getPurchaseKpisRequest(
+  userId: string,
+  opts?: { businessId?: string; accountBusinessCount?: number },
+): Promise<PurchaseKpis> {
   const id = normalizeUserId(userId);
+  const qs = purchaseListQuery(opts?.businessId, opts?.accountBusinessCount);
   const payload = await request<{ ok: boolean; kpis: PurchaseKpis }>(
-    `/api/purchase-orders/${encodeURIComponent(id)}/kpis`,
+    `/api/purchase-orders/${encodeURIComponent(id)}/kpis${qs}`,
   );
   return payload.kpis;
 }

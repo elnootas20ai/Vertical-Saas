@@ -1,0 +1,54 @@
+---
+description: CORE tiendas/PDV — una sola API de carga y alta; nunca listar PDV suelto
+alwaysApply: true
+---
+
+# Retail stores CORE — tienda = centro + PDV
+
+En Vertial una **tienda usable** son dos capas:
+
+| Capa | Qué es | Dónde |
+|------|--------|--------|
+| Centro / tienda | `sales_point` (work center) | Ajustes → Tiendas / Centros |
+| PDV de caja | `point_of_sale` delivery | TPV, Web Pedidos, caja |
+
+Si solo existe el centro (p. ej. «Badalona») y **no** el PDV enlazado, pantallas que listan solo PDV mienten: «No hay puntos de venta».
+
+## APIs obligatorias (punto único)
+
+Archivo: `src/app/verticals/retailScopeRegistry.ts`
+
+| Acción | Función |
+|--------|---------|
+| **Cargar** tiendas para UI (Web, Settings, TPV, etc.) | `loadStoresForBusiness` (asegura PDV) |
+| Listado rápido sin crear (solo sidebar/scope) | `loadRetailStoresForBusiness` con `skipPdvMerge: true` / `ensurePdv: false` |
+| **Crear cualquier centro** | `createWorkCenterForBusiness` (usa titular + `businessId`; tienda/almacén completan PDV + marca) |
+| **Crear** tienda/local con asistente de dirección | `createRetailStoreForBusiness` |
+| Tras `createWorkCenter` retail legado (import/IA) | `ensurePdvAfterRetailWorkCenterCreate` |
+
+Implementación: `deliverySetup.ts` (`setupDeliveryRetailStore`, `afterRetailWorkCenterCreated`, `loadTpvPointsOfSaleForBusiness`).
+
+## Prohibido
+
+1. Decidir «¿hay tiendas?» solo con `listPointsOfSaleRequest` (sin merge / sin `loadStoresForBusiness`).
+2. Crear centros desde UI con `createWorkCenter` directamente. Usar `createWorkCenterForBusiness` para no separar miembro/titular ni perder `businessId`.
+3. Inventar otro loader por pantalla (WebConfig, Settings, etc.) que bypass el registry.
+4. Mezclar caché restaurant ↔ delivery: siempre `retailScopeRegistry` (`clearAllRetailScopeCaches`, `persistRetailScopeAfterStoreSave`).
+
+## Al crear empresa / tienda
+
+1. Empresa nueva (`createBusiness`) **no** crea tienda sola.
+2. Primera tienda → `createRetailStoreForBusiness` o `createWorkCenterForBusiness`.
+3. `punto_de_venta` y `almacen` siguen el flujo Vertial: centro → PDV → marca. `oficina` / `custom` solo crean centro.
+4. El core resuelve el titular y pasa siempre el `businessId` de la empresa activa.
+5. Tras alta → invalidar/actualizar caché (`persistRetailScopeAfterStoreSave` / `clearAllRetailScopeCaches`).
+
+## Sidebar vs UI de producto
+
+- **ActiveStoreScope / sidebar**: puede ser solo lectura (`ensurePdv: false`) por rendimiento.
+- **Cualquier pantalla que el usuario use para elegir tienda** (Web Pedidos, TPV gate, Settings stats): `loadStoresForBusiness` / `ensurePdv: true`.
+- `ensurePdv` no implica generar códigos tablet; eso queda reservado a `tpvBootstrap`.
+
+## Al terminar
+
+Di: usaste **registry core** (`loadStoresForBusiness` / `createWorkCenterForBusiness`) y cómo probar (crear tienda → aparece en Web Pedidos y TPV).

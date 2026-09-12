@@ -2,7 +2,7 @@
 
 > **Uso:** texto listo para copiar al **anexo del contrato SaaS** o a la ficha comercial firmada con el cliente.  
 > **Fuente de verdad comercial:** [`VERTIAL-PRECIOS-PACKING.md`](VERTIAL-PRECIOS-PACKING.md)  
-> **Última actualización:** 2026-08-26
+> **Última actualización:** 2026-09-11
 
 Cada plan tiene su hoja. Lo que no figure aquí como incluido **no forma parte del suelo contratado** (SVAs, addons o plan superior).
 
@@ -50,12 +50,24 @@ Cada plan tiene su hoja. Lo que no figure aquí como incluido **no forma parte d
 
 ---
 
-## Plan Básico — pendiente hoja
+## Plan Básico — 49 €/mes
 
-_(Añadir cuando se cierre texto de contrato.)_
+**Precio mensual:** **49 €/mes**
+**Facturación anual (−20 %):** **470,40 €/año** (equivalente comercial mostrado: 39 €/mes)
+**Código producto:** `basic`
+
+Incluye **1 empresa**, **1 PDV**, **1 marca comercial**, **2 workers**, TPV con Verifactu, caja, operativa mínima del vertical, catálogo mínimo, clientes básicos y dashboard básico.
+
+No incluye inventario avanzado, escandallo, compras OCR, OPS, informes avanzados, OFFLINE, pedidos web/QR ni módulos SVA.
 
 ---
 
-## Plan Pro — pendiente hoja
+## Plan Pro — 350 €/mes
 
-_(Añadir cuando se cierre texto de contrato.)_
+**Precio mensual:** **350 €/mes**
+**Facturación anual (−20 %):** **3.360 €/año** (equivalente: 280 €/mes)
+**Código producto:** `pro`
+
+Incluye todo el plan Mediano y, además: **2 empresas**, **1 PDV incluido**, **2 marcas comerciales**, **12 workers**, OPS, Cocina/Bar separados, dashboard e informes avanzados, correo automático de facturas (IMAP), alertas, modo OFFLINE, API, webhooks, pedidos web/QR y módulos SVA incluidos.
+
+Los PDV adicionales se contratan por **149 €/mes** cada uno. Las marcas y empresas adicionales mantienen sus addons de capacidad. Un cambio a un plan inferior no elimina datos: las funciones dejan de estar activas hasta recuperar el plan correspondiente.

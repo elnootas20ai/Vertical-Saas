@@ -3,7 +3,7 @@
  * Usado en la página CEO `/saas/cocina` y embebido en el TPV (sin salir del gate).
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
@@ -17,18 +17,23 @@ import {
   updateComandaStatusRequest,
   type ComandaStatus,
   type DiningOrder,
+  type RestaurantProductionArea,
 } from '../../lib/salaApi';
 import { localCalendarDayKey } from '../../lib/tpvCajaScope';
 import { printDeliveryTicket } from '../../lib/deliveryTicketPrint';
 import { businessTicketInfoFrom } from '../../lib/deliveryTicketHelpers';
 import {
   buildKitchenTickets,
+  buildAccessibleKitchenTickets,
+  buildKitchenItemInstructions,
   kitchenTicketMinutes,
+  kitchenTicketStatusMinutes,
+  kitchenTicketTimerLabel,
   nextKitchenStatus,
   type KitchenTicket,
 } from './restaurantKitchen';
-import { orderItemCustomizationParts } from '../../lib/deliveryTicketHelpers';
 import { setCatalogItemAvailabilityRequest } from '../../lib/deliveryApi';
+import { useRestaurantPlanAccess } from '../../hooks/useRestaurantPlanAccess';
 import { DELIVERY_CATALOG_CHANGED } from '../../lib/deliverySetup';
 import {
   ChefHat,
@@ -45,15 +50,17 @@ import {
   VolumeX,
   Ban,
   ArrowLeft,
+  Coffee,
 } from 'lucide-react';
 
 const OVERTIME_MINUTES = 20;
 const SOUND_KEY = 'restaurant_kds_sound';
+const STATION_KEY = 'restaurant_kds_station';
 
-const ACTION_LABELS: Partial<Record<ComandaStatus, { label: string; color: string }>> = {
-  in_preparation: { label: 'Empezar', color: 'bg-orange-600 hover:bg-orange-700' },
-  ready: { label: '✓ Lista', color: 'bg-green-600 hover:bg-green-700' },
-  served: { label: 'Servida', color: 'bg-gray-700 hover:bg-gray-800' },
+const ACTION_LABELS: Partial<Record<ComandaStatus, { label: string; shortLabel: string; color: string }>> = {
+  in_preparation: { label: 'Empezar preparación', shortLabel: 'Empezar', color: 'bg-[var(--v-blue,#2563eb)] hover:bg-blue-700' },
+  ready: { label: 'Marcar lista para servir', shortLabel: 'Marcar lista', color: 'bg-[var(--v-blue,#2563eb)] hover:bg-blue-700' },
+  served: { label: 'Confirmar servida', shortLabel: 'Servida', color: 'bg-[var(--v-blue,#2563eb)] hover:bg-blue-700' },
 };
 
 const STATUS_TOAST_LABELS: Partial<Record<ComandaStatus, string>> = {
@@ -84,25 +91,24 @@ function KitchenItemCustomization({
 }: {
   item: KitchenTicket['items'][number];
 }) {
-  const parts = orderItemCustomizationParts({
-    notes: item.notes,
-    extras: item.extras.length > 0 ? item.extras : item.modifiers,
-    ingredients: item.ingredients,
-  });
-  const bits: string[] = [];
-  for (const block of parts.compositionBlocks) {
-    bits.push(`▸ ${block.label}`);
-    for (const n of block.added) bits.push(`  + ${n}`);
-    for (const n of block.removed) bits.push(`  SIN ${n}`);
-    if (block.note) bits.push(`  · ${block.note}`);
-  }
-  for (const n of parts.added) bits.push(`+ ${n}`);
-  for (const n of parts.removed) bits.push(`SIN ${n}`);
-  if (bits.length === 0) return null;
+  const { lines, note } = buildKitchenItemInstructions(item);
+  if (lines.length === 0 && !note) return null;
   return (
-    <p className="text-xs text-indigo-600 dark:text-indigo-400 font-semibold whitespace-pre-line">
-      {bits.join('\n')}
-    </p>
+    <div className="mt-1 space-y-1">
+      {lines.length > 0 ? (
+        <p className="whitespace-pre-line text-xs font-semibold leading-relaxed text-blue-700 dark:text-blue-300">
+          {lines.join('\n')}
+        </p>
+      ) : null}
+      {note ? (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 dark:border-amber-900 dark:bg-amber-950/30">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+            Nota de cocina
+          </p>
+          <p className="mt-0.5 text-xs font-semibold text-amber-950 dark:text-amber-100">{note}</p>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -114,6 +120,7 @@ function KitchenTicketCard({
   onMarkOutOfStock,
   acting,
   oosBusyId,
+  station,
 }: {
   ticket: KitchenTicket;
   now: number;
@@ -122,61 +129,77 @@ function KitchenTicketCard({
   onMarkOutOfStock: (productId: string, name: string) => void;
   acting: boolean;
   oosBusyId: string | null;
+  station: RestaurantProductionArea;
 }) {
   const mins = kitchenTicketMinutes(ticket, now);
-  const isOvertime = ticket.status !== 'ready' && mins > OVERTIME_MINUTES;
+  const stateMinutes = kitchenTicketStatusMinutes(ticket, now);
+  const isOvertime = ticket.status !== 'ready' && stateMinutes > OVERTIME_MINUTES;
   const next = nextKitchenStatus(ticket.status);
-  const action = next ? ACTION_LABELS[next] : null;
+  const baseAction = next ? ACTION_LABELS[next] : null;
+  const action = baseAction && station === 'bar'
+    ? {
+        ...baseAction,
+        label: next === 'in_preparation'
+          ? 'Preparar'
+          : next === 'ready'
+            ? 'Lista para servir'
+            : baseAction.label,
+        shortLabel: next === 'ready' ? 'Lista' : baseAction.shortLabel,
+      }
+    : baseAction;
+  const statusTimerColor = ticket.status === 'ready'
+    ? 'text-emerald-600 dark:text-emerald-400'
+    : timerColor(stateMinutes);
   const totalUnits = ticket.items.reduce((s, i) => s + i.quantity, 0);
 
   return (
     <div
-      className={`rounded-2xl border-2 p-3.5 transition-all bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 ${
-        isOvertime ? 'ring-2 ring-red-300' : ''
+      className={`rounded-xl border bg-white p-2.5 transition-all dark:bg-stone-900 ${
+        isOvertime
+          ? 'border-rose-300 ring-2 ring-rose-200 dark:border-rose-800 dark:ring-rose-950'
+          : 'border-stone-200 dark:border-stone-700'
       }`}
     >
-      <div className="flex items-start justify-between mb-2">
-        <div className="flex items-center gap-2 flex-wrap min-w-0">
-          <span className="flex items-center gap-1.5 font-bold text-gray-900 dark:text-gray-100">
+      <div>
+        <div className="min-w-0">
+          <span className="flex items-center gap-1.5 text-sm font-bold text-stone-900 dark:text-stone-100">
             <UtensilsCrossed className="w-4 h-4 text-stone-500 shrink-0" />
             <span className="truncate">{ticketTableLabel(ticket)}</span>
           </span>
-          <span className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-[10px] font-semibold rounded-full">
-            Comanda #{ticket.comandaNumber || '—'}
-          </span>
-          {ticket.zone && (
-            <span className="px-1.5 py-0.5 bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-300 text-[10px] font-medium rounded-full">
-              {ticket.zone}
-            </span>
-          )}
-          {isOvertime && (
-            <span className="flex items-center gap-0.5 px-1.5 py-0.5 bg-red-100 text-red-700 text-[10px] font-bold rounded-full animate-pulse">
-              <Flame className="w-3 h-3" /> RETRASO
-            </span>
-          )}
+          <p className="mt-0.5 truncate text-[10px] font-semibold text-stone-500">
+            #{ticket.comandaNumber || '—'}
+            {ticket.zone ? ` · ${ticket.zone}` : ''}
+            {ticket.createdByName ? ` · ${ticket.createdByName}` : ''}
+          </p>
         </div>
-        <div className={`flex items-center gap-1 text-base font-bold tabular-nums shrink-0 ${timerColor(mins)}`}>
-          <Timer className="w-4 h-4" />
-          {formatElapsed(mins)}
+        <div className="mt-1.5 flex items-center justify-between gap-2 border-t border-stone-100 pt-1.5 dark:border-stone-800">
+          <div className={`flex items-center gap-1 text-xs font-bold tabular-nums ${statusTimerColor}`}>
+            <Timer className="h-3.5 w-3.5" />
+            {kitchenTicketTimerLabel(ticket, now)}
+          </div>
+          {ticket.status !== 'sent_to_kitchen' ? (
+            <p className="text-right text-[10px] font-medium text-stone-400">
+              Total {formatElapsed(mins)}
+            </p>
+          ) : null}
         </div>
       </div>
 
-      {ticket.createdByName && (
-        <p className="text-xs text-gray-500 mb-2">Comanda de {ticket.createdByName}</p>
-      )}
+      {isOvertime ? (
+        <div className="mt-1.5 flex items-center gap-1 rounded-lg bg-rose-50 px-2 py-1 text-[10px] font-bold text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
+          <Flame className="h-3 w-3" /> Retraso: +{OVERTIME_MINUTES} min
+        </div>
+      ) : null}
 
-      <div className="mb-2 space-y-1">
+      <div className="my-2 space-y-1">
         {ticket.items.map((item) => (
-          <div key={item.id} className="flex items-start gap-1.5">
-            <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 shrink-0">
-              {item.quantity}x
+          <div key={item.id} className="flex items-start gap-1.5 rounded-lg bg-stone-50 px-2 py-1.5 dark:bg-stone-950/50">
+            <span className="flex h-6 min-w-6 shrink-0 items-center justify-center rounded-md bg-blue-100 px-1 text-xs font-black text-blue-800 dark:bg-blue-950 dark:text-blue-200">
+              {item.quantity}×
             </span>
             <div className="min-w-0 flex-1">
-              <span className="text-sm text-gray-800 dark:text-gray-200">{item.name}</span>
+              <span className="text-sm font-bold text-stone-900 dark:text-stone-100">{item.name}</span>
               <KitchenItemCustomization item={item} />
-              {item.notes && (
-                <p className="text-xs text-amber-600 dark:text-amber-400 italic">{item.notes}</p>
-              )}
             </div>
             {item.productId ? (
               <button
@@ -184,7 +207,7 @@ function KitchenTicketCard({
                 title="Marcar agotado en carta"
                 disabled={oosBusyId === item.productId}
                 onClick={() => onMarkOutOfStock(item.productId, item.name)}
-                className="shrink-0 p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-40"
+                className="shrink-0 rounded-lg p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-40"
               >
                 {oosBusyId === item.productId
                   ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -196,15 +219,20 @@ function KitchenTicketCard({
       </div>
 
       {ticket.notes && (
-        <div className="flex items-start gap-1.5 mb-2 p-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+        <div className="mb-2 flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 dark:border-amber-800 dark:bg-amber-900/20">
           <MessageSquare className="w-3.5 h-3.5 text-amber-500 mt-0.5 shrink-0" />
-          <p className="text-xs text-amber-800 dark:text-amber-300">{ticket.notes}</p>
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wide text-amber-700 dark:text-amber-300">Nota del pedido</p>
+            <p className="text-xs font-semibold text-amber-950 dark:text-amber-100">{ticket.notes}</p>
+          </div>
         </div>
       )}
 
-      <div className="flex items-center justify-between gap-2 pt-2 border-t border-gray-200/60 dark:border-gray-600/30">
-        <span className="text-xs text-gray-500">{totalUnits} uds</span>
-        <div className="flex items-center gap-1.5">
+      <div className="border-t border-stone-200/70 pt-2 dark:border-stone-700">
+        <span className="text-[10px] font-semibold text-stone-500">
+          {totalUnits} {totalUnits === 1 ? 'unidad' : 'unidades'}
+        </span>
+        <div className="mt-1.5 flex w-full items-center gap-1.5">
           <button
             type="button"
             onClick={() => onPrint(ticket)}
@@ -219,10 +247,13 @@ function KitchenTicketCard({
               onClick={() => onAdvance(ticket, next)}
               disabled={acting}
               onDoubleClick={(e) => e.preventDefault()}
-              className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-sm font-semibold transition-all disabled:opacity-50 shadow-sm ${action.color}`}
+              title={action.label}
+              aria-label={action.label}
+              className={`flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-center text-xs font-semibold text-white transition-all disabled:opacity-50 ${action.color}`}
             >
               {acting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-              {action.label}
+              <span className="xl:hidden">{action.shortLabel}</span>
+              <span className="hidden xl:inline">{action.label}</span>
             </button>
           )}
         </div>
@@ -243,6 +274,7 @@ function KitchenColumn({
   actingKey,
   oosBusyId,
   emptyLabel,
+  station,
 }: {
   title: string;
   icon: ReactNode;
@@ -255,21 +287,24 @@ function KitchenColumn({
   actingKey: string | null;
   oosBusyId: string | null;
   emptyLabel: string;
+  station: RestaurantProductionArea;
 }) {
   return (
     <div className="flex flex-col min-h-0 flex-1">
-      <div className={`flex items-center gap-2 px-4 py-3 rounded-t-2xl ${color}`}>
+      <div className={`flex items-center gap-2 rounded-t-xl px-3 py-2 ${color}`}>
         {icon}
         <h2 className="text-sm font-bold">{title}</h2>
         <span className="ml-auto flex items-center justify-center w-7 h-7 rounded-full bg-white/80 dark:bg-gray-800/80 text-sm font-bold text-gray-900 dark:text-gray-100">
           {tickets.length}
         </span>
       </div>
-      <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3 bg-gray-50/50 dark:bg-gray-900/50 rounded-b-2xl border border-t-0 border-gray-200 dark:border-gray-700">
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto rounded-b-xl border border-t-0 border-gray-200 bg-gray-50/50 p-2 dark:border-gray-700 dark:bg-gray-900/50">
         {tickets.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-gray-300 dark:text-gray-600">
-            <CheckCircle2 className="w-8 h-8 mb-2" />
-            <p className="text-xs font-medium">{emptyLabel}</p>
+          <div className="flex flex-col items-center justify-center py-12 text-stone-400 dark:text-stone-600">
+            <div className="mb-2 flex h-9 w-9 items-center justify-center rounded-full bg-stone-100 dark:bg-stone-800">
+              {icon}
+            </div>
+            <p className="text-center text-xs font-medium">{emptyLabel}</p>
           </div>
         ) : (
           tickets.map((t) => (
@@ -282,6 +317,7 @@ function KitchenColumn({
               onMarkOutOfStock={onMarkOutOfStock}
               acting={actingKey === t.key}
               oosBusyId={oosBusyId}
+              station={station}
             />
           ))
         )}
@@ -306,12 +342,16 @@ export function RestaurantKitchenBoard({
   showMesasNav = false,
 }: RestaurantKitchenBoardProps) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
+  const hasProAccess = useRestaurantPlanAccess('production_stations');
   const isRestaurant = isRestaurantBusinessType(currentBusiness?.businessType);
   const userId = resolveBusinessDataUserId(user, currentBusiness);
   const authUserId = user?.user_id || user?.id || null;
   const scopeBusinessId = resolveBusinessScopeId(currentBusiness);
+  const requestedStation = searchParams.get('station') === 'bar' ? 'bar' : 'kitchen';
+  const station: RestaurantProductionArea = hasProAccess ? requestedStation : 'kitchen';
 
   const [orders, setOrders] = useState<DiningOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -329,6 +369,29 @@ export function RestaurantKitchenBoard({
   const prevNewCountRef = useRef<number | null>(null);
   const soundEnabledRef = useRef(soundEnabled);
   soundEnabledRef.current = soundEnabled;
+
+  useEffect(() => {
+    if (!hasProAccess || searchParams.has('station')) return;
+    let saved = '';
+    try { saved = localStorage.getItem(STATION_KEY) || ''; } catch { /* ignore */ }
+    if (saved !== 'bar') return;
+    const next = new URLSearchParams(searchParams);
+    next.set('station', 'bar');
+    setSearchParams(next, { replace: true });
+  }, [hasProAccess, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (!hasProAccess && searchParams.get('station') === 'bar') {
+      const next = new URLSearchParams(searchParams);
+      next.set('station', 'kitchen');
+      setSearchParams(next, { replace: true });
+    }
+  }, [hasProAccess, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (!hasProAccess) return;
+    try { localStorage.setItem(STATION_KEY, station); } catch { /* ignore */ }
+  }, [hasProAccess, station]);
 
   useEffect(() => {
     try { localStorage.setItem(SOUND_KEY, soundEnabled ? 'on' : 'off'); } catch { /* ignore */ }
@@ -358,7 +421,12 @@ export function RestaurantKitchenBoard({
         dateFrom: `${today}T00:00:00.000Z`,
       });
       setOrders(data);
-      const newCount = buildKitchenTickets(data, scopeBusinessId)
+      const newCount = buildAccessibleKitchenTickets(
+        data,
+        scopeBusinessId,
+        station,
+        hasProAccess,
+      )
         .filter((t) => t.status === 'sent_to_kitchen').length;
       if (
         prevNewCountRef.current !== null &&
@@ -373,7 +441,7 @@ export function RestaurantKitchenBoard({
     } finally {
       setLoading(false);
     }
-  }, [userId, isRestaurant, scopeBusinessId, playNewComandaSound]);
+  }, [userId, isRestaurant, scopeBusinessId, station, hasProAccess, playNewComandaSound]);
 
   useEffect(() => { void loadOrders(); }, [loadOrders]);
 
@@ -420,7 +488,9 @@ export function RestaurantKitchenBoard({
     void printDeliveryTicket({
       order: {
         _id: ticket.orderId,
-        orderNumber: ticket.comandaNumber ? String(ticket.comandaNumber) : '',
+        orderNumber: ticket.comandaNumber
+          ? `${ticket.productionArea === 'bar' ? 'B' : 'C'}-${ticket.comandaNumber}`
+          : '',
         customerName: ticketTableLabel(ticket),
         items: ticket.items.map((item) => ({
           quantity: item.quantity,
@@ -430,7 +500,10 @@ export function RestaurantKitchenBoard({
           extras: item.extras.length > 0 ? item.extras : item.modifiers,
           ingredients: item.ingredients,
         })),
-        notes: ticket.notes,
+        notes: [
+          `ESTACIÓN: ${ticket.productionArea === 'bar' ? 'BARRA' : 'COCINA'}`,
+          ticket.notes,
+        ].filter(Boolean).join(' · '),
         createdAt: ticket.sentToKitchenAt || new Date().toISOString(),
         takenByName: ticket.createdByName,
       },
@@ -486,7 +559,14 @@ export function RestaurantKitchenBoard({
   }, [userId]);
 
   const tickets = useMemo(
-    () => buildKitchenTickets(orders, scopeBusinessId),
+    () => buildAccessibleKitchenTickets(orders, scopeBusinessId, station, hasProAccess),
+    [orders, scopeBusinessId, station, hasProAccess],
+  );
+  const stationCounts = useMemo(
+    () => ({
+      kitchen: buildKitchenTickets(orders, scopeBusinessId, 'kitchen').length,
+      bar: buildKitchenTickets(orders, scopeBusinessId, 'bar').length,
+    }),
     [orders, scopeBusinessId],
   );
   const colNew = useMemo(() => tickets.filter((t) => t.status === 'sent_to_kitchen'), [tickets]);
@@ -513,12 +593,19 @@ export function RestaurantKitchenBoard({
     }
   };
 
+  const selectStation = (nextStation: RestaurantProductionArea) => {
+    const next = new URLSearchParams(searchParams);
+    next.set('station', nextStation);
+    setSearchParams(next, { replace: true });
+    setMobileTab('nuevas');
+  };
+
   return (
     <div className={`flex flex-col min-h-0 ${className}`}>
       {overtimeCount > 0 && (
         <div className="shrink-0 bg-red-50 dark:bg-red-900/30 border-b border-red-200 dark:border-red-800 px-4 py-2">
           <p className="text-xs font-semibold text-red-700 dark:text-red-400">
-            {overtimeCount} comanda(s) fuera de tiempo (más de {OVERTIME_MINUTES} min)
+            {overtimeCount === 1 ? '1 comanda requiere' : `${overtimeCount} comandas requieren`} atención: más de {OVERTIME_MINUTES} min sin avanzar
           </p>
         </div>
       )}
@@ -536,11 +623,38 @@ export function RestaurantKitchenBoard({
               Mesas
             </button>
           ) : null}
+          {hasProAccess ? (
+            <div className="flex rounded-xl border border-stone-200 bg-stone-50 p-1 dark:border-stone-700 dark:bg-stone-950">
+              {([
+                ['kitchen', 'Cocina', ChefHat],
+                ['bar', 'Barra', Coffee],
+              ] as const).map(([value, label, Icon]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => selectStation(value)}
+                  className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-bold transition-colors ${
+                    station === value
+                      ? 'bg-violet-600 text-white shadow-sm'
+                      : 'text-stone-600 hover:bg-white dark:text-stone-300 dark:hover:bg-stone-800'
+                  }`}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {label}
+                  <span className={`flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] ${
+                    station === value ? 'bg-white/20' : 'bg-stone-200 dark:bg-stone-700'
+                  }`}>
+                    {stationCounts[value]}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : null}
           <div className="grid grid-cols-3 gap-2 flex-1">
             {[
-              { label: 'Nuevas', value: colNew.length, bg: 'bg-amber-50 text-amber-700 border-amber-200' },
+              { label: 'Pendientes', value: colNew.length, bg: 'bg-amber-50 text-amber-700 border-amber-200' },
               { label: 'En preparación', value: colPrep.length, bg: 'bg-orange-50 text-orange-700 border-orange-200' },
-              { label: 'Listas', value: colReady.length, bg: 'bg-green-50 text-green-700 border-green-200' },
+              { label: 'Para servir', value: colReady.length, bg: 'bg-green-50 text-green-700 border-green-200' },
             ].map((s) => (
               <div key={s.label} className={`rounded-xl border p-2 text-center ${s.bg}`}>
                 <p className="text-2xl font-bold tabular-nums">{s.value}</p>
@@ -571,9 +685,9 @@ export function RestaurantKitchenBoard({
 
       <div className="md:hidden shrink-0 flex gap-1 px-4 py-2 bg-gray-50 dark:bg-gray-950 border-b border-gray-200 dark:border-gray-700">
         {[
-          { id: 'nuevas' as const, label: 'Nuevas', count: colNew.length },
+          { id: 'nuevas' as const, label: 'Pendientes', count: colNew.length },
           { id: 'preparacion' as const, label: 'Preparación', count: colPrep.length },
-          { id: 'listas' as const, label: 'Listas', count: colReady.length },
+          { id: 'listas' as const, label: 'Para servir', count: colReady.length },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -601,9 +715,9 @@ export function RestaurantKitchenBoard({
         </div>
       ) : (
         <>
-          <div className="hidden md:flex flex-1 min-h-0 gap-4 p-4">
+          <div className="hidden min-h-0 flex-1 gap-3 p-3 md:flex">
             <KitchenColumn
-              title="Nuevas"
+              title="Pendientes de empezar"
               icon={<Clock className="w-4 h-4 text-amber-700" />}
               color="bg-amber-100/80 text-amber-800"
               tickets={colNew}
@@ -613,7 +727,8 @@ export function RestaurantKitchenBoard({
               onMarkOutOfStock={markOutOfStock}
               actingKey={actingKey}
               oosBusyId={oosBusyId}
-              emptyLabel="Sin comandas nuevas"
+              emptyLabel="No hay comandas esperando"
+              station={station}
             />
             <KitchenColumn
               title="En preparación"
@@ -626,10 +741,11 @@ export function RestaurantKitchenBoard({
               onMarkOutOfStock={markOutOfStock}
               actingKey={actingKey}
               oosBusyId={oosBusyId}
-              emptyLabel="Nada en los fogones"
+              emptyLabel="No hay comandas en preparación"
+              station={station}
             />
             <KitchenColumn
-              title="Listas"
+              title="Listas para servir"
               icon={<CheckCircle2 className="w-4 h-4 text-green-700" />}
               color="bg-green-100/80 text-green-800"
               tickets={colReady}
@@ -639,7 +755,8 @@ export function RestaurantKitchenBoard({
               onMarkOutOfStock={markOutOfStock}
               actingKey={actingKey}
               oosBusyId={oosBusyId}
-              emptyLabel="Sin comandas listas"
+              emptyLabel="No hay comandas esperando servicio"
+              station={station}
             />
           </div>
 
@@ -661,6 +778,7 @@ export function RestaurantKitchenBoard({
                     onMarkOutOfStock={markOutOfStock}
                     acting={actingKey === t.key}
                     oosBusyId={oosBusyId}
+                    station={station}
                   />
                 ))}
               </div>

@@ -178,6 +178,7 @@ export interface DiningFloorConfig {
 export type DiningOrderStatus = 'open' | 'served' | 'pending_payment' | 'paid' | 'closed' | 'cancelled';
 export type ComandaStatus = 'draft' | 'sent_to_kitchen' | 'in_preparation' | 'ready' | 'served' | 'cancelled';
 export type ComandaItemStatus = 'pending' | 'in_preparation' | 'ready' | 'served' | 'cancelled';
+export type RestaurantProductionArea = 'kitchen' | 'bar';
 
 export interface DiningOrderItem {
   id: string;
@@ -186,6 +187,9 @@ export interface DiningOrderItem {
   price: number;
   quantity: number;
   category: string;
+  /** IVA incluido en `price`; se conserva para desglose fiscal. */
+  taxRate?: number;
+  productionArea?: RestaurantProductionArea;
   notes: string;
   /** Líneas cocina (+ extra, SIN, ▸ combo…) — misma semántica que delivery `extras`. */
   modifiers: string[];
@@ -218,9 +222,11 @@ export interface DiningOrderItem {
 export interface DiningComanda {
   id: string;
   orderNumber: number;
+  productionArea?: RestaurantProductionArea;
   items: DiningOrderItem[];
   status: ComandaStatus;
   sentToKitchenAt: string;
+  preparationStartedAt?: string;
   readyAt: string;
   servedAt: string;
   createdBy: string;
@@ -489,6 +495,22 @@ export async function sendComandaToKitchenRequest(userId: string, orderId: strin
   const data = await request<{ order: DiningOrder }>(
     `/api/sala/orders/${uid}/${orderId}/comanda/${comandaId}/send`,
     { method: 'POST' },
+  );
+  return data.order;
+}
+
+export async function sendDraftComandasToProductionRequest(
+  userId: string,
+  orderId: string,
+  comandaIds: string[],
+) {
+  const uid = normalizeUserId(userId);
+  const data = await request<{ order: DiningOrder }>(
+    `/api/sala/orders/${uid}/${orderId}/comandas/send`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ comandaIds }),
+    },
   );
   return data.order;
 }

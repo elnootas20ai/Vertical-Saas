@@ -30,9 +30,13 @@ export async function loadStockInforme(
 ): Promise<InformeBuildResult | null> {
   if (!id.startsWith('stock-')) return null;
   ctx.onProgress?.(20, 'Cargando stock…');
+  const purchaseScope = {
+    businessId: ctx.businessId,
+    accountBusinessCount: ctx.accountBusinessCount,
+  };
 
   if (id === 'stock-estado') {
-    const items = await listCatalogItemsRequest(ctx.userId, 'stock');
+    const items = await listCatalogItemsRequest(ctx.userId, 'stock', purchaseScope);
     const stats = computeInventoryStats(items);
     const rows = items.map((it) => ({
       Articulo: it.name || it.id,
@@ -49,7 +53,7 @@ export async function loadStockInforme(
   }
 
   if (id === 'stock-alertas') {
-    const low = await getLowStockReportRequest(ctx.userId);
+    const low = await getLowStockReportRequest(ctx.userId, purchaseScope);
     const rows = (low.items || []).map((it: any) => ({
       Articulo: it.name || it.itemName || it.id,
       Stock: it.stockQuantity ?? it.qty ?? 0,
@@ -64,7 +68,7 @@ export async function loadStockInforme(
   }
 
   if (id === 'stock-rotacion') {
-    const forecast = await getSalesForecastRequest(ctx.userId);
+    const forecast = await getSalesForecastRequest(ctx.userId, purchaseScope);
     const rows = (forecast.forecast || []).map((f: any) => ({
       Articulo: f.name || f.itemName || f.id,
       MediaSemanal: round2(f.weeklyAvg || f.avgWeekly || 0),
@@ -78,7 +82,7 @@ export async function loadStockInforme(
   }
 
   if (id === 'stock-compras-proveedor') {
-    const orders = await listPurchaseOrdersRequest(ctx.userId);
+    const orders = await listPurchaseOrdersRequest(ctx.userId, purchaseScope);
     const bySup = new Map<string, { count: number; total: number }>();
     for (const o of orders) {
       const name = (o as any).supplierName || (o as any).supplierId || 'Sin proveedor';
@@ -96,7 +100,7 @@ export async function loadStockInforme(
       .sort((a, b) => b.Importe - a.Importe);
     let kpisHint = '';
     try {
-      const kpis = await getPurchaseKpisRequest(ctx.userId);
+      const kpis = await getPurchaseKpisRequest(ctx.userId, purchaseScope);
       kpisHint = ` KPIs compras disponibles.`;
       void kpis;
     } catch { /* optional */ }
@@ -127,7 +131,7 @@ export async function loadStockInforme(
   }
 
   if (id === 'stock-punto-pedido') {
-    const sug = await getSuggestionsRequest(ctx.userId);
+    const sug = await getSuggestionsRequest(ctx.userId, purchaseScope);
     const items = (sug as any).items || (sug as any).suggestions || [];
     const rows = items.map((it: any) => ({
       Articulo: it.name || it.itemName || '',
@@ -199,6 +203,9 @@ export async function loadStockInforme(
         dashboard: report.dashboard,
       };
     } catch {
+      if (ctx.businessId) {
+        return emptyResult('No se pudo obtener la merma aislada para la empresa seleccionada.');
+      }
       const { from, to } = lastDaysRange(30);
       try {
         const summary = await getWasteSummaryRequest(ctx.userId, { dateFrom: from, dateTo: to });

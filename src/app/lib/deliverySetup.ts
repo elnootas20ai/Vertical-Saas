@@ -27,6 +27,7 @@ import {
   isTemporaryEventWorkCenter,
   listWorkCentersForDelivery,
   updateWorkCenter,
+  type CreateWorkCenterPayload,
   type WorkCenter,
 } from './workCentersApi';
 import { clearTpvCatalogCache } from './tpvCatalogCache';
@@ -268,16 +269,11 @@ export function filterWorkCentersForBusinessScope(
   if (accountN === undefined) {
     result = mine.sort((a, b) => a.name.localeCompare(b.name, 'es'));
   } else if (mineRetail.length === 0) {
-    // Multi-empresa: no absorber tiendas huérfanas (bodegeta u otra vertical) en el scope activo.
-    if (typeof accountN === 'number' && accountN > 1) {
-      result = mine.sort((a, b) => a.name.localeCompare(b.name, 'es'));
-    } else {
-      const legacyRetail = active.filter((wc) => !readWorkCenterBusinessId(wc) && isRetail(wc));
-      const merged = new Map<string, WorkCenter>();
-      for (const wc of mine) merged.set(wc._id, wc);
-      for (const wc of legacyRetail) merged.set(wc._id, wc);
-      result = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name, 'es'));
-    }
+    const legacyRetail = active.filter((wc) => !readWorkCenterBusinessId(wc) && isRetail(wc));
+    const merged = new Map<string, WorkCenter>();
+    for (const wc of mine) merged.set(wc._id, wc);
+    for (const wc of legacyRetail) merged.set(wc._id, wc);
+    result = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name, 'es'));
   } else {
     result = mine.sort((a, b) => a.name.localeCompare(b.name, 'es'));
   }
@@ -351,7 +347,7 @@ export function workCentersStrictlyForBusiness(
     .filter((wc) => !isTemporaryEventWorkCenter(wc));
 }
 
-function isRetailWorkCenterType(wc: WorkCenter): boolean {
+export function isRetailWorkCenterType(wc: Pick<WorkCenter, 'centerType'>): boolean {
   return wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen';
 }
 
@@ -651,7 +647,9 @@ export async function loadTpvPointsOfSaleForBusiness(
     }
   }
 
-  pointsOfSale = await ensureTabletCodesForPointsOfSale(state.dataUserId, pointsOfSale);
+  if (options?.ensureTabletCodes !== false) {
+    pointsOfSale = await ensureTabletCodesForPointsOfSale(state.dataUserId, pointsOfSale);
+  }
 
   const beforeScopeFilter = dedupePointsOfSale(pointsOfSale);
   pointsOfSale = dedupePointsOfSale(
@@ -842,7 +840,7 @@ export async function setupDeliveryRetailStore(
     phone: payload.phone?.trim() || undefined,
     active: true,
     expectedStaffCount: 0,
-    businessId: payload.businessId,
+    businessId: resolveBusinessScopeId(business) || payload.businessId,
   });
 
   const pdv = await ensureDeliveryPdvForWorkCenter(dataUserId, wc, {
@@ -864,6 +862,99 @@ export async function setupDeliveryRetailStore(
   }
 
   return { workCenter: wc, pointOfSale: pdv };
+}
+
+/**
+ * Tras crear un centro retail (`punto_de_venta` | `almacen`): garantiza PDV de caja + bootstrap.
+ * Obligatorio en cualquier alta de tienda (manual, IA, import). Oficinas/custom: no-op.
+ */
+export async function afterRetailWorkCenterCreated(
+  authUser: AuthLike,
+  business: Business | null | undefined,
+  workCenter: WorkCenter,
+): Promise<PointOfSale | null> {
+  if (!isRetailWorkCenterType(workCenter) || workCenter.active === false || workCenter.deletedAt) {
+    return null;
+  }
+  const dataUserId = resolveDeliveryDataUserId(authUser, business);
+  if (!dataUserId) {
+    throw new Error('No hay usuario de datos para enlazar el punto de venta');
+  }
+
+  const pdv = await ensureDeliveryPdvForWorkCenter(dataUserId, workCenter, {
+    business: business ?? null,
+  });
+  if (!pdv) {
+    throw new Error(`El centro «${workCenter.name}» se creó, pero falta enlazar su PDV de caja`);
+  }
+
+  await bootstrapRetailStoreAfterCreate(authUser, business, {
+    workCenter,
+    pointOfSale: pdv,
+    storeName: workCenter.name,
+  });
+
+  const businessId = resolveBusinessScopeId(business);
+  if (businessId) {
+    persistRetailScopeAfterStorePdvSave(businessId, workCenter, pdv);
+  }
+  return pdv;
+}
+
+export class WorkCenterProvisionError extends Error {
+  readonly workCenter: WorkCenter;
+
+  constructor(workCenter: WorkCenter, cause: unknown) {
+    const reason = cause instanceof Error ? cause.message : 'No se pudo enlazar el PDV';
+    super(`«${workCenter.name}» se creó, pero su configuración quedó incompleta: ${reason}`);
+    this.name = 'WorkCenterProvisionError';
+    this.workCenter = workCenter;
+  }
+}
+
+export function prepareBusinessWorkCenterCreate(
+  authUser: AuthLike,
+  business: Business | null | undefined,
+  payload: Omit<CreateWorkCenterPayload, 'user_id' | 'businessId'>,
+): {
+  dataUserId: string;
+  payload: Omit<CreateWorkCenterPayload, 'user_id'>;
+} {
+  const dataUserId = resolveDeliveryDataUserId(authUser, business);
+  if (!dataUserId) {
+    throw new Error('No hay usuario de datos para crear el centro de trabajo');
+  }
+  const businessId = resolveBusinessScopeId(business);
+  if (!businessId) {
+    throw new Error('No hay empresa activa para crear el centro de trabajo');
+  }
+  return {
+    dataUserId,
+    payload: {
+      ...payload,
+      businessId,
+    },
+  };
+}
+
+/**
+ * Alta canónica de cualquier centro para una empresa.
+ * Usa el titular de datos y, si es tienda/almacén, completa PDV + marca + caché.
+ */
+export async function createBusinessWorkCenter(
+  authUser: AuthLike,
+  business: Business | null | undefined,
+  payload: Omit<CreateWorkCenterPayload, 'user_id' | 'businessId'>,
+): Promise<{ workCenter: WorkCenter; pointOfSale: PointOfSale | null }> {
+  const prepared = prepareBusinessWorkCenterCreate(authUser, business, payload);
+  const workCenter = await createWorkCenter(prepared.dataUserId, prepared.payload);
+
+  try {
+    const pointOfSale = await afterRetailWorkCenterCreated(authUser, business, workCenter);
+    return { workCenter, pointOfSale };
+  } catch (error) {
+    throw new WorkCenterProvisionError(workCenter, error);
+  }
 }
 
 /** Mismo post-alta para PDV 1, 2, 3…: tienda activa + marca por defecto enlazada. */

@@ -580,6 +580,8 @@ function SupplierOrderDraftSection({
 
 function NewPurchaseOrderModal({
   userId,
+  businessId,
+  accountBusinessCount,
   suppliers,
   catalogItems,
   storeIngredients = [],
@@ -590,6 +592,8 @@ function NewPurchaseOrderModal({
   onCreate,
 }: {
   userId: string;
+  businessId?: string;
+  accountBusinessCount: number;
   suppliers: Supplier[];
   catalogItems: CatalogItem[];
   storeIngredients?: StoreIngredient[];
@@ -628,9 +632,15 @@ function NewPurchaseOrderModal({
     let cancelled = false;
     setHydratingCatalog(true);
     void Promise.all([
-      listSuppliersRequest(userId).catch(() => null),
-      listCatalogItemsRequest(userId, 'stock').catch(() => [] as CatalogItem[]),
-      listCatalogItemsRequest(userId, 'catalog').catch(() => [] as CatalogItem[]),
+      liveSuppliers.length === 0
+        ? listSuppliersRequest(userId, { businessId, accountBusinessCount }).catch(() => null)
+        : Promise.resolve(null),
+      liveCatalogItems.length === 0
+        ? listCatalogItemsRequest(userId, 'stock').catch(() => [] as CatalogItem[])
+        : Promise.resolve([] as CatalogItem[]),
+      liveCatalogItems.length === 0
+        ? listCatalogItemsRequest(userId, 'catalog').catch(() => [] as CatalogItem[])
+        : Promise.resolve([] as CatalogItem[]),
     ])
       .then(([supplierList, stock, carta]) => {
         if (cancelled) return;
@@ -647,7 +657,7 @@ function NewPurchaseOrderModal({
     return () => {
       cancelled = true;
     };
-  }, [userId]);
+  }, [userId, businessId, accountBusinessCount, liveSuppliers.length, liveCatalogItems.length]);
 
   const activeSuppliers = useMemo(
     () =>
@@ -670,7 +680,7 @@ function NewPurchaseOrderModal({
     }
     let cancelled = false;
     setLoadingSuggestions(true);
-    void getSuggestionsRequest(userId)
+    void getSuggestionsRequest(userId, { businessId, accountBusinessCount })
       .then((res) => {
         if (!cancelled) setAllSuggestions(res.suggestions || []);
       })
@@ -683,7 +693,7 @@ function NewPurchaseOrderModal({
     return () => {
       cancelled = true;
     };
-  }, [userId]);
+  }, [userId, businessId, accountBusinessCount]);
 
   useEffect(() => {
     setDraftsBySupplier((prev) => {
@@ -753,25 +763,33 @@ function NewPurchaseOrderModal({
       if (!supplier || !draft?.lines.length) continue;
       const parsedLines = parseDraftLines(draft.lines);
       if (!parsedLines.every((l) => l.quantityNum > 0)) continue;
-      const items: PurchaseOrderItem[] = parsedLines.map((l, idx) => ({
-        id: `poi-${Date.now()}-${supplierId}-${idx}`,
-        catalogItemId: l.catalogItemId,
-        sku: l.sku,
-        name: l.name,
-        quantity: l.quantityNum,
-        unitCost: l.unitCostNum,
-        total: l.total,
-        received: 0,
-        notes: '',
-      }));
+      const items: PurchaseOrderItem[] = parsedLines.map((l, idx) => {
+        const catalogItem = orderCatalogItems.find((item) => item._id === l.catalogItemId);
+        return {
+          id: `poi-${Date.now()}-${supplierId}-${idx}`,
+          catalogItemId: l.catalogItemId,
+          sku: l.sku,
+          name: l.name,
+          quantity: l.quantityNum,
+          unit: l.unit,
+          unitCost: l.unitCostNum,
+          total: l.total,
+          taxRate: Number(catalogItem?.taxRate ?? 21),
+          received: 0,
+          notes: '',
+        };
+      });
       const subtotal = items.reduce((s, i) => s + i.total, 0);
-      const taxAmount = Math.round(subtotal * 0.21 * 100) / 100;
+      const taxAmount = Math.round(
+        items.reduce((sum, item) => sum + item.total * (Number(item.taxRate ?? 21) / 100), 0) * 100,
+      ) / 100;
+      const taxRates = [...new Set(items.map((item) => Number(item.taxRate ?? 21)))];
       payloads.push({
         supplierId: supplier._id,
         supplierName: supplier.name || 'Sin proveedor',
         items,
         subtotal: Math.round(subtotal * 100) / 100,
-        taxRate: 21,
+        taxRate: taxRates.length === 1 ? taxRates[0] : 0,
         taxAmount,
         total: Math.round((subtotal + taxAmount) * 100) / 100,
         status: 'draft',
@@ -1007,6 +1025,8 @@ function EditPurchaseOrderModal({
   order,
   supplier,
   userId,
+  businessId,
+  accountBusinessCount,
   catalogItems,
   onClose,
   onSaved,
@@ -1014,6 +1034,8 @@ function EditPurchaseOrderModal({
   order: PurchaseOrder;
   supplier: Supplier | null;
   userId: string;
+  businessId?: string;
+  accountBusinessCount: number;
   catalogItems: CatalogItem[];
   onClose: () => void;
   onSaved: (order: PurchaseOrder) => void;
@@ -1040,7 +1062,7 @@ function EditPurchaseOrderModal({
   useEffect(() => {
     if (!userId) return;
     let cancelled = false;
-    void getSuggestionsRequest(userId)
+    void getSuggestionsRequest(userId, { businessId, accountBusinessCount })
       .then((res) => {
         if (cancelled) return;
         const sugMap = new Map<string, SuggestionItem>();
@@ -1051,11 +1073,16 @@ function EditPurchaseOrderModal({
     return () => {
       cancelled = true;
     };
-  }, [userId]);
+  }, [userId, businessId, accountBusinessCount]);
 
   const parsedLines = useMemo(() => parseDraftLines(draft.lines), [draft.lines]);
   const subtotal = parsedLines.reduce((s, l) => s + l.total, 0);
-  const taxAmount = Math.round(subtotal * 0.21 * 100) / 100;
+  const taxAmount = Math.round(
+    parsedLines.reduce((sum, line, idx) => {
+      const taxRate = Number(order.items[idx]?.taxRate ?? order.taxRate ?? 21);
+      return sum + line.total * (taxRate / 100);
+    }, 0) * 100,
+  ) / 100;
   const total = Math.round((subtotal + taxAmount) * 100) / 100;
   const canSave =
     parsedLines.length > 0 && parsedLines.every((l) => l.quantityNum > 0) && !saving && Boolean(supplier);
@@ -1070,8 +1097,10 @@ function EditPurchaseOrderModal({
         sku: l.sku,
         name: l.name,
         quantity: l.quantityNum,
+        unit: l.unit,
         unitCost: l.unitCostNum,
         total: l.total,
+        taxRate: Number(order.items[idx]?.taxRate ?? order.taxRate ?? 21),
         received: order.items[idx]?.received || 0,
         notes: order.items[idx]?.notes || '',
       }));
@@ -1478,7 +1507,11 @@ function PurchaseOrderDetailModal({
               <span className="tabular-nums">{formatMoney(order.subtotal)}</span>
             </div>
             <div className="flex justify-between text-gray-600 dark:text-gray-400">
-              <span>IVA ({order.taxRate || 21}%)</span>
+              <span>
+                {[...new Set((order.items || []).map((item) => Number(item.taxRate ?? order.taxRate ?? 21)))].length > 1
+                  ? 'IVA (varios tipos)'
+                  : `IVA (${Number(order.items?.[0]?.taxRate ?? order.taxRate ?? 21)}%)`}
+              </span>
               <span className="tabular-nums">{formatMoney(order.taxAmount)}</span>
             </div>
             <div className="flex justify-between font-bold text-gray-900 dark:text-gray-100 pt-1 border-t border-gray-200 dark:border-gray-700">
@@ -1537,6 +1570,8 @@ function PurchaseOrderDetailModal({
 
 function PurchaseSuggestionsPanel({
   userId,
+  businessId,
+  accountBusinessCount,
   suppliers,
   catalogItems,
   storeIngredients,
@@ -1544,6 +1579,8 @@ function PurchaseSuggestionsPanel({
   onCreateOrder,
 }: {
   userId: string;
+  businessId?: string;
+  accountBusinessCount: number;
   suppliers: Supplier[];
   catalogItems: CatalogItem[];
   storeIngredients: StoreIngredient[];
@@ -1577,7 +1614,7 @@ function PurchaseSuggestionsPanel({
     if (!userId || loading) return;
     setLoading(true);
     try {
-      const result = await getSuggestionsRequest(userId);
+      const result = await getSuggestionsRequest(userId, { businessId, accountBusinessCount });
       setSuggestions(result.suggestions || []);
       setLoaded(true);
       if ((result.suggestions || []).length === 0) {
@@ -1603,14 +1640,17 @@ function PurchaseSuggestionsPanel({
           seen.add(s._id);
           const quantity = suggestionOrderQuantity(s);
           const unitCost = Number(s.costPrice) || 0;
+          const catalogItem = catalogItems.find((item) => item._id === s._id);
           items.push({
             id: `poi-${Date.now()}-${idx}`,
             catalogItemId: s._id,
             sku: s.sku || '',
             name: s.name,
             quantity,
+            unit: catalogItem?.unit || 'ud',
             unitCost,
             total: Math.round(quantity * unitCost * 100) / 100,
+            taxRate: Number(catalogItem?.taxRate ?? 21),
             received: 0,
             notes: '',
             supplierId: group.supplierId,
@@ -1623,13 +1663,16 @@ function PurchaseSuggestionsPanel({
         ...new Set(assignableGroups.map((group) => String(group.supplierName || '').trim()).filter(Boolean)),
       ];
       const subtotal = items.reduce((sum, item) => sum + item.total, 0);
-      const taxAmount = Math.round(subtotal * 0.21 * 100) / 100;
+      const taxAmount = Math.round(
+        items.reduce((sum, item) => sum + item.total * (Number(item.taxRate ?? 21) / 100), 0) * 100,
+      ) / 100;
+      const taxRates = [...new Set(items.map((item) => Number(item.taxRate ?? 21)))];
       await onCreateOrder({
         supplierId: assignableGroups.length === 1 ? assignableGroups[0].supplierId : '',
         supplierName: supplierNames.join(' · '),
         items,
         subtotal: Math.round(subtotal * 100) / 100,
-        taxRate: 21,
+        taxRate: taxRates.length === 1 ? taxRates[0] : 0,
         taxAmount,
         total: Math.round((subtotal + taxAmount) * 100) / 100,
         status: 'draft',
@@ -2004,6 +2047,8 @@ export function PurchaseOrdersPage({
       {userId ? (
         <PurchaseSuggestionsPanel
           userId={userId}
+          businessId={businessId}
+          accountBusinessCount={accountBusinessCount}
           suppliers={resolvedSuppliers}
           catalogItems={catalogItems}
           storeIngredients={storeIngredients}
@@ -2119,15 +2164,17 @@ export function PurchaseOrdersPage({
                           </button>
                         ) : null
                       ) : null}
-                      <button
-                        type="button"
-                        onClick={() => void handleDelete(order)}
-                        disabled={busy}
-                        className="p-2 rounded-lg text-gray-400 hover:text-red-600 disabled:opacity-40 shrink-0"
-                        title="Eliminar pedido"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {order.status === 'draft' ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleDelete(order)}
+                          disabled={busy}
+                          className="p-2 rounded-lg text-gray-400 hover:text-red-600 disabled:opacity-40 shrink-0"
+                          title="Eliminar pedido"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      ) : null}
                     </>
                   )}
                 </div>
@@ -2251,14 +2298,16 @@ export function PurchaseOrdersPage({
                                 </button>
                               ) : null
                             ) : null}
-                            <button
-                              type="button"
-                              onClick={() => void handleDelete(order)}
-                              className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:text-red-400 dark:hover:bg-red-950/30 transition-colors"
-                              title="Eliminar pedido"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            {order.status === 'draft' ? (
+                              <button
+                                type="button"
+                                onClick={() => void handleDelete(order)}
+                                className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:text-red-400 dark:hover:bg-red-950/30 transition-colors"
+                                title="Eliminar pedido"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            ) : null}
                           </>
                         )}
                       </div>
@@ -2275,6 +2324,8 @@ export function PurchaseOrdersPage({
       {showCreate ? (
         <NewPurchaseOrderModal
           userId={userId}
+          businessId={businessId}
+          accountBusinessCount={accountBusinessCount}
           suppliers={resolvedSuppliers}
           catalogItems={catalogItems}
           storeIngredients={storeIngredients}
@@ -2294,6 +2345,8 @@ export function PurchaseOrdersPage({
           order={editingOrder}
           supplier={resolvedSuppliers.find((s) => s._id === editingOrder.supplierId) || null}
           userId={userId}
+          businessId={businessId}
+          accountBusinessCount={accountBusinessCount}
           catalogItems={catalogItems}
           onClose={() => setEditingOrder(null)}
           onSaved={handleUpdate}

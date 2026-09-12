@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { MobileLazySection } from '../../components/saas/MobileLazySection';
+import { PublicOrderInbox } from '../../components/saas/PublicOrderInbox';
 import { useIsMobile } from '../../components/ui/use-mobile';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
@@ -2326,6 +2327,12 @@ export function DeliveryOpsCenter() {
   return (
     <Layout title="Centro Operativo" subtitle={layoutSubtitle} noPadding>
       <div className="px-3 md:px-4 pt-1 pb-4 md:pb-5">
+      <div className="mb-3">
+        <PublicOrderInbox
+          targetKind="delivery_ops"
+          salesPointId={isLiveAll ? null : resolvedOpsPdvId}
+        />
+      </div>
       <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 shadow-lg shadow-gray-200/40 dark:shadow-none flex flex-col overflow-hidden max-h-[calc(100dvh-8rem)] min-h-[260px]">
         <div className="shrink-0 px-3 py-2 border-b border-gray-200/90 dark:border-gray-700 bg-gradient-to-b from-gray-50 to-gray-50/90 dark:from-gray-900 dark:to-gray-950">
           <div className="flex items-center gap-2 min-w-0">

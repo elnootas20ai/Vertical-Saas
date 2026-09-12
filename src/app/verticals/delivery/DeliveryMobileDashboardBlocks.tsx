@@ -4,7 +4,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
-import { Hash, Package, RefreshCw, TrendingUp, Wallet } from 'lucide-react';
+import { Hash, Package, RefreshCw, Timer, TrendingUp, Wallet } from 'lucide-react';
 import type { Brand } from '../../lib/brandApi';
 import { listBrandsRequest } from '../../lib/brandApi';
 import {
@@ -37,6 +37,7 @@ import { useInViewOnce } from '../../hooks/useInViewOnce';
 import { WorkerPayMonthPanel } from './WorkerPayMonthPanel';
 import { buildWorkerPayMonthSummary, type WorkerPayMonthSummary } from './workerPayFromTpv';
 import { DeliveryOpsInsightsPanel } from './DeliveryOpsInsightsPanel';
+import { DeliveryProgressiveSection } from './DeliveryProgressiveSection';
 
 export type MobilePdvRef = {
   id: string;
@@ -487,11 +488,12 @@ export function DeliveryMobileDashboardBlocks({
               compact
             />
             {heavyReady ? (
-              <DashboardLazyPanel
+              <DeliveryProgressiveSection
                 title="Tiempos de entrega"
-                hint="Por tienda · abrir para cargar"
+                hint="Preparación, entrega y rendimiento por tienda"
                 icon={<Timer className="h-4 w-4" />}
-                storageKey={`mobile_dash_lazy_ops_insights:${businessId}`}
+                minHeight={220}
+                rootMargin="220px 0px"
               >
                 <DeliveryOpsInsightsPanel
                   orders={scopedOrders}
@@ -503,7 +505,7 @@ export function DeliveryMobileDashboardBlocks({
                   newClientsToday={newClientsToday}
                   newClientsYesterday={newClientsYesterday}
                 />
-              </DashboardLazyPanel>
+              </DeliveryProgressiveSection>
             ) : null}
           </div>
         ) : null}

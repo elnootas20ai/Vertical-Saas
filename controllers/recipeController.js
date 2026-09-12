@@ -13,9 +13,23 @@ import {
   listRecipesByUser,
   findRecipeByCatalogItem,
 } from '../services/recipeModel.js';
+import {
+  filterDocsForBusiness,
+  resolveBusinessIdFromRequest,
+} from '../shared/scope/opsScope.js';
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
+}
+
+function scopeRecipeDocs(req, docs) {
+  const businessId = resolveBusinessIdFromRequest(req);
+  if (!businessId) return docs;
+  const accountBusinessCount = Math.max(
+    1,
+    Number(req.query?.accountBusinessCount || req.body?.accountBusinessCount) || 1,
+  );
+  return filterDocsForBusiness(docs, businessId, { accountBusinessCount });
 }
 
 async function ensureRecipeOwner(req, userId, recipeId) {
@@ -23,7 +37,31 @@ async function ensureRecipeOwner(req, userId, recipeId) {
   await ensureDatabase(req, db);
   const doc = await getDocument(req, db, recipeId);
   if (!doc || doc.type !== 'recipe' || doc.user_id !== userId || doc.deletedAt) return null;
+  const businessId = resolveBusinessIdFromRequest(req);
+  if (businessId) {
+    const accountBusinessCount = Math.max(1, Number(req.query?.accountBusinessCount) || 1);
+    if (filterDocsForBusiness([doc], businessId, { accountBusinessCount }).length === 0) return null;
+  }
   return doc;
+}
+
+async function assertRecipeCatalogReferences(req, userId, recipe, businessId) {
+  const db = getCatalogDbName();
+  const ids = new Set([
+    recipe.catalogItemId,
+    ...(recipe.ingredients || []).map((ingredient) => ingredient.catalogItemId),
+  ].filter(Boolean).map(String));
+  for (const id of ids) {
+    const item = await getDocument(req, db, id).catch(() => null);
+    if (!item || item.deletedAt || item.type !== 'catalog_item' || item.user_id !== userId) {
+      throw new Error('La receta contiene artículos que no pertenecen a esta cuenta');
+    }
+    const itemBusinessId = String(item.businessId || item.business_id || '')
+      .replace(/^business:/, '').trim();
+    if (businessId && itemBusinessId && itemBusinessId !== businessId) {
+      throw new Error('La receta contiene artículos de otra empresa');
+    }
+  }
 }
 
 export async function listRecipes(req, res) {
@@ -34,6 +72,7 @@ export async function listRecipes(req, res) {
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
     let recipes = await listRecipesByUser(req, userId);
+    recipes = scopeRecipeDocs(req, recipes);
     recipes = recipes.map(sanitizeRecipe);
 
     const { category, active, catalogItemId } = req.query;
@@ -80,7 +119,10 @@ export async function createRecipe(req, res) {
     const db = getCatalogDbName();
     await ensureDatabase(req, db);
 
-    const doc = buildRecipeDocument(userId, recipe);
+    const businessId = resolveBusinessIdFromRequest(req)
+      || String(recipe.businessId || recipe.business_id || '').replace(/^business:/, '').trim();
+    await assertRecipeCatalogReferences(req, userId, recipe, businessId);
+    const doc = buildRecipeDocument(userId, { ...recipe, businessId, business_id: businessId });
     const saved = await putDocument(req, db, doc._id, doc);
 
     return res.status(201).json({ ok: true, recipe: sanitizeRecipe({ ...doc, _rev: saved.rev }) });
@@ -101,7 +143,14 @@ export async function updateRecipe(req, res) {
     if (!existing) return res.status(404).json({ ok: false, error: 'Receta no encontrada' });
 
     const db = getCatalogDbName();
-    const doc = buildRecipeDocument(userId, { ...existing, ...recipe }, existing);
+    const businessId = String(existing.businessId || existing.business_id || '')
+      .replace(/^business:/, '').trim();
+    await assertRecipeCatalogReferences(req, userId, { ...existing, ...recipe }, businessId);
+    const doc = buildRecipeDocument(
+      userId,
+      { ...existing, ...recipe, businessId, business_id: businessId },
+      existing,
+    );
     const saved = await putDocument(req, db, doc._id, doc);
 
     return res.json({ ok: true, recipe: sanitizeRecipe({ ...doc, _rev: saved.rev }) });
@@ -156,7 +205,10 @@ export async function getRecipeByProduct(req, res) {
     const { userId, catalogItemId } = req.params;
     if (!userId || !catalogItemId) return badRequest(res, 'Falta userId o catalogItemId');
 
-    const recipes = await findRecipeByCatalogItem(req, userId, catalogItemId);
+    const recipes = scopeRecipeDocs(
+      req,
+      await findRecipeByCatalogItem(req, userId, catalogItemId),
+    );
     return res.json({ ok: true, recipes: recipes.map(sanitizeRecipe) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Error al buscar recetas del producto' });
@@ -174,8 +226,8 @@ export async function recalculateCosts(req, res) {
     const db = getCatalogDbName();
     await ensureDatabase(req, db);
 
-    const recipes = await listRecipesByUser(req, userId);
-    const catalogItems = await listCatalogItemsByUser(req, userId);
+    const recipes = scopeRecipeDocs(req, await listRecipesByUser(req, userId));
+    const catalogItems = scopeRecipeDocs(req, await listCatalogItemsByUser(req, userId));
     const itemMap = new Map(catalogItems.map(item => [item._id, item]));
 
     let updated = 0;
@@ -211,14 +263,17 @@ export async function checkRecipeStock(req, res) {
     if (!userId) return badRequest(res, 'Falta userId');
     if (!Array.isArray(items) || items.length === 0) return badRequest(res, 'Falta el array items');
 
-    const catalogItems = await listCatalogItemsByUser(req, userId);
+    const catalogItems = scopeRecipeDocs(req, await listCatalogItemsByUser(req, userId));
     const itemMap = new Map(catalogItems.map(item => [item._id, item]));
 
     const details = [];
     let canFulfill = true;
 
     for (const { catalogItemId, quantity } of items) {
-      const recipes = await findRecipeByCatalogItem(req, userId, catalogItemId);
+      const recipes = scopeRecipeDocs(
+        req,
+        await findRecipeByCatalogItem(req, userId, catalogItemId),
+      );
       const recipe = recipes.find(r => r.active);
 
       if (!recipe) {
@@ -247,9 +302,8 @@ export async function checkRecipeStock(req, res) {
       for (const ing of recipe.ingredients) {
         const ingItem = itemMap.get(ing.catalogItemId);
         const available = ingItem ? Number(ingItem.stockQuantity || 0) : 0;
-        const requiredPerUnit = ing.wastePercent > 0
-          ? (ing.quantity / recipe.portions) / (1 - ing.wastePercent / 100)
-          : ing.quantity / recipe.portions;
+        // Misma regla que el descuento real: merma incrementa coste, no salida de stock.
+        const requiredPerUnit = ing.quantity / recipe.portions;
         const required = requiredPerUnit * Number(quantity || 1);
         const sufficient = available >= required || ing.optional;
         if (!sufficient && !ing.optional) canFulfill = false;

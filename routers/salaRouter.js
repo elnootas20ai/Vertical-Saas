@@ -19,6 +19,7 @@ import {
   addComanda,
   updateComanda,
   sendComandaToKitchen,
+  sendDraftComandasToProduction,
   cancelComanda,
   updateComandaStatus,
   payOrder,
@@ -67,6 +68,7 @@ salaRouter.post('/orders/:userId', createOrder);
 salaRouter.put('/orders/:userId/:orderId', updateOrder);
 salaRouter.post('/orders/:userId/:orderId/comanda', addComanda);
 salaRouter.put('/orders/:userId/:orderId/comanda/:comandaId', updateComanda);
+salaRouter.post('/orders/:userId/:orderId/comandas/send', sendDraftComandasToProduction);
 salaRouter.post('/orders/:userId/:orderId/comanda/:comandaId/send', sendComandaToKitchen);
 salaRouter.post('/orders/:userId/:orderId/comanda/:comandaId/cancel', cancelComanda);
 salaRouter.patch('/orders/:userId/:orderId/comanda/:comandaId/status', updateComandaStatus);

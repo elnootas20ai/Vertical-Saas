@@ -17,14 +17,20 @@ import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import {
   getWebConfigRequest,
   saveWebConfigRequest,
+  verifyWebCustomDomainRequest,
   type WebConfig as WebConfigType,
 } from '../../lib/webApi';
 import {
-  listPointsOfSaleRequest,
   pointOfSaleDisplayLabel,
   type PointOfSale,
 } from '../../lib/deliveryApi';
-import type { DiningTable } from '../../lib/salaApi';
+import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
+import { loadStoresForBusiness } from '../../verticals/retailScopeRegistry';
+import {
+  getFloorConfigRequest,
+  type DiningTable,
+  type SalaRoomConfig,
+} from '../../lib/salaApi';
 import {
   buildMesaPublicUrl,
   buildMesaQrImageUrl,
@@ -42,23 +48,10 @@ import {
   VERTIAL_BTN_SECONDARY,
   VERTIAL_SURFACE,
 } from '../../lib/vertialUiTokens';
-import { HOYPECAMOS_THEME } from '../../lib/webBrandThemes';
 
 type Door = 'pedir' | 'mesas';
 
 const COLOR_PRESETS = [
-  {
-    label: 'Hoy Pecamos',
-    primary: HOYPECAMOS_THEME.primaryColor,
-    secondary: HOYPECAMOS_THEME.secondaryColor,
-    accent: HOYPECAMOS_THEME.accentColor,
-    logo: HOYPECAMOS_THEME.storeLogo,
-    storeName: HOYPECAMOS_THEME.storeName,
-    welcomeMessage: HOYPECAMOS_THEME.welcomeMessage,
-    storeDescription: HOYPECAMOS_THEME.storeDescription,
-    backgroundColor: HOYPECAMOS_THEME.backgroundColor,
-  },
-  { label: 'Vertial', primary: '#2563EB', secondary: '#0B1220', accent: '#14B8A6' },
   { label: 'Verde', primary: '#16A34A', secondary: '#14532D', accent: '#22C55E' },
   { label: 'Negro', primary: '#0F172A', secondary: '#020617', accent: '#38BDF8' },
 ] as const;
@@ -110,7 +103,7 @@ function slugify(text: string): string {
 export function WebConfig() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, businesses } = useBusiness();
   const [door, setDoor] = useState<Door>('pedir');
   const [config, setConfig] = useState<Partial<WebConfigType>>(DEFAULT_CONFIG);
   const [pdvs, setPdvs] = useState<PointOfSale[]>([]);
@@ -120,14 +113,24 @@ export function WebConfig() {
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
   const [mesaTables, setMesaTables] = useState<DiningTable[]>([]);
+  const [mesaRooms, setMesaRooms] = useState<SalaRoomConfig[]>([]);
   const [mesaQrLoading, setMesaQrLoading] = useState(false);
   const [mesaQrBusyId, setMesaQrBusyId] = useState('');
   const [dnsOpen, setDnsOpen] = useState(false);
   const logoInputRef = useRef<HTMLInputElement | null>(null);
 
   const businessId = currentBusiness?.business_id || '';
+  const isRestaurant = isRestaurantBusinessType(currentBusiness?.businessType);
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
   const mesaOwnerUserId = String(user?.user_id || dataUserId || '').trim();
+  const accountBusinessCount = businesses.length || 1;
+  const knownBusinessIds = useMemo(
+    () =>
+      businesses
+        .map((b) => String(b.business_id || '').trim())
+        .filter(Boolean),
+    [businesses],
+  );
 
   const loadMesaQrTables = useCallback(async () => {
     if (!businessId || !mesaOwnerUserId) {
@@ -136,18 +139,43 @@ export function WebConfig() {
     }
     setMesaQrLoading(true);
     try {
-      const res = await ensureMesaQrTokensRequest(mesaOwnerUserId, businessId);
+      const [res, floor] = await Promise.all([
+        ensureMesaQrTokensRequest(mesaOwnerUserId, businessId),
+        getFloorConfigRequest(mesaOwnerUserId, { businessId }).catch(() => null),
+      ]);
       setMesaTables(res.tables || []);
+      setMesaRooms(floor?.rooms || []);
       if (res.created > 0) {
         toast.success(`${res.created} QR generados`);
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'No se pudieron cargar los QR');
       setMesaTables([]);
+      setMesaRooms([]);
     } finally {
       setMesaQrLoading(false);
     }
   }, [businessId, mesaOwnerUserId]);
+
+  const tableHasValidPdvContext = useCallback((table: DiningTable) => {
+    const allowedPdvIds = (config.salesPointIds || []).length > 0
+      ? (config.salesPointIds || [])
+      : pdvs.filter((pdv) => pdv.active !== false).map((pdv) => pdv._id);
+    if (allowedPdvIds.length <= 1) return allowedPdvIds.length === 1;
+    const room = mesaRooms.find((item) => (
+      item.id === table.roomId
+      || (
+        table.zone
+        && item.name.trim().toLowerCase() === table.zone.trim().toLowerCase()
+      )
+    ));
+    return Boolean(room?.pdvId && allowedPdvIds.includes(room.pdvId));
+  }, [config.salesPointIds, mesaRooms, pdvs]);
+
+  const invalidMesaCount = useMemo(
+    () => mesaTables.filter((table) => !tableHasValidPdvContext(table)).length,
+    [mesaTables, tableHasValidPdvContext],
+  );
 
   useEffect(() => {
     if (door !== 'mesas') return;
@@ -155,27 +183,29 @@ export function WebConfig() {
   }, [door, loadMesaQrTables]);
 
   const load = useCallback(async () => {
-    if (!businessId || !dataUserId) return;
+    if (!businessId || !dataUserId || !currentBusiness) return;
     setLoading(true);
     setError('');
     try {
-      const [res, points] = await Promise.all([
+      // CORE: loadStoresForBusiness (enlaza PDV a tiendas retail, p. ej. Badalona).
+      const [res, stores] = await Promise.all([
         getWebConfigRequest(businessId),
-        listPointsOfSaleRequest(dataUserId, { includeInactive: false }).catch(() => [] as PointOfSale[]),
+        loadStoresForBusiness(user, currentBusiness, businesses, {
+          accountBusinessCount,
+          knownBusinessIds,
+        }),
       ]);
-      const scoped = (points || []).filter((p) => {
-        const bid = String(p.business_id || p.businessId || '').replace(/^business:/, '');
-        const cur = String(businessId).replace(/^business:/, '');
-        return !bid || bid === cur;
-      });
+      const scoped = (stores.pointsOfSale || []).filter((p) => p.active !== false);
       setPdvs(scoped);
 
       if (res.config) {
         const ids = Array.isArray(res.config.salesPointIds) ? res.config.salesPointIds : [];
+        const valid = new Set(scoped.map((p) => p._id));
+        const kept = ids.filter((id) => valid.has(String(id)));
         setConfig({
           ...DEFAULT_CONFIG,
           ...res.config,
-          salesPointIds: ids.length > 0 ? ids : scoped.map((p) => p._id),
+          salesPointIds: kept.length > 0 ? kept : scoped.map((p) => p._id),
         });
       } else {
         setConfig({
@@ -191,7 +221,15 @@ export function WebConfig() {
     } finally {
       setLoading(false);
     }
-  }, [businessId, dataUserId, currentBusiness?.name]);
+  }, [
+    accountBusinessCount,
+    businessId,
+    businesses,
+    currentBusiness,
+    dataUserId,
+    knownBusinessIds,
+    user,
+  ]);
 
   useEffect(() => {
     void load();
@@ -427,7 +465,9 @@ export function WebConfig() {
                 <h2 className="text-sm font-bold text-stone-900 dark:text-stone-50">Enlace público (Vertial)</h2>
               </div>
               <p className="text-xs text-stone-500">
-                No hace falta dominio propio. Queda bajo Vertial: /web/tu-nombre
+                {isRestaurant
+                  ? 'Esta dirección identifica la carta, pero los clientes entran desde el QR único de cada mesa.'
+                  : 'No hace falta dominio propio. Queda bajo Vertial: /web/tu-nombre'}
               </p>
               <div className="flex items-center gap-2">
                 <span className="shrink-0 text-xs text-stone-400">/web/</span>
@@ -452,8 +492,24 @@ export function WebConfig() {
                     rel="noopener noreferrer"
                     className={`${VERTIAL_BTN_SECONDARY} !min-h-9 !px-3 !text-xs`}
                   >
-                    <ExternalLink className="h-3.5 w-3.5" /> Abrir
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    {isRestaurant ? 'Ver carta' : 'Abrir'}
                   </a>
+                </div>
+              ) : null}
+              {storeUrl && isRestaurant ? (
+                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 dark:border-blue-900/60 dark:bg-blue-950/30">
+                  <p className="min-w-0 flex-1 text-xs text-blue-900 dark:text-blue-100">
+                    Este enlace muestra la carta pública. Para pedir a una mesa, cada mesa utiliza su enlace <code>/m/…</code>.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setDoor('mesas')}
+                    className={`${VERTIAL_BTN_SECONDARY} !min-h-9 !px-3 !text-xs`}
+                  >
+                    <QrCode className="h-3.5 w-3.5" />
+                    Ver QR de mesas
+                  </button>
                 </div>
               ) : null}
             </section>
@@ -696,9 +752,10 @@ export function WebConfig() {
               <p className="text-xs text-stone-500">
                 El cliente entra al enlace y elige tienda (ej. Tiana o Badalona). Solo las marcadas.
               </p>
-              {pdvs.length === 0 ? (
+              {pdvs.length === 0 && !error ? (
                 <p className="text-sm text-amber-800 dark:text-amber-200">
-                  No hay puntos de venta. Créalos en el SaaS y vuelve.
+                  No aparece ninguna tienda de esta empresa. Revisa Ajustes → Tiendas (o Centros) y
+                  vuelve a abrir esta página.
                 </p>
               ) : (
                 <ul className="divide-y divide-stone-100 dark:divide-stone-800">
@@ -739,30 +796,30 @@ export function WebConfig() {
             <section className={`${VERTIAL_SURFACE} space-y-3 p-4 sm:p-5`}>
               <div className="flex items-center gap-2">
                 <Truck className="h-4 w-4 text-stone-400" />
-                <h2 className="text-sm font-bold text-stone-900 dark:text-stone-50">Cómo pide</h2>
-              </div>
-              <div className="flex flex-col gap-3 sm:flex-row sm:gap-6">
-                <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-stone-800 dark:text-stone-200">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(config.deliveryEnabled)}
-                    onChange={(e) => updateConfig('deliveryEnabled', e.target.checked)}
-                    className="h-4 w-4 rounded border-stone-300 text-[var(--v-blue,#2563eb)]"
-                  />
-                  Envío a domicilio
-                </label>
-                <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-stone-800 dark:text-stone-200">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(config.pickupEnabled)}
-                    onChange={(e) => updateConfig('pickupEnabled', e.target.checked)}
-                    className="h-4 w-4 rounded border-stone-300 text-[var(--v-blue,#2563eb)]"
-                  />
-                  Recogida en tienda
-                </label>
+                <h2 className="text-sm font-bold text-stone-900 dark:text-stone-50">Recogida y reparto</h2>
               </div>
               <p className="text-xs text-stone-500">
-                Productos = catálogo del SaaS (visibles en web). No se diseña otra carta aquí.
+                Se configura por tienda para que tarifas, mínimos y cobertura coincidan con el PDV real.
+              </p>
+              <div className="flex flex-wrap gap-2 text-xs font-semibold text-stone-700 dark:text-stone-200">
+                {pdvs.filter((pdv) => selectedIds.has(pdv._id)).map((pdv) => (
+                  <span key={pdv._id} className="rounded-lg border border-stone-200 px-2.5 py-1.5 dark:border-stone-700">
+                    {pdv.name}: {pdv.publicOrderingConfig?.pickupEnabled !== false ? 'recogida' : ''}
+                    {pdv.publicOrderingConfig?.pickupEnabled !== false && pdv.publicOrderingConfig?.deliveryEnabled ? ' + ' : ''}
+                    {pdv.publicOrderingConfig?.deliveryEnabled ? 'reparto' : ''}
+                  </span>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate('/saas/settings/tienda')}
+                className={VERTIAL_BTN_SECONDARY}
+              >
+                Configurar en Ajustes → Tiendas
+                <ChevronRight className="h-4 w-4" />
+              </button>
+              <p className="text-xs text-stone-500">
+                Productos = catálogo del SaaS marcado como visible en web.
               </p>
             </section>
           </div>
@@ -813,6 +870,15 @@ export function WebConfig() {
             </section>
 
             <section className={`${VERTIAL_SURFACE} space-y-3 p-4 sm:p-5`}>
+              {invalidMesaCount > 0 ? (
+                <div className="flex gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <p>
+                    {invalidMesaCount} mesa{invalidMesaCount === 1 ? '' : 's'} sin punto de venta.
+                    Asígnalo a su zona en Sala antes de imprimir el QR.
+                  </p>
+                </div>
+              ) : null}
               <div className="flex items-center justify-between gap-2">
                 <h2 className="text-sm font-bold text-stone-900 dark:text-stone-50">
                   QR por mesa
@@ -822,6 +888,7 @@ export function WebConfig() {
                     type="button"
                     onClick={() => {
                       mesaTables.forEach((t, i) => {
+                        if (!tableHasValidPdvContext(t)) return;
                         const token = String(t.qrCode || '').trim();
                         if (!token) return;
                         window.setTimeout(() => {
@@ -853,7 +920,8 @@ export function WebConfig() {
                 <ul className="divide-y divide-stone-100 dark:divide-stone-800">
                   {mesaTables.map((table) => {
                     const token = String(table.qrCode || '').trim();
-                    const publicUrl = token ? buildMesaPublicUrl(token) : '';
+                    const validPdvContext = tableHasValidPdvContext(table);
+                    const publicUrl = token && validPdvContext ? buildMesaPublicUrl(token) : '';
                     const qrSrc = publicUrl ? buildMesaQrImageUrl(publicUrl, 160) : '';
                     const label = table.name || `Mesa ${table.number}`;
                     return (
@@ -878,6 +946,11 @@ export function WebConfig() {
                               {table.zone || 'Sin zona'}
                               {token ? ` · ${token.slice(0, 10)}…` : ''}
                             </p>
+                            {!validPdvContext ? (
+                              <p className="mt-1 text-xs font-semibold text-amber-700">
+                                Falta asignar el punto de venta de esta zona
+                              </p>
+                            ) : null}
                           </div>
                         </div>
                         <div className="flex flex-wrap gap-2">
@@ -953,6 +1026,7 @@ export function WebConfig() {
         open={dnsOpen}
         onClose={() => setDnsOpen(false)}
         domain={String(config.customDomain || '')}
+        status={config.customDomainStatus}
         onChangeDomain={(value) => updateConfig('customDomain', value)}
         saving={saving}
         onSave={async () => {
@@ -960,6 +1034,20 @@ export function WebConfig() {
           if (ok) {
             toast.success('Dominio guardado');
             setDnsOpen(false);
+          }
+        }}
+        onVerify={async () => {
+          if (!businessId) return;
+          const ok = await handleSave();
+          if (!ok) return;
+          try {
+            const response = await verifyWebCustomDomainRequest(businessId);
+            setConfig(response.config);
+            toast.success(response.config.customDomainStatus === 'active'
+              ? 'Dominio activo'
+              : 'DNS aún pendiente');
+          } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'No se pudo verificar el DNS');
           }
         }}
       />

@@ -33,6 +33,14 @@ import {
   updatePurchaseInvoiceRequest,
 } from '../../lib/deliveryApi';
 import { deleteCatalogItemsRelentlessly } from '../../lib/catalogBulkDelete';
+import {
+  completeMasterDataDeletes,
+  enqueueMasterDataDeletes,
+  listMasterDataDeleteQueue,
+  subscribeMasterDataDeleteQueue,
+  withMasterDataDeleteFlushLock,
+  type MasterDataDeleteEntry,
+} from '../../lib/masterDataDeleteQueue';
 import { invalidateCatalogListCache } from '../../lib/catalogListCache';
 import { normalizeBusinessScopeId, notifyDeliveryCatalogChanged } from '../../lib/deliverySetup';
 import {
@@ -1092,14 +1100,24 @@ function InventoryItemDetailModal({
     ) {
       return;
     }
+    const [queued] = enqueueMasterDataDeletes([
+      {
+        userId,
+        businessId,
+        kind: 'almacen',
+        targetId: item._id,
+      },
+    ]);
+    onDeleted(item._id);
+    onClose();
     setDeleting(true);
     try {
       await deleteCatalogItemRequest(userId, item._id);
+      if (queued) completeMasterDataDeletes([queued.id]);
       invalidateCatalogListCache(userId);
       toast.success('Artículo eliminado del Almacén');
-      onDeleted(item._id);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'No se pudo eliminar');
+    } catch {
+      toast.message('Artículo oculto. El borrado se completará cuando vuelva la conexión.');
     } finally {
       setDeleting(false);
     }
@@ -1348,6 +1366,24 @@ export function InventoryPanel({
   const [showEntryPicker, setShowEntryPicker] = useState(false);
   const [entryItem, setEntryItem] = useState<CatalogItem | null>(null);
   const [localItems, setLocalItems] = useState<CatalogItem[]>([]);
+  const [pendingWarehouseDeletes, setPendingWarehouseDeletes] = useState<MasterDataDeleteEntry[]>([]);
+  const refreshPendingWarehouseDeletes = useCallback(() => {
+    setPendingWarehouseDeletes(
+      listMasterDataDeleteQueue({
+        userId: dataUserId,
+        businessId,
+        kinds: ['almacen'],
+      }),
+    );
+  }, [dataUserId, businessId]);
+  useEffect(() => {
+    refreshPendingWarehouseDeletes();
+    return subscribeMasterDataDeleteQueue(refreshPendingWarehouseDeletes);
+  }, [refreshPendingWarehouseDeletes]);
+  const pendingWarehouseDeleteIds = useMemo(
+    () => new Set(pendingWarehouseDeletes.map((entry) => entry.targetId)),
+    [pendingWarehouseDeletes],
+  );
   const [storeIngredients, setStoreIngredients] = useState<StoreIngredient[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [commercialBrands, setCommercialBrands] = useState<InventoryCommercialBrand[]>([]);
@@ -1374,7 +1410,7 @@ export function InventoryPanel({
   useEffect(() => {
     setLocalItems((prev) => {
       const prevById = new Map(prev.map((i) => [i._id, i]));
-      const merged = stockItems.map((serverItem) => {
+      const merged = stockItems.filter((item) => !pendingWarehouseDeleteIds.has(item._id)).map((serverItem) => {
         const id = serverItem._id;
         const patched = stockPatchRef.current.get(id);
         const local = prevById.get(id);
@@ -1400,7 +1436,7 @@ export function InventoryPanel({
       }
       return merged;
     });
-  }, [stockItems, storeWarehouseId]);
+  }, [stockItems, storeWarehouseId, pendingWarehouseDeleteIds]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1476,8 +1512,8 @@ export function InventoryPanel({
   }, [dataUserId]);
 
   const activeItems = useMemo(
-    () => localItems.filter((i) => i.active !== false && !i.deletedAt),
-    [localItems],
+    () => localItems.filter((i) => i.active !== false && !i.deletedAt && !pendingWarehouseDeleteIds.has(i._id)),
+    [localItems, pendingWarehouseDeleteIds],
   );
 
   const scopedItems = useMemo(() => {
@@ -1639,6 +1675,44 @@ export function InventoryPanel({
     await reload();
   }, [reload, dataUserId]);
 
+  const flushPendingWarehouseDeletes = useCallback(async () => {
+    if (!dataUserId) return;
+    await withMasterDataDeleteFlushLock(
+      `${dataUserId}:${businessId}:almacen`,
+      async () => {
+        const entries = listMasterDataDeleteQueue({
+          userId: dataUserId,
+          businessId,
+          kinds: ['almacen'],
+        });
+        if (entries.length === 0) return;
+        const result = await deleteCatalogItemsRelentlessly(
+          dataUserId,
+          entries.map((entry) => entry.targetId),
+          { maxRounds: 3 },
+        );
+        const remaining = new Set(result.remainingIds);
+        const completed = entries.filter((entry) => !remaining.has(entry.targetId));
+        if (completed.length === 0) return;
+        completeMasterDataDeletes(completed.map((entry) => entry.id));
+        const deletedIds = new Set(completed.map((entry) => entry.targetId));
+        setLocalItems((prev) => prev.filter((item) => !deletedIds.has(item._id)));
+        invalidateCatalogListCache(dataUserId);
+        notifyDeliveryCatalogChanged(dataUserId, businessId || undefined);
+        await reload();
+      },
+    );
+  }, [dataUserId, businessId, reload]);
+
+  useEffect(() => {
+    void flushPendingWarehouseDeletes().catch(() => undefined);
+    const onOnline = () => {
+      void flushPendingWarehouseDeletes().catch(() => undefined);
+    };
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, [flushPendingWarehouseDeletes]);
+
   const scheduleStockReload = useCallback(() => {
     invalidateCatalogListCache(dataUserId);
     if (reloadDebounceRef.current != null) {
@@ -1734,6 +1808,17 @@ export function InventoryPanel({
     setDeleteGuard(null);
     if (!dataUserId || !op || op.mode !== 'bulk') return;
     const list = op.items;
+    const queued = enqueueMasterDataDeletes(
+      list.map((item) => ({
+        userId: dataUserId,
+        businessId,
+        kind: 'almacen' as const,
+        targetId: item._id,
+      })),
+    );
+    const optimisticIds = new Set(list.map((item) => item._id));
+    setLocalItems((prev) => prev.filter((item) => !optimisticIds.has(item._id)));
+    setSelectedId((prev) => (prev && optimisticIds.has(prev) ? null : prev));
     setBulkDeleting(true);
     const toastId = toast.loading(`Eliminando ${list.length} artículo(s) del Almacén…`, {
       duration: Infinity,
@@ -1749,6 +1834,10 @@ export function InventoryPanel({
           },
         },
       );
+      const remaining = new Set(result.remainingIds);
+      completeMasterDataDeletes(
+        queued.filter((entry) => !remaining.has(entry.targetId)).map((entry) => entry.id),
+      );
       await refreshAll();
       notifyDeliveryCatalogChanged(dataUserId, businessId || undefined);
       toast.dismiss(toastId);
@@ -1762,9 +1851,9 @@ export function InventoryPanel({
           `Almacén: eliminados ${result.deleted}, fallaron ${result.failed}. Revisa e inténtalo de nuevo.`,
         );
       }
-    } catch (err) {
+    } catch {
       toast.dismiss(toastId);
-      toast.error(err instanceof Error ? err.message : 'No se pudo completar el borrado masivo');
+      toast.message('Los artículos están ocultos. El borrado se completará cuando vuelva la conexión.');
     } finally {
       setBulkDeleting(false);
     }
@@ -1925,6 +2014,10 @@ export function InventoryPanel({
             <p className="text-xs text-stone-500 dark:text-stone-400 flex items-center gap-2">
               <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
               {inventoryBootDetail}
+            </p>
+          ) : pendingWarehouseDeletes.length > 0 ? (
+            <p className="text-xs font-medium text-amber-700 dark:text-amber-300">
+              {pendingWarehouseDeletes.length} borrado(s) pendiente(s)
             </p>
           ) : null
         }

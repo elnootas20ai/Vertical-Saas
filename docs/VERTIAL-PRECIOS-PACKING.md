@@ -1,6 +1,6 @@
 # Vertial — Precios y packing (documento vivo)
 
-> **Última sesión:** 2026-08-26  
+> **Última sesión:** 2026-09-11
 > **Chats de referencia:** [ddf568c7](ddf568c7-f283-4186-9de9-43418654eac7) (SVAs y embudo, 3 ago) · [836107d7](836107d7-191b-4d38-a88e-30ca00ff8aeb) (comparativa mercado, 25 ago)  
 > **Backup plan Cursor:** `.cursor/plans/precios_smb_enterprise_5e4ae4a2.plan.md`
 
@@ -28,11 +28,11 @@ Este archivo es la **biblia comercial humana** para seguir apuntando precios, SV
 | Plan | €/mes (suelo) | Anual eq. (−20 %) | Incluye (suelo) | Qué puede sumar | Techo self-serve | Al superar → |
 |------|---------------:|------------------:|-----------------|-----------------|------------------|--------------|
 | **Gancho** (Básico) | **49** | 39 | TPV + Verifactu · catálogo mín. · **1 PDV** «vacío» · **2 workers** · owner | Packs workers | ~49 + workers · **sin** SVAs · **sin** tienda extra | Subir a Mediano |
-| **Mediano** | **179** * | **143** | **1 tienda** · paridad **TPV + gestión** (1 app) · ver §1 suelo · **4 workers** · **Dashboard 1** | SVAs · packs workers | **~366 €** con 4 SVAs · **1 tienda max** | Pro o «Hablar con Vertial» |
-| **Pro** | **350** * | 279 | **1 tienda** · **todo Vertial** (SVAs dentro) · **12 workers** · OFFLINE · chat/calendario · alertas/API/portfolio según gates | PDV/marca/empresa extra · packs workers | Workers **25** · PDVs ~**6–8** (propuesto) | **Enterprise** |
+| **Mediano** | **179** | **143** | **1 tienda** · paridad **TPV + gestión** (1 app) · ver §1 suelo · **4 workers** · **Dashboard 1** | SVAs · packs workers | **~366 €** con 4 SVAs · **1 tienda max** | Pro o «Hablar con Vertial» |
+| **Pro** | **350** | 280 | **1 tienda** · **todo Vertial** (SVAs dentro) · **12 workers** · OFFLINE · chat/calendario · alertas/API/portfolio según gates | PDV/marca/empresa extra · packs workers | Workers **25** · PDVs ~**6–8** (propuesto) | **Enterprise** |
 | **Enterprise** | Cotizado | — | A medida (multi-empresa, muchos PDV, +25 workers, SLA…) | — | Sin techo público | Contrato |
 
-\* Pro en código: **349 €/mes** (narrativa **350 €**). Mediano en código aún **149 €** — packing cerrado a **179 €** (pendiente alinear MONEI).
+Precios alineados en catálogo, cotización y cobro el 2026-09-11.
 
 **Embudo:** **49 → 179 → 350** (Pro **350 €** cerrado de momento).
 
@@ -44,8 +44,8 @@ Código producto: `basic` · `normal` · `pro`. UI: **Básico** · **Mediano (No
 
 | | **Básico** | **Mediano (Normal)** | **Pro** |
 |---|:---:|:---:|:---:|
-| **€/mes** | **49** | **179** | **350** (349 código) |
-| **Anual eq.** | 39 | 143 | 279 |
+| **€/mes** | **49** | **179** | **350** |
+| **Anual eq.** | 39 | 143 | 280 |
 | **Tiendas incluidas** | 1 | 1 | 1 |
 | **Workers** | 2 | 4 | 12 |
 | **SVAs** | ✗ no puede | ✗ compra aparte | ✓ todos incluidos |
@@ -184,7 +184,7 @@ Ver detalle en §1e (Mediano), §1 suelo Pro, §2 SVAs, §3 addons.
 | Pieza | Mediano | Notas |
 |-------|:-------:|-------|
 | **1 tienda / 1 PDV** | ✓ | |
-| **4 workers** | ✓ **Cerrado** | Antes 6; código aún 6 (`planCatalog.ts`) |
+| **4 workers** | ✓ **Cerrado** | Código alineado |
 | **TPV + Verifactu** | ✓ **Cerrado** | |
 | **Catálogo** | ✓ **Cerrado** | Productos/menú del local |
 | **Ops del vertical** (pedidos, caja…) | ✓ | Implícito en «1 tienda seria» |
@@ -371,7 +371,7 @@ Addons de **tamaño**, no de menú de módulos. Marca y empresa solo desde **Pro
 | 1 tienda + QR mesas (Mediano + SVA) | **228** |
 | Mercado TPV + Yurest (2 apps) | **~150** |
 | Vertial Mediano (1 app, +comodidad) | **179** (+29 vs 2 apps) |
-| 1 tienda + todo (Pro) | **350** (349 en código) |
+| 1 tienda + todo (Pro) | **350** |
 | 2 tiendas + todo (Pro + 1 PDV extra) | **499** (350 + 149) |
 | Pro + 2 empresas + portfolio CEO (addon empresa) | **439** (350 + 89) |
 | 2 tiendas + 2 empresas + todo | **588** (350 + 149 + 89) |
@@ -381,7 +381,7 @@ Addons de **tamaño**, no de menú de módulos. Marca y empresa solo desde **Pro
 
 ## 5. Comparativa vs mercado (argumentario ventas)
 
-**Escenario:** plan Pro · **12 trabajadores** · **1 PDV** · Vertial Pro **349 €/mes** (279 €/mes anual).
+**Escenario:** plan Pro · **12 trabajadores** · **1 PDV** · Vertial Pro **350 €/mes** (280 €/mes anual).
 
 **Reglas:** solo precios públicos verificables · total €/mes por app · sin «ahorro operativo» inventado · apps sin tarifa fija **no suman**.
 
@@ -399,7 +399,7 @@ Addons de **tamaño**, no de menú de módulos. Marca y empresa solo desde **Pro
 | TPV + caja | Revo XEF ONE | 50 |
 | Informes | Power BI Pro (~2 gestores) | 20 |
 | **SUMA stack** | | **666** |
-| **Vertial Pro** | todo incluido | **349** |
+| **Vertial Pro** | todo incluido | **350** |
 | **Diferencia** | | **317 (~48 %)** |
 
 ### Sin precio público (incluido en Pro, no suman)
@@ -441,24 +441,24 @@ Addons de **tamaño**, no de menú de módulos. Marca y empresa solo desde **Pro
 
 ---
 
-## 7. Código vs este doc (divergencias)
+## 7. Código vs este doc
 
-Prioridad comercial: **este doc** cuando está «Cerrado». El código refleja implementación anterior o parcial.
+Precios, cupos y capacidades cerradas deben mantenerse alineados con código y facturación.
 
 | Concepto | Packing (este doc) | Código hoy |
 |----------|-------------------:|-----------:|
-| Pro mensual | 350 (narrativa) | **349** (`planCatalog.ts`, MONEI) |
-| Básico / Mediano | 49 / **179** | **49 / 149** (`planCatalog.ts`) |
+| Pro mensual | **350** | **350** ✓ |
+| Básico / Mediano | **49 / 179** | **49 / 179** ✓ |
 | Pro — PDV incluidos | **1** | **1** (`planCatalog.ts` maxLocations) ✓ |
-| PDV extra (2ª+) | **149** | **49** (`planAddonCatalog.ts`) |
+| PDV extra (2ª+) | **149** | **149** ✓ |
 | Marca extra | **19** | **19** ✓ |
 | Empresa extra | **89** | **89** ✓ |
 | Worker extra | packs **29** / **49** (+5 / +10) | **5 €/u** (`extra_worker`) |
 | SVAs módulo (RRHH, Finanzas…) | 50 / 49 / 39 / 49 | **No existen** en catálogo billing |
 | Tablet TPV extra | 9,90 (solo código) | **9,90** ✓ |
-| Workers incluidos plan | 2 / **4** / 12 | **2 / 6 / 12** (`planCatalog.ts`) |
-| Mediano — suelo (chat, calendario, stock…) | §1 tabla suelo | Bullets distintos en `planCatalog.ts` |
-| Dashboard Mediano = solo Dashboard 1 | §1b | `dashboardPlanCatalog.ts` desbloquea charts/finance en **normal** |
+| Workers incluidos plan | 2 / **4** / 12 | **2 / 4 / 12** ✓ |
+| Mediano — suelo | §1 tabla suelo | Catálogo y gates alineados ✓ |
+| Dashboard Mediano = solo Dashboard 1 | §1b | Dashboard avanzado reservado a Pro ✓ |
 
 ---
 
@@ -470,11 +470,11 @@ Prioridad comercial: **este doc** cuando está «Cerrado». El código refleja i
 - [ ] **Gates producto** — catálogo: Mediano = Carta + Inventario + **Escandallo**; Compras = Pro + CTA  
 - [ ] **Dashboard 1 en Básico** — ¿igual que Mediano o más recortado?  
 - [ ] **Enterprise** — cotización (base + €/PDV + bloque workers); muro «Hablar con Vertial»  
-- [ ] **Alinear Mediano 179 €** en `planCatalog.ts` y MONEI (código hoy 149 €)  
+- [x] **Alinear 49 / 179 / 350 € y PDV extra 149 €** en catálogo, cotización y MONEI
 - [ ] Regenerar PDF equivalencias si cambia `CON_PRECIO`  
 - [ ] _(añadir aquí nuevas filas SVA o precios)_
 
-**Cerrados 2026-08-26 (sesión):** Chat + calendario → **SVAs** (Mediano compra · Pro incluye) · OFFLINE → **Pro** · Escandallo+Compras → **Pro** (Mediano = Inventario) · Pro precio → **350 €**
+**Cerrados:** Chat + calendario → **SVAs** (Mediano compra · Pro incluye) · OFFLINE → **Pro** · Escandallo + Compras OCR → **Mediano** · Pro precio → **350 €**
 
 ### Competencia (referencia rápida)
 

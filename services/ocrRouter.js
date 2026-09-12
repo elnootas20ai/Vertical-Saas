@@ -120,7 +120,9 @@ async function buildProposalFieldsAsync(ocrData, destination, entityMatch, userI
     }
     f('invoiceNumber', ocrData.documentNumber);
     const enrichedLines = userId
-      ? await enrichOcrLinesForUser(ocrData.lines || [], userId, supplierId)
+      ? await enrichOcrLinesForUser(ocrData.lines || [], userId, supplierId, {
+          businessId: req.body?.businessId || req.query?.businessId || '',
+        })
       : (ocrData.lines || []);
     f('lines', enrichedLines);
     const matchSummary = summarizeCatalogMatches(enrichedLines);

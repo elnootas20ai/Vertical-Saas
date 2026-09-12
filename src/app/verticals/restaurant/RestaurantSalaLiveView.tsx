@@ -18,6 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import { RestaurantSeatGuestsModal } from '../../components/saas/restaurant/RestaurantSeatGuestsModal';
+import { PublicOrderInbox } from '../../components/saas/PublicOrderInbox';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useSSE } from '../../hooks/useSSE';
@@ -722,6 +723,10 @@ export function RestaurantSalaLiveView({
           </span>
         </div>
       </header>
+
+      <div className="mb-4">
+        <PublicOrderInbox targetKind="restaurant_table" />
+      </div>
 
       {sortedRooms.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-2xl border border-stone-200 bg-white px-6 py-16 text-center shadow-sm">

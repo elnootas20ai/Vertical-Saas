@@ -33,8 +33,11 @@ import {
 } from '../controllers/settingsController.js';
 import { requireBusinessAccess } from '../middleware/requireBusinessAccess.js';
 import { requireUserScope } from '../middleware/requireUserScope.js';
+import { requireRestaurantPlanFeature } from '../middleware/requireRestaurantPlanFeature.js';
 
 const settingsRouter = Router();
+const requireRestaurantAlerts = requireRestaurantPlanFeature('restaurant_ops');
+const requireRestaurantInvoiceImap = requireRestaurantPlanFeature('invoice_imap');
 
 // ADM-08: Changelog público (sin auth requerida, accesible a usuarios autenticados)
 settingsRouter.get('/platform/changelog', getPlatformChangelog);
@@ -62,9 +65,9 @@ settingsRouter.get('/business-hours/:userId', requireUserScope, getBusinessHours
 settingsRouter.put('/business-hours/:userId', requireUserScope, saveBusinessHours);
 
 // ADM-09: Alerts config por negocio
-settingsRouter.get('/alerts/:businessId', requireBusinessAccess, getAlertsConfig);
-settingsRouter.put('/alerts/:businessId', requireBusinessAccess, saveAlertsConfig);
-settingsRouter.post('/alerts/:businessId/manager-focus', requireBusinessAccess, resetAlertsToManagerFocus);
+settingsRouter.get('/alerts/:businessId', requireBusinessAccess, requireRestaurantAlerts, getAlertsConfig);
+settingsRouter.put('/alerts/:businessId', requireBusinessAccess, requireRestaurantAlerts, saveAlertsConfig);
+settingsRouter.post('/alerts/:businessId/manager-focus', requireBusinessAccess, requireRestaurantAlerts, resetAlertsToManagerFocus);
 
 // ADM-06: Export/Import de datos del tenant
 settingsRouter.get('/export/:userId', requireUserScope, exportTenantData);
@@ -87,8 +90,8 @@ settingsRouter.get('/modules/:businessId', requireBusinessAccess, getModulesConf
 settingsRouter.put('/modules/:businessId', requireBusinessAccess, saveModulesConfig);
 
 // CFG-03: Correo recepción facturas
-settingsRouter.get('/invoice-email/:businessId', requireBusinessAccess, getInvoiceEmail);
-settingsRouter.put('/invoice-email/:businessId', requireBusinessAccess, saveInvoiceEmail);
+settingsRouter.get('/invoice-email/:businessId', requireBusinessAccess, requireRestaurantInvoiceImap, getInvoiceEmail);
+settingsRouter.put('/invoice-email/:businessId', requireBusinessAccess, requireRestaurantInvoiceImap, saveInvoiceEmail);
 
 // CFG-04: Configuración de importación
 settingsRouter.get('/import-config/:businessId', requireBusinessAccess, getImportConfig);

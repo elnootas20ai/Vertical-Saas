@@ -70,8 +70,8 @@ function forbidInvitedFromBilling(account, res) {
 
 const PLAN_CATALOG = {
   basic: { name: 'Básico', monthlyPrice: 4900, annualPrice: 47040 },
-  normal: { name: 'Normal', monthlyPrice: 14900, annualPrice: 143040 },
-  pro: { name: 'Pro', monthlyPrice: 34900, annualPrice: 335040 },
+  normal: { name: 'Normal', monthlyPrice: 17900, annualPrice: 171840 },
+  pro: { name: 'Pro', monthlyPrice: 35000, annualPrice: 336000 },
 };
 
 export { PLAN_CATALOG, PLAN_ADDON_CATALOG };

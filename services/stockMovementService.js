@@ -9,6 +9,7 @@ import {
 import { applyWarehouseStockDelta } from '../shared/stock/warehouseStockQty.js';
 import logger from './logger.js';
 import { v4 as uuidv4 } from 'uuid';
+import { createHash } from 'node:crypto';
 
 const VALID_MOVEMENT_TYPES = [
   'purchase_reception',
@@ -69,11 +70,12 @@ function normalizeMovementListLimit(limit) {
 
 function buildStockMovementDocument(userId, data = {}) {
   const now = new Date().toISOString();
-  const id = `smov-${uuidv4()}`;
+  const id = String(data.movementId || `smov-${uuidv4()}`);
   const movementType = VALID_MOVEMENT_TYPES.includes(data.movementType) ? data.movementType : 'adjustment_in';
 
   return {
     _id: id,
+    _rev: data._rev,
     type: 'stock_movement',
     id,
     user_id: userId,
@@ -82,10 +84,17 @@ function buildStockMovementDocument(userId, data = {}) {
     sku: String(data.sku || ''),
     warehouseId: String(data.warehouseId || ''),
     warehouseToId: String(data.warehouseToId || ''),
+    businessId: String(data.businessId || data.business_id || '').replace(/^business:/, '').trim(),
+    salesPointId: String(data.salesPointId || '').trim(),
+    workCenterId: String(data.workCenterId || '').trim(),
     movementType,
     quantity: Math.abs(Number(data.quantity || 0)),
     previousStock: Number(data.previousStock || 0),
     newStock: Number(data.newStock || 0),
+    previousGlobalStock: Number(data.previousGlobalStock ?? data.previousStock ?? 0),
+    newGlobalStock: Number(data.newGlobalStock ?? data.newStock ?? 0),
+    costApplicationVersion: Number(data.costApplicationVersion ?? 1),
+    applied: data.applied !== false,
     unitCost: Number(data.unitCost || 0),
     totalCost: Number(data.totalCost || 0),
     referenceId: String(data.referenceId || ''),
@@ -112,10 +121,17 @@ function sanitizeStockMovement(doc) {
     sku: doc.sku || '',
     warehouseId: doc.warehouseId || '',
     warehouseToId: doc.warehouseToId || '',
+    businessId: doc.businessId || doc.business_id || '',
+    salesPointId: doc.salesPointId || '',
+    workCenterId: doc.workCenterId || '',
     movementType: doc.movementType || '',
     quantity: Number(doc.quantity || 0),
     previousStock: Number(doc.previousStock || 0),
     newStock: Number(doc.newStock || 0),
+    previousGlobalStock: Number(doc.previousGlobalStock ?? doc.previousStock ?? 0),
+    newGlobalStock: Number(doc.newGlobalStock ?? doc.newStock ?? 0),
+    costApplicationVersion: Number(doc.costApplicationVersion || 0),
+    applied: doc.applied !== false,
     unitCost: Number(doc.unitCost || 0),
     totalCost: Number(doc.totalCost || 0),
     referenceId: doc.referenceId || '',
@@ -138,23 +154,62 @@ export async function recordMovement(req, userId, movementData) {
   if (!catalogItemId) throw new Error('catalogItemId es obligatorio');
   if (!quantity || quantity <= 0) throw new Error('quantity debe ser mayor que 0');
   if (!VALID_MOVEMENT_TYPES.includes(movementType)) throw new Error(`movementType inválido: ${movementType}`);
+  const idempotencyKey = String(movementData.idempotencyKey || '').trim();
+  const deterministicMovementId = idempotencyKey
+    ? `smov-${createHash('sha256').update(`${userId}:${idempotencyKey}`).digest('hex').slice(0, 32)}`
+    : '';
 
   const MAX_RETRIES = 3;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
       const catItem = await getDocument(req, db, catalogItemId);
-      if (!catItem || catItem.type !== 'catalog_item') {
+      if (!catItem || catItem.type !== 'catalog_item' || catItem.user_id !== userId) {
         throw new Error(`Artículo de catálogo no encontrado: ${catalogItemId}`);
+      }
+      const existingMovement = deterministicMovementId
+        ? await getDocument(req, db, deterministicMovementId).catch(() => null)
+        : null;
+      if (
+        existingMovement
+        && (
+          existingMovement.type !== 'stock_movement'
+          || existingMovement.user_id !== userId
+          || existingMovement.catalogItemId !== catalogItemId
+        )
+      ) {
+        throw new Error('La clave idempotente pertenece a otro movimiento');
+      }
+      const appliedMovementIds = Array.isArray(catItem.appliedStockMovementIds)
+        ? catItem.appliedStockMovementIds.map(String)
+        : [];
+      if (deterministicMovementId && appliedMovementIds.includes(deterministicMovementId)) {
+        if (!existingMovement) {
+          throw new Error(`Movimiento idempotente no encontrado: ${deterministicMovementId}`);
+        }
+        let appliedMovement = existingMovement;
+        if (existingMovement.applied === false) {
+          const finalized = { ...existingMovement, applied: true };
+          const finalizedSave = await putDocument(req, db, finalized._id, finalized);
+          appliedMovement = { ...finalized, _rev: finalizedSave.rev };
+        }
+        return sanitizeStockMovement(appliedMovement);
       }
 
       const warehouseId = String(movementData.warehouseId || '').trim();
       let warehouseName = '';
+      let warehouseDoc = null;
       if (warehouseId) {
         try {
           const whDoc = await getDocument(req, db, warehouseId);
-          if (whDoc?.type === 'warehouse') warehouseName = String(whDoc.name || '');
+          if (whDoc?.type === 'warehouse' && whDoc.user_id === userId) {
+            warehouseDoc = whDoc;
+            warehouseName = String(whDoc.name || '');
+          }
         } catch {
           /* noop */
+        }
+        if (!warehouseDoc) {
+          throw new Error('Almacén no encontrado o fuera del ámbito de la cuenta');
         }
       }
 
@@ -183,14 +238,28 @@ export async function recordMovement(req, userId, movementData) {
 
       const movDoc = buildStockMovementDocument(userId, {
         ...movementData,
+        movementId: deterministicMovementId || undefined,
+        _rev: existingMovement?._rev,
+        applied: deterministicMovementId ? false : true,
         catalogItemName: catItem.name || '',
         sku: catItem.sku || '',
         previousStock,
         newStock,
+        previousGlobalStock: Number(catItem.stockQuantity || 0),
+        newGlobalStock: nextStockQuantity,
         totalCost: Math.abs(quantity) * Number(movementData.unitCost || catItem.costPrice || 0),
+        businessId: movementData.businessId
+          || movementData.business_id
+          || warehouseDoc?.businessId
+          || warehouseDoc?.business_id
+          || catItem.businessId
+          || catItem.business_id
+          || '',
+        salesPointId: movementData.salesPointId || warehouseDoc?.salesPointId || '',
+        workCenterId: movementData.workCenterId || catItem.workCenterId || '',
       });
 
-      await putDocument(req, db, movDoc._id, movDoc);
+      const movementSave = await putDocument(req, db, movDoc._id, movDoc);
 
       await putDocument(req, db, catItem._id, {
         ...catItem,
@@ -199,8 +268,23 @@ export async function recordMovement(req, userId, movementData) {
         ...(warehouseId && movementType !== 'transfer'
           ? { warehouseStock: nextWarehouseStock }
           : {}),
+        ...(deterministicMovementId
+          ? {
+              appliedStockMovementIds: [
+                ...appliedMovementIds,
+                deterministicMovementId,
+              ].slice(-500),
+            }
+          : {}),
         updatedAt: new Date().toISOString(),
       });
+
+      let finalMovement = { ...movDoc, _rev: movementSave.rev };
+      if (deterministicMovementId) {
+        const finalized = { ...finalMovement, applied: true };
+        const finalizedSave = await putDocument(req, db, finalized._id, finalized);
+        finalMovement = { ...finalized, _rev: finalizedSave.rev };
+      }
 
       logger.info({
         tag: 'STOCK_MOVEMENT',
@@ -213,7 +297,7 @@ export async function recordMovement(req, userId, movementData) {
         userId,
       }, 'Movimiento de stock registrado');
 
-      return sanitizeStockMovement(movDoc);
+      return sanitizeStockMovement(finalMovement);
     } catch (err) {
       if (err?.statusCode === 409 && attempt < MAX_RETRIES - 1) {
         logger.warn({ tag: 'STOCK_MOVEMENT', attempt }, 'Conflicto CouchDB, reintentando...');
@@ -222,6 +306,59 @@ export async function recordMovement(req, userId, movementData) {
       throw err;
     }
   }
+}
+
+/**
+ * Aplica el coste medio de una recepción una sola vez por movimiento.
+ * Se ejecuta tras la acción de recepción; no usa workers ni procesos periódicos.
+ */
+export async function applyPurchaseMovementCost(req, userId, movement) {
+  const movementId = String(movement?._id || movement?.id || '').trim();
+  const catalogItemId = String(movement?.catalogItemId || '').trim();
+  const receivedQty = Number(movement?.quantity || 0);
+  const unitCost = Number(movement?.unitCost || 0);
+  if (
+    !movementId
+    || !catalogItemId
+    || receivedQty <= 0
+    || unitCost <= 0
+    || Number(movement.costApplicationVersion || 0) < 1
+  ) return false;
+
+  const db = getCatalogDbName();
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const item = await getDocument(req, db, catalogItemId);
+    if (!item || item.type !== 'catalog_item' || item.user_id !== userId) return false;
+    const appliedKeys = Array.isArray(item.purchaseCostMovementIds)
+      ? item.purchaseCostMovementIds.map(String)
+      : [];
+    if (appliedKeys.includes(movementId)) return false;
+
+    const previousQty = Math.max(
+      0,
+      Number(movement.previousGlobalStock ?? (Number(item.stockQuantity || 0) - receivedQty)),
+    );
+    const previousCost = Number(item.costPrice || 0);
+    const denominator = previousQty + receivedQty;
+    const costPrice = previousQty > 0 && previousCost > 0 && denominator > 0
+      ? Math.round(((previousQty * previousCost + receivedQty * unitCost) / denominator) * 100) / 100
+      : unitCost;
+    try {
+      await putDocument(req, db, item._id, {
+        ...item,
+        costPrice,
+        lastPurchasePrice: unitCost,
+        lastPurchaseDate: movement.createdAt || new Date().toISOString(),
+        purchaseCostMovementIds: [...appliedKeys, movementId].slice(-100),
+        updatedAt: new Date().toISOString(),
+      });
+      return true;
+    } catch (error) {
+      if (error?.statusCode === 409 && attempt < 2) continue;
+      throw error;
+    }
+  }
+  return false;
 }
 
 export async function listMovementsByReference(req, userId, referenceId, referenceType, options = {}) {
@@ -257,6 +394,7 @@ export async function listMovementsByReference(req, userId, referenceId, referen
     (doc) =>
       doc?.type === 'stock_movement' &&
       doc?.user_id === uid &&
+      doc?.applied !== false &&
       doc?.referenceId === refId &&
       (!refType || doc?.referenceType === refType),
   );
@@ -299,7 +437,10 @@ export async function listMovementsByUser(req, userId, filters = {}) {
   }
 
   let movements = docs.filter(
-    (doc) => doc?.type === 'stock_movement' && (!uid || doc?.user_id === uid),
+    (doc) =>
+      doc?.type === 'stock_movement'
+      && doc?.applied !== false
+      && (!uid || doc?.user_id === uid),
   );
 
   if (warehouseId) {

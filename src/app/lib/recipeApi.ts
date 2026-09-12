@@ -66,6 +66,9 @@ export interface Recipe {
   catalogItemId: string;
   catalogItemName: string;
   category: string;
+  businessId?: string;
+  workCenterId?: string;
+  salesPointId?: string;
   portions: number;
   active: boolean;
   ingredients: RecipeIngredient[];
@@ -115,13 +118,23 @@ export interface RecalculateCostsResult {
 
 export async function listRecipesRequest(
   userId: string,
-  filters?: { category?: string; active?: boolean; catalogItemId?: string },
+  filters?: {
+    category?: string;
+    active?: boolean;
+    catalogItemId?: string;
+    businessId?: string;
+    accountBusinessCount?: number;
+  },
 ): Promise<Recipe[]> {
   const id = normalizeUserId(userId);
   const params = new URLSearchParams();
   if (filters?.category) params.set('category', filters.category);
   if (filters?.active !== undefined) params.set('active', String(filters.active));
   if (filters?.catalogItemId) params.set('catalogItemId', filters.catalogItemId);
+  if (filters?.businessId) params.set('businessId', filters.businessId);
+  if (filters?.accountBusinessCount) {
+    params.set('accountBusinessCount', String(filters.accountBusinessCount));
+  }
   const qs = params.toString() ? `?${params}` : '';
   const payload = await request<{ ok: boolean; recipes: Recipe[] }>(
     `/api/recipes/${encodeURIComponent(id)}${qs}`,

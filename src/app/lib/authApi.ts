@@ -754,7 +754,7 @@ export async function authFetch(
     }
     // Fallo de red ≠ sesión muerta: no devolver 401 (los callers muestran "Sesión expirada").
     if (refreshed === 'network') {
-      throw new TypeError('No hay conexión con el servidor. Inténtalo de nuevo en unos segundos.');
+      throw new TypeError('Hay un problema de conexión. Comprueba tu red e inténtalo de nuevo.');
     }
     // Solo cerrar sesión si el servidor rechazó el refresh.
     if (refreshed === 'rejected' && !options.suppressLogout) {
@@ -816,7 +816,7 @@ async function request<T>(
       await new Promise((r) => setTimeout(r, 400 * (_networkAttempt + 1)));
       return request<T>(path, init, _retried, _networkAttempt + 1);
     }
-    throw new Error('No se pudo conectar con el servidor. Comprueba tu conexión e inténtalo de nuevo.');
+    throw new Error('Hay un problema de conexión. Comprueba tu red e inténtalo de nuevo.');
   }
 
   const rawText = await response.text();
@@ -840,7 +840,7 @@ async function request<T>(
       }
       if (refreshed === 'network') {
         // Sin conexión con el servidor: no cerrar sesión, dejar que el llamador reintente.
-        throw new Error('No hay conexión con el servidor. Inténtalo de nuevo en unos segundos.');
+        throw new Error('Hay un problema de conexión. Comprueba tu red e inténtalo de nuevo.');
       }
     }
     if (authErr) {
@@ -908,7 +908,7 @@ async function publicAuthRequest<T>(path: string, init?: RequestInit): Promise<A
       ...init,
     });
   } catch (err) {
-    throw new Error('No se pudo conectar con el servidor. Comprueba tu conexión e inténtalo de nuevo.');
+    throw new Error('Hay un problema de conexión. Comprueba tu red e inténtalo de nuevo.');
   }
 
   const rawText = await response.text();
@@ -1007,7 +1007,7 @@ export async function googleLoginRequest(credential: string): Promise<GoogleLogi
     }
     return {
       ok: false,
-      error: 'No se pudo conectar con el servidor. Comprueba tu conexión e inténtalo de nuevo.',
+      error: 'Hay un problema de conexión. Comprueba tu red e inténtalo de nuevo.',
     };
   }
 
@@ -1096,7 +1096,7 @@ export async function appleLoginRequest(
     }
     return {
       ok: false,
-      error: 'No se pudo conectar con el servidor. Comprueba tu conexión e inténtalo de nuevo.',
+      error: 'Hay un problema de conexión. Comprueba tu red e inténtalo de nuevo.',
     };
   }
 
@@ -1594,7 +1594,7 @@ export async function fetchCurrentUserRequest(): Promise<ApiEnvelope<AuthUser>> 
         headers: buildHeaders(),
       });
     } catch (err) {
-      throw new Error('No se pudo conectar con el servidor. Comprueba tu conexión e inténtalo de nuevo.');
+      throw new Error('Hay un problema de conexión. Comprueba tu red e inténtalo de nuevo.');
     }
     const rawText = await response.text();
     const payload = parseEnvelope(rawText);
@@ -1610,7 +1610,7 @@ export async function fetchCurrentUserRequest(): Promise<ApiEnvelope<AuthUser>> 
         const refreshed = await tryRefreshToken();
         if (refreshed === 'refreshed') return run(true);
         if (refreshed === 'network') {
-          throw new Error('Sin conexión con el servidor; se mantiene la sesión en caché.');
+          throw new Error('No se ha podido actualizar por un problema de conexión. Tu sesión continúa disponible.');
         }
       }
       const authErr = extractApiErrorMessage(payload as Record<string, unknown>);

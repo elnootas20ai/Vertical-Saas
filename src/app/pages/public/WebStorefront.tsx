@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import {
   Loader2, ShoppingCart, Plus, Minus, X, MapPin, Phone, Clock,
   Truck, Store, ChevronRight, CheckCircle, AlertCircle, Search,
@@ -18,6 +18,7 @@ import {
 } from '../../lib/webApi';
 import { resolveWebBrandTheme } from '../../lib/webBrandThemes';
 import { readMesaQrLock } from '../../lib/mesaQr';
+import { readCustomerKioskLock } from '../../lib/customerKiosk';
 
 interface CartItem extends WebOrderItem {}
 
@@ -51,11 +52,35 @@ function computeVolumeDiscount(
 
 export function WebStorefront() {
   const { slug } = useParams<{ slug: string }>();
-  const mesaLock = useMemo(() => readMesaQrLock(), []);
+  const [searchParams] = useSearchParams();
+  const routeMesaToken = String(searchParams.get('mesaToken') || '').trim();
+  const routeKioskToken = String(searchParams.get('kioskToken') || '').trim();
+  const mesaLock = useMemo(() => {
+    const stored = readMesaQrLock();
+    if (routeMesaToken) {
+      if (stored?.token === routeMesaToken) return stored;
+      return {
+        token: routeMesaToken,
+        tableId: '',
+        tableNumber: 0,
+        tableName: 'Tu mesa',
+        businessId: '',
+        salesPointId: '',
+      };
+    }
+    return null;
+  }, [routeMesaToken]);
+  const kioskLock = useMemo(() => {
+    const stored = readCustomerKioskLock();
+    return routeKioskToken && stored?.token === routeKioskToken ? stored : null;
+  }, [routeKioskToken]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [config, setConfig] = useState<WebConfig | null>(null);
+  const [orderingMode, setOrderingMode] = useState<
+    'restaurant_qr' | 'restaurant_hybrid' | 'delivery_web' | 'store_web' | 'unsupported'
+  >('delivery_web');
   const [catalog, setCatalog] = useState<PublicCatalogItem[]>([]);
   const [stores, setStores] = useState<PublicWebStore[]>([]);
   const [selectedStore, setSelectedStore] = useState<PublicWebStore | null>(null);
@@ -77,6 +102,7 @@ export function WebStorefront() {
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [confirmMessage, setConfirmMessage] = useState('');
+  const [confirmOrderNumber, setConfirmOrderNumber] = useState('');
 
   const [shippingOptions, setShippingOptions] = useState<ShippingOption[]>([]);
   const [selectedShippingId, setSelectedShippingId] = useState('');
@@ -89,29 +115,35 @@ export function WebStorefront() {
     setLoading(true);
     getPublicStorefront(slug)
       .then((res) => {
+        const nextOrderingMode = res.orderingMode || 'delivery_web';
+        setOrderingMode(nextOrderingMode);
         setConfig(res.config);
         setCatalog(res.catalog);
         const list = Array.isArray(res.stores) ? res.stores : [];
         setStores(list);
+        if (nextOrderingMode === 'restaurant_qr' && !mesaLock) {
+          setSelectedStore(list[0] || null);
+          setStep('menu');
+          return;
+        }
         if (mesaLock) {
           // QR mesa: tienda fijada / sin elegir otra mesa. Carta directa.
           setOrderType('pickup');
-          if (list.length === 1) {
-            setSelectedStore(list[0]);
-            setStep('menu');
-          } else if (list.length > 1) {
-            setSelectedStore(null);
-            setStep('pick_store');
-          } else {
-            setSelectedStore(null);
-            setStep('menu');
-          }
+          const fixedStore = list.find((store) => store.id === mesaLock.salesPointId) || null;
+          setSelectedStore(fixedStore);
+          setStep('menu');
           return;
         }
-        // Siempre landing de marca primero (estilo grupo); luego menú
+        if (kioskLock) {
+          setOrderType('pickup');
+          setSelectedStore(list.find((store) => store.id === kioskLock.salesPointId) || null);
+          setStep('menu');
+          return;
+        }
+        // Una sola tienda: ir directo al método de entrega. Varias: elegir PDV.
         if (list.length === 1) {
           setSelectedStore(list[0]);
-          setStep('pick_store');
+          setStep('where');
         } else if (list.length > 1) {
           setSelectedStore(null);
           setStep('pick_store');
@@ -119,12 +151,27 @@ export function WebStorefront() {
           setSelectedStore(null);
           setStep('menu');
         }
-        if (res.config.deliveryEnabled) setOrderType('delivery');
-        else if (res.config.pickupEnabled) setOrderType('pickup');
+        const initialFulfillment = list.length === 1 ? list[0].fulfillment : null;
+        if (initialFulfillment?.deliveryEnabled ?? res.config.deliveryEnabled) setOrderType('delivery');
+        else if (initialFulfillment?.pickupEnabled ?? res.config.pickupEnabled) setOrderType('pickup');
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
-  }, [slug, mesaLock]);
+  }, [slug, kioskLock, mesaLock]);
+
+  useEffect(() => {
+    if (step !== 'success' || !kioskLock) return;
+    const timer = window.setTimeout(() => {
+      setPromoCode('');
+      setPromoDiscount(0);
+      setConfirmMessage('');
+      setConfirmOrderNumber('');
+      setCustomerName('');
+      setNotes('');
+      setStep('menu');
+    }, 10_000);
+    return () => window.clearTimeout(timer);
+  }, [kioskLock, step]);
 
   useEffect(() => {
     const id = 'web-storefront-fonts';
@@ -140,6 +187,8 @@ export function WebStorefront() {
   const pickStore = (store: PublicWebStore) => {
     setSelectedStore(store);
     setCart([]);
+    if (store.fulfillment?.deliveryEnabled) setOrderType('delivery');
+    else if (store.fulfillment?.pickupEnabled) setOrderType('pickup');
     setStep('where');
   };
 
@@ -194,11 +243,17 @@ export function WebStorefront() {
 
   const cartTotal = useMemo(() => cart.reduce((s, i) => s + i.total, 0), [cart]);
   const cartCount = useMemo(() => cart.reduce((s, i) => s + i.quantity, 0), [cart]);
+  const restaurantPublicView = orderingMode === 'restaurant_qr' && !mesaLock;
+  const fulfillment = selectedStore?.fulfillment;
+  const deliveryEnabled = fulfillment?.deliveryEnabled ?? config?.deliveryEnabled ?? false;
+  const pickupEnabled = fulfillment?.pickupEnabled ?? config?.pickupEnabled ?? false;
+  const minimumOrder = fulfillment?.minimumOrder ?? config?.minimumOrder ?? 0;
+  const estimatedDeliveryTime = fulfillment?.estimatedDeliveryTime || config?.estimatedDeliveryTime || '';
 
   const selectedShipping = shippingOptions.find((o) => o.id === selectedShippingId);
-  const isZoneMode = config?.shippingMode === 'zones';
+  const isZoneMode = (fulfillment?.shippingMode || config?.shippingMode) === 'zones';
   const deliveryFee = orderType === 'delivery'
-    ? (isZoneMode && selectedShipping ? selectedShipping.rate : (config?.deliveryFee || 0))
+    ? (isZoneMode && selectedShipping ? selectedShipping.rate : (fulfillment?.deliveryFee ?? config?.deliveryFee ?? 0))
     : 0;
 
   const { rule: volumeRule, discountAmount: volumeDiscountAmount } = useMemo(
@@ -255,9 +310,14 @@ export function WebStorefront() {
   };
 
   const shippingDebounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const orderIdempotencyKeyRef = useRef(
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
 
   const fetchShippingRates = useCallback(async (postalCode: string) => {
-    if (!slug || !config || config.shippingMode !== 'zones') return;
+    if (!slug || !config || !isZoneMode) return;
     const pc = postalCode.trim();
     if (pc.length < 3) {
       setShippingOptions([]);
@@ -269,7 +329,7 @@ export function WebStorefront() {
     setShippingLoading(true);
     setShippingError('');
     try {
-      const res = await getPublicShippingRates(slug, pc);
+      const res = await getPublicShippingRates(slug, pc, selectedStore?.id || '');
       setShippingOptions(res.options || []);
       setShippingZoneName(res.zone?.name || '');
       if (res.options.length > 0) {
@@ -284,7 +344,7 @@ export function WebStorefront() {
     } finally {
       setShippingLoading(false);
     }
-  }, [slug, config]);
+  }, [slug, config, isZoneMode, selectedStore?.id]);
 
   const handlePostalCodeChange = (value: string) => {
     setCustomerPostalCode(value);
@@ -322,7 +382,7 @@ export function WebStorefront() {
         volumeDiscount: volumeDiscountAmount,
         volumeDiscountLabel: volumeRule?.label || '',
         selectedShippingOptionId: selectedShippingId,
-        salesPointId: selectedStore?.id || '',
+        salesPointId: mesaLock?.salesPointId || selectedStore?.id || '',
         salesPointName: selectedStore?.name || '',
         ...(mesaLock
           ? {
@@ -332,10 +392,16 @@ export function WebStorefront() {
               mesaToken: mesaLock.token,
             }
           : {}),
-      } as Record<string, unknown>);
+        ...(kioskLock ? { kioskToken: kioskLock.token } : {}),
+      } as Record<string, unknown>, orderIdempotencyKeyRef.current);
       setConfirmMessage(result.message);
+      setConfirmOrderNumber(result.order.orderNumber || '');
       setStep('success');
       setCart([]);
+      orderIdempotencyKeyRef.current =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Error al enviar pedido');
       setStep('error');
@@ -614,7 +680,7 @@ export function WebStorefront() {
             </div>
 
             <div className="mt-6 grid gap-3">
-              {config.deliveryEnabled ? (
+              {deliveryEnabled ? (
                 <button
                   type="button"
                   onClick={() => setOrderType('delivery')}
@@ -652,7 +718,7 @@ export function WebStorefront() {
                 </button>
               ) : null}
 
-              {config.pickupEnabled ? (
+              {pickupEnabled ? (
                 <button
                   type="button"
                   onClick={() => setOrderType('pickup')}
@@ -773,17 +839,25 @@ export function WebStorefront() {
             <CheckCircle className="w-10 h-10" style={{ color: config.accentColor }} />
           </div>
           <h1 className="text-2xl font-bold mb-3 text-stone-900">¡Pedido enviado!</h1>
+          {confirmOrderNumber ? (
+            <p className="mb-2 text-3xl font-black text-stone-900">{confirmOrderNumber}</p>
+          ) : null}
           <p className="text-gray-600 mb-6">{confirmMessage}</p>
+          {kioskLock ? (
+            <p className="mb-4 text-xs font-semibold text-stone-500">
+              La pantalla se reiniciará para el siguiente cliente.
+            </p>
+          ) : null}
           <button
             onClick={() => {
               setPromoCode('');
               setPromoDiscount(0);
-              setStep(stores.length > 1 ? 'pick_store' : 'where');
+              setStep(kioskLock ? 'menu' : stores.length > 1 ? 'pick_store' : 'where');
             }}
             className="px-6 py-3 rounded-xl text-white font-medium transition-opacity hover:opacity-90"
             style={{ backgroundColor: primary }}
           >
-            Volver al menú
+            {kioskLock ? 'Nuevo pedido' : 'Volver al menú'}
           </button>
         </div>
       </div>
@@ -816,6 +890,10 @@ export function WebStorefront() {
           Pedido en {mesaLock.tableName}
           {mesaLock.tableNumber ? ` · mesa ${mesaLock.tableNumber}` : ''}
         </div>
+      ) : restaurantPublicView ? (
+        <div className="bg-blue-700 px-4 py-2 text-center text-sm font-semibold text-white">
+          Carta pública · Para pedir en mesa, escanea su QR
+        </div>
       ) : null}
       {/* Header tipo app delivery */}
       <header className="sticky top-0 z-30 border-b border-stone-200/80 bg-white/95 backdrop-blur">
@@ -835,13 +913,26 @@ export function WebStorefront() {
               <h1 className="truncate text-base font-black tracking-tight text-stone-900">
                 {selectedStore?.name || brand.storeName}
               </h1>
-              <button
-                type="button"
-                onClick={() => setStep('where')}
-                className="flex max-w-full items-center gap-1 truncate text-left text-xs font-semibold"
-                style={{ color: primary }}
-              >
-                {orderType === 'delivery' ? (
+              {mesaLock ? (
+                <div className="flex max-w-full items-center gap-1 truncate text-xs font-semibold text-emerald-700">
+                  <MapPin className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{mesaLock.tableName}</span>
+                </div>
+              ) : restaurantPublicView ? (
+                <div className="flex max-w-full items-center gap-1 truncate text-xs font-semibold" style={{ color: primary }}>
+                  <MapPin className="h-3 w-3 shrink-0" />
+                  <span className="truncate">
+                    {config.address || selectedStore?.address || 'Dirección pendiente de configurar'}
+                  </span>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setStep('where')}
+                  className="flex max-w-full items-center gap-1 truncate text-left text-xs font-semibold"
+                  style={{ color: primary }}
+                >
+                  {orderType === 'delivery' ? (
                   <>
                     <MapPin className="h-3 w-3 shrink-0" />
                     <span className="truncate">
@@ -849,16 +940,17 @@ export function WebStorefront() {
                       {customerPostalCode.trim() ? ` · ${customerPostalCode}` : ''}
                     </span>
                   </>
-                ) : (
+                  ) : (
                   <>
                     <Store className="h-3 w-3 shrink-0" />
                     <span className="truncate">Recoger en local · Cambiar</span>
                   </>
-                )}
-              </button>
+                  )}
+                </button>
+              )}
             </div>
           </div>
-          <button
+          {!restaurantPublicView && <button
             type="button"
             onClick={() => setStep(step === 'menu' ? 'cart' : 'menu')}
             className="relative flex h-11 w-11 items-center justify-center rounded-xl border border-stone-200 bg-white"
@@ -873,7 +965,7 @@ export function WebStorefront() {
                 {cartCount}
               </span>
             ) : null}
-          </button>
+          </button>}
         </div>
       </header>
 
@@ -903,13 +995,13 @@ export function WebStorefront() {
                 <p className="text-sm text-stone-600">{brand.welcomeMessage}</p>
               ) : null}
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-stone-500">
-                {config.estimatedDeliveryTime ? (
+                {estimatedDeliveryTime ? (
                   <span className="inline-flex items-center gap-1 font-semibold">
-                    <Clock className="h-3.5 w-3.5" /> {config.estimatedDeliveryTime}
+                    <Clock className="h-3.5 w-3.5" /> {estimatedDeliveryTime}
                   </span>
                 ) : null}
-                {config.minimumOrder > 0 ? (
-                  <span className="font-semibold">Mín. {config.minimumOrder.toFixed(2)} €</span>
+                {minimumOrder > 0 ? (
+                  <span className="font-semibold">Mín. {minimumOrder.toFixed(2)} €</span>
                 ) : null}
                 {selectedStore?.address || config.address ? (
                   <span className="inline-flex items-center gap-1 truncate">
@@ -918,8 +1010,8 @@ export function WebStorefront() {
                   </span>
                 ) : null}
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                {config.deliveryEnabled ? (
+              {!mesaLock && !restaurantPublicView && <div className="grid grid-cols-2 gap-2">
+                {deliveryEnabled ? (
                   <button
                     type="button"
                     onClick={() => {
@@ -936,7 +1028,7 @@ export function WebStorefront() {
                     <Truck className="h-4 w-4" /> A domicilio
                   </button>
                 ) : null}
-                {config.pickupEnabled ? (
+                {pickupEnabled ? (
                   <button
                     type="button"
                     onClick={() => setOrderType('pickup')}
@@ -950,8 +1042,8 @@ export function WebStorefront() {
                     <Store className="h-4 w-4" /> Recoger
                   </button>
                 ) : null}
-              </div>
-              {orderType === 'delivery' && customerAddress.trim() ? (
+              </div>}
+              {!mesaLock && !restaurantPublicView && orderType === 'delivery' && customerAddress.trim() ? (
                 <button
                   type="button"
                   onClick={() => setStep('where')}
@@ -1039,6 +1131,10 @@ export function WebStorefront() {
                               {!available ? (
                                 <p className="mt-1 text-[11px] font-bold uppercase text-rose-600">
                                   Agotado
+                                </p>
+                              ) : restaurantPublicView ? (
+                                <p className="mt-2 text-xs font-semibold text-blue-700">
+                                  Disponible al escanear el QR de la mesa
                                 </p>
                               ) : inCart ? (
                                 <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-stone-200 bg-stone-50 px-1.5 py-1">
@@ -1198,9 +1294,9 @@ export function WebStorefront() {
                       <span>Total</span>
                       <span style={{ color: primary }}>{finalTotal.toFixed(2)} €</span>
                     </div>
-                    {config.minimumOrder > 0 && cartTotal < config.minimumOrder && (
+                    {minimumOrder > 0 && cartTotal < minimumOrder && (
                       <p className="text-xs text-orange-600 mt-1">
-                        Pedido mínimo: {config.minimumOrder.toFixed(2)} €
+                        Pedido mínimo: {minimumOrder.toFixed(2)} €
                       </p>
                     )}
                     {(() => {
@@ -1226,25 +1322,39 @@ export function WebStorefront() {
               <h2 className="text-lg font-bold text-gray-900 mb-4">Completa tu pedido</h2>
               <div className="space-y-3">
                 <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-3">
-                  <div>
-                    <label className="text-xs text-gray-500 font-medium mb-1 block">Nombre *</label>
+                  {mesaLock && (
+                    <div className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
+                      Pedido para {mesaLock.tableName}. Nombre y teléfono son opcionales.
+                    </div>
+                  )}
+                  {kioskLock ? (
+                    <div className="rounded-lg bg-blue-50 px-3 py-2 text-sm font-medium text-blue-800">
+                      Pedido de recogida en {kioskLock.salesPointName}. El equipo lo confirmará.
+                    </div>
+                  ) : null}
+                  {!kioskLock ? <div>
+                    <label className="text-xs text-gray-500 font-medium mb-1 block">
+                      Nombre {mesaLock ? '(opcional)' : '*'}
+                    </label>
                     <input
                       type="text" value={customerName} onChange={(e) => setCustomerName(e.target.value)}
                       className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2"
                       style={{ '--tw-ring-color': `${primary}40` } as React.CSSProperties}
                       placeholder="Tu nombre"
                     />
-                  </div>
-                  <div>
-                    <label className="text-xs text-gray-500 font-medium mb-1 block">Teléfono *</label>
+                  </div> : null}
+                  {!kioskLock ? <div>
+                    <label className="text-xs text-gray-500 font-medium mb-1 block">
+                      Teléfono {mesaLock ? '(opcional)' : '*'}
+                    </label>
                     <input
                       type="tel" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)}
                       className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2"
                       style={{ '--tw-ring-color': `${primary}40` } as React.CSSProperties}
                       placeholder="Ej: 612 345 678"
                     />
-                  </div>
-                  <div>
+                  </div> : null}
+                  {!mesaLock && !kioskLock && <div>
                     <label className="text-xs text-gray-500 font-medium mb-1 block">Email</label>
                     <input
                       type="email" value={customerEmail} onChange={(e) => setCustomerEmail(e.target.value)}
@@ -1252,8 +1362,8 @@ export function WebStorefront() {
                       style={{ '--tw-ring-color': `${primary}40` } as React.CSSProperties}
                       placeholder="tu@email.com"
                     />
-                  </div>
-                  {orderType === 'delivery' && (
+                  </div>}
+                  {!mesaLock && !kioskLock && orderType === 'delivery' && (
                     <>
                       <div className="grid grid-cols-3 gap-2">
                         <div className="col-span-2">
@@ -1416,7 +1526,7 @@ export function WebStorefront() {
                     <button
                       type="button"
                       onClick={() => setStep('checkout')}
-                      disabled={config.minimumOrder > 0 && cartTotal < config.minimumOrder}
+                      disabled={minimumOrder > 0 && cartTotal < minimumOrder}
                       className="flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl text-sm font-bold text-white disabled:opacity-50"
                       style={{ backgroundColor: primary }}
                     >
@@ -1436,7 +1546,12 @@ export function WebStorefront() {
                     <button
                       type="button"
                       onClick={() => void handleSubmit()}
-                      disabled={submitting || !customerName || !customerPhone || (orderType === 'delivery' && !customerAddress) || (orderType === 'delivery' && isZoneMode && (!selectedShippingId || shippingOptions.length === 0))}
+                      disabled={
+                        submitting
+                        || (!mesaLock && !kioskLock && (!customerName || !customerPhone))
+                        || (!mesaLock && !kioskLock && orderType === 'delivery' && !customerAddress)
+                        || (!mesaLock && !kioskLock && orderType === 'delivery' && isZoneMode && (!selectedShippingId || shippingOptions.length === 0))
+                      }
                       className="flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl text-sm font-bold text-white disabled:opacity-50"
                       style={{ backgroundColor: primary }}
                     >

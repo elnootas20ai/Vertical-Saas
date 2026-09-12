@@ -21,7 +21,7 @@ describe('albaranReceptionCompare', () => {
     expect(isPurchaseOrderWaitingAlbaran({ status: 'sent' })).toBe(true);
     expect(isPurchaseOrderWaitingAlbaran({ status: 'partial' })).toBe(true);
     expect(isPurchaseOrderWaitingAlbaran({ status: 'received' })).toBe(false);
-    expect(isPurchaseOrderWaitingAlbaran({ status: 'draft' })).toBe(true);
+    expect(isPurchaseOrderWaitingAlbaran({ status: 'draft' })).toBe(false);
   });
 
   it('detecta documento albarán', () => {

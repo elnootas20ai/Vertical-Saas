@@ -33,6 +33,8 @@ describe('toUserFacingMessage', () => {
   });
 
   it('maps network failures', () => {
-    expect(toUserFacingMessage(new TypeError('Failed to fetch'))).toMatch(/conexión/i);
+    expect(toUserFacingMessage(new TypeError('Failed to fetch'))).toBe(
+      'Hay un problema de conexión. Comprueba tu red e inténtalo de nuevo.',
+    );
   });
 });

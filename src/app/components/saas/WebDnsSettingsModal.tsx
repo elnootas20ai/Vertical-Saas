@@ -36,7 +36,9 @@ interface Props {
   domain: string;
   onChangeDomain: (value: string) => void;
   onSave: () => Promise<void>;
+  onVerify: () => Promise<void>;
   saving: boolean;
+  status?: 'unconfigured' | 'pending' | 'active';
 }
 
 export function WebDnsSettingsModal({
@@ -45,7 +47,9 @@ export function WebDnsSettingsModal({
   domain,
   onChangeDomain,
   onSave,
+  onVerify,
   saving,
+  status = 'unconfigured',
 }: Props) {
   const [copiedKey, setCopiedKey] = useState('');
   const normalized = useMemo(() => normalizeWebCustomDomain(domain), [domain]);
@@ -133,6 +137,15 @@ export function WebDnsSettingsModal({
                 spellCheck={false}
               />
             </div>
+            {normalized ? (
+              <p className={`inline-flex rounded-lg px-2 py-1 text-xs font-semibold ${
+                status === 'active'
+                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+                  : 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200'
+              }`}>
+                {status === 'active' ? 'Dominio activo' : 'Pendiente de verificar'}
+              </p>
+            ) : null}
           </section>
 
           <section className="space-y-2">
@@ -195,6 +208,11 @@ export function WebDnsSettingsModal({
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-stone-100 px-4 py-3 dark:border-stone-800">
+          {normalized ? (
+            <button type="button" disabled={saving} onClick={() => void onVerify()} className={VERTIAL_BTN_SECONDARY}>
+              Verificar DNS
+            </button>
+          ) : null}
           <button type="button" onClick={onClose} className={VERTIAL_BTN_SECONDARY}>
             Cerrar
           </button>

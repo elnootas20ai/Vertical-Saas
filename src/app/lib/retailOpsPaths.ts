@@ -27,6 +27,17 @@ export const DELIVERY_CAJA_PATH = '/saas/vertical/delivery/caja';
 /** Caja gerente bar/restaurante. */
 export const RESTAURANT_CAJA_PATH = '/saas/caja';
 
+/** Informes propios de bar/restaurante (no informes Delivery). */
+export const RESTAURANT_REPORTS_PATH = '/saas/vertical/restaurant/informes';
+
+/** Rutas compartidas cuyo destino cambia al operar un Restaurante. */
+export const RESTAURANT_SIDEBAR_PATH_OVERRIDES: Readonly<Record<string, string>> = {
+  'restaurant-ops': RESTAURANT_OPS_HOME_PATH,
+  caja: RESTAURANT_CAJA_PATH,
+  'tpv-rapido': RESTAURANT_CEO_TPV_PATH,
+  reports: RESTAURANT_REPORTS_PATH,
+};
+
 /** Caja gerente heladería. */
 export const HELADERIA_CAJA_PATH = '/saas/vertical/heladeria/caja';
 

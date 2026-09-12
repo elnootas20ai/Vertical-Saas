@@ -8,6 +8,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   Armchair,
   Banknote,
+  BarChart3,
   BookmarkCheck,
   ChefHat,
   Clock,
@@ -15,6 +16,8 @@ import {
   LayoutDashboard,
   ListChecks,
   Receipt,
+  RefreshCw,
+  Scale,
   TrendingUp,
   Users,
   UtensilsCrossed,
@@ -22,7 +25,10 @@ import {
   Zap,
 } from 'lucide-react';
 import { Layout } from '../../components/saas/Layout';
+import { CompanyBrandPerformancePanel } from '../../components/saas/CompanyBrandPerformancePanel';
 import { LiveBadge } from '../../components/saas/LiveBadge';
+import { StockCostAnalyticsPanel } from '../../components/saas/stock/StockCostAnalyticsPanel';
+import { VertialBillingUpgradeLink } from '../../components/saas/VertialBillingUpgradeLink';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useSSE } from '../../hooks/useSSE';
@@ -50,7 +56,8 @@ import {
 } from '../../lib/restaurantReservationTypes';
 import { listBrandsRequest, type Brand } from '../../lib/brandsApi';
 import { fetchActiveNow, type ActiveMember } from '../../lib/clockinsApi';
-import { RESTAURANT_OPS_HOME_PATH } from '../../lib/retailOpsPaths';
+import { diningOrdersToShiftDeliveryOrders } from '../../lib/restaurantShiftOrderMap';
+import { useDashboardPlanAccess } from '../../hooks/useDashboardPlanAccess';
 import {
   shouldUseAdminDashboardDemo,
 } from '../../lib/adminDashboardDemoGate';
@@ -62,6 +69,10 @@ import {
   type RestaurantOpsPipelineKey,
 } from './restaurantOpsSnapshot';
 import { RestaurantDashboardBillingCharts } from './RestaurantDashboardBillingCharts';
+import { RestaurantDailyPerformancePanel } from './dashboard/RestaurantDailyPerformancePanel';
+import { RestaurantProductMarginPanel } from './dashboard/RestaurantProductMarginPanel';
+import { RestaurantProgressiveSection } from './dashboard/RestaurantProgressiveSection';
+import { useRestaurantPlanAccess } from '../../hooks/useRestaurantPlanAccess';
 
 const LONG_STAY_MIN = 90;
 
@@ -223,6 +234,8 @@ export function RestaurantDashboard({ onSelectGeneral }: VerticalDashboardProps)
   const businessName = String(currentBusiness?.name || '').trim() || 'Bar / restaurante';
   const dayKey = localCalendarDayKey();
   const nowMs = useLiveClock(30_000);
+  const { planLabel } = useDashboardPlanAccess();
+  const canViewDashboardExtras = useRestaurantPlanAccess('dashboard_advanced');
 
   const [serverData, setServerData] = useState<DashboardServerData | null>(null);
   const [tables, setTables] = useState<Awaited<ReturnType<typeof listDiningTablesRequest>>>([]);
@@ -234,30 +247,34 @@ export function RestaurantDashboard({ onSelectGeneral }: VerticalDashboardProps)
   const [reservations, setReservations] = useState<RestaurantReservation[]>([]);
   const [activeMembers, setActiveMembers] = useState<ActiveMember[]>([]);
   const [loading, setLoading] = useState(true);
+  const [proLoading, setProLoading] = useState(false);
+  const [proStage, setProStage] = useState(0);
   const [hasData, setHasData] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const [sseOk, setSseOk] = useState(false);
   const loadSeqRef = useRef(0);
+  const proLoadSeqRef = useRef(0);
   const sseReloadRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (options?: { includePro?: boolean }) => {
     if (!dataUserId) {
       setLoading(false);
       return;
     }
     const seq = ++loadSeqRef.current;
+    const includePro = canViewDashboardExtras && options?.includePro !== false;
+    const proSeq = includePro ? ++proLoadSeqRef.current : null;
     setLoading(true);
     try {
-      const [server, tablesRow, ordersRow, sessionsRow, waitlistRow, brandsRow, floor, reservationsRow, activeRow] =
+      // Ola 1: el resumen Normal no espera gráficas, marcas, equipo ni finanzas Pro.
+      const [tablesRow, ordersRow, sessionsRow, waitlistRow, floor, reservationsRow] =
         await Promise.all([
-          fetchDashboardData(dataUserId).catch(() => null),
           listDiningTablesRequest(dataUserId).catch(() => []),
           listDiningOrdersRequest(dataUserId).catch(() => []),
           listRestaurantRegisterSessions(dataUserId, { businessId }).catch(() => []),
           businessId
             ? listWaitlistForBusiness(dataUserId, businessId).catch(() => [])
             : Promise.resolve([]),
-          businessId ? listBrandsRequest(businessId).catch(() => []) : Promise.resolve([]),
           businessId
             ? getFloorConfigRequest(dataUserId, { businessId }).catch(() => null)
             : Promise.resolve(null),
@@ -265,30 +282,65 @@ export function RestaurantDashboard({ onSelectGeneral }: VerticalDashboardProps)
             businessId,
             accountBusinessCount: businesses.length || 1,
           }).catch(() => [] as RestaurantReservation[]),
-          businessId ? fetchActiveNow(businessId).catch(() => []) : Promise.resolve([]),
         ]);
-      if (seq !== loadSeqRef.current) return;
-      setServerData(server);
-      setTables(tablesRow);
-      setOrders(ordersRow);
-      setSessions(sessionsRow);
-      setBrands(brandsRow);
-      setRooms(Array.isArray(floor?.rooms) ? (floor.rooms as SalaRoomConfig[]) : []);
-      setWaitlistActive(waitlistRow.filter((w) => isActiveWaitlistStatus(w.status)).length);
-      setReservations(reservationsRow);
-      setActiveMembers(activeRow);
-      setUpdatedAt(new Date());
-      setHasData(true);
+      if (seq === loadSeqRef.current) {
+        setTables(tablesRow);
+        setOrders(ordersRow);
+        setSessions(sessionsRow);
+        setRooms(Array.isArray(floor?.rooms) ? (floor.rooms as SalaRoomConfig[]) : []);
+        setWaitlistActive(waitlistRow.filter((w) => isActiveWaitlistStatus(w.status)).length);
+        setReservations(reservationsRow);
+        setUpdatedAt(new Date());
+        setHasData(true);
+        setLoading(false);
+        if (canViewDashboardExtras) {
+          setProStage((stage) => Math.max(stage, 1));
+        }
+      }
+
+      // Olas 2 y 3: solo Pro. SSE no las invalida ni las vuelve a solicitar.
+      if (includePro && proSeq != null) {
+        setProLoading(true);
+        try {
+          const [server, brandsRow] = await Promise.all([
+            fetchDashboardData(dataUserId).catch(() => null),
+            businessId ? listBrandsRequest(businessId).catch(() => []) : Promise.resolve([]),
+          ]);
+          if (proSeq !== proLoadSeqRef.current) return;
+          setServerData(server);
+          setBrands(brandsRow);
+          setProStage((stage) => Math.max(stage, 2));
+
+          const activeRow = businessId
+            ? await fetchActiveNow(businessId).catch(() => [])
+            : [];
+          if (proSeq !== proLoadSeqRef.current) return;
+          setActiveMembers(activeRow);
+          setProStage((stage) => Math.max(stage, 3));
+        } finally {
+          if (proSeq === proLoadSeqRef.current) setProLoading(false);
+        }
+      } else if (!canViewDashboardExtras) {
+        setServerData(null);
+        setBrands([]);
+        setActiveMembers([]);
+        setProStage(0);
+      }
     } catch (err) {
       if (seq === loadSeqRef.current) console.error('restaurant-dashboard error', err);
     } finally {
-      if (seq === loadSeqRef.current) setLoading(false);
+      if (seq === loadSeqRef.current) {
+        setLoading(false);
+      }
     }
-  }, [dataUserId, businessId, businesses.length]);
+  }, [businessId, businesses.length, canViewDashboardExtras, dataUserId]);
 
   useEffect(() => {
+    proLoadSeqRef.current += 1;
     setHasData(false);
     setLoading(true);
+    setProLoading(false);
+    setProStage(0);
   }, [dataUserId, businessId, businesses.length]);
 
   useEffect(() => {
@@ -309,7 +361,8 @@ export function RestaurantDashboard({ onSelectGeneral }: VerticalDashboardProps)
     if (sseReloadRef.current) clearTimeout(sseReloadRef.current);
     sseReloadRef.current = setTimeout(() => {
       sseReloadRef.current = null;
-      void load();
+      // Un cambio de mesa/comanda solo refresca la ola rápida.
+      void load({ includePro: false });
     }, 800);
   }, [load]);
 
@@ -363,6 +416,10 @@ export function RestaurantDashboard({ onSelectGeneral }: VerticalDashboardProps)
         nowMs,
       }),
     [tables, orders, sessions, brands, waitlistActive, businessId, dayKey, nowMs],
+  );
+  const brandPanelOrders = useMemo(
+    () => diningOrdersToShiftDeliveryOrders(orders),
+    [orders],
   );
 
   const openDwells = useMemo(
@@ -449,11 +506,12 @@ export function RestaurantDashboard({ onSelectGeneral }: VerticalDashboardProps)
           />
           <button
             type="button"
-            onClick={() => navigate(scoped(RESTAURANT_OPS_HOME_PATH))}
+            onClick={() => void load()}
+            disabled={loading}
             className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
           >
-            <UtensilsCrossed className="h-3.5 w-3.5" />
-            Centro operativo
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+            Actualizar
           </button>
           {onSelectGeneral ? (
             <button
@@ -466,15 +524,6 @@ export function RestaurantDashboard({ onSelectGeneral }: VerticalDashboardProps)
             </button>
           ) : null}
         </div>
-
-        {/* Facturación 14 días: carga propia (no espera el resto del dashboard) */}
-        {dataUserId ? (
-          <RestaurantDashboardBillingCharts
-            userId={dataUserId}
-            businessId={businessId}
-            businessIdForScope={businessId}
-          />
-        ) : null}
 
         {loading && !hasData ? (
           <DashboardSkeleton />
@@ -666,7 +715,7 @@ export function RestaurantDashboard({ onSelectGeneral }: VerticalDashboardProps)
                         : '—'
                     }
                     sub="media de cuentas cerradas hoy"
-                    onClick={() => navigate(scoped(RESTAURANT_OPS_HOME_PATH))}
+                    onClick={() => navigate(scoped('/saas/sala'))}
                   />
                 </div>
 
@@ -750,90 +799,230 @@ export function RestaurantDashboard({ onSelectGeneral }: VerticalDashboardProps)
               </SectionCard>
             </div>
 
+            {!canViewDashboardExtras ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 to-emerald-50 px-4 py-3 dark:border-blue-900/50 dark:from-blue-950/30 dark:to-emerald-950/20">
+                <div>
+                  <p className="text-sm font-bold text-stone-900 dark:text-stone-100">
+                    Dashboard {planLabel}
+                  </p>
+                  <p className="text-xs text-stone-600 dark:text-stone-400">
+                    Día a día, marcas, margen, escandallos, mermas, equipo y finanzas en Pro.
+                  </p>
+                </div>
+                <VertialBillingUpgradeLink className="text-xs font-bold text-blue-700 hover:underline dark:text-blue-300">
+                  Ver plan Pro
+                </VertialBillingUpgradeLink>
+              </div>
+            ) : null}
+
+            {canViewDashboardExtras ? (
+              <>
+                <RestaurantProgressiveSection
+                  title="Día a día"
+                  hint="Ventas, cuentas, comensales y ticket medio"
+                  icon={<BarChart3 className="h-4 w-4" />}
+                  ready={proStage >= 1}
+                  minHeight={260}
+                >
+                  <SectionCard icon={BarChart3} title="Evolución diaria" hint="7 días o mes móvil">
+                    <RestaurantDailyPerformancePanel orders={orders} businessId={businessId} />
+                  </SectionCard>
+                </RestaurantProgressiveSection>
+
+                {businessId ? (
+                  <RestaurantProgressiveSection
+                    title="Marcas"
+                    hint="Venta y rendimiento por marca del restaurante"
+                    icon={<UtensilsCrossed className="h-4 w-4" />}
+                    ready={proStage >= 2}
+                    minHeight={220}
+                  >
+                    <CompanyBrandPerformancePanel
+                      businessId={businessId}
+                      brands={brands}
+                      orders={brandPanelOrders}
+                      sessions={sessions}
+                      loading={proLoading}
+                      variant="restaurant"
+                    />
+                  </RestaurantProgressiveSection>
+                ) : null}
+
+                <RestaurantProgressiveSection
+                  title="Ranking productos · margen"
+                  hint="Ventas, coste de escandallo y margen real"
+                  icon={<Receipt className="h-4 w-4" />}
+                  ready={proStage >= 2}
+                  minHeight={300}
+                >
+                  <SectionCard icon={Receipt} title="Productos vendidos" hint="semana o mes">
+                    <RestaurantProductMarginPanel
+                      orders={orders}
+                      userId={dataUserId}
+                      businessId={businessId}
+                      brands={brands}
+                      accountBusinessCount={businesses.length || 1}
+                    />
+                  </SectionCard>
+                </RestaurantProgressiveSection>
+
+                <RestaurantProgressiveSection
+                  title="Costes, escandallo y merma"
+                  hint="Food cost, diferencias de inventario y margen"
+                  icon={<Scale className="h-4 w-4" />}
+                  ready={proStage >= 2}
+                  minHeight={320}
+                >
+                  <StockCostAnalyticsPanel
+                    userId={dataUserId}
+                    businessId={businessId}
+                    active
+                  />
+                </RestaurantProgressiveSection>
+
+                <RestaurantProgressiveSection
+                  title="Tiempos del restaurante"
+                  hint="Rotación de mesas y demoras actuales"
+                  icon={<Clock className="h-4 w-4" />}
+                  ready={proStage >= 1}
+                  minHeight={160}
+                >
+                  <SectionCard icon={Clock} title="Rotación y estancia">
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                      <MiniStat
+                        icon={Clock}
+                        iconClass="text-blue-600"
+                        label="Estancia media"
+                        value={snapshot.avgClosedDwellMinutes != null
+                          ? formatDwellMinutes(snapshot.avgClosedDwellMinutes)
+                          : '—'}
+                        sub={`${closedTodayCount} cuentas cerradas hoy`}
+                      />
+                      <MiniStat
+                        icon={Armchair}
+                        iconClass="text-amber-600"
+                        label="Mesas +90 min"
+                        value={String(snapshot.tableDwells.filter((row) => row.status === 'open' && row.minutes >= LONG_STAY_MIN).length)}
+                        sub="ocupadas ahora"
+                        warn={snapshot.tableDwells.some((row) => row.status === 'open' && row.minutes >= LONG_STAY_MIN)}
+                      />
+                      <MiniStat
+                        icon={ChefHat}
+                        iconClass="text-rose-600"
+                        label="Cocina +20 min"
+                        value={String(snapshot.kitchenOvertime)}
+                        sub={`${snapshot.kitchenTickets} tickets activos`}
+                        warn={snapshot.kitchenOvertime > 0}
+                      />
+                    </div>
+                  </SectionCard>
+                </RestaurantProgressiveSection>
+              </>
+            ) : null}
+
+            {canViewDashboardExtras ? (
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               {/* Equipo fichado */}
-              <SectionCard
-                icon={Users}
+              <RestaurantProgressiveSection
                 title="Equipo ahora"
-                hint="fichajes en tiempo real"
-                action={{ label: 'Equipo', onClick: () => navigate(scoped('/saas/team')) }}
+                hint="Fichajes en tiempo real"
+                icon={<Users className="h-4 w-4" />}
+                ready={proStage >= 3}
+                minHeight={150}
               >
-                {activeMembers.length === 0 ? (
-                  <p className="py-4 text-center text-sm text-gray-400">
-                    Nadie fichado ahora mismo.
-                  </p>
-                ) : (
-                  <div className="flex flex-wrap gap-1.5">
-                    {activeMembers.map((m) => (
-                      <span
-                        key={m.member_id}
-                        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
-                          m.status === 'break'
-                            ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300'
-                            : 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300'
-                        }`}
-                      >
+                <SectionCard
+                  icon={Users}
+                  title="Equipo ahora"
+                  hint="fichajes en tiempo real"
+                  action={{ label: 'Equipo', onClick: () => navigate(scoped('/saas/team')) }}
+                >
+                  {activeMembers.length === 0 ? (
+                    <p className="py-4 text-center text-sm text-gray-400">
+                      Nadie fichado ahora mismo.
+                    </p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {activeMembers.map((m) => (
                         <span
-                          className={`h-1.5 w-1.5 rounded-full ${
-                            m.status === 'break' ? 'bg-amber-500' : 'bg-emerald-500'
+                          key={m.member_id}
+                          className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+                            m.status === 'break'
+                              ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300'
+                              : 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300'
                           }`}
-                        />
-                        {m.member_name}
-                        <span className="font-normal opacity-70">
-                          {m.status === 'break' ? 'descanso' : formatDwellMinutes(m.totalMinutes)}
+                        >
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full ${
+                              m.status === 'break' ? 'bg-amber-500' : 'bg-emerald-500'
+                            }`}
+                          />
+                          {m.member_name}
+                          <span className="font-normal opacity-70">
+                            {m.status === 'break' ? 'descanso' : formatDwellMinutes(m.totalMinutes)}
+                          </span>
                         </span>
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </SectionCard>
+                      ))}
+                    </div>
+                  )}
+                </SectionCard>
+              </RestaurantProgressiveSection>
 
               {/* Resultado del mes (servidor) */}
-              <SectionCard
-                icon={TrendingUp}
+              <RestaurantProgressiveSection
                 title="Resultado del mes"
-                hint="ventas, gastos y beneficio estimado"
-                action={{
-                  label: 'Finanzas',
-                  onClick: () => navigate(scoped('/saas/income-expenses')),
-                }}
+                hint="Ventas, gastos y beneficio estimado"
+                icon={<TrendingUp className="h-4 w-4" />}
+                ready={proStage >= 2}
+                minHeight={190}
               >
-                <div className="grid grid-cols-2 gap-1.5">
-                  <MiniStat
-                    icon={Euro}
-                    iconClass="text-blue-600 dark:text-blue-400"
-                    label="Ventas hoy"
-                    value={displayKpis ? eur(displayKpis.salesToday) : '—'}
-                    sub={displayKpis ? `${displayKpis.salesTodayCount} venta${displayKpis.salesTodayCount === 1 ? '' : 's'}` : undefined}
-                    onClick={() => navigate(scoped('/saas/income-expenses'))}
-                  />
-                  <MiniStat
-                    icon={TrendingUp}
-                    iconClass="text-emerald-600 dark:text-emerald-400"
-                    label="Ventas mes"
-                    value={displayKpis ? eur(displayKpis.salesMonth) : '—'}
-                    onClick={() => navigate(scoped('/saas/income-expenses'))}
-                  />
-                  <MiniStat
-                    icon={Wallet}
-                    iconClass="text-rose-600 dark:text-rose-400"
-                    label="Gastos mes"
-                    value={displayKpis ? eur(displayKpis.expensesMonth) : '—'}
-                    onClick={() => navigate(scoped('/saas/income-expenses'))}
-                  />
-                  <MiniStat
-                    icon={Euro}
-                    iconClass="text-indigo-600 dark:text-indigo-400"
-                    label="Beneficio est."
-                    value={displayKpis ? eur(displayKpis.estimatedProfit) : '—'}
-                    warn={!!displayKpis && displayKpis.estimatedProfit < 0}
-                    onClick={() => navigate(scoped('/saas/income-expenses'))}
-                  />
-                </div>
-              </SectionCard>
+                <SectionCard
+                  icon={TrendingUp}
+                  title="Resultado del mes"
+                  hint="ventas, gastos y beneficio estimado"
+                  action={{
+                    label: 'Finanzas',
+                    onClick: () => navigate(scoped('/saas/income-expenses')),
+                  }}
+                >
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <MiniStat
+                      icon={Euro}
+                      iconClass="text-blue-600 dark:text-blue-400"
+                      label="Ventas hoy"
+                      value={displayKpis ? eur(displayKpis.salesToday) : '—'}
+                      sub={displayKpis ? `${displayKpis.salesTodayCount} venta${displayKpis.salesTodayCount === 1 ? '' : 's'}` : undefined}
+                      onClick={() => navigate(scoped('/saas/income-expenses'))}
+                    />
+                    <MiniStat
+                      icon={TrendingUp}
+                      iconClass="text-emerald-600 dark:text-emerald-400"
+                      label="Ventas mes"
+                      value={displayKpis ? eur(displayKpis.salesMonth) : '—'}
+                      onClick={() => navigate(scoped('/saas/income-expenses'))}
+                    />
+                    <MiniStat
+                      icon={Wallet}
+                      iconClass="text-rose-600 dark:text-rose-400"
+                      label="Gastos mes"
+                      value={displayKpis ? eur(displayKpis.expensesMonth) : '—'}
+                      onClick={() => navigate(scoped('/saas/income-expenses'))}
+                    />
+                    <MiniStat
+                      icon={Euro}
+                      iconClass="text-indigo-600 dark:text-indigo-400"
+                      label="Beneficio est."
+                      value={displayKpis ? eur(displayKpis.estimatedProfit) : '—'}
+                      warn={!!displayKpis && displayKpis.estimatedProfit < 0}
+                      onClick={() => navigate(scoped('/saas/income-expenses'))}
+                    />
+                  </div>
+                </SectionCard>
+              </RestaurantProgressiveSection>
             </div>
+            ) : null}
 
             {/* Accesos rápidos */}
+            {canViewDashboardExtras ? (
             <SectionCard icon={Zap} title="Accesos rápidos">
               <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
                 {QUICK.map(({ label, to, icon: Icon }) => (
@@ -850,6 +1039,23 @@ export function RestaurantDashboard({ onSelectGeneral }: VerticalDashboardProps)
                 ))}
               </div>
             </SectionCard>
+            ) : null}
+
+            {canViewDashboardExtras && dataUserId ? (
+              <RestaurantProgressiveSection
+                title="Gráficas y finanzas"
+                hint="Evolución de facturación y resultado"
+                icon={<TrendingUp className="h-4 w-4" />}
+                ready={proStage >= 2}
+                minHeight={360}
+              >
+                <RestaurantDashboardBillingCharts
+                  userId={dataUserId}
+                  businessId={businessId}
+                  businessIdForScope={businessId}
+                />
+              </RestaurantProgressiveSection>
+            ) : null}
           </>
         )}
       </div>

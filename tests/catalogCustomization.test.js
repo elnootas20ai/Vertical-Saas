@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_NEW_INGREDIENT_TPV_FLAGS,
   inferTpvDefaultExtraPrice,
   ingredientChargesExtra,
   isCustomizableCatalogItem,
@@ -11,8 +12,51 @@ import {
   parseCatalogFichaIngredientNames,
   normalizeCatalogIngredientsForSave,
   normalizeCatalogFichaIngredientsForSave,
+  normalizeStoreIngredients,
+  normalizeStoreIngredientUnit,
+  readStoreIngredientTpvFlags,
   resolveTpvCategoryTemplateKey,
+  withStoreIngredientTpvFlags,
 } from '../src/app/lib/catalogCustomization.ts';
+
+describe('subrecetas por talla', () => {
+  it('conserva mg y los consumos pequeño, mediano y grande', () => {
+    expect(normalizeStoreIngredientUnit('mg')).toBe('mg');
+    const [subrecipe] = normalizeStoreIngredients([
+      {
+        id: 'masa',
+        name: 'Masa',
+        unit: 'kg',
+        recipeLines: [{ storeIngredientId: 'harina', name: 'Harina', quantity: 1, unit: 'kg' }],
+        usageVariants: [
+          { size: 'small', label: 'Pequeño', quantity: 150000, unit: 'mg' },
+          { size: 'medium', label: 'Mediano', quantity: 0.2, unit: 'kg' },
+          { size: 'large', label: 'Grande', quantity: 1, unit: 'ud' },
+        ],
+      },
+    ]);
+    expect(subrecipe.usageVariants).toEqual([
+      { size: 'small', label: 'Pequeño', quantity: 150000, unit: 'mg' },
+      { size: 'medium', label: 'Mediano', quantity: 0.2, unit: 'kg' },
+      { size: 'large', label: 'Grande', quantity: 1, unit: 'ud' },
+    ]);
+  });
+});
+
+describe('ingredientes nuevos en TPV', () => {
+  it('activa extra y quitar de forma predeterminada', () => {
+    const ingredient = withStoreIngredientTpvFlags(
+      { id: 'cebolla', name: 'Cebolla' },
+      DEFAULT_NEW_INGREDIENT_TPV_FLAGS,
+    );
+    expect(readStoreIngredientTpvFlags(ingredient)).toEqual({
+      chargeExtra: true,
+      allowRemove: true,
+    });
+    expect(ingredient.tpvChargeExtra).toBe(true);
+    expect(ingredient.tpvAllowRemove).toBe(true);
+  });
+});
 
 const modomioBrand = {
   _id: 'mod',

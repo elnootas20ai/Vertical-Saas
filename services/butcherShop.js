@@ -127,7 +127,7 @@ export async function searchButcherClientsFn(req, userId, query) {
 
 export function buildButcherOrderDocument(userId, data = {}, existing = null) {
   const now = new Date().toISOString();
-  const id = existing?._id || `butcher_order-${uuidv4()}`;
+  const id = existing?._id || data._id || `butcher_order-${uuidv4()}`;
   const rawItems = Array.isArray(data.items) ? data.items : (existing?.items || []);
 
   return {
@@ -136,6 +136,9 @@ export function buildButcherOrderDocument(userId, data = {}, existing = null) {
     type: 'butcher_order',
     id,
     user_id: userId,
+    business_id: String(data.business_id || data.businessId || existing?.business_id || '').replace(/^business:/, '').trim(),
+    salesPointId: String(data.salesPointId || existing?.salesPointId || ''),
+    sourcePublicOrderId: String(data.sourcePublicOrderId || existing?.sourcePublicOrderId || ''),
     orderNumber: String(data.orderNumber || existing?.orderNumber || ''),
     orderType: normalizeOrderType(data.orderType ?? existing?.orderType),
     clientId: data.clientId || existing?.clientId || null,
@@ -167,6 +170,8 @@ export function sanitizeButcherOrder(doc) {
   if (!doc) return null;
   return {
     _id: doc._id, _rev: doc._rev, type: 'butcher_order', id: doc._id, user_id: doc.user_id,
+    business_id: doc.business_id || '', salesPointId: doc.salesPointId || '',
+    sourcePublicOrderId: doc.sourcePublicOrderId || '',
     orderNumber: doc.orderNumber || '', orderType: normalizeOrderType(doc.orderType),
     clientId: doc.clientId || null, clientName: doc.clientName || '', clientPhone: doc.clientPhone || '',
     items: Array.isArray(doc.items) ? doc.items : [],

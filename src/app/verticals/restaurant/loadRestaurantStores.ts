@@ -26,6 +26,8 @@ export type LoadRestaurantStoresOptions = {
   includeInactivePdvs?: boolean;
   skipPdvMerge?: boolean;
   tpvBootstrap?: boolean;
+  ensurePdv?: boolean;
+  ensureTabletCodes?: boolean;
   knownBusinessIds?: string[];
 };
 
@@ -93,7 +95,7 @@ export async function loadRestaurantStores(
     dedupeOpts,
   );
 
-  if (options?.tpvBootstrap) {
+  if (options?.ensurePdv || options?.tpvBootstrap) {
     for (const wc of retail.filter((w) => w.active !== false && !w.deletedAt)) {
       try {
         const ensured = await ensureDeliveryPdvForWorkCenter(dataUserId, wc, {
@@ -114,7 +116,7 @@ export async function loadRestaurantStores(
     }
   }
 
-  if (options?.tpvBootstrap) {
+  if (options?.ensureTabletCodes ?? options?.tpvBootstrap) {
     pointsOfSale = await ensureTabletCodesForPointsOfSale(dataUserId, pointsOfSale);
     pointsOfSale = dedupePointsOfSale(
       filterPointsOfSaleForWorkCenters(pointsOfSale, retail, pdvScope),

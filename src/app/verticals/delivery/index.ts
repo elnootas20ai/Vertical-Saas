@@ -41,6 +41,7 @@ export {
 } from './deliveryOpsInsights';
 
 export { DeliveryOpsInsightsPanel } from './DeliveryOpsInsightsPanel';
+export { DeliveryProgressiveSection } from './DeliveryProgressiveSection';
 
 export { DeliveryMobileDashboardBlocks } from './DeliveryMobileDashboardBlocks';
 export { DeliveryMobileHomeAlerts } from './DeliveryMobileHomeAlerts';

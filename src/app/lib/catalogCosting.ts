@@ -11,6 +11,7 @@ import {
 
 /** Factores a unidad base (g / ml) para convertir coste de receta. */
 const UNIT_BASE: Record<string, { family: 'mass' | 'vol'; toBase: number }> = {
+  mg: { family: 'mass', toBase: 0.001 },
   g: { family: 'mass', toBase: 1 },
   kg: { family: 'mass', toBase: 1000 },
   ml: { family: 'vol', toBase: 1 },
@@ -46,9 +47,9 @@ export function resolveIngredientCostUnit(
   recipeLineUnit?: string,
 ): string {
   const stored = normalizeStoreIngredientUnit(ingredientUnit, '');
-  if (stored === 'g' || stored === 'kg' || stored === 'ml' || stored === 'l') return stored;
+  if (stored === 'mg' || stored === 'g' || stored === 'kg' || stored === 'ml' || stored === 'l') return stored;
   const line = normalizeStoreIngredientUnit(recipeLineUnit, 'ud');
-  if (line === 'g' || line === 'kg') return 'kg';
+  if (line === 'mg' || line === 'g' || line === 'kg') return 'kg';
   if (line === 'ml' || line === 'l') return 'l';
   return stored || 'ud';
 }

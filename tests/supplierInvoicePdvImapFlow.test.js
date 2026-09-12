@@ -57,6 +57,12 @@ vi.mock('../services/couchdb.js', () => ({
     user_id: userId,
     ...data,
   })),
+  buildSupplierDocument: vi.fn((userId, data) => ({
+    _id: `sup_${userId}_1`,
+    type: 'supplier',
+    user_id: userId,
+    ...data,
+  })),
   listPurchaseInvoicesByUser: vi.fn(async () => []),
   findDuplicatePurchaseInvoice: vi.fn(async () => null),
   assignPurchaseInvoiceNumber: vi.fn(async () => 'F-1'),
@@ -155,5 +161,33 @@ describe('supplier invoice PDV IMAP', () => {
     const src = readFileSync(join(process.cwd(), 'routers/supplierInvoiceRouter.js'), 'utf8');
     expect(src).toMatch(/config\/:userId\/pdvs/);
     expect(src).toMatch(/listPdvEmailConfigs/);
+  });
+
+  it('no empareja proveedores distintos por un dominio público como gmail.com', async () => {
+    const couch = await import('../services/couchdb.js');
+    couch.listSuppliersByUser.mockResolvedValueOnce([
+      { _id: 'sup-1', name: 'Proveedor A', email: 'ventas.a@gmail.com' },
+    ]);
+    const { matchSupplier } = await import('../services/supplierInvoiceProcessor.js');
+    const result = await matchSupplier(
+      'user-pau',
+      { emitter: 'Proveedor B', emitterCIF: '' },
+      'ventas.b@gmail.com',
+    );
+    expect(result.matched).toBe(false);
+  });
+
+  it('crea proveedor OCR con el businessId del PDV cuando no existe', async () => {
+    const couch = await import('../services/couchdb.js');
+    couch.listSuppliersByUser.mockResolvedValue([]);
+    const { ensureSupplierFromOcr } = await import('../services/supplierInvoiceProcessor.js');
+    const result = await ensureSupplierFromOcr(
+      'user-pau',
+      { emitter: 'Proveedor Nuevo', emitterCIF: 'B12345678' },
+      'facturas@proveedor-nuevo.es',
+      { businessId: 'biz1' },
+    );
+    expect(result.method).toBe('auto_created');
+    expect(result.supplier.businessId).toBe('biz1');
   });
 });

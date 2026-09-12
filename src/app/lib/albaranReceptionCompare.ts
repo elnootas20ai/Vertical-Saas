@@ -2,7 +2,9 @@ import type { PurchaseInvoice, PurchaseInvoiceLine } from './deliveryApi';
 import type { PurchaseOrder, PurchaseOrderItem } from './purchaseOrderApi';
 
 /** Estados de pedido que esperan albarán / recepción. */
-export const PURCHASE_ORDER_WAITING_STATUSES = new Set(['draft', 'pending', 'sent', 'partial']);
+export const PURCHASE_ORDER_WAITING_STATUSES = new Set(['pending', 'sent', 'partial']);
+/** Estados que impiden abrir otro pedido al mismo proveedor. */
+export const PURCHASE_ORDER_OPEN_STATUSES = new Set(['draft', 'pending', 'sent', 'partial']);
 
 export type AlbaranCompareStatus = 'ok' | 'qty_diff' | 'price_diff' | 'both_diff' | 'missing_invoice' | 'extra_invoice';
 
@@ -75,7 +77,7 @@ export function findOpenPurchaseOrderForSupplier<
   let best: T | null = null;
   for (const order of orders) {
     if (String(order.supplierId || '').trim() !== sid) continue;
-    if (!isPurchaseOrderWaitingAlbaran(order)) continue;
+    if (!PURCHASE_ORDER_OPEN_STATUSES.has(String(order.status || ''))) continue;
     if (!best || String(order.createdAt || '') > String(best.createdAt || '')) {
       best = order;
     }

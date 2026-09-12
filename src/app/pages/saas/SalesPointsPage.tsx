@@ -4,9 +4,11 @@ import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { useModalClose } from '../../hooks/useModalClose';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
+import { createWorkCenterForBusiness } from '../../verticals/retailScopeRegistry';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import {
-  listWorkCenters,
-  createWorkCenter,
+  listWorkCentersForDelivery,
   updateWorkCenter,
   deleteWorkCenter,
   WORK_CENTER_TYPE_LABELS,
@@ -360,6 +362,7 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem }: WorkCenterModalP
 
 export function WorkCentersSettingsPanel({ embedded = false }: { embedded?: boolean }) {
   const { user } = useAuth();
+  const { currentBusiness } = useBusiness();
   const navigate = useNavigate();
   const [workCenters, setWorkCenters] = useState<WorkCenter[]>([]);
   const [loading, setLoading] = useState(true);
@@ -394,13 +397,14 @@ export function WorkCentersSettingsPanel({ embedded = false }: { embedded?: bool
   ];
 
   const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    if (!user?.id) return;
+    if (!user || !currentBusiness) return;
     let created = 0;
+    let failed = 0;
     for (const entry of entries) {
       try {
         const ct = String(entry.centerType || 'punto_de_venta');
         const ow = String(entry.ownership || 'propiedad');
-        const wc = await createWorkCenter(user.id, {
+        const { workCenter: wc } = await createWorkCenterForBusiness(user, currentBusiness, {
           name: String(entry.name || ''),
           centerType: (['oficina', 'punto_de_venta', 'almacen', 'custom'].includes(ct) ? ct : 'punto_de_venta') as WorkCenterType,
           ownership: (ow === 'alquiler' ? 'alquiler' : 'propiedad') as OwnershipType,
@@ -412,19 +416,24 @@ export function WorkCentersSettingsPanel({ embedded = false }: { embedded?: bool
         });
         setWorkCenters(prev => [...prev, wc]);
         created++;
-      } catch { /* skip */ }
+      } catch {
+        failed++;
+      }
     }
-    toast.success(`${created} centro(s) de trabajo creado(s) con IA`);
+    await loadData();
+    if (created > 0) toast.success(`${created} centro(s) de trabajo creado(s) con IA`);
+    if (failed > 0) toast.error(`${failed} centro(s) no pudieron configurarse por completo`);
   };
 
   const handleImportEntries = async (entries: Record<string, string>[]) => {
-    if (!user?.id) return;
+    if (!user || !currentBusiness) return;
     let created = 0;
+    let failed = 0;
     for (const entry of entries) {
       try {
         const ct = entry.centerType || 'punto_de_venta';
         const ow = entry.ownership || 'propiedad';
-        const wc = await createWorkCenter(user.id, {
+        const { workCenter: wc } = await createWorkCenterForBusiness(user, currentBusiness, {
           name: entry.name || '',
           centerType: (['oficina', 'punto_de_venta', 'almacen', 'custom'].includes(ct) ? ct : 'punto_de_venta') as WorkCenterType,
           ownership: (ow === 'alquiler' ? 'alquiler' : 'propiedad') as OwnershipType,
@@ -436,34 +445,43 @@ export function WorkCentersSettingsPanel({ embedded = false }: { embedded?: bool
         });
         setWorkCenters(prev => [...prev, wc]);
         created++;
-      } catch { /* skip */ }
+      } catch {
+        failed++;
+      }
     }
-    toast.success(`${created} centro(s) de trabajo importado(s)`);
+    await loadData();
+    if (created > 0) toast.success(`${created} centro(s) de trabajo importado(s)`);
+    if (failed > 0) toast.error(`${failed} centro(s) no pudieron configurarse por completo`);
   };
 
   const loadData = useCallback(async () => {
-    if (!user?.id) return;
+    if (!user || !currentBusiness) return;
     try {
-      const wcs = await listWorkCenters(user.id);
-      setWorkCenters(wcs);
+      const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
+      const businessId = String(currentBusiness.business_id || '').replace(/^business:/, '');
+      const wcs = await listWorkCentersForDelivery(dataUserId, currentBusiness);
+      setWorkCenters(wcs.filter((wc) => {
+        const wcBusinessId = String(wc.businessId || '').replace(/^business:/, '');
+        return !wcBusinessId || wcBusinessId === businessId;
+      }));
     } catch {
       toast.error('Error al cargar los centros de trabajo');
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [currentBusiness, user]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
   const handleSave = async (data: Partial<WorkCenter>) => {
-    if (!user?.id) return;
+    if (!user || !currentBusiness) return;
     try {
       if (editingItem) {
         const updated = await updateWorkCenter({ ...editingItem, ...data } as WorkCenter);
         setWorkCenters(prev => prev.map(wc => wc._id === updated._id ? updated : wc).sort((a, b) => a.name.localeCompare(b.name, 'es')));
         toast.success(`"${updated.name}" actualizado`);
       } else {
-        const created = await createWorkCenter(user.id, {
+        const { workCenter: created } = await createWorkCenterForBusiness(user, currentBusiness, {
           name: data.name!,
           centerType: data.centerType || 'punto_de_venta',
           customTypeName: data.customTypeName,
@@ -487,8 +505,9 @@ export function WorkCentersSettingsPanel({ embedded = false }: { embedded?: bool
       }
       setShowModal(false);
       setEditingItem(null);
-    } catch {
-      toast.error('Error al guardar');
+    } catch (error) {
+      await loadData();
+      toast.error(error instanceof Error ? error.message : 'Error al guardar');
       throw new Error('save failed');
     }
   };

@@ -15,6 +15,10 @@ import {
 import { broadcastToUser, broadcastToBusiness } from './sseService.js';
 import logger from './logger.js';
 
+function normalizeBusinessId(value) {
+  return String(value || '').replace(/^business:/, '').trim();
+}
+
 function broadcastTpvSessionLive(account, ownerUserId, sessionDoc) {
   const sanitized = sanitizeTpvRegisterSession(sessionDoc);
   broadcastToUser(ownerUserId, 'tpv_session_updated', sanitized);
@@ -29,6 +33,30 @@ function broadcastTpvSessionLive(account, ownerUserId, sessionDoc) {
       /* ignore */
     }
   }
+}
+
+export async function validateDiningCajaTarget(req, userId, { pdvId, diningOrder }) {
+  const pointId = String(pdvId || '').trim();
+  if (!pointId) {
+    return { status: 'no_pdv', message: 'Falta el punto de venta para registrar en caja.' };
+  }
+  const allSessions = await listTpvRegisterSessionsByUser(req, userId, { opsLite: true });
+  const openSession = findOpenTpvRegisterSessionForPointOfSale(allSessions, pointId);
+  if (!openSession) {
+    return {
+      status: 'no_open_session',
+      message: 'No hay caja abierta en esta tienda. Abre la caja antes de cobrar.',
+    };
+  }
+  const orderBusinessId = normalizeBusinessId(diningOrder?.businessId || diningOrder?.business_id);
+  const sessionBusinessId = normalizeBusinessId(openSession.businessId || openSession.business_id);
+  if (!orderBusinessId || !sessionBusinessId || orderBusinessId !== sessionBusinessId) {
+    return {
+      status: 'business_mismatch',
+      message: 'La cuenta y la caja abierta no pertenecen a la misma empresa.',
+    };
+  }
+  return { status: 'ready', session: openSession };
 }
 
 /**
@@ -72,6 +100,14 @@ export async function registerDiningSaleInTpvSession(req, userId, {
       };
     }
     lastOpenSession = openSession;
+    const orderBusinessId = normalizeBusinessId(diningOrder.businessId || diningOrder.business_id);
+    const sessionBusinessId = normalizeBusinessId(openSession.businessId || openSession.business_id);
+    if (!orderBusinessId || !sessionBusinessId || orderBusinessId !== sessionBusinessId) {
+      return {
+        status: 'business_mismatch',
+        message: 'La cuenta y la caja abierta no pertenecen a la misma empresa.',
+      };
+    }
 
     // Idempotencia por paymentId (reintentos del mismo tramo).
     const payKey = String(paymentId || '').trim();

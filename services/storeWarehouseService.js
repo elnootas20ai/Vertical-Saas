@@ -12,7 +12,7 @@ import {
   listPointsOfSaleByUser,
 } from './couchdb.js';
 import { storeWarehouseDisplayName } from '../shared/stock/warehouseStockQty.js';
-import { stampOpsDoc } from '../shared/scope/opsScope.js';
+import { resolveBusinessIdFromRequest, stampOpsDoc } from '../shared/scope/opsScope.js';
 import logger from './logger.js';
 
 function activePdvs(pointsOfSale = []) {
@@ -158,7 +158,25 @@ export async function resolvePurchaseReceptionWarehouseId(
   { warehouseId = '', salesPointId = '', workCenterId = '' } = {},
 ) {
   const preferred = String(warehouseId || '').trim();
-  if (preferred) return preferred;
+  if (preferred) {
+    const db = getCatalogDbName();
+    const warehouse = await getDocument(req, db, preferred).catch(() => null);
+    const requestedBusinessId = resolveBusinessIdFromRequest(req);
+    const warehouseBusinessId = String(
+      warehouse?.businessId || warehouse?.business_id || '',
+    ).replace(/^business:/, '').trim();
+    if (
+      !warehouse
+      || warehouse.type !== 'warehouse'
+      || warehouse.user_id !== userId
+      || warehouse.deletedAt
+      || warehouse.active === false
+      || (requestedBusinessId && warehouseBusinessId && warehouseBusinessId !== requestedBusinessId)
+    ) {
+      throw new Error('El almacén seleccionado no pertenece al ámbito activo');
+    }
+    return preferred;
+  }
 
   const pdvRef = String(salesPointId || workCenterId || '').trim();
   if (pdvRef) {

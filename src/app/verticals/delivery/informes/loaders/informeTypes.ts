@@ -96,6 +96,7 @@ export type InformeLoadCtx = {
   businessId?: string;
   businessName?: string;
   businessType?: string;
+  accountBusinessCount?: number;
   period?: InformePeriod;
   filters?: InformeFilters;
   signal?: AbortSignal;

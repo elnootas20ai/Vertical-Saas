@@ -1,9 +1,28 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { sanitizeCatalogItemForTpv } from '../services/couchdb.js';
+import { buildCatalogItemDocument, sanitizeCatalogItemForTpv } from '../services/couchdb.js';
 import { filterCatalogItemsForBusinessScope } from '../src/app/lib/catalogBusinessScope.ts';
 
 describe('sanitizeCatalogItemForTpv', () => {
+  it('reactiva el mismo documento al reimportar un artículo borrado', () => {
+    const existing = {
+      _id: 'cat-deleted',
+      _rev: '2-old',
+      type: 'catalog_item',
+      user_id: 'owner-1',
+      name: 'Harina',
+      deletedAt: '2026-01-01T00:00:00.000Z',
+    };
+    const rebuilt = buildCatalogItemDocument(
+      'owner-1',
+      { name: 'Harina', sku: 'HAR-1', module: 'stock', active: true },
+      existing,
+    );
+    expect(rebuilt._id).toBe('cat-deleted');
+    expect(rebuilt._rev).toBe('2-old');
+    expect(rebuilt).not.toHaveProperty('deletedAt');
+  });
+
   it('conserva business_id para filtrar por empresa en cuentas multi-negocio', () => {
     const doc = {
       _id: 'cat-1',

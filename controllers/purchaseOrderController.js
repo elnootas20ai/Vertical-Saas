@@ -18,16 +18,34 @@ import {
 import { nextPurchaseOrderNumber } from '../services/purchaseOrderNumber.js';
 import { generateAutoOrders } from '../services/autoOrderService.js';
 import { sendEmail } from '../services/email.js';
-import { recordMovement } from '../services/stockMovementService.js';
+import {
+  applyPurchaseMovementCost,
+  listMovementsByReference,
+  recordMovement,
+} from '../services/stockMovementService.js';
 import {
   canEmitCatalogStockAlerts,
   filterStockTrackedCatalogItems,
 } from '../services/stockAlertUtils.js';
 import logger from '../services/logger.js';
-import { stampOpsDoc, resolveBusinessIdFromRequest } from '../shared/scope/opsScope.js';
+import {
+  filterDocsForBusiness,
+  stampOpsDoc,
+  resolveBusinessIdFromRequest,
+} from '../shared/scope/opsScope.js';
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
+}
+
+function scopePurchaseDocs(req, docs) {
+  const businessId = resolveBusinessIdFromRequest(req);
+  if (!businessId) return docs;
+  const accountBusinessCount = Math.max(
+    1,
+    Number(req.query?.accountBusinessCount || req.body?.accountBusinessCount) || 1,
+  );
+  return filterDocsForBusiness(docs, businessId, { accountBusinessCount });
 }
 
 const PURCHASE_ROLES = {
@@ -52,6 +70,35 @@ async function ensurePurchaseOrderOwner(req, userId, orderId) {
   const doc = await getDocument(req, db, orderId);
   if (!doc || doc.type !== 'purchase_order' || doc.user_id !== userId) return null;
   return doc;
+}
+
+function purchaseDocBusinessId(doc) {
+  return String(doc?.businessId || doc?.business_id || '').replace(/^business:/, '').trim();
+}
+
+async function assertPurchaseOrderReferences(req, userId, order, businessId) {
+  const db = getCatalogDbName();
+  const ids = new Map();
+  if (order?.supplierId) ids.set(String(order.supplierId), 'supplier');
+  for (const item of order?.items || []) {
+    if (item?.catalogItemId) ids.set(String(item.catalogItemId), 'catalog_item');
+    if (item?.supplierId) ids.set(String(item.supplierId), 'supplier');
+  }
+  for (const [id, expectedType] of ids) {
+    const doc = await getDocument(req, db, id).catch(() => null);
+    if (!doc || doc.deletedAt || doc.user_id !== userId || doc.type !== expectedType) {
+      const label = expectedType === 'supplier' ? 'proveedor' : 'artículo';
+      const err = new Error(`El ${label} seleccionado no pertenece a esta cuenta`);
+      err.statusCode = 400;
+      throw err;
+    }
+    const docBusinessId = purchaseDocBusinessId(doc);
+    if (businessId && docBusinessId && docBusinessId !== businessId) {
+      const err = new Error('El pedido contiene datos de otra empresa');
+      err.statusCode = 400;
+      throw err;
+    }
+  }
 }
 
 export async function listPurchaseOrders(req, res) {
@@ -95,6 +142,9 @@ export async function listPurchaseOrders(req, res) {
 
 export async function createPurchaseOrder(req, res) {
   try {
+    if (!canPerform(req, 'create')) {
+      return res.status(403).json({ ok: false, error: 'No tienes permiso para crear pedidos' });
+    }
     const { userId } = req.params;
     const { order } = req.body || {};
     if (!userId) return badRequest(res, 'Falta userId');
@@ -107,6 +157,7 @@ export async function createPurchaseOrder(req, res) {
     const bid = String(
       order.businessId || order.business_id || resolveBusinessIdFromRequest(req) || '',
     ).trim();
+    await assertPurchaseOrderReferences(req, userId, order, bid);
     const existingOrders = await listPurchaseOrdersByUser(req, userId, bid ? { businessId: bid } : {});
     const orderNumber = String(order.orderNumber || '').trim()
       || nextPurchaseOrderNumber(existingOrders.map((o) => o.orderNumber));
@@ -128,12 +179,15 @@ export async function createPurchaseOrder(req, res) {
 
     return res.status(201).json({ ok: true, order: sanitizePurchaseOrder(saved) });
   } catch (error) {
-    return res.status(500).json({ ok: false, error: error.message || 'Error al crear pedido de compra' });
+    return res.status(error.statusCode || 500).json({ ok: false, error: error.message || 'Error al crear pedido de compra' });
   }
 }
 
 export async function updatePurchaseOrder(req, res) {
   try {
+    if (!canPerform(req, 'create')) {
+      return res.status(403).json({ ok: false, error: 'No tienes permiso para editar pedidos' });
+    }
     const { userId, orderId } = req.params;
     const { order } = req.body || {};
     if (!userId || !orderId) return badRequest(res, 'Faltan userId o orderId');
@@ -141,25 +195,43 @@ export async function updatePurchaseOrder(req, res) {
 
     const existing = await ensurePurchaseOrderOwner(req, userId, orderId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
+    if (existing.status !== 'draft') {
+      return badRequest(res, 'Solo se pueden editar pedidos en borrador');
+    }
+    const bid = purchaseDocBusinessId(existing) || resolveBusinessIdFromRequest(req);
+    await assertPurchaseOrderReferences(req, userId, order, bid);
 
     const db = getCatalogDbName();
-    const doc = buildPurchaseOrderDocument(userId, order, existing);
+    const doc = buildPurchaseOrderDocument(
+      userId,
+      { ...order, businessId: bid, business_id: bid },
+      existing,
+    );
     const result = await putDocument(req, db, doc._id, doc);
     const saved = { ...doc, _rev: result.rev };
 
     return res.json({ ok: true, order: sanitizePurchaseOrder(saved) });
   } catch (error) {
-    return res.status(500).json({ ok: false, error: error.message || 'Error al actualizar pedido de compra' });
+    return res.status(error.statusCode || 500).json({ ok: false, error: error.message || 'Error al actualizar pedido de compra' });
   }
 }
 
 export async function removePurchaseOrder(req, res) {
   try {
+    if (!canPerform(req, 'full')) {
+      return res.status(403).json({ ok: false, error: 'No tienes permiso para eliminar pedidos' });
+    }
     const { userId, orderId } = req.params;
     if (!userId || !orderId) return badRequest(res, 'Faltan userId o orderId');
 
     const existing = await ensurePurchaseOrderOwner(req, userId, orderId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
+    if (!['draft', 'cancelled'].includes(String(existing.status || ''))) {
+      return res.status(409).json({
+        ok: false,
+        error: 'No se puede eliminar un pedido enviado o recibido; debe conservarse su trazabilidad',
+      });
+    }
 
     const db = getCatalogDbName();
     await softDeleteDocument(req, db, existing._id);
@@ -172,6 +244,9 @@ export async function removePurchaseOrder(req, res) {
 
 export async function triggerAutoOrders(req, res) {
   try {
+    if (!canPerform(req, 'full')) {
+      return res.status(403).json({ ok: false, error: 'No tienes permiso para generar pedidos' });
+    }
     const { userId } = req.params;
     if (!userId) return badRequest(res, 'Falta userId');
     const account = await findAccountByUserId(req, userId);
@@ -203,7 +278,7 @@ export async function getLowStockReport(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
-    const items = await listCatalogItemsByUser(req, userId);
+    const items = scopePurchaseDocs(req, await listCatalogItemsByUser(req, userId));
     const lowStock = items
       .filter((item) => {
         if (!item.active || item.deletedAt) return false;
@@ -244,12 +319,18 @@ export async function getLowStockReport(req, res) {
 
 export async function markOrderReceived(req, res) {
   try {
+    if (!canPerform(req, 'receive')) {
+      return res.status(403).json({ ok: false, error: 'No tienes permiso para recibir pedidos' });
+    }
     const { userId, orderId } = req.params;
     const { receivedItems } = req.body || {};
     if (!userId || !orderId) return badRequest(res, 'Faltan userId o orderId');
 
     const existing = await ensurePurchaseOrderOwner(req, userId, orderId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
+    if (!['pending', 'sent', 'partial'].includes(String(existing.status || ''))) {
+      return badRequest(res, `No se puede recibir un pedido en estado "${existing.status || 'draft'}"`);
+    }
 
     const db = getCatalogDbName();
     const now = new Date().toISOString();
@@ -261,6 +342,9 @@ export async function markOrderReceived(req, res) {
       const nextReceived = Array.isArray(receivedItems)
         ? (received ? Number(received.quantity ?? 0) : Number(item.received || 0))
         : Number(item.quantity || 0);
+      if (!Number.isFinite(nextReceived) || nextReceived < Number(item.received || 0)) {
+        throw new Error(`La recepción de "${item.name || item.catalogItemId}" no puede reducir lo ya recibido`);
+      }
       const nextUnitCost =
         received && received.unitCost != null && Number(received.unitCost) >= 0
           ? Number(received.unitCost)
@@ -271,18 +355,12 @@ export async function markOrderReceived(req, res) {
     const allReceived = updatedItems.every(
       (item) => Number(item.received || 0) >= Number(item.quantity || 0),
     );
-
-    const doc = buildPurchaseOrderDocument(userId, {
-      ...existing,
-      items: updatedItems,
-      status: allReceived ? 'received' : 'partial',
-      receivedAt: now,
-    }, existing);
-    const result = await putDocument(req, db, doc._id, doc);
-
-    if (allReceived || Array.isArray(receivedItems)) {
-      const account = await findAccountByUserId(req, userId);
-      let warehouseId = String(req.body?.warehouseId || '').trim();
+    const shouldApplyStock = allReceived || Array.isArray(receivedItems);
+    let account = null;
+    let warehouseId = '';
+    if (shouldApplyStock) {
+      account = await findAccountByUserId(req, userId);
+      warehouseId = String(req.body?.warehouseId || existing.warehouseId || '').trim();
       try {
         const { resolvePurchaseReceptionWarehouseId } = await import('../services/storeWarehouseService.js');
         warehouseId = await resolvePurchaseReceptionWarehouseId(req, userId, {
@@ -295,27 +373,76 @@ export async function markOrderReceived(req, res) {
           { tag: 'PO_RECEIVE', err: resolveErr?.message },
           'No se pudo resolver almacén de recepción',
         );
+        return badRequest(res, resolveErr?.message || 'Almacén de recepción no válido');
       }
       if (!warehouseId) {
-        logger.warn(
-          { tag: 'PO_RECEIVE', orderId: existing._id, userId },
-          'Recepción sin warehouseId: el stock no se verá en almacén por tienda',
+        return badRequest(res, 'Selecciona el almacén de la tienda antes de recibir el pedido');
+      }
+    }
+
+    const doc = buildPurchaseOrderDocument(userId, {
+      ...existing,
+      items: updatedItems,
+      // Se confirma como recibido al final, cuando stock y costes han quedado aplicados.
+      status: shouldApplyStock ? 'partial' : (allReceived ? 'received' : 'partial'),
+      receivedAt: now,
+      receptionMovementsVersion: 1,
+      salesPointId: req.body?.salesPointId || existing.salesPointId || '',
+      workCenterId: req.body?.workCenterId || existing.workCenterId || '',
+      warehouseId,
+    }, existing);
+    const result = await putDocument(req, db, doc._id, doc);
+
+    if (shouldApplyStock) {
+      const priorMovements = (await listMovementsByReference(
+        req,
+        userId,
+        existing._id,
+        'purchase_order',
+        { movementTypes: ['purchase_reception'], maxDocs: 2000 },
+      )).filter((movement) => movement.applied !== false);
+      const receptionMovements = [...priorMovements];
+      const appliedByCatalog = new Map();
+      for (const movement of priorMovements) {
+        const key = String(movement.catalogItemId || '');
+        if (!key) continue;
+        appliedByCatalog.set(
+          key,
+          (appliedByCatalog.get(key) || 0) + Number(movement.quantity || 0),
         );
       }
-      const prevByCatalog = new Map(
-        (existing.items || []).map((it) => [String(it.catalogItemId || ''), Number(it.received || 0)]),
-      );
+      // Compatibilidad con pedidos históricos que se recibieron antes de registrar movimientos.
+      if (!existing.receptionMovementsVersion && priorMovements.length === 0) {
+        for (const item of existing.items || []) {
+          const key = String(item.catalogItemId || '');
+          if (key) {
+            appliedByCatalog.set(
+              key,
+              (appliedByCatalog.get(key) || 0) + Number(item.received || 0),
+            );
+          }
+        }
+      }
       let stockUpdated = 0;
       let stockFailed = 0;
       let stockUnits = 0;
+      let expectedStockLines = 0;
+      const targetByCatalog = new Map();
 
       for (const item of updatedItems) {
         if (!item.catalogItemId) continue;
-        const prevReceived = prevByCatalog.get(String(item.catalogItemId)) || 0;
-        const delta = Number(item.received || 0) - prevReceived;
+        const catalogKey = String(item.catalogItemId);
+        const targetReceived = Number(item.received || 0);
+        if (targetReceived > 0) expectedStockLines += 1;
+        const cumulativeTarget = Math.round(
+          ((targetByCatalog.get(catalogKey) || 0) + targetReceived) * 1_000_000,
+        ) / 1_000_000;
+        targetByCatalog.set(catalogKey, cumulativeTarget);
+        const alreadyApplied = appliedByCatalog.get(catalogKey) || 0;
+        const delta = cumulativeTarget - alreadyApplied;
         if (delta <= 0) continue;
         try {
-          await recordMovement(req, userId, {
+          const movement = await recordMovement(req, userId, {
             catalogItemId: item.catalogItemId,
             movementType: 'purchase_reception',
             quantity: delta,
@@ -323,41 +450,27 @@ export async function markOrderReceived(req, res) {
             warehouseId,
             referenceId: existing._id,
             referenceType: 'purchase_order',
+            idempotencyKey: `purchase-order:${existing._id}:${catalogKey}:${cumulativeTarget}`,
             notes: `Recepción pedido ${existing.orderNumber || existing._id.slice(-8)}`,
             performedBy: account?.fullName || userId,
           });
+          receptionMovements.push(movement);
           stockUpdated += 1;
           stockUnits += delta;
+          appliedByCatalog.set(catalogKey, alreadyApplied + delta);
         } catch (err) {
           stockFailed += 1;
           logger.warn({ tag: 'PO_RECEIVE', err: err?.message, catalogItemId: item.catalogItemId }, 'Error registrando movimiento de stock');
         }
       }
 
-      for (const item of updatedItems) {
-        if (!item.catalogItemId || !item.received || !item.unitCost) continue;
+      for (const movement of receptionMovements.sort(
+        (a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')),
+      )) {
         try {
-          const catItem = await getDocument(req, db, item.catalogItemId);
-          if (catItem && catItem.type === 'catalog_item' && catItem.user_id === userId) {
-            const prevQty = Number(catItem.stockQuantity || 0) - Math.max(0, Number(item.received || 0) - (prevByCatalog.get(String(item.catalogItemId)) || 0));
-            const prevCost = Number(catItem.costPrice || 0);
-            let newCostPrice = Number(item.unitCost);
-            if (prevQty > 0 && prevCost > 0) {
-              const delta = Math.max(0, Number(item.received || 0) - (prevByCatalog.get(String(item.catalogItemId)) || 0));
-              if (delta > 0) {
-                newCostPrice = Math.round(((prevQty * prevCost + delta * Number(item.unitCost)) / Number(catItem.stockQuantity || 1)) * 100) / 100;
-              }
-            }
-            const freshDoc = await getDocument(req, db, item.catalogItemId);
-            await putDocument(req, db, freshDoc._id, {
-              ...freshDoc,
-              costPrice: newCostPrice,
-              lastPurchasePrice: Number(item.unitCost),
-              lastPurchaseDate: now,
-              updatedAt: now,
-            });
-          }
+          await applyPurchaseMovementCost(req, userId, movement);
         } catch (err) {
+          stockFailed += 1;
           logger.warn({ tag: 'PO_RECEIVE', err: err?.message }, 'Error actualizando coste medio');
         }
       }
@@ -376,14 +489,23 @@ export async function markOrderReceived(req, res) {
               .replace(/\s+/g, ' ')
               .trim();
           const costByName = new Map();
+          const costByCatalogId = new Map();
           for (const item of updatedItems) {
             if (!item.received || !(Number(item.unitCost) > 0)) continue;
             const key = norm(item.name);
             if (key) costByName.set(key, Number(item.unitCost));
+            if (item.catalogItemId) {
+              costByCatalogId.set(String(item.catalogItemId), Number(item.unitCost));
+            }
           }
           let changed = false;
           const nextIngredients = cfg.storeIngredients.map((ing) => {
-            const cost = costByName.get(norm(ing.name));
+            const ingredientCatalogId = String(
+              ing.catalogItemId || ing.stockItemId || '',
+            ).trim();
+            const cost = ingredientCatalogId
+              ? costByCatalogId.get(ingredientCatalogId)
+              : costByName.get(norm(ing.name));
             if (cost == null) return ing;
             changed = true;
             return { ...ing, baseCost: Math.round(cost * 100) / 100 };
@@ -400,12 +522,27 @@ export async function markOrderReceived(req, res) {
         logger.warn({ tag: 'PO_RECEIVE', err: err?.message }, 'Error actualizando escandallo ingredientes');
       }
 
+      const stockComplete = expectedStockLines > 0 && stockFailed === 0;
+      let responseDoc = doc;
+      let responseRev = result.rev;
+      if (stockComplete && allReceived) {
+        const finalized = buildPurchaseOrderDocument(
+          userId,
+          { ...doc, status: 'received', receivedAt: now },
+          { ...doc, _rev: result.rev },
+        );
+        const finalizedSave = await putDocument(req, db, finalized._id, finalized);
+        responseDoc = finalized;
+        responseRev = finalizedSave.rev;
+      }
+
       return res.json({
         ok: true,
-        order: sanitizePurchaseOrder({ ...doc, _rev: result.rev }),
+        order: sanitizePurchaseOrder({ ...responseDoc, _rev: responseRev }),
         stockUpdated,
         stockUnits,
         stockFailed,
+        stockComplete,
         warehouseId: warehouseId || '',
       });
     }
@@ -418,6 +555,9 @@ export async function markOrderReceived(req, res) {
 
 export async function approvePurchaseOrder(req, res) {
   try {
+    if (!canPerform(req, 'full')) {
+      return res.status(403).json({ ok: false, error: 'No tienes permiso para aprobar pedidos' });
+    }
     const { userId, orderId } = req.params;
     if (!userId || !orderId) return badRequest(res, 'Faltan userId o orderId');
 
@@ -455,6 +595,13 @@ export async function approvePurchaseOrder(req, res) {
 }
 
 export async function receiveWithInvoice(req, res) {
+  // Flujo legado inseguro: sumaba el acumulado directamente al stock y podía duplicarlo.
+  // La UI usa /receive (delta + movimientos) y después persiste el albarán.
+  return res.status(410).json({
+    ok: false,
+    code: 'LEGACY_RECEIVE_DISABLED',
+    error: 'Usa el flujo de comprobación de albarán para recibir el pedido',
+  });
   try {
     const { userId, orderId } = req.params;
     const { ocrResult, receivedItems, createInvoice } = req.body || {};
@@ -627,7 +774,7 @@ export async function getSalesForecast(req, res) {
     const deliveryDocs = await getAllDocuments(req, deliveryDb);
 
     const fourWeeksAgo = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000).toISOString();
-    const deliveredOrders = deliveryDocs.filter(
+    const deliveredOrders = scopePurchaseDocs(req, deliveryDocs).filter(
       (d) => d?.type === 'delivery_order' && d?.user_id === userId && !d?.deletedAt
         && d?.status === 'delivered' && d?.createdAt >= fourWeeksAgo,
     );
@@ -649,7 +796,7 @@ export async function getSalesForecast(req, res) {
       (Date.now() - new Date(fourWeeksAgo).getTime()) / (7 * 24 * 60 * 60 * 1000),
     ));
 
-    const catalogItems = await listCatalogItemsByUser(req, userId);
+    const catalogItems = scopePurchaseDocs(req, await listCatalogItemsByUser(req, userId));
     const forecast = catalogItems
       .filter((item) => item.active && !item.deletedAt)
       .map((item) => {
@@ -697,10 +844,24 @@ export async function getPurchaseKpis(req, res) {
 
     const db = getCatalogDbName();
     await ensureDatabase(req, db);
-    const allDocs = await getAllDocuments(req, db);
+    const rawDocs = await getAllDocuments(req, db);
+    const allDocs = scopePurchaseDocs(req, rawDocs);
 
     const catalogItems = allDocs.filter((d) => d?.type === 'catalog_item' && d?.user_id === userId && !d?.deletedAt && d?.active);
     const orders = allDocs.filter((d) => d?.type === 'purchase_order' && d?.user_id === userId && !d?.deletedAt);
+    const catalogItemIds = new Set(catalogItems.map((item) => item._id));
+    const scopedWarehouses = new Set(
+      allDocs.filter((doc) => doc?.type === 'warehouse').map((doc) => doc._id),
+    );
+    const stockInfra = rawDocs.filter(
+      (doc) =>
+        doc?.user_id === userId
+        && !doc?.deletedAt
+        && (
+          (doc.type === 'warehouse' && scopedWarehouses.has(doc._id))
+          || (doc.type === 'stock_movement' && catalogItemIds.has(doc.catalogItemId))
+        ),
+    );
 
     const now = new Date();
     const pendingStatuses = ['draft', 'pending', 'sent'];
@@ -712,13 +873,11 @@ export async function getPurchaseKpis(req, res) {
       pendingValue: Math.round(pending.reduce((s, o) => s + Number(o.total || 0), 0) * 100) / 100,
       monthlySpend: Math.round(orders.filter((o) => o.status === 'received' && o.receivedAt >= firstOfMonth).reduce((s, o) => s + Number(o.total || 0), 0) * 100) / 100,
       lowStockCount: (() => {
-        const infra = allDocs.filter((d) => d?.user_id === userId && !d?.deletedAt && (d?.type === 'warehouse' || d?.type === 'stock_movement'));
-        if (!canEmitCatalogStockAlerts(catalogItems, infra)) return 0;
+        if (!canEmitCatalogStockAlerts(catalogItems, stockInfra)) return 0;
         return filterStockTrackedCatalogItems(catalogItems).filter((i) => i.minStock > 0 && Number(i.stockQuantity || 0) < i.minStock).length;
       })(),
       criticalProducts: (() => {
-        const infra = allDocs.filter((d) => d?.user_id === userId && !d?.deletedAt && (d?.type === 'warehouse' || d?.type === 'stock_movement'));
-        if (!canEmitCatalogStockAlerts(catalogItems, infra)) return 0;
+        if (!canEmitCatalogStockAlerts(catalogItems, stockInfra)) return 0;
         return filterStockTrackedCatalogItems(catalogItems).filter((i) => i.isCritical && i.minStock > 0 && Number(i.stockQuantity || 0) < i.minStock).length;
       })(),
       overdueDeliveries: orders.filter((o) => o.status === 'sent' && o.expectedDate && new Date(o.expectedDate) < now).length,
@@ -746,7 +905,7 @@ export async function getSmartPurchaseList(req, res) {
 
     const db = getCatalogDbName();
     await ensureDatabase(req, db);
-    const allDocs = await getAllDocuments(req, db);
+    const allDocs = scopePurchaseDocs(req, await getAllDocuments(req, db));
 
     const catalogItems = allDocs.filter((d) => d?.type === 'catalog_item' && d?.user_id === userId && !d?.deletedAt && d?.active);
     const existingOrders = allDocs.filter((d) => d?.type === 'purchase_order' && d?.user_id === userId && !d?.deletedAt);
@@ -758,7 +917,7 @@ export async function getSmartPurchaseList(req, res) {
       await ensureDatabase(req, deliveryDb);
       const deliveryDocs = await getAllDocuments(req, deliveryDb);
       const fourWeeksAgo = new Date(Date.now() - 28 * 86_400_000).toISOString();
-      deliveryOrders = deliveryDocs.filter(
+      deliveryOrders = scopePurchaseDocs(req, deliveryDocs).filter(
         (d) => d?.type === 'delivery_order' && d?.user_id === userId && !d?.deletedAt
           && d?.status === 'delivered' && d?.createdAt >= fourWeeksAgo,
       );
@@ -901,15 +1060,21 @@ export async function getSuggestions(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
-    const catalogItems = await listCatalogItemsByUser(req, userId);
+    const catalogItems = scopePurchaseDocs(req, await listCatalogItemsByUser(req, userId));
     const activeProducts = catalogItems.filter((i) => i.active && !i.deletedAt && i.itemType === 'product');
 
     const db = getCatalogDbName();
     await ensureDatabase(req, db);
     const allDocs = await getAllDocuments(req, db);
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const activeProductIds = new Set(activeProducts.map((item) => item._id));
     const recentMovements = allDocs.filter(
-      (d) => d?.type === 'stock_movement' && d?.user_id === userId && d?.createdAt >= thirtyDaysAgo,
+      (d) =>
+        d?.type === 'stock_movement'
+        && d?.user_id === userId
+        && d?.createdAt >= thirtyDaysAgo
+        && d?.applied !== false
+        && activeProductIds.has(d.catalogItemId),
     );
 
     const consumptionById = {};
@@ -1038,6 +1203,9 @@ function buildOrderWhatsAppText(order) {
 
 export async function sendPurchaseOrder(req, res) {
   try {
+    if (!canPerform(req, 'full')) {
+      return res.status(403).json({ ok: false, error: 'No tienes permiso para enviar pedidos' });
+    }
     const { userId, orderId } = req.params;
     const { method, email: targetEmail } = req.body || {};
     if (!userId || !orderId) return badRequest(res, 'Faltan userId o orderId');
@@ -1045,6 +1213,9 @@ export async function sendPurchaseOrder(req, res) {
 
     const existing = await ensurePurchaseOrderOwner(req, userId, orderId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
+    if (!['draft', 'pending'].includes(String(existing.status || ''))) {
+      return badRequest(res, `No se puede enviar un pedido en estado "${existing.status}"`);
+    }
 
     const account = await findAccountByUserId(req, userId);
     const businessName = account?.businessName || account?.fullName || 'Vertial';
@@ -1111,6 +1282,9 @@ export async function sendPurchaseOrder(req, res) {
 
 export async function createBulkPurchaseOrders(req, res) {
   try {
+    if (!canPerform(req, 'create')) {
+      return res.status(403).json({ ok: false, error: 'No tienes permiso para crear pedidos' });
+    }
     const { userId } = req.params;
     const { orders: orderDataList } = req.body || {};
     if (!userId) return badRequest(res, 'Falta userId');
@@ -1126,10 +1300,23 @@ export async function createBulkPurchaseOrders(req, res) {
     const createdOrders = [];
     const usedNumbers = (await listPurchaseOrdersByUser(req, userId)).map((o) => o.orderNumber);
     for (const orderData of orderDataList) {
+      const businessId = String(
+        orderData.businessId
+        || orderData.business_id
+        || resolveBusinessIdFromRequest(req)
+        || '',
+      ).trim();
+      await assertPurchaseOrderReferences(req, userId, orderData, businessId);
       const orderNumber = String(orderData.orderNumber || '').trim()
         || nextPurchaseOrderNumber(usedNumbers);
       usedNumbers.push(orderNumber);
-      const doc = buildPurchaseOrderDocument(userId, { ...orderData, orderNumber });
+      const scopedOrder = stampOpsDoc({ ...orderData, orderNumber }, {
+        ownerUserId: userId,
+        businessId,
+        salesPointId: orderData.salesPointId,
+        workCenterId: orderData.workCenterId,
+      });
+      const doc = buildPurchaseOrderDocument(userId, scopedOrder);
       const result = await putDocument(req, db, doc._id, doc);
       createdOrders.push(sanitizePurchaseOrder({ ...doc, _rev: result.rev }));
     }
@@ -1143,6 +1330,6 @@ export async function createBulkPurchaseOrders(req, res) {
 
     return res.status(201).json({ ok: true, orders: createdOrders, created: createdOrders.length });
   } catch (error) {
-    return res.status(500).json({ ok: false, error: error.message || 'Error al crear pedidos en lote' });
+    return res.status(error.statusCode || 500).json({ ok: false, error: error.message || 'Error al crear pedidos en lote' });
   }
 }

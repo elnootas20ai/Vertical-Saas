@@ -37,7 +37,7 @@ function categoryLabelForCandidate(candidate: {
   if (candidate.source === 'catalog_resale') {
     return candidate.stockCategory === 'beverage' ? 'Bebidas' : 'Reventa';
   }
-  return 'Cocina';
+  return 'Ingredientes';
 }
 
 export async function syncInventoryCatalogFromSources(

@@ -105,6 +105,8 @@ export interface WebConfig {
   slug: string;
   /** Dominio propio del cliente (ej. pedidos.tunegocio.es). CNAME → shops.vertialapp.com */
   customDomain?: string;
+  customDomainStatus?: 'unconfigured' | 'pending' | 'active';
+  customDomainCheckedAt?: string;
   enabled: boolean;
   storeName: string;
   storeDescription: string;
@@ -164,6 +166,15 @@ export interface WebOrder {
   id: string;
   orderNumber: string;
   business_id: string;
+  sourceChannel?: 'public_web' | 'restaurant_qr';
+  targetKind?: 'restaurant_table' | 'restaurant_takeaway' | 'delivery_ops' | 'butcher_ops' | 'retail_ops';
+  reviewStatus?: 'pending' | 'accepted' | 'rejected';
+  linkedDiningOrderId?: string;
+  linkedComandaId?: string;
+  linkedDeliveryOrderId?: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  rejectionReason?: string;
   salesPointId?: string;
   salesPointName?: string;
   customerName: string;
@@ -209,6 +220,17 @@ export interface PublicWebStore {
   name: string;
   code: string;
   address: string;
+  fulfillment?: {
+    pickupEnabled: boolean;
+    deliveryEnabled: boolean;
+    minimumOrder: number;
+    deliveryFee: number;
+    estimatedDeliveryTime: string;
+    deliveryRadius: string;
+    shippingMode: 'fixed' | 'zones';
+    shippingZones: ShippingZone[];
+    customerKioskEnabled?: boolean;
+  };
 }
 
 // ─── Public API (no auth) ────────────────────────────────────────────────────
@@ -219,22 +241,63 @@ export async function getPublicStorefront(slug: string) {
     config: WebConfig;
     catalog: PublicCatalogItem[];
     stores?: PublicWebStore[];
+    orderingMode?: 'restaurant_qr' | 'restaurant_hybrid' | 'delivery_web' | 'store_web' | 'unsupported';
   }>(
     `/api/web/storefront/${encodeURIComponent(slug)}`,
   );
 }
 
-export async function getPublicShippingRates(slug: string, postalCode: string) {
+export async function getPublicStorefrontByHost(host: string) {
+  return publicRequest<{
+    ok: boolean;
+    config: WebConfig;
+    catalog: PublicCatalogItem[];
+    stores?: PublicWebStore[];
+    orderingMode?: 'restaurant_qr' | 'restaurant_hybrid' | 'delivery_web' | 'store_web' | 'unsupported';
+  }>(`/api/web/host-storefront?host=${encodeURIComponent(host)}`);
+}
+
+export type CustomerKiosk = {
+  id: string;
+  name: string;
+  salesPointId: string;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export async function getPublicCustomerKiosk(token: string) {
+  return publicRequest<{
+    ok: boolean;
+    kiosk: {
+      token: string;
+      webSlug: string;
+      salesPointId: string;
+      salesPointName: string;
+      storeName: string;
+    };
+  }>(`/api/web/kiosk/${encodeURIComponent(token)}`);
+}
+
+export async function getPublicShippingRates(slug: string, postalCode: string, salesPointId = '') {
   return publicRequest<ShippingRatesResponse>(
     `/api/web/storefront/${encodeURIComponent(slug)}/shipping-rates`,
-    { method: 'POST', body: JSON.stringify({ postalCode }) },
+    { method: 'POST', body: JSON.stringify({ postalCode, salesPointId }) },
   );
 }
 
-export async function createPublicWebOrder(slug: string, order: Partial<WebOrder>) {
+export async function createPublicWebOrder(
+  slug: string,
+  order: Partial<WebOrder>,
+  idempotencyKey?: string,
+) {
   return publicRequest<{ ok: boolean; order: WebOrder; message: string }>(
     `/api/web/storefront/${encodeURIComponent(slug)}/orders`,
-    { method: 'POST', body: JSON.stringify({ order }) },
+    {
+      method: 'POST',
+      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
+      body: JSON.stringify({ order }),
+    },
   );
 }
 
@@ -253,9 +316,53 @@ export async function saveWebConfigRequest(businessId: string, config: Partial<W
   );
 }
 
-export async function listWebOrdersRequest(businessId: string) {
+export async function verifyWebCustomDomainRequest(businessId: string) {
+  return authRequest<{ ok: boolean; config: WebConfig }>(
+    `/api/web/config/${encodeURIComponent(businessId)}/verify-domain`,
+    { method: 'POST' },
+  );
+}
+
+export async function listCustomerKiosksRequest(businessId: string) {
+  return authRequest<{ ok: boolean; kiosks: CustomerKiosk[] }>(
+    `/api/web/kiosks/${encodeURIComponent(businessId)}`,
+  );
+}
+
+export async function createCustomerKioskRequest(
+  businessId: string,
+  input: { salesPointId: string; name: string },
+) {
+  return authRequest<{ ok: boolean; kiosk: CustomerKiosk; token: string }>(
+    `/api/web/kiosks/${encodeURIComponent(businessId)}`,
+    { method: 'POST', body: JSON.stringify(input) },
+  );
+}
+
+export async function revokeCustomerKioskRequest(businessId: string, kioskId: string) {
+  return authRequest<{ ok: boolean }>(
+    `/api/web/kiosks/${encodeURIComponent(businessId)}/${encodeURIComponent(kioskId)}`,
+    { method: 'DELETE' },
+  );
+}
+
+export async function listWebOrdersRequest(
+  businessId: string,
+  filters?: {
+    targetKind?: WebOrder['targetKind'];
+    reviewStatus?: WebOrder['reviewStatus'];
+    salesPointId?: string;
+    tableId?: string;
+  },
+) {
+  const params = new URLSearchParams();
+  if (filters?.targetKind) params.set('targetKind', filters.targetKind);
+  if (filters?.reviewStatus) params.set('reviewStatus', filters.reviewStatus);
+  if (filters?.salesPointId) params.set('salesPointId', filters.salesPointId);
+  if (filters?.tableId) params.set('tableId', filters.tableId);
+  const query = params.toString();
   return authRequest<{ ok: boolean; orders: WebOrder[] }>(
-    `/api/web/orders/${encodeURIComponent(businessId)}`,
+    `/api/web/orders/${encodeURIComponent(businessId)}${query ? `?${query}` : ''}`,
   );
 }
 
@@ -263,6 +370,20 @@ export async function updateWebOrderRequest(businessId: string, orderId: string,
   return authRequest<{ ok: boolean; order: WebOrder }>(
     `/api/web/orders/${encodeURIComponent(businessId)}/${encodeURIComponent(orderId)}`,
     { method: 'PUT', body: JSON.stringify({ order }) },
+  );
+}
+
+export async function acceptPublicOrderRequest(businessId: string, orderId: string) {
+  return authRequest<{ ok: boolean; order: WebOrder }>(
+    `/api/web/orders/${encodeURIComponent(businessId)}/${encodeURIComponent(orderId)}/accept`,
+    { method: 'POST', body: '{}' },
+  );
+}
+
+export async function rejectPublicOrderRequest(businessId: string, orderId: string, reason = '') {
+  return authRequest<{ ok: boolean; order: WebOrder }>(
+    `/api/web/orders/${encodeURIComponent(businessId)}/${encodeURIComponent(orderId)}/reject`,
+    { method: 'POST', body: JSON.stringify({ reason }) },
   );
 }
 

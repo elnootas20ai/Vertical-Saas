@@ -50,8 +50,8 @@ export function getEffectiveBusinessLimit(
 
 /** Marcas comerciales (sin contar la marca por defecto «General»). */
 export const INCLUDED_COMMERCIAL_BRANDS: Record<SubscriptionPlanTier, number> = {
-  basic: 0,
-  normal: 0,
+  basic: 1,
+  normal: 1,
   pro: 2,
 };
 

@@ -104,6 +104,7 @@ import { useActivationFocus } from '../../../hooks/useActivationFocus';
 import { ActivationFieldWrap } from '../ActivationGuideUi';
 import { ACCESO__AddressAutocomplete } from '../../design-system/ACCESO__AddressAutocomplete';
 import { SettingsWizardFooter, SettingsWizardShell, type SettingsWizardStep } from './SettingsWizardShell';
+import { PublicOrderingStoreSettings } from './PublicOrderingStoreSettings';
 
 async function syncPdvOpeningHoursToRrhhTemplate(
   businessId: string,
@@ -2526,6 +2527,8 @@ export function SalesPointsTab() {
           <div className="text-xs text-stone-700 dark:text-stone-400 mt-0.5">Inactivos</div>
         </div>
       </div>
+
+      {usesRetailPdvFlow ? <PublicOrderingStoreSettings /> : null}
 
       {orphanRetailCount > 0 && (
         <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/90 dark:bg-amber-950/30 px-4 py-3 text-sm text-amber-950 dark:text-amber-100 flex gap-2 items-start">

@@ -25,6 +25,8 @@ import { useSSE } from '../../hooks/useSSE';
 import { RestaurantSeatGuestsModal } from '../../components/saas/restaurant/RestaurantSeatGuestsModal';
 import { RestaurantTpvReservationsStrip } from '../../components/saas/restaurant/RestaurantTpvReservationsStrip';
 import { RestaurantTpvReservationsPanel } from '../../components/saas/restaurant/RestaurantTpvReservationsPanel';
+import { PublicOrderInbox } from '../../components/saas/PublicOrderInbox';
+import { listWebOrdersRequest } from '../../lib/webApi';
 import {
   cancelDiningOrderRequest,
   changeTableStatusRequest,
@@ -292,6 +294,7 @@ export function RestaurantTpvFloorBoard({
   const [floorWidth, setFloorWidth] = useState(DEFAULT_FLOOR_WIDTH);
   const [floorHeight, setFloorHeight] = useState(DEFAULT_FLOOR_HEIGHT);
   const [openOrdersByTable, setOpenOrdersByTable] = useState<Map<string, DiningOrder>>(() => new Map());
+  const [pendingPublicByTable, setPendingPublicByTable] = useState<Map<string, number>>(() => new Map());
   const [activeRoomId, setActiveRoomId] = useState('');
   const [seatTable, setSeatTable] = useState<DiningTable | null>(null);
   const [reservedTable, setReservedTable] = useState<DiningTable | null>(null);
@@ -326,10 +329,15 @@ export function RestaurantTpvFloorBoard({
     }
     if (!opts?.silent) setLoading(true);
     try {
-      const [config, listed, orders] = await Promise.all([
+      const [config, listed, orders, publicOrders] = await Promise.all([
         getFloorConfigRequest(userId, { businessId }).catch(() => null),
         listDiningTablesRequest(userId, salaScope).catch(() => []),
         listDiningOrdersRequest(userId).catch(() => []),
+        listWebOrdersRequest(businessId, {
+          targetKind: 'restaurant_table',
+          reviewStatus: 'pending',
+          ...(pdvId ? { salesPointId: pdvId } : {}),
+        }).then((result) => result.orders || []).catch(() => []),
       ]);
       const nextRooms = Array.isArray(config?.rooms) ? (config.rooms as SalaRoom[]) : [];
       const nextTables = filterSalaTablesByBusinessScope(listed || [], businessId, accountBusinessCount);
@@ -347,6 +355,12 @@ export function RestaurantTpvFloorBoard({
       setFloorWidth(compact.width);
       setFloorHeight(compact.height);
       setOpenOrdersByTable(openOrdersByTableId(scopedOrders));
+      const pendingMap = new Map<string, number>();
+      for (const order of publicOrders) {
+        const tableId = String(order.tableId || '');
+        if (tableId) pendingMap.set(tableId, (pendingMap.get(tableId) || 0) + 1);
+      }
+      setPendingPublicByTable(pendingMap);
       if (nextRooms.length > 0) {
         setActiveRoomId((prev) =>
           nextRooms.some((r) => r.id === prev) ? prev : nextRooms[0].id,
@@ -357,7 +371,7 @@ export function RestaurantTpvFloorBoard({
     } finally {
       if (!opts?.silent) setLoading(false);
     }
-  }, [userId, businessId, accountBusinessCount, salaScope]);
+  }, [userId, businessId, accountBusinessCount, salaScope, pdvId]);
 
   useEffect(() => {
     void loadFloor();
@@ -380,6 +394,8 @@ export function RestaurantTpvFloorBoard({
       'sala:order_cancelled': softReloadFloor,
       'sala:comanda_sent': softReloadFloor,
       'sala:comanda_status_changed': softReloadFloor,
+      'public_order:created': softReloadFloor,
+      'public_order:updated': softReloadFloor,
     }),
     [softReloadFloor],
   );
@@ -916,6 +932,12 @@ export function RestaurantTpvFloorBoard({
       />
 
       <div className="mx-auto w-full max-w-6xl flex-1 overflow-y-auto px-3 py-3 sm:px-4 sm:py-4">
+        <div className="mb-3">
+          <PublicOrderInbox targetKind="restaurant_table" salesPointId={pdvId} compact />
+          <div className="mt-2">
+            <PublicOrderInbox targetKind="restaurant_takeaway" salesPointId={pdvId} compact />
+          </div>
+        </div>
         {sortedRooms.length === 0 && tables.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-2xl border border-stone-200 bg-white px-5 py-12 text-center dark:border-stone-700 dark:bg-stone-900">
             <LayoutGrid className="h-8 w-8 text-stone-300" strokeWidth={1.5} />
@@ -1018,6 +1040,7 @@ export function RestaurantTpvFloorBoard({
                     const capacity = resolveTableCapacity(table);
                     const guests = table.currentGuests > 0 ? table.currentGuests : 0;
                     const reservationHint = reservationByTableId.get(tableId) || null;
+                    const pendingPublicCount = pendingPublicByTable.get(tableId) || 0;
                     const busy = busyId === tableId;
                     const isBarSeat = activeFloorSkin.id === 'barra';
                     const isTerraceTable = activeFloorSkin.id === 'terraza';
@@ -1048,6 +1071,11 @@ export function RestaurantTpvFloorBoard({
                         aria-label={`${visualTitle}, ${ui.label}`}
                       >
                         <span className={`absolute inset-x-0 top-0 h-1.5 ${ui.accent}`} aria-hidden />
+                        {pendingPublicCount > 0 ? (
+                          <span className="absolute right-1.5 top-2 rounded-full bg-[var(--v-blue,#2563eb)] px-1.5 py-0.5 text-[9px] font-bold text-white">
+                            {pendingPublicCount} QR
+                          </span>
+                        ) : null}
                         <span className="max-w-full truncate text-sm font-bold leading-tight">
                           {visualTitle}
                         </span>

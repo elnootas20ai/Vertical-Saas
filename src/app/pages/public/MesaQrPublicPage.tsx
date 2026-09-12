@@ -31,9 +31,16 @@ export function MesaQrPublicPage() {
         const payload = await getPublicMesaByTokenRequest(t);
         if (cancelled) return;
         setMesa(payload);
+        if (payload.setupError) {
+          setError(payload.setupError);
+          return;
+        }
         writeMesaQrLock(payload);
         if (payload.webEnabled && payload.webSlug) {
-          navigate(`/web/${encodeURIComponent(payload.webSlug)}`, { replace: true });
+          navigate(
+            `/web/${encodeURIComponent(payload.webSlug)}?mesaToken=${encodeURIComponent(payload.token)}`,
+            { replace: true },
+          );
           return;
         }
       } catch (err) {

@@ -48,6 +48,10 @@ import {
 } from './catalogComboSlots';
 import { buildStableImportCatalogSku, catalogLooseIdentityKey } from '../../../shared/catalog/catalogItemIdentity.js';
 import { applyCatalogImportCartaStockGuard } from '../../../shared/catalog/catalogStockGuard.js';
+import {
+  normalizeRestaurantProductionArea,
+  resolveRestaurantProductionArea,
+} from '../../../shared/restaurant/productionArea.js';
 import type { BrandBillingTaxPolicy } from './brandBillingConfig';
 import { inferTaxRateFromCategory } from './spainVat';
 
@@ -710,6 +714,13 @@ export async function mapImportEntryToCatalogItem(
         ingredients: parsed.join(', '),
       };
     }
+  }
+
+  if (!warehouseMeta && String(options.vertical || '').trim() === 'restaurant') {
+    const explicitArea = normalizeRestaurantProductionArea(
+      entry.productionArea || entry.destino_preparacion || entry.destinoPreparacion,
+    );
+    item.productionArea = (explicitArea || resolveRestaurantProductionArea(item)) as CatalogItem['productionArea'];
   }
 
   // Coste: aceptar "coste" / "costPrice" en formato ES.

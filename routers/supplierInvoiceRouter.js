@@ -16,8 +16,10 @@ import {
   listPdvEmailConfigs,
   testImap,
 } from '../controllers/supplierInvoiceController.js';
+import { requireUserScope } from '../middleware/requireUserScope.js';
 
 const supplierInvoiceRouter = Router();
+supplierInvoiceRouter.use(requireUserScope);
 
 supplierInvoiceRouter.get('/stats/:userId', supplierInvoiceStats);
 supplierInvoiceRouter.get('/config/:userId/pdvs', listPdvEmailConfigs);

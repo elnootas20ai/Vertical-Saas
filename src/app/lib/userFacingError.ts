@@ -8,14 +8,14 @@ const API_BASE = getApiBase();
 export const TPV_SAFE_ERROR_FALLBACK = 'No se pudo completar. Espera un momento e inténtalo de nuevo.';
 
 const FRIENDLY: Array<{ test: RegExp; message: string }> = [
-  { test: /failed to fetch|networkerror|load failed|no se pudo conectar|network|ECONNREFUSED|ENOTFOUND|offline/i, message: 'Sin conexión con el servidor. Comprueba la red o que el PC de caja esté encendido.' },
+  { test: /failed to fetch|networkerror|load failed|no se pudo conectar|network|ECONNREFUSED|ENOTFOUND|offline/i, message: 'Hay un problema de conexión. Comprueba tu red e inténtalo de nuevo.' },
   { test: /sesión expirada|session expired|401|unauthorized|token (expirado|inválido)|jwt/i, message: 'Tu sesión ha caducado. Cierra y vuelve a entrar.' },
   { test: /no hay caja abierta|abre la caja antes de cobrar|abre la caja de la tienda/i, message: 'Abre la caja de la tienda antes de cobrar.' },
   { test: /mesa.*cuenta|cuenta abierta|already has/i, message: 'Esa mesa ya tiene una cuenta abierta.' },
   { test: /no está libre|not available|unavailable/i, message: 'Esa mesa no está disponible ahora.' },
   { test: /ya hay una caja abierta/i, message: 'Ya hay una caja abierta en esa tienda.' },
   { test: /409|conflict|_rev|revision conflict/i, message: 'Otra acción se guardó antes. Espera un segundo y vuelve a intentarlo.' },
-  { test: /timeout|timed out|tard[oó] demasiado|AbortError/i, message: 'El servidor tardó demasiado. Reintenta en unos segundos.' },
+  { test: /timeout|timed out|tard[oó] demasiado|AbortError/i, message: 'La conexión está tardando más de lo normal. Reintenta en unos segundos.' },
   // Nunca mostrar el 500 genérico del middleware al camarero/gerente.
   {
     test: /error interno( del servidor)?|internal server error|\binternal_error\b|INTERNAL_ERROR|\[object Object\]|\bstatus\s*[:=]?\s*5\d\d\b|\bHTTP\s*5\d\d\b|\b500\b.*servidor|servidor.*(500|error)|error en fichajes|error inesperado/i,

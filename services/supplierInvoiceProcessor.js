@@ -514,10 +514,28 @@ function suggestNextSupplierCodeFromDocs(suppliers) {
 
 // ─── Matching de proveedor ───────────────────────────────────────────────────
 
-async function matchSupplier(userId, ocrData, emailFrom) {
+const PUBLIC_EMAIL_DOMAINS = new Set([
+  'gmail.com',
+  'hotmail.com',
+  'outlook.com',
+  'yahoo.com',
+  'icloud.com',
+  'live.com',
+]);
+
+async function matchSupplier(userId, ocrData, emailFrom, scope = {}) {
   let suppliers;
   try {
     suppliers = await listSuppliersByUser(fakeReq, userId);
+    const businessId = String(scope.businessId || '').replace(/^business:/, '').trim();
+    if (businessId) {
+      suppliers = suppliers.filter((supplier) => {
+        const supplierBusinessId = String(
+          supplier.businessId || supplier.business_id || '',
+        ).replace(/^business:/, '').trim();
+        return !supplierBusinessId || supplierBusinessId === businessId;
+      });
+    }
   } catch {
     return { matched: false, method: '', supplier: null };
   }
@@ -536,7 +554,7 @@ async function matchSupplier(userId, ocrData, emailFrom) {
     if (byEmail) return { matched: true, method: 'email', supplier: byEmail };
 
     const domain = fromLower.split('@')[1];
-    if (domain) {
+    if (domain && !PUBLIC_EMAIL_DOMAINS.has(domain)) {
       const byDomain = suppliers.find((s) => s.email && s.email.toLowerCase().endsWith(`@${domain}`));
       if (byDomain) return { matched: true, method: 'email_domain', supplier: byDomain };
     }
@@ -563,14 +581,15 @@ async function matchSupplier(userId, ocrData, emailFrom) {
   return { matched: false, method: '', supplier: null };
 }
 
-async function ensureSupplierFromOcr(userId, ocrData, emailFrom) {
-  const matchResult = await matchSupplier(userId, ocrData, emailFrom);
+async function ensureSupplierFromOcr(userId, ocrData, emailFrom, scope = {}) {
+  const matchResult = await matchSupplier(userId, ocrData, emailFrom, scope);
   if (matchResult.matched && matchResult.supplier) return matchResult;
 
   const name = String(ocrData?.emitter || '').trim();
   if (!name) return matchResult;
 
   try {
+    const suppliers = await listSuppliersByUser(fakeReq, userId);
     const doc = buildSupplierDocument(userId, {
       name,
       code: suggestNextSupplierCodeFromDocs(suppliers),
@@ -578,6 +597,7 @@ async function ensureSupplierFromOcr(userId, ocrData, emailFrom) {
       email: String(emailFrom || '').trim().split('<').pop()?.replace('>', '').trim() || '',
       notes: 'Creado automáticamente desde factura por email (OCR)',
       active: true,
+      businessId: String(scope.businessId || '').replace(/^business:/, '').trim(),
     });
     const db = getCatalogDbName();
     await ensureDatabase(fakeReq, db);
@@ -811,7 +831,9 @@ async function processSingleEmail(userId, email, scope = {}) {
       continue;
     }
 
-    const matchResult = await ensureSupplierFromOcr(userId, ocrData, email.from);
+    const matchResult = await ensureSupplierFromOcr(userId, ocrData, email.from, {
+      businessId,
+    });
 
     const invoiceNumber = await assignPurchaseInvoiceNumber(fakeReq, userId, {
       invoiceNumber: ocrData?.documentNumber || '',
@@ -860,6 +882,7 @@ async function processSingleEmail(userId, email, scope = {}) {
           ocrData?.lines || [],
           userId,
           matchResult.supplier?._id || '',
+          { businessId },
         )
       : [];
 
@@ -1276,4 +1299,11 @@ export async function processIncomingEmails(userId, imapOverrides, options = {})
   return summary;
 }
 
-export { runOcrOnBuffer, matchSupplier, saveAttachment, processSingleEmail, buildImapOverridesForPdv };
+export {
+  runOcrOnBuffer,
+  matchSupplier,
+  ensureSupplierFromOcr,
+  saveAttachment,
+  processSingleEmail,
+  buildImapOverridesForPdv,
+};

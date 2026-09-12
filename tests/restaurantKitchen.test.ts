@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   buildKitchenTickets,
   kitchenTicketMinutes,
+  kitchenTicketStatusMinutes,
+  kitchenTicketTimerLabel,
+  kitchenVisibleOrderNote,
   nextKitchenStatus,
 } from '../src/app/verticals/restaurant/restaurantKitchen';
 import type { DiningOrder } from '../src/app/lib/salaApi';
@@ -131,5 +134,33 @@ describe('restaurantKitchen', () => {
     const [ticket] = buildKitchenTickets([makeOrder()]);
     const now = Date.parse('2026-07-08T10:25:00.000Z');
     expect(kitchenTicketMinutes(ticket, now)).toBe(25);
+  });
+
+  it('oculta referencias técnicas y conserva la nota útil del pedido', () => {
+    expect(kitchenVisibleOrderNote(
+      '[public-order:webord-123] Sin cubiertos, por favor',
+    )).toBe('Sin cubiertos, por favor');
+  });
+
+  it('explica el tiempo del estado actual y conserva fallback histórico', () => {
+    const order = makeOrder();
+    order.comandas[0].status = 'in_preparation';
+    order.comandas[0].preparationStartedAt = '2026-07-08T10:10:00.000Z';
+    let [ticket] = buildKitchenTickets([order]);
+    const now = Date.parse('2026-07-08T10:25:00.000Z');
+    expect(kitchenTicketStatusMinutes(ticket, now)).toBe(15);
+    expect(kitchenTicketTimerLabel(ticket, now)).toBe('Preparando 15 min');
+    expect(kitchenTicketMinutes(ticket, now)).toBe(25);
+
+    order.comandas[0].status = 'ready';
+    order.comandas[0].readyAt = '2026-07-08T10:20:00.000Z';
+    [ticket] = buildKitchenTickets([order]);
+    expect(kitchenTicketStatusMinutes(ticket, now)).toBe(5);
+    expect(kitchenTicketTimerLabel(ticket, now)).toBe('Lista hace 5 min');
+
+    order.comandas[0].status = 'in_preparation';
+    order.comandas[0].preparationStartedAt = '';
+    [ticket] = buildKitchenTickets([order]);
+    expect(kitchenTicketStatusMinutes(ticket, now)).toBe(25);
   });
 });

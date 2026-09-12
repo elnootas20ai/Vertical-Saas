@@ -14,6 +14,7 @@ import {
   sanitizeSupplier,
   listSuppliersByUser,
   buildPurchaseInvoiceDocument,
+  normalizePurchaseDocumentKind,
   sanitizePurchaseInvoice,
   listPurchaseInvoicesByUser,
   normalizePurchaseListLimit,
@@ -470,6 +471,70 @@ async function ensurePurchaseInvoiceOwner(req, userId, invoiceId) {
   return doc;
 }
 
+async function assertPurchaseInvoiceReferences(req, userId, invoice, businessId = '') {
+  const db = getCatalogDbName();
+  const ids = new Map();
+  if (invoice?.supplierId) ids.set(String(invoice.supplierId), 'supplier');
+  for (const line of invoice?.lines || []) {
+    const catalogItemId = String(line?.catalogItemId || '').trim();
+    if (catalogItemId) ids.set(catalogItemId, 'catalog_item');
+  }
+  for (const [id, expectedType] of ids) {
+    const doc = await getDocument(req, db, id).catch(() => null);
+    if (!doc || doc.deletedAt || doc.user_id !== userId || doc.type !== expectedType) {
+      const error = new Error('La factura contiene referencias que no pertenecen a esta cuenta');
+      error.statusCode = 400;
+      throw error;
+    }
+    const docBusinessId = String(doc.businessId || doc.business_id || '')
+      .replace(/^business:/, '')
+      .trim();
+    if (businessId && docBusinessId && docBusinessId !== businessId) {
+      const error = new Error('La factura contiene datos de otra empresa');
+      error.statusCode = 400;
+      throw error;
+    }
+  }
+}
+
+async function linkPurchaseDocumentToOrder(req, userId, invoice) {
+  const orderId = String(invoice?.linkedPurchaseOrderId || '').trim();
+  if (!orderId) return;
+  const db = getCatalogDbName();
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const order = await getDocument(req, db, orderId).catch(() => null);
+    if (!order || order.type !== 'purchase_order' || order.user_id !== userId) {
+      throw new Error('El pedido vinculado no pertenece a esta cuenta');
+    }
+    const invoiceBusinessId = String(invoice.businessId || invoice.business_id || '')
+      .replace(/^business:/, '').trim();
+    const orderBusinessId = String(order.businessId || order.business_id || '')
+      .replace(/^business:/, '').trim();
+    if (invoiceBusinessId && orderBusinessId && invoiceBusinessId !== orderBusinessId) {
+      throw new Error('El pedido vinculado pertenece a otra empresa');
+    }
+    const isAlbaran = invoice.documentKind === 'albaran';
+    try {
+      await putDocument(req, db, order._id, {
+        ...order,
+        ...(isAlbaran
+          ? {
+              linkedAlbaranId: invoice._id,
+              linkedAlbaranNumber: invoice.invoiceNumber || '',
+            }
+          : {
+              purchaseInvoiceId: invoice._id,
+            }),
+        updatedAt: new Date().toISOString(),
+      });
+      return;
+    } catch (error) {
+      if (error?.statusCode === 409 && attempt < 2) continue;
+      throw error;
+    }
+  }
+}
+
 const DELIVERED_ORDER_STATUS = 'entregado';
 
 /** Estados destino que implican devolución / anulación de entrega (reponen stock). */
@@ -614,6 +679,10 @@ export async function listDeliveryOrders(req, res) {
     if (!(await assertUserScope(req, res, userId))) return;
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const businessId = String(
+      invoice.businessId || invoice.business_id || resolveBusinessIdFromRequest(req) || '',
+    ).replace(/^business:/, '').trim();
+    await assertPurchaseInvoiceReferences(req, userId, invoice, businessId);
     // Workers: solo jornada (Couch no carga histórico; cocina/montaje/reparto del día).
     const workerDateFrom = req.callerIsWorker
       ? new Date().toISOString().slice(0, 10)
@@ -3018,7 +3087,23 @@ export async function createPurchaseInvoice(req, res) {
 
     const forceDuplicate = Boolean(invoice.forceDuplicate);
     const loadToWarehouse = Boolean(invoice.loadToWarehouse);
-    const documentKind = String(
+    let resolvedWarehouseId = String(invoice.warehouseId || '').trim();
+    if (loadToWarehouse) {
+      try {
+        const { resolvePurchaseReceptionWarehouseId } = await import('../services/storeWarehouseService.js');
+        resolvedWarehouseId = await resolvePurchaseReceptionWarehouseId(req, userId, {
+          warehouseId: resolvedWarehouseId,
+          salesPointId: invoice.salesPointId || '',
+          workCenterId: invoice.workCenterId || invoice.costCenterId || '',
+        });
+      } catch (resolveErr) {
+        return badRequest(res, resolveErr?.message || 'Almacén de recepción no válido');
+      }
+      if (!resolvedWarehouseId) {
+        return badRequest(res, 'Selecciona el almacén de la tienda antes de cargar el documento');
+      }
+    }
+    const documentKind = normalizePurchaseDocumentKind(
       invoice.documentKind || invoice.ocrData?.documentType || 'factura_proveedor',
     );
     const invoiceNumber = await assignPurchaseInvoiceNumber(req, userId, {
@@ -3032,6 +3117,7 @@ export async function createPurchaseInvoice(req, res) {
         invoiceNumber,
         invoice.supplierId || '',
         invoice.total,
+        { documentKind },
       );
       if (dup) {
         return res.status(409).json({
@@ -3047,8 +3133,10 @@ export async function createPurchaseInvoice(req, res) {
     await ensureDatabase(req, db);
     const doc = buildPurchaseInvoiceDocument(userId, {
       ...invoice,
+      businessId,
       invoiceNumber,
       documentKind,
+      warehouseId: resolvedWarehouseId,
       flags: {
         ...(invoice.flags || {}),
         duplicate: forceDuplicate,
@@ -3057,6 +3145,7 @@ export async function createPurchaseInvoice(req, res) {
       duplicateWarning: forceDuplicate,
     });
     const saved = await putDocument(req, db, doc._id, doc);
+    await linkPurchaseDocumentToOrder(req, userId, { ...doc, _rev: saved.rev });
     try {
       const { rememberSupplierProductAliasesFromLines } = await import('../services/supplierProductAliasService.js');
       await rememberSupplierProductAliasesFromLines(
@@ -3071,25 +3160,14 @@ export async function createPurchaseInvoice(req, res) {
     let reconciled = null;
     try {
       const { reconcilePurchaseInvoiceFromOcr } = await import('../services/ocrPurchasePipeline.js');
-      let warehouseId = String(invoice.warehouseId || '').trim();
-      if (loadToWarehouse) {
-        try {
-          const { resolvePurchaseReceptionWarehouseId } = await import('../services/storeWarehouseService.js');
-          warehouseId = await resolvePurchaseReceptionWarehouseId(req, userId, {
-            warehouseId,
-            salesPointId: invoice.salesPointId || '',
-            workCenterId: invoice.workCenterId || invoice.costCenterId || '',
-          });
-        } catch {
-          /* keep invoice warehouseId */
-        }
-      }
+      const warehouseId = resolvedWarehouseId;
       reconciled = await reconcilePurchaseInvoiceFromOcr(req, userId, { ...doc, _rev: saved.rev, warehouseId }, {
         performedBy: account.fullName || userId,
         financeSource: 'invoice',
         entryMethod: doc.entryMethod || 'manual',
         applyStock: loadToWarehouse,
-        createFinance: true,
+        // Un albarán mueve stock, pero no representa todavía una obligación de pago.
+        createFinance: documentKind !== 'albaran',
         warehouseId,
         salesPointId: invoice.salesPointId || '',
         workCenterId: invoice.workCenterId || invoice.costCenterId || '',
@@ -3111,7 +3189,7 @@ export async function createPurchaseInvoice(req, res) {
       reconcile: reconciled,
     });
   } catch (error) {
-    return res.status(500).json({ ok: false, error: error.message || 'Error al crear factura' });
+    return res.status(error.statusCode || 500).json({ ok: false, error: error.message || 'Error al crear factura' });
   }
 }
 
@@ -3122,9 +3200,42 @@ export async function updatePurchaseInvoice(req, res) {
     if (!invoice || typeof invoice !== 'object') return badRequest(res, 'Faltan datos de la factura');
     const existing = await ensurePurchaseInvoiceOwner(req, userId, invoiceId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Factura no encontrada' });
+    const businessId = String(existing.businessId || existing.business_id || '')
+      .replace(/^business:/, '').trim();
+    await assertPurchaseInvoiceReferences(req, userId, invoice, businessId);
+    if (
+      existing.ocrStockReceivedAt
+      || existing.linkedExpenseId
+      || existing.linkedTaxEntryId
+    ) {
+      return res.status(409).json({
+        ok: false,
+        error: 'No se puede editar un documento con stock o finanzas aplicados',
+      });
+    }
     const db = getCatalogDbName();
-    const doc = buildPurchaseInvoiceDocument(userId, { ...existing, ...invoice }, existing);
+    const doc = buildPurchaseInvoiceDocument(
+      userId,
+      { ...existing, ...invoice, businessId, business_id: businessId },
+      existing,
+    );
     const saved = await putDocument(req, db, doc._id, doc);
+    await linkPurchaseDocumentToOrder(req, userId, { ...doc, _rev: saved.rev });
+    if (existing.linkedFinanceId && doc.documentKind !== 'albaran') {
+      try {
+        const { createFinancePagoFromPurchaseInvoice } = await import('../services/ocrPurchasePipeline.js');
+        await createFinancePagoFromPurchaseInvoice(req, userId, doc, {
+          financeSource: 'invoice',
+          entryMethod: doc.entryMethod || 'manual',
+        });
+      } catch (financeErr) {
+        console.warn('[updatePurchaseInvoice] finance sync:', financeErr?.message || financeErr);
+        return res.status(500).json({
+          ok: false,
+          error: 'La factura se guardó, pero no se pudo sincronizar su movimiento financiero',
+        });
+      }
+    }
     try {
       const { rememberSupplierProductAliasesFromLines } = await import('../services/supplierProductAliasService.js');
       await rememberSupplierProductAliasesFromLines(
@@ -3146,7 +3257,7 @@ export async function updatePurchaseInvoice(req, res) {
     }
     return res.json({ ok: true, invoice: sanitizePurchaseInvoice(outDoc) });
   } catch (error) {
-    return res.status(500).json({ ok: false, error: error.message || 'Error al actualizar factura' });
+    return res.status(error.statusCode || 500).json({ ok: false, error: error.message || 'Error al actualizar factura' });
   }
 }
 
@@ -3155,6 +3266,17 @@ export async function removePurchaseInvoice(req, res) {
     const { userId, invoiceId } = req.params;
     const existing = await ensurePurchaseInvoiceOwner(req, userId, invoiceId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Factura no encontrada' });
+    if (
+      existing.ocrStockReceivedAt
+      || existing.linkedFinanceId
+      || existing.linkedExpenseId
+      || existing.linkedTaxEntryId
+    ) {
+      return res.status(409).json({
+        ok: false,
+        error: 'No se puede eliminar un documento con stock o finanzas aplicados',
+      });
+    }
     const db = getCatalogDbName();
     await softDeleteDocument(req, db, invoiceId);
     return res.json({ ok: true, id: invoiceId });
@@ -3186,22 +3308,22 @@ export async function validatePurchaseInvoice(req, res) {
       validatedBy: userId,
     };
 
-    let linkedExpenseId = existing.linkedExpenseId || '';
-    let linkedTaxEntryId = existing.linkedTaxEntryId || '';
+    let linkedFinanceId = existing.linkedFinanceId || '';
     let linkedDocumentId = existing.linkedDocumentId || '';
 
-    try {
-      const expense = await generateExpenseFromInvoice(req, userId, { ...existing, ...updates });
-      linkedExpenseId = expense._id;
-    } catch (err) {
-      console.error('[validateInvoice] Error generating expense:', err.message);
-    }
-
-    try {
-      const taxEntry = await generateInputTaxFromInvoice(req, userId, { ...existing, ...updates });
-      linkedTaxEntryId = taxEntry._id;
-    } catch (err) {
-      console.error('[validateInvoice] Error generating tax entry:', err.message);
+    if (existing.documentKind !== 'albaran') {
+      try {
+        const { createFinancePagoFromPurchaseInvoice } = await import('../services/ocrPurchasePipeline.js');
+        const finance = await createFinancePagoFromPurchaseInvoice(
+          req,
+          userId,
+          { ...existing, ...updates },
+          { financeSource: 'invoice', entryMethod: existing.entryMethod || 'manual' },
+        );
+        linkedFinanceId = finance.movementId || linkedFinanceId;
+      } catch (err) {
+        console.error('[validateInvoice] Error generating finance movement:', err.message);
+      }
     }
 
     if (existing.pdfUrl) {
@@ -3216,8 +3338,7 @@ export async function validatePurchaseInvoice(req, res) {
     const doc = buildPurchaseInvoiceDocument(userId, {
       ...existing,
       ...updates,
-      linkedExpenseId,
-      linkedTaxEntryId,
+      linkedFinanceId,
       linkedDocumentId,
     }, existing);
     const saved = await putDocument(req, db, doc._id, doc);
@@ -3292,38 +3413,33 @@ export async function checkDuplicateInvoice(req, res) {
   }
 }
 
-/** Carga líneas de factura/albarán al almacén (stock). Idempotente salvo force. */
+/** Carga líneas de factura/albarán al almacén (stock). Una carga aplicada nunca se repite. */
 export async function loadPurchaseInvoiceToStock(req, res) {
   try {
     const { userId, invoiceId } = req.params;
     const force = Boolean(req.body?.force);
     const existing = await ensurePurchaseInvoiceOwner(req, userId, invoiceId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Factura no encontrada' });
+    if (existing.linkedPurchaseOrderId) {
+      return res.status(409).json({
+        ok: false,
+        code: 'ORDER_RECEPTION_REQUIRED',
+        error: 'Este albarán debe recibirse desde su pedido vinculado',
+      });
+    }
 
-    if (existing.ocrStockReceivedAt && !force) {
+    if (existing.ocrStockReceivedAt) {
       return res.json({
         ok: true,
         skipped: true,
         reason: 'already_loaded',
+        forced: force,
         invoice: sanitizePurchaseInvoice(existing),
         reconcile: { stockUpdated: 0, stockUnits: 0 },
       });
     }
 
-    // force: permite reintentar si se marcó «cargado» sin haber subido stock.
-    let invoiceDoc = existing;
-    if (force && existing.ocrStockReceivedAt) {
-      const db = getCatalogDbName();
-      const cleared = {
-        ...existing,
-        ocrStockReceivedAt: '',
-        ocrStockLinesReceived: 0,
-        flags: { ...(existing.flags || {}), stockPending: true },
-        updatedAt: new Date().toISOString(),
-      };
-      const saved = await putDocument(req, db, cleared._id, cleared);
-      invoiceDoc = { ...cleared, _rev: saved.rev };
-    }
+    const invoiceDoc = existing;
 
     const account = await findAccountByUserId(req, userId);
     let warehouseId = String(req.body?.warehouseId || existing.warehouseId || '').trim();
@@ -3334,8 +3450,11 @@ export async function loadPurchaseInvoiceToStock(req, res) {
         salesPointId: req.body?.salesPointId || existing.salesPointId || '',
         workCenterId: req.body?.workCenterId || existing.workCenterId || existing.costCenterId || '',
       });
-    } catch {
-      /* keep body/invoice warehouseId */
+    } catch (resolveErr) {
+      return badRequest(res, resolveErr?.message || 'Almacén de recepción no válido');
+    }
+    if (!warehouseId) {
+      return badRequest(res, 'Selecciona el almacén de la tienda antes de cargar el documento');
     }
 
     const { reconcilePurchaseInvoiceFromOcr } = await import('../services/ocrPurchasePipeline.js');

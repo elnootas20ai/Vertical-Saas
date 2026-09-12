@@ -17,10 +17,12 @@ import {
 } from 'lucide-react';
 import {
   catalogItemsUsingIngredient,
+  DEFAULT_NEW_INGREDIENT_TPV_FLAGS,
   inferTpvDefaultExtraPrice,
   ingredientChargesExtra,
   mergeDuplicateStoreIngredients,
   normalizeStoreIngredientRecipeLines,
+  normalizeStoreIngredientUsageVariants,
   normalizeStoreIngredientUnit,
   normalizeStoreIngredients,
   normalizeTpvDefaultExtraPrice,
@@ -29,7 +31,16 @@ import {
   unifyStoreIngredientsFromConfig,
   type StoreIngredient,
 } from '../../lib/catalogCustomization';
-import { getDeliveryConfigRequest, listCatalogItemsRequest, updateDeliveryConfigRequest, pointOfSaleDisplayLabel, type CatalogItem } from '../../lib/deliveryApi';
+import { getDeliveryConfigRequest, listCatalogItemsRequest, updateCatalogItemRequest, updateDeliveryConfigRequest, pointOfSaleDisplayLabel, type CatalogItem } from '../../lib/deliveryApi';
+import { deleteCatalogItemsRelentlessly } from '../../lib/catalogBulkDelete';
+import {
+  completeMasterDataDeletes,
+  enqueueMasterDataDeletes,
+  listMasterDataDeleteQueue,
+  subscribeMasterDataDeleteQueue,
+  withMasterDataDeleteFlushLock,
+  type MasterDataDeleteEntry,
+} from '../../lib/masterDataDeleteQueue';
 import {
   calculateRecipeLineCost,
   readProductRecipeLines,
@@ -70,6 +81,16 @@ type SortMode = 'name-asc' | 'name-desc' | 'extra-first';
 const GROUP_PREVIEW_ROWS = 15;
 
 const INGREDIENT_UNCATEGORIZED_ID = '__sin_categoria__';
+
+function formatSubrecipeUsage(ingredient: StoreIngredient): string {
+  const variants = normalizeStoreIngredientUsageVariants(ingredient.usageVariants);
+  if (variants.length > 0) {
+    return variants.map((variant) => `${variant.label}: ${variant.quantity} ${variant.unit}`).join(' · ');
+  }
+  return ingredient.usageQtyPerUnit != null
+    ? `${ingredient.usageQtyPerUnit} ${ingredient.usageUnit || 'ud'}`
+    : '—';
+}
 
 function emptyOrganizerStats(total: number): Pick<
   InventoryOrganizerGroup,
@@ -446,11 +467,11 @@ type IngredientDraft = {
   extraPrice: string;
 };
 
-function emptyDraft(chargeExtra = false): IngredientDraft {
+function emptyDraft(): IngredientDraft {
   return {
     name: '',
-    chargeExtra,
-    allowRemove: false,
+    chargeExtra: DEFAULT_NEW_INGREDIENT_TPV_FLAGS.chargeExtra,
+    allowRemove: DEFAULT_NEW_INGREDIENT_TPV_FLAGS.allowRemove,
     extraPrice: '',
   };
 }
@@ -1188,6 +1209,24 @@ export function StoreIngredientsPanel({
   const [configDocId, setConfigDocId] = useState<string | undefined>();
   const [configRev, setConfigRev] = useState<string | undefined>();
   const [items, setItems] = useState<StoreIngredient[]>([]);
+  const [pendingIngredientDeletes, setPendingIngredientDeletes] = useState<MasterDataDeleteEntry[]>([]);
+  const refreshPendingIngredientDeletes = useCallback(() => {
+    setPendingIngredientDeletes(
+      listMasterDataDeleteQueue({
+        userId,
+        businessId,
+        kinds: ['ingrediente', 'subreceta'],
+      }),
+    );
+  }, [userId, businessId]);
+  useEffect(() => {
+    refreshPendingIngredientDeletes();
+    return subscribeMasterDataDeleteQueue(refreshPendingIngredientDeletes);
+  }, [refreshPendingIngredientDeletes]);
+  const pendingIngredientDeleteIds = useMemo(
+    () => new Set(pendingIngredientDeletes.map((entry) => entry.targetId)),
+    [pendingIngredientDeletes],
+  );
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [newDraft, setNewDraft] = useState<IngredientDraft>(() => emptyDraft());
@@ -1198,6 +1237,7 @@ export function StoreIngredientsPanel({
   const [dirty, setDirty] = useState(false);
   const [creating, setCreating] = useState(false);
   const [showRecipeModal, setShowRecipeModal] = useState(false);
+  const [editingRecipeId, setEditingRecipeId] = useState<string | null>(null);
   const [listSearch, setListSearch] = useState('');
   const [listSection, setListSection] = useState<'ingredients' | 'subrecipes'>('ingredients');
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -1215,13 +1255,17 @@ export function StoreIngredientsPanel({
   }, []);
 
   const allBrandIds = useMemo(() => brands.map((b) => b._id), [brands]);
+  const visibleItems = useMemo(
+    () => items.filter((ing) => !pendingIngredientDeleteIds.has(ing.id)),
+    [items, pendingIngredientDeleteIds],
+  );
   const ingredientItems = useMemo(
-    () => items.filter((ing) => !isSubrecipeIngredient(ing)),
-    [items],
+    () => visibleItems.filter((ing) => !isSubrecipeIngredient(ing)),
+    [visibleItems],
   );
   const subrecipeItems = useMemo(
-    () => items.filter((ing) => isSubrecipeIngredient(ing)),
-    [items],
+    () => visibleItems.filter((ing) => isSubrecipeIngredient(ing)),
+    [visibleItems],
   );
   const hasExtras = useMemo(
     () => ingredientItems.some((i) => readStoreIngredientTpvFlags(i).chargeExtra),
@@ -1264,6 +1308,10 @@ export function StoreIngredientsPanel({
     () => (editingId ? items.find((i) => i.id === editingId) ?? null : null),
     [items, editingId],
   );
+  const editingRecipe = useMemo(
+    () => (editingRecipeId ? items.find((i) => i.id === editingRecipeId) ?? null : null),
+    [items, editingRecipeId],
+  );
 
   const openIngredientDetail = useCallback(
     (id: string, tab: EditIngredientTab = 'datos') => {
@@ -1278,6 +1326,20 @@ export function StoreIngredientsPanel({
     setEditingOpenTab('datos');
   }, []);
 
+  const openIngredientOrRecipe = useCallback(
+    (ingredient: StoreIngredient, tab: EditIngredientTab = 'datos') => {
+      if (isSubrecipeIngredient(ingredient)) {
+        setEditingId(null);
+        setEditingRecipeId(ingredient.id);
+        setShowRecipeModal(false);
+        return;
+      }
+      setEditingRecipeId(null);
+      openIngredientDetail(ingredient.id, tab);
+    },
+    [openIngredientDetail],
+  );
+
   const activeCategoryLabel =
     categoryGroups.find((g) => g.id === categoryFilter)?.label || '';
 
@@ -1288,6 +1350,9 @@ export function StoreIngredientsPanel({
     // Ingrediente nuevo no está en ninguna categoría de carta aún.
     setCategoryFilter(INGREDIENT_UNCATEGORIZED_ID);
     setExpandedPreview(true);
+    if (normalizeTpvDefaultExtraPrice(defaultExtraPrice) == null) {
+      setDefaultExtraPrice('0.5');
+    }
     setNewDraft(emptyDraft());
     setCreating(true);
   };
@@ -1316,11 +1381,18 @@ export function StoreIngredientsPanel({
       const merged = unifyStoreIngredientsFromConfig(cfg, brandIds);
       const unified = toPanelItems(merged);
       const { items: deduped, mergedCount } = mergeDuplicateStoreIngredients(unified);
+      const omitIds = new Set(
+        listMasterDataDeleteQueue({
+          userId,
+          businessId,
+          kinds: ['ingrediente', 'subreceta'],
+        }).map((entry) => entry.targetId),
+      );
 
       setConfigDocId(cfg._id || `dlvconf-${normalizeTenantUserId(userId)}`);
       setConfigRev(cfg._rev);
       setBrands(lineBrands);
-      setItems(deduped);
+      setItems(deduped.filter((item) => !omitIds.has(item.id)));
       setDirty(mergedCount > 0);
       if (mergedCount > 0) {
         toast.message(`Fusionamos ${mergedCount} duplicado(s) al cargar`, { duration: 5000 });
@@ -1454,6 +1526,118 @@ export function StoreIngredientsPanel({
     return persistList(deduped, { successToast });
   };
 
+  const flushPendingIngredientDeletes = useCallback(async () => {
+    if (!userId || !businessId) return;
+    await withMasterDataDeleteFlushLock(
+      `${userId}:${businessId}:ingredientes`,
+      async () => {
+        const entries = listMasterDataDeleteQueue({
+          userId,
+          businessId,
+          kinds: ['ingrediente', 'subreceta'],
+        });
+        if (entries.length === 0) return;
+        const targetIds = new Set(entries.map((entry) => entry.targetId));
+        const [cfg, catalog, rawBrands] = await Promise.all([
+          getDeliveryConfigRequest(userId),
+          listCatalogItemsRequest(userId),
+          listBrandsRequest(businessId).catch(() => []),
+        ]);
+        const lineBrands = sortBrandsForDisplay(commercialLineBrands(rawBrands));
+        const brandIds = lineBrands.map((brand) => brand._id);
+        const currentRows = toPanelItems(unifyStoreIngredientsFromConfig(cfg, brandIds));
+        const nextRows = currentRows
+          .filter((row) => !targetIds.has(row.id))
+          .map((row) => ({
+            ...row,
+            recipeLines: normalizeStoreIngredientRecipeLines(row.recipeLines).filter(
+              (line) => !targetIds.has(line.storeIngredientId),
+            ),
+          }));
+
+        const saved = await updateDeliveryConfigRequest(userId, {
+          _id: cfg._id || `dlvconf-${normalizeTenantUserId(userId)}`,
+          _rev: cfg._rev,
+          storeIngredients: normalizeStoreIngredients(nextRows),
+          tpvBrandSupplements: {},
+          tpvBrandCategorySupplements: {},
+        } as Parameters<typeof updateDeliveryConfigRequest>[1]);
+
+        const updatedCatalog: CatalogItem[] = [];
+        for (const product of catalog) {
+          const lines = readProductRecipeLines(product);
+          const filtered = lines.filter(
+            (line) => !line.storeIngredientId || !targetIds.has(line.storeIngredientId),
+          );
+          if (filtered.length === lines.length) continue;
+          updatedCatalog.push(
+            await updateCatalogItemRequest(userId, {
+              ...product,
+              customFields: {
+                ...(product.customFields || {}),
+                costingRecipe: filtered,
+              },
+            }),
+          );
+        }
+
+        const linkedStock = catalog.filter((item) =>
+          targetIds.has(String(item.customFields?.storeIngredientId || '').trim()),
+        );
+        if (linkedStock.length > 0) {
+          const warehouseQueue = enqueueMasterDataDeletes(
+            linkedStock.map((item) => ({
+              userId,
+              businessId,
+              kind: 'almacen' as const,
+              targetId: item._id,
+            })),
+          );
+          const result = await deleteCatalogItemsRelentlessly(
+            userId,
+            linkedStock.map((item) => item._id),
+            { maxRounds: 3 },
+          );
+          const remaining = new Set(result.remainingIds);
+          completeMasterDataDeletes(
+            warehouseQueue
+              .filter((entry) => !remaining.has(entry.targetId))
+              .map((entry) => entry.id),
+          );
+        }
+
+        const linkedStockIds = new Set(linkedStock.map((item) => item._id));
+        const catalogAfterRecipeCleanup = catalog
+          .filter((item) => !linkedStockIds.has(item._id))
+          .map((item) => updatedCatalog.find((updated) => updated._id === item._id) || item);
+        await syncInventoryCatalogFromSources(userId, {
+          businessType: String(currentBusiness?.businessType || 'delivery'),
+          businessId,
+          storeIngredients: normalizeStoreIngredients(nextRows),
+          brands: lineBrands,
+          catalogItems: catalogAfterRecipeCleanup,
+        });
+
+        setConfigDocId(saved._id || cfg._id);
+        setConfigRev(saved._rev);
+        setItems(nextRows);
+        setCatalogItems(catalogAfterRecipeCleanup);
+        completeMasterDataDeletes(entries.map((entry) => entry.id));
+        notifyDeliveryConfigChanged();
+        notifyDeliveryCatalogChanged(userId, businessId);
+      },
+    );
+  }, [userId, businessId, currentBusiness?.businessType]);
+
+  useEffect(() => {
+    void flushPendingIngredientDeletes().catch(() => undefined);
+    const onOnline = () => {
+      void flushPendingIngredientDeletes().catch(() => undefined);
+    };
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, [flushPendingIngredientDeletes]);
+
   const addItem = async (draft: IngredientDraft): Promise<boolean> => {
     const err = validateDraft(draft);
     if (err) {
@@ -1499,11 +1683,24 @@ export function StoreIngredientsPanel({
   };
 
   const removeItem = async (id: string) => {
+    const item = items.find((row) => row.id === id);
+    if (!item) return;
     if (editingId === id) setEditingId(null);
-    await applyAndPersist(
-      (prev) => prev.filter((i) => i.id !== id),
-      'Ingrediente eliminado',
-    );
+    enqueueMasterDataDeletes([
+      {
+        userId,
+        businessId,
+        kind: isSubrecipeIngredient(item) ? 'subreceta' : 'ingrediente',
+        targetId: id,
+      },
+    ]);
+    setItems((prev) => prev.filter((row) => row.id !== id));
+    try {
+      await flushPendingIngredientDeletes();
+      toast.success(isSubrecipeIngredient(item) ? 'Subreceta eliminada' : 'Ingrediente eliminado');
+    } catch {
+      toast.message('Elemento oculto. El borrado se completará cuando vuelva la conexión.');
+    }
   };
 
   const updateIngredientTpvFlags = (
@@ -1652,6 +1849,10 @@ export function StoreIngredientsPanel({
               <AlertCircle className="w-3.5 h-3.5 shrink-0" />
               Indica el precio del extra para poder guardar.
             </p>
+          ) : pendingIngredientDeletes.length > 0 ? (
+            <p className="text-amber-700 dark:text-amber-300">
+              {pendingIngredientDeletes.length} borrado(s) pendiente(s)
+            </p>
           ) : undefined
         }
         toolbarLeftExtra={
@@ -1713,6 +1914,7 @@ export function StoreIngredientsPanel({
                 setListSection('subrecipes');
                 setCreating(false);
                 setEditingId(null);
+                setEditingRecipeId(null);
                 setShowRecipeModal(true);
               }}
               disabled={saving}
@@ -1918,7 +2120,7 @@ export function StoreIngredientsPanel({
                             <li key={ing.id} className="px-3 py-2.5">
                               <button
                                 type="button"
-                                onClick={() => openIngredientDetail(ing.id, openTab)}
+                                onClick={() => openIngredientOrRecipe(ing, openTab)}
                                 className="flex w-full items-center justify-between gap-2 text-left rounded-lg -mx-1 px-1 py-0.5 hover:bg-stone-50 dark:hover:bg-stone-800/60"
                                 title="Ver ficha del ingrediente"
                               >
@@ -1941,16 +2143,14 @@ export function StoreIngredientsPanel({
                                   onClick={(e) => e.stopPropagation()}
                                   onKeyDown={(e) => e.stopPropagation()}
                                 >
-                                  {!isSub ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => openIngredientDetail(ing.id, openTab)}
-                                      className="p-2 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-                                      title="Editar"
-                                    >
-                                      <Pencil className="w-4 h-4" />
-                                    </button>
-                                  ) : null}
+                                  <button
+                                    type="button"
+                                    onClick={() => openIngredientOrRecipe(ing, openTab)}
+                                    className="p-2 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                                    title={isSub ? 'Editar subreceta' : 'Editar'}
+                                  >
+                                    <Pencil className="w-4 h-4" />
+                                  </button>
                                   <button
                                     type="button"
                                     onClick={() => void removeItem(ing.id)}
@@ -1964,8 +2164,8 @@ export function StoreIngredientsPanel({
                               {isSub ? (
                                 <p className="mt-1.5 text-[11px] text-stone-500 dark:text-stone-400 leading-snug">
                                   {recipeLines.map((l) => `${l.name} ${l.quantity}${l.unit}`).join(' · ')}
-                                  {ing.usageQtyPerUnit != null
-                                    ? ` · venta: ${ing.usageQtyPerUnit}${ing.usageUnit || 'ud'}`
+                                  {formatSubrecipeUsage(ing) !== '—'
+                                    ? ` · venta: ${formatSubrecipeUsage(ing)}`
                                     : ''}
                                 </p>
                               ) : (
@@ -2065,11 +2265,11 @@ export function StoreIngredientsPanel({
                                   key={ing.id}
                                   role="button"
                                   tabIndex={0}
-                                  onClick={() => openIngredientDetail(ing.id, openTab)}
+                                  onClick={() => openIngredientOrRecipe(ing, openTab)}
                                   onKeyDown={(e) => {
                                     if (e.key === 'Enter' || e.key === ' ') {
                                       e.preventDefault();
-                                      openIngredientDetail(ing.id, openTab);
+                                      openIngredientOrRecipe(ing, openTab);
                                     }
                                   }}
                                   className="hover:bg-blue-50/50 dark:hover:bg-blue-950/20 transition-colors cursor-pointer"
@@ -2094,9 +2294,7 @@ export function StoreIngredientsPanel({
                                         {recipeLines.map((l) => `${l.name} ${l.quantity}${l.unit}`).join(' · ')}
                                       </td>
                                       <td className="px-4 py-2 text-right text-xs font-semibold tabular-nums text-stone-700 dark:text-stone-200">
-                                        {ing.usageQtyPerUnit != null
-                                          ? `${ing.usageQtyPerUnit} ${ing.usageUnit || 'ud'}`
-                                          : '—'}
+                                        {formatSubrecipeUsage(ing)}
                                       </td>
                                     </>
                                   ) : (
@@ -2161,16 +2359,14 @@ export function StoreIngredientsPanel({
                                     onClick={(e) => e.stopPropagation()}
                                   >
                                     <div className="flex items-center justify-end gap-0.5">
-                                      {!isSub ? (
                                       <button
                                         type="button"
-                                        onClick={() => openIngredientDetail(ing.id, openTab)}
+                                        onClick={() => openIngredientOrRecipe(ing, openTab)}
                                         className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-gray-700"
-                                        title="Abrir ficha"
+                                        title={isSub ? 'Editar subreceta' : 'Abrir ficha'}
                                       >
                                         <Pencil className="w-4 h-4" />
                                       </button>
-                                      ) : null}
                                       <button
                                         type="button"
                                         onClick={() => void removeItem(ing.id)}
@@ -2281,12 +2477,16 @@ export function StoreIngredientsPanel({
       ) : null}
 
       <CreateIngredientRecipeModal
-        open={showRecipeModal}
-        onClose={() => setShowRecipeModal(false)}
+        open={showRecipeModal || editingRecipe != null}
+        onClose={() => {
+          setShowRecipeModal(false);
+          setEditingRecipeId(null);
+        }}
         brands={brands}
         storeIngredients={items}
         catalogItems={catalogItems}
         userId={userId}
+        editIngredient={editingRecipe}
         initialBrandId={allBrandIds[0] || ''}
         onSaved={async ({ ingredient, createdComponents }) => {
           const toAdd = [...createdComponents, ingredient];
@@ -2298,7 +2498,6 @@ export function StoreIngredientsPanel({
             });
           }
           const nextItems = [...map.values()];
-          commitItems(nextItems);
           try {
             const saved = await updateDeliveryConfigRequest(userId, {
               _id: configDocId || `dlvconf-${normalizeTenantUserId(userId)}`,
@@ -2308,6 +2507,7 @@ export function StoreIngredientsPanel({
                 ? { tpvDefaultExtraPrice: normalizeTpvDefaultExtraPrice(defaultExtraPrice) }
                 : {}),
             } as Parameters<typeof updateDeliveryConfigRequest>[1]);
+            commitItems(nextItems);
             setConfigDocId(saved._id || configDocId);
             setConfigRev(saved._rev);
             setDirty(false);
@@ -2316,7 +2516,8 @@ export function StoreIngredientsPanel({
             setCatalogItems(catalog);
             await syncToWarehouse(nextItems);
           } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'No se pudo guardar la receta');
+            // El asistente mantiene abierto el formulario y muestra el fallo real.
+            throw err instanceof Error ? err : new Error('No se pudo guardar la receta');
           }
         }}
       />

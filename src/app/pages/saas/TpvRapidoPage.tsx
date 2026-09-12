@@ -1320,6 +1320,7 @@ export function TpvRapidoOrderFlow({
   const [deliveryType, setDeliveryType] = useState<DeliveryType | null>(() => {
     // Al editar con «+»: hidratar YA (si no, products no es reachable → pantalla en blanco).
     if (editingDeliveryOrder && isDeliveryOrderEditableOnTpvBoard(editingDeliveryOrder)) {
+      if (editingDeliveryOrder.deliveryType === 'sala') return 'sala';
       return editingDeliveryOrder.deliveryType === 'recogida' ? 'recogida' : 'domicilio';
     }
     return startAsRestaurant ? 'recogida' : null;
@@ -2028,6 +2029,17 @@ export function TpvRapidoOrderFlow({
   }, [cart]);
 
   const effectiveCalc = useMemo(() => {
+    // Las promociones de pedido no se aplican a cuentas de mesa hasta que
+    // exista persistencia server-side auditable para dining_order.
+    if (restaurantAccountMode) {
+      return {
+        discount: 0,
+        finalTotal: cartTotal,
+        autoDiscount: 0,
+        manualDiscount: 0,
+        autoPromoNames: [] as string[],
+      };
+    }
     const autoDiscount = Math.min(cartTotal, Math.max(0, autoPromoCalc.discount));
     const afterAuto = Math.max(0, cartTotal - autoDiscount);
 
@@ -2076,6 +2088,7 @@ export function TpvRapidoOrderFlow({
     };
   }, [
     promoMode,
+    restaurantAccountMode,
     cartTotal,
     appliedPromo,
     clientPromoSelected,
@@ -2246,6 +2259,7 @@ export function TpvRapidoOrderFlow({
   /** Mostrador bar: cobro obligatorio en el TPV (no cuenta abierta). */
   const paymentRequiredToSubmit =
     deliveryType === 'domicilio'
+    || deliveryType === 'sala'
     || Boolean(isRestaurantMode && restaurantTable?.isCounter);
   const canSubmit = orderReady && (!paymentRequiredToSubmit || !!paymentMethod);
   const isProductsFocus = currentStep === 'products' && isStepReachable('products');
@@ -5947,7 +5961,7 @@ export function TpvRapidoOrderFlow({
                                       initial: ci.customization,
                                     });
                                   }}
-                                  className="min-w-0 flex-1 text-left hover:opacity-80"
+                                  className="min-w-0 text-left hover:opacity-80"
                                 >
                                   <div className="flex items-center gap-1.5">
                                     <span className="text-gray-500 dark:text-gray-400 tabular-nums text-xs shrink-0">
@@ -5974,42 +5988,32 @@ export function TpvRapidoOrderFlow({
                                     </div>
                                   )}
                                 </button>
-                                <div className="shrink-0 text-right">
-                                  {promoOnLine && priced && priced.catalogTotal !== lineTotal ? (
-                                    <p className="text-[10px] text-gray-400 line-through tabular-nums leading-none">
-                                      {formatPrice(priced.catalogTotal)}
-                                    </p>
-                                  ) : null}
-                                  <span className={`font-semibold tabular-nums text-xs ${promoOnLine ? 'text-emerald-700 dark:text-emerald-400' : 'text-gray-700 dark:text-gray-300'}`}>
-                                    {formatPrice(lineTotal)}
-                                  </span>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <div className="text-right">
+                                    {promoOnLine && priced && priced.catalogTotal !== lineTotal ? (
+                                      <p className="text-[10px] text-gray-400 line-through tabular-nums leading-none">
+                                        {formatPrice(priced.catalogTotal)}
+                                      </p>
+                                    ) : null}
+                                    <span className={`font-semibold tabular-nums text-xs ${promoOnLine ? 'text-emerald-700 dark:text-emerald-400' : 'text-gray-700 dark:text-gray-300'}`}>
+                                      {formatPrice(lineTotal)}
+                                    </span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => decrementCartLine(ci.lineId)}
+                                    className="text-gray-400 hover:text-red-500 transition-colors p-0.5"
+                                  >
+                                    <Minus className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => incrementCartLine(ci.lineId)}
+                                    className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors p-0.5"
+                                  >
+                                    <Plus className="w-3 h-3" />
+                                  </button>
                                 </div>
-                              </div>
-                              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => decrementCartLine(ci.lineId)}
-                                  className="inline-flex min-h-11 items-center justify-center rounded-xl border border-red-200 bg-white text-red-600 hover:bg-red-50 active:bg-red-100 dark:border-red-900/60 dark:bg-gray-900 dark:text-red-400 dark:hover:bg-red-950/30 transition-colors touch-manipulation"
-                                  aria-label={`Restar una unidad de ${ci.catalogItem.name}`}
-                                  title="Restar unidad"
-                                >
-                                  <Minus className="h-6 w-6" strokeWidth={2.5} />
-                                </button>
-                                <span
-                                  className="min-w-8 text-center text-sm font-bold tabular-nums text-gray-900 dark:text-gray-100"
-                                  aria-live="polite"
-                                >
-                                  {ci.quantity}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => incrementCartLine(ci.lineId)}
-                                  className="inline-flex min-h-11 items-center justify-center rounded-xl bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-800 transition-colors touch-manipulation"
-                                  aria-label={`Sumar una unidad de ${ci.catalogItem.name}`}
-                                  title="Sumar unidad"
-                                >
-                                  <Plus className="h-6 w-6" strokeWidth={2.5} />
-                                </button>
                               </div>
                               <div className="pl-4">
                                 <input
@@ -6081,7 +6085,7 @@ export function TpvRapidoOrderFlow({
                             ))}
                           </div>
                         ) : null}
-                        {(cart.length > 0 || (restaurantAccountMode && accountDue > 0)) ? (
+                        {!restaurantAccountMode && cart.length > 0 ? (
                           <>
                         <label className="block text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">
                           Promoción

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from '../../../../context/AuthContext';
-import { downloadDeliveryActa } from '../../../../lib/deliveryActaPdfGenerator';
+import { downloadSalesActa } from '../../../../lib/salesActaPdfGenerator';
 import {
   filterSalesForWorker,
   isWorkerAccount,
@@ -110,7 +110,7 @@ export function EntregasModuleShell() {
 
       if (actionId === 'print') {
         try {
-          downloadDeliveryActa(selectedRecord);
+          downloadSalesActa(selectedRecord);
           toast.success('Acta de entrega descargada');
         } catch (error) {
           toast.error(error instanceof Error ? error.message : 'No se pudo generar el acta');
@@ -137,7 +137,7 @@ export function EntregasModuleShell() {
           const saved = await markSaleDelivered(userId, selectedRecord);
           setSalesRecords((prev) => prev.map((s) => (s.id === saved.id ? saved : s)));
           try {
-            downloadDeliveryActa(saved);
+            downloadSalesActa(saved);
           } catch {
             /* acta opcional si falla PDF */
           }

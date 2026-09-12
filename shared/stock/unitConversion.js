@@ -4,6 +4,7 @@
  */
 
 const UNIT_BASE = {
+  mg: { family: 'mass', toBase: 0.001 },
   g: { family: 'mass', toBase: 1 },
   kg: { family: 'mass', toBase: 1000 },
   ml: { family: 'vol', toBase: 1 },
@@ -16,7 +17,7 @@ export function normalizeStockUnit(raw, fallback = 'ud') {
     .toLowerCase()
     .replace(/^lt$/, 'l');
   if (!u) return fallback;
-  if (u === 'ud' || u === 'g' || u === 'kg' || u === 'ml' || u === 'l') return u;
+  if (u === 'ud' || u === 'mg' || u === 'g' || u === 'kg' || u === 'ml' || u === 'l') return u;
   return fallback;
 }
 

@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Layout } from '../../components/saas/Layout';
+import { PublicOrderInbox } from '../../components/saas/PublicOrderInbox';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import {
@@ -571,6 +572,7 @@ export function ButcherHub() {
         </div>
       ) : (
       <div className="flex flex-col gap-4">
+        <PublicOrderInbox targetKind="butcher_ops" />
 
         {/* ── Header bar: role toggle + filters + status ── */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">

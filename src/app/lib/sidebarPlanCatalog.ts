@@ -22,6 +22,7 @@ export const SIDEBAR_PLAN_CATALOG: Record<string, SidebarPlanEntry> = {
   clients: { minPlan: 'basic' },
   'delivery-clients': { minPlan: 'basic' },
   catalog: { minPlan: 'basic' },
+  'catalog-carta': { minPlan: 'basic' },
   team: { minPlan: 'basic' },
   tpv: { minPlan: 'basic' },
   'tpv-rapido': { minPlan: 'basic' },
@@ -44,11 +45,17 @@ export const SIDEBAR_PLAN_CATALOG: Record<string, SidebarPlanEntry> = {
 
   // ── Mediano: inventario + escandallo + compras (OCR foto) ──
   'catalog-stock': { minPlan: 'normal' },
+  'catalog-ingredientes': { minPlan: 'normal' },
+  'catalog-stock-tpv': { minPlan: 'normal' },
+  'catalog-purchases': { minPlan: 'normal' },
+  'catalog-invoices': { minPlan: 'normal' },
+  'catalog-consumos': { minPlan: 'normal' },
   costing: { minPlan: 'normal' },
   suppliers: { minPlan: 'normal' },
-  verifactu: { minPlan: 'normal' },
+  verifactu: { minPlan: 'basic' },
 
   // ── Pro (o SVA en packing; hasta existir compra SVA = Pro) ──
+  'restaurant-ops': { minPlan: 'pro' },
   alertas: { minPlan: 'pro' },
   calendar: { minPlan: 'pro' },
   chat: { minPlan: 'pro' },

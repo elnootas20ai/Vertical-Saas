@@ -275,6 +275,7 @@ export function AlbaranCorroborateModal({
       id: `pinvl-${idx}`,
       itemName: r.name,
       quantity: r.receiveQty,
+      unit: order?.items.find((item) => item.catalogItemId === r.catalogItemId)?.unit || '',
       unitPrice: r.receiveUnitCost,
       total: Math.round(r.receiveQty * r.receiveUnitCost * 100) / 100,
       catalogItemId: r.catalogItemId,
@@ -289,6 +290,7 @@ export function AlbaranCorroborateModal({
             id: l.id || `draft-${idx}`,
             itemName: l.itemName,
             quantity: l.quantity,
+            unit: l.unit,
             unitPrice: l.unitPrice,
             total: l.total,
             catalogItemId: l.catalogItemId,
@@ -592,6 +594,7 @@ export function AlbaranCorroborateModal({
   );
 
   const handleConfirm = async () => {
+    if (saving) return;
     if (receivable.length === 0) {
       toast.error(
         allowExtras
@@ -610,6 +613,25 @@ export function AlbaranCorroborateModal({
       let resolvedWarehouseId = warehouseId || '';
 
       if (order) {
+        // Primero persiste el albarán pendiente. Si la recepción falla, queda recuperable
+        // y nunca hay stock aplicado sin documento de origen.
+        const pendingPayload = {
+          ...buildDraftPayload({ withStock: false }),
+          lines: invoiceLines,
+          warehouseId,
+          ocrStockReceivedAt: '',
+        };
+        if (workingInvoice?._id) {
+          savedInvoice = await updatePurchaseInvoiceRequest(userId, {
+            ...workingInvoice,
+            ...pendingPayload,
+          } as PurchaseInvoice);
+        } else {
+          savedInvoice = await createPurchaseInvoiceRequest(
+            userId,
+            pendingPayload as Partial<PurchaseInvoice> & { loadToWarehouse?: boolean },
+          );
+        }
         // Backend espera recibido acumulado absoluto, no el delta de este albarán.
         const receivedItems = buildCumulativeReceivedItems(order, receivable);
         const receiveResult = await markOrderReceivedRequest(userId, order._id, receivedItems, {
@@ -618,7 +640,7 @@ export function AlbaranCorroborateModal({
           workCenterId,
         });
         updatedOrder = receiveResult.order;
-        stockOk = (receiveResult.stockUpdated || 0) > 0;
+        stockOk = receiveResult.stockComplete === true;
         stockUpdated = receiveResult.stockUpdated || 0;
         resolvedWarehouseId = receiveResult.warehouseId || warehouseId || '';
         const pendingOrderLines = buildPendingOrderLinesFromCompare(order, rows);
@@ -636,16 +658,11 @@ export function AlbaranCorroborateModal({
           pendingOrderLines,
           flags: { orderIncomplete: incomplete, stockPending: !stockOk },
         };
-        if (workingInvoice?._id) {
+        if (savedInvoice?._id) {
           savedInvoice = await updatePurchaseInvoiceRequest(userId, {
-            ...workingInvoice,
+            ...savedInvoice,
             ...payload,
           } as PurchaseInvoice);
-        } else {
-          savedInvoice = await createPurchaseInvoiceRequest(
-            userId,
-            payload as Partial<PurchaseInvoice> & { loadToWarehouse?: boolean },
-          );
         }
         if (!stockOk) {
           toast.message(

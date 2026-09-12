@@ -65,6 +65,7 @@ import {
   resolveTpvBrandConfigFromDeliveryConfig,
   normalizeStoreIngredients,
   normalizeStoreIngredientUnit,
+  DEFAULT_NEW_INGREDIENT_TPV_FLAGS,
   withStoreIngredientTpvFlags,
   resolveBrandTpvCategoryKeys,
   type StoreIngredient,
@@ -98,6 +99,8 @@ import {
 } from '../../lib/catalogComboSlots';
 import { normalizeTenantUserId } from '../../lib/tenantUserId';
 import { VehicleConfirmDialog } from './vehicles/VehicleConfirmDialog';
+import { useRestaurantPlanAccess } from '../../hooks/useRestaurantPlanAccess';
+import { resolveRestaurantProductionArea } from '../../../../shared/restaurant/productionArea.js';
 
 // ─── Create Catalog Item Wizard ──────────────────────────────────────────────
 
@@ -172,6 +175,7 @@ export function CreateCatalogItemModal({
   isRestaurantCatalog = false,
 }: CreateCatalogItemModalProps) {
   const navigate = useNavigate();
+  const hasProductionStationsAccess = useRestaurantPlanAccess('production_stations');
   const commercialBrandCount = useMemo(() => countCommercialBrands(brands), [brands]);
   const brandEntitlements = useTenantEntitlements({ commercialBrandCount });
   const canAddCommercialBrand =
@@ -210,12 +214,14 @@ export function CreateCatalogItemModal({
   const [creatingByoIngredient, setCreatingByoIngredient] = useState(false);
   const [creatingRecipeIngredient, setCreatingRecipeIngredient] = useState(false);
   const [fieldErrorsShown, setFieldErrorsShown] = useState(false);
+  const [productionAreaTouched, setProductionAreaTouched] = useState(false);
   const emptyCreateForm = useCallback(
     () => ({
       itemType: 'product' as CatalogItem['itemType'],
       name: '',
       description: '',
       category: '',
+      productionArea: 'kitchen' as NonNullable<CatalogItem['productionArea']>,
       selectedBrandIds: [] as string[],
       newBrandName: '',
       showNewBrand: false,
@@ -258,6 +264,7 @@ export function CreateCatalogItemModal({
       setNewByoIngredientName('');
       setCreatingByoIngredient(false);
       setFieldErrorsShown(false);
+      setProductionAreaTouched(false);
       setRecipePicks([]);
       setPackagingPicks([]);
       setModalPackagingItems([]);
@@ -290,6 +297,7 @@ export function CreateCatalogItemModal({
     }
 
     if (editItem) {
+      setProductionAreaTouched(Boolean(editItem.productionArea));
       const editCategory = normalizeImportCategory(String(editItem.category || '').trim());
       setExtraCategories(editCategory ? [editCategory] : []);
       setAddingCategory(false);
@@ -346,6 +354,7 @@ export function CreateCatalogItemModal({
         name: editItem.name,
         description: editItem.description,
         category: editItem.category,
+        productionArea: resolveRestaurantProductionArea(editItem) as NonNullable<CatalogItem['productionArea']>,
         selectedBrandIds: (() => {
           const ids = Array.isArray(editItem.brandIds) ? editItem.brandIds.filter(Boolean) : [];
           return ids.length > 0 ? [ids[0]] : [];
@@ -429,6 +438,7 @@ export function CreateCatalogItemModal({
     setComboStructure(defaultComboStructure.map((s) => ({ ...s })));
     setComboStructureConfirmed(true);
     setForm(emptyCreateForm());
+    setProductionAreaTouched(false);
     setStep(1);
   }, [editItem, seedFromProduct, isOpen, defaultComboStructure, catalogCategoriesInUse.length, emptyCreateForm]);
 
@@ -648,6 +658,24 @@ export function CreateCatalogItemModal({
     () => normalizeImportCategory(form.category),
     [form.category],
   );
+
+  useEffect(() => {
+    if (!isOpen || !isRestaurantCatalog || productionAreaTouched || form.itemType === 'service') return;
+    const inferred = resolveRestaurantProductionArea({
+      category: form.category,
+      customFields: { ingredients: form.ingredients },
+    }) as NonNullable<CatalogItem['productionArea']>;
+    setForm((current) => (
+      current.productionArea === inferred ? current : { ...current, productionArea: inferred }
+    ));
+  }, [
+    isOpen,
+    isRestaurantCatalog,
+    productionAreaTouched,
+    form.itemType,
+    form.category,
+    form.ingredients,
+  ]);
   const isSharedCatalogCategory = shouldClearBrandForCategory(normalizedCategory);
 
   useEffect(() => {
@@ -881,6 +909,11 @@ export function CreateCatalogItemModal({
       if (!isEditMode) setStep(1);
       return;
     }
+    if (isWarehouseImportCategory(normalizedCategory)) {
+      toast.error('Ingredientes y categorías de compra se crean desde Almacén, no desde Carta');
+      if (!isEditMode) setStep(1);
+      return;
+    }
     if (form.halfHalf && !form.halfHalfBrandId.trim()) {
       toast.error('Elige la marca comercial para mitad y mitad');
       if (!isEditMode) setStep(1);
@@ -1045,6 +1078,9 @@ export function CreateCatalogItemModal({
         allergens: form.allergens,
         notes: form.notes,
         customFields,
+        ...(isRestaurantCatalog && form.itemType !== 'service'
+          ? { productionArea: form.productionArea }
+          : {}),
         active: form.active !== false,
         webVisible: form.webVisible,
         available: form.available,
@@ -1083,6 +1119,7 @@ export function CreateCatalogItemModal({
         setRecipePicks([]);
         setPackagingPicks([]);
         setFieldErrorsShown(false);
+        setProductionAreaTouched(false);
         setForm((f) => ({
           ...f,
           name: '',
@@ -1713,7 +1750,7 @@ export function CreateCatalogItemModal({
     const productParts: TpvCategoryTemplateKey[] =
       parts.size > 0 ? [...parts] : ['pizzas', 'hamburguesas'];
 
-    const flags = opts.flags ?? { chargeExtra: false, allowRemove: true };
+    const flags = opts.flags ?? DEFAULT_NEW_INGREDIENT_TPV_FLAGS;
     const unit = normalizeStoreIngredientUnit(opts.unit, 'ud');
     let created = withStoreIngredientTpvFlags(
       {
@@ -1789,7 +1826,7 @@ export function CreateCatalogItemModal({
     try {
       const created = await persistLinkedStoreIngredient({
         name: newByoIngredientName,
-        flags: { chargeExtra: false, allowRemove: true },
+        flags: DEFAULT_NEW_INGREDIENT_TPV_FLAGS,
         successToast: `«${newByoIngredientName.trim()}» creado: TPV (base) + almacén`,
       });
       if (!created) return;
@@ -1821,7 +1858,7 @@ export function CreateCatalogItemModal({
         name: input.name,
         baseCost: input.baseCost,
         unit: normalizeStoreIngredientUnit(input.unit, 'ud'),
-        flags: { chargeExtra: false, allowRemove: false },
+        flags: DEFAULT_NEW_INGREDIENT_TPV_FLAGS,
         successToast: `«${input.name.trim()}» creado: escandallo + almacén`,
       });
     } catch (err) {
@@ -2602,6 +2639,42 @@ export function CreateCatalogItemModal({
               ) : (
                 <>
                   {renderCategoryUnit()}
+                  {isRestaurantCatalog && hasProductionStationsAccess ? (
+                    <div className="rounded-xl border border-violet-200 bg-violet-50/70 p-3 dark:border-violet-800 dark:bg-violet-950/30">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-bold text-violet-950 dark:text-violet-100">
+                            Se prepara en
+                          </p>
+                          <p className="mt-0.5 text-[10px] text-violet-700 dark:text-violet-300">
+                            PRO · El TPV separará Cocina y Barra automáticamente.
+                          </p>
+                        </div>
+                        <div className="flex rounded-lg border border-violet-200 bg-white p-1 dark:border-violet-700 dark:bg-stone-900">
+                          {([
+                            ['kitchen', 'Cocina'],
+                            ['bar', 'Barra'],
+                          ] as const).map(([value, label]) => (
+                            <button
+                              key={value}
+                              type="button"
+                              onClick={() => {
+                                setProductionAreaTouched(true);
+                                setForm((current) => ({ ...current, productionArea: value }));
+                              }}
+                              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                                form.productionArea === value
+                                  ? 'bg-violet-600 text-white'
+                                  : 'text-stone-600 hover:bg-violet-50 dark:text-stone-300 dark:hover:bg-violet-950/50'
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                   {renderProductConfiguratorOptions()}
                   {renderBuildYourOwnIngredientPicker()}
                   {renderHalfHalfPizzaPicker()}

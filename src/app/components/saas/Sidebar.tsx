@@ -174,6 +174,7 @@ import {
   isRestaurantBusinessType,
   isStrictDeliveryBusinessType,
 } from '../../lib/deliveryOpsTypes';
+import { RESTAURANT_SIDEBAR_PATH_OVERRIDES } from '../../lib/retailOpsPaths';
 import { useSidebarDeliveryStoreRows } from '../../hooks/useSidebarDeliveryStoreRows';
 import { useRestaurantStoreRows } from '../../hooks/useRestaurantStoreRows';
 import { useAlertCenterSummary } from '../../hooks/useAlertCenterSummary';
@@ -672,14 +673,6 @@ const VERTICAL_GROUP_ITEM_OVERRIDES: Partial<Record<BusinessType, Record<string,
     // Despacho: clientes + propuestas (sin promos TPV; captación = leads).
     clientesCrm: ['clients', 'quotes'],
   },
-};
-
-/** Rutas sidebar bar/restaurante (separadas de Delivery). */
-const RESTAURANT_SIDEBAR_PATH_OVERRIDES: Record<string, string> = {
-  'restaurant-ops': '/saas/restaurant-ops',
-  caja: '/saas/caja',
-  'tpv-rapido': '/saas/caja/tpv',
-  reports: '/saas/vertical/restaurant/informes',
 };
 
 /** Eventos: Carta = Servicios → Productos (misma fuente que TPV / contratación). */

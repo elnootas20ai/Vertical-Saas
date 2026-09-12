@@ -45,7 +45,7 @@ export function DeliveryInformeRunner({
   onBack: () => void;
 }) {
   const { user: authUser } = useAuth();
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, businesses } = useBusiness();
   const planTier = useEffectivePlanTier();
   const dataUserId = resolveBusinessDataUserId(authUser, currentBusiness);
   const businessId = currentBusiness?.business_id || currentBusiness?.id;
@@ -106,6 +106,7 @@ export function DeliveryInformeRunner({
           businessId,
           businessName: currentBusiness?.name,
           businessType: currentBusiness?.businessType,
+          accountBusinessCount: Math.max(1, businesses.length),
           period,
           filters,
           signal: ctrl.signal,
@@ -152,6 +153,7 @@ export function DeliveryInformeRunner({
     businessId,
     currentBusiness?.name,
     currentBusiness?.businessType,
+    businesses.length,
     period,
     filtersKey,
     allowed,

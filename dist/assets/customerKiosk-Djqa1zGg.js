@@ -1,0 +1,1 @@
+const s="vertial:customer-kiosk-lock";function o(t){sessionStorage.setItem(s,JSON.stringify(t))}function e(){try{const t=JSON.parse(sessionStorage.getItem(s)||"null");return t!=null&&t.token&&(t!=null&&t.salesPointId)?t:null}catch{return null}}export{e as r,o as w};

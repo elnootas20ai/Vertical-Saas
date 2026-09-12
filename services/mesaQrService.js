@@ -9,9 +9,11 @@ import {
   putDocument,
   bulkPutDocuments,
   getWebConfigByBusinessId,
+  listScopedPointsOfSaleForBusiness,
 } from './couchdb.js';
 import {
   getSalaDbName,
+  getFloorConfigByUser,
   listDiningTablesByUser,
   sanitizeDiningTable,
   buildDiningTableDocument,
@@ -53,6 +55,86 @@ export async function findDiningTableByQrToken(req, token) {
       && d.active !== false
       && String(d.qrCode || '') === raw,
   ) || null;
+}
+
+export async function resolveMesaQrContext(req, input = {}) {
+  const token = String(input.token || '').trim();
+  const table = await findDiningTableByQrToken(req, token);
+  if (!table) {
+    const error = new Error('QR no válido o mesa no encontrada');
+    error.status = 404;
+    throw error;
+  }
+
+  const tableBusinessId = normalizeBusinessId(table.businessId);
+  const expectedBusinessId = normalizeBusinessId(input.businessId);
+  if (input.tableId && String(input.tableId) !== String(table._id)) {
+    const error = new Error('La mesa no corresponde con el QR');
+    error.status = 400;
+    throw error;
+  }
+  if (expectedBusinessId && tableBusinessId !== expectedBusinessId) {
+    const error = new Error('El QR no pertenece a este negocio');
+    error.status = 400;
+    throw error;
+  }
+
+  const config = tableBusinessId
+    ? await getWebConfigByBusinessId(req, tableBusinessId).catch(() => null)
+    : null;
+  if (input.slug && String(config?.slug || '') !== String(input.slug)) {
+    const error = new Error('El QR no pertenece a esta tienda');
+    error.status = 400;
+    throw error;
+  }
+
+  const floor = await getFloorConfigByUser(req, table.user_id, tableBusinessId).catch(() => null);
+  const rooms = Array.isArray(floor?.rooms) ? floor.rooms : [];
+  const room = rooms.find((item) => (
+    String(item?.id || '') === String(table.roomId || '')
+    || (
+      String(table.zone || '').trim()
+      && String(item?.name || '').trim().toLowerCase() === String(table.zone).trim().toLowerCase()
+    )
+  ));
+  const configuredPdvIds = Array.isArray(config?.salesPointIds)
+    ? config.salesPointIds.map((id) => String(id || '').trim()).filter(Boolean)
+    : [];
+  const businessPdvs = await listScopedPointsOfSaleForBusiness(
+    req,
+    table.user_id,
+    tableBusinessId,
+  ).catch(() => []);
+  const activePdvIds = (businessPdvs || [])
+    .filter((pdv) => pdv && pdv.active !== false && !pdv.deletedAt)
+    .map((pdv) => String(pdv._id || '').trim())
+    .filter(Boolean);
+  const allowedPdvIds = configuredPdvIds.length > 0 ? configuredPdvIds : activePdvIds;
+  let salesPointId = String(room?.pdvId || '').trim();
+  if (!salesPointId && allowedPdvIds.length === 1) salesPointId = allowedPdvIds[0];
+  if (!salesPointId && allowedPdvIds.length === 0) {
+    const error = new Error('Configura un punto de venta antes de usar los QR de mesa');
+    error.status = 409;
+    throw error;
+  }
+  if (!salesPointId && allowedPdvIds.length > 1) {
+    const error = new Error('Configura el punto de venta de esta zona antes de usar su QR');
+    error.status = 409;
+    throw error;
+  }
+  if (salesPointId && allowedPdvIds.length > 0 && !allowedPdvIds.includes(salesPointId)) {
+    const error = new Error('El punto de venta de la zona no está habilitado en la web');
+    error.status = 409;
+    throw error;
+  }
+
+  return {
+    table,
+    config,
+    room: room || null,
+    salesPointId,
+    businessId: tableBusinessId,
+  };
 }
 
 /**
@@ -138,6 +220,8 @@ export async function buildPublicMesaPayload(req, tableDoc) {
   let webSlug = '';
   let webEnabled = false;
   let storeName = '';
+  let salesPointId = '';
+  let setupError = '';
 
   if (businessId) {
     try {
@@ -152,6 +236,17 @@ export async function buildPublicMesaPayload(req, tableDoc) {
     }
   }
 
+  try {
+    const context = await resolveMesaQrContext(req, {
+      token: table.qrCode,
+      tableId: table._id,
+      businessId,
+    });
+    salesPointId = context.salesPointId;
+  } catch (error) {
+    setupError = error instanceof Error ? error.message : 'Configuración de mesa incompleta';
+  }
+
   return {
     token: String(table.qrCode || '').trim(),
     tableId: table._id,
@@ -162,5 +257,7 @@ export async function buildPublicMesaPayload(req, tableDoc) {
     webSlug,
     webEnabled,
     storeName,
+    salesPointId,
+    setupError,
   };
 }

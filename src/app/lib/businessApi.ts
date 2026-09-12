@@ -125,9 +125,7 @@ async function request(path: string, init?: RequestInit): Promise<BusinessEnvelo
       ...init,
     });
   } catch (err) {
-    const hint = API_BASE
-      ? `No se pudo conectar con el servidor (${url}).`
-      : 'No se pudo conectar con el servidor. Comprueba que el backend esté en marcha (npm start, puerto 3001).';
+    const hint = 'Hay un problema de conexión. Comprueba tu red e inténtalo de nuevo.';
     throw new Error(
       err instanceof Error && err.message.toLowerCase().includes('fetch') ? hint : (err instanceof Error ? err.message : hint),
     );

@@ -31,10 +31,10 @@ describe('subscriptionQuote', () => {
         commercialBrandCount: 0,
       },
     });
-    // 349 + 2*49 + 3*5 = 462
+    // 350 + 2*149 + 3*5 = 663
     expect(q.extras.extraPdv).toBe(2);
     expect(q.extras.extraWorkers).toBe(3);
-    expect(q.amountDueEuros).toBe(462);
+    expect(q.amountDueEuros).toBe(663);
   });
 
   it('PRO + extras en anual usa la misma lista ×12×0,8', () => {
@@ -48,8 +48,8 @@ describe('subscriptionQuote', () => {
         commercialBrandCount: 0,
       },
     });
-    expect(q.listMonthlyEuros).toBe(462);
-    expect(q.amountDueEuros).toBe(4435.2); // 462*12*0.8
+    expect(q.listMonthlyEuros).toBe(663);
+    expect(q.amountDueEuros).toBe(6364.8); // 663*12*0.8
   });
 
   it('prioriza métricas del onboarding sobre slots vacíos en subscription', () => {
@@ -74,7 +74,7 @@ describe('subscriptionQuote', () => {
       },
     });
     expect(q.billingMode).toBe('annual');
-    expect(q.listMonthlyEuros).toBe(462);
-    expect(q.amountDueEuros).toBe(4435.2);
+    expect(q.listMonthlyEuros).toBe(663);
+    expect(q.amountDueEuros).toBe(6364.8);
   });
 });

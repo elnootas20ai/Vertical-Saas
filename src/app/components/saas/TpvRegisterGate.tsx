@@ -8579,7 +8579,7 @@ export function TpvRegisterGate({
                 No se pudo cargar la caja
               </p>
               <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                El servidor puede estar ocupado o sin conexión. Reintenta en unos segundos.
+                La conexión está tardando más de lo normal. Reintenta en unos segundos.
               </p>
               <button
                 type="button"

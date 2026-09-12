@@ -11,6 +11,7 @@ import {
   listDiningOrdersRequest,
   payDiningOrderRequest,
   sendComandaToKitchenRequest,
+  sendDraftComandasToProductionRequest,
   splitDiningOrderRequest,
   updateComandaRequest,
   updateDiningOrderRequest,
@@ -32,6 +33,7 @@ import {
   formatUnavailableCartNames,
   unavailableCartLines,
 } from './restaurantCatalogAvailability';
+import { resolveRestaurantProductionArea } from '../../../shared/restaurant/productionArea.js';
 
 export type RestaurantCartLine = {
   lineId: string;
@@ -52,6 +54,8 @@ export function cartLinesToDiningItems(lines: RestaurantCartLine[]): DiningOrder
       price: cartLineUnitPrice(ci.catalogItem.unitPrice, ci.customization),
       quantity: ci.quantity,
       category: ci.catalogItem.category || '',
+      taxRate: Number(ci.catalogItem.taxRate ?? 10),
+      productionArea: resolveRestaurantProductionArea(ci.catalogItem),
       notes: ci.customization.notes?.trim() || '',
       modifiers: extras,
       extras,
@@ -106,6 +110,7 @@ export function deliveryItemsToDiningItems(items: DeliveryOrderItem[]): DiningOr
       price: Number(i.unitPrice || 0),
       quantity: Number(i.quantity || 1),
       category: i.category || '',
+      taxRate: Number(i.taxRate ?? 10),
       notes: i.notes || '',
       modifiers: extras,
       extras,
@@ -182,6 +187,8 @@ export async function addCartToDiningAccount(params: {
   sendToKitchen?: boolean;
   /** Cuenta actual para merge optimista offline. */
   currentOrder?: DiningOrder | null;
+  /** El modo offline de Restaurante es una capacidad Pro. */
+  allowOffline?: boolean;
 }): Promise<{ order: DiningOrder; comanda: DiningComanda; queuedOffline?: boolean }> {
   const blocked = unavailableCartLines(params.lines);
   if (blocked.length > 0) {
@@ -190,6 +197,9 @@ export async function addCartToDiningAccount(params: {
 
   const items = cartLinesToDiningItems(params.lines);
 
+  if (!isBrowserOnline() && params.allowOffline === false) {
+    throw new Error('La conexión está lenta o interrumpida. Reintenta cuando vuelva la red.');
+  }
   if (!isBrowserOnline()) {
     const clientMutationId = uuidv4();
     enqueueTpvOfflineItem('dining_comanda_add', {
@@ -253,17 +263,14 @@ export function diningOrderHasDraftComandas(order: DiningOrder | null | undefine
   return listDraftComandaIds(order).length > 0;
 }
 
-/** Envía a cocina todas las comandas en borrador de la cuenta. */
+/** Envía todos los borradores de forma atómica; el servidor aplica Normal o PRO. */
 export async function sendDraftComandasToKitchen(params: {
   userId: string;
   order: DiningOrder;
 }): Promise<DiningOrder> {
-  let order = params.order;
-  const ids = listDraftComandaIds(order);
-  for (const comandaId of ids) {
-    order = await sendComandaToKitchenRequest(params.userId, order._id, comandaId);
-  }
-  return order;
+  const ids = listDraftComandaIds(params.order);
+  if (ids.length === 0) return params.order;
+  return sendDraftComandasToProductionRequest(params.userId, params.order._id, ids);
 }
 
 export type PayAndCloseDiningResult = {
@@ -276,6 +283,7 @@ export async function payAndCloseDiningOrder(params: {
   userId: string;
   order: DiningOrder;
   payment: {
+    id?: string;
     method: string;
     amount: number;
     amountReceived?: number;
@@ -290,34 +298,43 @@ export async function payAndCloseDiningOrder(params: {
   registerInCaja?: boolean;
   /** Si hay comandas en cocina, fuerza el cierre al cobrar (evita pagado-huérfano). */
   forceCloseIfKitchenPending?: boolean;
+  /** El modo offline de Restaurante es una capacidad Pro. */
+  allowOffline?: boolean;
 }): Promise<PayAndCloseDiningResult & { queuedOffline?: boolean }> {
+  const payment = {
+    ...params.payment,
+    id: String(params.payment.id || uuidv4()),
+  };
+  if (!isBrowserOnline() && params.allowOffline === false) {
+    throw new Error('La conexión está lenta o interrumpida. No se ha registrado el cobro.');
+  }
   if (!isBrowserOnline()) {
     const force =
       Boolean(params.forceCloseIfKitchenPending) && diningOrderHasPendingKitchen(params.order);
     enqueueTpvOfflineItem('dining_pay', {
       userId: params.userId,
       orderId: params.order._id,
-      payment: params.payment,
+      payment,
       salesPointId: params.salesPointId || '',
       salesPointName: params.salesPointName || '',
       registerInCaja: params.registerInCaja !== false,
       closeAfterPay: true,
       forceClose: force,
     });
-    const paidAmt = Number(params.payment.amount || 0);
+    const paidAmt = Number(payment.amount || 0);
     const payments = [
       ...(params.order.payments || []),
       {
-        id: `offline-pay-${Date.now()}`,
-        method: params.payment.method,
+        id: payment.id,
+        method: payment.method,
         amount: paidAmt,
-        amountReceived: Number(params.payment.amountReceived || paidAmt),
-        changeGiven: Number(params.payment.changeGiven || 0),
-        tip: Number(params.payment.tip || 0),
-        paidBy: params.payment.paidBy,
-        paidByName: params.payment.paidByName,
+        amountReceived: Number(payment.amountReceived || paidAmt),
+        changeGiven: Number(payment.changeGiven || 0),
+        tip: Number(payment.tip || 0),
+        paidBy: payment.paidBy,
+        paidByName: payment.paidByName,
         paidAt: new Date().toISOString(),
-        splitLabel: params.payment.splitLabel || '',
+        splitLabel: payment.splitLabel || '',
       },
     ];
     const paidTotal = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
@@ -340,7 +357,7 @@ export async function payAndCloseDiningOrder(params: {
   const { order, fullyPaid, cajaRegistration } = await payDiningOrderRequest(
     params.userId,
     params.order._id,
-    params.payment,
+    payment,
     {
       salesPointId: params.salesPointId,
       salesPointName: params.salesPointName,
@@ -352,6 +369,9 @@ export async function payAndCloseDiningOrder(params: {
   );
   // Compat: APIs antiguas sin closeAfterPay → cerrar en segunda llamada.
   if (fullyPaid && order.status !== 'closed') {
+    if (diningOrderHasPendingKitchen(order) && !force) {
+      return { order, fullyPaid: true, cajaRegistration };
+    }
     const closed = await closeDiningOrderRequest(
       params.userId,
       params.order._id,

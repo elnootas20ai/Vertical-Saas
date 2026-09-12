@@ -53,7 +53,8 @@ export const DELIVERY_CATALOG_ESCANDALLO_COLUMNS = ['costPrice', 'mermaPct'] as 
 export const DELIVERY_CATALOG_IMPORT_LABELS: Record<
   (typeof DELIVERY_CATALOG_IMPORT_COLUMNS)[number] |
     (typeof DELIVERY_CATALOG_ESCANDALLO_COLUMNS)[number] |
-    (typeof DELIVERY_CATALOG_OPTIONAL_COLUMNS)[number],
+    (typeof DELIVERY_CATALOG_OPTIONAL_COLUMNS)[number] |
+    'productionArea',
   string
 > = {
   name: 'nombre',
@@ -66,6 +67,7 @@ export const DELIVERY_CATALOG_IMPORT_LABELS: Record<
   ingredients: 'ingredientes',
   description: 'descripcion',
   tipo_menu: 'tipo_menu',
+  productionArea: 'destino_preparacion',
   taxRate: 'iva',
   allergens: 'alergenos',
   formato: 'formato',
@@ -83,7 +85,7 @@ export const DELIVERY_CATALOG_TEMPLATE_HEADERS = [
 ];
 
 /** Versión de la plantilla (solo cambiar si hay migración acordada). */
-export const DELIVERY_CATALOG_TEMPLATE_VERSION = 6;
+export const DELIVERY_CATALOG_TEMPLATE_VERSION = 7;
 
 export const DELIVERY_CATALOG_TEMPLATE_FILENAME = 'plantilla_catalogo_tpv.xlsx';
 export const HELADERIA_CATALOG_TEMPLATE_FILENAME = 'plantilla_catalogo_heladeria.xlsx';
@@ -183,6 +185,7 @@ export const RESTAURANT_CATALOG_IMPORT_FIELDS: ImportFieldDef[] = [
   ...CATALOG_ESCANDALLO_IMPORT_FIELDS,
   { key: 'ingredients', label: 'ingredientes', example: 'Patata, Aceite, Pimentón' },
   { key: 'description', label: 'descripcion', example: '' },
+  { key: 'productionArea', label: 'destino_preparacion', example: 'cocina' },
   ...CATALOG_OPTIONAL_IMPORT_FIELDS.map((f) =>
     f.key === 'allergens' ? { ...f, example: 'gluten' } : f,
   ),
@@ -198,6 +201,7 @@ export const DELIVERY_CATALOG_HEADER_ALIASES: Record<string, string[]> = {
   ingredients: ['ingredientes', 'ingredients', 'ingrediente', 'receta', 'componentes'],
   description: ['descripcion', 'description', 'desc', 'notas', 'observaciones'],
   tipo_menu: ['tipo_menu', 'tipo menu', 'tipo menú', 'menu', 'menú', 'tamano menu', 'tamaño menú', 'combo tipo'],
+  productionArea: ['destino_preparacion', 'destino preparacion', 'destino preparación', 'estacion', 'estación', 'production area'],
   taxRate: ['iva', 'tax', 'taxrate', 'vat', 'impuesto', 'tipo iva', '% iva'],
   allergens: ['alergenos', 'alérgenos', 'allergens', 'alergeno', 'alérgeno', 'alergias'],
   formato: ['formato', 'format', 'tamano', 'tamaño', 'size', 'presentacion', 'presentación'],
@@ -290,9 +294,12 @@ export function catalogHeaderAliasesForVertical(vertical?: string | null): Recor
   return DELIVERY_CATALOG_HEADER_ALIASES;
 }
 
-export function catalogTemplateHeadersForVertical(_vertical?: string | null): string[] {
-  // Misma plantilla para todas las verticales: core + opcionales visibles.
-  return [...DELIVERY_CATALOG_TEMPLATE_HEADERS];
+export function catalogTemplateHeadersForVertical(vertical?: string | null): string[] {
+  const headers = [...DELIVERY_CATALOG_TEMPLATE_HEADERS];
+  if (String(vertical || '').trim() === 'restaurant') {
+    headers.push(DELIVERY_CATALOG_IMPORT_LABELS.productionArea);
+  }
+  return headers;
 }
 
 /** Rellena celdas vacías hasta el nº de columnas de la plantilla. */

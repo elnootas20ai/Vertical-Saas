@@ -8,6 +8,7 @@ import {
   listFinanceByUser,
   putDocument,
 } from './couchdb.js';
+import { calcLinesTaxBreakdown } from '../shared/tax/spainVat.js';
 import logger from './logger.js';
 
 function round2(n) {
@@ -27,6 +28,52 @@ function orderRef(orderId) {
 
 function businessIdOf(order) {
   return String(order?.business_id || order?.businessId || '').replace(/^business:/, '').trim();
+}
+
+function diningTaxAmounts(order, total) {
+  const lines = (order?.comandas || [])
+    .filter((comanda) => comanda?.status !== 'cancelled')
+    .flatMap((comanda) => (comanda.items || [])
+      .filter((item) => item?.status !== 'cancelled')
+      .map((item) => ({
+        quantity: Number(item.quantity || 0),
+        unitPrice: Number(item.price || 0),
+        taxRate: Number(item.taxRate ?? 10),
+        category: item.category,
+      })));
+  const grossBeforeDiscount = lines.reduce(
+    (sum, line) => sum + line.quantity * line.unitPrice,
+    0,
+  );
+  const ratio = grossBeforeDiscount > 0 ? Math.min(1, total / grossBeforeDiscount) : 1;
+  const breakdown = calcLinesTaxBreakdown(
+    lines.map((line) => ({
+      ...line,
+      total: round2(line.quantity * line.unitPrice * ratio),
+    })),
+    {
+      enabled: true,
+      pricesIncludeTax: true,
+      defaultFoodTaxRate: 10,
+      defaultStandardTaxRate: 21,
+    },
+  );
+  if (breakdown.gross > 0.009) {
+    const taxAmount = Math.min(round2(total), breakdown.tax);
+    return {
+      amountBase: round2(total - taxAmount),
+      taxAmount,
+      totalAmount: round2(total),
+      taxRate: breakdown.effectiveTaxRate,
+    };
+  }
+  const amountBase = round2(total / 1.10);
+  return {
+    amountBase,
+    taxAmount: round2(total - amountBase),
+    totalAmount: round2(total),
+    taxRate: 10,
+  };
 }
 
 async function hasMovement(req, userId, predicate) {
@@ -58,7 +105,7 @@ export async function ensureDiningOrderIncomeServer(req, userId, order) {
     const dateStr = String(
       order.paidAt || order.closedAt || order.updatedAt || order.createdAt || new Date().toISOString(),
     ).slice(0, 10);
-    const base = round2(total / 1.21);
+    const tax = diningTaxAmounts(order, total);
     const tableLabel = order.tableName
       || (order.tableNumber != null ? `Mesa ${order.tableNumber}` : 'Sala');
     const bid = businessIdOf(order);
@@ -69,8 +116,10 @@ export async function ensureDiningOrderIncomeServer(req, userId, order) {
       concept: `Venta sala · ${tableLabel}${order.clientName ? ` · ${order.clientName}` : ''}`,
       reference: orderRef(id),
       category: 'ventas',
-      amountBase: base,
-      taxRate: 21,
+      amountBase: tax.amountBase,
+      taxRate: tax.taxRate,
+      taxAmount: tax.taxAmount,
+      totalAmount: tax.totalAmount,
       date: dateStr,
       payMethod,
       notes: `dining_order:${id}`,

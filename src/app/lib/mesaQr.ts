@@ -17,6 +17,8 @@ export type PublicMesaPayload = {
   webSlug: string;
   webEnabled: boolean;
   storeName: string;
+  salesPointId?: string;
+  setupError?: string;
 };
 
 export function buildMesaPublicPath(token: string): string {
@@ -133,6 +135,7 @@ export function writeMesaQrLock(mesa: PublicMesaPayload): void {
       tableNumber: mesa.tableNumber,
       tableName: mesa.tableName,
       businessId: mesa.businessId,
+      salesPointId: mesa.salesPointId || '',
       at: Date.now(),
     }));
   } catch {
@@ -146,6 +149,7 @@ export function readMesaQrLock(): {
   tableNumber: number;
   tableName: string;
   businessId: string;
+  salesPointId: string;
 } | null {
   try {
     const raw = sessionStorage.getItem(MESA_LOCK_KEY);
@@ -160,6 +164,7 @@ export function readMesaQrLock(): {
       tableNumber: Number(parsed.tableNumber) || 0,
       tableName: String(parsed.tableName || '').trim() || `Mesa ${parsed.tableNumber || ''}`,
       businessId: String(parsed.businessId || '').trim(),
+      salesPointId: String(parsed.salesPointId || '').trim(),
     };
   } catch {
     return null;

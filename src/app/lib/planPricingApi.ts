@@ -79,6 +79,10 @@ async function ensureDb() {
 }
 
 function mergePlansWithCatalogDefaults(plans: PlanDefinition[]): PlanDefinition[] {
+  const legacyClosedPrices: Partial<Record<string, number>> = {
+    normal: 149,
+    pro: 349,
+  };
   return (plans || []).map((plan) => {
     const def = DEFAULT_PLANS.find((d) => d.id === plan.id);
     if (!def) return plan;
@@ -86,6 +90,10 @@ function mergePlansWithCatalogDefaults(plans: PlanDefinition[]): PlanDefinition[
     return {
       ...plan,
       name: def.name,
+      // Migra solo los antiguos defaults cerrados; respeta precios personalizados reales.
+      monthlyPrice: plan.monthlyPrice === legacyClosedPrices[plan.id]
+        ? def.monthlyPrice
+        : plan.monthlyPrice,
       features: def.features,
       badge: plan.badge ?? def.badge,
       highlight: plan.highlight ?? def.highlight,

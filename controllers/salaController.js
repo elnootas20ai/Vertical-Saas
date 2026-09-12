@@ -15,6 +15,7 @@ import {
   getDiningOrderById,
   addComandaToOrder,
   updateComandaInOrder,
+  routeDraftComandasToProductionAreas,
   shouldAutoTransitionTable,
   isValidKitchenComandaTransition,
   listDiningTableTicketStatsByUser,
@@ -33,7 +34,10 @@ import {
 import { broadcastToBusiness, broadcastToUser } from '../services/sseService.js';
 import logger from '../services/logger.js';
 import { tryAutoIssueForDiningOrder } from '../services/verifactuIssueService.js';
-import { registerDiningSaleInTpvSession } from '../services/diningCajaService.js';
+import {
+  registerDiningSaleInTpvSession,
+  validateDiningCajaTarget,
+} from '../services/diningCajaService.js';
 import { maybeDeductRecipeStockForDiningOrder } from '../services/diningStockService.js';
 import { ensureDiningOrderIncomeServer } from '../services/diningOrderFinanceService.js';
 import { syncClientAfterDiningOrder } from '../services/restaurantClientSync.js';
@@ -41,34 +45,173 @@ import { redeemClientLoyaltyPoints } from '../services/restaurantLoyaltyRedeem.j
 import { stampOpsDoc, resolveBusinessIdFromRequest, resolveAccountBusinessCount } from '../shared/scope/opsScope.js';
 import { emitGlobalAlert } from '../services/alertEmitter.js';
 import { randomUUID } from 'crypto';
+import { accountHasRestaurantFeature } from '../shared/billing/restaurantPlanFeatures.js';
+import {
+  assertBusinessTeamAccess,
+  canManageBusinessTeam,
+  isTenantAccountOwner,
+} from '../services/businessAccess.js';
+import { getAuthUserId } from '../services/clockinsAccess.js';
+import { resolveCatalogItemTaxRate } from '../shared/tax/spainVat.js';
 
-/** Rechaza ítems de carta marcados agotados / inactivos. */
-async function assertComandaCatalogAvailable(req, userId, comanda) {
+async function accountHasRestaurantStationsPro(req, userId) {
+  const account = await findAccountByUserId(req, userId).catch(() => null);
+  return accountHasRestaurantFeature(account, 'production_stations');
+}
+
+async function catalogByComandaProductId(req, userId, comandas) {
+  const productIds = new Set(
+    (comandas || [])
+      .flatMap((comanda) => Array.isArray(comanda?.items) ? comanda.items : [])
+      .map((item) => String(item?.productId || item?.catalogItemId || '').trim())
+      .filter(Boolean),
+  );
+  if (productIds.size === 0) return new Map();
+  const db = getCatalogDbName();
+  await ensureDatabase(req, db);
+  const rows = await Promise.all(
+    [...productIds].map(async (id) => {
+      const item = await getDocument(req, db, id).catch(() => null);
+      if (!item || item.type !== 'catalog_item' || (item.user_id && item.user_id !== userId)) {
+        return null;
+      }
+      return [id, item];
+    }),
+  );
+  return new Map(rows.filter(Boolean));
+}
+
+function broadcastSentComandas(userId, order, sentComandas) {
+  for (const comanda of sentComandas) {
+    broadcastToUser(userId, 'sala:comanda_sent', {
+      orderId: order._id,
+      comandaId: comanda.id,
+      productionArea: comanda.productionArea || 'kitchen',
+      tableNumber: order.tableNumber,
+      tableName: order.tableName,
+      zone: order.zone,
+      items: comanda.items,
+    });
+  }
+}
+
+function normalizeBusinessId(value) {
+  return String(value || '').replace(/^business:/, '').trim();
+}
+
+async function requireOrderManager(req, res, order, ownerUserId) {
+  const businessId = normalizeBusinessId(order?.businessId || order?.business_id);
+  if (businessId) {
+    const access = await assertBusinessTeamAccess(req, businessId);
+    if (!access.ok) {
+      res.status(access.status).json({ ok: false, error: access.error });
+      return false;
+    }
+    if (!canManageBusinessTeam(access.business, access.userId)) {
+      res.status(403).json({ ok: false, error: 'Solo gerente, encargado o propietario puede hacer esta acción' });
+      return false;
+    }
+    return true;
+  }
+
+  // Compatibilidad con cuentas antiguas sin businessId: solo el titular real.
+  const actorId = getAuthUserId(req);
+  const actor = actorId ? await findAccountByUserId(req, actorId).catch(() => null) : null;
+  if (actorId !== String(ownerUserId || '').replace(/^account:/, '') || !isTenantAccountOwner(actor)) {
+    res.status(403).json({ ok: false, error: 'Solo el propietario puede modificar una cuenta antigua sin empresa' });
+    return false;
+  }
+  return true;
+}
+
+async function assertWritableBusiness(req, res, businessId) {
+  const bid = normalizeBusinessId(businessId);
+  if (!bid) {
+    res.status(400).json({ ok: false, error: 'Falta businessId' });
+    return null;
+  }
+  const access = await assertBusinessTeamAccess(req, bid);
+  if (!access.ok) {
+    res.status(access.status).json({ ok: false, error: access.error });
+    return null;
+  }
+  return access;
+}
+
+/** Revalida disponibilidad, empresa, identidad y precio base desde catálogo. */
+async function prepareComandaFromCatalog(req, userId, order, comanda) {
   const items = Array.isArray(comanda?.items) ? comanda.items : [];
-  if (items.length === 0) return;
+  if (items.length === 0) {
+    const err = new Error('Añade al menos un producto a la comanda');
+    err.code = 'CATALOG_INVALID';
+    throw err;
+  }
   const catalogDb = getCatalogDbName();
   await ensureDatabase(req, catalogDb);
   const blocked = [];
+  const preparedItems = [];
+  const orderBusinessId = normalizeBusinessId(order?.businessId || order?.business_id);
   for (const line of items) {
     const productId = String(line?.productId || line?.catalogItemId || '').trim();
-    if (!productId) continue;
+    if (!productId) {
+      const err = new Error('Una línea de comanda no tiene producto de catálogo');
+      err.code = 'CATALOG_INVALID';
+      throw err;
+    }
     let catalogItem;
     try {
       catalogItem = await getDocument(req, catalogDb, productId);
     } catch {
-      continue;
+      catalogItem = null;
     }
-    if (!catalogItem || catalogItem.type !== 'catalog_item') continue;
-    if (catalogItem.user_id && catalogItem.user_id !== userId) continue;
+    if (!catalogItem || catalogItem.type !== 'catalog_item' || (catalogItem.user_id && catalogItem.user_id !== userId)) {
+      const err = new Error('Uno de los productos ya no existe en la carta');
+      err.code = 'CATALOG_INVALID';
+      throw err;
+    }
+    const itemBusinessId = normalizeBusinessId(catalogItem.businessId || catalogItem.business_id);
+    if (orderBusinessId && itemBusinessId && itemBusinessId !== orderBusinessId) {
+      const err = new Error('Uno de los productos pertenece a otra empresa');
+      err.code = 'CATALOG_INVALID';
+      throw err;
+    }
     if (catalogItem.active === false || catalogItem.available === false) {
       blocked.push(String(catalogItem.name || line.name || productId));
     }
+    const quantity = Math.floor(Number(line.quantity || 0));
+    if (!(quantity > 0) || quantity > 99) {
+      const err = new Error('Cantidad de producto no válida');
+      err.code = 'CATALOG_INVALID';
+      throw err;
+    }
+    const basePrice = Math.round(Number(catalogItem.unitPrice || 0) * 100) / 100;
+    const requestedPrice = Math.round(Number(line.price || 0) * 100) / 100;
+    if (!Number.isFinite(requestedPrice) || requestedPrice + 0.001 < basePrice) {
+      const err = new Error(`El precio de ${catalogItem.name || 'un producto'} no coincide con la carta`);
+      err.code = 'CATALOG_PRICE_MISMATCH';
+      throw err;
+    }
+    preparedItems.push({
+      ...line,
+      productId,
+      name: String(catalogItem.name || ''),
+      category: String(catalogItem.category || ''),
+      quantity,
+      price: requestedPrice,
+      taxRate: resolveCatalogItemTaxRate(catalogItem, {
+        enabled: true,
+        pricesIncludeTax: true,
+        defaultFoodTaxRate: 10,
+        defaultStandardTaxRate: 21,
+      }),
+    });
   }
   if (blocked.length > 0) {
     const err = new Error(`Agotado en carta: ${[...new Set(blocked)].join(', ')}`);
     err.code = 'CATALOG_UNAVAILABLE';
     throw err;
   }
+  return { ...comanda, items: preparedItems };
 }
 
 function badRequest(res, error) {
@@ -116,12 +259,14 @@ export async function createTable(req, res) {
     if (!userId) return badRequest(res, 'Falta userId');
     if (!table || typeof table !== 'object') return badRequest(res, 'Falta el objeto table en el body');
     if (!table.number && table.number !== 0) return badRequest(res, 'Falta el número de mesa');
+    const businessId = table.businessId || table.business_id || resolveBusinessIdFromRequest(req);
+    if (!(await assertWritableBusiness(req, res, businessId))) return;
 
     const db = getSalaDbName();
     await ensureDatabase(req, db);
     const doc = buildDiningTableDocument(userId, stampOpsDoc(table, {
       ownerUserId: userId,
-      businessId: table.businessId || table.business_id || resolveBusinessIdFromRequest(req),
+      businessId,
     }));
     const saved = await putDocument(req, db, doc._id, doc);
     const sanitized = sanitizeDiningTable({ ...doc, _rev: saved.rev });
@@ -144,7 +289,8 @@ export async function updateTable(req, res) {
     if (!existing) return res.status(404).json({ ok: false, error: 'Mesa no encontrada' });
 
     const db = getSalaDbName();
-    const doc = buildDiningTableDocument(userId, table, existing);
+    const { businessId: _businessId, business_id: _businessIdLegacy, user_id: _userId, ...safeTable } = table;
+    const doc = buildDiningTableDocument(userId, safeTable, existing);
     const saved = await putDocument(req, db, doc._id, doc);
     const sanitized = sanitizeDiningTable({ ...doc, _rev: saved.rev });
 
@@ -170,7 +316,8 @@ export async function bulkUpdateTables(req, res) {
       if (!t._id) continue;
       const existing = await getDocument(req, db, t._id);
       if (!existing || existing.type !== 'dining_table' || existing.user_id !== userId) continue;
-      docs.push(buildDiningTableDocument(userId, t, existing));
+      const { businessId: _businessId, business_id: _businessIdLegacy, user_id: _userId, ...safeTable } = t;
+      docs.push(buildDiningTableDocument(userId, safeTable, existing));
     }
 
     if (docs.length > 0) {
@@ -191,11 +338,25 @@ export async function bulkCreateTables(req, res) {
     const { tables } = req.body || {};
     if (!userId) return badRequest(res, 'Falta userId');
     if (!Array.isArray(tables) || tables.length === 0) return badRequest(res, 'Se espera un array de mesas');
+    const businessId =
+      resolveBusinessIdFromRequest(req)
+      || tables[0]?.businessId
+      || tables[0]?.business_id;
+    if (!(await assertWritableBusiness(req, res, businessId))) return;
+    if (tables.some((table) => {
+      const rowBusinessId = normalizeBusinessId(table?.businessId || table?.business_id || businessId);
+      return rowBusinessId !== normalizeBusinessId(businessId);
+    })) {
+      return badRequest(res, 'Todas las mesas deben pertenecer a la misma empresa');
+    }
 
     const db = getSalaDbName();
     await ensureDatabase(req, db);
 
-    const docs = tables.map((table) => buildDiningTableDocument(userId, table));
+    const docs = tables.map((table) => buildDiningTableDocument(
+      userId,
+      stampOpsDoc(table, { ownerUserId: userId, businessId }),
+    ));
     await bulkPutDocuments(req, db, docs);
     const sanitized = docs.map((doc) => sanitizeDiningTable(doc));
 
@@ -389,19 +550,38 @@ export async function createOrder(req, res) {
     if (!userId) return badRequest(res, 'Falta userId');
     if (!order || typeof order !== 'object') return badRequest(res, 'Falta el objeto order');
     if (!order.tableId) return badRequest(res, 'Falta tableId');
+    const businessId = order.businessId || order.business_id || resolveBusinessIdFromRequest(req);
+    const access = await assertWritableBusiness(req, res, businessId);
+    if (!access) return;
 
     const db = getSalaDbName();
     await ensureDatabase(req, db);
 
+    const table = await getDocument(req, db, order.tableId);
+    if (!table || table.type !== 'dining_table' || table.user_id !== userId) {
+      return res.status(404).json({ ok: false, error: 'Mesa no encontrada' });
+    }
+    const tableBusinessId = normalizeBusinessId(table.businessId || table.business_id);
+    if (tableBusinessId && tableBusinessId !== normalizeBusinessId(businessId)) {
+      return res.status(409).json({ ok: false, error: 'La mesa pertenece a otra empresa' });
+    }
+    const openOnTable = (await listDiningOrdersByUser(req, userId, {
+      tableId: order.tableId,
+      businessId,
+      accountBusinessCount: resolveAccountBusinessCount(req),
+    })).find((row) => !['closed', 'cancelled'].includes(String(row.status || '')));
+    if (openOnTable) {
+      return res.status(409).json({ ok: false, error: 'La mesa ya tiene una cuenta abierta', order: sanitizeDiningOrder(openOnTable) });
+    }
+
     const doc = buildDiningOrderDocument(userId, stampOpsDoc({ ...order, status: 'open' }, {
       ownerUserId: userId,
-      businessId: order.businessId || order.business_id || resolveBusinessIdFromRequest(req),
+      businessId,
       salesPointId: order.salesPointId,
     }));
     const saved = await putDocument(req, db, doc._id, doc);
 
     // Auto-transition table to occupied
-    const table = await getDocument(req, db, order.tableId);
     if (table && table.type === 'dining_table' && table.user_id === userId) {
       const now = new Date().toISOString();
       const updatedTable = buildDiningTableDocument(userId, {
@@ -432,40 +612,92 @@ export async function updateOrder(req, res) {
     const existing = await ensureDiningOrderOwner(req, userId, orderId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
 
+    const allowedFields = new Set([
+      'tableId',
+      'tableNumber',
+      'tableName',
+      'zone',
+      'discount',
+      'discountPercent',
+      'discountReason',
+    ]);
+    const forbidden = Object.keys(order).filter((key) => !allowedFields.has(key));
+    if (forbidden.length > 0) {
+      return badRequest(res, `Campos no permitidos en la actualización: ${forbidden.join(', ')}`);
+    }
+    const changesDiscount = ['discount', 'discountPercent', 'discountReason'].some((key) =>
+      Object.prototype.hasOwnProperty.call(order, key));
+    if ((changesDiscount || loyaltyRedeem) && !(await requireOrderManager(req, res, existing, userId))) {
+      return;
+    }
+    if (
+      !Object.prototype.hasOwnProperty.call(order, 'tableId')
+      && ['tableNumber', 'tableName', 'zone'].some((key) => Object.prototype.hasOwnProperty.call(order, key))
+    ) {
+      return badRequest(res, 'Para cambiar datos de mesa debe indicarse tableId');
+    }
+    if (order.tableId && String(order.tableId) !== String(existing.tableId || '')) {
+      const targetTable = await ensureDiningTableOwner(req, userId, String(order.tableId));
+      if (!targetTable) return res.status(404).json({ ok: false, error: 'Mesa destino no encontrada' });
+      const orderBusinessId = normalizeBusinessId(existing.businessId || existing.business_id);
+      const tableBusinessId = normalizeBusinessId(targetTable.businessId || targetTable.business_id);
+      if (!orderBusinessId || !tableBusinessId || orderBusinessId !== tableBusinessId) {
+        return res.status(409).json({ ok: false, error: 'La mesa destino pertenece a otra empresa' });
+      }
+      const occupied = (await listDiningOrdersByUser(req, userId, {
+        tableId: targetTable._id,
+        businessId: orderBusinessId,
+      })).find((row) =>
+        row._id !== existing._id && !['closed', 'cancelled'].includes(String(row.status || '')));
+      if (occupied) return res.status(409).json({ ok: false, error: 'La mesa destino ya tiene una cuenta abierta' });
+      order.tableNumber = targetTable.number;
+      order.tableName = targetTable.name || `Mesa ${targetTable.number}`;
+      order.zone = targetTable.zone || '';
+    }
+
     let redeemMeta = existing.loyaltyRedeem || null;
     const redeemPts = Math.max(0, Math.floor(Number(loyaltyRedeem?.points || 0)));
     if (redeemPts > 0) {
-      const clientId = String(
-        loyaltyRedeem?.clientId || order.clientId || existing.clientId || '',
-      ).trim();
-      if (!clientId || clientId.startsWith('tpv-')) {
-        return badRequest(res, 'Vincula un cliente CRM para canjear puntos');
-      }
-      try {
-        const redeemed = await redeemClientLoyaltyPoints(req, userId, {
-          clientId,
-          points: redeemPts,
-          orderId,
-          reason: String(order.discountReason || loyaltyRedeem?.reason || 'LOYALTY'),
-        });
-        if (!redeemed) return badRequest(res, 'No se pudo canjear puntos');
-        redeemMeta = {
-          points: redeemed.pointsDebited,
-          discountEuro: redeemed.discountEuro,
-          clientId,
-          redeemedAt: new Date().toISOString(),
-        };
-        if (!(Number(order.discount) > 0) && !(Number(order.discountPercent) > 0)) {
-          order.discount = redeemed.discountEuro;
-          order.discountPercent = 0;
-          order.discountReason = order.discountReason
-            || `LOYALTY ${redeemed.pointsDebited} pts`;
+      if (existing.loyaltyRedeem) {
+        const sameRedeem =
+          Number(existing.loyaltyRedeem.points || 0) === redeemPts
+          && String(existing.loyaltyRedeem.clientId || '') === String(loyaltyRedeem?.clientId || existing.clientId || '');
+        if (!sameRedeem) {
+          return res.status(409).json({ ok: false, error: 'Esta cuenta ya tiene un canje de puntos aplicado' });
         }
-      } catch (redeemErr) {
-        if (redeemErr?.code === 'LOYALTY_INSUFFICIENT') {
-          return badRequest(res, redeemErr.message);
+      } else {
+        const clientId = String(
+          loyaltyRedeem?.clientId || existing.clientId || '',
+        ).trim();
+        if (!clientId || clientId.startsWith('tpv-')) {
+          return badRequest(res, 'Vincula un cliente CRM para canjear puntos');
         }
-        throw redeemErr;
+        try {
+          const redeemed = await redeemClientLoyaltyPoints(req, userId, {
+            clientId,
+            points: redeemPts,
+            orderId,
+            reason: String(order.discountReason || loyaltyRedeem?.reason || 'LOYALTY'),
+          });
+          if (!redeemed) return badRequest(res, 'No se pudo canjear puntos');
+          redeemMeta = {
+            points: redeemed.pointsDebited,
+            discountEuro: redeemed.discountEuro,
+            clientId,
+            redeemedAt: new Date().toISOString(),
+          };
+          if (!(Number(order.discount) > 0) && !(Number(order.discountPercent) > 0)) {
+            order.discount = redeemed.discountEuro;
+            order.discountPercent = 0;
+            order.discountReason = order.discountReason
+              || `LOYALTY ${redeemed.pointsDebited} pts`;
+          }
+        } catch (redeemErr) {
+          if (redeemErr?.code === 'LOYALTY_INSUFFICIENT') {
+            return badRequest(res, redeemErr.message);
+          }
+          throw redeemErr;
+        }
       }
     }
 
@@ -497,16 +729,20 @@ export async function addComanda(req, res) {
       return badRequest(res, 'No se puede añadir comanda a un pedido cerrado o cancelado');
     }
 
+    let preparedComanda;
     try {
-      await assertComandaCatalogAvailable(req, userId, comanda);
+      preparedComanda = await prepareComandaFromCatalog(req, userId, existing, comanda);
     } catch (availErr) {
       if (availErr?.code === 'CATALOG_UNAVAILABLE') {
         return badRequest(res, availErr.message);
       }
+      if (availErr?.code === 'CATALOG_INVALID' || availErr?.code === 'CATALOG_PRICE_MISMATCH') {
+        return res.status(409).json({ ok: false, error: availErr.message });
+      }
       throw availErr;
     }
 
-    const result = addComandaToOrder(existing, comanda);
+    const result = addComandaToOrder(existing, preparedComanda);
     const db = getSalaDbName();
     const doc = buildDiningOrderDocument(userId, {
       comandas: result.comandas,
@@ -537,8 +773,37 @@ export async function updateComanda(req, res) {
 
     const found = (existing.comandas || []).find((c) => c.id === comandaId);
     if (!found) return res.status(404).json({ ok: false, error: 'Comanda no encontrada' });
+    if (!(await requireOrderManager(req, res, existing, userId))) return;
+    const keys = Object.keys(comanda);
+    if (keys.some((key) => key !== 'items') || !Array.isArray(comanda.items)) {
+      return badRequest(res, 'Solo se permite anular líneas desde esta operación');
+    }
+    const requestedById = new Map(comanda.items.map((item) => [String(item.id || ''), item]));
+    if (requestedById.size !== found.items.length) {
+      return badRequest(res, 'No se pueden añadir ni eliminar líneas mediante esta operación');
+    }
+    for (const current of found.items) {
+      const requested = requestedById.get(String(current.id || ''));
+      if (!requested) return badRequest(res, 'Línea de comanda no válida');
+      const nextStatus = String(requested.status || current.status);
+      if (nextStatus !== current.status && nextStatus !== 'cancelled') {
+        return badRequest(res, 'Solo se permite marcar líneas como canceladas');
+      }
+    }
+    const items = found.items.map((current) => {
+      const requested = requestedById.get(String(current.id || ''));
+      const nextStatus = String(requested.status || current.status);
+      return nextStatus === 'cancelled'
+        ? {
+            ...current,
+            status: 'cancelled',
+            cancelledReason: String(requested.cancelledReason || '').trim(),
+            cancelledBy: String(requested.cancelledBy || '').trim(),
+          }
+        : current;
+    });
 
-    const result = updateComandaInOrder(existing, comandaId, comanda);
+    const result = updateComandaInOrder(existing, comandaId, { items });
     const db = getSalaDbName();
     const doc = buildDiningOrderDocument(userId, {
       comandas: result.comandas,
@@ -568,11 +833,14 @@ export async function sendComandaToKitchen(req, res) {
     if (!comanda) return res.status(404).json({ ok: false, error: 'Comanda no encontrada' });
     if (comanda.status !== 'draft') return badRequest(res, 'Solo se pueden enviar comandas en borrador');
 
-    const now = new Date().toISOString();
-    const result = updateComandaInOrder(existing, comandaId, {
-      status: 'sent_to_kitchen',
-      sentToKitchenAt: now,
-      items: comanda.items.map((i) => ({ ...i, status: i.status === 'pending' ? 'pending' : i.status })),
+    const [hasProAccess, catalogByProductId] = await Promise.all([
+      accountHasRestaurantStationsPro(req, userId),
+      catalogByComandaProductId(req, userId, [comanda]),
+    ]);
+    const result = routeDraftComandasToProductionAreas(existing, {
+      comandaIds: [comandaId],
+      catalogByProductId,
+      hasProAccess,
     });
 
     const db = getSalaDbName();
@@ -580,18 +848,56 @@ export async function sendComandaToKitchen(req, res) {
     const saved = await putDocument(req, db, doc._id, doc);
     const sanitized = sanitizeDiningOrder({ ...doc, _rev: saved.rev });
 
-    broadcastToUser(userId, 'sala:comanda_sent', {
-      orderId: doc._id,
-      comandaId,
-      tableNumber: doc.tableNumber,
-      tableName: doc.tableName,
-      zone: doc.zone,
-      items: comanda.items,
-    });
+    broadcastSentComandas(userId, doc, result.sentComandas);
 
     return res.json({ ok: true, order: sanitized });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al enviar comanda a cocina' });
+  }
+}
+
+export async function sendDraftComandasToProduction(req, res) {
+  try {
+    const { userId, orderId } = req.params;
+    const requestedIds = Array.isArray(req.body?.comandaIds)
+      ? req.body.comandaIds.map((id) => String(id || '').trim()).filter(Boolean)
+      : [];
+    const existing = await ensureDiningOrderOwner(req, userId, orderId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
+
+    const drafts = (existing.comandas || []).filter(
+      (comanda) => comanda.status === 'draft'
+        && (requestedIds.length === 0 || requestedIds.includes(String(comanda.id))),
+    );
+    if (drafts.length === 0) return badRequest(res, 'No hay comandas en borrador para enviar');
+
+    const [hasProAccess, catalogByProductId] = await Promise.all([
+      accountHasRestaurantStationsPro(req, userId),
+      catalogByComandaProductId(req, userId, drafts),
+    ]);
+    const result = routeDraftComandasToProductionAreas(existing, {
+      comandaIds: drafts.map((comanda) => comanda.id),
+      catalogByProductId,
+      hasProAccess,
+    });
+
+    const db = getSalaDbName();
+    const doc = buildDiningOrderDocument(userId, { comandas: result.comandas }, existing);
+    const saved = await putDocument(req, db, doc._id, doc);
+    const sanitized = sanitizeDiningOrder({ ...doc, _rev: saved.rev });
+    broadcastSentComandas(userId, doc, result.sentComandas);
+    broadcastToUser(userId, 'sala:order_updated', sanitized);
+
+    return res.json({
+      ok: true,
+      order: sanitized,
+      stationRouting: hasProAccess ? 'pro' : 'normal',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error.message || 'Error al enviar comandas a preparación',
+    });
   }
 }
 
@@ -602,6 +908,7 @@ export async function cancelComanda(req, res) {
 
     const existing = await ensureDiningOrderOwner(req, userId, orderId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
+    if (!(await requireOrderManager(req, res, existing, userId))) return;
 
     const comanda = (existing.comandas || []).find((c) => c.id === comandaId);
     if (!comanda) return res.status(404).json({ ok: false, error: 'Comanda no encontrada' });
@@ -649,40 +956,78 @@ export async function payOrder(req, res) {
       forceCloseReason = '',
     } = req.body || {};
     if (!payment || typeof payment !== 'object') return badRequest(res, 'Falta el objeto payment');
+    if (registerInCaja === false) {
+      return badRequest(res, 'Los cobros de sala deben registrarse siempre en una caja abierta');
+    }
 
     const existing = await ensureDiningOrderOwner(req, userId, orderId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
-    if (existing.status === 'closed' || existing.status === 'cancelled') {
+    if (forceClose && !(await requireOrderManager(req, res, existing, userId))) return;
+    const now = new Date().toISOString();
+    const paymentId = String(payment.id || randomUUID()).trim();
+    const recordedPayment = (existing.payments || []).find((row) => String(row.id || '') === paymentId);
+    if ((existing.status === 'closed' || existing.status === 'cancelled') && !recordedPayment) {
       return badRequest(res, 'No se puede pagar un pedido cerrado o cancelado');
     }
 
-    const now = new Date().toISOString();
-    const paymentId = String(payment.id || randomUUID()).trim();
     const paymentRow = { ...payment, id: paymentId, paidAt: now };
-    const payments = [...(existing.payments || []), paymentRow];
+    if (recordedPayment && (
+      Math.abs(Number(recordedPayment.amount || 0) - Number(payment.amount || 0)) > 0.001
+      || String(recordedPayment.method || '') !== String(payment.method || '')
+    )) {
+      return res.status(409).json({ ok: false, error: 'El identificador de cobro ya existe con otros datos' });
+    }
+    if (existing.status === 'paid' && !recordedPayment) {
+      return res.status(409).json({ ok: false, error: 'La cuenta ya está pagada' });
+    }
+    const paidBefore = (existing.payments || []).reduce((s, p) => s + Number(p.amount || 0), 0);
+    const dueBefore = Math.max(0, Number(existing.total || 0) - paidBefore);
+    const amount = Number(payment.amount || 0);
+    if (!(amount > 0)) return badRequest(res, 'El importe del cobro debe ser mayor que cero');
+    if (!recordedPayment && amount > dueBefore + 0.02) {
+      return badRequest(res, 'El importe del cobro supera el pendiente de la cuenta');
+    }
+    const pdvId = String(salesPointId || payment.salesPointId || '').trim();
+    if (!recordedPayment) {
+      const cajaTarget = await validateDiningCajaTarget(req, userId, {
+        pdvId,
+        diningOrder: existing,
+      });
+      if (cajaTarget.status !== 'ready') {
+        return res.status(409).json({
+          ok: false,
+          error: cajaTarget.message || 'No se puede registrar el cobro en caja',
+          cajaRegistration: cajaTarget,
+        });
+      }
+    }
+    const payments = recordedPayment
+      ? [...(existing.payments || [])]
+      : [...(existing.payments || []), paymentRow];
     const totalPaid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
     const isPaid = totalPaid >= Number(existing.total || 0) - 0.02;
 
     const db = getSalaDbName();
-    let doc = buildDiningOrderDocument(userId, {
-      payments,
-      status: isPaid ? 'paid' : existing.status,
-      paidAt: isPaid ? now : existing.paidAt,
-    }, existing);
-    let saved = await putDocument(req, db, doc._id, doc);
-    let savedDoc = { ...doc, _rev: saved.rev };
+    let doc = recordedPayment
+      ? existing
+      : buildDiningOrderDocument(userId, {
+          payments,
+          status: isPaid ? 'paid' : existing.status,
+          paidAt: isPaid ? now : existing.paidAt,
+        }, existing);
+    let saved = recordedPayment ? { rev: existing._rev } : await putDocument(req, db, doc._id, doc);
+    let savedDoc = recordedPayment ? existing : { ...doc, _rev: saved.rev };
 
     // Camino crítico TPV: pago + caja (+ cierre). Verifactu/stock/finanzas/loyalty → después.
     let cajaRegistration = null;
-    if (registerInCaja !== false) {
-      const pdvId = String(salesPointId || payment.salesPointId || '').trim();
+    {
       const tableNote = savedDoc.tableName
         || (savedDoc.tableNumber != null ? `Mesa ${savedDoc.tableNumber}` : 'Sala');
       const splitLabel = String(payment.splitLabel || '').trim();
       cajaRegistration = await registerDiningSaleInTpvSession(req, userId, {
         pdvId,
         diningOrder: savedDoc,
-        amount: Number(payment.amount || 0),
+        amount,
         paymentMethod: payment.method || 'efectivo',
         registeredBy: payment.paidByName || payment.paidBy || 'TPV',
         description: splitLabel
@@ -694,7 +1039,7 @@ export async function payOrder(req, res) {
     }
 
     // Un solo round-trip desde el TPV: cobrar y cerrar mesa (libera mesa aquí).
-    if (isPaid && closeAfterPay) {
+    if (isPaid && closeAfterPay && savedDoc.status !== 'closed') {
       const hasPendingComandas = (savedDoc.comandas || []).some((c) =>
         ['sent_to_kitchen', 'in_preparation'].includes(c.status));
       // Si hay cocina pendiente y no forzamos, dejamos `paid` (no fallar tras haber cobrado/caja).
@@ -739,6 +1084,7 @@ export async function payOrder(req, res) {
       order: sanitized,
       fullyPaid: isPaid,
       cajaRegistration,
+      paymentAlreadyRecorded: Boolean(recordedPayment),
     });
 
     if (!isPaid) return;
@@ -807,6 +1153,7 @@ export async function closeOrder(req, res) {
 
     const existing = await ensureDiningOrderOwner(req, userId, orderId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
+    if (force && !(await requireOrderManager(req, res, existing, userId))) return;
 
     const totalPaid = (existing.payments || []).reduce((s, p) => s + Number(p.amount || 0), 0);
     const hasPendingComandas = (existing.comandas || []).some((c) =>
@@ -863,6 +1210,14 @@ export async function cancelOrder(req, res) {
     const existing = await ensureDiningOrderOwner(req, userId, orderId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
     if (existing.status === 'closed') return badRequest(res, 'No se puede cancelar un pedido cerrado');
+    if (!(await requireOrderManager(req, res, existing, userId))) return;
+    const paidAmount = (existing.payments || []).reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    if (existing.status === 'paid' || paidAmount > 0.001) {
+      return res.status(409).json({
+        ok: false,
+        error: 'No se puede anular una cuenta con cobros. Registra primero la devolución desde caja.',
+      });
+    }
 
     const now = new Date().toISOString();
     const db = getSalaDbName();
@@ -1128,6 +1483,7 @@ export async function updateComandaStatus(req, res) {
 
     const now = new Date().toISOString();
     const updates = { status };
+    if (status === 'in_preparation') updates.preparationStartedAt = now;
     if (status === 'ready') updates.readyAt = now;
     if (status === 'served') updates.servedAt = now;
     if (status === 'in_preparation') {

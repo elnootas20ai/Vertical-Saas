@@ -266,16 +266,15 @@ export const BrandingTab = forwardRef<BrandingTabHandle, Props>(function Brandin
           <Globe className="h-4 w-4 text-gray-500 dark:text-gray-400" />
           <h3 className="font-bold text-gray-900 dark:text-gray-100">Dominio</h3>
         </div>
-        <div className="relative">
-          <Globe className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            value={config.customDomain}
-            onChange={(e) => setConfig((c) => ({ ...c, customDomain: e.target.value }))}
-            className="w-full rounded-xl border border-gray-200 py-2.5 pl-9 pr-3.5 font-mono text-sm outline-none focus:border-gray-900 dark:border-gray-700 dark:bg-gray-800"
-            placeholder="tudominio.es"
-          />
-        </div>
+        <p className="text-sm text-gray-600 dark:text-gray-300">
+          El dominio público se configura una sola vez desde Web Pedidos.
+        </p>
+        <a
+          href="/saas/web-config"
+          className="inline-flex min-h-11 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-blue-50/60 hover:text-[var(--v-blue,#2563eb)] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+        >
+          Abrir configuración DNS
+        </a>
       </div>
 
       {showInlineActions ? (

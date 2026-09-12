@@ -68,8 +68,8 @@ function stockUnitCost(stock) {
 function lineCostWithUnitConversion(quantity, lineUnit, costPerUnit, stockUnit) {
   const from = normalizeStockUnit(lineUnit, 'ud');
   let costUnit = normalizeStockUnit(stockUnit, '');
-  if (costUnit !== 'g' && costUnit !== 'kg' && costUnit !== 'ml' && costUnit !== 'l') {
-    if (from === 'g' || from === 'kg') costUnit = 'kg';
+  if (costUnit !== 'mg' && costUnit !== 'g' && costUnit !== 'kg' && costUnit !== 'ml' && costUnit !== 'l') {
+    if (from === 'mg' || from === 'g' || from === 'kg') costUnit = 'kg';
     else if (from === 'ml' || from === 'l') costUnit = 'l';
     else costUnit = from || 'ud';
   }
@@ -107,7 +107,8 @@ function lineToRecipeIngredient(line, inventoryById, storeIngToStock, wastePerce
 
   const lineUnit = line.unit || 'ud';
   const stockUnit = normalizeStockUnit(stock?.unit || lineUnit, lineUnit);
-  const qtyForStock = Math.round(quantityInStockUnit(quantity, lineUnit, stockUnit) * 10000) / 10000;
+  // Seis decimales para no perder consumos expresados en mg al convertirlos a kg.
+  const qtyForStock = Math.round(quantityInStockUnit(quantity, lineUnit, stockUnit) * 1_000_000) / 1_000_000;
   const totalCost = lineCostWithUnitConversion(quantity, lineUnit, costPerUnit, stock?.unit);
   const isPackaging = stockCategory === 'packaging';
   const waste = isPackaging ? 0 : Math.min(100, Math.max(0, Number(wastePercent) || 0));

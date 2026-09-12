@@ -14,47 +14,30 @@ import {
 } from './couchdb.js';
 import { enrichOcrLinesWithCatalog, summarizeCatalogMatches } from './ocrCatalogLineMatcher.js';
 import { filterStockInventoryItems } from './stockInventoryScope.js';
-import { recordMovement } from './stockMovementService.js';
+import {
+  applyPurchaseMovementCost,
+  listMovementsByReference,
+  recordMovement,
+} from './stockMovementService.js';
 import logger from './logger.js';
+import { convertPurchaseLineToCatalogUnit } from './purchaseUnitService.js';
 
 const fakeReq = { headers: {} };
 
-export async function loadStockCatalogItems(userId) {
+export async function loadStockCatalogItems(userId, options = {}) {
   const items = await listCatalogItemsByUser(fakeReq, userId);
-  return filterStockInventoryItems(items);
-}
-
-export async function enrichOcrLinesForUser(rawLines, userId, supplierId = '') {
-  const catalogItems = await loadStockCatalogItems(userId);
-  return enrichOcrLinesWithCatalog(rawLines, catalogItems, { supplierId });
-}
-
-async function updateWeightedCatalogCost(req, userId, catalogItemId, receivedQty, unitCost, prevQtyBeforeReceipt) {
-  const db = getCatalogDbName();
-  const now = new Date().toISOString();
-  const catItem = await getDocument(req, db, catalogItemId);
-  if (!catItem || catItem.type !== 'catalog_item' || catItem.user_id !== userId) return;
-
-  const prevQty = Number(prevQtyBeforeReceipt ?? catItem.stockQuantity ?? 0);
-  const prevCost = Number(catItem.costPrice || 0);
-  const received = Number(receivedQty || 0);
-  let newCostPrice = Number(unitCost || 0);
-
-  const newStockQty = prevQty + received;
-  if (prevQty > 0 && prevCost > 0 && unitCost > 0 && newStockQty > 0) {
-    newCostPrice = Math.round(
-      ((prevQty * prevCost + received * Number(unitCost)) / newStockQty) * 100,
-    ) / 100;
-  }
-
-  const fresh = await getDocument(req, db, catalogItemId);
-  await putDocument(req, db, fresh._id, {
-    ...fresh,
-    costPrice: unitCost > 0 ? newCostPrice : fresh.costPrice,
-    lastPurchasePrice: unitCost > 0 ? unitCost : fresh.lastPurchasePrice,
-    lastPurchaseDate: now,
-    updatedAt: now,
+  const businessId = String(options.businessId || '').replace(/^business:/, '').trim();
+  return filterStockInventoryItems(items).filter((item) => {
+    if (!businessId) return true;
+    const itemBusinessId = String(item.businessId || item.business_id || '')
+      .replace(/^business:/, '').trim();
+    return !itemBusinessId || itemBusinessId === businessId;
   });
+}
+
+export async function enrichOcrLinesForUser(rawLines, userId, supplierId = '', options = {}) {
+  const catalogItems = await loadStockCatalogItems(userId, options);
+  return enrichOcrLinesWithCatalog(rawLines, catalogItems, { supplierId });
 }
 
 function financeScopeFromInvoice(entity = {}) {
@@ -73,10 +56,6 @@ export async function createFinancePagoFromPurchaseInvoice(req, userId, invoice,
   const alreadyLinked = allMvs.find(
     (m) => !m.deletedAt && m.sourceRef === invoice._id && m.type === 'pago',
   );
-  if (alreadyLinked) {
-    return { movementId: alreadyLinked._id, skipped: true };
-  }
-
   const invStatus = invoice.status || 'pending';
   const movementData = {
     type: 'pago',
@@ -85,6 +64,8 @@ export async function createFinancePagoFromPurchaseInvoice(req, userId, invoice,
     category: 'compras_stock',
     amountBase: Number(invoice.subtotal || 0),
     taxRate: Number(invoice.taxRate || 21),
+    taxAmount: Number(invoice.taxAmount || 0),
+    totalAmount: Number(invoice.total || 0),
     date: invoice.date || new Date().toISOString().slice(0, 10),
     payMethod: invoice.payMethod || '',
     companyName: invoice.supplierName || '',
@@ -103,6 +84,12 @@ export async function createFinancePagoFromPurchaseInvoice(req, userId, invoice,
     }],
     ...financeScopeFromInvoice(invoice),
   };
+
+  if (alreadyLinked) {
+    const updated = buildFinanceDocument(userId, movementData, alreadyLinked);
+    const saved = await putDocument(req, financeDb, updated._id, updated);
+    return { movementId: updated._id, skipped: true, updated: true, rev: saved.rev };
+  }
 
   const doc = buildFinanceDocument(userId, movementData);
   const saved = await putDocument(req, financeDb, doc._id, doc);
@@ -160,6 +147,8 @@ export async function reconcilePurchaseInvoiceFromOcr(req, userId, invoiceDoc, o
   const lines = Array.isArray(invoiceDoc.lines) ? invoiceDoc.lines : [];
   let stockUpdated = 0;
   let stockUnits = 0;
+  let stockFailures = 0;
+  let expectedStockLines = 0;
   const now = new Date().toISOString();
   const performedBy = options.performedBy || 'ocr-system';
   const applyStock = options.applyStock === true;
@@ -192,44 +181,92 @@ export async function reconcilePurchaseInvoiceFromOcr(req, userId, invoiceDoc, o
 
   if (applyStock) {
     if (!warehouseId) {
-      logger.warn(
-        { tag: 'OCR-STOCK', invoiceId: invoiceDoc._id, userId },
-        'Carga almacén sin warehouseId: el stock no se verá por tienda',
-      );
+      throw new Error('Selecciona el almacén de la tienda antes de cargar el documento');
+    }
+    const priorMovements = (await listMovementsByReference(
+      req,
+      userId,
+      invoiceDoc._id,
+      'purchase_invoice_ocr',
+      { movementTypes: ['purchase_reception'], maxDocs: 2000 },
+    )).filter((movement) => movement.applied !== false);
+    const receptionMovements = [...priorMovements];
+    const appliedByCatalog = new Map();
+    const targetByCatalog = new Map();
+    for (const movement of priorMovements) {
+      const key = String(movement.catalogItemId || '');
+      if (!key) continue;
+      appliedByCatalog.set(key, (appliedByCatalog.get(key) || 0) + Number(movement.quantity || 0));
     }
     for (const line of lines) {
       const catalogItemId = String(line.catalogItemId || '').trim();
-      const qty = Number(line.quantity || 0);
-      const unitCost = Number(line.unitPrice || line.unitCost || 0);
-      if (!catalogItemId || qty <= 0) continue;
+      const sourceQty = Number(line.quantity || 0);
+      const sourceUnitCost = Number(line.unitPrice || line.unitCost || 0);
+      if (!catalogItemId || sourceQty <= 0) continue;
+      expectedStockLines += 1;
 
       try {
-        const catItemBefore = await getDocument(req, db, catalogItemId);
-        const prevQty = Number(catItemBefore?.stockQuantity || 0);
-
-        await recordMovement(req, userId, {
+        const catalogItem = await getDocument(req, db, catalogItemId);
+        if (
+          !catalogItem
+          || catalogItem.type !== 'catalog_item'
+          || catalogItem.user_id !== userId
+        ) {
+          throw new Error('Artículo de catálogo no válido');
+        }
+        const converted = convertPurchaseLineToCatalogUnit(
+          sourceQty,
+          sourceUnitCost,
+          line.unit,
+          catalogItem.unit,
+        );
+        if (!converted) {
+          throw new Error(`Unidad incompatible: ${line.unit || '?'} → ${catalogItem.unit || 'ud'}`);
+        }
+        const targetQty = Math.round(
+          ((targetByCatalog.get(catalogItemId) || 0) + converted.quantity) * 1_000_000,
+        ) / 1_000_000;
+        targetByCatalog.set(catalogItemId, targetQty);
+        const alreadyApplied = appliedByCatalog.get(catalogItemId) || 0;
+        const delta = targetQty - alreadyApplied;
+        if (delta <= 0) continue;
+        const movement = await recordMovement(req, userId, {
           catalogItemId,
           movementType: 'purchase_reception',
-          quantity: qty,
-          unitCost,
+          quantity: delta,
+          unitCost: converted.unitCost,
           warehouseId,
           referenceId: invoiceDoc._id,
           referenceType: 'purchase_invoice_ocr',
+          idempotencyKey: `purchase-invoice:${invoiceDoc._id}:${catalogItemId}:${targetQty}`,
           notes: `Recepción - ${invoiceDoc.documentKind === 'albaran' ? 'Albarán' : 'Factura'} ${invoiceDoc.invoiceNumber || invoiceDoc._id.slice(-8)}`,
           performedBy,
         });
-
-        if (unitCost > 0) {
-          await updateWeightedCatalogCost(req, userId, catalogItemId, qty, unitCost, prevQty);
-        }
+        receptionMovements.push(movement);
 
         stockUpdated += 1;
-        stockUnits += qty;
+        stockUnits += delta;
+        appliedByCatalog.set(catalogItemId, alreadyApplied + delta);
       } catch (err) {
+        stockFailures += 1;
         logger.warn({ tag: 'OCR-STOCK', err: err?.message, catalogItemId }, 'Stock reception failed');
       }
     }
+    for (const movement of receptionMovements.sort(
+      (a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')),
+    )) {
+      try {
+        await applyPurchaseMovementCost(req, userId, movement);
+      } catch (error) {
+        stockFailures += 1;
+        logger.warn(
+          { tag: 'OCR-STOCK-COST', err: error?.message, movementId: movement._id },
+          'Average cost update failed',
+        );
+      }
+    }
   }
+  const stockComplete = applyStock && expectedStockLines > 0 && stockFailures === 0;
 
   let financeResult = null;
   if (options.createFinance !== false) {
@@ -254,11 +291,11 @@ export async function reconcilePurchaseInvoiceFromOcr(req, userId, invoiceDoc, o
       ...invFresh,
       linkedFinanceId: financeResult?.movementId || invFresh.linkedFinanceId || '',
       warehouseId: warehouseId || invFresh.warehouseId || '',
-      ocrStockReceivedAt: stockUpdated > 0 ? now : invFresh.ocrStockReceivedAt || '',
-      ocrStockLinesReceived: stockUpdated > 0 ? stockUpdated : (invFresh.ocrStockLinesReceived || 0),
+      ocrStockReceivedAt: stockComplete ? now : invFresh.ocrStockReceivedAt || '',
+      ocrStockLinesReceived: stockComplete ? expectedStockLines : (invFresh.ocrStockLinesReceived || 0),
       flags: {
         ...(invFresh.flags || {}),
-        stockPending: stockUpdated > 0 ? false : stockPending,
+        stockPending: stockComplete ? false : stockPending,
       },
       updatedAt: now,
     });
@@ -269,6 +306,8 @@ export async function reconcilePurchaseInvoiceFromOcr(req, userId, invoiceDoc, o
   return {
     stockUpdated,
     stockUnits,
+    stockFailures,
+    stockComplete,
     warehouseId: warehouseId || '',
     financeMovementId: financeResult?.movementId || null,
     financeSkipped: financeResult?.skipped || false,

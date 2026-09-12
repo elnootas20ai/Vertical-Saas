@@ -110,6 +110,8 @@ type CatalogProductRecipePickerProps = {
   /** Crea ingrediente maestro + almacén; el picker lo mete en la composición. */
   onCreateIngredient?: (input: CatalogRecipeCreateIngredientInput) => Promise<StoreIngredient | null>;
   creatingIngredient?: boolean;
+  /** Unidades visibles en este flujo. Por defecto conserva UND/LT/KG. */
+  unitOptions?: Array<'ud' | 'l' | 'kg' | 'mg'>;
 };
 
 function foldName(s: string): string {
@@ -123,6 +125,7 @@ function foldName(s: string): string {
 function defaultQtyForIngredient(ing: StoreIngredient, unitOverride?: string): number {
   const unit = String(unitOverride || (ing as { unit?: string }).unit || 'ud').toLowerCase();
   if (unit === 'kg' || unit === 'l' || unit === 'lt') return 0.05;
+  if (unit === 'mg') return 100;
   if (unit === 'g' || unit === 'ml') return 50;
   return 1;
 }
@@ -161,20 +164,29 @@ export function recipePicksToTpvIngredientsText(picks: CatalogRecipePick[]): str
     .join(', ');
 }
 
-function ingredientUnit(ing: StoreIngredient): string {
-  return toRecipePickerUnit((ing as { unit?: string }).unit);
+const DEFAULT_RECIPE_UNITS: Array<'ud' | 'l' | 'kg' | 'mg'> = ['ud', 'l', 'kg'];
+
+function ingredientUnit(
+  ing: StoreIngredient,
+  unitOptions: Array<'ud' | 'l' | 'kg' | 'mg'> = DEFAULT_RECIPE_UNITS,
+): string {
+  return toRecipePickerUnit((ing as { unit?: string }).unit, unitOptions);
 }
 
 /**
  * Solo 3 unidades de uso en receta: und / LT / KG.
  * g→kg y ml→l (misma familia; el coste €/kg o €/l sigue en la ficha del ingrediente).
  */
-function toRecipePickerUnit(raw: unknown): string {
+function toRecipePickerUnit(
+  raw: unknown,
+  unitOptions: Array<'ud' | 'l' | 'kg' | 'mg'> = DEFAULT_RECIPE_UNITS,
+): 'ud' | 'l' | 'kg' | 'mg' {
   const u = normalizeStoreIngredientUnit(raw, 'ud');
-  if (u === 'g') return 'kg';
-  if (u === 'ml') return 'l';
-  if (u === 'kg' || u === 'l' || u === 'ud') return u;
-  return 'ud';
+  const normalized = u === 'g' ? 'kg' : u === 'ml' ? 'l' : u;
+  if (unitOptions.includes(normalized as 'ud' | 'l' | 'kg' | 'mg')) {
+    return normalized as 'ud' | 'l' | 'kg' | 'mg';
+  }
+  return unitOptions.includes('ud') ? 'ud' : (unitOptions[0] || 'ud');
 }
 
 export function CatalogProductRecipePicker({
@@ -188,10 +200,12 @@ export function CatalogProductRecipePicker({
   hideTpvOptions = false,
   onCreateIngredient,
   creatingIngredient = false,
+  unitOptions = DEFAULT_RECIPE_UNITS,
 }: CatalogProductRecipePickerProps) {
   const [search, setSearch] = useState('');
   const [showCreatePanel, setShowCreatePanel] = useState(false);
   const [newName, setNewName] = useState('');
+  const unitHelp = unitOptions.map((unit) => (unit === 'ud' ? 'UND' : unit.toUpperCase())).join('/');
   const scoped = useMemo(() => scopeIngredients(storeIngredients, brandIds), [storeIngredients, brandIds]);
 
   const pickedIds = useMemo(() => new Set(picks.map((p) => p.storeIngredientId)), [picks]);
@@ -210,7 +224,7 @@ export function CatalogProductRecipePicker({
   const addIngredient = (ing: StoreIngredient, unitOverride?: string) => {
     const role = resolveIngredientRole(ing);
     // Unidad de uso en la línea (no pisa el €/kg de la ficha).
-    const unit = toRecipePickerUnit(unitOverride || ingredientUnit(ing));
+    const unit = toRecipePickerUnit(unitOverride || ingredientUnit(ing, unitOptions), unitOptions);
     const quantity = defaultQtyForIngredient(ing, unit);
     // Por defecto: se puede quitar en el pedido (salvo escandallo / elaboración).
     const tpvRemovable =
@@ -278,10 +292,10 @@ export function CatalogProductRecipePicker({
     <div className={`space-y-3 ${compact ? '' : ''}`}>
       <p className="text-[11px] text-stone-500 dark:text-stone-400 leading-snug">
         {hideTpvOptions
-          ? 'Elige qué componentes forman este elaborado. UND/LT/KG es cuánto usas en la composición; el €/kg o €/l del coste está en la ficha del ingrediente.'
+          ? `Elige qué componentes forman este elaborado. ${unitHelp} es cuánto usas en la composición; el coste está en la ficha del ingrediente.`
           : (
             <>
-              Elige qué lleva este plato. UND/LT/KG es <strong className="font-semibold text-stone-700 dark:text-stone-200">cuánto usas</strong>
+              Elige qué lleva este plato. {unitHelp} es <strong className="font-semibold text-stone-700 dark:text-stone-200">cuánto usas</strong>
               {' '}en la receta; el precio de compra (€/kg, €/l…) se gestiona en{' '}
               <strong className="font-semibold text-stone-700 dark:text-stone-200">Ingredientes / proveedores</strong>
               .
@@ -312,9 +326,9 @@ export function CatalogProductRecipePicker({
                     ariaLabel={`Cantidad de ${pick.name}`}
                   />
                   <select
-                    value={toRecipePickerUnit(pick.unit)}
+                    value={toRecipePickerUnit(pick.unit, unitOptions)}
                     onChange={(e) => {
-                      const unit = toRecipePickerUnit(e.target.value);
+                      const unit = toRecipePickerUnit(e.target.value, unitOptions);
                       onChange(
                         picks.map((p) =>
                           p.storeIngredientId === pick.storeIngredientId ? { ...p, unit } : p,
@@ -325,9 +339,11 @@ export function CatalogProductRecipePicker({
                     title="Unidad de uso en la receta (no es el €/kg del coste)"
                     className="h-10 rounded-xl border-2 border-stone-200 bg-white pl-2 pr-1 text-xs font-semibold text-stone-700 outline-none focus:border-[var(--v-blue,#2563eb)] dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200"
                   >
-                    <option value="ud">UND</option>
-                    <option value="l">LT</option>
-                    <option value="kg">KG</option>
+                    {unitOptions.map((unit) => (
+                      <option key={unit} value={unit}>
+                        {unit === 'ud' ? 'UND' : unit.toUpperCase()}
+                      </option>
+                    ))}
                   </select>
                   <span className="text-[10px] text-stone-400 hidden sm:inline">aprox.</span>
                 </div>

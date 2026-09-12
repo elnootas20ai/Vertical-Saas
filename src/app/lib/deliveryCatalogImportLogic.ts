@@ -10,7 +10,7 @@ import {
 } from './catalogCustomization';
 import type { CatalogItem } from './deliveryApi';
 import { getDeliveryBrandLinePreset, UNIVERSAL_CATALOG_CATEGORIES } from './deliveryBrandLineKinds';
-import { restaurantBrandCategoriesFromCatalogOnly } from '../verticals/restaurant/restaurantBrandCatalogPolicy';
+import { restaurantBrandCategoriesFromCatalogOnly } from './restaurantBrandCatalogPolicy';
 import { normalizeSubfamilyCategory, resolveTpvFamilyKey } from './tpvCatalogFamilies';
 
 export type ImportBrandLike = {
@@ -204,7 +204,7 @@ const IMPORT_CATEGORY_ALIASES: Record<string, string> = {
 };
 
 /** Categorías de Excel / sync almacén → solo almacén (no aparecen en TPV ni chips de carta). */
-export const WAREHOUSE_IMPORT_CATEGORIES = ['Envases', 'Limpieza', 'Varios', 'Cocina', 'Ingredientes'] as const;
+export const WAREHOUSE_IMPORT_CATEGORIES = ['Envases', 'Limpieza', 'Varios', 'Ingredientes'] as const;
 
 export type WarehouseImportStockCategory = 'packaging' | 'cleaning' | 'consumable' | 'ingredient';
 
@@ -212,7 +212,7 @@ export function isWarehouseImportCategory(category: string): boolean {
   const key = foldKey(normalizeImportCategory(category));
   if (!key) return false;
   if (key === 'envases' || key === 'limpieza' || key === 'varios') return true;
-  // Sync escandallo → almacén crea «Cocina» / «Cocina · Marca» (legacy: Ingredientes). Nunca carta/TPV.
+  // «Cocina» es un nombre legacy. Ambos prefijos son siempre almacén, nunca carta/TPV.
   if (
     key === 'cocina' ||
     key.startsWith('cocina ') ||
@@ -293,7 +293,7 @@ export function listCatalogCategoryOrganizerChoices(
 export function resolveWarehouseImportMeta(category: string): {
   stockCategory: WarehouseImportStockCategory;
   categoryLabel: string;
-  organizerId: 'packaging' | 'cleaning' | 'varios';
+  organizerId: 'packaging' | 'cleaning' | 'varios' | 'total';
 } | null {
   const key = foldKey(normalizeImportCategory(category));
   if (key === 'envases') {
@@ -304,6 +304,16 @@ export function resolveWarehouseImportMeta(category: string): {
   }
   if (key === 'varios') {
     return { stockCategory: 'consumable', categoryLabel: 'Varios', organizerId: 'varios' };
+  }
+  if (
+    key === 'cocina' ||
+    key.startsWith('cocina ') ||
+    key.startsWith('cocina·') ||
+    key === 'ingredientes' ||
+    key.startsWith('ingredientes ') ||
+    key.startsWith('ingredientes·')
+  ) {
+    return { stockCategory: 'ingredient', categoryLabel: 'Ingredientes', organizerId: 'total' };
   }
   return null;
 }

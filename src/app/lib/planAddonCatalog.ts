@@ -27,7 +27,7 @@ export const PLAN_ADDON_CATALOG: Record<PlanAddonId, PlanAddonDefinition> = {
     name: 'Tienda / PDV extra',
     shortLabel: '+1 tienda',
     description: 'Punto de venta adicional con TPV, stock y operativa propia.',
-    monthlyPriceEur: 49,
+    monthlyPriceEur: 149,
     requiresProPlan: true,
   },
   extra_brand: {
@@ -75,7 +75,9 @@ export function getAddonMonthlyPriceEur(addonId: PlanAddonId): number {
 }
 
 export function getAddonAnnualTotalEur(addonId: PlanAddonId): number {
-  return Math.round(getAddonMonthlyPriceEur(addonId) * 12 * (1 - PLAN_ADDON_ANNUAL_DISCOUNT));
+  return Math.round(
+    getAddonMonthlyPriceEur(addonId) * 12 * (1 - PLAN_ADDON_ANNUAL_DISCOUNT) * 100,
+  ) / 100;
 }
 
 function formatEurAmount(value: number): string {

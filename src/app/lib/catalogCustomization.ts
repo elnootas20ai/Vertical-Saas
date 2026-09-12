@@ -61,10 +61,26 @@ export type TpvBrandCategoryIngredients = Record<
 
 export type StoreIngredientRole = 'escandallo' | 'base' | 'extra';
 
+/** Todo ingrediente nuevo queda disponible como extra y se puede retirar en TPV. */
+export const DEFAULT_NEW_INGREDIENT_TPV_FLAGS = {
+  chargeExtra: true,
+  allowRemove: true,
+} as const;
+
 /** Componentes de un ingrediente elaborado (ej. masa = harina + agua). */
 export type StoreIngredientRecipeLine = {
   storeIngredientId: string;
   name: string;
+  quantity: number;
+  unit: string;
+};
+
+export type StoreIngredientUsageSize = 'small' | 'medium' | 'large';
+
+/** Consumo del elaborado por talla del producto al que se aplica. */
+export type StoreIngredientUsageVariant = {
+  size: StoreIngredientUsageSize;
+  label: string;
   quantity: number;
   unit: string;
 };
@@ -97,6 +113,8 @@ export interface StoreIngredient {
   /** Cantidad de este elaborado que se descuenta por unidad vendida del producto. */
   usageQtyPerUnit?: number;
   usageUnit?: string;
+  /** Consumos alternativos cuando el producto se vende por tallas. */
+  usageVariants?: StoreIngredientUsageVariant[];
 }
 
 export function normalizeStoreIngredientUnit(raw: unknown, fallback = 'ud'): string {
@@ -105,8 +123,32 @@ export function normalizeStoreIngredientUnit(raw: unknown, fallback = 'ud'): str
     .toLowerCase()
     .replace(/^lt$/, 'l');
   if (!u) return fallback;
-  if (u === 'ud' || u === 'g' || u === 'kg' || u === 'ml' || u === 'l') return u;
+  if (u === 'ud' || u === 'mg' || u === 'g' || u === 'kg' || u === 'ml' || u === 'l') return u;
   return fallback;
+}
+
+export function normalizeStoreIngredientUsageVariants(raw: unknown): StoreIngredientUsageVariant[] {
+  if (!Array.isArray(raw)) return [];
+  const validSizes = new Set<StoreIngredientUsageSize>(['small', 'medium', 'large']);
+  const seen = new Set<StoreIngredientUsageSize>();
+  const out: StoreIngredientUsageVariant[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const rec = entry as Record<string, unknown>;
+    const size = String(rec.size || '') as StoreIngredientUsageSize;
+    const quantity = Number(rec.quantity);
+    if (!validSizes.has(size) || seen.has(size) || !Number.isFinite(quantity) || quantity <= 0) continue;
+    seen.add(size);
+    out.push({
+      size,
+      label:
+        String(rec.label || '').trim()
+        || (size === 'small' ? 'Pequeño' : size === 'medium' ? 'Mediano' : 'Grande'),
+      quantity: Math.round(quantity * 1000) / 1000,
+      unit: normalizeStoreIngredientUnit(rec.unit, 'ud'),
+    });
+  }
+  return out;
 }
 
 export function normalizeStoreIngredientRecipeLines(raw: unknown): StoreIngredientRecipeLine[] {
@@ -1238,6 +1280,7 @@ export function normalizeStoreIngredients(raw: unknown): StoreIngredient[] {
     const usageQtyPerUnit =
       Number.isFinite(usageQtyRaw) && usageQtyRaw > 0 ? Math.round(usageQtyRaw * 1000) / 1000 : undefined;
     const usageUnit = normalizeStoreIngredientUnit(rec.usageUnit, unit);
+    const usageVariants = normalizeStoreIngredientUsageVariants(rec.usageVariants);
     out.push({
       id: String(rec.id || `ing-${idx}-${ingredientNameKey(name).replace(/\s+/g, '-')}`),
       name,
@@ -1252,6 +1295,7 @@ export function normalizeStoreIngredients(raw: unknown): StoreIngredient[] {
       ...(baseCost !== undefined ? { baseCost } : {}),
       ...(recipeLines.length > 0 ? { recipeLines } : {}),
       ...(usageQtyPerUnit != null ? { usageQtyPerUnit, usageUnit } : {}),
+      ...(usageVariants.length > 0 ? { usageVariants } : {}),
     });
   });
   return out;
@@ -1325,6 +1369,10 @@ function mergeStoreIngredientRows(a: StoreIngredient, b: StoreIngredient): Store
         ? b.usageQtyPerUnit
         : undefined;
   const usageUnit = normalizeStoreIngredientUnit(a.usageUnit || b.usageUnit, mergedUnit);
+  const usageVariants =
+    (Array.isArray(a.usageVariants) && a.usageVariants.length > 0 ? a.usageVariants : null)
+    || (Array.isArray(b.usageVariants) && b.usageVariants.length > 0 ? b.usageVariants : null)
+    || [];
   return withStoreIngredientTpvFlags(
     {
       id: String(a.id || b.id || '').trim() || `ing-${Date.now()}`,
@@ -1337,6 +1385,7 @@ function mergeStoreIngredientRows(a: StoreIngredient, b: StoreIngredient): Store
       ...(mergedBaseCost !== undefined ? { baseCost: mergedBaseCost } : {}),
       ...(recipeLines.length > 0 ? { recipeLines } : {}),
       ...(usageQty != null ? { usageQtyPerUnit: usageQty, usageUnit } : {}),
+      ...(usageVariants.length > 0 ? { usageVariants } : {}),
     },
     { chargeExtra, allowRemove },
   );

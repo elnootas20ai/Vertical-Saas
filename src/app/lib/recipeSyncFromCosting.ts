@@ -47,8 +47,14 @@ export async function syncRecipesFromCostingCatalog(
   let skipped = 0;
 
   let recipesByProduct = new Map<string, Recipe>();
+  const businessId = String(
+    catalogItems.find((item) => item.business_id)?.business_id
+      || '',
+  ).replace(/^business:/, '').trim();
   try {
-    recipesByProduct = indexRecipesByProduct(await listRecipesRequest(uid));
+    recipesByProduct = indexRecipesByProduct(
+      await listRecipesRequest(uid, { businessId: businessId || undefined }),
+    );
   } catch {
     /* sin recetas previas */
   }
@@ -72,6 +78,7 @@ export async function syncRecipesFromCostingCatalog(
           catalogItemId: item._id,
           catalogItemName: item.name,
           category: item.category || '',
+          businessId: String(item.business_id || businessId),
           portions: 1,
           active: true,
           ingredients,
