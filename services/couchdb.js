@@ -7632,6 +7632,16 @@ export function buildPointOfSaleDocument(userId, data = {}, existing = null) {
     ...resolvePrinterConfigField(data, existing),
     ...(tpvAllowedDevices !== undefined ? { tpvAllowedDevices } : {}),
     ...(supplierInvoiceConfig !== undefined ? { supplierInvoiceConfig } : {}),
+    ...(
+      Object.prototype.hasOwnProperty.call(data, 'publicOrderingConfig')
+      || Object.prototype.hasOwnProperty.call(existing || {}, 'publicOrderingConfig')
+        ? {
+          publicOrderingConfig: sanitizePointOfSalePublicOrderingConfig(
+            data.publicOrderingConfig ?? existing?.publicOrderingConfig,
+          ),
+        }
+        : {}
+    ),
     active: data.active !== undefined ? Boolean(data.active) : (existing?.active !== false),
     createdAt: existing?.createdAt || now,
     updatedAt: now,
@@ -7676,10 +7686,28 @@ export function sanitizePointOfSale(doc) {
           },
         }
       : {}),
+    ...(Object.prototype.hasOwnProperty.call(doc, 'publicOrderingConfig')
+      ? { publicOrderingConfig: sanitizePointOfSalePublicOrderingConfig(doc.publicOrderingConfig) }
+      : {}),
     active: doc.active !== false,
     createdAt: doc.createdAt || new Date().toISOString(),
     updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
     deletedAt: doc.deletedAt || null,
+  };
+}
+
+export function sanitizePointOfSalePublicOrderingConfig(value) {
+  const raw = value && typeof value === 'object' ? value : {};
+  return {
+    pickupEnabled: raw.pickupEnabled !== false,
+    deliveryEnabled: Boolean(raw.deliveryEnabled),
+    minimumOrder: Math.max(0, Number(raw.minimumOrder || 0)),
+    deliveryFee: Math.max(0, Number(raw.deliveryFee || 0)),
+    estimatedDeliveryTime: String(raw.estimatedDeliveryTime || '30-45 min').trim(),
+    deliveryRadius: String(raw.deliveryRadius || '').trim(),
+    shippingMode: raw.shippingMode === 'zones' ? 'zones' : 'fixed',
+    shippingZones: Array.isArray(raw.shippingZones) ? raw.shippingZones : [],
+    customerKioskEnabled: Boolean(raw.customerKioskEnabled),
   };
 }
 
@@ -12332,10 +12360,21 @@ export async function listSuppliersByUser(req, userId) {
 
 // ─── PURCHASE INVOICES ────────────────────────────────────────────────────────
 
+export function normalizePurchaseDocumentKind(value) {
+  const normalized = String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .trim();
+  return normalized.includes('albar') || normalized.includes('delivery_note')
+    ? 'albaran'
+    : 'factura_proveedor';
+}
+
 export function buildPurchaseInvoiceDocument(userId, data = {}, existing = null) {
   const now = new Date().toISOString();
   const id = existing?._id || `pinv-${uuidv4()}`;
-  const documentKind = String(
+  const documentKind = normalizePurchaseDocumentKind(
     data.documentKind || data.ocrData?.documentType || existing?.documentKind || 'factura_proveedor',
   );
   const invoiceNumber = existing
@@ -12366,6 +12405,9 @@ export function buildPurchaseInvoiceDocument(userId, data = {}, existing = null)
       catalogItemId: String(line.catalogItemId || ''),
       catalogItemName: String(line.catalogItemName || ''),
       sku: String(line.sku || ''),
+      taxRate: Number(
+        line.taxRate ?? data.taxRate ?? data.ocrData?.taxRate ?? existing?.taxRate ?? 21,
+      ),
       matchConfidence: line.matchConfidence ?? null,
       matchMethod: String(line.matchMethod || ''),
     };
@@ -12378,10 +12420,10 @@ export function buildPurchaseInvoiceDocument(userId, data = {}, existing = null)
   const ocrTaxAmount = Number(data.taxAmount ?? data.ocrData?.taxAmount ?? NaN);
 
   let subtotal = computedSubtotal;
-  let taxAmount = Number.isFinite(ocrTaxAmount) && computedSubtotal <= 0
+  let taxAmount = Number.isFinite(ocrTaxAmount)
     ? ocrTaxAmount
     : subtotal * (taxRate / 100);
-  let total = subtotal + taxAmount;
+  let total = ocrTotal > 0 ? ocrTotal : subtotal + taxAmount;
 
   // OCR a veces da total/cabecera pero líneas vacías o a 0 → no dejar 0,00 €
   if (computedSubtotal <= 0 && (ocrTotal > 0 || ocrSubtotal > 0)) {
@@ -12408,11 +12450,16 @@ export function buildPurchaseInvoiceDocument(userId, data = {}, existing = null)
     id,
     invoiceNumber,
     user_id: userId,
-    supplierId: String(data.supplierId || ''),
-    supplierName: String(data.supplierName || ''),
+    supplierId: String(data.supplierId || existing?.supplierId || ''),
+    supplierName: String(data.supplierName || existing?.supplierName || ''),
+    supplierCif: String(data.supplierCif || existing?.supplierCif || ''),
     date: String(data.date || now.split('T')[0]),
     dueDate: String(data.dueDate || ''),
-    status: String(data.status || 'pending'),
+    status: String(data.status || existing?.status || 'pending'),
+    paymentStatus: String(data.paymentStatus || existing?.paymentStatus || 'pending'),
+    validationStatus: String(data.validationStatus || existing?.validationStatus || 'pending'),
+    validatedAt: String(data.validatedAt || existing?.validatedAt || ''),
+    validatedBy: String(data.validatedBy || existing?.validatedBy || ''),
     lines,
     subtotal: Math.round(subtotal * 100) / 100,
     taxRate,
@@ -12424,6 +12471,12 @@ export function buildPurchaseInvoiceDocument(userId, data = {}, existing = null)
     linkedPurchaseOrderNumber: data.linkedPurchaseOrderNumber || existing?.linkedPurchaseOrderNumber || '',
     linkedAlbaranId: String(data.linkedAlbaranId || existing?.linkedAlbaranId || '').trim(),
     linkedAlbaranNumber: String(data.linkedAlbaranNumber || existing?.linkedAlbaranNumber || '').trim(),
+    linkedFinanceId: String(data.linkedFinanceId || existing?.linkedFinanceId || ''),
+    linkedDocumentId: String(data.linkedDocumentId || existing?.linkedDocumentId || ''),
+    pdfUrl: String(data.pdfUrl || existing?.pdfUrl || ''),
+    pdfFilename: String(data.pdfFilename || existing?.pdfFilename || ''),
+    reviewNotes: String(data.reviewNotes || existing?.reviewNotes || ''),
+    reviewedBy: String(data.reviewedBy || existing?.reviewedBy || ''),
     costCenterId: data.costCenterId || data.workCenterId || existing?.costCenterId || existing?.workCenterId || '',
     costCenterName: data.costCenterName || data.workCenterName || existing?.costCenterName || existing?.workCenterName || '',
     businessId: String(data.businessId || data.business_id || existing?.businessId || existing?.business_id || '').trim(),
@@ -12468,7 +12521,7 @@ export function buildPurchaseInvoiceDocument(userId, data = {}, existing = null)
 }
 
 function normalizePurchaseInvoiceStatus(value) {
-  const allowed = ['paid', 'pending', 'overdue', 'draft', 'partial'];
+  const allowed = ['paid', 'pending', 'overdue', 'draft', 'partial', 'validated'];
   return allowed.includes(String(value || '')) ? String(value) : 'pending';
 }
 
@@ -12479,7 +12532,7 @@ export function sanitizePurchaseInvoice(doc, options = {}) {
     ? doc.flags
     : {};
   const statusRaw = String(doc.status || '').trim();
-  const status = ['paid', 'pending', 'overdue', 'draft', 'partial'].includes(statusRaw)
+  const status = ['paid', 'pending', 'overdue', 'draft', 'partial', 'validated'].includes(statusRaw)
     ? statusRaw
     : 'pending';
   const sanitized = {
@@ -12515,6 +12568,14 @@ export function sanitizePurchaseInvoice(doc, options = {}) {
     linkedAlbaranId: doc.linkedAlbaranId || '',
     linkedAlbaranNumber: doc.linkedAlbaranNumber || '',
     linkedFinanceId: doc.linkedFinanceId || '',
+    linkedDocumentId: doc.linkedDocumentId || '',
+    validationStatus: doc.validationStatus || 'pending',
+    validatedAt: doc.validatedAt || '',
+    validatedBy: doc.validatedBy || '',
+    pdfUrl: doc.pdfUrl || '',
+    pdfFilename: doc.pdfFilename || '',
+    reviewNotes: doc.reviewNotes || '',
+    reviewedBy: doc.reviewedBy || '',
     costCenterId: doc.costCenterId || '',
     costCenterName: doc.costCenterName || '',
     businessId: doc.businessId || doc.business_id || '',
@@ -12881,6 +12942,7 @@ export function buildPurchaseOrderDocument(userId, data = {}, existing = null) {
     quantity: Number(item.quantity || 0),
     unitCost: Number(item.unitCost || 0),
     total: Number(item.quantity || 0) * Number(item.unitCost || 0),
+    taxRate: Number(item.taxRate ?? data.taxRate ?? existing?.taxRate ?? 21),
     received: Number(item.received ?? 0),
     notes: String(item.notes || ''),
     supplierId: String(item.supplierId || ''),
@@ -12889,7 +12951,10 @@ export function buildPurchaseOrderDocument(userId, data = {}, existing = null) {
 
   const subtotal = items.reduce((s, l) => s + Number(l.total || 0), 0);
   const taxRate = Number(data.taxRate ?? existing?.taxRate ?? 21);
-  const taxAmount = subtotal * (taxRate / 100);
+  const taxAmount = items.reduce(
+    (sum, item) => sum + Number(item.total || 0) * (Number(item.taxRate ?? taxRate) / 100),
+    0,
+  );
 
   return {
     _id: id,
@@ -12910,6 +12975,9 @@ export function buildPurchaseOrderDocument(userId, data = {}, existing = null) {
     source: String(data.source || existing?.source || 'manual'),
     expectedDate: String(data.expectedDate || existing?.expectedDate || ''),
     sentAt: String(data.sentAt || existing?.sentAt || ''),
+    sentVia: String(data.sentVia || existing?.sentVia || ''),
+    approvedBy: String(data.approvedBy || existing?.approvedBy || ''),
+    approvedAt: String(data.approvedAt || existing?.approvedAt || ''),
     receivedAt: String(data.receivedAt || existing?.receivedAt || ''),
     businessId: normalizeBusinessScopeId(
       data.businessId || data.business_id || existing?.businessId || existing?.business_id || '',
@@ -12917,6 +12985,10 @@ export function buildPurchaseOrderDocument(userId, data = {}, existing = null) {
     businessName: String(
       data.businessName || data.business_name || existing?.businessName || existing?.business_name || '',
     ).trim(),
+    salesPointId: String(data.salesPointId || existing?.salesPointId || '').trim(),
+    workCenterId: String(data.workCenterId || existing?.workCenterId || '').trim(),
+    warehouseId: String(data.warehouseId || existing?.warehouseId || '').trim(),
+    purchaseInvoiceId: String(data.purchaseInvoiceId || existing?.purchaseInvoiceId || '').trim(),
     createdAt: existing?.createdAt || now,
     updatedAt: now,
   };
@@ -12943,9 +13015,16 @@ export function sanitizePurchaseOrder(doc) {
     source: doc.source || 'manual',
     expectedDate: doc.expectedDate || '',
     sentAt: doc.sentAt || '',
+    sentVia: doc.sentVia || '',
+    approvedBy: doc.approvedBy || '',
+    approvedAt: doc.approvedAt || '',
     receivedAt: doc.receivedAt || '',
     businessId: normalizeBusinessScopeId(doc.businessId || doc.business_id || '') || undefined,
     businessName: doc.businessName || doc.business_name || '',
+    salesPointId: doc.salesPointId || '',
+    workCenterId: doc.workCenterId || '',
+    warehouseId: doc.warehouseId || '',
+    purchaseInvoiceId: doc.purchaseInvoiceId || '',
     createdAt: doc.createdAt || new Date().toISOString(),
     updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
     deletedAt: doc.deletedAt || null,
@@ -13567,6 +13646,34 @@ export async function getWebConfigBySlug(req, slug) {
   await ensureDatabase(req, db);
   const docs = await getAllDocuments(req, db);
   return docs.find((d) => d?.type === 'web_config' && d?.slug === slug && !d?.deletedAt) || null;
+}
+
+export async function getWebConfigByCustomDomain(req, domain) {
+  const normalized = String(domain || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/\/.*$/, '')
+    .replace(/\.$/, '');
+  if (!normalized) return null;
+  const db = getWebDbName();
+  await ensureDatabase(req, db);
+  try {
+    const docs = await findDocuments(
+      req,
+      db,
+      { type: 'web_config', customDomain: normalized },
+      { pageSize: 5, maxDocs: 5 },
+    );
+    return (docs || []).find(
+      (doc) => doc?.type === 'web_config' && !doc.deletedAt && doc.customDomain === normalized,
+    ) || null;
+  } catch {
+    const docs = await getAllDocuments(req, db);
+    return docs.find(
+      (doc) => doc?.type === 'web_config' && !doc.deletedAt && doc.customDomain === normalized,
+    ) || null;
+  }
 }
 
 function normalizeWebOrderStatus(value) {
