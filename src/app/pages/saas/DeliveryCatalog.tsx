@@ -3862,7 +3862,7 @@ export function CatalogPage() {
   // ── Derived data ────────────────────────────────────────────────────────────
 
   const categories = useMemo(() => {
-    const groups: CatalogNavGroup[] = [
+    return [
       ...new Set(
         catalogItems
           .filter((i) => String(i.module || 'catalog') !== 'stock')
@@ -5947,7 +5947,7 @@ export function CatalogPage() {
       { id: 'catalog', label: 'Carta', count: catalogMenuItems.filter((i) => i.active).length || undefined },
     ];
 
-    return [
+    const groups: CatalogNavGroup[] = [
       {
         id: 'carta',
         label: 'Carta',

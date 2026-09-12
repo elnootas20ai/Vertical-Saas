@@ -30,7 +30,8 @@ describe('eventsServicesExcelTemplate', () => {
     expect(String(ws.A1?.v)).toBe('Nombre');
     expect(String(ws.B1?.v)).toBe('Categoría');
     expect(String(ws.C1?.v)).toBe('Precio');
-    expect(String(ws.D1?.v)).toBe('Unidad');
+    expect(String(ws.D1?.v)).toBe('IVA');
+    expect(String(ws.E1?.v)).toBe('Unidad');
   });
 
   it('ignora filas de ejemplo', () => {

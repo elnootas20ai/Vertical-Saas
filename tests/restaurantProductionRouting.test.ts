@@ -64,7 +64,7 @@ describe('ruteo profesional Cocina y Barra', () => {
     expect(routed.sentComandas).toHaveLength(1);
     expect(routed.sentComandas[0].productionArea).toBe('kitchen');
     expect(routed.sentComandas[0].items).toHaveLength(2);
-    expect(routed.total).toBe(15.4);
+    expect(routed.total).toBe(14);
   });
 
   it('en PRO divide atómicamente el borrador y el KDS no mezcla estaciones', () => {

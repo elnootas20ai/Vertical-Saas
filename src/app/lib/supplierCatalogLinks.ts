@@ -12,6 +12,15 @@ function foldName(value: string): string {
     .replace(/\s+/g, ' ');
 }
 
+export function pruneDeletedIdsFromSupplierCatalogItemIds(
+  catalogItemIds: string[] | null | undefined,
+  deletedIds: Iterable<string>,
+): string[] {
+  if (!Array.isArray(catalogItemIds) || catalogItemIds.length === 0) return [];
+  const deleted = new Set(Array.from(deletedIds || [], (id) => String(id || '').trim()));
+  return catalogItemIds.filter((id) => !deleted.has(String(id || '').trim()));
+}
+
 /**
  * Convierte ids del selector de proveedor (artículos de almacén o ids de ingrediente TPV)
  * en ids reales de artículos de stock del catálogo.

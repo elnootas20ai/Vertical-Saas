@@ -24,13 +24,14 @@ describe('collectInventoryCandidates', () => {
           costPrice: 0.65,
         },
       ],
+      { includeVertialTemplates: true },
     );
 
     const names = candidates.map((c) => c.name);
     expect(names).toContain('Mozzarella');
     expect(names).toContain('Albahaca');
     expect(names).toContain('Caja pizza M');
-    expect(names).toContain('Bolsa delivery');
+    expect(names).toContain('Bolsa para llevar');
     expect(names).toContain('Coca-Cola 33cl');
     const moz = candidates.find((c) => c.name === 'Mozzarella');
     expect(moz?.storeIngredientId).toBe('ing-moz');

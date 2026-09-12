@@ -370,18 +370,18 @@ export async function leaveTpvTabletSession(
       window.requestAnimationFrame(tick);
     });
 
+  if (!opts?.navigate) {
+    paintCodePlaceholder();
+    await clearSessionQuietly();
+    window.location.replace(dest);
+    return;
+  }
+
   let spaOk = false;
   try {
-    if (opts?.navigate) {
-      await Promise.resolve(opts.navigate(dest, { replace: true }));
-      await waitUntilOnCodeScreen();
-      spaOk = String(window.location.pathname || '').startsWith(TPV_TABLET_LOGIN_PATH);
-    } else {
-      const { router } = await import('../routes');
-      await router.navigate(dest, { replace: true });
-      await waitUntilOnCodeScreen();
-      spaOk = String(window.location.pathname || '').startsWith(TPV_TABLET_LOGIN_PATH);
-    }
+    await Promise.resolve(opts.navigate(dest, { replace: true }));
+    await waitUntilOnCodeScreen();
+    spaOk = String(window.location.pathname || '').startsWith(TPV_TABLET_LOGIN_PATH);
   } catch {
     spaOk = false;
   }

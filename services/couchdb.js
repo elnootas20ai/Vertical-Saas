@@ -33,6 +33,7 @@ import { nextPurchaseOrderNumber } from './purchaseOrderNumber.js';
 import { resolvePurchaseInvoiceNumber } from './purchaseDocNumber.js';
 import { sanitizeSupplierProductAliases } from '../shared/purchases/supplierProductAlias.js';
 import { normalizeEsTaxPolicy } from '../shared/tax/spainVat.js';
+import { normalizeRestaurantProductionArea } from '../shared/restaurant/productionArea.js';
 import { isEncryptedSecret, sealImapPassword } from './secretAtRest.js';
 import {
   filterCatalogDocsByBusinessScope as filterCatalogDocsByBusinessScopeCore,
@@ -11835,6 +11836,9 @@ export function buildCatalogItemDocument(userId, data = {}, existing = null) {
     name: String(data.name || ''),
     description: String(data.description || ''),
     category: String(data.category || 'general'),
+    productionArea: normalizeRestaurantProductionArea(
+      data.productionArea ?? existing?.productionArea,
+    ),
     unitPrice: Number(data.unitPrice || 0),
     staffPrice: data.staffPrice !== undefined && data.staffPrice !== null && data.staffPrice !== ''
       ? Number(data.staffPrice)
@@ -11907,6 +11911,7 @@ export function sanitizeCatalogItem(doc) {
     name: doc.name || '',
     description: doc.description || '',
     category: doc.category || 'general',
+    productionArea: normalizeRestaurantProductionArea(doc.productionArea),
     unitPrice: Number(doc.unitPrice || 0),
     staffPrice: doc.staffPrice !== undefined && doc.staffPrice !== null && doc.staffPrice !== ''
       ? Number(doc.staffPrice)
@@ -12004,6 +12009,7 @@ export function sanitizeCatalogItemForTpv(doc) {
     itemType: doc.itemType || 'product',
     name: doc.name || '',
     category: doc.category || 'general',
+    productionArea: normalizeRestaurantProductionArea(doc.productionArea),
     unitPrice: Number(doc.unitPrice || 0),
     sku: doc.sku || '',
     barcode: doc.barcode || '',

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { test } from 'vitest';
 import {
   mergeSupplierInvoiceOcr,
   ocrHasUsefulLines,
@@ -6,6 +7,7 @@ import {
   reconstructTextFromPdfItems,
 } from '../services/supplierInvoicePdfParse.js';
 
+test('parsea y fusiona facturas de proveedor españolas', () => {
 const sample = `
 DISTRIBUCIONES MODORRA S.L.
 CIF B12345678
@@ -88,4 +90,5 @@ console.log('ok supplierInvoicePdfParse', {
   lines: parsed.lines.length,
   flatLines: flat.lines.length,
   mergedLines: merged.lines.length,
+});
 });

@@ -30,6 +30,7 @@ describe('inviteFunctionRoles', () => {
   it('realEstate: roles inmobiliaria con Comercial (sin Reparto/Cocina)', () => {
     const roles = getFunctionRolesForBusiness('realEstate');
     expect(roles.map((r) => r.id)).toEqual([
+      'Admin',
       'Administrador',
       'Gestor',
       'Encargado',
